@@ -1398,7 +1398,7 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
             // Source spans identify raw ordinary strings.
             if {
                 jfmt_src_valid(f, span.start, span.end) && jfmt_bytes_starts_at(f.src_bytes, span.start, "`") -> {
-                    jfmt_fmt_str_raw(f, parts)
+                    jfmt_fmt_str_raw(f, parts, span)
                 }
                 jfmt_src_valid(f, span.start, span.start + 3) && jfmt_bytes_starts_at(f.src_bytes, span.start, "\"\"\"") -> {
                     jfmt_fmt_str_multiline(f, parts)
@@ -2786,7 +2786,10 @@ jfmt_fmt_call_arg: fn(f: &JetFmt, arg: CallArg) {
     jfmt_fmt_expr(f, arg.expr, JFMT_PREC_OR_FALLBACK)
 }
 
-jfmt_fmt_str_raw: fn(f: &JetFmt, parts: [StrPart]) {
+// A raw text keeps its written fence: the source's backtick run, which no run
+// inside the text matches. Text the source doesn't spell takes the shortest
+// fence longer than every run inside it.
+jfmt_fmt_str_raw: fn(f: &JetFmt, parts: [StrPart], span: Span) {
     text := ""
     loop part in parts {
         literal: jfmt_str_part_lit(part) ?? {
@@ -2799,18 +2802,26 @@ jfmt_fmt_str_raw: fn(f: &JetFmt, parts: [StrPart]) {
         jfmt_fmt_str(f, parts)
         return
     }
+    written := 0
+    loop span.start + written < span.end && f.src_bytes[span.start + written] == 96 -> written += 1
     max_run := 0
     run := 0
+    written_inside := false
     any_other := false
     loop byte in text.bytes() {
         if byte == 96 {
             run += 1
             if run > max_run -> max_run = run
-        } else { run = 0 }
+        } else {
+            if run == written -> written_inside = true
+            run = 0
+        }
         if byte != 32 -> any_other = true
     }
+    if run == written -> written_inside = true
+    width: if written > 0 && !written_inside -> written else -> max_run + 1
     fence := ""
-    loop _ in 0..<max_run + 1 -> fence = "{fence}`"
+    loop _ in 0..<width -> fence = "{fence}`"
     padded: text.starts_with(" ") && text.ends_with(" ") && any_other
     jfmt_write(f, fence)
     if padded -> jfmt_write(f, " ")
@@ -2884,7 +2895,7 @@ jfmt_fmt_str: fn(f: &JetFmt, parts: [StrPart]) {
 jfmt_fmt_typed_head_str: fn(f: &JetFmt, parts: [StrPart], span: Span) {
     if {
         jfmt_src_valid(f, span.start, span.end) && jfmt_bytes_starts_at(f.src_bytes, span.start, "`") -> {
-            jfmt_fmt_str_raw(f, parts)
+            jfmt_fmt_str_raw(f, parts, span)
         }
         jfmt_src_valid(f, span.start, span.start + 3) && jfmt_bytes_starts_at(f.src_bytes, span.start, "\"\"\"") -> {
             jfmt_fmt_typed_head_str_multiline(f, parts)

@@ -1608,6 +1608,7 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
             selected.deep_checks = deep_checks
             selected.explain_partition = command == "build" && jet_cli_flag_before_separator(jet_argv, "--explain-partition")
             selected.compiler_events = command == "build" && jet_cli_flag_before_separator(jet_argv, "--json")
+            selected.library = command == "build" && jet_cli_flag_before_separator(jet_argv, "--lib")
             selected.target_machine = machine
             return JetCLIBuildOptions.Selected{options: selected, notes: text}
         }
@@ -1700,6 +1701,10 @@ jet_cli_with_build_options: fn(plan: &&JetCLIPlan, jet_argv: [String], quiet: Bo
             }
         }
         .BuildPackage(file, color, _, build_args, threads, invocation, notice, _) -> {
+            // A package build runs its `build: fn`, which writes no Library yet.
+            if jet_argv.contains("--lib") {
+                return jet_cli_not_ported("build <package build with --lib>", color)
+            }
             if jet_argv.contains("--sbom") {
                 return jet_cli_not_ported("build <package build with --sbom>", color)
             }

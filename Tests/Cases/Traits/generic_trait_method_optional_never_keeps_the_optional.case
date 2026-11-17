@@ -1,0 +1,18 @@
+# A generic call of a trait method declared `T? Never!` keeps the optional:
+# `[U8]? Never!` and `Int? Never!` methods called through `fn<H: Src>` give
+# their None to `??` and to a `.Val` pattern on every tier, with no backend
+# rejection and no trap.
+fixture: GenericTraitMethodOptionalNeverKeepsTheOptional.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "6\n-1\n3\n-2\n7\n0\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "6\n-1\n3\n-2\n7\n0\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "6\n-1\n3\n-2\n7\n0\n"

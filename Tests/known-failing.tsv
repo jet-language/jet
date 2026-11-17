@@ -74,9 +74,9 @@ Tests/UI/wasip2_unsupported_tls_surface_e3305	#5201	E2104 `jet build --target=wa
 Tests/UI/wasip2_unsupported_websocket_e3305	#5201	E2104 `jet build --target=wasm32-wasip2` is not built yet
 Tests/UI/wasip2_unsupported_socket_surface_e3304	#5201	E2104 `jet build --target=wasm32-unknown-unknown` is not built yet
 Tests/UI/wasip2_unsupported_surface_e3304	#5201	E2104 `jet build --target=wasm32-unknown-unknown` is not built yet
-Tests/UI/LibraryInvalidBinding/run	#6418	E2104 `jet build --lib` is not built yet, so no Library binding is validated (E1341)
-Tests/UI/jetlib_version_mismatch	#6418	E2104 `jet build --lib` is not built yet, so no `.jetlib` exists for a `jet run` load site to refuse (E1338)
-Tests/UI/jetlib_effect_refused	#6418	E2104 `jet build --lib` is not built yet, so no `.jetlib` exists for a `jet run` load site to refuse (E1339)
+Tests/UI/LibraryInvalidBinding/run	#6418	`jet build --lib` checks no Library `bindings:` yet: run.jet exports nothing, so the build stops with E1341 "exports no function" instead of the unsupported `lua` binding
+Tests/UI/jetlib_version_mismatch	#6418	`jet build --lib` writes no loadable `.jetlib` (and this file exports nothing, E1341), so no `jet run` load site refuses one (E1338)
+Tests/UI/jetlib_effect_refused	#6418	`jet build --lib` writes no loadable `.jetlib` (and this file exports nothing, E1341), so no `jet run` load site refuses one (E1339)
 Tests/UI/FactContributionConflict/run	#6843	`jet build` exits 0 and prints only the effects summary: the build entry's `b.contribute` writes are not folded into build facts, so the same-layer conflict (E3521) is never reported
 Tests/UI/FactContributionUndeclared/run	#6843	`jet build` exits 0 and prints only the effects summary: the build entry's `b.contribute` writes are not folded into build facts, so the undeclared setting (E0302) is never reported
 Tests/UI/WorkspaceLockE1202/run	#3590	`jet env --trust` with a malformed workspace `.jet/lock` reports E1350 "Locked Nix closure could not be replayed" (Project lock is invalid: workspace member is missing `path`), not the E1202 malformed-workspace-lock diagnostic; the lock-write E1202 needs an unwritable `.jet` the fixture cannot stage
@@ -263,9 +263,8 @@ Tests/Cases/JetPerfTracePartsCaptureRun/perf_run_captures_wall_and_alloc_into_je
 Tests/Cases/JetpackDispatch/jet_run_without_nix_compatibility_output_reports_e1272.case	#6418	`jet run --no-color` is not built yet (E2104)
 Tests/Cases/LibUse/unrealized_library_points_at_build_when_preparation_is_refused.case	#6418	E0983 is retired until the driver has a realized-library root in the hangar; `jet run --no-prepare` reports E0603 for the unrealized library
 Tests/Cases/LibraryOutputs/component_build_load_and_foreign_call_are_one_surface.case	#6418	`jet build --target=sandbox` is not built yet (E2104)
-Tests/Cases/LibraryOutputs/guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic.case	#6418	`jet build --lib` is not built yet (E2104)
-Tests/Cases/LibraryOutputs/guest_import_library_calls_native_c_and_cpp_hosts.case	#6418	`jet build --lib` is not built yet (E2104)
-Tests/Cases/LibraryOutputs/locked_named_library_build_selects_the_requested_output.case	#6418	`jet build --lib` is not built yet (E2104)
+Tests/Cases/LibraryOutputs/guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic.case	#6418	`jet build --lib` writes only the static `libembedding.a`, no shared library, and refuses `greet`'s String parameter and result (E1341): the native header has no JetText projection or `jet_text_free`
+Tests/Cases/LibraryOutputs/locked_named_library_build_selects_the_requested_output.case	#6418	`jet build --output` is not built yet (E2104), so `--lib --locked --output core` selects no Library and writes no `.jetlib`
 Tests/Cases/LSP/lsp_bench_reports_deterministic_cache_and_memory.case	#6418	`jet self lsp` serves stdio only; its `--bench` report is not ported
 Tests/Cases/LSP/lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words.case	#6418	`jet self lsp` semantic tokens have no ownership or decorator modifiers yet
 Tests/Cases/LSP/lsp_budget_reports_projects_canonical_report_without_measuring.case	#6903	`jet self lsp` answers no `workspace/executeCommand` (`jet.budgetReports`)

@@ -1,0 +1,191 @@
+// `jet build --lib <file>`: the entry's native Library. Its `#Export(c)`
+// functions are built the way the runtime library is (Request.jet
+// jet_cli_library_ir) into one relocatable object whose exports are its
+// only global symbols. The object goes into the static archive
+// `lib<name>.a` beside the Jet runtime object it calls into and the fault
+// report that runtime names, so a C or C++ host links the archive alone
+// (with the system's `-ldl -lpthread -lm`). `<name>.h` declares each
+// export for the host. `name` is the package's Library output's `name:`,
+// else its key, else the entry's stem. Both files land in the output
+// directory (Host.jet jet_cli_output_dir_path).
+use {
+    cli_files: core.files
+    jet_backend.[x64_fault_report_object, x64_static_archive]
+    jet_driver.[
+        JetDriverCompileMode,
+        JetDriverVerbOutput,
+        JET_DRIVER_EXIT_OK,
+        JET_DRIVER_EXIT_USAGE,
+        JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_check_failures,
+        jet_driver_present_diagnostics,
+        jet_driver_report_problems,
+    ]
+    jet_foundation.[BuildOptions, CompilerThreads, FnBody, build_options_value]
+    jet_ir.[IRLibraryExportRow, ir_x64_compile_module, ir_x64_library_object]
+}
+
+// Build the Library of `file` (whose bytes are `source`) under `options`
+// (moved in). A compile that reaches its object ends the process
+// (jet_cli_finish); a refusal before it returns.
+jet_cli_build_library: fn(file: String, source: String, color: Bool, options: &&BuildOptions, threads: Int?, trace_sink: JetCLITraceSink?) -[Env, FS, Exec, IO, Net, Time, Rand, FFI.Asm]> JetDriverVerbOutput {
+    owned := options.move()
+    if build_options_value(owned, "os") == "web" || owned.target_machine != "" {
+        return jet_cli_report_output("", "E2104", "`jet build --lib` builds a native Library for this machine, and this build targets another", jet_cli_why("E2104"), "drop `--target`, or build the program without `--lib`", color, JET_DRIVER_EXIT_USAGE)
+    }
+    opt: jet_cli_opt_options(jet_cli_native_level(owned), owned)
+    debug_info: build_options_value(owned, "debug_info") != "false"
+    name: jet_cli_library_name(file, source)
+    if name == "" || name.contains("/") || name.contains("\\") {
+        return jet_cli_report_output("", "E1341", "the Library name `{name}` can't name a file", jet_cli_why("E1341"), "give the package's Library output a `name:` of letters, digits, `_` and `-`", color, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
+    // The compile is the runtime library's (Request.jet
+    // jet_cli_compile_prepared): a library has no entry function, and it
+    // checks and builds every Core body it calls, since its object carries
+    // them.
+    prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
+    if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    if prepared.move() == {
+        .Refused(refusal) -> { output = refusal }
+        .Prepared(request, snapshot) -> {
+            directory: jet_cli_output_dir_path(snapshot, owned)
+            selected := request
+            selected.trace_sink = jet_cli_trace_boxed(trace_sink)
+            if owned.profile != "" -> selected.profile = owned.profile
+            selected.setting_overrides = owned.settings.move()
+            selected.release_state_aside = true
+            // The request's threads, which the IR build and machine code
+            // compile on too.
+            compiler_threads: CompilerThreads{cap: selected.compiler_threads.cap, cores: selected.compiler_threads.cores, memory_available: selected.compiler_threads.memory_available}
+            front := jet_cli_lowering_inputs(selected, trace_sink)
+            result := front.compile.move()
+            errors: jet_driver_present_diagnostics(jet_driver_check_failures(result.diagnostics), snapshot, result.generated_source_files)
+            if errors.len() > 0 {
+                jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR})
+            }
+            if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
+            if !result.complete {
+                jet_cli_finish(jet_cli_ice("the Jet compiler stopped before finishing `{file}`"))
+            }
+            checked := front.inputs.move() ?? jet_cli_finish(jet_cli_ice("the Jet compiler finished `{file}` without its checked functions"))
+            rows: jet_cli_library_export_rows(checked)
+            if rows.len() == 0 {
+                jet_cli_finish(jet_cli_report_output("", "E1341", "`{file}` exports no function, so its Library would be empty", jet_cli_why("E1341"), "mark the functions a C host calls with `#Export(c)`", color, JET_DRIVER_EXIT_USER_ERROR))
+            }
+            problems := [String]{}
+            prototypes: jet_cli_library_prototypes(rows, checked.functions, problems)
+            if problems.len() > 0 {
+                jet_cli_finish(jet_cli_report_output("", "E1341", problems.join("; "), jet_cli_why("E1341"), "export only functions whose parameters and result are C scalars (`Int`, `Float`, `F32`, `Bool`, `I8`-`I64`, `U8`-`U64`)", color, JET_DRIVER_EXIT_USER_ERROR))
+            }
+            built := jet_cli_library_ir(checked, rows, [String]{}, opt, compiler_threads, trace_sink)
+            if built.refused {
+                jet_cli_finish(jet_cli_report_output("", "E1341", built.issues.join("; "), jet_cli_why("E1341"), "give each export its own C symbol, and export only functions a C host can call", color, JET_DRIVER_EXIT_USER_ERROR))
+            }
+            if built.issues.len() > 0 {
+                jet_cli_finish(jet_cli_ice("the Library of `{file}` failed to lower: {built.issues.join("; ")}"))
+            }
+            // The header declares what the object exports, in its order.
+            declarations := ""
+            loop abi in built.library.abis {
+                loop (index, row) in rows {
+                    if row.symbol == abi.symbol {
+                        declarations = "{declarations}{prototypes[index]};\n"
+                    }
+                }
+            }
+            if trace_sink == .Val(sink) -> sink.begin("ir.x64", "", -1, -1)
+            compiled := ir_x64_compile_module(built.library.program.move(), built.threads)
+            if trace_sink == .Val(sink) -> sink.end("ir.x64", compiled.functions.len())
+            if trace_sink == .Val(sink) -> sink.begin("ir.object", "", -1, -1)
+            object := ir_x64_library_object(compiled, built.library.exports, built.library.data, debug_info, true)
+            if trace_sink == .Val(sink) -> sink.end("ir.object", object.bytes.len())
+            if object.errors.len() > 0 {
+                jet_cli_finish(jet_cli_ice("the Library object of `{file}` failed: {object.errors.join("; ")}"))
+            }
+            runtime_dir: jet_cli_runtime_dir()
+            runtime: jet_cli_runtime_bytes(runtime_dir, JET_CLI_RUNTIME_OBJECT_FILE) ?? jet_cli_finish(jet_cli_native_report(file, "build", JetCLINativeFailure.Runtime{what: "couldn't read the Jet runtime object: {err.message}"}, color))
+            // The members: the Library's object, the runtime and its fault
+            // report, each name short enough for the member header.
+            archive := x64_static_archive([String]{"library.o", "runtime.o", "fault.o"}, [[U8]]{object.bytes.move(), runtime, x64_fault_report_object()})
+            if archive.errors.len() > 0 {
+                jet_cli_finish(jet_cli_ice("the Library archive of `{file}` failed: {archive.errors.join("; ")}"))
+            }
+            if jet_cli_build_dir(directory, color) == .Val(refused) -> jet_cli_finish(refused)
+            archive_path: "{directory}/lib{name}.a"
+            header_path: "{directory}/{name}.h"
+            cli_files.write_bytes(archive_path, archive.bytes) ?? jet_cli_finish(jet_cli_build_failed("couldn't write the Library archive {archive_path}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color))
+            cli_files.write(header_path, jet_cli_library_header(name, declarations)) ?? jet_cli_finish(jet_cli_build_failed("couldn't write the Library header {header_path}: {err}", jet_cli_why("E2105"), "check that the build directory is writable", color))
+            jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
+        }
+    }
+    // Reached only by a refusal: a value-returning verb never ends in its
+    // Never exit call.
+    output
+}
+
+// The name a Library's files carry: the `name:` of the first Library output
+// of the package `file` (whose bytes are `source`) compiles under, else
+// that output's key; the stem of `file` when the package has no Library
+// output or `file` is a loose file.
+jet_cli_library_name: fn(file: String, source: String) -[FS]> String Never! {
+    manifest: jet_cli_file_manifest(file, source) ?? return jet_cli_stem(file)
+    loop output in manifest.outputs {
+        if output.kind == "Library" -> return output.artifact ?? output.name
+    }
+    jet_cli_stem(file)
+}
+
+// The C prototype of each export row, by row: `int64_t call_host(int64_t
+// p0)`, read from the checked function the row names. An export whose
+// parameter or result has no C spelling (jet_cli_inline_c_type) is a row in
+// `problems`.
+jet_cli_library_prototypes: fn(rows: [IRLibraryExportRow], functions: [FnBody], problems: &[String]) -> [String] Never! {
+    prototypes := loop _ in rows -> ""
+    loop function in functions {
+        loop (index, row) in rows {
+            if row.key == function.key {
+                prototypes[index] = jet_cli_library_prototype(row.symbol, function, problems)
+            }
+        }
+    }
+    prototypes
+}
+
+jet_cli_library_prototype: fn(symbol: String, function: FnBody, problems: &[String]) -> String Never! {
+    result := "void"
+    if function.ret == .Val(ty) {
+        unit: if ty == .Tuple(fields) -> fields.len() == 0 else -> false
+        if !unit {
+            result = jet_cli_inline_c_type(ty) ?? {
+                problems.push("the export `{symbol}` returns a type a C header can't spell")
+                "void"
+            }
+        }
+    }
+    parameters := [String]{}
+    loop (position, parameter) in function.params {
+        spelled: jet_cli_inline_c_type(parameter.ty) ?? {
+            problems.push("parameter `{parameter.name}` of the export `{symbol}` has a type a C header can't spell")
+            "void"
+        }
+        parameters.push("{spelled} p{position}")
+    }
+    listed: if parameters.len() == 0 -> "void" else -> parameters.join(", ")
+    "{result} {symbol}({listed})"
+}
+
+// The C header of the Library `name`: its include guard, the integer and
+// bool types the prototypes use, and the `declarations` (one prototype a
+// line) with C linkage in C++.
+jet_cli_library_header: fn(name: String, declarations: String) -> String Never! {
+    guard := [U8]{}
+    loop byte in name.to_upper().bytes() {
+        letter: byte >= U8{65} && byte <= U8{90}
+        digit: byte >= U8{48} && byte <= U8{57}
+        guard.push(if letter || digit -> byte else -> U8{95})
+    }
+    macro: "JET_LIBRARY_{String.from_bytes(guard) ?? ""}_H"
+    "/* The C interface of the Jet Library `{name}`, written by `jet build --lib`. */\n#ifndef {macro}\n#define {macro}\n\n#include <stdbool.h>\n#include <stdint.h>\n\n#ifdef __cplusplus\nextern \"C\" {{\n#endif\n\n{declarations}\n#ifdef __cplusplus\n}}\n#endif\n\n#endif\n"
+}

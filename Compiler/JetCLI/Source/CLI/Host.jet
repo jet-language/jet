@@ -4582,7 +4582,12 @@ jet_cli_execute: fn(plan: &&JetCLIPlan, trace_sink: JetCLITraceSink?{None}, reco
         }
         .Build(file, source, color, options, threads, invocation, notice, json, sbom, quiet, verbose) -> {
             jet_cli_write_notice(notice)
-            output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, quiet, verbose, trace_sink)
+            // `jet build --lib` writes the entry's native Library (LibraryBuild.jet).
+            if options.library {
+                output = jet_cli_build_library(file, source, color, options.move(), threads, trace_sink)
+            } else {
+                output = jet_cli_compile_build(file, source, color, options, threads, invocation, json, sbom, quiet, verbose, trace_sink)
+            }
         }
         .BuildPackage(file, color, options, build_args, threads, invocation, notice, locked) -> {
             jet_cli_write_notice(notice)

@@ -1,4 +1,5 @@
-// Static archive reading for the in-process linker (Image/StaticLink.jet):
+// Static archives, read for the in-process linker (Image/StaticLink.jet)
+// and written for a native library (x64_static_archive), in
 // the System V / GNU `ar` format that rustc rlibs, musl's libc.a and
 // libgcc_eh.a all use. An archive is the 8-byte magic `!<arch>\n`, then
 // members, each a 60-byte text header (name, dates, mode, decimal size, "`\n")
@@ -137,4 +138,113 @@ link_read_archive: fn(path: String, bytes: [U8]) -> LinkArchive Never! {
         archive.symbol_members.push(member)
     }
     archive
+}
+
+// The global and weak symbols the ELF relocatable object `objects[b]` (the
+// member `name`) defines, in symbol table order. A member that is no 64-bit
+// little-endian relocatable object is a row in `errors`.
+link_ar_defined: fn(objects: [[U8]], b: Int, name: String, errors: &[String]) -> [String] Never! {
+    defined := [String]{}
+    if objects[b].len() < 64 || link_u32(objects, b, 0) != 0x464c457f || link_u8(objects, b, 4) != 2 || link_u8(objects, b, 5) != 1 || link_u16(objects, b, 16) != 1 {
+        errors.push("archive member `{name}` is not a 64-bit little-endian ELF relocatable object")
+        return defined
+    }
+    shoff: link_u64(objects, b, 40)
+    count := link_u16(objects, b, 60)
+    // Extended numbering: the real count lives in section header 0.
+    if count == 0 -> count = link_u64(objects, b, shoff + 32)
+    loop k in 1..<count {
+        header: shoff + 64 * k
+        if link_u32(objects, b, header + 4) != LINK_SHT_SYMTAB -> next
+        symbols: link_u64(objects, b, header + 24)
+        total: link_u64(objects, b, header + 32).div_euclid(24)
+        strings: link_u64(objects, b, shoff + 64 * link_u32(objects, b, header + 40) + 24)
+        // The locals come first; the header's info is the first global.
+        loop index in link_u32(objects, b, header + 44)..<total {
+            at: symbols + 24 * index
+            bind: link_u8(objects, b, at + 4) >> 4
+            // A section index of 0 is an undefined reference.
+            if (bind == 1 || bind == 2) && link_u16(objects, b, at + 6) != 0 {
+                symbol: link_cstr(objects, b, strings + link_u32(objects, b, at))
+                if symbol != "" -> defined.push(symbol)
+            }
+        }
+    }
+    defined
+}
+
+// `text` left-aligned in a header field of `width` bytes, padded with spaces.
+link_ar_field: fn(out: &[U8], text: String, width: Int) Never! {
+    out.extend(text.bytes())
+    loop _ in text.len()..<width -> out.push(U8{0x20})
+}
+
+link_ar_be32: fn(out: &[U8], value: Int) Never! {
+    out.push(U8{(value >> 24) & 255})
+    out.push(U8{(value >> 16) & 255})
+    out.push(U8{(value >> 8) & 255})
+    out.push(U8{value & 255})
+}
+
+// One member: its 60-byte header (`name`, zero dates and owners, mode 644,
+// the size), its bytes, and a newline padding it to an even offset.
+link_ar_member: fn(out: &[U8], name: String, bytes: [U8]) Never! {
+    link_ar_field(out, name, 16)
+    link_ar_field(out, "0", 12)
+    link_ar_field(out, "0", 6)
+    link_ar_field(out, "0", 6)
+    link_ar_field(out, "644", 8)
+    link_ar_field(out, "{bytes.len()}", 10)
+    out.push(U8{0x60})
+    out.push(U8{0x0a})
+    loop byte in bytes -> out.push(byte)
+    if bytes.len() % 2 == 1 -> out.push(U8{0x0a})
+}
+
+// The static archive of the ELF relocatable objects `objects`, member k
+// named `names[k]`, as `ar rcs` writes it: the `/` symbol index of every
+// global and weak symbol a member defines, so a C linker pulls in the
+// members it needs, then the members. A name is 1 to 15 bytes with no `/`,
+// so the archive needs no long name table. Each problem is a row in
+// `errors`, and then there are no bytes.
+x64_static_archive: fn(names: [String], objects: [[U8]]) -> X64ExecutableResult Never! {
+    errors := [String]{}
+    if names.len() != objects.len() {
+        errors.push("an archive of {objects.len()} members has {names.len()} names")
+        return X64ExecutableResult{bytes: [U8]{}, errors: errors}
+    }
+    symbols := [String]{}
+    owners := [Int]{}
+    loop (k, name) in names {
+        if name.len() == 0 || name.len() > 15 || name.contains("/") {
+            errors.push("archive member name `{name}` is not 1 to 15 bytes without a `/`")
+        }
+        loop symbol in link_ar_defined(objects, k, name, errors) {
+            symbols.push(symbol)
+            owners.push(k)
+        }
+    }
+    if errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: errors}
+    // The index: the symbol count, each symbol's member header offset, then
+    // the names. Its size places the members.
+    index_size := 4 + 4 * symbols.len()
+    loop symbol in symbols -> index_size += symbol.len() + 1
+    starts := [Int]{}
+    at := 8 + LINK_AR_HEADER_SIZE + index_size + index_size % 2
+    loop object in objects {
+        starts.push(at)
+        at += LINK_AR_HEADER_SIZE + object.len() + object.len() % 2
+    }
+    index := [U8]{}
+    link_ar_be32(index, symbols.len())
+    loop owner in owners -> link_ar_be32(index, starts[owner])
+    loop symbol in symbols {
+        index.extend(symbol.bytes())
+        index.push(U8{0})
+    }
+    out := [U8]{}
+    out.extend("!<arch>\n".bytes())
+    link_ar_member(out, "/", index)
+    loop (k, object) in objects -> link_ar_member(out, "{names[k]}/", object)
+    X64ExecutableResult{bytes: out.move(), errors: errors}
 }

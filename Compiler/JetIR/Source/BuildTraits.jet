@@ -680,13 +680,16 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
 
 // Sema types a trait-owned call by the method's success value while the
 // implementation returns its failure carrier: the carrier is propagated at
-// the call.
+// the call. A `T? Never!` method's call keeps its `Result<T?, Never>`
+// carrier, whose success is the optional itself: the implementation's
+// optional is that value, not a carrier to unwrap.
 ir_trait_propagate: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, method: TMethodRef, slot: Int, checked: Type, span: Span) -> Int Never! {
     if method.trait_owner == None || slot < 0 || ir_failed(b) -> return slot
     returned: m.types[b.f.slot_type[slot]].ty
+    checked_success: ir_untag(ir_never_carrier_success(checked) ?? checked)
     carried: if ir_untag(returned) == {
         .Result(_, _) -> !(ir_untag(checked) == .Result(_, _))
-        .Option(_) -> !(ir_untag(checked) == .Option(_))
+        .Option(_) -> !(checked_success == .Option(_))
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     if !carried -> return slot

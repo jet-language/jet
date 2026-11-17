@@ -73,9 +73,7 @@ Host: trait {
     // xClose of the Host's virtual table cursor `cursor` on VTable vt.
     vtab_close: fn(&self, db: &conn.Conn, vt: Int, cursor: Int) -[DB]> Never!,
     // Take sqlite3_vtab.zErrMsg of VTable vt's instance; None when unset.
-    // (No `Never!`: a generic call of a trait method returning `T? Never!`
-    // loses the optional in the backend.)
-    vtab_take_errmsg: fn(&self, db: conn.Conn, vt: Int) -[]> [U8]?,
+    vtab_take_errmsg: fn(&self, db: conn.Conn, vt: Int) -[]> [U8]? Never!,
     // xOpen on VTable vt: cursor gets the new cursor's handle.
     vtab_open: fn(&self, db: &conn.Conn, vt: Int, cursor: &Int) -[DB]> Int Never!,
     // xFilter of `cursor` with idxNum, idxStr and the argc values in the
