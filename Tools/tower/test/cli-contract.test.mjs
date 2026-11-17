@@ -69,6 +69,7 @@ const ARGS = ({ root, ids }) => ({
   'card criteria': ['#1', '--add', 'third'],
   'card log': ['#1', '--text', 'noted'],
   'card history': ['#1'],
+  'card split': ['#1', '--criteria', '1', '--title', 'Split'],
   'decision list': [],
   'decision show': ['D-T1'],
   'decision scaffold': ['#1', '--id', 'D-T2', '--out', join(root, 'scaffold.json')],
