@@ -2367,13 +2367,14 @@ ir_atomic_taken: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, lane:
 // An Atomic method, by the runtime operation its row declares: the borrowed
 // receiver is the word's own storage address, never a copy; each operand
 // moves into the runtime, and a load or the OLD value of an add returns a
-// fresh owner.
+// fresh owner. An exact Int's `try_add` answers its checked Result
+// (ir_atomic_try_add).
 ir_atomic_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: String, args: [Int], span: Span) -> Int Never! {
     receiver_ty: ir_ty(p, b, receiver)
     scalar: ir_atomic_scalar(receiver_ty) ?? return ir_fail_slot(b, span, "Atomic {operation} on {ir_type_name(receiver_ty)}")
     lane: ir_atomic_lane(scalar) ?? return ir_fail_slot(b, span, "Atomic {operation} on {ir_type_name(receiver_ty)}")
     arity: if operation == "load" -> 0 else if operation == "compare_exchange" -> 2 else -> 1
-    known: operation == "load" || operation == "store" || operation == "compare_exchange" || (operation == "add" && lane != "bool")
+    known: operation == "load" || operation == "store" || operation == "compare_exchange" || (operation == "add" && lane != "bool") || (operation == "try_add" && lane == "int")
     if !known || args.len() != arity {
         return ir_fail_slot(b, span, "Atomic {operation} with {args.len()} operands on {ir_type_name(receiver_ty)}")
     }
@@ -2389,6 +2390,11 @@ ir_atomic_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         if value < 0 -> return ir_fail_slot(b, span, "Atomic {operation} on a Unit operand")
         operands.push(ir_atomic_taken(m, p, b, value, lane))
     }
+    if operation == "try_add" {
+        added: ir_atomic_try_add(m, p, b, ty, address, operands[1], span)
+        ir_release(m, b, address)
+        return added
+    }
     result_row := -1
     if operation != "store" {
         result_row = ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
@@ -2398,6 +2404,48 @@ ir_atomic_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiv
         if index > 0 -> b.fresh[operand] = false
     }
     ir_release(m, b, address)
+    result
+}
+
+// `cell.try_add(delta)` on an exact Atomic<Int>, `delta` an owner the runtime
+// takes. jet_rt_atomic_int_try_add (Runtime AtomicInt.jet) borrows 32 frame
+// bytes: on success it wrote the OLD owner at +0, which Ok holds; a refused
+// allocation leaves the cell as it was and wrote the requested bytes at +8,
+// which the Err(AllocError) names with the allocator "exact-int".
+ir_atomic_try_add: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, address: Int, delta: Int, span: Span) -> Int Never! {
+    err_ty: if ir_untag(ty) == .Result(_, err) -> err else -> {
+        return ir_fail_slot(b, span, "Atomic try_add without its checked Result")
+    }
+    result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    int_row: ir_type_row(m, Type.Int) ?? 0
+    bool_row: ir_type_row(m, Type.Bool) ?? 0
+    pointer_row: ir_pointer_row(m)
+    scratch: ir_temp(m, b, pointer_row)
+    ir_emit(b.f, IROp.StackAddress, scratch, 32, 8, -1, b.line)
+    taken: ir_runtime(m, b, "jet_rt_atomic_int_try_add", [Int]{address, delta, scratch}, bool_row)
+    b.fresh[delta] = false
+    result: ir_fresh_temp(m, b, result_row)
+    ir_open_if(b.f, taken, b.line)
+    previous: ir_fresh_temp(m, b, int_row)
+    ir_emit(b.f, IROp.Load, previous, scratch, 0, -1, b.line)
+    added: ir_result_box(m, p, b, ty, true, previous)
+    ir_emit(b.f, IROp.Copy, result, added, -1, -1, b.line)
+    b.fresh[added] = false
+    ir_else(b.f, b.line)
+    word_row: ir_word_row(m)
+    bytes: ir_load_at(m, b, scratch, 8, word_row)
+    requested: ir_runtime(m, b, "jet_int_owned_from_i64", [Int]{bytes}, int_row)
+    string_row: ir_string_row(m)
+    exact_text: ir_static_text(m, b, "exact-int")
+    allocator: ir_runtime(m, b, "jet_rt_string_from_static", exact_text, string_row)
+    record: ir_runtime(m, b, "jet_rt_record_new_alloc_error", [Int]{requested, allocator}, pointer_row)
+    ir_release(m, b, requested)
+    ir_release(m, b, allocator)
+    refused: ir_result_box(m, p, b, ty, false, -1)
+    ir_record_in(m, p, b, err_ty, record, refused, 8, span)
+    ir_emit(b.f, IROp.Copy, result, refused, -1, -1, b.line)
+    b.fresh[refused] = false
+    ir_end(b.f, b.line)
     result
 }
 

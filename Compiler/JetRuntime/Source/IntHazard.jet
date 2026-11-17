@@ -1,9 +1,14 @@
 // Native exact-Int's ONE hazard domain, port. Root16: hazards0, retired8;
 // Hazard16: protectedNode0, next8. Hazard records are append-only
-// PROCESS-LIFETIME; TCB192 lends this thread's record. Numeric nodes use
-// Int.jet's established immutable Node48/limbs ABI. Native arithmetic and
-// carrier sites retire nodes through this Jet domain.
+// PROCESS-LIFETIME; the TCB word INT_HAZARD_TCB_RECORD holds this thread's
+// record, which a fiber borrows from the carrier it runs on
+// (int_hazard_lend). Numeric nodes use Int.jet's established immutable
+// Node48/limbs ABI. Native arithmetic and carrier sites retire nodes through
+// this Jet domain.
 int_hazard_root := I64{0}
+
+// The TCB word of this thread's hazard record (Thread.jet's layout).
+INT_HAZARD_TCB_RECORD: I64{736}
 
 // Allocator init0 precedes this root. Any code that reads the root keeps this
 // guarded hook, whose init-array run precedes all user code/Int spills.
@@ -19,7 +24,7 @@ int_hazard_root := I64{0}
 
 #Export(c) jet_rt_int_hazard_enter: fn() -> I64 {
     base: thread_base()
-    record := sync_load(wrapping(base + I64{192}))
+    record := sync_load(wrapping(base + INT_HAZARD_TCB_RECORD))
     if (record != I64{0}) { return record }
     record = jet_rt_alloc(I64{16}, I64{8})
     sync_store(record, I64{0})
@@ -28,8 +33,16 @@ int_hazard_root := I64{0}
         sync_store(wrapping(record + I64{8}), head)
         if sync_cas(int_hazard_root, head, record) == head -> break
     }
-    sync_store(wrapping(base + I64{192}), record)
+    sync_store(wrapping(base + INT_HAZARD_TCB_RECORD), record)
     record
+}
+
+// Hands the hazard record `from`'s TCB holds to `to`'s: a carrier lends its
+// record to the fiber it switches to and takes back the one the fiber holds
+// when it switches out, so the carrier keeps a record the fiber made. No
+// guard spans a switch, so the running TCB alone uses the record.
+int_hazard_lend: fn(from: I64, to: I64) {
+    sync_store(wrapping(to + INT_HAZARD_TCB_RECORD), sync_load(wrapping(from + INT_HAZARD_TCB_RECORD)))
 }
 
 #Export(c) jet_rt_int_hazard_protect: fn(record: I64, node: I64) {
