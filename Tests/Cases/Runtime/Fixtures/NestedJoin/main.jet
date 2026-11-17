@@ -2,11 +2,11 @@
 // at least the core count, runs that many parents on one carrier, and each
 // parent spawns two children and joins them. A 4 GiB address-space cap set
 // before the first task leaves fiber stacks for about 25 tasks, so the
-// parents past them run on the carrier itself. No carrier is free to start
-// a child before its parent joins it, so every join finds its child not yet
-// started and runs it on the joining thread: each child reports its
-// parent's thread. A join that waited for a carrier instead would block
-// the only one, and a child would run on another thread or never.
+// parents past them run on the carrier itself. Such a parent's join blocks
+// the only carrier, so no carrier is left to start its child: the join runs
+// the child on the joining thread. A parent on a fiber parks instead, and
+// the carrier runs its children. Either way each child reports its parent's
+// thread. A join that waited for a carrier where none is left would hang.
 package: {
     name: "nested_join"
     authority: { allow: [Env, Mem.Alloc, Time.Wait] }

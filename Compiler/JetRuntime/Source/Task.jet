@@ -375,25 +375,24 @@ task_start: fn(child: I64) -> Bool {
     prior == I64{0} || (prior == TASK_STOLEN && sync_cas(word, TASK_STOLEN, TASK_STARTED) == TASK_STOLEN)
 }
 
-// A join on a child no carrier has started runs it on the joining thread
-// instead of waiting for a carrier, so joins nested past the carriers'
-// count never wait on work no carrier is left to take. The run queue keeps
-// its entry, and the entry its ref, so the join runs the task under one of
-// its own (task_run drops it). The run takes a fiber (task_run_joined); with
-// none to take a plain thread runs the task on its own stack, as a carrier
-// does, and a fiber leaves it to the carrier that pops it, since its park
-// frees its carrier. A thread with no TCB, or a joiner already stopping,
-// leaves it queued.
+// A join whose child waits in the run queue with no carrier left to start it
+// (Scheduler.jet scheduler_join_starves: the joiner runs on a carrier's own
+// stack, which its wait would block, no idle carrier is left to wake and no
+// carrier may start) runs the child on the joining thread, so joins nested
+// past the carriers' count never wait on work no carrier is left to take.
+// Any other join waits for a carrier to run the child, so the child keeps
+// the thread, CPU clock and carrier kind a carrier gives it. The run queue
+// keeps its entry, and the entry its ref, so the join runs the task under
+// one of its own (task_run drops it). The run takes a fiber
+// (task_run_joined); with none to take, the carrier's thread runs the task
+// on its own stack, as it runs any job it has no fiber for. A thread with no
+// TCB, or a joiner already stopping, leaves it queued.
 task_run_stolen: fn(child: I64) {
-    if (thread_base() == I64{0} || jet_scheduler_native_propagate() != I64{0} || !task_steal(child)) {
+    if (thread_base() == I64{0} || jet_scheduler_native_propagate() != I64{0} || !scheduler_join_starves() || !task_steal(child)) {
         return
     }
     task_retain(child)
     if task_run_joined(child) {
-        return
-    }
-    if (fiber_current() != I64{0}) {
-        task_drop(child)
         return
     }
     root: scheduler_root_required()
@@ -605,8 +604,8 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
 }
 
 // A deferred task its join claims runs here, unless the joiner is already
-// stopping, whose join cancels and drains it on a carrier. A submitted one no
-// carrier has started runs here too (task_run_stolen).
+// stopping, whose join cancels and drains it on a carrier. A submitted one
+// no carrier is left to start runs here too (task_run_stolen).
 #Export(c) jet_rt_native_task_join: fn(child: I64, flatten: I64, out: I64) -> I64 {
     if (child != I64{0}) {
         if task_claim(child) {

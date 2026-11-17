@@ -266,8 +266,9 @@ kit_test_pool_report: fn(env: KitEnv, root: String, index: Int, done: Sender<Int
 kit_test_pool_send: fn(done: Sender<Int>, code: Int) Err! { done.send(code) }
 
 // Every running entry's reporting task joins the entry's own task, which waits on its
-// children itself (kit_exec_wait). A join on an entry no scheduler worker has started
-// runs it on the joining thread, so a pool twice as wide as the cores finishes.
+// children itself (kit_exec_wait). A join on a fiber parks and frees its scheduler
+// worker; a join on a worker's own stack, with no worker left to start the entry, runs
+// it on the joining thread. Either way a pool twice as wide as the cores finishes.
 #Test("a pool wider than the cores finishes its guarded children") {
     root: cases_test_root("pool-width")
     env: KitEnv{root: root, scratch: root, jet: "/bin/sh", jetpack: "", timeout: 30s, memory_limit: 0, resident_limit: 67108864}
