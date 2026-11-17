@@ -639,7 +639,12 @@ none is E2102 too, never ignored: a switch takes no `=value`
 - `--locked` requires locked dependency and provenance facts, and refuses a
   dependency whose inferred effect row is wider than the one `.jet/lock`
   records (E3513); `--fixtures` selects an explicit fixture bundle.
-- `--lib` makes `build` emit the native Library and C header; `--output` selects
+- `--lib` makes `build` emit the native Library: the static archive
+  `lib<name>.a`, which holds the entry's `#Export(c)` functions with the Jet
+  runtime they call, so a C or C++ host links it alone (with `-ldl -lpthread
+  -lm` on Linux), and the C header `<name>.h` declaring each export. `<name>`
+  is the `name:` of the package's Library output. An export whose parameter
+  or result is not a C scalar is refused with E1341. `--output` selects
   a named output; `--small` favors a smaller binary; `--checked-alloc` on
   `build`, `run` and `test` links the checked memory allocator, which stops at
   a bad free or a write after free.

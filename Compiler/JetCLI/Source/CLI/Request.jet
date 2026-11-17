@@ -104,7 +104,7 @@ use {
         jet_eval_native_session,
     ]
     jet_backend.[X64ExecutableResult, X64ImageFile, X64_SELF_EXECUTABLE, x64_image_file_read, x64_image_part_file, x64_link_runtime_image, x64_link_runtime_pack, x64_self_read, x64_self_read_into]
-    jet_ir.[IRLibraryExportRow, IRLibraryResult, IRLintFinding, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
+    jet_ir.[IRLibraryExportRow, IRLibraryResult, IRLintFinding, IROptOptions, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent, sema_core_bodies_read]
     jet_web.[web_runtime_partition]
@@ -311,12 +311,11 @@ jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, l
         return JetCLIRuntimeIR.Stopped{result: result}
     }
     checked := owned.inputs.move() ?? return jet_cli_runtime_stopped("the runtime front end returned no checked inputs")
-    // The lifecycle list, the export and interface rows and the checked
-    // declarations the IR build reads.
+    // The lifecycle list and the export and interface rows the IR build reads.
     if trace_sink == .Val(sink) -> sink.begin("runtime.inputs", "", -1, -1)
     lifecycle_path: lifecycle ?? return jet_cli_runtime_stopped("runtime packaging requires the lifecycle list")
     lifecycle_text: cli_files.read(lifecycle_path) ?? return jet_cli_runtime_stopped("cannot read runtime lifecycle list: {err}")
-    rows: loop row in checked.c_exports if row.exported -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
+    rows: jet_cli_library_export_rows(checked)
     interface_rows := [RuntimeInterfaceRow]{}
     loop row in checked.c_exports {
         found: row.runtime_interface ?? next
@@ -326,12 +325,48 @@ jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, l
         interface_rows.push(RuntimeInterfaceRow{module_name: found.module_name.copy(), member: found.member.copy(), declaration: found.declaration.copy(), symbol: found.symbol.copy()})
     }
     interface_text: jet_driver_runtime_interface_file(interface_rows)
-    declarations := jet_driver_checked_declarations(checked)
     if trace_sink == .Val(sink) -> sink.end("runtime.inputs", interface_rows.len())
+    built := jet_cli_library_ir(checked, rows, lifecycle_text.split("\n").to_list(), ir_opt_options(1), compiler_threads, trace_sink)
+    if built.issues.len() > 0 {
+        cli_files.write("{prefix}.issues", built.issues.join("\n")) ?? return jet_cli_runtime_stopped("cannot write runtime library findings: {err}")
+        return jet_cli_runtime_stopped("runtime library lowering failed; see {prefix}.issues")
+    }
+    receipt: ir_thread_exports(built.library.program, built.library.exports, [String]{})
+    JetCLIRuntimeIR.Built{result: result, library: built.library.move(), interface_text: interface_text, threads: built.threads.move(), receipt: receipt}
+}
+
+// The export rows of a native library: each `#Export(c)` function the
+// checked entry exports, under its C symbol.
+jet_cli_library_export_rows: fn(checked: JetDriverLoweringInputs) -> [IRLibraryExportRow] Never! {
+    loop row in checked.c_exports if row.exported -> IRLibraryExportRow{key: row.key, symbol: jet_driver_c_symbol(row.name)}
+}
+
+// A native library built as IR (jet_cli_library_ir): the library, the
+// threads its machine code compiles on, and the issues that stop it. With
+// `refused` they are the export and lifecycle problems the build refuses
+// (ir_build_library's errors), else each is a compiler bug: a function the
+// builder could not build, or an IR Lint finding.
+JetCLILibraryIR: struct {
+    library: IRLibraryResult,
+    threads: CompilerThreads,
+    issues: [String],
+    refused: Bool,
+}
+
+// The native library of the checked inputs `checked` (moved in) with the
+// export `rows` and the runtime lifecycle rows `lifecycle_rows` (none for a
+// user library): built (`ir.build`), linted, optimized as `opt` says
+// (`ir.opt`) and linted again (`ir.lint`). The runtime library
+// (jet_cli_runtime_ir) and `jet build --lib` (LibraryBuild.jet) build
+// through it.
+jet_cli_library_ir: fn(checked: &&JetDriverLoweringInputs, rows: [IRLibraryExportRow], lifecycle_rows: [String], opt: IROptOptions, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLILibraryIR {
+    owned := checked.move()
+    declarations := jet_driver_checked_declarations(owned)
     if trace_sink == .Val(sink) -> sink.begin("ir.build", "", -1, -1)
-    library := ir_build_library(checked.functions.move(), checked.decls, checked.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), checked.sources.move(), declarations.constants.move(), declarations.foreign.move(), rows, lifecycle_text.split("\n").to_list(), compiler_threads)
+    library := ir_build_library(owned.functions.move(), owned.decls, owned.symbols.move(), declarations.type_defs.move(), declarations.impls.move(), owned.sources.move(), declarations.constants.move(), declarations.foreign.move(), rows, lifecycle_rows, compiler_threads)
     if trace_sink == .Val(sink) -> sink.end("ir.build", library.program.functions.len())
     issues := compiler_take_rows<String>(library.errors)
+    refused: issues.len() > 0
     loop failure in library.failures {
         issues.push("{failure.name} [{failure.key}]: {failure.message} at {failure.source_file}:{failure.span.start}..{failure.span.end}")
     }
@@ -346,7 +381,7 @@ jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, l
     }
     if issues.len() == 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
-        _ := ir_optimize_module(library.program, ir_opt_options(1), threads)
+        _ := ir_optimize_module(library.program, opt, threads)
         if trace_sink == .Val(sink) -> sink.end("ir.opt", library.program.functions.len())
         if trace_sink == .Val(sink) -> sink.begin("ir.lint", "", -1, -1)
         loop finding in ir_lint_module(library.program, "ir.opt", threads) {
@@ -354,12 +389,7 @@ jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, l
         }
         if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
-    if issues.len() > 0 {
-        cli_files.write("{prefix}.issues", issues.join("\n")) ?? return jet_cli_runtime_stopped("cannot write runtime library findings: {err}")
-        return jet_cli_runtime_stopped("runtime library lowering failed; see {prefix}.issues")
-    }
-    receipt: ir_thread_exports(library.program, library.exports, [String]{})
-    JetCLIRuntimeIR.Built{result: result, library: library, interface_text: interface_text, threads: threads, receipt: receipt}
+    JetCLILibraryIR{library: library.move(), threads: threads, issues: issues.move(), refused: refused}
 }
 
 // The runtime's machine code from its IR `library`, then, under

@@ -1,0 +1,48 @@
+// A native Library's static archive (Image/Archive.jet x64_static_archive)
+// reads back through the in-process linker's reader (link_read_archive):
+// each member under its name with its bytes, and each symbol a member
+// defines indexed to that member, never a symbol it only references.
+use jet_backend.[link_read_archive, link_synth, link_synth_code, link_synth_function, link_synth_object, link_synth_pcrel_field, x64_static_archive]
+
+// An object defining each of `names` as a function that returns, the first
+// of them calling `called`, which the object does not define.
+archive_object: fn(names: [String], called: String) -> [U8] Never! {
+    s := link_synth()
+    loop (k, name) in names {
+        link_synth_function(s, name)
+        if k == 0 {
+            // call rel32
+            link_synth_code(s, [Int]{0xe8})
+            link_synth_pcrel_field(s, called)
+        }
+        link_synth_code(s, [Int]{0xc3})
+    }
+    link_synth_object(s)
+}
+
+#Test("a written archive keeps each member and indexes the symbols it defines") {
+    first: archive_object([String]{"alpha", "beta"}, "outside")
+    second: archive_object([String]{"gamma"}, "alpha")
+    built: x64_static_archive([String]{"first.o", "second.o"}, [[U8]]{first, second})
+    assert(built.errors.len() == 0, "the archive is written: {built.errors.join("; ")}")
+    read: link_read_archive("test.a", built.bytes)
+    assert(read.errors.len() == 0, "the archive reads back: {read.errors.join("; ")}")
+    assert(read.names.join(",") == "first.o,second.o", "the members keep their names: {read.names.join(",")}")
+    objects: [[U8]]{first, second}
+    loop (k, object) in objects {
+        assert(read.sizes[k] == object.len(), "member {k} keeps its size")
+        loop (at, byte) in object {
+            if built.bytes[read.starts[k] + at] != byte {
+                assert(false, "member {k} differs at byte {at}")
+            }
+        }
+    }
+    indexed := [String]{}
+    loop (k, symbol) in read.symbol_names -> indexed.push("{symbol}@{read.symbol_members[k]}")
+    assert(indexed.join(",") == "alpha@0,beta@0,gamma@1", "the index names each defined symbol's member: {indexed.join(",")}")
+}
+
+#Test("an archive refuses a member name its header can't hold") {
+    built: x64_static_archive([String]{"a_member_name_too_long.o"}, [[U8]]{archive_object([String]{"alpha"}, "outside")})
+    assert(built.errors.len() == 1 && built.bytes.len() == 0, "the long name is refused: {built.errors.join("; ")}")
+}

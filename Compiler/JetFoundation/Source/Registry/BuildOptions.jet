@@ -232,7 +232,9 @@ BuildSettingOverride: struct {
 // image is written for it yet; "" builds for the host. `compiler_events` is
 // `jet build --json`: the compile records its public moments
 // (Registry/CompilerEvents.jet) and the build writes one line for each; it
-// shapes no image.
+// shapes no image. `library` is `jet build --lib`: the build writes the
+// entry's native Library, a static archive and its C header, in place of an
+// executable.
 BuildOptions: struct {
     command: String,
     profile: String,
@@ -247,6 +249,7 @@ BuildOptions: struct {
     explain_partition: Bool{false},
     target_machine: String{""},
     compiler_events: Bool{false},
+    library: Bool{false},
 }
 
 // The deep checks one compile keeps (`--deep-checks` of run, dev, test, build,

@@ -1516,6 +1516,16 @@ link_fault_report: fn(s: &LinkSynth, report: LinkFaultReport) Never! {
     }
 }
 
+// The full fault report alone in an ELF relocatable object defining
+// `jet_rt_fault_report`: a native library's archive carries it for the
+// runtime it holds, since no Jet link writes the report into the C host's
+// image.
+x64_fault_report_object: fn() -> [U8] Never! {
+    s := link_synth()
+    link_fault_report(s, LinkFaultReport.Full)
+    link_synth_object(s)
+}
+
 // The unwind shims, written in the round no other shim is wanted, so every
 // member the program pulls in is already in.
 //
