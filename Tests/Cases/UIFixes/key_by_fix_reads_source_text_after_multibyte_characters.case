@@ -13,7 +13,7 @@ exit: 0
 stderr: ~ "run.jet: applied 1 fix" # the edit checks
 stderr: !~ "rolled back" # no text cut mid-character or shifted
 file: run.jet ~ "// Readings — two in one ten-degree band — are equal: “warm” is 20–29°." # the comment stays
-file: run.jet ~ "\n    impl KeyBy {\n        Key: Int\n\n        key: fn(self) -> Int { self.celsius }\n    }\n" # the indent and the field type, cut whole
+file: run.jet ~ "\n    impl KeyBy {\n        Key: Int,\n\n        key: fn(self) -> Int { self.celsius }\n    }\n" # the indent and the field type, cut whole
 file: run.jet ~ "\n    equal_by_rule: fn(self, rhs: Reading) -> Bool { self.celsius / 10 == rhs.celsius / 10 }\n}\n" # the method head and body around the new name
 file: run.jet !~ "impl Equatable" # the written equality is gone
 step again: jet fix run.jet
