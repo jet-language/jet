@@ -107168,6 +107168,88 @@
       "completedAt": "2026-11-14T13:37:09.528Z",
       "questions": [],
       "retiredAt": "2026-11-17T13:46:01.770Z"
+    },
+    {
+      "id": "c0ku1nvb",
+      "num": 6708,
+      "title": "Element and module-storage reassignment drops the old Close value without closing it (xs[i] = v, m[k] = v, module storage)",
+      "body": "Found by AllocLead while tracing #6707. With seed a0_040, `xs[i] = v` and `m[k] = v` drop the replaced element without running its close. Assigning to module storage does the same, from reading the code; that path has not been run. Field writes and Shared guard writes correctly close before they drop. Fix: one replace-then-close-then-drop path for every assignment target, with a case for each target on every tier.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A plain write that replaces a Close value in a List element, a Map entry or module storage closes it before it drops, on O0, O1 and O2. Proof: jet test Compiler --profile cases --filter resource_close/replaced_list_element_map_value_and_module_storage_close_before_they_drop -> PASS 1.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter resource_close/replaced_list_element_map_value_and_module_storage_close_before_they_drop on batch compiler gate-p131 (dev 8d83659ef3), 2026-11-14 ~18:03: PASS (1 PASS, 0 FAIL); O0/O1/O2 stdout matches the .out",
+          "at": "2026-11-14T22:52:25.704Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T22:39:35.331Z",
+      "updated": "2026-11-14T22:52:30.393Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T22:52:30.393Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T23:03:01.616Z"
+    },
+    {
+      "id": "c05c458o",
+      "num": 6767,
+      "title": "Remove card and criterion citations from tests/ comments",
+      "body": "G6Meta-4's 2026-11-12 sweep found 365 non-TSV lines under tests/ citing cards, 136 of them as parenthetical criterion citations such as '(#4276 c49)'. AGENTS I7 keeps decision history in Tower and the specs, never in source comments. Rewrite each comment to state the behavior it guards, in plain words, and add a guard so new citations are refused. known-failing.tsv rows, which name their owning card by design, stay as they are.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P3",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "No comment line under tests/ outside *.tsv cites a Tower card, and tests/guards/card_citations.jet refuses new ones. Proof: jet test tests/guards/card_citations.jet --filter tests_comments_cite_no_cards passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test tests/guards/card_citations.jet --filter tests_comments_cite_no_cards on batch compiler gate-p131 (dev 8d83659ef3), 2026-11-14 ~18:03: 1 passed, 0 failed",
+          "at": "2026-11-14T22:52:26.594Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T10:11:00.976Z",
+      "updated": "2026-11-14T22:52:32.579Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T22:52:32.579Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T23:03:01.616Z"
     }
   ]
 }

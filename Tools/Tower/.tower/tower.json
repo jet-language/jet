@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 111989,
+    "rev": 111994,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -66350,20 +66350,20 @@
         {
           "n": 4,
           "text": "Generic code that runs a task.group child calling a function value is memory-safe on every tier (found while building core.actor on p270, dev eba6f39612). Three failures: (1) a group child calling plan.handler(...), a function-valued field of a && struct parameter, corrupts the struct's other fields once it joins, so a match on an enum field hits the 'no else arm' ICE (exit 101); (2) a group child calling a function-valued && parameter or local segfaults at address 0 on the loop's second turn; (3) a panic inside task.any { handler(current, message) } segfaults at an address equal to the Int state's value. Proof: a case in Tests/Cases/Concurrency with the three reductions passes on O0, O1 and O2, and core.actor runs each supervised turn in a group child.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T17:40:24.285Z"
+          "evidence": "Landed in 0921df52d9 (p278), with the fixture loop-count fix 460365d12b (p279). On the p279 batch compiler 0099c1cc87, `jet test Compiler --profile cases --filter scoped_children_call_function_values_on_every_tier` passes 1/1. It checks O0, O1 and O2 under --checked-alloc: a group child or task.any branch borrows a function-valued field, parameter or local until the join, on every loop turn. The Concurrency/Actors golden passes 3/3.",
+          "at": "2026-11-17T23:03:01.277Z"
         },
         {
           "n": 5,
           "text": "A task that calls a function value whose captures it mutates, while the creating code also calls that function, is refused at compile time (or the shared state is made data-race-free) on every tier. Today it compiles and runs, a data race in safe Jet (I1). Found by the D-FNVAL-COPY1 ballot probes on gate-p277: make_counter returns fn(value: Int) { seen.push(value); seen.len() * 100 + value } over a := [Int]{}; run does counter: make_counter(); worker: task counter(1); print(counter(2)); print(worker.join() ?? 0), and it prints 102 then 201. Proof: a Tests/Cases/Concurrency case with this program reports the registered refusal (UI snapshot) on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T21:53:55.989Z"
+          "evidence": "Landed in b92cae749b (p280). A writing function value now has its calls take turns under the invocation lock that D-FNVAL-WRITE1 keeps, and a detached task that takes one gets E0121 with a function-value fix. On the p280 batch compiler 412b58dbb6, the cases filter Concurrency/writing_function_values_take_turns_or_stay_with_their_task passes 1/1, and the ui filter ConcurrencyBoundaries/task_takes_a_writing_function_value_its_owner_calls_again passes 1/1.",
+          "at": "2026-11-17T23:03:03.990Z"
         }
       ],
       "refs": [],
@@ -66374,7 +66374,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-17T21:53:55.989Z",
+      "updated": "2026-11-17T23:03:03.990Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -85038,11 +85038,11 @@
         {
           "n": 10,
           "text": "Sema's web-target refusal of an API the web host does not provide also catches calls through a bare import (use { app.[open_folder] } then open_folder(...)), not only qualified app.open_folder(...) calls. Found by IfHole on p279. Proof: a UI snapshot of the refusal for the bare-imported spelling on a web build.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T22:08:44.927Z"
+          "evidence": "Landed in 412b58dbb6 (p280). Sema runs the app device checks on a call through `use { app.[x] }`. On the p280 batch compiler, `jet test Compiler --profile ui --filter app_device_bare_import_target` passes 1/1. Sweep: no Core, Examples, Tools, Jetpack or Tests source bare-imports a device call, so nothing else is refused.",
+          "at": "2026-11-17T23:03:06.780Z"
         }
       ],
       "refs": [],
@@ -85054,7 +85054,7 @@
       "parentId": "c0vxf4u0",
       "needsAcceptance": false,
       "created": "2026-11-04T01:02:34.688Z",
-      "updated": "2026-11-17T22:08:44.927Z",
+      "updated": "2026-11-17T23:03:06.780Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -92988,45 +92988,6 @@
       "criteriaLastN": 5
     },
     {
-      "id": "c0ku1nvb",
-      "num": 6708,
-      "title": "Element and module-storage reassignment drops the old Close value without closing it (xs[i] = v, m[k] = v, module storage)",
-      "body": "Found by AllocLead while tracing #6707. With seed a0_040, `xs[i] = v` and `m[k] = v` drop the replaced element without running its close. Assigning to module storage does the same, from reading the code; that path has not been run. Field writes and Shared guard writes correctly close before they drop. Fix: one replace-then-close-then-drop path for every assignment target, with a case for each target on every tier.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A plain write that replaces a Close value in a List element, a Map entry or module storage closes it before it drops, on O0, O1 and O2. Proof: jet test Compiler --profile cases --filter resource_close/replaced_list_element_map_value_and_module_storage_close_before_they_drop -> PASS 1.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile cases --filter resource_close/replaced_list_element_map_value_and_module_storage_close_before_they_drop on batch compiler gate-p131 (dev 8d83659ef3), 2026-11-14 ~18:03: PASS (1 PASS, 0 FAIL); O0/O1/O2 stdout matches the .out",
-          "at": "2026-11-14T22:52:25.704Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-08T22:39:35.331Z",
-      "updated": "2026-11-14T22:52:30.393Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-14T22:52:30.393Z"
-    },
-    {
       "id": "c01xp5ri",
       "num": 6711,
       "title": "Generic call to a trait method returning `T? Never!` loses the optional and fails in the backend (ICE)",
@@ -95810,45 +95771,6 @@
       "criteriaLastN": 4
     },
     {
-      "id": "c05c458o",
-      "num": 6767,
-      "title": "Remove card and criterion citations from tests/ comments",
-      "body": "G6Meta-4's 2026-11-12 sweep found 365 non-TSV lines under tests/ citing cards, 136 of them as parenthetical criterion citations such as '(#4276 c49)'. AGENTS I7 keeps decision history in Tower and the specs, never in source comments. Rewrite each comment to state the behavior it guards, in plain words, and add a guard so new citations are refused. known-failing.tsv rows, which name their owning card by design, stay as they are.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P3",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "No comment line under tests/ outside *.tsv cites a Tower card, and tests/guards/card_citations.jet refuses new ones. Proof: jet test tests/guards/card_citations.jet --filter tests_comments_cite_no_cards passes.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "jet test tests/guards/card_citations.jet --filter tests_comments_cite_no_cards on batch compiler gate-p131 (dev 8d83659ef3), 2026-11-14 ~18:03: 1 passed, 0 failed",
-          "at": "2026-11-14T22:52:26.594Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-12T10:11:00.976Z",
-      "updated": "2026-11-14T22:52:32.579Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-14T22:52:32.579Z"
-    },
-    {
       "id": "c0xphd0i",
       "num": 6769,
       "title": "I9: a built binary keeps strings past their last use (memory_semantics/strings_free_at_their_last_use passes on jet run, fails after jet build)",
@@ -97640,11 +97562,11 @@
         {
           "n": 1,
           "text": "start, foreground, background, suspend and terminate reach the app through window and session events on the Linux desktop and the Page Lifecycle API on the web. native.lifecycle(on_resume:) runs on resume. Proof: `jet test Compiler --profile cases --filter NativeApp/lifecycle_events_reach_the_app_on_every_target` on Linux and the web.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T21:54:46.415Z"
+          "evidence": "Landed in b230a9b63e and 7ae60a532b (p280). On the p280 batch compiler 412b58dbb6, `jet test Compiler --profile cases --filter NativeApp/lifecycle_events_reach_the_app_on_every_target` passes 1/1, with Linux steps and the web page steps through the Page Lifecycle API.",
+          "at": "2026-11-17T23:03:09.466Z"
         },
         {
           "n": 2,
@@ -97671,11 +97593,11 @@
         {
           "n": 4,
           "text": "D-LIFECYCLE-PHASE1=A is built: app.phase() -> Phase? (None without an initialized app; Phase carries instance identity, observation sequence, visibility Visible/Hidden/Unknown and execution Running/Suspending/Unknown, aggregated over app-owned windows natively and over the document on the web) and app.LIFECYCLE as Event<LifecycleEvent>. Proof: a NativeApp case and a WebBuild case print the phase sequence across hide, show and suspend.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T17:23:30.992Z"
+          "evidence": "Landed in 7ae60a532b (p280). On the p280 batch compiler 412b58dbb6, the cases NativeApp/the_phase_follows (1/1) and WebBuild/the_phase_follows_hide_show_and_suspend_in_a_page (1/1) print the phase sequence across hide, show and suspend.",
+          "at": "2026-11-17T23:03:12.062Z"
         }
       ],
       "refs": [],
@@ -97683,7 +97605,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:53.581Z",
-      "updated": "2026-11-17T19:38:12.889Z",
+      "updated": "2026-11-17T23:03:12.062Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -216004,6 +215926,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T23:03:12.062Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c051j6ab",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-17T23:03:09.466Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c051j6ab",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T23:03:06.781Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tjjr66",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-17T23:03:03.991Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mhdm27",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-17T23:03:01.277Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mhdm27",
+      "note": "#4"
+    },
     {
       "at": "2026-11-17T22:33:17.795Z",
       "by": "Main",
