@@ -1,0 +1,35 @@
+// A crew app keeps the folder the person chose for its exports. A run that
+// finds the folder kept lists it. Otherwise the run asks for one in the
+// system's open dialog, keeps access to it as "exports", writes the board
+// there and lists it. When no folder could be chosen, the app's notice
+// says why.
+use app
+
+run: fn() -[Env, FS, IO, Net, Time]> {
+    _: app.new("Crew")
+    kept: app.kept_folder("exports")
+    if kept == .Val(folder) {
+        print("kept: {folder.name}")
+        list(folder)
+        return
+    }
+    picked: app.open_folder()
+    if picked == .Val(folder) {
+        print("picked: {folder.name}")
+        folder.keep("exports")
+        folder.write("board.csv", "title,status\nFix the gate,done\n".bytes()) ?? return print("unwritten: {err}")
+        print("wrote board.csv")
+        list(folder)
+        return
+    }
+    print("picked: none")
+    loop notice in app.notices() -> print("notice: {notice.text}")
+}
+
+// The files in `folder`, by name, with their sizes.
+list: fn(folder: app.PickedFolder) -[FS.Read, IO]> {
+    found: folder.files() ?? return print("unlisted: {err}")
+    names := [String]{}
+    loop file in found -> names.push("{file.name} ({file.bytes} bytes)")
+    print("files: {names.join(", ")}")
+}

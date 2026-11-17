@@ -1620,6 +1620,13 @@ portal_open_file: fn(c: &DbusConnection, title: String, filters: [FileFilter], t
     file_dialog(c, "OpenFile", title, [DbusValue]{}, filters, timeout_ns)
 }
 
+// Shows the portal's open dialog, titled `title`, asking for a folder, and
+// waits at most `timeout_ns` for the person. Gives the `file://` URI of the
+// folder they chose, or None when they cancelled or chose nothing in time.
+portal_open_folder: fn(c: &DbusConnection, title: String, timeout_ns: Int) -[Net, Time]> String? DbusError! {
+    file_dialog(c, "OpenFile", title, [DbusValue]{entry_of("directory", DbusValue.Bool(true))}, [FileFilter]{}, timeout_ns)
+}
+
 // Shows the portal's save dialog, titled `title`, with the file name
 // `suggested` filled in and `filters` offered (the first one chosen), and
 // waits at most `timeout_ns` for the person. Gives the `file://` URI of
@@ -1630,8 +1637,8 @@ portal_save_file: fn(c: &DbusConnection, title: String, suggested: String, filte
 }
 
 // Shows the FileChooser dialog `member` with the options `named` beside
-// its handle token and `filters`, and gives the URI of the one file the
-// person chose, or None when they chose none in time.
+// its handle token and `filters`, and gives the URI of the one file or
+// folder the person chose, or None when they chose none in time.
 file_dialog: fn(c: &DbusConnection, member: String, title: String, named: [DbusValue], filters: [FileFilter], timeout_ns: Int) -[Net, Time]> String? DbusError! {
     deadline: now() + timeout_ns
     watch(c, REQUEST, "Response", "", deadline) ?? return Err(err)
