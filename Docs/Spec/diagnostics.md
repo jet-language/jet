@@ -174,7 +174,9 @@ A native program's fatal signal is reported the same way under `jet run` and
 `jet build`. The handler runs on a per-thread alternate stack, so an exhausted
 stack is reported too. A SIGSEGV within the guard region below the stack
 pointer is a stack overflow: `Stop [E3012]` names the Jet function and its
-source line and exits 70. Any other SIGSEGV, SIGBUS, SIGILL or SIGFPE prints
+source line and exits 70. Deep recursion reaches it only past the thread's
+total stack budget, since a recursive body moves onto stack segments as it
+goes deeper (spec.md, `#MaxDepth`). Any other SIGSEGV, SIGBUS, SIGILL or SIGFPE prints
 `Fault [SIGNAME]: invalid memory access at address 0x…` (or the signal's own
 reason) and a backtrace of the Jet frames (`name at file:line`, from the
 image's location table, `.debug_jetline`, which the compiler writes beside

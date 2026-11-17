@@ -726,6 +726,7 @@ App: struct {
     bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net, FS.Read]> HTTPServer HTTPError! {
         app_image_route(self)
         app_push_route(self)
+        app_session_routes(self)
         app_crawl_routes(self)
         app_install_routes(self)
         app_uploads_clean(app_service_routes(self))
@@ -738,6 +739,7 @@ App: struct {
     serve_once: fn(self, listener: TCPListener) -[Net, FS.Read, Time]> HTTPError! {
         app_image_route(self)
         app_push_route(self)
+        app_session_routes(self)
         app_crawl_routes(self)
         app_install_routes(self)
         app_uploads_clean(app_service_routes(self))
@@ -801,6 +803,7 @@ bind: fn<Settings: Decode>(address: String, *, prefix: String, build: fn(Setting
     app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, app_build_failure("{err}"))
     app_image_route(app)
     app_push_route(app)
+    app_session_routes(app)
     app_uploads_clean(app_service_routes(app))
     app_screen_routes(app)
     _: app_trace_start(app)
@@ -961,6 +964,7 @@ priv app_serve: fn(app: App, chosen: AppPort) -[Env, IO, Net, FS.Read, Time]> Ne
     if dev -> app_dev_reload(table)
     app_image_route(app)
     app_push_route(app)
+    app_session_routes(app)
     app_crawl_routes(app)
     app_install_routes(app)
     app_uploads_clean(app_service_routes(app))
@@ -1203,6 +1207,73 @@ priv app_push_route: fn(app: App) -[Net]> Never! {
     refused: calls.push.start()
     if refused != "" -> core.rt.__coded_stop("E2416", refused)
     http_server.route_add(table, "POST", C_APP_PUSH_DEVICES, http_server.__handler(fn(request: HTTPRequest) { Ok(app_push_register(request)) }), "", #here)
+}
+
+// Registers POST `{SESSION_PATH}/sign-in` (app_session_sign_in) and
+// POST `{SESSION_PATH}/refresh` (app_session_refresh) when the app graph
+// gives `.sessions`, unless the app did this before.
+priv app_session_routes: fn(app: App) Never! {
+    if calls.sessions.access_ms() == None {
+        return
+    }
+    table: app_table(app)
+    sign_in: "{calls.sessions.path()}/sign-in"
+    loop route in http_server.mux_routes(table) {
+        if route.method == "POST" && route.pattern == sign_in {
+            return
+        }
+    }
+    http_server.route_add(table, "POST", sign_in, http_server.__handler(fn(request: HTTPRequest) { Ok(app_session_sign_in(request)) }), "", #here)
+    http_server.route_add(table, "POST", "{calls.sessions.path()}/refresh", http_server.__handler(fn(request: HTTPRequest) { Ok(app_session_refresh(request)) }), "", #here)
+}
+
+// A native app's sign-in (`app.sign_in`): the account, its credential as
+// core.auth keeps it, and the device signing in.
+#Codable
+priv AppSessionSignIn: struct {
+    account: String,
+    password: String,
+    device: String,
+}
+
+// A native app's refresh: the refresh token it spends.
+#Codable
+priv AppSessionRefresh: struct {
+    refresh: String,
+}
+
+// Signs a device in with the tokens the graph's `.sessions` give
+// (`auth.tokens_login`): 200 with the tokens (`app_session_tokens`), 401
+// when core.auth refuses the account, its credential or the device's name,
+// 400 for a body that is no sign-in, and 404 without `.sessions`.
+priv app_session_sign_in: fn(request: HTTPRequest) -[Net]> HTTPResponse Never! {
+    if calls.sessions.access_ms() == None {
+        return app_json(404, app_error_json("this app signs no native app in"))
+    }
+    body: request.json<AppSessionSignIn>() ?? return app_json(400, app_error_json("a sign-in is a JSON object of account, password and device"))
+    now: request.__received * 1000
+    tokens: calls.sessions.sign_in(body.account, body.password, body.device, now) ?? return app_json(401, app_error_json("the sign-in is refused"))
+    app_session_tokens(tokens, now)
+}
+
+// Spends a device's refresh token for its next tokens
+// (`auth.tokens_refresh`): 200 with them, 401 when the token is unknown,
+// spent, expired or revoked, 400 for a body that is no refresh, and 404
+// without `.sessions`.
+priv app_session_refresh: fn(request: HTTPRequest) -[Net]> HTTPResponse Never! {
+    if calls.sessions.access_ms() == None {
+        return app_json(404, app_error_json("this app signs no native app in"))
+    }
+    body: request.json<AppSessionRefresh>() ?? return app_json(400, app_error_json("a refresh is a JSON object of the refresh token"))
+    now: request.__received * 1000
+    tokens: calls.sessions.refresh(body.refresh, now) ?? return app_json(401, app_error_json("the refresh token expired or was revoked"))
+    app_session_tokens(tokens, now)
+}
+
+// `tokens` as a native app reads them: `{"access", "refresh",
+// "expires_in_ms"}`, the access token's lifetime from `now`.
+priv app_session_tokens: fn(tokens: auth.Tokens, now: Int) -> HTTPResponse Never! {
+    app_json(200, "{{\"access\":{app_json_string(tokens.access)},\"refresh\":{app_json_string(tokens.refresh)},\"expires_in_ms\":{tokens.access_expires_at - now}}}")
 }
 
 // Registers GET `/sitemap.xml` (app_sitemap_response) when the app graph
@@ -4584,6 +4655,47 @@ priv app_push_test_status: fn(authorization: String, at: Int, body: String) -[Ne
     request := web_http.server_request("POST", C_APP_PUSH_DEVICES, web_http.body_text(body), fields)
     request.__received = at
     app_push_register(request).status
+}
+
+#Test("a native app signs in for a device, each refresh token works once, and a revoked device's next refresh is refused") {
+    sign_in: "{{\"account\":\"acct_dev\",\"password\":\"dev's hash\",\"device\":\"laptop\"}}"
+    _: calls.new("Sessions")
+    unoffered: app()
+    app_session_routes(unoffered)
+    assert_eq(app_session_test(app_table(unoffered), "sign-in", 0, sign_in).status, 404)
+    _: calls.new("Sessions").sessions(access: Duration{1min}, refresh: Duration{1h})
+    served: app()
+    app_session_routes(served)
+    table: app_table(served)
+    auth.register_user("acct_dev", "dev's hash") ?? panic("dev registers: {err}")
+    now: core.time.now_utc().to_timestamp()
+    assert_eq(app_session_test(table, "sign-in", now, "{{\"account\":\"acct_dev\",\"password\":\"wrong\",\"device\":\"laptop\"}}").status, 401)
+    assert_eq(app_session_test(table, "sign-in", now, "[1]").status, 400)
+    first: live_json.decode<AppSessionTokens>(app_session_test(table, "sign-in", now, sign_in).body.text(4096) ?? panic("the sign-in answers: {err}")) ?? panic("the sign-in answers tokens: {err}")
+    assert_eq(first.expires_in_ms, 60000)
+    assert_eq(auth.session_user(auth.session_validate(first.access, now * 1000) ?? panic("the access token is a session: {err}")), "acct_dev")
+    refresh: "{{\"refresh\":{app_json_string(first.refresh)}}}"
+    second: live_json.decode<AppSessionTokens>(app_session_test(table, "refresh", now, refresh).body.text(4096) ?? panic("the refresh answers: {err}")) ?? panic("the refresh answers tokens: {err}")
+    assert(second.refresh != first.refresh)
+    assert_eq(app_session_test(table, "refresh", now, refresh).status, 401)
+    assert(auth.revoke_device("acct_dev", "laptop") ?? panic("revoke: {err}"))
+    assert_eq(app_session_test(table, "refresh", now, "{{\"refresh\":{app_json_string(second.refresh)}}}").status, 401)
+}
+
+// The tokens a sign-in or refresh answers, as a test reads them.
+#Codable
+priv AppSessionTokens: struct {
+    access: String,
+    refresh: String,
+    expires_in_ms: Int,
+}
+
+// What `table` answers a POST of `body` to the session route `step`,
+// received at the Unix second `at`.
+priv app_session_test: fn(table: HTTPMux, step: String, at: Int, body: String) -[Net, FS.Read]> HTTPResponse Never! {
+    request := web_http.server_request("POST", "/__jet/session/{step}", web_http.body_text(body), web_http.headers())
+    request.__received = at
+    http_server.__dispatch(table, request)
 }
 
 #Test("trace settings follow the OpenTelemetry SDK variables") {

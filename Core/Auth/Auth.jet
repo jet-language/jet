@@ -631,10 +631,124 @@ session_show: fn(session: Session) -> String Never! {
     "Session(id=<redacted>, user={session.user_id}, exp={session.expires_at}, cookie_len={session.cookie.bytes().len()})"
 }
 
+// ── Device tokens ───────────────────────────────────────────────────────────
+//
+// A native app signs in for one device and gets a pair of tokens: a
+// short-lived access token, which is a session (`Bearer <id>`), and a
+// refresh token, which makes the next pair once. Each refresh retires the
+// refresh token it used, so a copy of it works at most once. Revoking a
+// device drops its refresh token: its next refresh is refused, so the
+// device is signed out once its access token ends, within one access-token
+// lifetime.
+
+/// A device's tokens: `access` is a session id, `refresh` makes the next
+/// pair (`tokens_refresh`), and `access_expires_at` is when the access
+/// token ends, in Unix milliseconds. Neither its display nor its debug view
+/// prints a token.
+Tokens: struct {
+    #Redact access: String,
+    #Redact refresh: String,
+    access_expires_at: Int,
+    device: String,
+
+    impl Display {
+        display: fn(self) -> String {
+            "Tokens(access=<redacted>, refresh=<redacted>, device={self.device}, exp={self.access_expires_at})"
+        }
+    }
+}
+
+/// Check the credentials and sign in the device `device`: an access token
+/// valid until `now_ms + access_ms` and a refresh token valid until
+/// `now_ms + refresh_ms`. The new refresh token replaces any the device
+/// held.
+tokens_login: fn(user_id: String, password_hash: String, device: String, now_ms: Int, access_ms: Int, refresh_ms: Int) -[DB, Rand]> Tokens Err! {
+    if !valid_identifier(device, 256) -> return Err("device name is invalid")
+    session: new_session(user_id, now_ms, access_ms)
+    refresh: opaque_token("refresh")
+    refresh_until: expiry(now_ms, refresh_ms)
+    loop {
+        seen: store_load()
+        records: decode_store(seen) ?? return Err("auth store is unavailable")
+        ok := false
+        loop record in records {
+            if record.kind == 1 && record.a == user_id && ct_text(record.b, password_hash) {
+                ok = true
+            }
+        }
+        if !ok -> return Err("invalid credentials")
+        next := without_device(records, user_id, device)
+        next.push(session_record(session))
+        next.push(AuthRecord{kind: 5, a: refresh, b: user_id, c: device, n: refresh_until})
+        if store_replace(seen, encode_store(next)) {
+            return Ok(Tokens{access: session.id, refresh: refresh, access_expires_at: session.expires_at, device: device})
+        }
+    }
+}
+
+/// Spend the live refresh token `refresh` for its device's next pair of
+/// tokens, as `tokens_login` makes them. A refresh token works once; an
+/// unknown, spent, expired or revoked one fails.
+tokens_refresh: fn(refresh: String, now_ms: Int, access_ms: Int, refresh_ms: Int) -[DB, Rand]> Tokens Err! {
+    refresh_until: expiry(now_ms, refresh_ms)
+    if !valid_identifier(refresh, 256) -> return Err("refresh token expired or revoked")
+    next_refresh: opaque_token("refresh")
+    loop {
+        seen: store_load()
+        records: decode_store(seen) ?? return Err("auth store is unavailable")
+        index: find_live(records, 5, refresh, now_ms)
+        if index < 0 -> return Err("refresh token expired or revoked")
+        entry: records[index]
+        session: new_session(entry.b, now_ms, access_ms)
+        next := without_index(records, index)
+        next.push(session_record(session))
+        next.push(AuthRecord{kind: 5, a: next_refresh, b: entry.b, c: entry.c, n: refresh_until})
+        if store_replace(seen, encode_store(next)) {
+            return Ok(Tokens{access: session.id, refresh: next_refresh, access_expires_at: session.expires_at, device: entry.c})
+        }
+    }
+}
+
+/// The devices `user_id` signed in with a refresh token live at `now_ms`,
+/// in the order of their latest sign-in or refresh.
+devices: fn(user_id: String, now_ms: Int) -[DB]> [String] Err! {
+    records: decode_store(store_load()) ?? return Err("auth store is unavailable")
+    out := [String]{}
+    loop record in records {
+        if record.kind == 5 && record.b == user_id && now_ms < record.n -> out.push(record.c)
+    }
+    Ok(out)
+}
+
+/// Revoke `user_id`'s device `device`: its refresh token is dropped, so its
+/// next refresh fails and the device is signed out once its access token
+/// ends. Whether the device was signed in.
+revoke_device: fn(user_id: String, device: String) -[DB]> Bool Err! {
+    loop {
+        seen: store_load()
+        records: decode_store(seen) ?? return Err("auth store is unavailable")
+        next: without_device(records, user_id, device)
+        if next.len() == records.len() -> return Ok(false)
+        if store_replace(seen, encode_store(next)) -> return Ok(true)
+    }
+}
+
+/// `records` without `user_id`'s refresh tokens for `device`.
+without_device: fn(records: [AuthRecord], user_id: String, device: String) -> [AuthRecord] Never! {
+    out := [AuthRecord]{}
+    loop i in 0..<records.len() {
+        if records[i].kind != 5 || records[i].b != user_id || records[i].c != device {
+            out.push(records[i])
+        }
+    }
+    out
+}
+
 /// One store row. `kind` 1 = user (a id, b password hash, c delivery
 /// identity, n 1 when c is present), 2 = session (a id, b user, c cookie,
 /// n expiry ms), 3 = magic-link token (a token, b user, c delivery identity,
-/// n expiry ms), 4 = OAuth state (a state, b provider, c nonce, n expiry ms).
+/// n expiry ms), 4 = OAuth state (a state, b provider, c nonce, n expiry ms),
+/// 5 = refresh token (a token, b user, c device, n expiry ms).
 AuthRecord: struct {
     kind: Int,
     a: String,
@@ -1358,6 +1472,13 @@ expiry_outcome: fn(now_ms: Int, ttl_ms: Int) -> String Never! {
     }
 }
 
+tokens_outcome: fn(got: Tokens Err!) -> String Never! {
+    if got == {
+        .Ok(tokens) -> "ok:{tokens.device}"
+        .Err(error) -> "{error}"
+    }
+}
+
 #Test("JWT errors keep their variants and payloads") {
     key: "0123456789abcdef0123456789abcdef".bytes()
     header: "{{\"alg\":\"HS256\",\"typ\":\"JWT\"}}"
@@ -1510,4 +1631,31 @@ expiry_outcome: fn(now_ms: Int, ttl_ms: Int) -> String Never! {
     assert(expiry_outcome(10, 0) == "auth lifetime must be positive")
     assert(expiry_outcome(9223372036854775807, 1) == "auth lifetime is out of range")
     assert(expiry_outcome(10, 5) == "ok:15")
+}
+
+#Test("a device's refresh token works once, and revoking the device refuses its next refresh") {
+    register_user("device-tester", "argon2id:device") ?? panic("register")
+    assert(tokens_outcome(tokens_login("device-tester", "wrong", "laptop", 1000, 10, 100)) == "invalid credentials")
+    assert(tokens_outcome(tokens_login("device-tester", "argon2id:device", "", 1000, 10, 100)) == "device name is invalid")
+    first: tokens_login("device-tester", "argon2id:device", "laptop", 1000, 10, 100) ?? panic("sign in")
+    assert(first.access_expires_at == 1010)
+    assert(validate_outcome(first.access, 1009) == "ok:device-tester")
+    assert("{first}" == "Tokens(access=<redacted>, refresh=<redacted>, device=laptop, exp=1010)")
+    second: tokens_refresh(first.refresh, 1009, 10, 100) ?? panic("refresh")
+    assert(second.device == "laptop")
+    assert(second.refresh != first.refresh)
+    assert(validate_outcome(second.access, 1018) == "ok:device-tester")
+    // A spent token fails, and so does one past its lifetime.
+    assert(tokens_outcome(tokens_refresh(first.refresh, 1010, 10, 100)) == "refresh token expired or revoked")
+    assert(tokens_outcome(tokens_refresh(second.refresh, 1109, 10, 100)) == "refresh token expired or revoked")
+    phone: tokens_login("device-tester", "argon2id:device", "phone", 1000, 10, 100) ?? panic("phone signs in")
+    assert((devices("device-tester", 1010) ?? panic("devices")) == [String]{"laptop", "phone"})
+    assert(revoke_device("device-tester", "laptop") ?? panic("revoke"))
+    assert(!(revoke_device("device-tester", "laptop") ?? panic("revoke again")))
+    assert((devices("device-tester", 1010) ?? panic("devices")) == [String]{"phone"})
+    // The revoked device keeps its access token until it ends; its next
+    // refresh is refused.
+    assert(validate_outcome(second.access, 1018) == "ok:device-tester")
+    assert(tokens_outcome(tokens_refresh(second.refresh, 1011, 10, 100)) == "refresh token expired or revoked")
+    assert(tokens_outcome(tokens_refresh(phone.refresh, 1011, 10, 100)) == "ok:phone")
 }

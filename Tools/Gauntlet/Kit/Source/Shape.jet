@@ -76,11 +76,15 @@ load_entries: fn(entries_dir: String, selected: String?) -[FS, IO]> EntryCatalog
     loop name in names {
         dir: files.join(entries_dir, name)
         text: files.read(files.join(dir, "entry.json")) ?? {
-            if !picking -> skip_entry(catalog, name, "invalid entry.json: {err}", "invalid entry.json: {err}")
+            if !picking {
+                skip_entry(catalog, name, "invalid entry.json: {err}", "invalid entry.json: {err}")
+            }
             next
         }
         entry := json.parse(text) ?? {
-            if !picking -> skip_entry(catalog, name, "invalid entry.json: {err}", "invalid entry.json: {err}")
+            if !picking {
+                skip_entry(catalog, name, "invalid entry.json: {err}", "invalid entry.json: {err}")
+            }
             next
         }
         if entry == .Array(_) {
@@ -92,7 +96,9 @@ load_entries: fn(entries_dir: String, selected: String?) -[FS, IO]> EntryCatalog
             next
         }
         if !(entry == .Object(_)) {
-            if !picking -> skip_entry(catalog, name, "invalid entry.json: it is not an object", "invalid entry.json: it is not an object")
+            if !picking {
+                skip_entry(catalog, name, "invalid entry.json: it is not an object", "invalid entry.json: it is not an object")
+            }
             next
         }
         name_declared: value_at(entry, "name") != None
@@ -133,7 +139,9 @@ entry_shape_issues: fn(item: LoadedEntry, matrix: Dyn) -> [String] {
     issues := http_service_probe_issues(entry)
     if !item.name_declared -> issues.push("{item.directory_name}: entry.json must declare name")
     named: if text_at(entry, "name") == .Val(text) -> text.len() > 0 else -> false
-    if !named -> issues.push("{item.directory_name}: entry.name is {json.stringify(entry_name(entry))}")
+    if !named {
+        issues.push("{item.directory_name}: entry.name is {json.stringify(entry_name(entry))}")
+    }
     mode: member(entry, "mode")
     if !is_entry_mode(mode) {
         issues.push("{name}: unsupported mode {if mode == .Val(found) -> js_text(found) else -> "missing"}")

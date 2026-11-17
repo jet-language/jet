@@ -168,9 +168,12 @@ SemaOwnershipClosureWrites: struct {
 // A lambda binding `key` that is only ever called directly and reads or
 // writes the captured `places` (it takes or materializes none of them):
 // each call reads them, so a call after one of them moved is E0121.
+// `copied_writes[i]` is the write count of `places[i]`'s root when the lambda
+// was made, the copy it reads; -1 when the lambda borrows that capture.
 SemaOwnershipClosureCaptures: struct {
     key: String,
     places: [SemaOwnershipPlace],
+    copied_writes: [Int],
 }
 
 // A captured name an escaping lambda binding writes, held until the scope
@@ -4357,12 +4360,16 @@ sema_ownership_is_direct_call_lambda: fn(state: SemaOwnershipState, site: Span) 
 // The binding `key` holds the lambda at `site` with `captures`. When only
 // direct calls reach it, each call reads its outer bindings, whether they
 // are viewed in place or were copied at creation: a capture is shared read
-// access to its owner (spec "Captures and escaping lambdas").
+// access to its owner (spec "Captures and escaping lambdas"). A name the
+// lambda only reads is its copy, made here, so a call after that name changed
+// would read the old value: the call is refused (E0204). A `Shared` handle's
+// copy reaches the same value, and a name the lambda writes it borrows.
 sema_ownership_bind_closure_captures: fn(state: &SemaOwnershipState, key: String, site: Span, captures: [TCapture], facts: TCaptureFacts, scopes: SemaScopeTable) Never! {
     if facts.escapes && !sema_ownership_is_direct_call_lambda(state, site) {
         return
     }
     places := [SemaOwnershipPlace]{}
+    copied_writes := [Int]{}
     loop capture in captures {
         name: capture.source
         if facts.moved.contains(name) || facts.materialized.contains(name) -> next
@@ -4373,27 +4380,48 @@ sema_ownership_bind_closure_captures: fn(state: &SemaOwnershipState, key: String
         // A capture already moved here was moved by the lambda's own body
         // (`name.move()`): that lambda runs once, which its own check enforces.
         if sema_ownership_place_moved(state, place) != None -> next
+        shared: capture.ty == .Shared(_)
+        copied_writes.push(if facts.mutable.contains(name) || shared -> -1 else -> sema_ownership_root_writes(state, place.root_id))
         places.push(place)
     }
     if places.len() > 0 {
-        state.closure_captures.push(SemaOwnershipClosureCaptures{key: key, places: places})
+        state.closure_captures.push(SemaOwnershipClosureCaptures{key: key, places: places, copied_writes: copied_writes})
     }
 }
 
+// The writes noted so far to the binding `id`.
+sema_ownership_root_writes: fn(state: SemaOwnershipState, id: SymbolID) -> Int Never! {
+    slot: state.id_slots.get(id.id) ?? return 0
+    state.key_facts[slot].writes
+}
+
 // A call of the lambda binding `callee` reads its captures: one that moved
-// since is a use after move at the call.
+// since is a use after move at the call, and one that changed since the
+// lambda copied it would be read stale (E0204).
 sema_ownership_check_closure_captures: fn(state: &SemaOwnershipState, callee: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
-    if callee == .Ident(_, span, _) {
+    if callee == .Ident(callee_name, span, _) {
         binding: sema_ownership_binding_for_expr(state, callee, scopes) ?? return
         loop captured in state.closure_captures {
             if captured.key != binding.key -> next
-            loop place in captured.places {
+            position := 0
+            loop position < captured.places.len() {
+                place: captured.places[position]
+                copied: captured.copied_writes[position]
+                position += 1
                 if sema_ownership_place_moved(state, place) == .Val(origin) {
                     sema_ownership_report_moved(state, origin, place, span, diagnostics)
+                    next
+                }
+                if copied >= 0 && sema_ownership_root_writes(state, place.root_id) > copied {
+                    diagnostics.push(sema_ownership_diag_stale_capture(callee_name, place.root, span))
                 }
             }
         }
     }
+}
+
+sema_ownership_diag_stale_capture: fn(lambda: String, name: String, span: Span) -[]> Diagnostic {
+    sema_error("E0204", span, "`{lambda}` reads its own copy of `{name}`, made before `{name}` changed, so this call can't see the change", "a lambda keeps a copy of each name it only reads, made when the lambda is made; a later change to `{name}` never reaches that copy", "make `{lambda}` after the last change to `{name}`, or pass `{name}` to it as a parameter")
 }
 
 // A call of a run-once lambda binding moves the binding,

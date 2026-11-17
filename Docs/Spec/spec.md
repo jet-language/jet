@@ -1654,9 +1654,13 @@ Writing a captured name requires a mutable `:=` binding; otherwise the compiler
 reports **E0111**. A lambda bound to a local that is only ever called directly
 in that scope does not escape: it borrows each `:=` local it writes, so the
 write lands on the owner (`count := 0; bump: (n: Int) -> { count += n };
-bump(2)` leaves `count` at 2). An escaping lambda—one stored in a binding that
-is passed, stored, or returned, returned itself, stored in a struct field, or
-passed to a `&&T` parameter—must own its captures.
+bump(2)` leaves `count` at 2). It reads its own copy of each name it only
+reads, made when the lambda is made, so a call after that name changed is
+**E0204** (`v := [1]; f: fn() -> Int { v.len() }; v.push(2); f()`): make the
+lambda after the change, or pass the value as a parameter. An escaping
+lambda—one stored in a binding that is passed, stored, or returned, returned
+itself, stored in a struct field, or passed to a `&&T` parameter—must own its
+captures.
 Copy values are copied at closure creation; other clonable values are cloned;
 an owned non-clonable value moves. A borrowed non-clonable parameter cannot
 escape (**E0120**), and a lambda a function returns cannot write that
@@ -2520,6 +2524,22 @@ descend: fn(level: Int) -[!Mem.Stack(above: 65536)]> Int {
     descend(level - 1) + 1
 }
 ```
+
+Recursion needs no `#MaxDepth` to be safe from the stack. In a native program
+or test, Core included, a body that can reach itself again, one on a call
+cycle or one that calls through a function or trait value, first checks the
+stack it has left. A `jet build --lib` library has no checks: its code runs
+on threads its host made. When the thread's or fiber's stack runs low, the
+call moves onto a fresh stack
+segment mapped for it (1 MiB, each deeper segment twice the last, up to
+256 MiB), and the segment is given back when the call returns. Fault reports
+and backtraces walk across segments; a function shows once more at each
+segment boundary, where the call moved. Only the thread's total stack, its
+own stack and its segments together, has a limit: the soft `RLIMIT_STACK`
+(`ulimit -s`), at least 1 GiB, at most the runtime's thread stack maximum.
+Past it the call stops with E3012, exit 70. A web build cannot switch stacks:
+its recursion is bounded by the engine's own stack, past which it stops with
+E3012 too.
 
 The human aliasing rule is: while something is being changed, nobody else may be
 looking at it. Foreign `read` and `write` spellings are not Jet access syntax;

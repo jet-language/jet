@@ -824,8 +824,9 @@ NATIVE_DEBUG_SIGTRAP: 5
 
 NATIVE_DEBUG_SIGSTOP: 19
 
-// The bytes of a function's start read for its prologue.
-NATIVE_DEBUG_PROLOGUE: 32
+// The bytes of a function's start read for its prologue: a stack check, the
+// frame's opening and its saves.
+NATIVE_DEBUG_PROLOGUE: 48
 
 // The longest x86-64 call instruction.
 NATIVE_DEBUG_LONGEST_CALL: 15
@@ -856,17 +857,44 @@ NativeSave: struct {
     slot: Int,
 }
 
-// Whether `prologue` (a function's first bytes, at `low`) opens a frame:
-// `push rbp; mov rbp, rsp`.
-native_frame_opened: fn(prologue: [U8]) -> Bool Never! {
-    prologue.len() >= 4 && prologue[0] == (U8{0x55}) && prologue[1] == (U8{0x48}) && prologue[2] == (U8{0x89}) && prologue[3] == (U8{0xe5})
+// Where `prologue` (a function's first bytes) opens a frame with `push rbp;
+// mov rbp, rsp`: at its start, or past the stack check a body that may grow
+// its stack starts with (JetIR X64Select.jet ir_x64_stack_check: an
+// optional `lea r11, [rsp - frame]`, `cmp rsp|r11, gs:[limit]` and `jb`);
+// -1 when it opens none there.
+native_frame_open: fn(prologue: [U8]) -> Int Never! {
+    at := 0
+    if native_bytes_at(prologue, at, [U8]{0x4c, 0x8d, 0x9c, 0x24}) -> at = 8
+    compared: native_bytes_at(prologue, at, [U8]{0x65, 0x48, 0x3b, 0x24, 0x25}) || native_bytes_at(prologue, at, [U8]{0x65, 0x4c, 0x3b, 0x1c, 0x25})
+    if !compared && at > 0 -> return -1
+    if compared {
+        // the jb past the compare: rel32 or, relaxed, rel8
+        branch: if {
+            native_bytes_at(prologue, at + 9, [U8]{0x0f, 0x82}) -> 6
+            native_bytes_at(prologue, at + 9, [U8]{0x72}) -> 2
+            else -> 0
+        }
+        if branch == 0 -> return -1
+        at += 9 + branch
+    }
+    if native_bytes_at(prologue, at, [U8]{0x55, 0x48, 0x89, 0xe5}) -> at else -> -1
+}
+
+// Whether `bytes` holds `want` at `at`.
+native_bytes_at: fn(bytes: [U8], at: Int, want: [U8]) -> Bool Never! {
+    if at + want.len() > bytes.len() -> return false
+    loop (k, byte) in want {
+        if bytes[at + k] != byte -> return false
+    }
+    true
 }
 
 // The callee-saved registers the prologue pushes after it opens the frame.
 native_prologue_saves: fn(prologue: [U8], low: Int) -> [NativeSave] Never! {
     saves := [NativeSave]{}
-    if !native_frame_opened(prologue) -> return saves
-    at := 4
+    open: native_frame_open(prologue)
+    if open < 0 -> return saves
+    at := open + 4
     loop at < prologue.len() {
         byte: Int{prologue[at]}
         if byte >= 0x50 && byte <= 0x57 {
@@ -893,9 +921,10 @@ native_prologue_saves: fn(prologue: [U8], low: Int) -> [NativeSave] Never! {
 native_frame_base: fn(prologue: [U8], low: Int, registers: [Int], pc: Int, here: [U8]) -> Int Never! {
     rsp: registers[X64_TRACE_RSP]
     rbp: registers[X64_TRACE_RBP]
-    if low >= 0 && native_frame_opened(prologue) {
-        if pc == low -> return rsp + 8
-        if pc == low + 1 -> return rsp + 16
+    open: if low >= 0 -> native_frame_open(prologue) else -> -1
+    if open >= 0 {
+        if pc >= low && pc <= low + open -> return rsp + 8
+        if pc == low + open + 1 -> return rsp + 16
         if here.len() == 1 && here[0] == (U8{0xc3}) -> return rsp + 8
     }
     rbp + 16
@@ -906,9 +935,10 @@ native_frame_base: fn(prologue: [U8], low: Int, registers: [Int], pc: Int, here:
 native_caller_rbp: fn(prologue: [U8], low: Int, registers: [Int], trace: X64Trace, pc: Int, here: [U8]) -> Int? Never! {
     rsp: registers[X64_TRACE_RSP]
     rbp: registers[X64_TRACE_RBP]
-    if low >= 0 && native_frame_opened(prologue) {
-        if pc == low -> return Val(rbp)
-        if pc == low + 1 -> return native_debug_word(trace, rsp)
+    open: if low >= 0 -> native_frame_open(prologue) else -> -1
+    if open >= 0 {
+        if pc >= low && pc <= low + open -> return Val(rbp)
+        if pc == low + open + 1 -> return native_debug_word(trace, rsp)
         if here.len() == 1 && here[0] == (U8{0xc3}) -> return Val(rbp)
     }
     if rbp <= 0 -> return None

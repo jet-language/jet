@@ -909,15 +909,33 @@ priv remote_key: fn(address: String, method: String) -> String Never! {
 // call has both. It also carries its request key `key`, its
 // `idempotency-key`, and is sent again under that key when no reply comes,
 // up to `REMOTE_SENDS` times. A `local` call is the app graph's, answered in
-// this process under the same key (`graph_post`).
+// this process under the same key (`graph_post`). A call to a server the
+// app signed in to (`sign_in`) carries the session's access token, renewed
+// first when it has ended, and once more when the server refuses it.
 priv remote_send: fn(address: String, local: Bool, method: String, body: String, key: String) -[Net, Time]> String CallError! {
     if local -> return graph_post("{address}/{method}", key, body)
+    origin: session_origin(address)
+    bearer: session_access(origin) ?? return Err(err)
+    if bearer == "" -> return remote_send_as(address, method, body, key, "")
+    if remote_send_as(address, method, body, key, bearer) == {
+        .Ok(text) -> return Ok(text)
+        .Err(.SignedOut) -> {}
+        .Err(failure) -> return Err(failure)
+    }
+    renewed: session_renew(origin) ?? return Err(err)
+    remote_send_as(address, method, body, key, renewed)
+}
+
+// `remote_send`'s sends of one call, carrying `bearer` as its
+// `Authorization` unless it is "".
+priv remote_send_as: fn(address: String, method: String, body: String, key: String, bearer: String) -[Net, Time]> String CallError! {
     seed: "{rt.clock_mono_ns()}:{trace_next()}:{key}"
     trace: make_trace_id("trace:{seed}", 16)
     lost := ""
     loop sends in 0..<REMOTE_SENDS {
         if sends > 0 -> tasks.sleep(REMOTE_RESEND_MS * sends)
-        sent: http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{make_trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_header("idempotency-key", key).__with_body(body)
+        sent := http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{make_trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_header("idempotency-key", key).__with_body(body)
+        if bearer != "" -> sent = sent.__with_header("authorization", "Bearer {bearer}")
         response: sent.send() ?? {
             lost = "{err}"
             next
@@ -936,6 +954,273 @@ priv remote_send: fn(address: String, local: Bool, method: String, body: String,
         }
     }
     Err(.Unreachable("{address}/{method}: {lost}"))
+}
+
+// ---- native sessions
+//
+// A native app signs its person in to a server (`sign_in`) for a pair of
+// tokens. The access token is short-lived and kept in memory: each call
+// through a Remote of that server carries it as `Authorization: Bearer`.
+// The refresh token is kept in the desktop's Secret Service, where
+// libsecret keeps secrets, and buys the next pair when the access token
+// ends or the server refuses it; each refresh token works once. A server
+// that revokes the device (`auth.revoke_device`) drops its refresh token,
+// so the device's next refresh is refused, at the latest when its access
+// token ends: the kept token is deleted and the call fails `.SignedOut`.
+
+// Where a server of an app graph that gives `.sessions` answers a native
+// app: POST `{SESSION_PATH}/sign-in` with `{"account", "password",
+// "device"}` and POST `{SESSION_PATH}/refresh` with `{"refresh"}`, each
+// with the device's next tokens, `{"access", "refresh", "expires_in_ms"}`,
+// or 401 when it refuses them.
+priv SESSION_PATH: "/__jet/session"
+
+// The Secret Service schema of a kept refresh token, as libsecret names
+// schemas; its other attribute is the server's origin.
+priv SESSION_SCHEMA: "dev.jet.Session"
+
+// The longest wait for the Secret Service, in nanoseconds.
+priv SESSION_WAIT_NS: 10000000000
+
+// The session this app holds with the server at `origin`: its access
+// token and when that ends, on the monotonic clock ("" before the first),
+// and the session bus socket and user the kept refresh token is reached
+// through.
+priv AppSession: struct {
+    origin: String,
+    access: String,
+    access_until_ns: Int,
+    bus: String,
+    uid: Int,
+}
+
+priv APP_SESSIONS: Shared{[AppSession]{}}
+
+// A sign-in or refresh as a server answers it.
+#Codable
+priv AppSessionTokens: struct {
+    access: String,
+    refresh: String,
+    expires_in_ms: Int,
+}
+
+#Codable
+priv AppSessionSignIn: struct {
+    account: String,
+    password: String,
+    device: String,
+}
+
+#Codable
+priv AppSessionRefresh: struct {
+    refresh: String,
+}
+
+// Signs `account` in to the server at `server` (its origin,
+// `https://crew.example`) as the device `device`, with `password` as the
+// server's `auth` store holds the account's credential. The access token
+// is kept in memory and the refresh token in the Secret Service, in place
+// of one kept for that server before; from then on each call through a
+// Remote of that server carries the session. Fails `.SignedOut` when the
+// server refuses the credentials, and `.Unreachable` when the server or
+// the Secret Service doesn't answer.
+sign_in: fn(server: String, account: String, password: String, device: String) -[Env, Net, Time]> CallError! {
+    held: session_start(session_origin(server)) ?? return Err(err)
+    body: live_json.to_string(AppSessionSignIn{account: account, password: password, device: device}) ?? return Err(.Unreachable("the sign-in can't be encoded: {err}"))
+    tokens: session_post(held.origin, "sign-in", body) ?? return Err(err)
+    session_keep(held, tokens) ?? return Err(err)
+    Ok()
+}
+
+// Whether this app holds a session with the server at `server`: one it
+// signed in to (`sign_in`), or one whose refresh token the Secret Service
+// keeps from an earlier run, which the next call through a Remote of that
+// server spends for its first access token.
+signed_in: fn(server: String) -[Env, Net, Time]> Bool Never! {
+    origin: session_origin(server)
+    if session_held(origin) != None -> return true
+    held: session_start(origin) ?? return false
+    kept: session_secret(held, .Lookup) ?? return false
+    if kept == "" -> return false
+    session_put(held)
+    true
+}
+
+// A session with `origin` that holds no access token yet, reaching the
+// Secret Service on this user's session bus.
+priv session_start: fn(origin: String) -[Env]> AppSession CallError! {
+    #if #build.target.os == {
+        .Linux -> {
+            bus: dbus.session_path(sys.get("DBUS_SESSION_BUS_ADDRESS") ?? "", sys.get("XDG_RUNTIME_DIR") ?? "") ?? return Err(.Unreachable("the Secret Service: {err}"))
+            return Ok(AppSession{origin: origin, access: "", access_until_ns: 0, bus: bus, uid: sys.getuid()})
+        }
+        .MacOS -> { return Err(.Unreachable(SESSION_UNBUILT)) }
+        .Windows -> { return Err(.Unreachable(SESSION_UNBUILT)) }
+        .Web -> { return Err(.Unreachable("a page signs in with its server's cookie")) }
+        .Wasm -> { return Err(.Unreachable("a page signs in with its server's cookie")) }
+        .Freestanding -> { return Err(.Unreachable(SESSION_UNBUILT)) }
+    }
+}
+
+priv SESSION_UNBUILT: "this system's keychain for native sessions is not built yet"
+
+// The origin of `address`: its scheme, host and port, with no path.
+priv session_origin: fn(address: String) -> String Never! {
+    parts: address.split("://").to_list()
+    if parts.len() < 2 -> return address.copy()
+    host: parts[1].split("/").to_list()
+    "{parts[0]}://{host[0]}"
+}
+
+// The session held with `origin`, if any.
+priv session_held: fn(origin: String) -> AppSession? Never! {
+    held: APP_SESSIONS.guard_read()
+    loop session in held.value {
+        if session.origin == origin -> return Val(session.copy())
+    }
+    None
+}
+
+// Holds `session` in place of the one held with its origin.
+priv session_put: fn(session: AppSession) Never! {
+    held := APP_SESSIONS.guard_edit()
+    kept := [AppSession]{}
+    loop i in 0..<held.value.len() {
+        if held.value[i].origin != session.origin -> kept.push(held.value[i])
+    }
+    kept.push(session.copy())
+    held.value = kept
+}
+
+// Drops the session held with `origin`.
+priv session_drop: fn(origin: String) Never! {
+    held := APP_SESSIONS.guard_edit()
+    kept := [AppSession]{}
+    loop i in 0..<held.value.len() {
+        if held.value[i].origin != origin -> kept.push(held.value[i])
+    }
+    held.value = kept
+}
+
+// The access token a call to `origin` carries: "" with no session, the
+// held one while it lasts, else the one a refresh buys (`session_renew`).
+priv session_access: fn(origin: String) -[Net, Time]> String CallError! {
+    held: session_held(origin) ?? return Ok("")
+    if held.access != "" && rt.clock_mono_ns() < held.access_until_ns -> return Ok(held.access)
+    session_renew(origin)
+}
+
+// Spends the kept refresh token of the session with `origin` for the
+// next pair of tokens, keeps them, and gives the access token. A refresh
+// the server refuses deletes the kept token and drops the session:
+// `.SignedOut`.
+priv session_renew: fn(origin: String) -[Net, Time]> String CallError! {
+    held: session_held(origin) ?? return Err(.SignedOut)
+    refresh: session_secret(held, .Lookup) ?? return Err(err)
+    if refresh == "" {
+        session_drop(origin)
+        return Err(.SignedOut)
+    }
+    body: live_json.to_string(AppSessionRefresh{refresh: refresh}) ?? return Err(.Unreachable("the refresh can't be encoded: {err}"))
+    tokens: if session_post(origin, "refresh", body) == {
+        .Ok(tokens) -> tokens
+        .Err(failure) -> {
+            if failure == .SignedOut {
+                session_drop(origin)
+                _: session_secret(held, .Clear) ?? return Err(err)
+            }
+            return Err(failure)
+        }
+    }
+    session_keep(held, tokens) ?? return Err(err)
+    Ok(tokens.access)
+}
+
+// Keeps `tokens` for the session `held`: the refresh token in the Secret
+// Service, then the access token in memory.
+priv session_keep: fn(held: AppSession, tokens: AppSessionTokens) -[Net, Time]> CallError! {
+    _: session_secret(held, .Store(tokens.refresh)) ?? return Err(err)
+    next := held.copy()
+    next.access = tokens.access.copy()
+    next.access_until_ns = rt.clock_mono_ns() + tokens.expires_in_ms * 1000000
+    session_put(next)
+    Ok()
+}
+
+// What `session_secret` does with a server's refresh token.
+priv AppSessionSecret: enum {
+    Store(String),
+    Lookup,
+    Clear,
+}
+
+// Keeps, reads or deletes the refresh token the Secret Service keeps for
+// `held`'s server; the token read, or "" (a refresh token is never empty).
+priv session_secret: fn(held: AppSession, change: AppSessionSecret) -[Net, Time]> String CallError! {
+    #if #build.target.os == {
+        .Linux -> { return session_secret_linux(held, change) }
+        .MacOS -> { return Err(.Unreachable(SESSION_UNBUILT)) }
+        .Windows -> { return Err(.Unreachable(SESSION_UNBUILT)) }
+        .Web -> { return Err(.Unreachable(SESSION_UNBUILT)) }
+        .Wasm -> { return Err(.Unreachable(SESSION_UNBUILT)) }
+        .Freestanding -> { return Err(.Unreachable(SESSION_UNBUILT)) }
+    }
+}
+
+// `session_secret` on Linux, over the session bus `held` names.
+priv session_secret_linux: fn(held: AppSession, change: AppSessionSecret) -[Net, Time]> String CallError! {
+    stream := net.unix_connect(held.bus) ?? return Err(.Unreachable("the Secret Service: the session bus at {held.bus}: {err}"))
+    c := dbus.start(stream.move(), held.uid, SESSION_WAIT_NS) ?? return Err(.Unreachable("the Secret Service: {err}"))
+    attributes: [String:String]{"xdg:schema": SESSION_SCHEMA, "server": held.origin}
+    if change == {
+        .Store(refresh) -> {
+            dbus.secret_store(c, "Session with {held.origin}", attributes, refresh, SESSION_WAIT_NS) ?? return Err(.Unreachable("the Secret Service: {err}"))
+        }
+        .Lookup -> {
+            if dbus.secret_lookup(c, attributes, SESSION_WAIT_NS) == {
+                .Ok(kept) -> return Ok(kept ?? "")
+                .Err(problem) -> return Err(.Unreachable("the Secret Service: {problem}"))
+            }
+        }
+        .Clear -> {
+            dbus.secret_clear(c, attributes, SESSION_WAIT_NS) ?? return Err(.Unreachable("the Secret Service: {err}"))
+        }
+    }
+    Ok("")
+}
+
+// POSTs `body` to `{origin}{SESSION_PATH}/{step}` and gives the tokens
+// the server answers; 401 is `.SignedOut`.
+priv session_post: fn(origin: String, step: String, body: String) -[Net, Time]> AppSessionTokens CallError! {
+    address: "{origin}{SESSION_PATH}/{step}"
+    response: http.__request("POST", address).__with_header("content-type", "application/json").__with_body(body).send() ?? return Err(.Unreachable("{address}: {err}"))
+    text: response.body.text(REMOTE_MAX_REPLY) ?? return Err(.Unreachable("{address}: {err}"))
+    if response.status == 401 -> return Err(.SignedOut)
+    if response.status != 200 -> return Err(.Unreachable("{address} answered {response.status}"))
+    live_json.decode<AppSessionTokens>(text) ?? return Err(.Unreachable("{address} answered no tokens"))
+}
+
+#Test("a native session is held per server origin, and a server the app can't reach signs no app in") {
+    assert_eq(session_origin("http://127.0.0.1:8080/api/"), "http://127.0.0.1:8080")
+    assert_eq(session_origin("https://example.net"), "https://example.net")
+    session_put(AppSession{origin: "http://held.test", access: "a", access_until_ns: 0, bus: "", uid: 0})
+    assert(signed_in("http://held.test/api"))
+    session_drop("http://held.test")
+    assert(session_held("http://held.test") == None)
+    // No session: a call carries no token and fails as any unanswered call.
+    unanswered: if remote_send("http://127.0.0.1:9/api", false, "ping", "[]", "k") == {
+        .Ok(_) -> "answered"
+        .Err(.Unreachable(_)) -> "unreachable"
+        .Err(failure) -> "{failure}"
+    }
+    assert_eq(unanswered, "unreachable")
+    refused: if sign_in("http://127.0.0.1:9", "acct", "hash", "laptop") == {
+        .Ok(_) -> "signed in"
+        .Err(.Unreachable(_)) -> "unreachable"
+        .Err(failure) -> "{failure}"
+    }
+    assert_eq(refused, "unreachable")
+    assert(session_held("http://127.0.0.1:9") == None)
 }
 
 // A W3C trace-context id of `n` bytes (16 for a trace, 8 for a span) as
@@ -2484,6 +2769,29 @@ App: struct {
         self.copy()
     }
 
+    // Lets a native app sign in to a server of the graph (`sign_in`) with
+    // an account core.auth keeps (`auth.register_user`): the server answers
+    // POST `{SESSION_PATH}/sign-in` and `{SESSION_PATH}/refresh` with the
+    // device's tokens, an access token, a core.auth session that lasts
+    // `access`, and a refresh token that lasts `refresh` and works once. A
+    // device the server revokes (`auth.revoke_device`) is signed out when
+    // its access token ends. The graph keeps core.auth's `tokens_login` and
+    // `tokens_refresh` for its servers to call, so the app that gives
+    // `.sessions` reaches `DB` and `Rand`, which they use, here. Gives back
+    // the graph. Panics when a lifetime is under a millisecond.
+    sessions: fn(self, access: Duration{15min}, refresh: Duration{30d}) -[DB, Rand]> App Never! {
+        if access.ns < 1000000 || refresh.ns < 1000000 {
+            panic("a session's tokens last at least a millisecond, not {access.ns}ns and {refresh.ns}ns")
+        }
+        mint: AppSessionMint{
+            sign_in: fn(account: String, password: String, device: String, now_ms: Int, access_ms: Int, refresh_ms: Int) { auth.tokens_login(account, password, device, now_ms, access_ms, refresh_ms) },
+            refresh: fn(token: String, now_ms: Int, access_ms: Int, refresh_ms: Int) { auth.tokens_refresh(token, now_ms, access_ms, refresh_ms) },
+        }
+        held := APP_GRAPH.guard_edit()
+        held.value.sessions = Val(AppSessions{access_ms: access.ns /% 1000000, refresh_ms: refresh.ns /% 1000000, mint: Shared{mint}})
+        self.copy()
+    }
+
     // Shows the app in a window `width` x `height` logical pixels on a Linux
     // desktop from `launch` on, titled the app's title. The window shows the
     // current screen (`go`, `open_link`): the node tree its view gives, as
@@ -2820,7 +3128,7 @@ Query: struct {
 // heads, queue or links yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
-    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None, resume: None, push: None}
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None, resume: None, push: None, sessions: None}
     heads := APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
     App{title: title}
@@ -2886,6 +3194,69 @@ priv AppPush: struct {
 priv app_push_named: fn() -> AppPush? Never! {
     held: APP_GRAPH.guard_read()
     held.value.push.copy()
+}
+
+// How long the tokens of a graph's `.sessions` last, in milliseconds, and
+// what mints them.
+priv AppSessions: struct {
+    access_ms: Int,
+    refresh_ms: Int,
+    mint: Shared<AppSessionMint>,
+}
+
+// core.auth's `tokens_login` and `tokens_refresh`, as `.sessions` keeps
+// them for the graph's servers.
+priv AppSessionMint: struct {
+    sign_in: fn(String, String, String, Int, Int, Int) -> auth.Tokens Err!,
+    refresh: fn(String, Int, Int, Int) -> auth.Tokens Err!,
+}
+
+// Where and how long the graph's `.sessions` sign a native app in, as
+// core.web's servers answer its sign-in and refresh.
+priv(package) sessions: module {
+    // The path the sign-in and refresh routes live under.
+    path: fn() -> String Never! { SESSION_PATH }
+
+    // How long an access token lasts; None when the graph gives no
+    // `.sessions`, so its servers sign no native app in.
+    access_ms: fn() -> Int? Never! {
+        given: app_sessions_given() ?? return None
+        Val(given.access_ms)
+    }
+
+    // Signs `device` in for `account` with its credential `password`, at
+    // the Unix millisecond `now_ms`, for the graph's lifetimes
+    // (`auth.tokens_login`).
+    sign_in: fn(account: String, password: String, device: String, now_ms: Int) -> auth.Tokens Err! {
+        given: app_sessions_given() ?? return Err(SESSIONS_NONE)
+        held: given.mint.guard_read()
+        app_sessions_sign_in(held.value.sign_in, account, password, device, now_ms, given)
+    }
+
+    // Spends the refresh token `token` at the Unix millisecond `now_ms` for
+    // its device's next tokens, for the graph's lifetimes
+    // (`auth.tokens_refresh`).
+    refresh: fn(token: String, now_ms: Int) -> auth.Tokens Err! {
+        given: app_sessions_given() ?? return Err(SESSIONS_NONE)
+        held: given.mint.guard_read()
+        app_sessions_refresh(held.value.refresh, token, now_ms, given)
+    }
+}
+
+priv SESSIONS_NONE: "this app signs no native app in"
+
+// The graph's `.sessions`, if it gives them.
+priv app_sessions_given: fn() -> AppSessions? Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.sessions.copy()
+}
+
+priv app_sessions_sign_in: fn(mint: fn(String, String, String, Int, Int, Int) -> auth.Tokens Err!, account: String, password: String, device: String, now_ms: Int, given: AppSessions) -> auth.Tokens Err! {
+    mint(account, password, device, now_ms, given.access_ms, given.refresh_ms)
+}
+
+priv app_sessions_refresh: fn(mint: fn(String, Int, Int, Int) -> auth.Tokens Err!, token: String, now_ms: Int, given: AppSessions) -> auth.Tokens Err! {
+    mint(token, now_ms, given.access_ms, given.refresh_ms)
 }
 
 // The settings of the services `apns`, `fcm` and `web` name, each from the
@@ -3414,7 +3785,8 @@ AppInstall: struct {
 // links open its screens (`.url_scheme`, `.app_links`), the activation
 // tokens of the later launches that handed it their links (`.launch`), its
 // background work (`.background`), its tray (`.tray`), its window
-// (`.window`) and the window's menu bar (`.menu_bar`).
+// (`.window`), the window's menu bar (`.menu_bar`), its push services
+// (`.push`) and its native sessions' lifetimes (`.sessions`).
 priv AppGraph: struct {
     title: String,
     apis: [String:AppAPI],
@@ -3433,9 +3805,10 @@ priv AppGraph: struct {
     menu_bar: Shared<AppMenuBar>?,
     resume: Shared<AppResume>?,
     push: AppPush?,
+    sessions: AppSessions?,
 }
 
-priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None, resume: None, push: None}}
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None, resume: None, push: None, sessions: None}}
 
 // One piece of a graph's background work (`App.background`): it runs every
 // `every_ns` nanoseconds while the app runs, and at login when `at_login`.

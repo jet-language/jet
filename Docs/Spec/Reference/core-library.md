@@ -2360,6 +2360,9 @@ empty, so a world and its tasks never read or change the process store.
 | `session_validate(session_id, now_ms)` | `Session Err!` | Validate the session identifier and return its session carrier (`DB`). |
 | `session_user(session)` / `session_cookie(session)` / `session_id(session)` | `String` | Project the validated session fields. |
 | `session_show(session)` | `String` | Render a redacted session summary; cookie bytes are not printed. |
+| `tokens_login(user_id, password_hash, device, now_ms, access_ms, refresh_ms)` | `Tokens Err!` | Validate credentials and sign `device` in: an access token, a session lasting `access_ms`, and a refresh token lasting `refresh_ms` (`DB`, `Rand`). |
+| `tokens_refresh(refresh, now_ms, access_ms, refresh_ms)` | `Tokens Err!` | Spend a refresh token, which works once, for the device's next pair; an unknown, spent, expired or revoked token fails (`DB`, `Rand`). |
+| `devices(user_id, now_ms)` / `revoke_device(user_id, device)` | `[String] Err!` / `Bool Err!` | The devices holding a live refresh token, in the order of their latest sign-in or refresh; revoking drops the device's refresh tokens, so its access token works until it ends and its next refresh fails (`DB`). |
 | `auth(users_table)` / `auth_oauth(auth, providers)` | `Auth` | An app's auth configuration: its users table and the comma- or space-separated OAuth providers, deduplicated and bounded. |
 | `auth_routes(auth)` / `auth_show(auth)` | `String` | Render the routes the configuration serves, or its summary. |
 
@@ -5701,6 +5704,8 @@ tasks never read or change the process registry. The module source is
 | `live_stats() -> String` | text | Report the registry's binding count, its 1024-binding limit, evictions, invalidations, value changes, WebSocket pushes, the per-second re-run cap and the re-runs it held over. |
 | `remote(service: S, client: String = "") -> Remote<S>` | client | The server's own client of `service`: each call of a marked method runs on `service` directly. `client` names the client holding it, which a test can cut off (`disconnect`). |
 | `remote_at<S>(address: String, client: String = "") -> Remote<S>` | client | A client of the `S` an App mounts at `address` (`http://host:port/api`): each call of a marked method posts to that App. `client` is as for `remote`. |
+| `sign_in(server: String, account: String, password: String, device: String)` | `-[Env, Net, Time]> CallError!` | Sign a native app in to the server at `server` for `device`: its refresh token goes to the Secret Service, its access token rides each `remote_at` call to that server (see "A native app signs in" below). The server refusing the account is `SignedOut`. |
+| `signed_in(server: String) -[Env, Net, Time]> Bool` | whether | Whether the app holds a session with `server`, from `sign_in` or a refresh token the Secret Service kept from an earlier run. |
 | `disconnect(client: String)` | — | The test host cuts client `client` off every server: until `reconnect(client)`, each call through a Remote made for it fails `CallError.Unreachable`, naming the client and the method, and runs nothing on the server. Nothing touches the network, so an offline, catch-up or replay case runs the same each time; the servers and every other client go on. Inside `testing.world` the links are the world's own. A blank name, or one with a control character, panics. |
 | `reconnect(client: String) -[Net, Time]>` | — | Restore the link `disconnect` cut: the client's next call reaches the server, and the writes it queued meanwhile are sent now, in order (see `graph.offline(.Queue)` below). |
 | `pending() -> Int` | count | The number of writes the device's queue holds, waiting to send; always 0 on a device that doesn't queue. |
@@ -5730,6 +5735,7 @@ tasks never read or change the process registry. The module source is
 | `graph.menu_bar(menus: fn() -> [Menu] Notice!) -> App` | graph | Give the app's window the menus `menus` makes, kept current: on Linux the window's menu, and each item's key equivalent in the window; give back the graph. See below. |
 | `graph.lifecycle(on_resume: fn() Notice!) -> App` | graph | Run `on_resume` each time the app comes back: on Linux when its window takes the focus again, and when the machine wakes from sleep; give back the graph. See below. |
 | `graph.window(width: Int, height: Int) -> App` | graph | Show the app in a Linux desktop window from `launch` on, drawing the current screen's tree; give back the graph. See below. |
+| `graph.sessions(access: Duration = 15min, refresh: Duration = 30d) -[DB, Rand]> App` | graph | Let a native app sign in to the graph's servers (`sign_in`): an access token lasts `access`, a refresh token `refresh` and works once; give back the graph. The graph keeps `auth.tokens_login` and `auth.tokens_refresh` for its servers, so the app that calls it reaches `DB` and `Rand`. Panics when a lifetime is under a millisecond. |
 | `item(label: String, run: fn() Notice!, key: String = "", enabled: Bool = true) -> MenuItem` / `separator() -> MenuItem` / `quit_item() -> MenuItem` | item | A menu item that runs `run` when chosen, with the key equivalent `key` (such as `"Cmd+N"`) and grayed out unless `enabled`; a separator line; and the item that quits the app (Cmd+Q). |
 | `menu(title: String, items: [MenuItem]) -> Menu` / `edit_menu() -> Menu` / `window_menu() -> Menu` | menu | A menu bar's menu titled `title` holding `items`; the Edit menu (Cut, Copy, Paste); and the Window menu (Minimize, Close). |
 | `graph.desktop_entry(exec: String) -> String` | text | The app's Linux desktop entry, running `exec` with the link it opens. |
@@ -5852,6 +5858,30 @@ or reply the call does not understand), `Invalid([FieldError])` (status 422:
 the arguments did not decode; the body
 `{"invalid": [{"path": …, "reason": …}]}` names each field error),
 `SignedOut` (401) and `UpdateRequired` (426).
+
+A native app signs in to such a server with
+`app.sign_in(server, account, password, device)`, which fails with `CallError`,
+when the server's graph gives `.sessions(access: Duration{15min},
+refresh: Duration{30d})`. Only then does the server answer POST
+`/__jet/session/sign-in` (`{"account", "password", "device"}`, checked by
+`auth.tokens_login` against the credential `auth.register_user` keeps) and
+POST `/__jet/session/refresh` (`{"refresh"}`, spent by
+`auth.tokens_refresh`). The graph keeps those two for its servers, so the
+app's `.sessions` call, not the server, reaches `DB` and `Rand`. Each
+answers 200 with
+`{"access", "refresh", "expires_in_ms"}`, or 401. The app keeps the access
+token in memory and sends it as `Authorization: Bearer` on each call through
+a `remote_at` Remote of that server. The refresh token lives in the Secret
+Service on Linux (the store libsecret uses), under the schema
+`dev.jet.Session` and the server's origin, never in a file. The call after the
+access token ends spends the refresh token for the next pair first, and a call
+the server answers 401 refreshes once and is sent again. A refused refresh
+deletes the kept token and fails the call `SignedOut`. A device the server
+revokes (`auth.revoke_device`) is therefore signed out within one access-token
+lifetime. `app.signed_in(server) -[Env, Net, Time]> Bool` is whether the app
+holds a session with the server, a kept refresh token from an earlier run
+included. Other systems' keychains are not built yet: there `sign_in` fails
+`Unreachable`.
 
 An endpoint marker may cap its calls: `#App.Public(limit: 30, per: 1min)`
 allows 30 calls from one network address in each one-minute window. `per`
