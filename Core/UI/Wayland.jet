@@ -236,6 +236,15 @@ Connection: struct {
     priv synced: Bool,
     priv configured: Bool,
     priv mapped: Bool,
+    // xdg_wm_base's bound version (6 says when the compositor suspends the
+    // window), the latest configure's suspended state, whether the program
+    // minimized the window since, and what the program last heard of the
+    // window's visibility (`tell_visibility`): 0 nothing yet, 1 shown, 2
+    // hidden, 3 unknown.
+    priv wm_base_version: Int,
+    priv suspended: Bool,
+    priv minimized: Bool,
+    priv told: Int,
     priv format: sys.PixelFormat,
     // The configures not yet acked, oldest first.
     priv configures: [Configure],
@@ -561,6 +570,10 @@ connect: fn(width: Int, height: Int, title: String) -[Env, Net, Time]> Connectio
         synced: false,
         configured: false,
         mapped: false,
+        wm_base_version: 0,
+        suspended: false,
+        minimized: false,
+        told: 0,
         format: sys.PixelFormat.XRGB8888,
         configures: [Configure]{},
         shown_width: 0,
@@ -834,8 +847,9 @@ next_frame: fn(c: &Connection) -[Env, Net, Time]> [UIEvent] {
 }
 
 // Whether input a person waits to see has arrived (a key, text, a
-// composition, a button or a drop), or a wake (`waker`), and a buffer is
-// free to show it in; uncapped, a free buffer alone is enough.
+// composition, a button or a drop), the window was hidden or shown, or a
+// wake (`waker`), and a buffer is free to show it in; uncapped, a free
+// buffer alone is enough.
 urgent: fn(c: Connection) -> Bool {
     if !c.mapped || free_buffer(c) < 0 -> return false
     if c.uncapped || c.woken || c.drops.len() > 0 -> return true
@@ -847,6 +861,9 @@ urgent: fn(c: Connection) -> Bool {
             .PointerDown(_) -> return true
             .PointerUp(_) -> return true
             .Drop(_, _, _) -> return true
+            // The program hears at once that its window was hidden or
+            // shown: a hidden window may get no frame callback.
+            .Visible(_) -> return true
             .KeyUp(_) | .PointerMove(_, _) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Close -> {}
         }
     }
@@ -1036,6 +1053,7 @@ present: fn(c: &Connection, pixels: [U8], damage: [UIRect]) -[Env, Net, Time]> U
     ack_configure(c)
     header(c, c.surface, 6, 0)
     c.mapped = true
+    tell_visibility(c)
     flush(c)
     if c.failure == .Val(failure) -> return Err(failure)
     cost: rt.clock_mono_ns() - c.frame_start
@@ -1489,9 +1507,10 @@ global: fn(c: &Connection, name: Int, interface: String, version: Int) {
         c.compositor = bind(c, name, interface, c.compositor_version)
     }
     if interface == "wl_shm" && c.shm == 0 -> c.shm = bind(c, name, interface, 1)
-    // v2 tells the tiled states.
+    // v2 tells the tiled states, v6 the suspended one.
     if interface == "xdg_wm_base" && c.wm_base == 0 {
-        c.wm_base = bind(c, name, interface, min_int(version, 2))
+        c.wm_base_version = min_int(version, 6)
+        c.wm_base = bind(c, name, interface, c.wm_base_version)
     }
     if interface == "wl_subcompositor" && c.subcompositor == 0 {
         c.subcompositor = bind(c, name, interface, 1)
@@ -2343,9 +2362,14 @@ set_fullscreen: fn(c: &Connection, fullscreen: Bool) {
     request(c, c.toplevel, 12, [U8]{})
 }
 
-// xdg_toplevel.set_minimized (13). No configure says when the user
-// brings the window back.
-minimize: fn(c: &Connection) { request(c, c.toplevel, 13, [U8]{}) }
+// xdg_toplevel.set_minimized (13). The window is hidden from now on; only
+// xdg_wm_base v6 says, by its suspended state, when the user brings it
+// back, so on an older compositor its visibility is unknown from now on.
+minimize: fn(c: &Connection) {
+    request(c, c.toplevel, 13, [U8]{})
+    c.minimized = true
+    tell_visibility(c)
+}
 
 // Whether the latest configure maximized the window, or made it
 // fullscreen.
@@ -2637,13 +2661,17 @@ margin: fn(c: Connection) -> Int { if c.look.square -> 0 else -> frame.MARGIN }
 rounded: fn(c: Connection) -> Bool { c.chrome != 0 && header_height(c) > 0 && !c.look.square }
 
 // xdg_toplevel.configure's states: maximized 1, fullscreen 2, activated
-// 4, and tiled on a side 5 to 8 (xdg_wm_base v2).
+// 4, tiled on a side 5 to 8 (xdg_wm_base v2) and suspended 9 (v6): the
+// compositor shows no part of the window, which is minimized, on another
+// workspace or wholly covered. A v6 configure says the window's
+// visibility, minimized or not.
 toplevel_states: fn(c: &Connection, body: [U8]) {
     end: min_int(12 + u32_at(body, 8), body.len())
     maximized := false
     fullscreen := false
     activated := false
     tiled := false
+    suspended := false
     at := 12
     loop at + 4 <= end {
         state: u32_at(body, at)
@@ -2651,6 +2679,7 @@ toplevel_states: fn(c: &Connection, body: [U8]) {
         if state == 2 -> fullscreen = true
         if state == 4 -> activated = true
         if state >= 5 && state <= 8 -> tiled = true
+        if state == 9 -> suspended = true
         at += 4
     }
     square: maximized || tiled
@@ -2660,6 +2689,31 @@ toplevel_states: fn(c: &Connection, body: [U8]) {
     c.look.maximized = maximized
     c.look.active = activated
     c.fullscreen = fullscreen
+    c.suspended = suspended
+    if c.wm_base_version >= 6 -> c.minimized = false
+    tell_visibility(c)
+}
+
+// Tells the program whether the compositor shows the window
+// (`UIEvent.Visible`) when that changed since it last heard: from the
+// first frame on, shown unless it is suspended or minimized, and unknown
+// once minimized on a compositor that never says when it comes back. The
+// window's focus says nothing of it.
+tell_visibility: fn(c: &Connection) {
+    if !c.mapped {
+        return
+    }
+    told: if {
+        c.minimized && c.wm_base_version < 6 -> 3
+        c.minimized || c.suspended -> 2
+        else -> 1
+    }
+    if told == c.told {
+        return
+    }
+    c.told = told
+    shown: if told == 3 -> Bool?{None} else -> Val(told == 1)
+    c.events.push(UIEvent.Visible(shown))
 }
 
 // The frame's shape changed: the chrome and every buffer's content

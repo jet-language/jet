@@ -984,10 +984,15 @@ UIIconImage: struct {
 // committed; `Compose` is the input method's composition in progress,
 // shown at the caret in place of the previous one until its text is
 // committed (empty text: none); `Resize` gives the new frame size in
-// pixels; `Drop` is what a drag dropped on the window and where it fell:
-// each URI of a list of URIs (a file manager's files are `file://` URIs),
-// or its text; `Close` asks the program to close the window and ends the
-// frames.
+// pixels; `Focus` says the window took or lost the keyboard; `Visible`
+// says the compositor shows the window again (true) or no longer does
+// (false: minimized, or suspended on another workspace or wholly
+// covered), or that the window can no longer tell (`None`: minimized on
+// a compositor that never says when it comes back), the first time from
+// the window's first frame, shown; `Drop` is what a drag dropped on the
+// window and where it fell: each URI of a list of URIs (a file manager's
+// files are `file://` URIs), or its text; `Close` asks the program to
+// close the window and ends the frames.
 UIEvent: enum {
     KeyDown(Key),
     KeyUp(Key),
@@ -999,6 +1004,7 @@ UIEvent: enum {
     Scroll(dx: Float, dy: Float),
     Resize(width: Int, height: Int),
     Focus(Bool),
+    Visible(Bool?),
     Drop(x: Int, y: Int, items: [UIDropItem]),
     Close,
 }
@@ -1471,7 +1477,7 @@ FrameCursor: struct {
                         guard.value.keys = [Key]{}
                         guard.value.buttons = [UIPointerButton]{}
                     }
-                    .Text(_) | .Compose(_) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Drop(_, _, _) -> {}
+                    .Text(_) | .Compose(_) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Visible(_) | .Drop(_, _, _) -> {}
                 }
             }
             frame: Frame{
@@ -2145,7 +2151,7 @@ priv internal: module {
                 }
                 false
             }
-            .KeyUp(_) | .Compose(_) | .PointerMove(_, _) | .PointerUp(_) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Close -> false
+            .KeyUp(_) | .Compose(_) | .PointerMove(_, _) | .PointerUp(_) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Visible(_) | .Close -> false
         }
     }
 

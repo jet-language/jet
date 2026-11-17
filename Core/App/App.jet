@@ -44,6 +44,7 @@ use {
     core.ui.[UINode]
     core.ui.host.drag_drop.[UIDropItem]
     ui: core.ui
+    event: core.event
 }
 
 SYNC_MAX_SESSION: 256
@@ -2637,8 +2638,9 @@ App: struct {
     // `{config}/mimeapps.list`, as `xdg-mime default` does. `{data}` is
     // `$XDG_DATA_HOME`, else `~/.local/share`; `{config}` is
     // `$XDG_CONFIG_HOME`, else `~/.config`. It starts the graph's background
-    // work (`background`), puts its tray in the desktop's (`tray`) and
-    // follows the machine's sleep to resume the app (`lifecycle`).
+    // work (`background`), puts its tray in the desktop's (`tray`), starts
+    // the app's run (`phase`, `LIFECYCLE`) and follows the machine's sleep
+    // into it.
     // Then it opens the link the launch was given (`open_link`), else,
     // when the graph has a window (`window`), the address `/`, opens the
     // window, and is true. That link is the first argument that is one, as
@@ -2657,6 +2659,7 @@ App: struct {
         app_launch_listen(App{title: self.title.copy()}, socket)
         app_background_start(self.title)
         app_tray_start(self.title)
+        app_lifecycle_start(app_graph_window() != None)
         app_sleep_start()
         if link != "" -> _: self.open_link(link) else if app_graph_window() != None {
             _: self.open_link("/")
@@ -2729,18 +2732,27 @@ App: struct {
     // Runs `on_resume` each time the app comes back from `launch` on: on
     // a Linux desktop, when its window takes the focus again after it lost
     // it, and when the machine wakes from sleep (logind's PrepareForSleep
-    // on the system bus). The moments in between (the app starting, going
-    // to the background, the machine going to sleep, the window closing)
-    // only drive the runtime. Coming back, with or without `on_resume`,
+    // on the system bus), as the app's lifecycle hears them (`LIFECYCLE`,
+    // a listener of which this subscribes for the graph's life). Losing
+    // the focus and the machine going to sleep take the app away; only a
+    // focus or a wake after that brings it back, and the window being
+    // shown again does not. Coming back, with or without `on_resume`,
     // first sends the writes the device queued (`offline(.Queue)`) and then
     // re-runs every live binding at its next read, so the screen shows what
-    // changed while the app was away. A notice `on_resume` fails with shows
-    // at the top of the window that came back until a click dismisses it;
-    // with no window open it joins the app's notice list (`notices`). Gives
-    // back the graph.
+    // changed while the app was away, in a task of its own. A notice
+    // `on_resume` fails with shows at the top of the window that came back
+    // until a click dismisses it; with no window open it joins the app's
+    // notice list (`notices`). Gives back the graph.
     lifecycle: fn(self, on_resume: &&fn() Notice!) -> App Never! {
-        held := APP_GRAPH.guard_edit()
-        held.value.resume = Val(Shared{AppResume{run: on_resume.move()}})
+        resume: Shared{AppResume{run: on_resume.move()}}
+        held := APP_LIFECYCLE.guard_edit()
+        if held.value.scope == None -> held.value.scope = Val(event.scope())
+        held.value.adapted = true
+        if held.value.scope == .Val(scope) {
+            LIFECYCLE.on(scope, fn(_heard: LifecycleEvent) {
+                if app_lifecycle_resuming() -> app_resume_start(Val(resume.copy()))
+            })
+        }
         self.copy()
     }
 
@@ -3125,12 +3137,13 @@ Query: struct {
 }
 
 // Starts the app graph, titled `title`: a graph with no services, screens,
-// heads, queue or links yet.
+// heads, queue, links or lifecycle listeners of its own yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
-    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None, resume: None, push: None, sessions: None}
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None, push: None, sessions: None}
     heads := APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
+    app_lifecycle_graph()
     App{title: title}
 }
 
@@ -3803,12 +3816,11 @@ priv AppGraph: struct {
     tray: AppTray?,
     window: AppWindow?,
     menu_bar: Shared<AppMenuBar>?,
-    resume: Shared<AppResume>?,
     push: AppPush?,
     sessions: AppSessions?,
 }
 
-priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None, resume: None, push: None, sessions: None}}
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None, push: None, sessions: None}}
 
 // One piece of a graph's background work (`App.background`): it runs every
 // `every_ns` nanoseconds while the app runs, and at login when `at_login`.
@@ -3833,7 +3845,8 @@ priv AppTrayMenu: struct {
     menu: fn() -> [MenuItem] Notice!,
 }
 
-// What a graph runs each time the app comes back (`App.lifecycle`).
+// What a graph runs each time the app comes back (`App.lifecycle`), which
+// its lifecycle listener hands each resume's task.
 priv AppResume: struct {
     run: fn() Notice!,
 }
@@ -4297,47 +4310,227 @@ LifecycleReason: enum {
     Closing,
 }
 
-// The moments the runtime follows while the app runs: its window took or
-// lost the focus, and the machine went to sleep or woke. They stay inside
-// the runtime; the app hears only that it came back (`App.lifecycle`).
+// One observation of the app's run (`LIFECYCLE`): the run's `instance`, the
+// observation's `sequence` in it, why the app's phase moved, and the phase
+// before and after it.
+LifecycleEvent: struct {
+    instance: Int,
+    sequence: Int,
+    reason: LifecycleReason,
+    before: Phase,
+    after: Phase,
+}
+
+// The app's lifecycle, from `launch` on: on a Linux desktop its window is
+// shown or hidden (the compositor's configure and the window's
+// `minimize`), takes the focus again, or closes, and the machine prepares
+// to sleep or wakes (logind's PrepareForSleep on the system bus). Each
+// listener (`.on(scope, handler)`) hears the observations one at a time,
+// in the order they arrived, never two at once; `phase` gives each one's
+// `after` before its listeners hear it, and an observation made while
+// they listen, their own included, waits its turn. An observation that
+// leaves the phase as it was, other than a focus regained or a wake, is
+// not heard. The app hears nothing once its window closed, and no
+// platform promises a last word before it ends.
+LIFECYCLE: event.new<LifecycleEvent>()
+
+// The app's phase: the latest observation of its run its lifecycle's
+// listeners hear (`LIFECYCLE`), from `launch` on; `None` before `launch`
+// and once the app's window closed.
+phase: fn() -> Phase? Never! {
+    held: APP_LIFECYCLE.guard_read()
+    held.value.published.copy()
+}
+
+// The moments the runtime observes while the app runs: its window took or
+// lost the focus, the machine prepares to sleep or woke, the compositor
+// showed or hid the window, and the window closed.
 priv AppMoment: enum {
     Foreground,
     Background,
     Suspend,
     Wake,
+    Shown(Visibility),
+    Closed,
 }
 
-// Whether the app has been away, in the background or asleep, since it
-// last came back.
-priv AppAway: struct {
+// The app's lifecycle (`LIFECYCLE`, `phase`): the runs `launch` started;
+// the run's latest observation (`observed`, `None` before `launch` and once
+// the window closed); the phase its listeners heard last (`published`);
+// the observations waiting for them, oldest first; whether a task is
+// handing them out; whether the app has been away, in the background or
+// asleep, and its window without the focus, since it last came back;
+// whether the observation the listeners hear now brings it back
+// (`app_lifecycle_resuming`); and the scope of the graph's own listeners,
+// which resume the app, and whether `App.lifecycle` gave one.
+priv AppLifecycle: struct {
+    runs: Int,
+    observed: Phase?,
+    published: Phase?,
+    waiting: [AppObserved],
+    handing: Bool,
     away: Bool,
+    unfocused: Bool,
+    resuming: Bool,
+    scope: EventScope?,
+    adapted: Bool,
 }
 
-priv APP_AWAY: Shared{AppAway{away: false}}
+// An observation waiting for LIFECYCLE's listeners, and whether it brings
+// the app back from away.
+priv AppObserved: struct {
+    event: LifecycleEvent,
+    came_back: Bool,
+}
 
-// The app reaches `moment`; coming back, to the foreground or awake, after
-// it was away resumes it (`app_resume_start`).
+priv APP_LIFECYCLE: Shared{AppLifecycle{runs: 0, observed: None, published: None, waiting: [AppObserved]{}, handing: false, away: false, unfocused: false, resuming: false, scope: None, adapted: false}}
+
+// A new graph (`new`) resumes through listeners of its own: the ones an
+// earlier graph subscribed stop.
+priv app_lifecycle_graph: fn() Never! {
+    held := APP_LIFECYCLE.guard_edit()
+    held.value.scope = Val(event.scope())
+    held.value.adapted = false
+}
+
+// Starts the app's run (`launch`): its first phase is published, running,
+// with its visibility unknown until the window's first frame, or hidden
+// with no window. A graph without `App.lifecycle` still resumes when the
+// app comes back, with no code of its own (`app_resume_run`).
+priv app_lifecycle_start: fn(windowed: Bool) -[Net, Time]> Never! {
+    held := APP_LIFECYCLE.guard_edit()
+    held.value.runs += 1
+    visibility: if windowed -> Visibility.Unknown else -> Visibility.Hidden
+    first: Phase{instance: held.value.runs, sequence: 0, visibility: visibility, execution: .Running}
+    held.value.published = Val(first.copy())
+    held.value.observed = Val(first)
+    held.value.waiting = [AppObserved]{}
+    held.value.away = false
+    held.value.unfocused = false
+    if held.value.scope == None -> held.value.scope = Val(event.scope())
+    if held.value.adapted {
+        return
+    }
+    if held.value.scope == .Val(scope) {
+        LIFECYCLE.on(scope, fn(_heard: LifecycleEvent) {
+            if app_lifecycle_resuming() -> app_resume_start(None)
+        })
+    }
+}
+
+// The app observes `moment` (`app_observe`), and LIFECYCLE's listeners hear
+// it when it moved the app's phase (`app_lifecycle_hand`).
 priv app_moment: fn(moment: AppMoment) -[Net, Time]> Never! {
-    if app_came_back(moment) -> app_resume_start()
+    if app_observe(moment) -> app_lifecycle_hand()
 }
 
-// Whether reaching `moment` brings the app back from away.
-priv app_came_back: fn(moment: AppMoment) -> Bool Never! {
-    held := APP_AWAY.guard_edit()
-    was: held.value.away
-    held.value.away = moment == .Background || moment == .Suspend
-    was && !held.value.away
+// Joins `moment` to the run's observations; whether it waits for the
+// listeners. The window losing the focus, or the machine preparing to
+// sleep, takes the app away; the focus or the wake that follows brings it
+// back. A moment before `launch` or after the window closed, or one that
+// leaves the phase as it was other than a focus regained or a wake, is
+// not heard.
+priv app_observe: fn(moment: AppMoment) -> Bool Never! {
+    held := APP_LIFECYCLE.guard_edit()
+    before: held.value.observed.copy() ?? return false
+    was_away: held.value.away
+    unfocused: held.value.unfocused
+    if moment == {
+        .Background -> {
+            held.value.away = true
+            held.value.unfocused = true
+        }
+        .Suspend -> { held.value.away = true }
+        .Foreground -> {
+            held.value.away = false
+            held.value.unfocused = false
+        }
+        .Wake -> held.value.away = false
+        .Shown(_) | .Closed -> {}
+    }
+    came_back: was_away && !held.value.away
+    reason: if moment == {
+        .Background -> {
+            return false
+        }
+        .Foreground -> {
+            if !unfocused && !came_back -> return false
+            LifecycleReason.FocusRegained
+        }
+        .Suspend -> LifecycleReason.SleepPreparing
+        .Wake -> LifecycleReason.Woke
+        .Shown(_) -> LifecycleReason.VisibilityChanged
+        .Closed -> LifecycleReason.Closing
+    }
+    visibility: if moment == {
+        .Shown(shown) -> shown
+        .Closed -> Visibility.Hidden
+        .Foreground | .Background | .Suspend | .Wake -> before.visibility
+    }
+    execution: if moment == {
+        .Suspend -> Execution.Suspending
+        .Wake -> Execution.Running
+        .Foreground | .Background | .Shown(_) | .Closed -> before.execution
+    }
+    moved: visibility != before.visibility || execution != before.execution
+    if !moved && (reason == .VisibilityChanged || reason == .SleepPreparing) -> return false
+    after: Phase{instance: before.instance, sequence: before.sequence + 1, visibility: visibility, execution: execution}
+    held.value.observed = if reason == .Closing -> None else -> Val(after.copy())
+    held.value.waiting.push(AppObserved{event: LifecycleEvent{instance: before.instance, sequence: after.sequence, reason: reason, before: before, after: after}, came_back: came_back})
+    true
 }
 
-priv app_graph_resume: fn() -> Shared<AppResume>? Never! {
-    held: APP_GRAPH.guard_read()
-    held.value.resume.copy()
+// Hands the waiting observations to LIFECYCLE's listeners, oldest first,
+// unless another task is handing them out, which hands these too: one
+// task at a time, so the listeners hear one observation at a time, in the
+// order they arrived. A listener's own observation waits for the one it
+// hears.
+priv app_lifecycle_hand: fn() -[Net, Time]> Never! {
+    handing := false
+    loop {
+        heard: app_lifecycle_next(handing) ?? return
+        handing = true
+        _: LIFECYCLE.emit(heard)
+    }
+}
+
+// The next observation for LIFECYCLE's listeners, published first as the
+// app's phase (`phase`), when `handing` or no other task hands them out;
+// `None` once none waits, when the phase of a closed window's run goes too.
+priv app_lifecycle_next: fn(handing: Bool) -> LifecycleEvent? Never! {
+    held := APP_LIFECYCLE.guard_edit()
+    if held.value.handing && !handing -> return None
+    if held.value.waiting.len() == 0 {
+        held.value.handing = false
+        held.value.resuming = false
+        if held.value.observed == None -> held.value.published = None
+        return None
+    }
+    observed: held.value.waiting.remove(0, .Slot) ?? return None
+    held.value.handing = true
+    held.value.resuming = observed.came_back
+    held.value.published = Val(observed.event.after.copy())
+    Val(observed.event)
+}
+
+// Whether the observation LIFECYCLE's listeners hear now brings the app
+// back from away: the window took the focus again, or the machine woke,
+// after the app was in the background or asleep.
+priv app_lifecycle_resuming: fn() -> Bool Never! {
+    held: APP_LIFECYCLE.guard_read()
+    held.value.resuming
+}
+
+// The visibility a window's `UIEvent.Visible` says.
+priv app_visibility: fn(shown: Bool?) -> Visibility Never! {
+    seen: shown ?? return .Unknown
+    if seen -> .Visible else -> .Hidden
 }
 
 // Resumes the app in a task of its own, so the window's frames and the
-// sleep watch never wait on it (`app_resume_run`).
-priv app_resume_start: fn() -[Net, Time]> Never! {
-    resume: app_graph_resume()
+// sleep watch never wait on it (`app_resume_run`), with the graph's
+// `on_resume` (`App.lifecycle`) when it gave one.
+priv app_resume_start: fn(resume: Shared<AppResume>?) -[Net, Time]> Never! {
     running: task { app_resume_run(resume) }
     running.detach()
 }
@@ -4345,10 +4538,10 @@ priv app_resume_start: fn() -[Net, Time]> Never! {
 // Resumes the app, with no code of its own: the writes the device queued
 // while it was away go to the server (`queue_resume`), then every live
 // binding re-runs at its next read (`live_invalidate`), so what the screen
-// reads again holds them, and then the graph's `on_resume`
-// (`App.lifecycle`), when it has one, runs once. The notice it fails with
-// shows at the top of the window (`app_window_resumed`), or joins the
-// notice list without one.
+// reads again holds them, and then `on_resume` (`App.lifecycle`), when
+// there is one, runs once. The notice it fails with shows at the top of
+// the window (`app_window_resumed`), or joins the notice list without
+// one.
 priv app_resume_run: fn(resume: Shared<AppResume>?) -[Net, Time]> Never! {
     queue_resume()
     live_invalidate(None, None, None, 0)
@@ -4366,16 +4559,11 @@ priv app_resume_once: fn(run: fn() Notice!) Never! {
 // How long the sleep watch waits on the system bus at a time.
 priv APP_SLEEP_WAIT_NS: 60000000000
 
-// Follows the machine going to sleep and waking, from `launch` on, when
-// the app has something to resume (`app_resume_run`): a window, a queue
-// (`offline(.Queue)`) or an `on_resume`. logind says
-// PrepareForSleep(true) before the sleep and PrepareForSleep(false) after
-// the wake, on the system bus. Without a system bus or logind there is
-// nothing to follow.
+// Follows the machine going to sleep and waking, from `launch` on, into
+// the app's lifecycle (`app_moment`). logind says PrepareForSleep(true)
+// before the sleep and PrepareForSleep(false) after the wake, on the
+// system bus. Without a system bus or logind there is nothing to follow.
 priv app_sleep_start: fn() -[Env, Net, Time]> Never! {
-    if app_graph_resume() == None && !queue_on() && app_graph_window() == None {
-        return
-    }
     watching: task { app_sleep_watch() }
     watching.detach()
 }
@@ -6193,11 +6381,12 @@ priv app_graph_window: fn() -> AppWindow? Never! {
 // tree (`app_menu_bar_keyed`), and the items of the Edit and Window menus
 // chosen from the bar wake the frames to act (`app_window_act`). The
 // window taking or losing the focus brings the app to the foreground or
-// the background (`app_moment`); a resume that fails shows its notice at
-// the top until a click there dismisses it. A frame draws the tree when
-// nothing is drawn yet, the tree is new or an event changed it, or the
-// window took another size. A display that is missing or fails leaves a
-// notice.
+// the background, and the compositor showing or hiding it, and its
+// closing, change the app's phase (`app_moment`); a resume that fails
+// shows its notice at the top until a click there dismisses it. A frame
+// draws the tree when nothing is drawn yet, the tree is new or an event
+// changed it, or the window took another size. A display that is missing
+// or fails leaves a notice.
 priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Read, Net, Time]> Never! {
     window: ui.open(width: size.width, height: size.height, title: title) ?? return app_window_lost("{err}")
     // Taken before the frames: a frame's wait holds the window.
@@ -6220,6 +6409,7 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
             if event == .Focus(on) {
                 app_moment(if on -> AppMoment.Foreground else -> AppMoment.Background)
             }
+            if event == .Visible(visible) -> app_moment(AppMoment.Shown(app_visibility(visible)))
             if event == .Drop(x, y, items) -> app_window_dropped(tree, frame, x, y, items)
             if event == .PointerDown(.Right) {
                 open = app_context_open(frame, app_context_items(tree.__menu_at(frame, frame.get_mouse_x(), frame.get_mouse_y())))
@@ -6299,6 +6489,7 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
         drawn = true
     }
     if window.failure() == .Val(failure) -> app_window_lost("{failure}")
+    app_moment(AppMoment.Closed)
     process.exit(0)
 }
 
@@ -6348,7 +6539,7 @@ priv app_window_drag: fn(frame: ui.Frame, tree: UINode, event: ui.UIEvent, focus
             picked = Val(AppPicked{drag: drag, zone: 1})
             true
         }
-        .KeyUp(_) | .Text(_) | .Compose(_) | .PointerMove(_, _) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Drop(_, _, _) | .Close -> false
+        .KeyUp(_) | .Text(_) | .Compose(_) | .PointerMove(_, _) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Visible(_) | .Drop(_, _, _) | .Close -> false
     }
 }
 
@@ -6780,13 +6971,60 @@ priv app_graph_shows: fn(ids: [Int]) -> Bool Never! {
     assert_eq(after[after.len() - 1].text, "The board is offline")
 }
 
-#Test("the app resumes only when it comes back from away, re-running every live binding, and a failed resume with no window joins the notices") {
-    assert(!app_came_back(.Foreground))
-    assert(!app_came_back(.Background))
-    assert(app_came_back(.Foreground))
-    assert(!app_came_back(.Foreground))
-    assert(!app_came_back(.Suspend))
-    assert(app_came_back(.Wake))
+// What LIFECYCLE's listeners hear of `moment`, one line per observation:
+// its reason, sequence, phase after and whether it resumes the app.
+priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
+    heard := [String]{}
+    if !app_observe(moment) -> return heard
+    loop {
+        event: app_lifecycle_next(true) ?? return heard
+        heard.push("{event.reason} {event.sequence} {event.after.visibility} {event.after.execution} resumes={app_lifecycle_resuming()}")
+    }
+}
+
+#Test("a run's phase follows its observations in order, one hand at a time; only a focus or a wake after away resumes it, and a repeated state is heard once") {
+    app_lifecycle_graph()
+    app_lifecycle_start(true)
+    started: phase() ?? panic("a started run has a phase")
+    assert_eq(started.sequence, 0)
+    assert(started.visibility == .Unknown && started.execution == .Running, "a window's run starts running, its visibility unknown")
+    assert_eq(app_lifecycle_test_hear(.Shown(.Visible)), [String]{"VisibilityChanged 1 Visible Running resumes=false"})
+    assert_eq(app_lifecycle_test_hear(.Shown(.Visible)), [String]{})
+    assert_eq(app_lifecycle_test_hear(.Background), [String]{})
+    assert_eq(app_lifecycle_test_hear(.Foreground), [String]{"FocusRegained 2 Visible Running resumes=true"})
+    assert_eq(app_lifecycle_test_hear(.Foreground), [String]{})
+    assert_eq(app_lifecycle_test_hear(.Shown(.Hidden)), [String]{"VisibilityChanged 3 Hidden Running resumes=false"})
+    assert_eq(app_lifecycle_test_hear(.Suspend), [String]{"SleepPreparing 4 Hidden Suspending resumes=false"})
+    assert_eq(app_lifecycle_test_hear(.Suspend), [String]{})
+    assert_eq(app_lifecycle_test_hear(.Wake), [String]{"Woke 5 Hidden Running resumes=true"})
+    assert_eq(app_lifecycle_test_hear(.Wake), [String]{"Woke 6 Hidden Running resumes=false"})
+    // Asleep, then the focus: it comes back with no wake.
+    assert_eq(app_lifecycle_test_hear(.Suspend), [String]{"SleepPreparing 7 Hidden Suspending resumes=false"})
+    assert_eq(app_lifecycle_test_hear(.Foreground), [String]{"FocusRegained 8 Hidden Suspending resumes=true"})
+    now: phase() ?? panic("a running app has a phase")
+    assert_eq(now.sequence, 8)
+    // Observations made while one task hands them out wait for it, in order.
+    assert(app_observe(.Wake) && app_observe(.Shown(.Visible)))
+    first: app_lifecycle_next(false) ?? panic("an observation waits")
+    assert(first.reason == .Woke && first.before.sequence == 8 && first.after.sequence == 9)
+    assert((phase() ?? panic("published")).sequence == 9, "the phase is published before the listeners hear it")
+    assert(app_lifecycle_next(false) == None, "another task leaves the handing to the one handing out")
+    assert(app_observe(.Closed))
+    second: app_lifecycle_next(true) ?? panic("the second observation waits")
+    assert(second.reason == .VisibilityChanged && second.after.visibility == .Visible)
+    closing: app_lifecycle_next(true) ?? panic("the closing waits")
+    assert(closing.reason == .Closing && closing.after.visibility == .Hidden && closing.after.sequence == 11)
+    assert((phase() ?? panic("published")).sequence == 11, "the closing's listeners still read its phase")
+    assert(app_lifecycle_next(true) == None)
+    assert(phase() == None, "a closed window's run has no phase")
+    assert(!app_observe(.Wake), "nothing is heard after the window closed")
+    // The next run starts its own sequence.
+    app_lifecycle_start(false)
+    again: phase() ?? panic("a new run has a phase")
+    assert(again.instance == started.instance + 1 && again.sequence == 0 && again.visibility == .Hidden)
+}
+
+#Test("the app resumes re-running every live binding, and a failed resume with no window joins the notices") {
     binding: __live_bind<Int, AppError>("app.test.resumed", [String]{}, fn() { resume_test_square() })
     _: state(binding)
     assert(live_current(binding.id, rt.clock_mono_ns()).value != None, "a binding just read is current")
