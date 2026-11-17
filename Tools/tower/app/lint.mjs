@@ -2,7 +2,7 @@
 // board. Each rule is its own function returning findings [{rule, ref, msg}];
 // `lint()` aggregates them. Read-only — never mutates the store. The
 // Docs/Spec reference scan lives in Tools/tower/Board.jet (`lint --docs`).
-import { ballotGaps, decisionStage, findCard } from './store.mjs';
+import { ballotGaps, criteriaSoftLimit, decisionStage, findCard, liveCriteriaCount } from './store.mjs';
 import { isOpenCard, referenceLabel, referenceTokens } from './card-matching.mjs';
 import { SCRATCH_PATH_RE } from './durable.mjs';
 
@@ -252,4 +252,24 @@ export function evidenceProvenance(s, resolver) {
   for (const c of s.cards || []) for (const item of c.criteria || []) check(`#${c.num}`, `#${c.num} "${c.title}"`, item);
   for (const m of s.milestones || []) for (const item of m.exitCriteria || []) check(m.id, `milestone ${m.id}`, item);
   return findings;
+}
+
+// ---- tower lint --limits -----------------------------------------------------
+// Unfinished cards holding more criteria than `criteriaSoftLimit`, largest
+// first, each with the reason last logged for growing it, if any.
+export function criteriaOverLimit(s, config) {
+  const limit = criteriaSoftLimit(config);
+  const reasons = new Map();
+  for (const e of s.events || []) {
+    if (e.action === 'card.over-limit' && !reasons.has(e.ref)) reasons.set(e.ref, String(e.note || '').replace(/^[^:]*: /, ''));
+  }
+  return (s.cards || [])
+    .filter(c => c.phase !== 'done' && liveCriteriaCount(c) > limit)
+    .sort((a, b) => liveCriteriaCount(b) - liveCriteriaCount(a) || a.num - b.num)
+    .map(c => {
+      const count = liveCriteriaCount(c);
+      const reason = reasons.get(c.id);
+      return { rule: 'criteria-over-limit', ref: `#${c.num}`, count, limit, reason: reason ?? null,
+        msg: `#${c.num} "${c.title}" holds ${count} criteria, over the soft limit of ${limit}${reason ? ` — kept for: ${reason}` : ' — split it with `tower card split`'}` };
+    });
 }

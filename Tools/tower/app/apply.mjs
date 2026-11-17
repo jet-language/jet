@@ -9,7 +9,7 @@ import { TowerError } from './store.mjs';
 const fail = (code, msg) => { throw new TowerError(code, msg); };
 const pick = (op, keys) => Object.fromEntries(keys.filter(k => Object.hasOwn(op, k)).map(k => [k, op[k]]));
 
-const CARD_UPDATE_FIELDS = [...db.CARD_FIELDS.filter(k => k !== 'needsAcceptance'), 'addTags', 'removeTags', 'logEntry'];
+const CARD_UPDATE_FIELDS = [...db.CARD_FIELDS.filter(k => k !== 'needsAcceptance'), 'addTags', 'removeTags', 'logEntry', 'overLimit'];
 const EPOCH_FIELDS = ['name', 'goal', 'status', 'order', 'exitCriteria'];
 const MILESTONE_FIELDS = ['title', 'goal', 'order', 'exitCriteria', 'epochId'];
 
@@ -26,9 +26,9 @@ export const APPLY_OPS = {
     run: (s, o, by) => db.editCriterion(s, o.card, o.n, { ...pick(o, ['text', 'proof', 'blockedBy', 'reason']), by }),
   },
   add: {
-    needs: ['card', 'text'], may: ['proof', 'blockedBy'],
+    needs: ['card', 'text'], may: ['proof', 'blockedBy', 'overLimit'],
     ref: o => o.card,
-    run: (s, o, by) => db.addCriterion(s, o.card, o.text, by, pick(o, ['proof', 'blockedBy'])),
+    run: (s, o, by, cfg) => db.addCriterion(s, o.card, o.text, by, pick(o, ['proof', 'blockedBy', 'overLimit']), cfg),
   },
   remove: {
     needs: ['card', 'n', 'reason'], may: [],
@@ -36,9 +36,14 @@ export const APPLY_OPS = {
     run: (s, o, by) => db.removeCriterion(s, o.card, o.n, { reason: o.reason, by }),
   },
   move: {
-    needs: ['card', 'n', 'to'], may: ['reason'],
+    needs: ['card', 'n', 'to'], may: ['reason', 'overLimit'],
     ref: o => `${o.card} c${o.n} → ${o.to}`,
-    run: (s, o, by) => db.moveCriterion(s, o.card, o.n, { to: o.to, reason: o.reason, by }),
+    run: (s, o, by, cfg) => db.moveCriterion(s, o.card, o.n, { to: o.to, reason: o.reason, overLimit: o.overLimit, by }, cfg),
+  },
+  'card.split': {
+    needs: ['card', 'criteria', 'title'], may: ['overLimit'],
+    ref: o => o.card,
+    run: (s, o, by, cfg) => db.splitCard(s, o.card, { criteria: o.criteria, title: o.title, overLimit: o.overLimit, by }, cfg),
   },
   'card.update': {
     needs: ['card'], may: CARD_UPDATE_FIELDS, change: true,
@@ -89,7 +94,7 @@ export function checkPlan(plan) {
     if (missing.length) problems.push(`${at} (${o.op}): needs ${missing.join(', ')}`);
     const unknown = Object.keys(o).filter(k => k !== 'op' && !spec.needs.includes(k) && !spec.may.includes(k));
     if (unknown.length) problems.push(`${at} (${o.op}): unknown field${unknown.length > 1 ? 's' : ''} ${unknown.join(', ')}`);
-    if (spec.change && !spec.may.some(k => Object.hasOwn(o, k))) problems.push(`${at} (${o.op}): changes nothing`);
+    if (spec.change && !spec.may.some(k => k !== 'overLimit' && Object.hasOwn(o, k))) problems.push(`${at} (${o.op}): changes nothing`);
     if (o.op === 'edit' && !['text', 'proof', 'blockedBy'].some(k => Object.hasOwn(o, k)))
       problems.push(`${at} (edit): needs text, proof or blockedBy`);
   });

@@ -14,7 +14,7 @@ import { findDataDir, projectRoot, readJSON, readLatestJSON, writeJSON } from '.
 import { SHARD_BYTES, historyFiles, planShards } from './history-shards.mjs';
 import { ConfigError } from './config.mjs';
 import { migrate } from './migrate.mjs';
-import { evidenceProvenance, lint } from './lint.mjs';
+import { criteriaOverLimit, evidenceProvenance, lint } from './lint.mjs';
 import { executeRuns, proveEvidence, proveRuns, proveTargets, unmatchedProofs } from './proof.mjs';
 import { findDuplicateCandidates } from './card-matching.mjs';
 import { hasHardeningPayload } from './hardening.mjs';
@@ -82,17 +82,18 @@ export const COMMAND_FLAGS = {
     list: ['lane', 'phase', 'epoch', 'track', 'kind', 'milestone', 'tag', 'untagged', 'parent', 'hardeningDedupKey'],
     show: ['hardeningDedupKey'],
     add: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'checkSteps', 'probe', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force',
+      'checkSteps', 'probe', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force', 'overLimit',
       'hardeningDedupKey', 'hardeningSeam', 'hardeningRelation', 'hardeningWrongTierMask',
       'hardeningInputPartition', 'hardeningFindingId', 'hardeningFixture'),
     update: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'checkSteps', 'probe', 'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'parent', 'expectRev',
+      'checkSteps', 'probe', 'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'parent', 'expectRev', 'overLimit',
       'hardeningDedupKey', 'hardeningSeam', 'hardeningRelation', 'hardeningWrongTierMask',
       'hardeningInputPartition', 'hardeningFindingId', 'hardeningFixture'),
     claim: by(),
     release: by('handoff'),
     delete: by(),
-    criteria: by('add', 'edit', 'text', 'proof', 'blockedBy', 'unblock', 'remove', 'move', 'to', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
+    criteria: by('add', 'edit', 'text', 'proof', 'blockedBy', 'unblock', 'remove', 'move', 'to', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list', 'overLimit'),
+    split: by('criteria', 'title', 'overLimit'),
     log: by('text'),
     history: ['limit'],
   }},
@@ -150,7 +151,7 @@ export const COMMAND_FLAGS = {
   closest: { flags: ['epoch', 'limit'] },
   ballots: { flags: [] },
   brief: { flags: ['agent', 'noClaim', 'color'] },
-  lint: { flags: ['proofs', 'tree', 'evidence'] },
+  lint: { flags: ['proofs', 'tree', 'evidence', 'limits'] },
   prove: { flags: by('card', 'epoch', 'jet', 'tree', 'commit', 'dryRun', 'yes') },
   docs: { verbs: {
     list: [],
@@ -196,6 +197,7 @@ const REQUIRED = {
   'card criteria': { arg: 'REF' },
   'card log': { arg: 'REF', flags: ['text'] },
   'card history': { arg: 'REF' },
+  'card split': { arg: 'REF', flags: ['criteria', 'title'] },
   'decision show': { arg: 'ID' },
   'decision scaffold': { arg: 'REF', flags: ['id'] },
   'decision add': { flags: ['card'], waivedBy: PAYLOAD_WAIVER },
@@ -317,6 +319,7 @@ function checkRequired(cmd, verb, args, flags) {
 
 const FLAG_VALUE = {
   add: '"text"', edit: 'n', remove: 'n', move: 'n', to: 'REF', meet: 'n', verify: 'n', reopen: 'n', unblock: 'n', reason: '"…"', evidence: '"…"',
+  overLimit: '"reason"', criteria: 'N,N,…', limits: null,
   proof: '"jet test …"', proofs: null, jet: 'PATH', tree: 'DIR', yes: null,
   by: 'X', file: 'FILE', stdin: null, color: '=auto|always|never',
   sections: 'FILE',
@@ -503,6 +506,9 @@ function cmdStatus(store, { flags }) {
   const delta = `${trend.delta > 0 ? '+' : ''}${trend.delta}`;
   const deltaText = trend.delta > 0 ? t.error(delta) : trend.delta < 0 ? t.success(delta) : t.dim(delta);
   console.log(`  ${t.accent('OPEN TREND')}        ${trend.openAtStart} → ${trend.openNow}  ${deltaText} ${t.dim(`over ${trend.windowDays}d`)}`);
+  const day = s.counts.today;
+  const today = (n, d) => `${n}${d ? ` ${(d > 0 ? t.error : t.success)(signed(d))}` : ''}`;
+  console.log(`  ${t.accent('OPEN TODAY')}        ${today(day.openCards, day.openCardsDelta)} cards ${t.border('·')} ${today(day.openCriteria, day.openCriteriaDelta)} criteria ${t.dim(`since the start of ${day.date}`)}`);
   console.log(`\n  ${t.error('BLOCKED ON OWNER')}  ${t.warn(String(s.counts.decide))} decisions`);
   console.log(`  ${t.success('AGENT-READY')}       ${t.success(String(s.counts.agentReady))}  ${t.dim('(review / build / implement / plan)')}`);
   console.log(`  ${t.dim('open questions')}    ${t.warn(String(s.counts.openQuestions))}   ${t.dim(`sidequests ${s.counts.sidequests}   ideas ${s.counts.ideas}`)}\n`);
@@ -656,7 +662,7 @@ function cmdCard(store, { pos, flags }) {
         phase: flags.phase ?? p.phase, priority: flags.priority ?? p.priority, plan: flags.plan ?? p.plan,
         checkSteps: flags.checkSteps ?? p.checkSteps, probe: flags.probe ?? p.probe,
         blockedBy: flags.blockedBy ? String(flags.blockedBy).split(',') : p.blockedBy,
-        criteria: p.criteria,
+        criteria: p.criteria, overLimit: flags.overLimit ?? p.overLimit,
         refs: flags.refs ? String(flags.refs).split(',').map(x => x.trim()).filter(Boolean) : p.refs,
         tags,
         parent: flags.parent ?? p.parentId ?? p.parent,
@@ -678,6 +684,7 @@ function cmdCard(store, { pos, flags }) {
         ['checkSteps', 'checkSteps'], ['probe', 'probe'],
         ['workOrder', 'workOrder'], ['log', 'logEntry'], ['needsAcceptance', 'needsAcceptance']])
         if (flags[f] !== undefined) patch[k] = flags[f];
+      if (flags.overLimit !== undefined) patch.overLimit = flags.overLimit;
       if (flags.blockedBy !== undefined) patch.blockedBy = flags.blockedBy === '' ? [] : String(flags.blockedBy).split(',');
       if (flags.refs !== undefined) patch.refs = flags.refs === '' ? [] : String(flags.refs).split(',').map(x => x.trim()).filter(Boolean);
       if (flags.tags !== undefined) patch.tags = flags.tags === '' ? [] : String(flags.tags).split(',');
@@ -722,11 +729,11 @@ function cmdCard(store, { pos, flags }) {
       if (flags.to !== undefined && flags.move === undefined) throw new TowerError('E_USAGE', 'card criteria --to goes with --move n');
       if (flags.move !== undefined) {
         if (flags.to === undefined) throw new TowerError('E_USAGE', 'card criteria --move n needs --to <card>');
-        const { result } = store.mutate((s) => db.moveCriterion(s, ref, flags.move, { to: flags.to, reason: flags.reason, by }));
+        const { result } = store.mutate((s, cfg) => db.moveCriterion(s, ref, flags.move, { to: flags.to, reason: flags.reason, overLimit: flags.overLimit, by }, cfg));
         return out(flags, `criterion #${result.from.n} moved from card #${result.from.cardNum} to card #${result.to.cardNum} as c${result.to.n}`, result);
       }
       if (flags.add !== undefined) {
-        const { result } = store.mutate((s) => db.addCriterion(s, ref, flags.add, by, { proof: flags.proof, blockedBy: flags.blockedBy }));
+        const { result } = store.mutate((s, cfg) => db.addCriterion(s, ref, flags.add, by, { proof: flags.proof, blockedBy: flags.blockedBy, overLimit: flags.overLimit }, cfg));
         return out(flags, `added criterion #${result.n} to card #${result.cardNum}${result.blockedBy ? `, waiting on ${result.blockedBy}` : ''}`, result);
       }
       if (flags.kind !== undefined && flags.meet === undefined && flags.verify === undefined)
@@ -758,6 +765,10 @@ function cmdCard(store, { pos, flags }) {
       const { result } = store.mutate((s) => db.deleteCard(s, ref, { by }));
       const ballots = result.decisions.length ? ` with ballot${result.decisions.length > 1 ? 's' : ''} ${result.decisions.map(d => `${d.id} (${d.status})`).join(', ')}` : '';
       return out(flags, `deleted card #${result.num}${ballots}`, result);
+    }
+    case 'split': {
+      const { result } = store.mutate((s, cfg) => db.splitCard(s, ref, { criteria: flags.criteria, title: flags.title, overLimit: flags.overLimit, by }, cfg));
+      return out(flags, `split ${result.moved.map(m => `c${m.from}`).join(', ')} off card #${result.from.num} into card #${result.card.num} (${result.moved.map(m => `c${m.to}`).join(', ')})`, result);
     }
     case 'log': {
       const { result } = store.mutate((s, cfg) => db.updateCard(s, ref, {
@@ -1189,17 +1200,26 @@ function epochArg(s, raw) {
 // and open criteria, headed by the active epoch and the next one.
 function cmdChain(store, { flags }) {
   const proj = db.project(store.load());
-  const chain = epochChain(proj.epochs, proj.cards);
+  const today = proj.counts.today.epochs;
+  const chain = epochChain(proj.epochs, proj.cards).map(e => ({
+    ...e, openCardsDelta: today[e.id]?.openCardsDelta ?? 0, openCriteriaDelta: today[e.id]?.openCriteriaDelta ?? 0,
+  }));
   if (flags.json) return out(flags, null, chain);
   const [active, following] = ['active', 'next'].map(role => chain.find(e => e.role === role));
   console.log(active
     ? `active ${active.label}: ${active.openCriteria} open criteria${active.blockedCriteria ? ` (+${active.blockedCriteria} blocked)` : ''} on ${active.openCards} cards · next ${following ? following.label : '—'}`
     : '(no unfinished epoch)');
+  const todayText = (e) => {
+    const parts = [[e.openCardsDelta, 'cards'], [e.openCriteriaDelta, 'open']].filter(([d]) => d).map(([d, what]) => `${signed(d)} ${what}`);
+    return parts.length ? `  (today ${parts.join(', ')})` : '';
+  };
   for (const e of chain) {
     const role = e.role === 'finished' ? `finished (${e.status})` : e.staff ? `${e.role} · ${e.staff} agent${e.staff === 1 ? '' : 's'}` : e.role;
-    console.log(` ${e.label.padEnd(5)} ${role.padEnd(18)} ${String(e.openCards).padStart(4)} cards ${String(e.openCriteria).padStart(5)} open${e.blockedCriteria ? ` ${e.blockedCriteria} blocked` : ''}  ${e.name}`);
+    console.log(` ${e.label.padEnd(5)} ${role.padEnd(18)} ${String(e.openCards).padStart(4)} cards ${String(e.openCriteria).padStart(5)} open${e.blockedCriteria ? ` ${e.blockedCriteria} blocked` : ''}  ${e.name}${todayText(e)}`);
   }
 }
+
+const signed = (n) => `${n > 0 ? '+' : ''}${n}`;
 
 // Open cards nearest to done: fewest workable open criteria first; blocked
 // criteria are counted apart and do not count as progress.
@@ -1242,12 +1262,15 @@ function cmdLint(store, { flags }) {
   const s = store.load();
   if (flags.tree !== undefined && !flags.proofs) throw new TowerError('E_USAGE', 'lint --tree goes with --proofs');
   if (flags.proofs && typeof flags.tree !== 'string') throw new TowerError('E_USAGE', 'lint --proofs needs --tree DIR, a checkout holding Tests and Examples');
-  if (flags.proofs && flags.evidence) throw new TowerError('E_USAGE', 'lint --proofs and --evidence are separate sweeps; run one at a time');
+  if ([flags.proofs, flags.evidence, flags.limits].filter(Boolean).length > 1)
+    throw new TowerError('E_USAGE', 'lint --proofs, --evidence and --limits are separate sweeps; run one at a time');
   const findings = flags.proofs ? unmatchedProofs(s, resolve(flags.tree))
     : flags.evidence ? evidenceProvenance(s, store.config.durability)
+    : flags.limits ? criteriaOverLimit(s, store.config)
     : lint(s, store.loadHistory());
-  // --evidence warns: old evidence stays readable, so its findings never fail the run.
-  process.exitCode = findings.length && !flags.evidence ? 1 : 0;
+  // --evidence and --limits warn: old evidence stays readable, and a card may
+  // stay over the limit for a logged reason, so their findings never fail the run.
+  process.exitCode = findings.length && !flags.evidence && !flags.limits ? 1 : 0;
   if (flags.json) return out(flags, null, findings);
   for (const f of findings) console.log(`${f.rule}  ${f.ref}  ${f.msg}`);
   if (!findings.length) console.log('(clean)');

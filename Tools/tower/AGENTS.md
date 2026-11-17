@@ -51,7 +51,8 @@ tower next --burndown        # burndown: active epoch's epoch-track cards
 tower next --ready-across-epochs  # every unblocked card board-wide —
                               # the parallel-safe set (D-TWR-OPS2)
 tower chain [--json]         # epochs in order: active (3 agents), next (1
-                              # agent), open cards and open criteria each
+                              # agent), open cards and open criteria each, with
+                              # today's change
 tower closest [--epoch E] [--limit N] [--json]   # open cards nearest to done:
                               # fewest open criteria first, blocked counted apart
 tower docs list|show|add|update|archive|delete   # durable Docs/*.md + scratchpad
@@ -62,6 +63,8 @@ tower lint --proofs --tree DIR  # proofs whose filter matches no Tests/Examples 
 tower lint --evidence [--json]  # settled rows whose evidence cites a scratch
                               # path, a wave tree or a Rust-era command and no
                               # commit on dev/master; warnings, exit 0
+tower lint --limits [--json]  # unfinished cards over criteriaSoftLimit, largest
+                              # first, with their logged reason; warnings, exit 0
 tower prove --card '#N'|--epoch E [--yes --jet PATH --tree DIR --commit SHA --by X] [--dry-run]
                               # run row proofs; meet the passing rows (see Proofs)
 jet Tools/tower/Board.jet lint --docs [--docs-root DIR] [--json]
@@ -74,6 +77,8 @@ tower card show '#12'        # one card, with computed lane + decisions
 tower card list --tag needs-triage --json   # triage / wayfinder tag filter
 tower card list --parent '#12' --json       # wayfinder map children
 tower card update '#12' --add-tag ready-for-agent --by me
+tower card split '#12' --criteria 5,6,7 --title "…" --by me  # move open rows
+                              # onto a new card in the same epoch
 tower card history '#12' [--limit N] [--json]  # everything that happened to the
                               # card, its ballots and questions, and the plans
                               # (board.apply) that touched it, newest first
@@ -215,6 +220,22 @@ evidence `Moved to #M cK`. Both rows keep the link (`movedTo` on the old row,
 `movedFrom` on the new one), shown by `--list`, the briefing and the card view.
 Only an open row moves, and never onto a done card.
 
+### Card size
+
+A card holds at most `criteriaSoftLimit` live criteria (config, default 6; a
+row moved off the card does not count). A write that grows a card past it
+(`--add`, `--move` onto it, `card add` or `card update` with a longer list) is
+refused with `E_OVER_LIMIT` unless it carries `--over-limit "reason"`
+(`overLimit` in a plan op or API payload). The reason is logged on the card as
+a `card.over-limit` event. A card already past the limit is not blocked until
+it grows again. The owner UI asks for the reason before adding the row.
+
+`tower card split '#12' --criteria 5,6,7 --title "…" --by me` moves those open
+rows onto a new card with the source's epoch, track, kind, priority and
+milestone, body `Split from #12.`, each row moved as `--move` would move it.
+The card's history logs `card.split` with both cards. `tower lint --limits`
+lists the unfinished cards past the limit, each with its latest reason.
+
 No board text names this machine's home, user, host, email, mounts or dev tool
 roots (#6564 c5). Every write is checked against the rule table in
 `app/personal-info.mjs`, which Tower builds from the machine it runs on. A write
@@ -328,6 +349,14 @@ to the chain's active epoch. `tower chain` lists every epoch in order with its
 role, staffing, open cards and open criteria, headed by the active epoch's
 open-criteria count and the next epoch. `tower brief` names the card's epoch
 role, and the board's epoch headers show it.
+
+Each row also carries today's change in open cards and open criteria
+(`openCardsDelta`, `openCriteriaDelta`). The first write of each UTC day
+records the board's open tally in `meta.dayStart`; today's change is the board
+now against it, and a board not written today has changed by 0. `tower status`
+prints the board-wide line (`OPEN TODAY`), its JSON carries it as
+`counts.today`, and the UI header shows open cards and open criteria with the
+same change.
 
 `tower closest [--epoch E] [--limit N]` ranks the open (not done or frozen)
 cards that have criteria by open rows, fewest first, then blocked rows, then
@@ -573,10 +602,11 @@ CLI verb:
 |---|---|---|
 | `meet` | `card`, `n`, `evidence` | `kind` |
 | `edit` | `card`, `n`, and one of `text`, `proof`, `blockedBy` | `reason` (needed with `text`) |
-| `add` | `card`, `text` | `proof`, `blockedBy` |
+| `add` | `card`, `text` | `proof`, `blockedBy`, `overLimit` |
 | `remove` | `card`, `n`, `reason` | — |
-| `move` | `card`, `n`, `to` | `reason` |
-| `card.update` | `card` and a field | stored card fields (`phase`, `epoch`, `milestoneId`, `tags`, `blockedBy`, …), `addTags`, `removeTags`, `logEntry` |
+| `move` | `card`, `n`, `to` | `reason`, `overLimit` |
+| `card.split` | `card`, `criteria` (`[5, 6]` or `"5,6"`), `title` | `overLimit` |
+| `card.update` | `card` and a field | stored card fields (`phase`, `epoch`, `milestoneId`, `tags`, `blockedBy`, …), `addTags`, `removeTags`, `logEntry`, `overLimit` |
 | `epoch.update` | `id` and a field | `name`, `goal`, `status`, `order`, `exitCriteria` |
 | `milestone.add` | `epochId`, `title` | `id`, `goal`, `order`, `exitCriteria` |
 | `milestone.update` | `id` and a field | `title`, `goal`, `order`, `exitCriteria`, `epochId` (moves its live cards too) |
@@ -681,8 +711,9 @@ GET  /api/events?limit=50           audit trail
 GET  /api/gauntlet/standings        the one run shown: newest full or merged
                                      results file, else the planned grid
 GET  /api/messages?card=&open=0|1   durable card messages; open=1 filters
-POST /api/card/add|update|claim|release|delete   (release: {handoff})
-POST /api/card/criteria-add|criteria-edit|criteria-unblock|criteria-remove|criteria-move|criteria-meet|criteria-verify|criteria-reopen   (add/edit: {proof, blockedBy}; unblock: {n, reason}; move: {n, to, reason})
+POST /api/card/add|update|claim|release|delete   (release: {handoff}; add/update: {overLimit})
+POST /api/card/split {id, criteria, title, overLimit}
+POST /api/card/criteria-add|criteria-edit|criteria-unblock|criteria-remove|criteria-move|criteria-meet|criteria-verify|criteria-reopen   (add/edit: {proof, blockedBy}; add/move: {overLimit}; unblock: {n, reason}; move: {n, to, reason})
 POST /api/decision/add|update|delete   (add: {draft, reviewedBy})
 POST /api/decision/review {id, reject, reason}       (by must not be the ballot's author)
 POST /api/decision/post {id}                         (stage reviewed only; runs the ballot gate)

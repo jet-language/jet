@@ -48,6 +48,9 @@ export const DEFAULTS = {
   // full or short hash (for example
   // "https://github.com/OWNER/REPO/commit/{sha}"). Empty: SHAs stay text.
   commitUrl: '',
+  // A card past this many criteria should be split (`tower card split`).
+  // Adding a row beyond it needs `--over-limit "reason"`, logged on the card.
+  criteriaSoftLimit: 6,
 };
 
 // Persist a partial update into the user's config.json (creates it if absent).

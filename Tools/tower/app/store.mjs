@@ -25,7 +25,7 @@ import {
   fileKey, historyKeyAt, historyShardPaths, readHistoryAt, tornMessage, writeHistoryAt,
 } from './history-shards.mjs';
 import { withLock, withLockAsync } from './lock.mjs';
-import { loadConfig, publicConfig } from './config.mjs';
+import { DEFAULTS, loadConfig, publicConfig } from './config.mjs';
 import { CLOSURE_KINDS, SCRATCH_PATH_RE, createCommitResolver } from './durable.mjs';
 import { checkBoard, commitBoard, pushBoardVerified } from './board-git.mjs';
 import { migrateMilestones, migrateRecommendationLosses, migrateRetiredPlanning, migrateReviewPasses } from './migrate.mjs';
@@ -369,6 +369,7 @@ export function openStore(dataDir) {
       // keep (or redact) old ones but never add one.
       const personal = machinePersonalInfo();
       const personalBefore = personal.rules.length ? tallyValue(s, personal) : null;
+      stampDayStart(s);
       const result = fn(s, config, historyView);
       const personalIssue = personalBefore && personalInfoAdded(personal, personalBefore, s);
       if (personalIssue) fail('E_PERSONAL_INFO', personalIssue);
@@ -1294,6 +1295,7 @@ export function project(s, config = null, history = null) {
     frozen: cards.filter(c => c.phase === 'frozen').length,
     ideas: s.ideas.filter(b => b.status !== 'tagged').length,
     openQuestions: s.questions.filter(q => q.kind !== 'message' && q.status === 'open').length,
+    today: openToday(s),
   };
   return { meta: s.meta, config: publicConfig(config) || undefined, epochs: sortEpochs(s.epochs), milestones, phases: PHASES, lanes: LANES,
     cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas,
@@ -1336,6 +1338,7 @@ export function projectBoard(s, config = null) {
     frozen: s.cards.filter(c => c.phase === 'frozen').length,
     ideas: s.ideas.filter(b => b.status !== 'tagged').length,
     openQuestions: s.questions.filter(q => q.kind !== 'message' && q.status === 'open').length,
+    today: openToday(s),
   };
   return {
     meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones,
@@ -1435,6 +1438,46 @@ export function openCountTrend(s, history, days = 7, at = Date.now()) {
     openAtStart,
     openNow,
     delta: openNow - openAtStart,
+  };
+}
+
+// Open cards (not done or frozen) and their unsettled criteria, board-wide,
+// and per epoch the way the chain counts them (no sidequests; open criteria
+// leave blocked rows out).
+export function openTally(s) {
+  let openCards = 0;
+  let openCriteria = 0;
+  for (const c of s.cards || []) {
+    if (c.phase === 'done' || c.phase === 'frozen') continue;
+    const counts = criteriaCounts(c);
+    openCards++;
+    openCriteria += counts.open + counts.blocked;
+  }
+  const epochs = Object.fromEntries(epochChain(s.epochs || [], s.cards || [])
+    .map(e => [e.id, { openCards: e.openCards, openCriteria: e.openCriteria }]));
+  return { openCards, openCriteria, epochs };
+}
+
+// The first write of each (UTC) day records the open tally it started from,
+// so today's change is the board now against that start.
+function stampDayStart(s) {
+  const date = today();
+  if (s.meta.dayStart?.date !== date) s.meta.dayStart = { date, ...openTally(s) };
+}
+
+// Open cards and criteria now, each with today's change, board-wide and per
+// epoch. A board not written today has not changed today.
+export function openToday(s) {
+  const date = today();
+  const current = openTally(s);
+  const start = s.meta?.dayStart?.date === date ? s.meta.dayStart : current;
+  const delta = (now, before = { openCards: 0, openCriteria: 0 }) => ({
+    openCards: now.openCards, openCriteria: now.openCriteria,
+    openCardsDelta: now.openCards - before.openCards, openCriteriaDelta: now.openCriteria - before.openCriteria,
+  });
+  return {
+    date, ...delta(current, start),
+    epochs: Object.fromEntries(Object.entries(current.epochs).map(([id, e]) => [id, delta(e, start.epochs?.[id])])),
   };
 }
 
@@ -1643,6 +1686,7 @@ export function addCard(s, p, config, history = emptyHistory()) {
   validateStoredString(p.probe, 'card.probe', { nullable: true, nonEmpty: true });
   const visualMedia = normalizeVisualMedia(p.visualMedia);
   if (p.criteria !== undefined) assertCriterionText(p.criteria);
+  const overLimit = admitCriteria(config, 0, Array.isArray(p.criteria) ? liveCriteriaCount(p) : 0, p.overLimit, 'the new card');
   const num = p.num == null ? s.meta.nextNum++ : Number(p.num);
   validateStoredNumber(num, 'card.num', { integer: true, min: 1 });
   const workOrder = p.workOrder == null || p.workOrder === '' ? undefined : Number(p.workOrder);
@@ -1682,6 +1726,7 @@ export function addCard(s, p, config, history = emptyHistory()) {
   s.cards.push(card);
   syncMilestones(s, [card.milestoneId]);
   logEvent(s, { by: p.by, action: 'card.add', ref: card.id, note: card.title });
+  noteOverLimit(s, card, overLimit, p.by);
   return card;
 }
 
@@ -2020,6 +2065,9 @@ export function updateCard(s, ref, patch, config) {
   if (openAcceptance && 'needsAcceptance' in patch && !(patch.needsAcceptance === true || patch.needsAcceptance === 'true'))
     fail('E_ACCEPTANCE_OWNER_UI', `${openAcceptance.id} is open — needsAcceptance cannot be cleared to bypass owner verification`);
   assertOwnerLane(c, patch, patch.by);
+  const overLimit = Array.isArray(patch.criteria)
+    ? admitCriteria(config, liveCriteriaCount(c), liveCriteriaCount(patch), patch.overLimit, `card #${c.num}`)
+    : null;
   if ('criteria' in patch) {
     assertCriterionText(patch.criteria);
     invalidateCardMilestone(s, c);
@@ -2059,16 +2107,44 @@ export function updateCard(s, ref, patch, config) {
   if (patch.logEntry) c.log.unshift({ at: today(), by: patch.by || 'agent', text: patch.logEntry });
   touchCard(c, patch.by);
   syncMilestones(s, [oldMilestoneId, c.milestoneId]);
-  logEvent(s, { by: patch.by, action: 'card.update', ref: c.id, note: Object.keys(patch).filter(k => k !== 'id' && k !== 'by').join(',') });
+  logEvent(s, { by: patch.by, action: 'card.update', ref: c.id, note: Object.keys(patch).filter(k => !['id', 'by', 'overLimit'].includes(k)).join(',') });
+  noteOverLimit(s, c, overLimit, patch.by);
   return c;
 }
 
 // ---- mutations: exit criteria ----------------------------------------------
 
-export function addCriterion(s, ref, text, by, { proof, blockedBy } = {}) {
+// A card's size is the rows still on it: a row moved to another card stays
+// behind only as a pointer and does not count.
+export const liveCriteriaCount = (card) => (card?.criteria || []).filter(i => !i?.movedTo).length;
+
+export function criteriaSoftLimit(config) {
+  const limit = config?.criteriaSoftLimit ?? DEFAULTS.criteriaSoftLimit;
+  if (!Number.isInteger(limit) || limit < 1)
+    fail('E_INVALID', `config criteriaSoftLimit must be a positive whole number, not ${JSON.stringify(limit)}`);
+  return limit;
+}
+
+// Growing a card past the soft limit takes a reason. Returns what to log, or
+// null when the card stays within the limit or does not grow.
+function admitCriteria(config, before, after, overLimit, what) {
+  const limit = criteriaSoftLimit(config);
+  if (after <= limit || after <= before) return null;
+  const reason = typeof overLimit === 'string' ? overLimit.trim() : '';
+  if (!reason)
+    fail('E_OVER_LIMIT', `${what} would hold ${after} criteria, over the soft limit of ${limit} — split it with \`tower card split\`, or give --over-limit "reason"`);
+  return { count: after, limit, reason };
+}
+
+function noteOverLimit(s, card, over, by) {
+  if (over) logEvent(s, { by, action: 'card.over-limit', ref: card.id, note: `${over.count} criteria, soft limit ${over.limit}: ${over.reason}` });
+}
+
+export function addCriterion(s, ref, text, by, { proof, blockedBy, overLimit } = {}, config = {}) {
   const c = mustCard(s, ref);
   if (!text || !String(text).trim()) fail('E_INVALID', 'criterion needs text');
   const checked = proof === undefined ? null : proofInput(proof);
+  const over = admitCriteria(config, liveCriteriaCount(c), liveCriteriaCount(c) + 1, overLimit, `card #${c.num}`);
   c.criteria ||= [];
   const n = nextCriterionNumber(c);
   const blocker = blockedBy === undefined ? null : criterionBlockerInput(s, c, n, blockedBy);
@@ -2079,6 +2155,7 @@ export function addCriterion(s, ref, text, by, { proof, blockedBy } = {}) {
   invalidateCardMilestone(s, c);
   touchCard(c, by);
   logEvent(s, { by, action: 'card.criteria-add', ref: c.id, note: `#${n} ${item.text.slice(0, 60)}${blocker ? ` (blocked by ${blocker})` : ''}` });
+  noteOverLimit(s, c, over, by);
   return { ...item, cardId: c.id, cardNum: c.num };
 }
 
@@ -2245,17 +2322,30 @@ export function removeCriterion(s, ref, n, { reason, by } = {}) {
 // on the target card, and the source row closes as a duplicate that points at
 // it. Both rows carry the link (movedTo / movedFrom), so either side leads to
 // the other.
-export function moveCriterion(s, ref, n, { to, reason, by } = {}) {
+export function moveCriterion(s, ref, n, { to, reason, by, overLimit } = {}, config = {}) {
   const c = mustCard(s, ref);
   const item = mustCriterion(c, n);
   if (!by) fail('E_INVALID', 'move needs --by <agent>');
   if (to == null || to === '' || to === true) fail('E_INVALID', 'move needs --to <card>');
   const target = mustCard(s, to);
   if (target === c) fail('E_INVALID', `criterion #${item.n} is already on card #${c.num}`);
+  assertMovable(c, item);
+  if (target.phase === 'done') fail('E_INVALID', `card #${target.num} is done; reopen it before moving work onto it`);
+  const over = admitCriteria(config, liveCriteriaCount(target), liveCriteriaCount(target) + 1, overLimit, `card #${target.num}`);
+  const moved = relocateCriterion(s, c, item, target, reason == null ? '' : String(reason).trim(), by);
+  noteOverLimit(s, target, over, by);
+  return {
+    from: { ...item, cardId: c.id, cardNum: c.num },
+    to: { ...moved, cardId: target.id, cardNum: target.num },
+  };
+}
+
+function assertMovable(c, item) {
   if (item.status !== 'open')
     fail('E_INVALID', `criterion #${item.n} on card #${c.num} is ${item.status}; only an open criterion moves`);
-  if (target.phase === 'done') fail('E_INVALID', `card #${target.num} is done; reopen it before moving work onto it`);
-  const why = reason == null ? '' : String(reason).trim();
+}
+
+function relocateCriterion(s, c, item, target, why, by) {
   target.criteria ||= [];
   const k = nextCriterionNumber(target);
   const moved = {
@@ -2279,10 +2369,34 @@ export function moveCriterion(s, ref, n, { to, reason, by } = {}) {
   maybeMintAcceptance(s, c);
   logEvent(s, { by, action: 'card.criteria-move', ref: c.id, note: `#${item.n} → #${target.num} c${k}${why ? `: ${why}` : ''}` });
   logEvent(s, { by, action: 'card.criteria-add', ref: target.id, note: `#${k} moved from #${c.num} c${item.n}` });
-  return {
-    from: { ...item, cardId: c.id, cardNum: c.num },
-    to: { ...moved, cardId: target.id, cardNum: target.num },
-  };
+  return moved;
+}
+
+// Splitting a card moves some of its open criteria onto a new card in the same
+// epoch, milestone and track. Each row moves as `move` would, so both cards
+// keep the link; the new card's body says where it came from.
+export function splitCard(s, ref, { criteria, title, by, overLimit } = {}, config = {}) {
+  const c = mustCard(s, ref);
+  if (!by || by === true) fail('E_INVALID', 'split needs --by <agent>');
+  if (!title || title === true || !String(title).trim()) fail('E_INVALID', 'split needs --title "…" for the new card');
+  const raw = Array.isArray(criteria) ? criteria : String(criteria ?? '').split(',');
+  const ns = raw.map(v => String(v).trim().replace(/^c/, '')).filter(Boolean).map(Number);
+  if (!ns.length || ns.some(n => !Number.isInteger(n) || n < 1))
+    fail('E_INVALID', 'split needs --criteria N,N,… (criterion numbers on the card)');
+  const repeated = ns.find((n, i) => ns.indexOf(n) !== i);
+  if (repeated) fail('E_INVALID', `criterion #${repeated} is listed twice`);
+  if (c.phase === 'done') fail('E_INVALID', `card #${c.num} is done; reopen it before splitting it`);
+  const items = ns.map(n => mustCriterion(c, n));
+  for (const item of items) assertMovable(c, item);
+  const over = admitCriteria(config, 0, items.length, overLimit, 'the split-off card');
+  const card = addCard(s, {
+    title, body: `Split from #${c.num}.`, kind: c.kind, track: c.track, epoch: c.epoch,
+    milestoneId: c.milestoneId, priority: c.priority, by,
+  }, config);
+  const moved = items.map(item => ({ from: item.n, to: relocateCriterion(s, c, item, card, `split into #${card.num}`, by).n }));
+  logEvent(s, { by, action: 'card.split', ref: c.id, refs: [c.id, card.id], note: `${ns.map(n => `c${n}`).join(', ')} → #${card.num} ${card.title.slice(0, 60)}` });
+  noteOverLimit(s, card, over, by);
+  return { from: { id: c.id, num: c.num }, card: { id: card.id, num: card.num, title: card.title, epoch: card.epoch }, moved };
 }
 
 function mustCriterion(c, n) {
@@ -3039,7 +3153,8 @@ const SYNTAX_RATIFY_CHORES = ['Data/Syntax registry entry updated', 'syntax-deci
 function appendSyntaxChores(s, c, by) {
   if (!c) return;
   const have = new Set((c.criteria || []).map(i => i.text));
-  for (const text of SYNTAX_RATIFY_CHORES) if (!have.has(text)) addCriterion(s, c.id, text, by || 'agent');
+  for (const text of SYNTAX_RATIFY_CHORES)
+    if (!have.has(text)) addCriterion(s, c.id, text, by || 'agent', { overLimit: 'the standard syntax ratification chores' });
 }
 
 function assertReadyForVerdict(d) {

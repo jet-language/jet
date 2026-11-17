@@ -103,6 +103,13 @@ meets only on durable evidence (a commit on `dev` or `master`, or a `--kind`
 with its evidence); a refused meet changes nothing. A refused close lists every
 failing row with its reason, one per line.
 
+A card holds at most `criteriaSoftLimit` live rows (config, default 6). A
+write that grows it past that is refused (`E_OVER_LIMIT`) unless it carries
+`--over-limit "reason"`, which the card's log keeps. Prefer `tower card split
+'#N' --criteria 5,6,7 --title "…" --by <agent>`: it moves those open rows onto
+a new card in the same epoch, linked as `--move` links them. `tower lint
+--limits` lists the cards past the limit with their reasons.
+
 `--proof "jet test Compiler --profile P --filter F"` on `--add` or `--edit n`
 sets the row's proof (`P` is `cases`, `ui`, `golden`, `core` or `packages`; any
 other `jet test …` command is kept as given); `--proof ""` clears it. A row text
@@ -124,8 +131,10 @@ skips blocked rows.
 Epoch `order` is the chain: the first epoch not `done` or `arrived` is active
 (three agents), the one after it next (one agent). `tower next` picks the
 active epoch's cards first. `tower chain [--json]` lists every epoch with its
-role and open criteria; `tower closest [--epoch E] [--limit N] [--json]` ranks
-open cards by open criteria, fewest first, with blocked rows counted apart.
+role, open cards and open criteria, each with today's change; `tower status`
+prints the board-wide `OPEN TODAY` line. `tower closest [--epoch E] [--limit N]
+[--json]` ranks open cards by open criteria, fewest first, with blocked rows
+counted apart.
 
 Only the owner starts `tower serve`. Agents use the non-serve CLI. Use HTTP
 only when the owner has already started the server and the task explicitly

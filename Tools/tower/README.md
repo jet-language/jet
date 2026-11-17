@@ -94,6 +94,10 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   `--kind decision|duplicate|obsolete` with its evidence. A refused close lists
   every failing row with its reason. `card criteria --move n --to '#M'` moves
   an open row to another card and links both rows (`movedTo`/`movedFrom`).
+  A card past `criteriaSoftLimit` rows (default 6) grows only with
+  `--over-limit "reason"`, logged on the card; `tower card split '#N'
+  --criteria 5,6 --title "…"` moves rows onto a new card instead, and
+  `tower lint --limits` lists the cards past the limit.
   A row's `proof` (`--proof "jet test …"` on `--add`/`--edit`) names the test
   run that settles it; `tower prove --card|--epoch` runs the proofs at a landed
   commit and meets the passing rows, and `tower lint --proofs --tree DIR`
@@ -104,8 +108,10 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   attempts remain in the audit log.
 - **Epoch chain** — epoch `order` is the plan: the first unfinished epoch is
   active (three agents), the next gets one. `tower next` follows the chain,
-  `tower chain` lists it, and `tower closest` (and the UI's Closest view) ranks
-  open cards by open criteria, fewest first.
+  `tower chain` lists it with each epoch's open cards and open criteria and
+  today's change, and `tower closest` (and the UI's Closest view) ranks open
+  cards by open criteria, fewest first. `tower status` and the UI header show
+  the board's open cards and open criteria with today's change.
 - **Decisions** — ballot-ready choices attached to a card; only the owner
   ratifies. New full ballots contain a complete base draft followed by one
   fresh-agent adversarial review; model families may match. Historical
@@ -277,7 +283,8 @@ first.
   "port": 7878,
   "backups": 20,
   "retireAfterDays": 3,
-  "commitUrl": "https://github.com/OWNER/REPO/commit/{sha}"
+  "commitUrl": "https://github.com/OWNER/REPO/commit/{sha}",
+  "criteriaSoftLimit": 6
 }
 ```
 
@@ -287,7 +294,8 @@ decision moves to the archive, `Tools/tower/.tower/history.json` (with its
 shards under `history/` once sharded). `commitUrl` makes commit SHAs in
 criterion evidence, logs and questions link to that URL (`{sha}` is replaced);
 without it they stay text. `#N` and `#N cM` in any text open that card (and
-criterion) in the UI; the CLI prints them as written.
+criterion) in the UI; the CLI prints them as written. `criteriaSoftLimit` is
+the most criteria a card holds before a new row needs `--over-limit "reason"`.
 
 There is no runtime credential file. `auth` and `push` are removed fields.
 Tower rejects them in tracked `config.json` with `ConfigError`; remove those

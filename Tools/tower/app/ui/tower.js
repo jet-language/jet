@@ -496,7 +496,9 @@ function renderChrome() {
     t.addEventListener('click', () => go(v.id));
     tabs.appendChild(t);
   }
-  $('#feed').innerHTML = `<b>${S.cards.length}</b> cards · <b>${S.counts.agentReady}</b> agent-ready`;
+  const day = S.counts.today;
+  const change = (d) => d ? ` <span class="top__delta top__delta--${d > 0 ? 'up' : 'down'}" title="since the start of ${day.date}">${d > 0 ? '+' : ''}${d}</span>` : '';
+  $('#feed').innerHTML = `<b>${day.openCards}</b> open cards${change(day.openCardsDelta)} · <b>${day.openCriteria}</b> open criteria${change(day.openCriteriaDelta)} · <b>${S.counts.agentReady}</b> agent-ready`;
   updatePill();
 }
 function updatePill() {
@@ -1624,7 +1626,19 @@ function renderDetail(c) {
     cb.appendChild(row);
   }
   const critAdd = el(`<div class="qadd"><input data-keep="crit-add" placeholder="Add exit criterion…"><button class="btn btn--red btn--sm">Add</button></div>`);
-  const postCrit = async () => { const i = $('input', critAdd); const t = i.value.trim(); if (!t) return; i.value = ''; await api('card/criteria-add', { id, text: t, by: 'owner' }); };
+  const postCrit = async () => {
+    const i = $('input', critAdd); const t = i.value.trim(); if (!t) return;
+    // Past the soft limit a new row needs a reason, which the card's log keeps.
+    const limit = CFG().criteriaSoftLimit;
+    const live = (c.criteria || []).filter(it => !it.movedTo).length;
+    let overLimit;
+    if (live + 1 > limit) {
+      overLimit = prompt(`Card #${c.num} would hold ${live + 1} criteria, over the soft limit of ${limit}. Split it with \`tower card split\`, or say why it stays one card:`);
+      if (!overLimit || !overLimit.trim()) return;
+    }
+    i.value = '';
+    await api('card/criteria-add', { id, text: t, by: 'owner', overLimit });
+  };
   $('button', critAdd).addEventListener('click', postCrit);
   $('input', critAdd).addEventListener('keydown', e => { if (e.key === 'Enter') postCrit(); });
   cb.appendChild(critAdd);
