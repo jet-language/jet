@@ -7,8 +7,10 @@
 # its own on Done, which refuses that too. Then it moves the card to Done
 # with the keyboard alone (Tab, Space, Right, Enter), and back to Doing
 # from the menu a long press on the card opens, with no drag. Then it
-# closes the window, which ends the app.
-fixture: DropZoneRefusesOtherTypesAndOffersAMoveWithoutDraggingOnLinux.fixture
+# closes the window, which ends the app. In a page the browser's drag and
+# drop, keys and context menu do the same, the keys outlining the drop zone
+# they show, and a Notices button prints the refusals.
+fixture: DropZoneRefusesOtherTypesAndOffersAMoveWithoutDragging.fixture
 requires: os-name:linux
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -28,3 +30,14 @@ stdout: empty
 wait: compositor timeout 60s
 exit: 0
 file: compositor.stdout = "board: 200x200, panel [51, 102, 255, 255], corner [255, 255, 255, 255]\ndragged the card to Doing\nafter the drag: panel [204, 153, 0, 255]\ndragged the note to Done\nrefused: panel [204, 153, 0, 255], corner [153, 27, 27, 255]\ndismissed the notice\ndropped text from another program on Done\nrefused: panel [204, 153, 0, 255], corner [153, 27, 27, 255]\ndismissed the notice\nmoved the card with Tab, Space, Right and Enter\nafter the keys: panel [51, 153, 51, 255], menu spot [120, 60, 160, 255]\nlong-pressed the card\nmenu: spot [245, 245, 245, 255]\nclicked Move Ship it to Doing\nafter the menu: panel [204, 153, 0, 255], menu spot [120, 60, 160, 255], corner [255, 255, 255, 255]\nclosed the window\n"
+when tool node
+step: jet build --target web main.jet
+cwd: web
+exit: 0
+copy: web/page.mjs web/.jet/build/page.mjs
+step: node page.mjs
+cwd: web/.jet/build
+env: XDG_DATA_HOME={work}/page-data
+exit: 0
+stdout: = "board: panel #3366ff; the card drags: true, takes focus: true; the note takes focus: true\ndragged Ship it to Doing: the page took it; panel #cc9900\ndragged Standup notes to Done: the page took it; panel #cc9900\ndropped another program's text on Done: the page took it; panel #cc9900\n\" \": taken; outlined Doing (2px solid #3366ff); panel #cc9900\n\"ArrowRight\": taken; outlined Done (2px solid #3366ff); panel #cc9900\n\"Enter\": taken; outlined none; panel #339933\n\" \": taken; outlined Doing (2px solid #3366ff); panel #339933\n\"Escape\": taken; outlined none; panel #339933\nright-click Standup notes: browser menu shown; menu closed\nright-click Ship it: browser menu suppressed; menu Move Ship it to Doing | Move Ship it to Done\nchose Move Ship it to Doing: menu closed; panel #cc9900\nnotice: Couldn't move Standup notes to Done: it doesn't take that\nnotice: Couldn't drop that on Done: it takes only what you move there in this app\n"
+end when

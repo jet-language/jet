@@ -5895,16 +5895,17 @@ priv app_context_draw: fn(frame: ui.Frame, menu: AppOpenMenu) Never! {
 // Enter drops it on the one shown and Escape puts it back. A long press on
 // it (half a second, then letting go where it began) opens a menu of the
 // drop zones to move it to. On Linux the app's window (`App.window`)
-// carries the move; the other native targets keep a notice that says
-// their drag and drop is not built yet and give `body` back as it is. The
-// page runtime can't carry a drag yet, so a call in code whose target is
-// the web output is a compile error.
+// carries the move; in a web build the page does, with the browser's drag
+// and drop, the same keys and, on its `contextmenu` (a long press on a
+// touch screen, or the menu key), the same menu (`app_drag_web`). The
+// other native targets keep a notice that says their drag and drop is not
+// built yet and give `body` back as it is.
 draggable: fn<V: Encode>(body: UINode, value: V, label: String) -> UINode Never! {
     #if #build.target.os == {
         .Linux -> { return app_drag_source(body, value.encode(), Type{V}, label) }
         .MacOS -> { return app_no_drag(body) }
         .Windows -> { return app_no_drag(body) }
-        .Web -> { return app_no_drag(body) }
+        .Web -> { return app_drag_web(body, value.encode(), Type{V}, label) }
         .Wasm -> { return app_no_drag(body) }
         .Freestanding -> { return app_no_drag(body) }
     }
@@ -5915,10 +5916,9 @@ draggable: fn<V: Encode>(body: UINode, value: V, label: String) -> UINode Never!
 // joins the app's notices, as a button's does, and the window shows it.
 // A value of another type, and a file or text another program drops on
 // it, is refused with a notice and goes nowhere. On Linux the app's
-// window (`App.window`) delivers the drops; the other native targets keep
-// a notice that says their drag and drop is not built yet and give `body`
-// back as it is. The page runtime can't carry a drag yet, so a call in
-// code whose target is the web output is a compile error.
+// window (`App.window`) delivers the drops, and in a web build the page
+// (`app_zone_web`); the other native targets keep a notice that says
+// their drag and drop is not built yet and give `body` back as it is.
 drop_zone: fn<V: Decode>(body: UINode, label: String, on_drop: &&fn(V) Notice!) -> UINode {
     #if #build.target.os == {
         .Linux -> {
@@ -5926,7 +5926,7 @@ drop_zone: fn<V: Decode>(body: UINode, label: String, on_drop: &&fn(V) Notice!) 
         }
         .MacOS -> { return app_no_drag(body) }
         .Windows -> { return app_no_drag(body) }
-        .Web -> { return app_no_drag(body) }
+        .Web -> { return app_zone_web(body, label, Type{V}, app_zone_decoding<V>(on_drop.move())) }
         .Wasm -> { return app_no_drag(body) }
         .Freestanding -> { return app_no_drag(body) }
     }
@@ -6008,6 +6008,70 @@ priv app_no_drag: fn(body: UINode) -> UINode Never! {
     body.copy()
 }
 
+// What a page's drag picked up last (`app_drag_web`), which the drop zone
+// it moves onto takes (`app_zone_web`); None for nothing.
+priv APP_WEB_PICKED: Shared{AppWebPicked{moved: None}}
+
+priv AppWebPicked: struct {
+    moved: AppDrag?,
+}
+
+// The kinds of value a page's dragged bodies and drop zones move
+// (`Type{V}`), each one's key its index, so the page offers a body only
+// the drop zones that take its kind.
+priv APP_WEB_KINDS: Shared{[Type]{}}
+
+// The key of the kind `kind` in a page (`APP_WEB_KINDS`).
+priv app_web_kind: fn(kind: Type) -> Int Never! {
+    held: APP_WEB_KINDS.guard_edit()
+    loop index in 0..<held.value.len() {
+        if held.value[index] == kind -> return index
+    }
+    held.value.push(kind.copy())
+    held.value.len() - 1
+}
+
+// `body` as one a page drags `value`, of the type `kind`, with
+// (`UINode.__dragging_in_page`): a move picks it up first, through a
+// handler that holds what it moves.
+priv app_drag_web: fn(body: UINode, value: Dyn, kind: Type, label: String) -> UINode Never! {
+    moved: AppDrag{label: label.copy(), kind: kind.copy(), value: value.copy()}
+    pick: ui.button("", fn() { app_web_pick(moved) })
+    body.__dragging_in_page(pick, app_web_kind(kind), label)
+}
+
+// `body` as one whose drops in a page of a value of the type `kind` go to
+// `run` (`UINode.__taking_drops_in_page`), through a handler that takes
+// what the move picked up.
+priv app_zone_web: fn(body: UINode, label: String, kind: Type, run: &&fn(Dyn) Notice!) -> UINode Never! {
+    target: AppZone{label: label.copy(), kind: kind.copy(), run: Shared{AppZoneRun{run: run.move()}}}
+    taker: ui.button("", fn() { app_web_take(target) })
+    body.__taking_drops_in_page(taker, app_web_kind(kind), label)
+}
+
+// Picks up what a page moves.
+priv app_web_pick: fn(moved: AppDrag) Never! {
+    held := APP_WEB_PICKED.guard_edit()
+    held.value.moved = Val(moved.copy())
+}
+
+// A page's drop on the drop zone `target`: what the move picked up goes
+// there (`app_move`), and with nothing picked up, a drop from elsewhere,
+// the drop is refused (`app_refuse`).
+priv app_web_take: fn(target: AppZone) Never! {
+    picked: app_web_taken()
+    if picked == .Val(moved) -> app_move(moved, target) else -> app_refuse(target)
+}
+
+// What the move picked up, which no longer is; None for nothing. Its guard
+// ends before the drop zone's `on_drop` runs.
+priv app_web_taken: fn() -> AppDrag? Never! {
+    held := APP_WEB_PICKED.guard_edit()
+    picked: held.value.moved.copy()
+    held.value.moved = None
+    picked
+}
+
 // Starts the window's dragged bodies and drop zones over, for a tree
 // opened anew.
 priv app_drags_clear: fn() Never! {
@@ -6037,12 +6101,18 @@ priv app_zones: fn() -> Int Never! {
     held.value.len()
 }
 
-// Drops the value of the dragged body `drag` on the drop zone `zone`: its
-// `on_drop` takes it when it is of the zone's type, and its failure joins
-// the app's notices; a value of another type is refused with a notice.
+// Drops the value of the dragged body `drag` on the drop zone `zone`
+// (`app_move`).
 priv app_drag_drop: fn(drag: Int, zone: Int) Never! {
     moved: app_drag(drag) ?? return
     target: app_zone(zone) ?? return
+    app_move(moved, target)
+}
+
+// Drops the value `moved` carries on the drop zone `target`: its
+// `on_drop` takes it when it is of the zone's type, and its failure joins
+// the app's notices; a value of another type is refused with a notice.
+priv app_move: fn(moved: AppDrag, target: AppZone) Never! {
     if moved.kind != target.kind {
         __keep_notice(Notice{text: "Couldn't move {moved.label} to {target.label}: it doesn't take that"})
         return
@@ -6057,11 +6127,17 @@ priv app_zone_once: fn(run: fn(Dyn) Notice!, value: Dyn) Never! {
     if run(value) == .Err(notice) -> __keep_notice(notice)
 }
 
-// A drop from another program on the drop zone `zone` (0 for none): a
-// drop zone takes only what the app's own bodies carry, so it is refused
-// with a notice.
+// A drop from another program on the drop zone `zone` (0 for none)
+// (`app_refuse`).
 priv app_zone_refuse: fn(zone: Int) Never! {
     target: app_zone(zone) ?? return
+    app_refuse(target)
+}
+
+// A drop from another program on the drop zone `target`: a drop zone
+// takes only what the app's own bodies carry, so it is refused with a
+// notice.
+priv app_refuse: fn(target: AppZone) Never! {
     __keep_notice(Notice{text: "Couldn't drop that on {target.label}: it takes only what you move there in this app"})
 }
 
@@ -7435,6 +7511,23 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
     assert_eq(shown[shown.len() - 1].text, "Doing took 7")
     app_drags_clear()
     assert_eq(app_zones(), 0)
+}
+
+#Test("a page's drop zone takes what the move picked up, refuses another type, and refuses a drop with nothing picked up") {
+    assert_eq(app_web_kind(Type{Int}), app_web_kind(Type{Int}))
+    assert(app_web_kind(Type{Int}) != app_web_kind(Type{String}))
+    doing: AppZone{label: "Doing", kind: Type{Int}, run: Shared{AppZoneRun{run: app_zone_decoding<Int>(fn(task: Int) Notice! { Err(Notice{text: "Doing took {task}"}) })}}}
+    app_web_pick(AppDrag{label: "Ship it", kind: Type{Int}, value: 7.encode()})
+    app_web_take(doing)
+    shown := notices()
+    assert_eq(shown[shown.len() - 1].text, "Doing took 7")
+    app_web_take(doing)
+    shown = notices()
+    assert_eq(shown[shown.len() - 1].text, "Couldn't drop that on Doing: it takes only what you move there in this app")
+    app_web_pick(AppDrag{label: "Standup notes", kind: Type{String}, value: "Standup notes".encode()})
+    app_web_take(doing)
+    shown = notices()
+    assert_eq(shown[shown.len() - 1].text, "Couldn't move Standup notes to Doing: it doesn't take that")
 }
 
 #Test("a menu bar's menus hold their items with their keys, and a key equivalent names its keys") {

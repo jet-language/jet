@@ -990,6 +990,13 @@ class Host {
     this.dom = false;
     // The scene's open context menu (openMenu), null for none.
     this.menu = null;
+    // The scene's bodies that take what a person moves (paintScene), the
+    // pick slot of the body a pointer drags now (0 for none), and the body
+    // the keyboard picked up and the one it shows it would drop on (null
+    // for none).
+    this.zones = [];
+    this.dragging = 0;
+    this.picked = null;
     crypto.getRandomValues(new Uint8Array(this.memory.buffer, AUX_RANDOM, 16));
   }
 
@@ -1307,7 +1314,15 @@ class Host {
   // one with a files slot accepts a drop of files, which the provider keeps
   // (filesDropped) for the handler it then clicks to take (deviceRequest);
   // one with context menu entries opens them (openMenu) on contextmenu in
-  // place of the browser's own menu.
+  // place of the browser's own menu. An element of a body a person drags
+  // (app.draggable) drags; one of a body that takes what is moved
+  // (app.drop_zone) takes a drop, which moves what the person drags there
+  // (move) and refuses anything else. The move needs no drag: the first
+  // such element of each dragged body is focusable, and Space picks it up,
+  // the arrow keys step it through the bodies that take what is moved,
+  // Enter drops it on the one outlined and Escape puts it back (pickKey);
+  // its contextmenu (a long press on a touch screen, or the menu key)
+  // offers a move to each body that takes its kind, after its own entries.
   paintScene() {
     if (!this.dom || this.rt.jet_ui_web_scene_take() === 0n) return;
     const doc = globalThis.document;
@@ -1338,9 +1353,25 @@ class Host {
       offset += Number(length) + 1;
       return text;
     };
+    // The bodies that take what is moved, by their take slots, in paint
+    // order, and the dragged bodies by their pick slots, each with its kind,
+    // its name, its elements and whether one of them is focusable.
+    const zones = new Map();
+    const drags = new Map();
+    const held = (bodies, slot, kind, name, element) => {
+      if (!bodies.has(slot)) bodies.set(slot, { slot, kind, name, elements: [], focusable: false });
+      bodies.get(slot).elements.push(element);
+      return bodies.get(slot);
+    };
+    this.picked = null;
+    this.dragging = 0;
     while (offset < bytes.length) {
-      const [kind, slot, dropSlot, filesSlot, entries, x, y, width, height, color, length] = fields(11);
+      const [kind, slot, dropSlot, filesSlot, entries, pickSlot, pickKind, takeSlot, takeKind, x, y, width, height, color, length] = fields(15);
       const text = label(length);
+      const pick = Number(pickSlot);
+      const take = Number(takeSlot);
+      const dragName = pick !== 0 ? label(fields(1)[0]) : "";
+      const zoneName = take !== 0 ? label(fields(1)[0]) : "";
       const menu = [];
       for (let index = 0; index < Number(entries); index += 1) {
         const [entryKind, entrySlot, entryLength] = fields(3);
@@ -1360,7 +1391,8 @@ class Host {
       if (id !== 0) element.addEventListener("click", () => this.click(id));
       const dropId = Number(dropSlot);
       const filesId = Number(filesSlot);
-      if (dropId !== 0 || filesId !== 0) {
+      if (take !== 0) held(zones, take, takeKind, zoneName, element);
+      if (dropId !== 0 || filesId !== 0 || take !== 0) {
         element.addEventListener("dragover", (event) => event.preventDefault());
         element.addEventListener("drop", (event) => {
           event.preventDefault();
@@ -1369,18 +1401,83 @@ class Host {
             globalThis.jetUiProvider?.filesDropped?.(files);
             return this.click(filesId);
           }
+          if (take !== 0) {
+            const moved = this.dragging;
+            this.dragging = 0;
+            return this.move(moved, take);
+          }
           if (dropId !== 0) return this.drop(dropId, event.dataTransfer);
           return Promise.resolve();
         });
       }
-      if (menu.length > 0) {
+      if (pick !== 0) {
+        const body = held(drags, pick, pickKind, dragName, element);
+        element.draggable = true;
+        element.addEventListener("dragstart", (event) => {
+          event.dataTransfer?.setData?.("application/x-jet-move", dragName);
+          this.dragging = pick;
+        });
+        element.addEventListener("dragend", () => (this.dragging = 0));
+        if (!body.focusable && tag !== "button" && tag !== "input") {
+          body.focusable = true;
+          element.tabIndex = 0;
+          element.addEventListener("keydown", (event) => this.pickKey(body, event));
+        }
+      }
+      if (menu.length > 0 || pick !== 0) {
         element.addEventListener("contextmenu", (event) => {
+          const moves = [...zones.values()]
+            .filter((zone) => zone.kind === pickKind)
+            .map((zone) => ({ kind: "3", label: `Move ${dragName} to ${zone.name}`, run: () => this.move(pick, zone.slot) }));
+          const shown = pick !== 0 ? [...menu, ...(menu.length > 0 && moves.length > 0 ? [{ kind: "0" }] : []), ...moves] : menu;
+          if (shown.length === 0) return;
           event.preventDefault();
-          this.openMenu(menu, event.clientX, event.clientY);
+          this.openMenu(shown, event.clientX, event.clientY);
         });
       }
       root.appendChild(element);
     }
+    this.zones = [...zones.values()];
+  }
+
+  // Moves what the dragged body whose pick slot is `pick` holds onto the
+  // body whose take slot is `take`: its handler picks the value up, then
+  // the other's takes it. With no pick (0), as for a drop from elsewhere,
+  // the take refuses the drop. A promise of the take's end.
+  move(pick, take) {
+    return (pick !== 0 ? this.click(pick) : Promise.resolve()).then(() => this.click(take));
+  }
+
+  // A key on the focusable element of the dragged body `body`: Space picks
+  // it up and outlines the first body that takes what is moved; with it
+  // picked up, an arrow key outlines the next (Right, Down) or the
+  // previous (Left, Up) one, around the end, Enter drops it on the one
+  // outlined (move) and Escape puts it back.
+  pickKey(body, event) {
+    const outline = (at) => {
+      this.zones.forEach((zone, index) => zone.elements.forEach((element) => (element.style.outline = index === at ? "2px solid #3366ff" : "")));
+    };
+    if (this.picked === null || this.picked.body !== body) {
+      if (event.key !== " " || this.zones.length === 0) return Promise.resolve();
+      event.preventDefault();
+      this.picked = { body, at: 0 };
+      outline(0);
+      return Promise.resolve();
+    }
+    const count = this.zones.length;
+    const step = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: count - 1, ArrowUp: count - 1 }[event.key];
+    if (step !== undefined) {
+      event.preventDefault();
+      this.picked.at = (this.picked.at + step) % count;
+      outline(this.picked.at);
+      return Promise.resolve();
+    }
+    if (event.key !== "Enter" && event.key !== "Escape") return Promise.resolve();
+    event.preventDefault();
+    const zone = this.zones[this.picked.at];
+    this.picked = null;
+    outline(-1);
+    return event.key === "Enter" ? this.move(body.slot, zone.slot) : Promise.resolve();
   }
 
   // Opens a scene element's context menu (`app.context_menu`) at the
@@ -1414,10 +1511,10 @@ class Host {
       item.style.width = "100%";
       item.style.textAlign = "left";
       item.textContent = entry.label;
-      if (entry.kind === "3" && entry.slot !== 0) {
+      if (entry.kind === "3" && (entry.run !== undefined || entry.slot !== 0)) {
         item.addEventListener("click", () => {
           this.closeMenu();
-          return this.click(entry.slot);
+          return entry.run !== undefined ? entry.run() : this.click(entry.slot);
         });
       } else item.disabled = true;
       box.appendChild(item);

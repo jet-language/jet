@@ -1,0 +1,67 @@
+// Crewboard on a page: a task card and a note card a person drags
+// (`app.draggable`), and the Doing and Done columns, drop zones that take
+// a task (`app.drop_zone`). The board's panel shows the task's column:
+// blue for To Do, yellow for Doing, green for Done. The Notices button
+// prints the app's notices.
+use {
+    app
+    ui: core.ui
+    reactive: core.reactive
+    core.color.[Color]
+}
+
+Task: struct {
+    id: Int,
+    title: String,
+}
+
+Note: struct {
+    text: String,
+}
+
+TASK: Task{id: 7, title: "Ship it"}
+
+run: fn() {
+    column: reactive.signal(0)
+    backend: ui.null_backend()
+    ui.reactive_render(
+        fn() {
+            shown: column.get()
+            color: if shown == 0 -> Color{r: 51, g: 102, b: 255, a: 255} else if shown == 1 -> Color{r: 204, g: 153, b: 0, a: 255} else -> Color{r: 51, g: 153, b: 51, a: 255}
+            card: ui.node_color("Ship it", 200.0, 30.0, Color{r: 120, g: 120, b: 120, a: 255})
+            note: ui.node_color("Standup notes", 200.0, 30.0, Color{r: 120, g: 60, b: 160, a: 255})
+            doing: ui.node_color("Doing", 200.0, 30.0, Color{r: 250, g: 230, b: 160, a: 255})
+            done: ui.node_color("Done", 200.0, 30.0, Color{r: 180, g: 230, b: 180, a: 255})
+            tree: ui.box(
+                [
+                    ui.node_color("", 200.0, 30.0, color),
+                    app.draggable<Task>(card, value: TASK, label: TASK.title),
+                    app.draggable<Note>(note, value: Note{text: "Standup notes"}, label: "Standup notes"),
+                    app.drop_zone<Task>(
+                        doing,
+                        label: "Doing",
+                        on_drop: fn(task: Task) app.Notice! {
+                            column.set(1)
+                            Ok()
+                        },
+                    ),
+                    app.drop_zone<Task>(
+                        done,
+                        label: "Done",
+                        on_drop: fn(task: Task) app.Notice! {
+                            column.set(2)
+                            Ok()
+                        },
+                    ),
+                    ui.button(
+                        "Notices",
+                        fn() {
+                            loop notice in app.notices() { print("notice: {notice.text}") }
+                        },
+                    ),
+                ],
+            )
+            ui.mount(backend, tree, ui.constraint(0.0, 0.0, 200.0, 200.0))
+        },
+    )
+}

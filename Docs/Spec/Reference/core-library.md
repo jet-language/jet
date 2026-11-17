@@ -5821,8 +5821,8 @@ tasks never read or change the process registry. The module source is
 | `copy_text(text: String)` | — | Puts `text` on the clipboard, for this app and every other program to paste. Delivered by the Linux app window (Wayland) and the web page's Clipboard API. See below. |
 | `paste_text() -[Env, Net, Time]> String?` | text | The clipboard's text; `None` when it holds none, or a page's browser refuses the read. Delivered by the Linux app window (Wayland) and, inside the person's gesture, the web page's Clipboard API. See below. |
 | `share(url: String)` | — | Shares `url` through the system's share sheet; on Linux, which has none, and in a browser without the Web Share API, copies it and says so. Delivered by the Linux app window (Wayland) and the web page. See below. |
-| `draggable<V: Encode>(body: UINode, value: V, label: String) -> UINode` | node | `body` as one a person drags `value` with, named `label`; a drop zone that takes a `V` gets it. The keyboard and a long press move it too. Delivered by the Linux app window. See below. |
-| `drop_zone<V: Decode>(body: UINode, label: String, on_drop: fn(V) Notice!) -> UINode` | node | `body`, named `label`, giving each `V` a person drops on it to `on_drop`; anything else dropped on it is refused with a notice. Delivered by the Linux app window. See below. |
+| `draggable<V: Encode>(body: UINode, value: V, label: String) -> UINode` | node | `body` as one a person drags `value` with, named `label`; a drop zone that takes a `V` gets it. The keyboard and a long press move it too. Delivered by the Linux app window and a web build's page. See below. |
+| `drop_zone<V: Decode>(body: UINode, label: String, on_drop: fn(V) Notice!) -> UINode` | node | `body`, named `label`, giving each `V` a person drops on it to `on_drop`; anything else dropped on it is refused with a notice. Delivered by the Linux app window and a web build's page. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
@@ -6752,12 +6752,14 @@ joins the focus ring. Space picks it up, the arrow keys step it through the
 drop zones, a bar over the top of the window naming the one shown, Enter
 drops it there and Escape puts it back. A long press, half a second let go
 where it began, opens a menu of the drop zones that take it. On Linux the
-app's window (`graph.window`) carries every move; the other native targets
-keep a notice saying their drag and drop is not built yet and give `body`
-back as it is. The page runtime can't carry the app's values in a
-browser's drag yet, so either call in code whose target is the web output
-is a compile error, E-APP-TARGET-FEATURE, whether it is spelled
-`app.draggable(…)` or `draggable(…)` through `use { app.[draggable] }`.
+app's window (`graph.window`) carries every move. In a web build the page
+does: the browser's drag and drop drops a dragged body's value on a drop
+zone, the same keys move it, an outline in place of the bar marking the
+drop zone shown, and the body's `contextmenu`, which a long press on a
+touch screen or the menu key opens, offers the drop zones that take it,
+after the body's own `context_menu` items. The other native targets keep
+a notice saying their drag and drop is not built yet and give `body` back
+as it is.
 
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file

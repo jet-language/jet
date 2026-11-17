@@ -1563,14 +1563,12 @@ sema_app_feature_target: fn(environment: SemaScopeEnvironment, graph: SemaRegist
 
 // The App checks of a device call (`app.ask`, the photo, the location, the
 // sensor streams, the open dialogs, a kept folder, a drop target, a drag
-// and a notification on this device): the web output has none of them but
-// `ask`, `open_settings`, the photo, the location, the sensor streams, the
-// clipboard, the share sheet, the file chooser, the files dropped on a
-// body and a picked or kept folder, which a page answers
-// (sema_call_app_device_target), and one that
-// may ask for a permission needs its purpose
-// (sema_call_app_permission_purpose): `ask` those its argument names, the
-// photo the camera's, the location's calls its, a notification its own.
+// and a notification on this device): the web output has all of them,
+// which a page answers, but a notification on this device
+// (sema_call_app_device_target), and one that may ask for a permission
+// needs its purpose (sema_call_app_permission_purpose): `ask` those its
+// argument names, the photo the camera's, the location's calls its, a
+// notification its own.
 sema_call_app_device: fn(module_name: String, member: String, alias: String, span: Span, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
     if module_name != SEMA_APP_MARKER_MODULE {
         return
@@ -1587,9 +1585,6 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
         "location" | "location_updates" -> {
             sema_call_app_permission_purpose(member, alias, Val("Location"), span, program, diagnostics)
         }
-        "draggable" | "drop_zone" -> {
-            sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
-        }
         "notify" -> {
             if !sema_app_notify_here(args) {
                 return
@@ -1602,9 +1597,9 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
 }
 
 // The `app` member a bare call names through a member import (`use
-// app.[draggable]` then `draggable(…)`), so the call gets the device checks
-// (sema_call_app_device) its qualified spelling gets; None for a name no
-// member import of `app` binds.
+// app.[take_photo]` then `take_photo(…)`), so the call gets the device
+// checks (sema_call_app_device) its qualified spelling gets; None for a
+// name no member import of `app` binds.
 sema_app_imported_member: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? Never! {
     // Read in place through the pattern: a `??` binding copies the graph.
     if program.registration_graph == .Val(graph) {
@@ -1623,10 +1618,9 @@ sema_app_imported_member: fn(name: String, environment: SemaScopeEnvironment, pr
     None
 }
 
-// A browser shows a page's notification only while the page is open, and
-// the page runtime carries no drag of the app's. So such a device call on
-// an app whose resolved target is the web output is refused, never dropped
-// or answered for the browser.
+// A browser shows a page's notification only while the page is open. So a
+// notification on this device in an app whose resolved target is the web
+// output is refused, never dropped.
 sema_call_app_device_target: fn(member: String, alias: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
     // Read in place through the pattern: a `??` binding copies the graph.
     if program.registration_graph == .Val(graph) {
@@ -1636,12 +1630,8 @@ sema_call_app_device_target: fn(member: String, alias: String, span: Span, envir
         }
         entry: diagnostic_registry_row("E-APP-TARGET-FEATURE") ?? panic("E-APP-TARGET-FEATURE must have a registry row")
         what: entry.what.replace("{{feature}}", member).replace("{{required}}", "native").replace("{{target}}", target)
-        why := "A page's drag is the browser's own, and the page runtime can't carry the app's values in it yet, so the web output has no `{alias}.{member}` to run; dropping the move would lose it."
-        fix := "On the web, offer the move as buttons in the screen, one for each place the value can go. Keep `{alias}.{member}` for a native build."
-        if member == "notify" {
-            why = "A browser shows a page's notification only while the page is open, so the web output has no `{alias}.notify` for this device; one for a closed page would be lost."
-            fix = "Send it from the server: `{alias}.notify(to:, title:, body:, open:)` reaches each browser the account registered, through Web Push. Keep `{alias}.notify(title:, body:, open:)` for a native build."
-        }
+        why: "A browser shows a page's notification only while the page is open, so the web output has no `{alias}.notify` for this device; one for a closed page would be lost."
+        fix: "Send it from the server: `{alias}.notify(to:, title:, body:, open:)` reaches each browser the account registered, through Web Push. Keep `{alias}.notify(title:, body:, open:)` for a native build."
         diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, why, fix))
     }
 }

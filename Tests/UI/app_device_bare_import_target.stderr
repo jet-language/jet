@@ -1,8 +1,8 @@
-Error [jet.AppFeatureNotOnTarget]: App feature `.draggable` needs target `native`, but the resolved target is `Wasm`.
-  --> Tests/UI/app_device_bare_import_target.jet:7:16
+Error [jet.AppPermissionPurpose]: `app.take_photo` may ask for the `camera` permission, but the package's `purposes:` doesn't say why.
+  --> Tests/UI/app_device_bare_import_target.jet:4:16
     |
-  7 | run: fn() { _: draggable(ui.text("Fix the gate"), 7, "Fix the gate") }
-    |                ^^^^^^^^^
- Why: A page's drag is the browser's own, and the page runtime can't carry the app's values in it yet, so the web output has no `app.draggable` to run; dropping the move would lose it.
- Fix: On the web, offer the move as buttons in the screen, one for each place the value can go. Keep `app.draggable` for a native build.
-More: jet-lang.dev/e/E-APP-TARGET-FEATURE
+  4 | run: fn() { _: take_photo() }
+    |                ^^^^^^^^^^
+ Why: When the app asks for a device permission, the system shows the person why the app wants it, and a phone build writes the same text into its manifest; a permission the app asks for with no purpose has nothing to show. During `jet check`, Jet reports this diagnostic.
+ Fix: Say why in the package's `purposes:` (for example `camera: "…"`), or remove the call.
+More: jet-lang.dev/e/E-APP-PERMISSION-PURPOSE
