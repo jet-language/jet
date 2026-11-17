@@ -3653,6 +3653,8 @@ jet_cli_fmt_walk: fn(directory: String, files: &[String]) {
     names.sort()
     loop name in names {
         path: if directory.ends_with("/") -> "{directory}{name}" else -> "{directory}/{name}"
+        // A symlink is not followed: a link back to `.` or `..` would walk forever.
+        if cli_files.is_symlink(path) -> next
         if cli_files.is_dir(path) {
             if !JET_CLI_FMT_IGNORED_DIRS.contains(name) && !jet_cli_fmt_skip_walk_path(path) {
                 jet_cli_fmt_walk(path, files)
