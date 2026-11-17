@@ -13,6 +13,7 @@ use {
         DeepChecks,
         CompilerThreads,
         compiler_threads_single,
+        CompilerEventRecord,
         CompilerTraceSink,
         Diagnostic,
         GateLedger,
@@ -303,6 +304,10 @@ JetDriverCompileRequest: struct {
     schema_snapshots: [String:SchemaSnapshot]?{None},
     // The host's streaming trace (`JET_TRACE_FILE`); `None` traces nothing.
     trace_sink: CompilerTraceSink?,
+    // The compile records its public moments (CompilerEvents.jet) in the
+    // result's `events`: `jet build --json` and `stages()`. false records
+    // none and builds no payload.
+    compiler_events: Bool{false},
     // The compiler threads this compile may use (`--threads N`;
     // automatic, memory-aware admission without it). Every thread count gives
     // the same diagnostics and output bytes.
@@ -835,6 +840,9 @@ JetDriverCompileTrace: struct {
     debug_trace: [String]{[String]{}},
     soft_stop: Bool,
     exit_code: Int?,
+    // The public moments recorded so far (CompilerEvents.jet), under the
+    // request's `compiler_events`.
+    events: [CompilerEventRecord]{[CompilerEventRecord]{}},
 }
 
 JetDriverLoadResult: struct {
@@ -990,6 +998,9 @@ JetDriverCompileResult: struct {
     // second pass expands the loops over (Pipeline.jet
     // jet_driver_compile_stages). None for every other compile.
     root_loop_values: [SemaRootLoopValue]?{None},
+    // Under the request's `compiler_events`: the compile's public moments,
+    // in their fixed order (CompilerEvents.jet). Empty otherwise.
+    events: [CompilerEventRecord]{[CompilerEventRecord]{}},
 }
 
 // The `allocator:` policy of the entry package of `load`

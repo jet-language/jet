@@ -159,6 +159,10 @@ use {
         policy_key_name,
         sha256_hex,
         sha256_hex_bytes,
+        COMPILER_EVENT_EMITTED,
+        compiler_event_json,
+        compiler_event_record,
+        CompilerEventRecord,
         compiler_threads_failure_text,
         CompilerThreads,
         CompilerTraceSink,
@@ -2173,6 +2177,9 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
     stripped_jobs: if json || quiet -> "" else -> jet_cli_release_job_summary(inputs, options)
     built := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     log := ""
+    // The image written, as the compiler.emitted moment `jet build --json`
+    // lists; a web build writes none.
+    emitted := CompilerEventRecord?{None}
     if build_options_value(options, "os") == "web" {
         built = jet_cli_build_web(file, color, options, result, inputs, snapshot)
     } else {
@@ -2180,6 +2187,9 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
             .Failed(failure) -> return failure
             .Written(path, lines, reused) -> {
                 log = lines
+                if json {
+                    emitted = Val(compiler_event_record(COMPILER_EVENT_EMITTED, [String]{jet_cli_json_string(name), jet_cli_json_string(path), "\"\""}))
+                }
                 if sbom -> built = jet_cli_build_sbom(file, name, source, path, color, quiet)
                 built.reused = reused
             }
@@ -2192,7 +2202,7 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
         if result.trace_sink == .Val(sink) -> sink.end("cli.lock", -1)
         if rows.exit_code != JET_DRIVER_EXIT_OK -> return rows
         if read_inputs.exit_code != JET_DRIVER_EXIT_OK -> return read_inputs
-        if json -> built.stdout = jet_cli_build_effects_json(authority) else {
+        if json -> built.stdout = jet_cli_build_effects_json(authority, result, emitted) else {
             built.stderr = "{log}{rows.stderr}{summary}{built.stderr}"
             built.stdout = "{stripped_jobs}{built.stdout}"
         }
@@ -2201,8 +2211,21 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
 }
 
 // The `build.effects` status: `effects` repeats `required_effects` for
-// readers of the effect list alone.
-jet_cli_build_effects_json: fn(authority: JetCLIAuthority) -> String Never! {
+// readers of the effect list alone. `events` lists the public moments the
+// compile recorded (JetDriverCompileResult.events), in their fixed order,
+// with the image `emitted` before the compile's finished moment, its last;
+// each is its `{"event":…,"data":…}` object, so the status stays the one
+// machine line on stdout.
+jet_cli_build_effects_json: fn(authority: JetCLIAuthority, result: JetDriverCompileResult, emitted: CompilerEventRecord?) -> String Never! {
+    // Each event object is JSON already, which a rendered-text value carries
+    // as written.
+    events := [JetCLIStatusValue]{}
+    loop (index, event) in result.events {
+        if index == result.events.len() - 1 && emitted == .Val(written) {
+            events.push(JetCLIStatusValue.Float{text: compiler_event_json(written)})
+        }
+        events.push(JetCLIStatusValue.Float{text: compiler_event_json(event)})
+    }
     status: jet_cli_status_render(
         "build.effects",
         true,
@@ -2212,6 +2235,7 @@ jet_cli_build_effects_json: fn(authority: JetCLIAuthority) -> String Never! {
             jet_cli_status_field("granted_effects", jet_cli_status_texts(authority.granted)),
             jet_cli_status_field("denied_effects", jet_cli_status_texts(authority.denied)),
             jet_cli_status_field("authority", jet_cli_status_text(authority.authority)),
+            jet_cli_status_field("events", jet_cli_status_array(events)),
         ],
     )
     "{status}\n"

@@ -150,3 +150,46 @@ COMPILER_EVENT_PAYLOADS: [CompilerEventPayload]{
         },
     },
 }
+
+// One moment as a compile met it: its row name and its payload as one JSON
+// object whose keys are the payload row's fields, in row order. The
+// compile result carries them in the order `stages()` and `jet build
+// --json` give them.
+CompilerEventRecord: struct {
+    name: String,
+    data: String,
+}
+
+// The payload struct the moment `name` carries; "" for a name no row has.
+compiler_event_payload_name: fn(name: String) -> String Never! {
+    loop row in COMPILER_EVENTS {
+        if row.name == name -> return row.payload
+    }
+    ""
+}
+
+// The JSON object of payload struct `payload`: each of its row's fields,
+// in row order, with the JSON value at the same position of `values`.
+compiler_event_object: fn(payload: String, values: [String]) -> String Never! {
+    members := [String]{}
+    loop row in COMPILER_EVENT_PAYLOADS {
+        if row.name != payload -> next
+        loop (index, field) in row.fields {
+            value: if index < values.len() -> values[index] else -> "null"
+            members.push("{foundation_json_quote(field.name)}:{value}")
+        }
+    }
+    "{{{members.join(",")}}}"
+}
+
+// The record of the moment `name`, its payload's field values given as
+// JSON in the payload row's field order.
+compiler_event_record: fn(name: String, values: [String]) -> CompilerEventRecord Never! {
+    CompilerEventRecord{name: name, data: compiler_event_object(compiler_event_payload_name(name), values)}
+}
+
+// The JSON object of `record` that `jet build --json` lists and the session
+// wire sends: `{"event":<name>,"data":<payload object>}`.
+compiler_event_json: fn(record: CompilerEventRecord) -> String Never! {
+    "{{\"event\":{foundation_json_quote(record.name)},\"data\":{record.data}}}"
+}

@@ -563,8 +563,10 @@ schema is generated from them.
 resolved name; a call through a function value is not in it. `complete` is
 false when the compiler checked only part of the declaration. `LinkInputs.default`
 is the command Jet's own link runs, so a hook that changes one argument keeps
-the rest. In `jet build --json`, a moment is one line,
+the rest. In `jet build --json`, the one `build.effects` status lists the
+compile's moments in order under `events`, each one object, such as
 `{"event":"compiler.settled","data":{"round":2,"program":{…},"new_items":[…]}}`.
+A build whose compile fails prints only its `diagnostics` status.
 
 ### `core.meta` — module and package metadata
 
