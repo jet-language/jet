@@ -712,7 +712,7 @@ ir_trait_arm_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, i
     if ir_untag(m.types[b.f.slot_type[subject]].ty) == .TraitObject(bounds) {
         if bounds.len() == 1 {
             loop implementer in ir_trait_implementers(p, bounds[0]) {
-                if ir_trait_identity(p, implementer) == wanted || type_carrier_identity(ir_untag(implementer)) == identity {
+                if ir_trait_identity(p, implementer) == wanted || type_carrier_identity(ir_untag(implementer)) == identity || ir_trait_arm_instance(p, implementer) == identity {
                     held = Val(implementer)
                 }
             }
@@ -744,6 +744,17 @@ ir_trait_arm_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, i
     ir_emit(b.f, IROp.Copy, result, test, -1, -1, b.line)
     ir_end_tested(m, b, before)
     result
+}
+
+// A generic instance's identity as a type arm spells it (sema_pattern_trait_arm):
+// its declaration's key with its arguments' identities, however the boxed
+// type spells the name; "" for any other type.
+ir_trait_arm_instance: fn(p: IRProgram, ty: Type) -> String Never! {
+    if ir_untag(ty) == .Apply(name, args) {
+        spelled: loop arg in args -> type_carrier_identity(arg)
+        return "{ir_nominal_key(p, name)}<{spelled.join(", ")}>"
+    }
+    ""
 }
 
 #Test("two types whose first payload keys collide each get a key of their own, whatever order they are declared in") {

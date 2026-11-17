@@ -414,7 +414,14 @@ sema_pattern_trait_arm: fn(subject: Type, bounds: [String], variant: String, env
             diagnostics.push(sema_error("E0305", span, "pattern `{variant}` names no type", "an arm over a trait value names a type that implements `{trait_shown}`, as type position names it", "name a type in scope that implements `{trait_shown}`, or match the rest with `else`"))
             return result
         }
-        identity = sema_checked_nominal_key(graph, graph.modules[row.module_index], graph.modules[row.module_index].nominals[row.row])
+        key: sema_checked_nominal_key(graph, graph.modules[row.module_index], graph.modules[row.module_index].nominals[row.row])
+        // A generic instance's identity spells its arguments, as the boxed
+        // instance's payload key does (`Box<Int>` and `Box<String>` are two).
+        identity = key
+        if held == .Apply(_, args) {
+            spelled: loop arg in args -> type_carrier_identity(arg)
+            identity = "{identity}<{spelled.join(", ")}>"
+        }
     }
     if sema_type_assignable_in_graph_at(graph, subject, held, caller, env.generic_params) != .Val(true) {
         diagnostics.push(sema_error("E0305", span, "pattern `{variant}` names `{type_name(held)}`, which doesn't implement `{trait_shown}`", "a `{trait_shown}` value only ever holds a type that implements `{trait_shown}`, so this arm could never match", "implement `{trait_shown}` for `{type_name(held)}`, or name a type that implements it"))
