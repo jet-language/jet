@@ -2,13 +2,20 @@
 // apps share one graph (Screens/shell.jet) and call one server: the Crew
 // service (Logic/crew.jet). This entry is the server's half in one process.
 // It mounts the Crew on the shared graph and shows the projects screen to
-// each person, through the same Remote every app calls.
+// each person, through the same Remote every app calls. Then Ann imports
+// tasks into a project as the desktop app's import does, from the rows of
+// a CSV file (Desktop/files.jet), and her projects count them. Ben, who
+// isn't one of that project's members, can't.
 use {
     app
     auth: core.auth
+    desktop
     logic
     screens
 }
+
+// A file of tasks, as the desktop app's open dialog would give it.
+SPRING_FAIR_CSV: "title,notes\nHang the bunting,from the shed\nPrint the flyers,'=two hundred\n"
 
 run: fn() -[DB.Read, IO, Net, Time]> {
     _: screens.crewboard().mount(logic.demo_crew())
@@ -19,9 +26,43 @@ run: fn() -[DB.Read, IO, Net, Time]> {
         print("{app.url_of(logic.ProjectsView{})} as {who}:")
         print(shown_to(crew.copy(), who))
     }
+    print(imported_by(crew.copy(), "ann", "p2"))
+    print(imported_by(crew.copy(), "ben", "p2"))
+    // The projects screen's live query reruns when a database write reaches
+    // the tables it read; these tasks are held in memory, so the list is
+    // asked for afresh.
+    print("ann's projects now:")
+    print(listed_for(crew.copy(), "ann"))
 }
 
 // The projects screen as the account `who` sees it.
 shown_to: fn(crew: app.Remote<logic.Crew>, who: String) -[DB.Read, Net, Time]> String Never! {
     app.as_caller(auth.AccountID.from_string(who), fn() { screens.projects(crew, logic.ProjectsView{}) })
+}
+
+// The account `who`'s projects, asked for now, as the projects screen
+// lists them.
+listed_for: fn(crew: app.Remote<logic.Crew>, who: String) -[DB.Read, Net, Time]> String Never! {
+    app.as_caller(
+        auth.AccountID.from_string(who),
+        fn() {
+            if crew.my_projects() == {
+                .Ok(cards) -> screens.project_list(cards)
+                .Err(failure) -> screens.failed(failure)
+            }
+        },
+    )
+}
+
+// What the account `who` importing SPRING_FAIR_CSV into `project` comes to.
+imported_by: fn(crew: app.Remote<logic.Crew>, who: String, project: String) -[DB.Read, Net, Time]> String Never! {
+    app.as_caller(
+        auth.AccountID.from_string(who),
+        fn() {
+            if desktop.import_text(crew, project, SPRING_FAIR_CSV) == {
+                .Ok(added) -> "{who} imported {added} tasks"
+                .Err(failure) -> "{who}'s import: {desktop.import_notice(failure).text}"
+            }
+        },
+    )
 }

@@ -1,0 +1,69 @@
+// Crewboard's types: projects and their tasks, the screen states that
+// address them, and the ways a call can fail. Every target shares them.
+use app
+
+Status: enum {
+    Todo,
+    Doing,
+    Done,
+}
+
+// A project is a board its members share. A member is named by the text of
+// their account.
+Project: struct {
+    id: String,
+    name: String,
+    members: [String],
+}
+
+Task: struct {
+    id: String,
+    project: String,
+    title: String,
+    notes: String,
+    status: Status,
+}
+
+// A task an import adds: its title and notes. It starts as Todo.
+#Codable
+TaskDraft: struct {
+    title: String,
+    notes: String,
+}
+
+// The tasks one import adds, every one of them or none.
+#Codable
+TaskBatch: struct {
+    tasks: [TaskDraft],
+}
+
+// A project as the projects screen lists it.
+ProjectCard: struct {
+    id: String,
+    name: String,
+    open_tasks: Int,
+}
+
+// The projects screen's state: it has no fields, so its address is `/`.
+ProjectsView: struct {}
+
+#Error
+TaskError: enum {
+    NotFound,
+    NotAllowed,
+    SignedOut,
+    UpdateRequired,
+    Unreachable(String),
+    Invalid(String),
+}
+
+// A call through an `app.Remote<Crew>` can fail on the way; each failure
+// has a case.
+impl app.CallError -> TaskError {
+    if self == {
+        .Unreachable(why) -> TaskError.Unreachable(why)
+        .Invalid(errors) -> TaskError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> TaskError.SignedOut
+        .UpdateRequired -> TaskError.UpdateRequired
+    }
+}

@@ -1,0 +1,74 @@
+// The desktop app's import: the person picks a CSV file in the system's
+// open dialog, and its rows become tasks in one call, so either every row
+// becomes a task or none does. A browser's file chooser answers after the
+// page's code has returned, so a web build of this file is a compile error
+// at `app.open_file`; the web app takes files through an upload instead.
+use {
+    app
+    csv: core.encoding.csv
+    logic
+}
+
+#Codable
+ImportRow: struct {
+    title: String,
+    notes: String,
+}
+
+#Error
+ImportError: enum {
+    Unreadable(String),
+    BadRows,
+    Board(logic.TaskError),
+}
+
+// The notice an import that failed shows, in words for the person.
+import_notice: fn(error: ImportError) -> app.Notice Never! {
+    if error == {
+        .Unreadable(name) -> app.Notice{text: "Couldn't read {name}."}
+        .BadRows -> app.Notice{text: "That file needs title and notes columns."}
+        .Board(.Invalid(why)) -> app.Notice{text: "Couldn't import the tasks: {why}."}
+        .Board(.NotAllowed) -> app.Notice{text: "You can't add tasks to that project."}
+        .Board(_) -> app.Notice{text: "Couldn't import the tasks. Try again.", retry: true}
+    }
+}
+
+// Asks the person for a CSV file and adds its rows to `project` as tasks;
+// how many, 0 when they picked none. The dialog gives an app.PickedFile,
+// never a path.
+import_tasks: fn(crew: app.Remote<logic.Crew>, project: String) -[Env, FS.Read, Net, Time]> Int ImportError! {
+    file: app.open_file(types: [app.FileType]{app.FileType.CSV}) ?? return Ok(0)
+    import_file(crew, project, file)
+}
+
+// Adds the rows of the CSV file `file` to `project` as tasks.
+import_file: fn(crew: app.Remote<logic.Crew>, project: String, file: app.PickedFile) -[FS.Read, Net, Time]> Int ImportError! {
+    text: file.text() ?? return Err(ImportError.Unreadable(file.name.copy()))
+    import_text(crew, project, text)
+}
+
+// Adds the rows of the CSV text `text`, with title and notes columns, to
+// `project` as tasks.
+import_text: fn(crew: app.Remote<logic.Crew>, project: String, text: String) -[Net, Time]> Int ImportError! {
+    rows: csv.decode<ImportRow>(text) ?? return Err(ImportError.BadRows)
+    drafts := [logic.TaskDraft]{}
+    loop row in rows {
+        drafts.push(logic.TaskDraft{title: unescape(row.title), notes: unescape(row.notes)})
+    }
+    if crew.import_tasks(project, logic.TaskBatch{tasks: drafts}) == {
+        .Ok(added) -> Ok(added)
+        .Err(failure) -> Err(ImportError.Board(failure))
+    }
+}
+
+// A spreadsheet export writes a cell that starts with =, +, -, @, a tab or
+// a carriage return with one leading apostrophe, so the spreadsheet shows
+// it as text. The import takes that one apostrophe off, so an exported board
+// imports as it was. The cost: a title that really began with an apostrophe
+// before one of those characters loses it.
+unescape: fn(cell: String) -> String Never! {
+    loop lead in ([String]{"'=", "'+", "'-", "'@", "'\t", "'\r"}) {
+        if cell.starts_with(lead) -> return cell.slice(1, cell.len())
+    }
+    cell.copy()
+}

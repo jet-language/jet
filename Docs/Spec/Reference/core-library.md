@@ -6309,8 +6309,11 @@ person cancelling is `None` with no notice. A file that can't be read, or
 no dialog to ask with, is `None`, and a notice in the app's notice list says
 why. On Linux the desktop portal's open dialog
 (org.freedesktop.portal.FileChooser) asks, and the file is the path of the
-file:// URI it answers with. The other targets keep that notice: their
-open dialogs are not built yet.
+file:// URI it answers with. The other native targets keep that notice:
+their open dialogs are not built yet. A browser's file chooser answers
+after the page's code has returned, and the page runtime can't wait for it
+yet, so `app.open_file` in code whose target is the web output is a compile
+error, E-APP-TARGET-FEATURE, never a file made up for the person.
 
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file

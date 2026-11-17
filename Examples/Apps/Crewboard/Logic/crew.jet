@@ -4,7 +4,9 @@ use app
 
 Crew: struct {
     projects: [Project],
-    tasks: [Task],
+    // Every copy of a Crew holds the same tasks, so a task an import adds
+    // is there for the next call.
+    tasks: Shared<[Task]>,
 
     // The caller's projects, each with its count of tasks not done. A
     // server refuses a call with no account before it runs; a Remote in the
@@ -21,15 +23,47 @@ Crew: struct {
         Ok(cards)
     }
 
+    // Adds the batch's tasks to `project`, each as Todo, and gives how
+    // many. Every task is added or none is: none when the caller isn't
+    // one of the project's members, a task has no title, or the batch has
+    // more than 500 tasks.
+    #App.SignedIn import_tasks: fn(self, project: String, batch: TaskBatch) -> Int TaskError! {
+        account: app.maybe_caller() ?? return Err(TaskError.SignedOut)
+        if !self.member_of(project, "{account}") -> return Err(TaskError.NotAllowed)
+        if batch.tasks.len() > C_IMPORT_MOST {
+            return Err(TaskError.Invalid("an import adds at most {C_IMPORT_MOST} tasks, not {batch.tasks.len()}"))
+        }
+        loop draft in batch.tasks {
+            if draft.title.trim() == "" -> return Err(TaskError.Invalid("every task needs a title"))
+        }
+        held := self.tasks.guard_edit()
+        loop draft in batch.tasks {
+            id: "t{held.value.len() + 1}"
+            held.value.push(Task{id: id, project: project.copy(), title: draft.title.copy(), notes: draft.notes.copy(), status: Status.Todo})
+        }
+        Ok(batch.tasks.len())
+    }
+
     // How many of the project's tasks are not done.
     open_tasks: fn(self, project: String) -> Int Never! {
         open := 0
-        loop task in self.tasks {
+        loop task in self.tasks.guard_read().value {
             if task.project == project && task.status != Status.Done -> open += 1
         }
         open
     }
+
+    // Whether the account `who` is one of the project's members.
+    member_of: fn(self, project: String, who: String) -> Bool Never! {
+        loop known in self.projects {
+            if known.id == project -> return known.members.contains(who)
+        }
+        false
+    }
 }
+
+// The most tasks one import adds.
+C_IMPORT_MOST: 500
 
 // The crew a new server starts with: two projects, Ann in both.
 demo_crew: fn() -> Crew Never! {
@@ -38,11 +72,11 @@ demo_crew: fn() -> Crew Never! {
             Project{id: "p1", name: "Gate repair", members: [String]{"ann", "ben"}},
             Project{id: "p2", name: "Spring fair", members: [String]{"ann"}},
         },
-        tasks: [Task]{
-            Task{id: "t1", project: "p1", title: "Order hinges", status: Status.Done},
-            Task{id: "t2", project: "p1", title: "Fix the gate", status: Status.Doing},
-            Task{id: "t3", project: "p1", title: "Paint the gate", status: Status.Todo},
-            Task{id: "t4", project: "p2", title: "Book the hall", status: Status.Todo},
-        },
+        tasks: Shared{[Task]{
+            Task{id: "t1", project: "p1", title: "Order hinges", notes: "", status: Status.Done},
+            Task{id: "t2", project: "p1", title: "Fix the gate", notes: "", status: Status.Doing},
+            Task{id: "t3", project: "p1", title: "Paint the gate", notes: "", status: Status.Todo},
+            Task{id: "t4", project: "p2", title: "Book the hall", notes: "", status: Status.Todo},
+        }},
     }
 }
