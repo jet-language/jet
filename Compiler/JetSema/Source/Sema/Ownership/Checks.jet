@@ -5248,9 +5248,11 @@ sema_ownership_collect_lvalue_access: fn(state: &SemaOwnershipState, target: LVa
 // writes become the lambda's construction requirements. A cloned capture is
 // read whole; an owned non-copy capture the lambda moves (its body moves it,
 // or it escapes without a clone) moves the captured place; a non-escaping
-// lambda borrows what it reads or writes, so every other capture (and a
-// view) stays lent through the call that receives the lambda, where the
-// callee may run it: a write beside a read capture in that call conflicts.
+// lambda that only reads copies a Copy value when it is built, and borrows
+// every other capture, so that capture (every capture of a lambda that
+// writes one, and a view) stays lent through the call that receives the
+// lambda, where the callee may run it: a write beside a borrowed capture in
+// that call conflicts.
 sema_ownership_collect_lambda_requirement_events: fn(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, events: &[SemaOwnershipEvaluatedAccess]) {
     params: loop param in lambda.params -> param.name
     captured := [SemaOwnershipEvaluatedAccess]{}
@@ -5272,6 +5274,10 @@ sema_ownership_collect_lambda_requirement_events: fn(state: &SemaOwnershipState,
     // A lambda this check did not record keeps plain capture reads.
     if state.lambda_facts.get(sema_ownership_span_key(lambda.span)) == .Val(facts) {
         retains: !facts.escapes
+        has_write := false
+        loop event in captured {
+            if event.access == AccessConvention.Write -> has_write = true
+        }
         loop index in 0..<captured.len() {
             name: captured[index].capture_place.root
             if facts.cloned.contains(name) {
@@ -5283,7 +5289,10 @@ sema_ownership_collect_lambda_requirement_events: fn(state: &SemaOwnershipState,
                 captured[index].access = AccessConvention.Write
                 captured[index].moves_owner = true
             }
-            captured[index].through_call = (captured[index].capture_is_view || (retains && !taken.contains(name))) && !captured[index].moves_owner
+            // A read-only lambda's read of a Copy capture is its own copy:
+            // nothing of the captured place stays lent.
+            lent: has_write || !sema_ownership_walk_type_is_copy(captured[index].capture_ty)
+            captured[index].through_call = (captured[index].capture_is_view || (retains && lent && !taken.contains(name))) && !captured[index].moves_owner
         }
     }
     loop event in captured {
