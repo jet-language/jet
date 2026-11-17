@@ -1604,7 +1604,10 @@ slots such a declared function fills. A payload that the copy law can't copy
 out of a read parameter is taken, so its constructor value fits only a
 function type that marks the take (`fn(&&FileWriter) -> Sink`); anywhere else
 it reports **E0227**. The enum's type arguments are written on the case
-(`Holder<Int>.Full`) or come from the result of the expected function type. A
+(`Holder<Int>.Full`) or come from the result of the expected function type. In
+a slot whose function fails (`request: fn(Reply<R>) -> M E!`), the constructor
+takes that failing form, as the lambda written there would, with a body that
+never fails: `counter.ask(Count.Total)`. A
 unit case stays a value (`Message.Quit` is a `Message`), a leading-dot case
 never becomes a constructor from an expected function type, and a payload case
 whose expected type is not a function keeps the literal's missing-payload

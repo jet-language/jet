@@ -32,6 +32,8 @@ source_module core.devtools path Core/Devtools/Devtools.jet alias core_core_devt
 module core.debug exports { Stop, StopKind, __stop_ignore, __trace_records } types { Stop:plain, StopKind:plain(Panic|Assert|Contract|Bounds|Shift|Todo) } depends_on []
 source_module core.debug path Core/Debug/Debug.jet alias core_core_debug owns { __stop_ignore, __trace_records } types { Stop, StopKind }
 module core.context exports {  } depends_on []
+module core.actor exports { Actor, Reply, Strategy, spawn, supervise } types { Actor:generic(1), Reply:generic(1), Strategy:plain(Stop|Restart) } depends_on []
+source_module core.actor path Core/Actor/Actor.jet alias core_core_actor owns { spawn, supervise } types { Actor, Reply, Strategy }
 module core.archive exports { ArchiveError, adler32, crc32, deflate, inflate, compress, decompress, tar_add, tar_get, tar_names_json, unzip, zip_close, zip_decompress, zip_extract, zip_names_json, zip_next, zip_open, zip_read, zip_write, list, create } types { ArchiveError:plain(Malformed|Unsupported|Checksum|NotFound) } depends_on []
 source_module core.archive path Core/Archive/Archive.jet alias core_archive owns { crc32, adler32, deflate, inflate, compress, decompress, zip_decompress, zip_names_json, list, zip_open, zip_next, zip_read, zip_write, zip_close, zip_extract, unzip, tar_add, tar_get, tar_names_json, create }
 module core.archive.gzip exports { compress, decompress, is_gzip, isize, magic, crc, compress_text, decompress_text, peek_isize, compress_file, decompress_file, GzipFileError } types { GzipFileError:plain(Read|Write|Malformed|Unsupported|Checksum) } depends_on [core.archive]

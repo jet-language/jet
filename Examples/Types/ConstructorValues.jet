@@ -28,6 +28,9 @@ describe: fn(message: Message) -> String {
 
 build: fn(make: fn(String) -> Message, body: String) -> Message { make(body) }
 
+// A slot whose function fails, with the call's own failure type `E`.
+attempt: fn<E>(make: fn(String) -> Message E!, body: String) -> Message E! { make(body) }
+
 pair_with: fn(make: fn(*, left: Int, right: Int) -> Message) -> Message { make(right: 2, left: 1) }
 
 fill: fn(make: fn(Int) -> Holder<Int>, value: Int) -> Int {
@@ -44,6 +47,9 @@ takes: fn(make: fn(&&FileWriter) -> Sink) -> String { "takes its writer" }
 run: fn() {
     // A single payload stays positional.
     print(describe(build(Message.Text, "hello")))
+    // A slot whose function fails takes the constructor in that failing
+    // form, as the lambda written there would; this call can't fail.
+    print(describe(attempt(Message.Text, "tried")))
     texts: ["a", "b"].map(Message.Text)
     loop text in texts -> print(describe(text))
     // A named payload keeps its labels label-only.

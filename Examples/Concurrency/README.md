@@ -6,6 +6,7 @@ Run a lesson from the repository root, for example `jet run Examples/Concurrency
 
 ## Lessons
 
+- [Actors](Actors.jet) — A counter actor and a supervised worker from `core.actor`, a Core library over tasks and channels.
 - [AllFailFast](AllFailFast.jet) — All fail-fast cancels siblings when one task panics.
 - [BusyTurns](BusyTurns.jet) — A task that never waits gives its thread to waiting tasks at its next loop iteration once its time slice is up.
 - [CancelCleanup](CancelCleanup.jet) — Cancellation is preemptive at wait points and at loop checks.

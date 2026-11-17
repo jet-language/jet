@@ -5062,6 +5062,34 @@ Compile-time code also runs natively at O0, but there the kernel uses one
 worker: a `para_*` call in a `#run` block, a `#run fn` or a value
 computed while building runs its chunks in order and returns the same value.
 
+### `core.actor` — actors over tasks and channels
+
+`core.actor` writes the actor model in Jet over `task` and `channel`, with no
+new syntax (D-ACTOR1). An actor is a detached task that owns its state and
+takes messages from its mailbox, a channel, one at a time; each message
+replaces the state with `handler(state, message)`. The state never leaves the
+actor's task, and a message crosses into it under the ordinary sendability
+rules. The implementation is in
+[`Core/Actor/Actor.jet`](../../../Core/Actor/Actor.jet).
+
+| Signature | Result | Description |
+|---|---|---|
+| `spawn<S, M>(state: S, handler: fn(S, M) -> S) -> Actor<M>` | actor | Start an actor whose state begins as `state`; it stops when `handler` fails or when it is stopped. |
+| `supervise<S, M>(start: fn() -> S, handler: fn(S, M) -> S, strategy: Strategy) -> Actor<M>` | actor | Start a supervised actor whose state begins as `start()`; when `handler` fails, the message is dropped and `strategy` decides what follows. |
+| `actor.send(message: M) -[Time.Wait]> SendError<M>!` | — | Queue `message`; fails with the message back once the actor has stopped. |
+| `actor.ask<R, E>(request: fn(Reply<R>) -> M E!) -[Time.Wait]> R? E!` | answer | Send the message `request` builds around a fresh `Reply<R>` and wait until the actor has handled it: the handler's answer, or None when the actor stopped first or the handler failed or did not answer. A failure of `request` is the call's, unchanged, and sends nothing. |
+| `actor.stop()` | — | Stop the actor once it has handled the messages already queued; later sends fail. |
+| `reply.answer(value: R) -[Time.Wait]>` | — | Answer the ask this reply belongs to; only the first answer counts. |
+| `Strategy.Stop`, `Strategy.Restart(limit: Int)` | strategy | Stop on the first failure, or start again from `start()` until the actor has restarted `limit` times, then stop. |
+
+A message type carries `Reply<R>` as a payload, so an enum constructor serves
+as the request: `counter.ask(Count.Total)` for `Total(actor.Reply<Int>)`. The
+handler answers while it handles that message; once the actor has handled it,
+the ask returns. A stopped actor releases every ask still queued, so an ask
+never waits on an actor that will not answer. Sends from one task arrive in the
+order they were sent. See
+[`Examples/Concurrency/Actors.jet`](../../../Examples/Concurrency/Actors.jet).
+
 ### `core.prelude` — small compiler-owned helpers
 
 `core.prelude` is available without a separate package import. Its functions
@@ -8204,6 +8232,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.devtools`
 - `core.debug`
 - `core.context`
+- `core.actor`
 - `core.archive`
 - `core.archive.gzip`
 - `core.archive.zstd`
