@@ -571,6 +571,12 @@ A build reads the same moments as `Event` values with `meta.stages()` on its
 `Compiler` value: the program's moments up to `compiler.settled`, in one
 order whatever the thread count (Metaprogramming reference).
 
+A function hooks a moment with `#On(moment)`, such as
+`#On(compiler.settled) settled: fn(round: compiler.Round) { … }`. The
+compiler checks the hook against the moment's row: an unknown moment, or a
+hook that does not take exactly the moment's payload, is E0930. Running moment
+hooks during a compile or build is not built yet.
+
 ### `core.meta` — module and package metadata
 
 Every module has a `Module` value and every package a `Package` value, and the

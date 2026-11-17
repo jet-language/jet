@@ -1,0 +1,14 @@
+use compiler: core.compiler
+
+// The settled moment, read through `meta.stages()` as `compiler.Event`.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["main.jet"], [])
+    meta: b.compiler(app)
+    settled := [String]{}
+    loop stage in meta.stages() {
+        if stage == .Settled(round) -> settled.push("round {round.round}")
+    }
+    panic("settled: {settled.join(", ")}")
+}
+
+run: fn() { print("ran") }

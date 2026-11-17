@@ -19,7 +19,7 @@ use {
         foundation_byte_text,
         jet_config_string_escape,
         sema_casing_marker_qualifier,
-        tool_stage_hook,
+        stage_hook,
     ]
     jet_lexer.[TOKEN_DOT, TOKEN_EOF, TOKEN_HASH, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RPAREN, lex, token_text]
     jet_parser.[parse_source]
@@ -122,7 +122,7 @@ jet_driver_tool_stage_snapshot_markers: fn(snapshot: JetDriverAuthorizedSourceSn
             loop item in parsed.program.items {
                 if item == .Func(func) {
                     loop marker in func.markers {
-                        hook: tool_stage_hook(marker) ?? next
+                        hook: stage_hook(marker) ?? next
                         if hook.stage == stage && !markers.contains(hook.marker) {
                             markers.push(hook.marker)
                         }
@@ -195,7 +195,7 @@ jet_driver_tool_stage_plan: fn(modules: [JetDriverDocModule], document: Int, sta
         loop item in module_ref.items {
             if item == .Func(func) {
                 loop marker in func.markers {
-                    hook: tool_stage_hook(marker) ?? next
+                    hook: stage_hook(marker) ?? next
                     if hook.stage != stage -> next
                     loop block in blocks {
                         if at >= 0 && (at < block.body.start || at > block.body.end) -> next
