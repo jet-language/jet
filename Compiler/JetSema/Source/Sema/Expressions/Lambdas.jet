@@ -1193,10 +1193,12 @@ sema_expression_lambda_bound_escapes: fn(binding: Binding, statements: [Stmt], s
         tail_index += 1
     }
     if !saw_use {
-        // No use reaches the lambda, so no call can run it: like a direct-call
-        // lambda it borrows the locals it writes rather than keeping a copy
-        // whose writes the owner never sees.
-        if binding.init == .Lambda(lambda, _) {
+        // A lambda bound to a `_` name is declared never to run: like a
+        // direct-call lambda it borrows the locals it writes rather than
+        // keeping a copy whose writes the owner never sees. Any other unused
+        // binding stays stored, since the scan of its uses is no proof that
+        // nothing calls it.
+        if binding.name.starts_with("_") && binding.init == .Lambda(lambda, _) {
             sema_ownership_note_direct_call_lambda(state, lambda.span)
         }
         return Val(true)
