@@ -149,6 +149,9 @@ UINode: struct {
     priv click: Int,
     // The id the runtime's drop registry keeps the handler under; 0 for none.
     priv drop: Int,
+    // The id the app keeps the handler of files dropped on the node under
+    // (`__taking_files`); 0 for none.
+    priv files: Int,
 
     // The tree as a server sends it (`html.node`), as a screen whose view
     // gives a tree shows it.
@@ -175,6 +178,22 @@ UINode: struct {
     // the runtime keeps for the node's slot.
     __input: fn(&self, frame: Frame, event: UIEvent, focused: &Int) -> Bool Never! {
         internal.window_input(self, frame, event, focused)
+    }
+
+    // The tree as a body that takes the files dropped on it, whose handler
+    // the app keeps under `files` (`app.drop_files`).
+    __taking_files: fn(self, files: Int) -> UINode Never! {
+        result := self.copy()
+        result.files = files
+        result
+    }
+
+    // The id of the innermost body that takes dropped files
+    // (`__taking_files`) under the point (x, y) of a native window's
+    // `frame`, in pixels, the tree laid out as `__draw` lays it out; 0 for
+    // none.
+    __files_at: fn(self, frame: Frame, x: Int, y: Int) -> Int Never! {
+        internal.files_at(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, Float{x} / frame.scale, Float{y} / frame.scale)
     }
 }
 
@@ -221,6 +240,7 @@ box: fn(children: [UINode]) -> UINode Never! {
         color: None,
         click: 0,
         drop: 0,
+        files: 0,
     }
 }
 
@@ -1697,6 +1717,7 @@ priv internal: module {
             color: color,
             click: 0,
             drop: 0,
+            files: 0,
         }
     }
 
@@ -1916,6 +1937,24 @@ priv internal: module {
             }
         }
         None
+    }
+
+    // `UINode.__files_at`, at (x, y) in units: the innermost node laid out
+    // over the point that takes dropped files gives its id, a box's
+    // children laid out as `placed_leaves` lays them out.
+    files_at: fn(node: UINode, frame: Rect, x: Float, y: Float) -> Int Never! {
+        if x < frame.x || x >= frame.x + frame.width || y < frame.y || y >= frame.y + frame.height {
+            return 0
+        }
+        if node.kind == .Box {
+            at := frame.y
+            loop child in node.children {
+                inner: files_at(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, x, y)
+                if inner != 0 -> return inner
+                at += child.height
+            }
+        }
+        node.files
     }
 
     // `node` with its leaf `target`, counted in paint order
@@ -2235,6 +2274,17 @@ priv html_name: fn(tree: UINode) -> String Never! {
         seen.push("{changed} {focused} {tree.children[1].label} {tree.children[1].width} {tree.width}")
     }
     assert_eq(seen, [String]{"false -1 ab 2.0 6.0", "true 0 abd 3.0 6.0", "false 1 abd 3.0 6.0", "false 0 abd 3.0 6.0", "false 0 abd 3.0 6.0"})
+}
+
+#Test("a native window finds the innermost body that takes dropped files under a point") {
+    // A 10x4 panel over a body of its own, then a one-unit button.
+    panel: node_color("", 10.0, 4.0, Color{r: 0, g: 0, b: 255, a: 255}).__taking_files(2)
+    tree: box([panel, button("Go")]).__taking_files(1)
+    whole: Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}
+    assert_eq(internal.files_at(tree, whole, 3.0, 2.0), 2)
+    assert_eq(internal.files_at(tree, whole, 3.0, 4.5), 1)
+    assert_eq(internal.files_at(tree, whole, 3.0, 5.0), 0)
+    assert_eq(internal.files_at(box([text("plain")]), whole, 1.0, 0.0), 0)
 }
 
 #Test("a native window's key matches a button's shortcut as a page's does") {

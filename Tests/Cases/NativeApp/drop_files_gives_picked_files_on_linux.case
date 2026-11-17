@@ -1,0 +1,28 @@
+# A Linux app's window delivers files dropped on a body `app.drop_files`
+# takes: a fake compositor on $WAYLAND_DISPLAY drags a list of URIs over
+# the window and drops it on the body (Wayland wl_data_device, as
+# text/uri-list). The window reads the list, and `on_drop` gets the two
+# CSV files as PickedFile values backed by their paths, in the list's
+# order, the percent-encoded name decoded; the text file is not a kind the
+# body takes, and the web address is no local file. The compositor closes
+# the window once the window has finished with the drop.
+fixture: DropFilesGivesPickedFilesOnLinux.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+mkdir: run
+spawn compositor: jet run compositor/fake_compositor.jet
+stdout: file compositor.stdout
+stderr: file compositor.stderr
+await: file compositor.ready timeout 120s every 10ms # the fake compositor listens
+step: jet run main.jet
+env: WAYLAND_DISPLAY={work}/wl.sock
+exit: 0
+stdout: = "dropped 2 files\ntasks.csv: 42 bytes, first row 1,Fix the gate\nboard.csv: 23 bytes, first row 3,Order bolts\n"
+wait: compositor timeout 60s
+exit: 0
+file: compositor.stdout = "the window shows its first frame\ndropped 4 URIs at 50,40\nthe offer accepted as text/uri-list\nthe offer takes actions 1, preferring 1\nthe offer received as text/uri-list\nthe offer finished\nclosed the window\nthe offer destroyed\n"

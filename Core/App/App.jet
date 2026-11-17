@@ -40,6 +40,7 @@ use {
     core.net.[UnixListener, UnixStream]
     builtin: jet_builtins
     core.ui.[UINode]
+    core.ui.host.drag_drop.[UIDropItem]
     ui: core.ui
 }
 
@@ -4064,14 +4065,109 @@ priv app_no_folder: fn(why: String) -> PickedFolder? Never! {
 // `body`, taking the files a person drops on it: each one of a kind in
 // `types` goes to `on_drop` as a PickedFile, and a notice `on_drop` fails
 // with shows beside `body`, as a button's does. A native target delivers
-// drops through the window that shows `body`, and the Linux window
-// (`App.window`) takes none for `body` yet, so each native target keeps a
-// notice that says so and gives `body` back as it is. A page's drop gives
-// the browser's File handles, which the page runtime can't give the app
-// yet, so a call in code whose target is the web output is a compile error.
-drop_files: fn(body: UINode, types: [FileType], on_drop: fn([PickedFile]) Notice!) -> UINode {
+// drops through the window that shows `body`: on Linux the app's window
+// (`App.window`) takes them (`app_window_drop`); the other native targets
+// keep a notice that says their drop target is not built yet and give
+// `body` back as it is. A page's drop gives the browser's File handles,
+// which the page runtime can't give the app yet, so a call in code whose
+// target is the web output is a compile error.
+drop_files: fn(body: UINode, types: [FileType], on_drop: &&fn([PickedFile]) Notice!) -> UINode {
+    #if #build.target.os == {
+        .Linux -> { return app_drop_target(body, types, on_drop.move()) }
+        .MacOS -> { return app_undroppable(body) }
+        .Windows -> { return app_undroppable(body) }
+        .Web -> { return app_undroppable(body) }
+        .Wasm -> { return app_undroppable(body) }
+        .Freestanding -> { return app_undroppable(body) }
+    }
+}
+
+// The bodies that take dropped files (`drop_files`) in the tree the
+// window shows, each one's id one past its index (`app_window_tree`
+// starts them over).
+priv APP_DROPS: Shared{[AppDrop]{}}
+
+priv AppDrop: struct {
+    types: [FileType],
+    run: Shared<AppDropRun>,
+}
+
+priv AppDropRun: struct {
+    run: fn([PickedFile]) Notice!,
+}
+
+// `body` as one the window gives the files dropped on it, of a kind in
+// `types`, to `on_drop`.
+priv app_drop_target: fn(body: UINode, types: [FileType], on_drop: &&fn([PickedFile]) Notice!) -> UINode Never! {
+    held: APP_DROPS.guard_edit()
+    held.value.push(AppDrop{types: types.copy(), run: Shared{AppDropRun{run: on_drop.move()}}})
+    body.__taking_files(held.value.len())
+}
+
+// Keeps the notice that this target takes no dropped files; gives `body`.
+priv app_undroppable: fn(body: UINode) -> UINode Never! {
     __keep_notice(Notice{text: "Couldn't take dropped files: this system's drop target is not built yet"})
     body.copy()
+}
+
+// Starts the window's drop targets over, for a tree opened anew.
+priv app_drops_clear: fn() Never! {
+    held: APP_DROPS.guard_edit()
+    held.value.clear()
+}
+
+// The drop target whose id is `id`, if the shown tree has it.
+priv app_drop: fn(id: Int) -> AppDrop? Never! {
+    held: APP_DROPS.guard_read()
+    if id < 1 || id > held.value.len() -> return None
+    Val(held.value[id - 1].copy())
+}
+
+// A drop's items on the window, at the body whose drop target id is `id`
+// (0 for none), as `drop_files` gives them: each item a local file
+// (`file://`) of a kind the body takes, as a PickedFile, in the drop's
+// order, to its `on_drop` once. A drop with none of them calls nothing; a
+// file that can't be read, and the notice `on_drop` fails with, join the
+// app's notices.
+priv app_window_drop: fn(id: Int, items: [UIDropItem]) -[FS.Read]> Never! {
+    target: app_drop(id) ?? return
+    dropped := [PickedFile]{}
+    loop item in items {
+        if item == .URI(uri) {
+            path: app_chosen_path(uri) ?? next
+            if !app_file_kind(files.basename(path), target.types) -> next
+            if app_picked(path) == {
+                .Ok(file) -> { dropped.push(file) }
+                .Err(err) -> {
+                    __keep_notice(Notice{text: "Couldn't take {files.basename(path)}: {err}"})
+                }
+            }
+        }
+    }
+    if dropped.len() == 0 {
+        return
+    }
+    held: target.run.guard_read()
+    app_drop_once(held.value.run, dropped)
+}
+
+// Gives `dropped` to a body's `on_drop`, as a button's handler runs; the
+// notice it fails with joins the app's notices.
+priv app_drop_once: fn(run: fn([PickedFile]) Notice!, dropped: [PickedFile]) Never! {
+    if run(dropped) == .Err(notice) -> __keep_notice(notice)
+}
+
+// Whether the file named `name` is of a kind in `types`, as a file
+// dialog matches it (`app_file_filter`): its name ends as one of the
+// kind's patterns, in any case.
+priv app_file_kind: fn(name: String, types: [FileType]) -> Bool Never! {
+    lower: name.lower()
+    loop kind in types {
+        loop glob in app_file_filter(kind).globs {
+            if lower.ends_with(glob.removeprefix("*")) -> return true
+        }
+    }
+    false
 }
 
 // Asks the person where to save a file and writes `bytes` there, all at
@@ -4542,9 +4638,11 @@ priv app_graph_window: fn() -> AppWindow? Never! {
 // Shows the window until the person closes it, which ends the app. The
 // window shows the current screen's tree (`app_window_tree`), opened again
 // when another screen opens, and routes each event to it (`__input`), which
-// keeps its focus until then. A frame draws the tree when nothing is drawn
-// yet, the tree is new or an event changed it, or the window took another
-// size. A display that is missing or fails leaves a notice.
+// keeps its focus until then; a drop on a body that takes dropped files
+// (`drop_files`) gives them to its handler (`app_window_drop`). A frame
+// draws the tree when nothing is drawn yet, the tree is new or an event
+// changed it, or the window took another size. A display that is missing
+// or fails leaves a notice.
 priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Read, Net, Time]> Never! {
     window: ui.open(width: size.width, height: size.height, title: title) ?? return app_window_lost("{err}")
     tree := ui.box([UINode]{})
@@ -4555,6 +4653,7 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
         stale := !drawn
         loop event in frame.events() {
             if event == .Resize(_, _) -> stale = true
+            if event == .Drop(x, y, items) -> app_window_drop(tree.__files_at(frame, x, y), items)
             if tree.__input(frame, event, focused) -> stale = true
         }
         now: app_graph_current()
@@ -4574,8 +4673,10 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
 
 // The tree the window shows for the screen `now`, opened as `go` opens it,
 // so the bindings its view reads are the screen's route data: an empty box
-// before a screen opens and for the not-found state.
+// before a screen opens and for the not-found state. The drop targets of
+// the tree shown before (`drop_files`) go with it.
 priv app_window_tree: fn(now: AppCurrent?) -[FS.Read, Net]> UINode Never! {
+    app_drops_clear()
     current: now ?? return ui.box([UINode]{})
     screen: app_screen(current.state) ?? return ui.box([UINode]{})
     me: tasks.current_task()
@@ -4623,6 +4724,37 @@ priv app_window_lost: fn(why: String) Never! {
     assert_eq(parts.read_bytes(12) ?? panic("part: {err}"), "title,notes\n".bytes())
     assert_eq(parts.read_bytes(100) ?? panic("rest: {err}"), "Gate repair,hinge\n".bytes())
     assert_eq(parts.read_bytes(100) ?? panic("end: {err}"), [U8]{})
+    files.remove_all(folder) ?? panic("clean: {err}")
+}
+
+#Test("a drop on a window's body that takes files gives its handler the local files of its kinds once, in order") {
+    folder: "{sys.temp_dir()}/jet-dropped-{sys.getpid()}"
+    files.create_dir_all(folder) ?? panic("folder: {err}")
+    files.write("{folder}/tasks 1.csv", "id,title\n1,Fix the gate\n") ?? panic("write: {err}")
+    files.write("{folder}/BOARD.CSV", "id\n") ?? panic("write: {err}")
+    files.write("{folder}/notes.txt", "notes\n") ?? panic("write: {err}")
+    app_drops_clear()
+    _: drop_files(
+        ui.box([UINode]{}),
+        [FileType]{.CSV},
+        fn(dropped: [PickedFile]) Notice! {
+            names := [String]{}
+            loop file in dropped -> names.push("{file.name} {file.bytes}")
+            Err(Notice{text: names.join(", ")})
+        },
+    )
+    items: [UIDropItem]{.URI{value: "file://{folder}/tasks%201.csv"}, .Text{value: "id,title"}, .URI{value: "file://{folder}/notes.txt"}, .URI{value: "https://example.com/a.csv"}, .URI{value: "file://{folder}/BOARD.CSV"}}
+    before: notices().len()
+    app_window_drop(1, items)
+    after: notices()
+    assert_eq(after.len(), before + 1)
+    assert_eq(after[after.len() - 1].text, "tasks 1.csv 24, BOARD.CSV 3")
+    // No file of its kinds, or no body that takes files, calls nothing.
+    app_window_drop(1, [UIDropItem]{.URI{value: "file://{folder}/notes.txt"}})
+    app_window_drop(0, items)
+    app_window_drop(2, items)
+    assert_eq(notices().len(), before + 1)
+    app_drops_clear()
     files.remove_all(folder) ?? panic("clean: {err}")
 }
 
