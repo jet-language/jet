@@ -1999,7 +1999,9 @@ jet_cli_release_job_summary: fn(inputs: JetDriverLoweringInputs?, options: Build
 // stock entry's it inherits), else from the source root `root`.
 jet_cli_build_option_gate_refusal: fn(file: String, root: String, result: JetDriverCompileResult, options: BuildOptions, color: Bool) -[FS, Env]> JetDriverVerbOutput? Never! {
     inline := false
-    if result.authority_policy == .Val(policy) -> inline = policy.inline_package && file.ends_with(".jet")
+    if result.authority_policy == .Val(policy) {
+        inline = policy.inline_package && file.ends_with(".jet")
+    }
     gate_root: if inline -> file else -> root
     loop choice in build_options_check_removals(options) {
         if jet_cli_build_option_policy(gate_root, PolicyKey.CheckRemoval, choice, color) == .Val(refused) {

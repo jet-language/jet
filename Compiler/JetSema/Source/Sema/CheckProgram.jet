@@ -9655,7 +9655,9 @@ sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_mo
 sema_comptime_step_limit: fn(markers: [Marker]) -> Int? Never! {
     loop marker in markers {
         if !sema_marker_is_hook(marker, MarkerHook.StepLimit) || marker.args.len() != 1 -> next
-        if marker.args[0] == .Expr(written) && written == .Int(value, _, _, _, _) && value > 0 -> return Val(value)
+        if marker.args[0] == .Expr(written) && written == .Int(value, _, _, _, _) && value > 0 {
+            return Val(value)
+        }
     }
     None
 }
