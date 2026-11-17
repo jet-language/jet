@@ -328,7 +328,7 @@ jet_cli_compile_check: fn(file: String, source: String, color: Bool, quiet: Bool
                 if recording == .Val(claimed) && jet_cli_check_snapshot_inputs(snapshot) == .Val(sources) {
                     jet_cli_check_receipt_publish(claimed, output, sources)
                 }
-                jet_cli_finish(output)
+                jet_cli_finish(output, trace_sink)
             }
         }
     }
@@ -580,7 +580,7 @@ jet_cli_compile_emit: fn(file: String, source: String, color: Bool, json: Bool, 
     if compiled.move() == {
         .Refused(refusal) -> { output = refusal }
         .Checked(result, inputs, snapshot) -> {
-            jet_cli_finish(jet_cli_emit_ir_result(file, source, color, json, function, result, inputs, snapshot))
+            jet_cli_finish(jet_cli_emit_ir_result(file, source, color, json, function, result, inputs, snapshot), trace_sink)
         }
     }
     output
@@ -2389,7 +2389,7 @@ jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: Bu
     if compiled.move() == {
         .Refused(refusal) -> { output = refusal }
         .Checked(result, inputs, snapshot) -> {
-            jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, options, invocation, json, sbom, quiet, verbose, false, result, inputs, snapshot))
+            jet_cli_finish(jet_cli_build_result(file, jet_cli_stem(file), source, color, options, invocation, json, sbom, quiet, verbose, false, result, inputs, snapshot), trace_sink)
         }
     }
     // Reached only by a refusal: a value-returning verb never ends in its
@@ -2409,7 +2409,12 @@ jet_cli_compile_build: fn(file: String, source: String, color: Bool, options: Bu
 // A Jet defect (JET_CLI_EXIT_ICE, I2) ends through process.exit_unmapped
 // with status 101 as it is: `process.exit` gives a program's 101 the
 // user-error status 1, since no program may claim a Jet defect's status.
-jet_cli_finish: fn(output: JetDriverVerbOutput) -> Never {
+// A compiling verb that ends here passes its `trace_sink`, whose trace is
+// finished first (Request.jet jet_cli_trace_finish): the exit skips
+// jet_cli_compile_on_worker's finish, and the readable trace's summary
+// closes the stream before the verb's output.
+jet_cli_finish: fn(output: JetDriverVerbOutput, trace_sink: JetCLITraceSink?{None}) -> Never {
+    if trace_sink == .Val(sink) -> jet_cli_trace_finish(sink)
     jet_cli_write_output(output)
     if output.exit_code == JET_CLI_EXIT_ICE {
         #Unsafe("I2: jet alone among Jet programs ends a Jet defect with status 101, which process.exit maps to 1 for every program (S36), so its ICE exit takes the unmapped process exit") {
@@ -3270,7 +3275,7 @@ jet_cli_compile_test: fn(file: String, source: String, color: Bool, verbose: Boo
     if compiled.move() == {
         .Refused(refusal) -> { output = refusal }
         .Checked(result, inputs, snapshot) -> {
-            jet_cli_finish(jet_cli_test_result(file, tested, doctests, measure, color, verbose, options, result, inputs, snapshot))
+            jet_cli_finish(jet_cli_test_result(file, tested, doctests, measure, color, verbose, options, result, inputs, snapshot), trace_sink)
         }
     }
     output
@@ -3526,7 +3531,7 @@ jet_cli_compile_doc: fn(file: String, source: String, color: Bool, json: Bool, r
     if compiled == {
         .Refused(refusal) -> { output = refusal.move() }
         .Compiled(result, snapshot) -> {
-            jet_cli_finish(jet_cli_doc_result(file, source, color, json, request, result, snapshot))
+            jet_cli_finish(jet_cli_doc_result(file, source, color, json, request, result, snapshot), trace_sink)
         }
     }
     output
@@ -4487,7 +4492,8 @@ jet_cli_main: fn(args: [String]) {
 // launches keeps the main thread and every stack default. The trace sink is
 // opened here and finished here once the compile is over, even when it
 // panicked (Request.jet jet_cli_trace_finish), so its last events reach the
-// file; the worker's task traces as the trace's first lane.
+// file; a verb that ends the process inside the compile finishes it in
+// jet_cli_finish instead. The worker's task traces as the trace's first lane.
 JET_CLI_COMPILE_STACK_BYTES: 201326592
 
 jet_cli_compile_on_worker: fn(plan: &&JetCLIPlan, discovery: &WorkspaceDeclarationCache, recording: JetCLICheckRecording?{None}) -> JetDriverVerbOutput {
