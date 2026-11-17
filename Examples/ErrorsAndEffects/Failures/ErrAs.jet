@@ -1,0 +1,59 @@
+// A typed failure that reaches `Err` keeps its own value: `err.as<T>()`
+// gives it back as `T?` when the failure was a `T`, and None when it was
+// another type or a plain message.
+use core.encoding.hex
+
+#Error
+StoreErr: enum {
+    Missing,
+    Locked(String),
+}
+
+#Error
+NetErr: enum {
+    Timeout(Int),
+}
+
+read_store: fn(key: String) -> String StoreErr! {
+    if key == "" -> return Err(StoreErr.Missing)
+    if key == "admin" -> return Err(StoreErr.Locked(key))
+    "user {key}"
+}
+
+fetch: fn(seconds: Int) -> String NetErr! { Err(NetErr.Timeout(seconds)) }
+
+// Each typed failure converts into `Err` at the written `Err!`.
+load_user: fn(key: String) -> String Err! { read_store(key) }
+
+load_remote: fn(seconds: Int) -> String Err! { fetch(seconds) }
+
+load_plain: fn() -> String Err! { Err("no user") }
+
+// A library failure converts through its Prelude conversion the same way.
+load_key: fn(text: String) -> String Err! {
+    bytes: hex.decode(text)
+    "{bytes.len()} key bytes"
+}
+
+// A failure wrapped as a cause keeps its value on the cause.
+load_wrapped: fn() -> String Err! { load_user("") ?? return Err("lookup failed", cause: err) }
+
+describe: fn(error: Err) -> String {
+    if error.as<StoreErr>() == .Val(.Missing) -> return "store: missing"
+    if error.as<StoreErr>() == .Val(.Locked(who)) -> return "store: locked by {who}"
+    if error.as<NetErr>() == .Val(.Timeout(seconds)) -> return "net: timed out after {seconds}s"
+    if error.as<HexError>() == .Val(hex) -> return "hex: {hex.reason}"
+    if error.cause == .Val(inner) -> return "{error.message}, because {describe(inner)}"
+    "other: {error.message}"
+}
+
+run: fn() {
+    print(load_user("ada") ?? describe(err))
+    print(load_user("") ?? describe(err))
+    print(load_user("admin") ?? describe(err))
+    print(load_remote(3) ?? describe(err))
+    print(load_plain() ?? describe(err))
+    print(load_key("00ff") ?? describe(err))
+    print(load_key("abc") ?? describe(err))
+    print(load_wrapped() ?? describe(err))
+}

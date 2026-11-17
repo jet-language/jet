@@ -5,7 +5,7 @@ use {
     jet_foundation.[AccessConvention, BinEndian, BinMatchPart, DeclID, Span, StrMatchPart, SymbolID, Type, TBinaryOp, TBinaryPatternPart, TBuiltinOp, BodyCallArg, TCanonicalField, TComptimeEnumArg, TComptimeField, TComptimeKey, TComptimeMapEntry, TComptimeValue, TDestructureBinding, BodyEnumArg, BodyEnumPayload, NodeKind, FnBody, TFuncKind, BodyHandleOp, BodyIfCond, BodyLambda, BodyListSpreadPart, TLocal, BodyMapPatternEntry, BodyMatchArm, TMethodRef, BodyMixedArm, BodyNestedPattern, TNumericOp, BodyOrFallback, TPanicLoc, BodyPattern, BodyPatternBinding, BodyPatternShape, BodyRangeArm, BodyRequireKind, TStaticOwner, BodyStrPart, BodyStructFieldValue, TTextPatternPart, TTryConvert, TypeTupleField, measure_literal_value, body_each_expr_child, body_each_or_fallback_child, body_each_stmt_child, body_stmt, checked_generated_local, checked_user_local, name_rows_set, name_rows_value, type_carrier_identity, StmtKind]
     jet_foundation.[AutoVectorizationFacts, FunctionCallMetadata, function_param_writes, ir_host_value_name, module_is_core, number_argument_value, symbol_none]
     jet_foundation.[ComponentSignatureDescriptor, ComponentTypeDescriptor, ComponentTypeField]
-    jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY]
+    jet_backend.[ERR_CONTEXT, ERR_CONTEXT_BYTES, ERR_CONVERSIONS, ERR_CONVERSION_BYTES, ERR_DETAILS, ERR_DETAILS_BYTES, ERR_DETAILS_END, ERR_DETAILS_FIELDS, ERR_DETAILS_HAS_SPAN, ERR_DETAILS_START, ERR_DETAILS_VARIANT, ERR_FIELD_BYTES, ERR_IDENTITY, ERR_PAYLOAD]
     jet_sema.[sema_type_def_instance_type]
 }
 
@@ -2448,6 +2448,9 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
                 if kind == .Unwrap -> return ir_option_unwrap(m, p, b, inner, span)
             }
             if call == .Method(receiver, method, args) {
+                if method == "as" && args.len() == 0 && ir_default_err(p, ir_ty(p, b, receiver)) {
+                    return ir_err_as(m, p, b, expression_ty, receiver, span)
+                }
                 receiver_ty: ir_ty(p, b, receiver)
                 if ir_pool_inner(receiver_ty) != None {
                     return ir_pool_method(m, p, b, expression_ty, receiver, method, args, span)
@@ -9025,6 +9028,42 @@ ir_comptime_struct: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row:
 // (ir_compiler_owned_core_fields).
 ir_comptime_answered_member: fn(ty: Type, field: String) -> Bool Never! {
     ir_untag(ty) == (Type.Named{name: "MarkerArgInfo"}) && field == "value"
+}
+
+// `err.as<T>()` (the host method `as` on the default Err): a fresh `T?`
+// holding a copy of the failure whose conversion built the Err (BuildTypes
+// ir_err_payload_node, kept at ERR_PAYLOAD) when the node's payload key is
+// T's (ir_trait_key), else None. A node is never written after its Err is
+// built, so reading it needs no lock.
+ir_err_as: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, span: Span) -> Int Never! {
+    row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
+    failure: if ir_untag(ty) == .Option(inner) -> inner else -> {
+        return ir_fail_slot(b, span, "Err.as producing {ir_type_name(ty)}")
+    }
+    failure_row: ir_value_type(m, p, failure) ?? return ir_type_fail(b, span, failure)
+    error: ir_expr(m, p, b, receiver)
+    if ir_failed(b) || error < 0 -> return -1
+    pointer_row: ir_pointer_row(m)
+    word_row: ir_word_row(m)
+    node: ir_load_at(m, b, error, Int{ERR_PAYLOAD}, pointer_row)
+    zero: ir_word_const(m, b, 0)
+    present: ir_bool_op(m, b, IROp.Ne, node, zero)
+    result: ir_fresh_temp(m, b, row)
+    ir_option_none(m, b, result)
+    ir_open_if(b.f, present, b.line)
+    key: ir_load_at(m, b, node, 24, word_row)
+    wanted: ir_word_const(m, b, ir_trait_key(p, failure))
+    same: ir_bool_op(m, b, IROp.Eq, key, wanted)
+    ir_open_if(b.f, same, b.line)
+    view: ir_load_at(m, b, node, 32, failure_row)
+    owned: ir_copy_value(m, p, b, view, span)
+    size: m.types[failure_row].size
+    made: ir_option_make(m, p, b, row, owned, size)
+    ir_option_set(m, b, result, made)
+    ir_end(b.f, b.line)
+    ir_end(b.f, b.line)
+    ir_release(m, b, error)
+    result
 }
 
 // A default Err constant (ir_default_err): a fresh JetErr from its message,
