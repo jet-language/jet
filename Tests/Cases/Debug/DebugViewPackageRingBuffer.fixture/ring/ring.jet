@@ -1,0 +1,13 @@
+// A ring buffer of Ints: `count` items from slot `start`, wrapping past the
+// last slot. Its view lists the items oldest first.
+Ring: struct {
+    slots: [Int]
+    start: Int
+    count: Int
+
+    impl DebugView {
+        debug_view: fn(self) -> [DebugItem] {
+            loop k in 0..<self.count -> DebugItem{label: "{k}", value: "{self.slots[(self.start + k) % self.slots.len()]}"}
+        }
+    }
+}

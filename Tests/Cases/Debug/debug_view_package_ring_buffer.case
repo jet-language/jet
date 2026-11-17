@@ -1,0 +1,14 @@
+# A dependency package's ring buffer implements Core's DebugView, and
+# `jet debug` shows a value of it through that view: its items oldest first,
+# not its slots and start. The program never calls the view; a build with
+# debug information keeps it, and the debugger runs it in the stopped program.
+fixture: DebugViewPackageRingBuffer.fixture
+env: NO_COLOR=1
+step: jet debug app/main.jet
+stdin: debug_view_package_ring_buffer.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  main.jet:5  in run()" # the ring is bound by the print line
+stdout: ~ "(Jet) print buffer\nbuffer = Ring{0: 3, 1: 4, 2: 5}\n" # the view's items, in ring order
+stdout: ~ "buffer: Ring = Ring{0: 3, 1: 4, 2: 5}\n" # `locals` shows the same view
+stdout: !~ "slots:" # never the raw fields
+stdout: ~ "3 items\nProgram finished\n" # the program goes on unchanged after the view ran

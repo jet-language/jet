@@ -422,6 +422,10 @@ IRChecks: struct {
     // library's (ir_core_image_fits). None builds every Core function it
     // calls.
     core: IRCoreImage?{None}
+    // A build with debug information: each DebugView implementation's
+    // `debug_view` is built as a root next to the entry (ir_build_program),
+    // so a debugger can call it on a stopped program's value.
+    debug_views: Bool{false}
 }
 
 // An argv-selectable job: the checked function `key` that the program word
@@ -1579,7 +1583,9 @@ ir_symbol_name: fn(function: FnBody) -> String Never! {
 // foreign functions; `checks` the runtime checks the program's functions
 // keep (ir_bounds_mode). Under `dead_code: keep` (checks.keep) every
 // non-generic function of checks.modules is a root too, so the image carries
-// the package's unreached functions. With `trace_sink` the build's steps are
+// the package's unreached functions; with checks.debug_views each
+// non-generic DebugView implementation's `debug_view` is one, so a debugger
+// can call it. With `trace_sink` the build's steps are
 // spans inside the host's `ir.build`: `ir.build.program` (the checked
 // program's tables), the steps of ir_build_waves_parted, and
 // `ir.build.core_cells`.
@@ -1598,17 +1604,28 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     }
     p.entry = row
     roots := [IRWaveJob]{IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1}}
-    kept_keys := [String]{}
+    kept_rows := [Int]{}
     if p.checks.keep {
         loop kept in 0..<p.functions.len() {
-            function: p.functions[kept]
-            if kept == row || p.checks.modules.get(function.module_identity.id) == None -> next
-            if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None {
-                next
+            if kept != row && p.checks.modules.get(p.functions[kept].module_identity.id) != None {
+                kept_rows.push(kept)
             }
-            roots.push(IRWaveJob{key: function.key.copy(), row: kept, args: [Type]{}, lambda: -1, part: -1, local: -1})
-            kept_keys.push(function.key.copy())
         }
+    }
+    if p.checks.debug_views {
+        loop kept in (p.trait_methods.get("DebugView|debug_view") ?? [Int]{}) {
+            taken: p.checks.keep && p.checks.modules.get(p.functions[kept].module_identity.id) != None
+            if kept != row && !taken -> kept_rows.push(kept)
+        }
+    }
+    kept_keys := [String]{}
+    loop kept in kept_rows {
+        function: p.functions[kept]
+        if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 || p.intrinsics.get(function.key) != None {
+            next
+        }
+        roots.push(IRWaveJob{key: function.key.copy(), row: kept, args: [Type]{}, lambda: -1, part: -1, local: -1})
+        kept_keys.push(function.key.copy())
     }
     if trace_sink == .Val(sink) -> sink.end("ir.build.program", p.functions.len())
     waves: ir_build_waves_kept(p, roots, true, threads, trace_sink)
