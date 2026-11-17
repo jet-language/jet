@@ -2799,24 +2799,33 @@ path to the function that opens the gate and the gate's `file:line`. `Unsafe`
 never has to be granted, and naming it in a positive row grants nothing
 (D-MEMRAW-EFFECT1).
 
-Core operations contribute the following broad categories. More precise leaves
-are retained when the operation supplies them.
+The effect list below is the one list of effect roots: one row per root that
+the three effect sources declare (the machine effects, Core's service effects
+in Core/Effects/Effects.jet, and the metaprogramming effects in
+Core/Compiler/Meta.jet), in their canonical order, saying what the root
+covers. The roots keep their short words: `FS`, `Rand`, `Env` and `Exec`
+beside `Time` and `Browser` (D-EFFECT-ROOT-WORDS1). Core operations record
+these roots, and keep a more precise leaf when the operation supplies one.
 
-| Root | Typical operations |
+| Root | What it covers |
 | --- | --- |
-| `IO` | `print`, `eprint`, input, and terminal operations |
-| `FS` | `core.files` and file watchers |
 | `Net` | `core.net`, `core.http`, and port watchers |
-| `Time` | ambient clock, zone, sleep, and timer operations |
+| `FS` | `core.files` and file watchers, as `FS.Read` and `FS.Write` |
+| `IO` | `print`, `eprint`, input, and terminal operations |
+| `Time` | ambient clock, zone, sleep, and timer operations; `Time.Wait` is the deny-only wait |
 | `Rand` | ambient random operations |
 | `Env` | `core.sys` environment operations |
-| `Exec` | argv, process, command, pipeline, and process watchers |
+| `Exec` | argv, process, command, pipeline, and process watchers; `Exec.Args` and `Exec.Exit` |
+| `GPU` | graphics and game operations |
+| `FFI` | calls through a foreign-language boundary, one leaf per language |
+| `Browser` | browser or DOM provider operations |
+| `Panic` | deny-only: code that can stop with a panic |
+| `Mem` | deny-only: allocation, reference counting, stack use, and collection (`Mem.Alloc`, `Mem.Rc`, `Mem.Stack`, `Mem.Gc`) |
+| `Unsafe` | deny-only: reaching `#Unsafe` code outside Core |
 | `DB` | database operations; query and execute refine to `DB.Read` and `DB.Write` |
 | `Log` | `core.log` operations |
-| `GPU` | graphics and game operations |
-| `FFI` | calls through a foreign-language boundary |
-| `Browser` | browser or DOM provider operations |
 | `Secret` | decrypted repository-secret reads |
+| `Meta` | compiler operations of library code running inside the compiler: `Meta.Generate`, `Meta.Include`, and the expert `Meta.Code` family |
 
 A call to an opaque `extern rust` or C function contributes the maximal effect
 set because the checker cannot inspect its body. This keeps inference sound
