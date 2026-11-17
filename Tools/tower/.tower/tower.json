@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111562,
+    "rev": 111572,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -70019,11 +70019,11 @@
         {
           "n": 1,
           "text": "A dated audit in Docs/Audits lists every Odin array, matrix, quaternion, simd and soa feature with its Jet status and probe; every row is PASS or links a card or an owner ballot. Proof: the audit file exists (`git ls-files 'Docs/Audits/*odin-arrays*'`) and has no row without a status.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:58:59.762Z"
+          "evidence": "Audit Docs/Audits/2026-11-16-odin-arrays.md landed in 58664a641a (p239: cases audit_reports_list_findings_without_a_disposition PASS); every section 9 row cites its open ballot D-ARRAY-CONVERT1/SHUFFLE1/MATRESIZE1/ROWMAJOR1/CONJ1/COMPLEXT1/LANEBCAST1/ZIPCOLUMNS1 in 06bc13fa64.",
+          "at": "2026-11-17T02:51:30.673Z"
         },
         {
           "n": 2,
@@ -70067,7 +70067,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T13:58:56.482Z",
-      "updated": "2026-11-17T01:42:02.275Z",
+      "updated": "2026-11-17T02:51:30.673Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -105915,11 +105915,11 @@
         {
           "n": 3,
           "text": "The debugger has one scalar-name source (today debug_scalar_class in Debug/Snapshot.jet and the safe_value and jet_type_name lists in Inferior.jet), and a package ring buffer shows its items through a Core `DebugView` impl.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:25:11.055Z",
+          "evidence": "p240 batch compiler (dev 8182df2b05): jet test Compiler --profile cases --filter debug_view_package_ring_buffer PASS (n=1 bad=0); Compiler/JetLSP/Tests/LSP/ToolStages.jet PASS.",
+          "at": "2026-11-17T02:58:37.363Z",
           "proof": {
             "profile": "cases",
             "filter": "debug_view_package_ring_buffer"
@@ -105947,7 +105947,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:11.055Z",
-      "updated": "2026-11-17T01:48:10.664Z",
+      "updated": "2026-11-17T02:58:37.363Z",
       "updatedBy": "Main"
     },
     {
@@ -217699,6 +217699,1750 @@
       "created": "2026-11-16T14:35:19.813Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-16"
+    },
+    {
+      "id": "D-ARRAY-COMPLEXT1",
+      "cardId": "c05gn07n",
+      "group": "syntax",
+      "title": "Offer F32 complex values without requiring generic default syntax",
+      "situation": "Complex currently stores two Float components. Signal buffers may need F32 components to reduce component storage and match other F32 data. The draft proposed Complex<T> while allowing plain Complex to mean Complex<Float>. That is also a public generic-default and literal-typing decision, not just a struct edit. We recommend one shared implementation with concrete Complex and Complex32 aliases. An explicit public generic family remains a strong alternative, with its language costs stated honestly.",
+      "gist": "How should Jet offer a complex number with F32 components?",
+      "lesson": "Complex32 here means two F32 components, not 32 bits in total. Sharing an implementation does not require exposing generic defaults to every caller.",
+      "explainer": "Beginner path: existing Complex code keeps Float components. Complex32{real: 3.0, imaginary: 4.0} asks for F32 components explicitly. Context supplies each literal's component type. No new imaginary literal inference rule is approved.\n\nExpert path: share arithmetic and every existing Complex math method over an internal component parameter restricted to F32 or Float. Expose destination-owned from_complex conversions for both concrete aliases, using scalar conversion policy for each component. Narrowing is explicit and fallible; do not silently select a type from the operand values or promise twice the throughput.",
+      "story": "Em edits a long signal buffer. F32 components halve the payload bits compared with two Float components, before considering padding or container overhead. She measures numerical error and actual throughput instead of treating smaller components as a universal speedup.",
+      "inWild": "// Rust num-complex exposes a generic family and convenient aliases.\nlet z = num_complex::Complex32::new(3.0, 4.0);\n// Julia supports parameterized Complex and concrete precision aliases.\nz = ComplexF32(3, 4)",
+      "detail": "Core/Math/Math.jet:40404-40406 fixes both components to Float. :40414-40487 contains the full current arithmetic and elementary method surface, which any new precision must cover. missing.jet rejects Complex<F32>{...} with E0104. edges.jet rejects the audit's call-shaped Complex<F32>(...) with E0803, not its older E0119. Current z.abs() prints 5.0 and z*z prints -7 + 24i. The review does not infer successful F32 support from generic syntax or from another language.\n\nD-SHAPE-CONVERT1=A requires destination-owned source-named conversion. D-ARRAY-CONJ1 is an open companion ballot, not a ratified prerequisite or a current method. Public generic defaults and complex literal inference are not licensed by merely adding F32 storage. B explicitly requests a default type argument for this family and thus needs full syntax review. A needs no such default and must migrate compiler-protected Complex handling to the shared representation in one cutover, without a hidden legacy type.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Concrete aliases over one implementation",
+          "detail": "Keep public Complex as the Float specialization and add Complex32 as the F32 specialization of one internal generic implementation. Both have identical operations at their own precision.",
+          "technical": "The internal generic family is not a second public construction path. Preserve existing Complex meaning and literal behavior. Complex32 fields are F32, with normal aggregate alignment rather than a packed-ABI guarantee. Generate or share implementations for all existing methods, including transcendental functions, without silently calculating in Float then narrowing. from_complex infers the source specialization; widening is lossless and narrowing follows the established scalar fallible conversion policy. No implicit precision change.",
+          "code": "z: Complex{real: 3.0, imaginary: 4.0}\ns: Complex32{real: 3.0, imaginary: 4.0}\nwide: Complex.from_complex(s)\nsmall: Complex32.from_complex(z) ?? return"
+        },
+        {
+          "key": "B",
+          "name": "Public Complex<T> with Float default",
+          "detail": "Expose Complex<F32> and Complex<Float>, with bare Complex denoting the Float specialization. This is the original recommended model, with the default rule made explicit.",
+          "technical": "Approve omitted component arguments for this family, not a general default-argument feature by implication. Explicitly annotated fields receive T; unannotated imaginary literals keep today's Float behavior rather than gaining value-driven inference. Restrict T to F32 or Float. Supply the full A operation and conversion set. Migrate every compiler identity check and existing caller; do not preserve an old non-generic Complex beside the new family.",
+          "code": "z: Complex{real: 3.0, imaginary: 4.0}\ns: Complex<F32>{real: 3.0, imaginary: 4.0}\nsmall: Complex<F32>.from_complex(z) ?? return"
+        },
+        {
+          "key": "C",
+          "name": "Two concrete nominal types",
+          "detail": "Keep today's nominal Complex and add a distinct Complex32 struct with F32 fields. Share private generic helpers or generated methods instead of duplicating algorithms by hand.",
+          "technical": "Same mathematical coverage, conversion and precision rules as A. This avoids converting the existing protected type into an alias, but creates two nominal declarations and associated compiler registrations. It does not inherently double handwritten math. I8 permits implementation sharing; do not ship multiple public mechanisms for the same precision.",
+          "code": "z: Complex{real: 3.0, imaginary: 4.0}\ns: Complex32{real: 3.0, imaginary: 4.0}\nsmall: Complex32.from_complex(z) ?? return"
+        },
+        {
+          "key": "D",
+          "name": "Float computation with F32 boundary pairs",
+          "detail": "Keep Complex unchanged. Store compact buffers as fixed F32 pairs, widen components when reading, compute with Complex, and explicitly narrow when writing.",
+          "technical": "A complete same-program route for storage-oriented work; it does not supply F32-precision complex arithmetic. Conversions and pair indexing remain caller code. This may be enough when buffer size matters more than F32 computation throughput, without a second complex API.",
+          "code": "pair: [F32#2]{3.0, 4.0}\nz: Complex{real: Float{pair[0]}, imaginary: Float{pair[1]}}\nresult: z * z // Float computation; narrow explicitly at the boundary"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Odin",
+          "note": "complex64 has two f32 components; the name counts total bits. Odin also has complex32 and complex128, so Jet's Complex32 name must explain its different convention.",
+          "code": "z: complex64 = 3 + 4i",
+          "source": "https://odin-lang.org/docs/overview/#complex-numbers"
+        },
+        {
+          "lang": "Rust / num-complex",
+          "note": "Complex<T> offers reusable generic algorithms; Complex32 and Complex64 aliases make common precisions easy. Layout compatibility does not guarantee by-value C calling convention compatibility.",
+          "code": "let z = num_complex::Complex32::new(3.0, 4.0);",
+          "source": "https://docs.rs/num-complex/latest/num_complex/struct.Complex.html"
+        },
+        {
+          "lang": "Julia",
+          "note": "Complex is parametric; ComplexF32 and ComplexF64 are concrete aliases. Promotion provides convenience beyond Jet's explicit conversion rule and has its own complexity.",
+          "code": "z = ComplexF32(3, 4)",
+          "source": "https://docs.julialang.org/en/v1/manual/complex-and-rational-numbers/"
+        },
+        {
+          "lang": "Swift SIMD",
+          "note": "SIMD's scalar parameter reuses vector algorithms across precisions. It is a representation example, not a claim that a two-lane SIMD value has complex multiplication semantics.",
+          "code": "let pair = SIMD2<Float>(3, 4)",
+          "source": "https://github.com/swiftlang/swift/blob/main/stdlib/public/core/SIMDVector.swift"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Concrete aliases keep the beginner surface small and share one implementation. Public generic defaults and new complex literal inference are unnecessary to offer F32 components.",
+        "gains": [
+          "One implementation across precisions.",
+          "Existing Complex meaning stays stable.",
+          "No public generic-default rule."
+        ],
+        "losses": [
+          {
+            "loss": "Two public precision names.",
+            "mitigation": "Document component widths explicitly, including the difference from Odin's total-bit names."
+          },
+          {
+            "loss": "No public component-generic complex family.",
+            "mitigation": "Choose B if cross-precision generic APIs are a requirement, accepting its explicit default-type decision."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Strong for public generic numeric code, but couples the precision feature to omitted type arguments and compiler identity migration."
+          },
+          {
+            "key": "C",
+            "reason": "Avoids alias migration, but keeps two nominal declarations even when all operations share one implementation."
+          },
+          {
+            "key": "D",
+            "reason": "Sufficient for compact storage with Float math, but not F32-precision complex computation."
+          }
+        ],
+        "tradeoff": "Convenient concrete precisions now, without implicitly approving a broader generic-default feature."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT-6-1 Sol. Fresh agent: OdinBallotReview. GPT-6.1 Sol rejects the original generic-default recommendation and adds concrete aliases over one implementation as A. Corrected diagnostics, naming conventions, migration costs and unsupported packed-layout or throughput claims."
+      },
+      "checkInstructions": "Review confirms Float-only fields and failed generic construction with E0104/E0803. Acceptance must cover the entire existing Complex API in both precisions, branch cuts, signed zero, subnormals, infinities, NaNs, explicit narrowing failure and alias/protected-type cutover. Measure actual buffer layout and kernels before promising ABI size or speed; compare execution tiers.",
+      "surface": {
+        "gist": "How should Jet add F32 complex components?",
+        "lesson": "Complex32 means two F32 components here. Sharing implementation does not require exposing omitted generic arguments or changing complex literals.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Concrete aliases",
+            "gist": "Two precision names, one internal implementation.",
+            "gains": [
+              "No public generic default."
+            ],
+            "losses": [
+              "No public component-generic family."
+            ],
+            "proposed": {
+              "code": "s: Complex32{real: 3.0, imaginary: 4.0}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Complex<T>",
+            "gist": "Expose the parameter and default it to Float.",
+            "gains": [
+              "Public precision-generic APIs."
+            ],
+            "losses": [
+              "Adds an omitted-argument rule."
+            ],
+            "proposed": {
+              "code": "s: Complex<F32>{real: 3.0, imaginary: 4.0}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Concrete structs",
+            "gist": "Two nominal declarations share private math.",
+            "gains": [
+              "No alias migration for current Complex."
+            ],
+            "losses": [
+              "Two nominal registrations."
+            ],
+            "proposed": {
+              "code": "s: Complex32{real: 3.0, imaginary: 4.0}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Boundary pairs",
+            "gist": "Store F32 pairs; calculate with Float Complex.",
+            "gains": [
+              "No new complex API."
+            ],
+            "losses": [
+              "Not F32 complex arithmetic."
+            ],
+            "proposed": {
+              "code": "pair: [F32#2]{3.0, 4.0}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It offers both precisions without a new public generic-default or literal rule.",
+          "gains": [
+            "One implementation, small beginner surface."
+          ],
+          "losses": [
+            {
+              "loss": "Two public names.",
+              "mitigation": "State component widths and distinguish Odin's total-bit naming."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Best for public generic code, but adds a default-type rule."
+            },
+            {
+              "key": "C",
+              "reason": "Fair sharing, but two nominal types."
+            },
+            {
+              "key": "D",
+              "reason": "Works for storage; computes in Float."
+            }
+          ],
+          "tradeoff": "Concrete convenience over a public generic family."
+        },
+        "trio": {
+          "current": {
+            "note": "Only the Float-component type exists.",
+            "code": "z: Complex{real: 3.0, imaginary: 4.0}"
+          },
+          "wild": {
+            "lang": "Rust num-complex",
+            "note": "A concrete precision alias wraps generic math.",
+            "code": "let z = Complex32::new(3.0, 4.0);"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "The draft implied packed layout, doubled speed and necessarily duplicated concrete-type math.",
+          "attempts": [
+            "Add aliases over one implementation and keep concrete structs as a fair alternative.",
+            "Require complete method coverage and scalar-policy conversions."
+          ],
+          "result": "The original recommendation fails as an API-only argument; A supplies the feature with fewer language rules."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-17T02:38:53.733Z"
+    },
+    {
+      "id": "D-ARRAY-CONJ1",
+      "cardId": "c05gn07n",
+      "group": "types",
+      "title": "Add Complex.conj without adding a synonym",
+      "situation": "Jet has a Complex value with real and imaginary parts, but no conjugation method. A program can construct the conjugate by copying the real part and negating the imaginary part. The free math.conj currently accepts a Float and returns it unchanged. The approved quaternion API uses conj. We recommend the same short method name for Complex, without also adding conjugate. Extending the existing free function is a serious alternative for generic numeric code.",
+      "gist": "Should complex conjugation use conj, conjugate, or the existing free function?",
+      "lesson": "Conjugation keeps the real part and negates the imaginary part. It does not compute magnitude, inverse, transpose or a matrix adjoint.",
+      "explainer": "Beginner path: z.conj() returns a Complex. For 3 + 4i the result is 3 - 4i. This is a value operation; the receiver does not change.\n\nExpert path: use the existing scalar negation on the imaginary component, including signed zero, infinities and NaNs. Do not replace a norm calculation with z*z.conj() under an exact floating-point identity: overflow and non-finite values can invalidate that shortcut. If both complex precisions are approved, the method preserves the receiver's component type.",
+      "story": "Ivo needs the conjugate in a signal calculation. A named operation avoids repeating the two-field construction. His quaternion code uses the same operation name, but the quaternion surface is approved work, not an API demonstrated by today's compiler.",
+      "inWild": "// Julia favors the generic free function.\nconj(3 + 4im)\n// Rust num-complex uses the short method.\nlet c = z.conj();",
+      "detail": "Core/Math/Math.jet:40404-40406 declares Float components; :40414-40487 gives magnitude, elementary methods and arithmetic, with no conj. :37547-37552 defines real/imag/conj for Float; conj returns its input. missing.jet reports E0102 for z.conj(), confirming audit Q4. current.jet prints z*z as -7 + 24i, magnitude 5.0, and real conj 3.0.\n\nreference.jet's manual conjugate prints 3 - 4i and product 25 + 0i. Its reciprocal of conjugated positive imaginary zero prints -inf. These are finite and signed-zero witnesses, not a universal floating-point norm identity.\n\nD-ARRAY-QUAT1=A ratifies quaternion conj(); it does not prove an implementation exists. D-ARRAY-COMPLEXT1 is a separate open precision question. This ballot approves scalar Complex conjugation, not complex matrices or automatic elementwise broadcasting. I8 does not inherently prefer methods to free functions; do not add both conj and conjugate for the same receiver.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Complex.conj",
+          "detail": "Add conj() to Complex, preserving its component precision. Keep the approved quaternion operation name. Do not add a conjugate alias.",
+          "technical": "Return Complex{real: self.real, imaginary: -self.imaginary} using ordinary scalar negation. No allocation, mutation, conjugate-transpose or norm shortcut is included. The existing Float free conj remains a real-number identity; this ballot adds no second Complex call path.",
+          "code": "z: Complex{real: 3.0, imaginary: 4.0}\nc: z.conj() // proposed: 3 - 4i"
+        },
+        {
+          "key": "B",
+          "name": "Complex.conjugate",
+          "detail": "Use the full English method name. Amend the approved quaternion name at the same time, avoiding two synonymous methods.",
+          "technical": "Same value and special-value semantics as A. Rename the quaternion operation in its approved spec and all implementation callers when landed; do not keep conj as a compatibility alias. Costs are the amendment and migration, not an intrinsic inability to write clear math.",
+          "code": "c: z.conjugate()\nq2: q.conjugate()"
+        },
+        {
+          "key": "C",
+          "name": "Extend math.conj",
+          "detail": "Extend the existing free function to Complex. Use one generic numeric entry point alongside the current real identity.",
+          "technical": "No Complex method is added. This is attractive for code handling real and complex numbers under a shared function constraint. Existing overload and owning-package rules still apply. Quaternion method naming need not change because it is a different receiver surface; this does not automatically authorize a second Complex spelling.",
+          "code": "c: math.conj(z)\nr: math.conj(Float{3.0})"
+        },
+        {
+          "key": "D",
+          "name": "Use explicit fields",
+          "detail": "Add no API. Write the complete same-program operation using today's fields and scalar negation.",
+          "technical": "Useful when conjugation is rare and requires no protected-type method work. Repeated field construction is less recognizable than a single named operation. Same numerical behavior as the proposed method, including signed-zero negation.",
+          "code": "c: Complex{real: z.real, imaginary: -z.imaginary}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Odin",
+          "note": "The built-in conj operation works on complex values and the overview also documents quaternion conjugation. One mathematical name can serve multiple number families.",
+          "code": "c := conj(z)",
+          "source": "https://odin-lang.org/docs/overview/#complex-numbers"
+        },
+        {
+          "lang": "Rust / num-complex / nalgebra",
+          "note": "num-complex exposes conj as a method; nalgebra supports matrix conjugation separately. Scalar conjugation need not also approve matrix adjoints.",
+          "code": "let c = z.conj();",
+          "source": "https://docs.rs/num-complex/latest/num_complex/struct.Complex.html"
+        },
+        {
+          "lang": "Julia / numpy",
+          "note": "Free conj is familiar in numerical code and numpy applies it elementwise. numpy also has a conjugate alias, which Jet need not copy.",
+          "code": "c = np.conj(z)",
+          "source": "https://numpy.org/doc/stable/reference/generated/numpy.conj.html"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The method fits Complex's existing numeric methods and the approved quaternion name. The free-function alternative is stronger for generic numeric code, not a semantic error.",
+        "gains": [
+          "Matches existing Complex method style.",
+          "Matches the approved quaternion name.",
+          "One Complex spelling."
+        ],
+        "losses": [
+          {
+            "loss": "conj is an abbreviation.",
+            "mitigation": "Document it as conjugation beside a two-field example; do not promise untested completion or diagnostic features."
+          },
+          {
+            "loss": "Real and complex calls use different surfaces.",
+            "mitigation": "Choose C instead if a common generic numeric function is the priority."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Clearer English, but requires changing the approved quaternion method name."
+          },
+          {
+            "key": "C",
+            "reason": "A strong generic-code choice; A favors the existing Complex method surface."
+          },
+          {
+            "key": "D",
+            "reason": "Already works, but repeats the definition instead of naming the mathematical operation."
+          }
+        ],
+        "tradeoff": "Prefer the existing numeric method style while acknowledging the generic-function advantage."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT-6-1 Sol. Fresh agent: OdinBallotReview. GPT-6.1 Sol agrees with conj within scalar scope after correcting current versus approved behavior and the floating-point identity. Added the complete no-new-API alternative and treated generic free conjugation fairly."
+      },
+      "checkInstructions": "Review missing.jet confirms E0102; current.jet runs existing magnitude and real conj; reference.jet runs the equivalent field definition and signed-zero witness. Acceptance must test real unchanged, imaginary scalar negation, positive/negative zero, infinities, NaNs, both approved precisions and applicable execution tiers. No matrix conjugation or norm identity is approved here.",
+      "surface": {
+        "gist": "How should Complex expose conjugation?",
+        "lesson": "Conjugation keeps the real part and negates the imaginary part. It is not magnitude, inverse or matrix transpose.",
+        "options": [
+          {
+            "key": "A",
+            "name": "conj method",
+            "gist": "Use the approved quaternion name.",
+            "gains": [
+              "Fits Complex's method style."
+            ],
+            "losses": [
+              "Abbreviated name."
+            ],
+            "proposed": {
+              "code": "c: z.conj()"
+            }
+          },
+          {
+            "key": "B",
+            "name": "conjugate method",
+            "gist": "Use the full word everywhere.",
+            "gains": [
+              "Clear English."
+            ],
+            "losses": [
+              "Changes the quaternion decision."
+            ],
+            "proposed": {
+              "code": "c: z.conjugate()"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Free math.conj",
+            "gist": "Extend the real-number function.",
+            "gains": [
+              "One generic numeric entry point."
+            ],
+            "losses": [
+              "Different from existing Complex methods."
+            ],
+            "proposed": {
+              "code": "c: math.conj(z)"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Explicit fields",
+            "gist": "Add no conjugation API.",
+            "gains": [
+              "Works with today's fields."
+            ],
+            "losses": [
+              "Repeats the definition."
+            ],
+            "proposed": {
+              "code": "c: Complex{real: z.real, imaginary: -z.imaginary}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It fits the existing numeric methods and the approved quaternion name.",
+          "gains": [
+            "One Complex spelling."
+          ],
+          "losses": [
+            {
+              "loss": "Abbreviated name.",
+              "mitigation": "Teach it beside the direct two-field definition."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Clear, but amends the quaternion name."
+            },
+            {
+              "key": "C",
+              "reason": "Strong for generic code; less consistent with Complex methods."
+            },
+            {
+              "key": "D",
+              "reason": "Works, but repeats the operation's definition."
+            }
+          ],
+          "tradeoff": "Method consistency over a generic free-function surface."
+        },
+        "trio": {
+          "current": {
+            "note": "The direct field construction works; the method is missing.",
+            "code": "c: Complex{real: z.real, imaginary: -z.imaginary}"
+          },
+          "wild": {
+            "lang": "Julia",
+            "note": "Numerical code uses a generic function.",
+            "code": "conj(3 + 4im)"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "The draft leaned on a floating-point norm identity and untested discovery tooling.",
+          "attempts": [
+            "Use the direct field definition and test a signed zero.",
+            "Keep scope to scalar Complex and distinguish approved quaternion work from current code."
+          ],
+          "result": "The recommendation holds without those claims."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-17T02:38:54.830Z"
+    },
+    {
+      "id": "D-ARRAY-CONVERT1",
+      "cardId": "c05gn07n",
+      "group": "syntax",
+      "title": "Convert fixed arrays with length-preserving map; lanes use their arrays",
+      "situation": "Programs often need four integer counts as four floats, without losing the length. Today [Float#4]{counts} fails, and map produces a growable list. Lane values have array adapters but no element conversion. Jet already requires map to keep a fixed array's length. We recommend finishing that rule rather than giving braces another meaning. The alternatives add a converting head or a named conversion on the destination.",
+      "gist": "How should a fixed array or lane value convert its elements?",
+      "lesson": "Keep the length and apply the ordinary scalar conversion to each element. Shape-preserving map already has that contract; converting braces would be a new rule.",
+      "explainer": "Beginner path: counts.map(fn(n) { F32{n} }) keeps the fixed length under option A. This fixes an existing implementation gap, not a new map meaning. Until that fix lands, explicit indexed construction works.\n\nExpert path: F32x4.from_array(ints.to_array().map(fn(n) { F32{n} })) uses the same conversion. Fixed map must not allocate a heap list. The scalar head keeps its exactness and failure rules; it does not silently round integers to fit F32. Failure handling belongs inside the callback, not a new checked(map(...)) rule.",
+      "story": "Lena converts four tile counts for a shader. A length-preserving map keeps her conversion correct when the fixed length changes. She uses the same scalar expression in a lane array adapter.",
+      "inWild": "// Odin converts same-length arrays element by element.\nb := cast([4]f32)a\n// Rust's fixed array map also keeps the length.\nlet b = a.map(|n| n as f32);",
+      "detail": "Core/Math/Math.jet:40675-40686 defines F32x4 and its array adapters. Compiler/JetSema/Source/Sema/Expressions/Literals.jet:597-600 checks literal length. missing.jet reports E0963 for [Float#4]{counts}, E0303 for F32x4{ints}, and E0102 for to_i32x4. current.jet runs map; its fixed-result type is checked separately. Audit A15/S10 identify real gaps, but old diagnostic spellings are not promises.\n\nreference.jet stops with E3010 converting runtime Int 16777217 to F32: exactness, not just range, matters. A separate check rejects checked(F32{huge}) with E1005. No ballot may claim aggregate checked handling already follows from this implementation. Numeric.jet:7-8 and BuildTypes.jet:5067-5068 identify the exactness stop.\n\nD-FIXARR1=A is ratified; Docs/Spec/syntax-decisions.md:1631-1634 records map preserving N. D-DOTCTOR3's amendment (:1663-1683) distinguishes whole values from elements and permits scalar conversion. D-SHAPE-CONVERT1=A requires destination-owned source-named conversions. B explicitly amends the aggregate head and checked rules. All option examples are proposed unless called current.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Length-preserving map",
+          "detail": "Finish fixed map as ratified. Each element uses the existing scalar head. Lanes convert through fixed arrays; no new aggregate conversion operation is added.",
+          "technical": "Map visits indexes in order, evaluates its receiver once and retains N, including N=0. Failure and cleanup follow the existing callback rules. Checked scalar conversions belong inside the callback; no outer checked-map feature is included. Nested arrays use nested maps, not an implicit recursive cast.",
+          "code": "counts: [Int#4]{3, 7, 0, 12}\nweights: counts.map(fn(n) { F32{n} })\nlanes: F32x4.from_array(ints.to_array().map(fn(n) { F32{n} }))"
+        },
+        {
+          "key": "B",
+          "name": "Converting type heads",
+          "detail": "[F32#4]{counts} and F32x4{ints} convert each element using the scalar rule. Only equal lengths and numeric elements qualify.",
+          "technical": "Explicitly amend D-DOTCTOR3. Same-type whole values retain priority, then eligible equal-length conversions, then literal notation. Cross array/lane representation conversion is excluded; use existing adapters. Length mismatch is a build error. Also extend checked to these aggregate heads: evaluate once in index order and return None at the first scalar failure, with no partial result. This is a new checked rule, not current behavior.",
+          "code": "weights: [F32#4]{counts}\nlanes: F32x4{ints}\nbytes: checked([U8#4]{levels}) ?? return"
+        },
+        {
+          "key": "C",
+          "name": "Destination-owned generic conversions",
+          "detail": "Add from_array on fixed destinations and from_lanes on the ratified generic lane family. The source element type is inferred, avoiding a method for every width pair.",
+          "technical": "[F32#4].from_array(counts) and Lanes<F32, 4>.from_lanes(ints) preserve shape. Narrowing is fallible under D-SHAPE-CONVERT1. This depends on generic lanes and number parameters, not today's twenty structs. Reuse the scalar conversion implementation rather than defining another rounding policy.",
+          "code": "weights: [F32#4].from_array(counts) ?? return\nlanes: Lanes<F32, 4>.from_lanes(ints) ?? return"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Odin",
+          "note": "Array casts include equal-depth nested arrays; less ceremony than A, with different scalar conversion policy.",
+          "code": "b := cast([4]f32)a",
+          "source": "https://odin-lang.org/docs/overview/#array-casts"
+        },
+        {
+          "lang": "Zig",
+          "note": "@floatFromInt converts vector elements and rounds to the closest float; explicit operation names expose conversion policy.",
+          "code": "const b: @Vector(4, f32) = @floatFromInt(a);",
+          "source": "https://ziglang.org/documentation/master/#floatFromInt"
+        },
+        {
+          "lang": "Rust / nalgebra",
+          "note": "Fixed array map retains length; nalgebra also offers element mapping across matrix shapes. These avoid converting construction syntax.",
+          "code": "let b = a.map(|n| n as f32);",
+          "source": "https://docs.rs/nalgebra/latest/nalgebra/base/struct.Matrix.html"
+        },
+        {
+          "lang": "GLSL",
+          "note": "vec4(ivec4) is compact component conversion; integer-to-float precision loss is explicitly allowed, unlike exact checked integer conversions.",
+          "code": "vec4 b = vec4(a);",
+          "source": "https://github.com/KhronosGroup/GLSL/blob/master/chapters/operators.adoc"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It fulfills an existing shape rule and reuses scalar conversion. No additional aggregate head meaning or conversion-name family is needed.",
+        "gains": [
+          "No new aggregate conversion rule.",
+          "Fixed length survives conversion.",
+          "Arbitrary scalar policies remain explicit."
+        ],
+        "losses": [
+          {
+            "loss": "Lane conversions need array adapters.",
+            "mitigation": "Keep adapters allocation-free; require focused code-generation evidence before claiming their cost disappears."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Compact, but adds aggregate conversion to a literal/assertion form and must settle precedence and nesting."
+          },
+          {
+            "key": "C",
+            "reason": "A strong alternative for lane-heavy code, but adds public conversion APIs and depends on generic lanes."
+          }
+        ],
+        "tradeoff": "Longer lane expressions in exchange for one reusable element-mapping path."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT-6-1 Sol. Fresh agent: OdinBallotReview. GPT-6.1 Sol rejects converting heads in favor of ratified fixed map and adds generic destination conversion. Corrected lane diagnostics and scalar exactness, and classified aggregate heads and checked behavior as explicit syntax changes."
+      },
+      "checkInstructions": "Review probes establish E0963/E0303/E0102 and the scalar E3010 exactness stop. Acceptance must cover zero length, nesting, identity heads, first failure, scalar exactness, opt-in rounding and special values. Compare applicable tiers and measure lane adapters before claiming equal code.",
+      "surface": {
+        "gist": "How should fixed arrays and lanes convert their elements?",
+        "lesson": "A fixed array keeps its length while each scalar converts. A converting brace head would add a separate rule.",
+        "options": [
+          {
+            "key": "A",
+            "name": "map",
+            "gist": "Finish the existing fixed-length rule.",
+            "gains": [
+              "No new conversion rule."
+            ],
+            "losses": [
+              "Lanes need adapters."
+            ],
+            "proposed": {
+              "code": "weights: counts.map(fn(n) { F32{n} })"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Converting heads",
+            "gist": "The destination head converts all slots.",
+            "gains": [
+              "Short at the call site."
+            ],
+            "losses": [
+              "Another meaning for braces."
+            ],
+            "proposed": {
+              "code": "weights: [F32#4]{counts}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Named conversion",
+            "gist": "The destination supplies a generic converter.",
+            "gains": [
+              "No method per width pair."
+            ],
+            "losses": [
+              "New APIs and generic-lane dependencies."
+            ],
+            "proposed": {
+              "code": "lanes: Lanes<F32, 4>.from_lanes(ints) ?? return"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It finishes an existing rule and keeps scalar policy visible.",
+          "gains": [
+            "One reusable mapping path."
+          ],
+          "losses": [
+            {
+              "loss": "Longer lane expressions.",
+              "mitigation": "Use fixed-array adapters without heap allocation; measure before claiming equivalent code."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Shorter, but adds a meaning to braces."
+            },
+            {
+              "key": "C",
+              "reason": "Useful for lanes, but adds public APIs."
+            }
+          ],
+          "tradeoff": "More typing, fewer rules."
+        },
+        "trio": {
+          "current": {
+            "note": "The converting head fails today.",
+            "code": "weights: [Float#4]{counts} // E0963"
+          },
+          "wild": {
+            "lang": "Odin",
+            "note": "A cast converts each element.",
+            "code": "b := cast([4]f32)a"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Verbose lane conversion.",
+          "attempts": [
+            "Use generic from_lanes instead of a method per pair.",
+            "Prefer existing adapters while retaining fixed map."
+          ],
+          "result": "No performance superiority is claimed without a paired measurement."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-17T02:38:55.837Z"
+    },
+    {
+      "id": "D-ARRAY-LANEBCAST1",
+      "cardId": "c05gn07n",
+      "group": "types",
+      "title": "Add lane-scalar arithmetic through typed hooks, not broader mirroring",
+      "situation": "A lane value currently needs an explicit splat before arithmetic with a scalar. Vec3 already supports a scalar on the right, so the two families feel inconsistent. We recommend scalar arithmetic on either side of exact lanes, using ordinary typed hooks. The draft incorrectly relied on D-OPMIX1 mirroring for fixed-width F32 and integer scalars. That rule mirrors only Int, Float and Decimal. Explicit reverse hooks can supply the feature without changing the mirror rule or adding a special broadcast parser.",
+      "gist": "Should exact lane values support scalar arithmetic without an explicit splat?",
+      "lesson": "A scalar is repeated across the lanes for +, -, * and /. Preserve operand order and scalar arithmetic policy; this is not a general array broadcast feature.",
+      "explainer": "Beginner path: lanes * gain means lanes * LaneType.splat(gain), where gain has the lane element type. gain - lanes means subtract each lane from gain, not the reverse. Scalar operands are evaluated once, in source order.\n\nExpert path: add L.Add<E>, L.Sub<E>, L.Mul<E> and L.Div<E> for operations L already supports. Add the corresponding E hooks for a lane on the right in the owning Core package. Existing direct hooks win before D-OPMIX1 fallback. Exact lane type and element type remain unchanged; normal literal context applies, with no new cross-width coercion.",
+      "story": "Kai changes brightness with a runtime F32 gain. He no longer writes a manual splat at every arithmetic site. He does not assume that a literal-only example proves a stored Decimal variable can silently narrow to F32.",
+      "inWild": "// Odin SIMD arithmetic accepts a scalar.\nresult := lanes * gain\n// Zig makes that broadcast explicit.\nconst result = lanes * @as(@Vector(4, f32), @splat(gain));",
+      "detail": "Core/Math/Math.jet:40675-40686 gives F32x4.splat and adapters; :41486-41515 gives I32x4's four vector arithmetic operations. missing.jet reports E2511 for F32x4 * 2.0. current.jet runs explicit F32x4.splat(10.0) and Vec3 * 2.0; its earlier scalar-left Vec3 expression failed E0133. Ratified mixed operators are therefore not fully working today. Audit S3's gap is real.\n\nD-OPMIX1=D ratifies typed hooks and mirrors only + and * from Int, Float or Decimal on the left. It does not automatically mirror F32, I32 or U8. Direct hooks win; operands evaluate left-to-right once. An unconstrained 2.0 is Decimal, not Float.\n\nD-LANES1=A replaces the current named structs with exact generic lanes. A adds library hooks under existing rules; it does not amend lookup or extend fixed-array arithmetic. No performance identity is asserted without code-generation evidence.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Typed hooks on both sides",
+          "detail": "Support +, -, * and / between an exact lane value and its element scalar, on either side, whenever that lane-lane operation exists. Implement each direction with ordinary owning-package hooks.",
+          "technical": "Do not depend on fixed-width scalars entering D-OPMIX1's mirror set. Reverse subtraction and division retain source order. Match explicit splat arithmetic for overflow, division by zero, signed zero and NaN behavior. Receiver and scalar evaluate once, left-to-right. No comparison, mask, bitwise, shift, arbitrary array or sizeless-lane feature is included. Compound assignment follows existing direct-hook rules rather than gaining an automatic mirror.",
+          "code": "gain: F32{0.8}\nbright: pixels * gain\ninverted: F32{1.0} - pixels\nratio: F32{2.0} / pixels"
+        },
+        {
+          "key": "B",
+          "name": "Scalar on the right only",
+          "detail": "Add lane-owned typed hooks, but no scalar-owned reverse hooks. Left-scalar expressions use an explicit splat.",
+          "technical": "A smaller implementation and a visible direction for broadcasting, without a new lookup mechanism. Existing D-OPMIX1 mirroring still applies only where its actual permitted types and hooks match. Do not teach that every literal or fixed-width scalar automatically mirrors. Noncommutative reverse operations are written explicitly.",
+          "code": "bright: pixels * gain\ninverted: F32x4.splat(F32{1.0}) - pixels\nratio: F32x4.splat(F32{2.0}) / pixels"
+        },
+        {
+          "key": "C",
+          "name": "Explicit splat only",
+          "detail": "Keep the current representation conversion visible at every arithmetic site. This is a complete equivalent program with no new mixed hooks.",
+          "technical": "Evaluate a stored scalar once, splat it to the exact lane type, then use existing lane-lane operators. This is Zig's strong explicit baseline, not an inherently slower program. Avoid claiming redundant machine copies without checking lowering for the actual target and optimization tier.",
+          "code": "bright: pixels * F32x4.splat(gain)\ninverted: F32x4.splat(F32{1.0}) - pixels\nratio: F32x4.splat(F32{2.0}) / pixels"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Odin",
+          "note": "Scalar operands are convenient for SIMD arithmetic and array programming. Jet can offer that convenience through existing typed operator hooks rather than a general broadcast rule.",
+          "code": "result := lanes * gain",
+          "source": "https://odin-lang.org/docs/overview/#simd-vector-types"
+        },
+        {
+          "lang": "Zig",
+          "note": "Vectors and scalars cannot be mixed directly; @splat is explicit and exposes the repeated value. Its optimized cost need not exceed mixed-operator syntax.",
+          "code": "const b = a * @as(@Vector(4, f32), @splat(gain));",
+          "source": "https://ziglang.org/documentation/master/#Vectors"
+        },
+        {
+          "lang": "Swift SIMD",
+          "note": "Float SIMD supports scalar arithmetic on both sides. Integer SIMD deliberately rejects ordinary checked +, - and * in favor of wrapping operators; its overflow policy differs from Jet's.",
+          "code": "let b = a * gain",
+          "source": "https://github.com/swiftlang/swift/blob/main/stdlib/public/core/SIMDVector.swift"
+        },
+        {
+          "lang": "GLSL / HLSL",
+          "note": "Scalar-vector component arithmetic is familiar in shader expressions. That convenience does not settle CPU overflow or Jet's typed-hook ownership rules.",
+          "code": "vec4 b = a * gain;",
+          "source": "https://github.com/KhronosGroup/GLSL/blob/master/chapters/operators.adoc"
+        },
+        {
+          "lang": "Julia / numpy",
+          "note": "Broadcast syntax and array operations cover broader shape combinations. They solve more than exact-lane scalar arithmetic, at the cost of a larger shape and dispatch model.",
+          "code": "b = a .* gain",
+          "source": "https://docs.julialang.org/en/v1/manual/arrays/"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Ordinary typed hooks provide the requested convenience on both sides. Explicit reverse hooks preserve D-OPMIX1's narrow mirror set and ordered subtraction and division.",
+        "gains": [
+          "Less repeated splat notation.",
+          "Both operand orders are supported.",
+          "No new operator lookup rule."
+        ],
+        "losses": [
+          {
+            "loss": "More hook instances to maintain.",
+            "mitigation": "Share elementwise implementations and test each supported direction against explicit splat."
+          },
+          {
+            "loss": "Broadcast is less visible at the call.",
+            "mitigation": "Restrict it to exact element scalars and document the equivalent splat expression."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Smaller, but left-scalar subtraction and division remain asymmetric."
+          },
+          {
+            "key": "C",
+            "reason": "Strong explicit baseline with potentially identical code; A favors readability in repeated lane arithmetic."
+          }
+        ],
+        "tradeoff": "More Core operator instances in exchange for simpler expressions, without a compiler broadcast mechanism."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT-6-1 Sol. Fresh agent: OdinBallotReview. GPT-6.1 Sol agrees within exact-lane arithmetic scope after replacing invalid fixed-width mirroring with explicit reverse hooks. Corrected Decimal literal behavior and removed unmeasured machine-code and hoisting claims."
+      },
+      "checkInstructions": "Review checks missing F32x4 scalar multiplication, runs explicit splat and right-scalar Vec3 arithmetic, and observes today's unsupported scalar-left Decimal expression. Acceptance must compare both orders with splat using literals and runtime scalars, overflow modes, division failures, signed zero, NaNs, effects and applicable tiers. Do not expand the mirror set or fixed-array rules here.",
+      "surface": {
+        "gist": "Should lanes accept element scalars without explicit splat?",
+        "lesson": "Repeat the scalar across lanes for arithmetic, preserving source order and the lane operation's normal numeric rules.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Both directions",
+            "gist": "Use ordinary typed hooks for each direction.",
+            "gains": [
+              "Simple expressions in either order."
+            ],
+            "losses": [
+              "More Core hook instances."
+            ],
+            "proposed": {
+              "code": "bright: pixels * gain\ninverted: F32{1.0} - pixels"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Right scalar only",
+            "gist": "Only lanes on the left gain hooks.",
+            "gains": [
+              "Smaller hook surface."
+            ],
+            "losses": [
+              "Reverse operations still need splat."
+            ],
+            "proposed": {
+              "code": "bright: pixels * gain\ninverted: F32x4.splat(F32{1.0}) - pixels"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Explicit splat",
+            "gist": "Keep every broadcast visible.",
+            "gains": [
+              "No new mixed hooks."
+            ],
+            "losses": [
+              "More notation at repeated calls."
+            ],
+            "proposed": {
+              "code": "bright: pixels * F32x4.splat(gain)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Typed hooks give both directions without broadening the ratified mirror rule.",
+          "gains": [
+            "No compiler broadcast mechanism."
+          ],
+          "losses": [
+            {
+              "loss": "More hook instances.",
+              "mitigation": "Share implementations and compare every direction with explicit splat."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Smaller, but leaves reverse arithmetic asymmetric."
+            },
+            {
+              "key": "C",
+              "reason": "Clear and potentially equally fast; more repeated notation."
+            }
+          ],
+          "tradeoff": "More library instances, simpler expressions."
+        },
+        "trio": {
+          "current": {
+            "note": "Lane arithmetic needs explicit splat.",
+            "code": "bright: pixels * F32x4.splat(gain)"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Broadcast is deliberately explicit.",
+            "code": "const b = a * @as(@Vector(4, f32), @splat(gain));"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "The draft extended mirroring beyond its ratified scalar types and promised equal machine code.",
+          "attempts": [
+            "Use explicit reverse hooks in the owning package.",
+            "Keep splat as the semantic and measured performance baseline."
+          ],
+          "result": "The user-facing recommendation survives, but its implementation argument is repaired."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-17T02:38:56.858Z"
+    },
+    {
+      "id": "D-ARRAY-MATRESIZE1",
+      "cardId": "c05gn07n",
+      "group": "syntax",
+      "title": "Keep matrix cropping, identity growth and reshape distinct",
+      "situation": "A graphics program may copy a top-left block, extend a smaller transform with identity entries, or reinterpret the same count of entries under another shape. These are three different operations. Today Mat3 and Mat4 offer fixed column arrays, but no matrix resize or fixed reshape. Jet has ratified bracket places and destination-owned conversions. We recommend using those rules, with explicit source-named growth helpers and array-based reshape. A direct destination reshape is also a serious alternative.",
+      "gist": "How should a matrix crop, grow or change shape?",
+      "lesson": "A block selection borrows until copied. Growth adds identity entries. Reshape preserves entry count and column sequence; it is not a transpose.",
+      "explainer": "Beginner path: ~m4[0..<3, 0..<3] makes an owned top-left block under the ratified matrix-place rule. Without ~ it is a read place, not an owned Mat3. Mat4.from_mat3(m3) keeps the 3 by 3 corner and fills the rest as identity.\n\nExpert path: Matrix<2, 8>.from_array(m4.to_array()) preserves the column-major sequence. This example is proposed fixed-matrix syntax, not a current compiler success. Current core.compute.reshape uses row-major Tensor data and copies it; do not infer that fixed matrices already share this representation or promise a zero-copy view.",
+      "story": "Mira embeds a 3 by 3 rotation into a 4 by 4 homogeneous transform. A top-left block copied from an arbitrary transform can still contain scale or shear. It is not generally a rotation or the correct normal transform.",
+      "inWild": "// GLSL keeps the shared corner and fills new diagonal entries with 1.\nmat4 grown = mat4(small);\n// glam makes the source conversion explicit.\nlet grown = Mat4::from_mat3(small);",
+      "detail": "Core/Math/Math.jet:39470-39510 defines Mat3 with nine Float values, column-indexed multiplication and copying to_array. :39536-39562 gives Mat4's sixteen values and copying adapter. current.jet prints the original and transposed column sequences. missing.jet rejects Mat4{m} with E0303; edges.jet rejects Mat3.reshape with E0102.\n\nAudit M17/M18 identify missing fixed operations, not an ownership or copy law. Core/Compute/Compute.jet:173-179 checks element count and copies Tensor data for reshape; :192-203 transposes row-major data. Fixed matrices cannot inherit those storage rules merely through an alias spelling.\n\nD-MATRIX-INDEX1=E makes bracket results places, with ~ selecting an owned copy. D-SHAPE-CONVERT1=A owns named conversions on the destination. D-ARRAY-MAT21=A makes Mat2/3/4 aliases once fixed Matrix parameters exist. B amends aggregate heads; C amends destination ownership and S33's generic-call restriction. The alternatives therefore require full syntax review.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Places, source-named growth, array reshape",
+          "detail": "Crop with an owned copy of a bracket block. Add Mat3.from_mat2, Mat4.from_mat2 and Mat4.from_mat3. Reshape equal-count fixed matrices through their fixed column arrays.",
+          "technical": "Growth preserves the top-left square, writes one on newly added diagonal positions and zero elsewhere. No translation is invented. Cropping neither mutates nor converts the source, and ~ is required for ownership. Reshape requires equal counts at compile time and keeps scalar type and column sequence. No cross Tensor conversion is included. Coordinate with the generic Matrix alias cutover so these are not a second matrix family.",
+          "code": "corner: ~m4[0..<3, 0..<3]\ngrown: Mat4.from_mat3(m3)\nflat: grown.to_array()\nwide: Matrix<2, 8>.from_array(flat)"
+        },
+        {
+          "key": "B",
+          "name": "Destination head for all three",
+          "detail": "Use Mat3{m4} to crop, Mat4{m3} to identity-extend, and a matrix head to reshape an equal entry count.",
+          "technical": "Amend D-DOTCTOR3, with precedence required between equal-count reshape and resize. Different dimension pairs can otherwise imply both operations. The ballot must choose equal-count reshape first, then top-left copy and identity-fill for unequal counts. A head would now mean different mathematical transformations depending on shape.",
+          "code": "corner: Mat3{m4}\ngrown: Mat4{m3}\nwide: Matrix<2, 8>{grown}"
+        },
+        {
+          "key": "C",
+          "name": "Source resize and reshape methods",
+          "detail": "Name the mathematical action at the source. A single resized dimension can cover the small square family, with explicit reshaped dimensions for equal counts.",
+          "technical": "Amend D-SHAPE-CONVERT1 and S33, rather than calling this impossible. Reuse A's crop and growth math; require equal count for reshaped. No borrowed result is implied by either method. Explicit verbs are clearer than a dimension-dependent head, at the cost of a destination-type argument mechanism.",
+          "code": "corner: m4.resized<3>()\ngrown: m3.resized<4>()\nwide: grown.reshaped<2, 8>()"
+        },
+        {
+          "key": "D",
+          "name": "Places, named growth, direct destination reshape",
+          "detail": "Keep A's crop and growth rules, but add from_matrix for equal-count fixed matrices instead of requiring an array adapter round trip.",
+          "technical": "Matrix<2,8>.from_matrix(m4) copies the column sequence and requires equal counts. The source-kind name follows D-SHAPE-CONVERT1. It cannot silently resize. This is a strong same-program alternative, not another spelling for growth or a new layout.",
+          "code": "corner: ~m4[0..<3, 0..<3]\ngrown: Mat4.from_mat3(m3)\nwide: Matrix<2, 8>.from_matrix(grown)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Odin / GLSL",
+          "note": "Matrix casts are compact and specify identity extension. Odin also distinguishes equal-count nonsquare reshapes in column order; short casts still need those rules.",
+          "code": "grown := matrix[4,4]f32(small)",
+          "source": "https://odin-lang.org/docs/overview/#matrix-types"
+        },
+        {
+          "lang": "Rust / glam",
+          "note": "Mat4::from_mat3 clearly names growth and establishes a homogeneous transform, without changing literal construction.",
+          "code": "let grown = Mat4::from_mat3(small);",
+          "source": "https://docs.rs/glam/latest/glam/f32/struct.Mat4.html"
+        },
+        {
+          "lang": "Julia / numpy",
+          "note": "Reshape is a distinct equal-count operation. Julia shares data; numpy may return a view or copy, and its order parameter specifies index traversal.",
+          "code": "b = np.reshape(a, (2, 8), order='F')",
+          "source": "https://numpy.org/doc/stable/reference/generated/numpy.reshape.html"
+        },
+        {
+          "lang": "C++ / Eigen",
+          "note": "Matrix storage and dimensions are independent choices; named reshape and block operations avoid assigning every transformation to a cast.",
+          "code": "auto b = a.reshaped(2, 8);",
+          "source": "https://libeigen.gitlab.io/eigen/docs-nightly/group__TutorialReshape.html"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It reuses ratified places and destination ownership. Separate operations expose whether data is cropped, identity-extended or merely reshaped.",
+        "gains": [
+          "Ownership is explicit for crops.",
+          "Growth names its source shape.",
+          "Reshape preserves a documented sequence."
+        ],
+        "losses": [
+          {
+            "loss": "Array reshape is longer.",
+            "mitigation": "Keep fixed arrays inline; choose D if direct matrix reshaping earns its own public API."
+          },
+          {
+            "loss": "Several small growth helpers are needed.",
+            "mitigation": "Provide all three widening pairs and migrate them with the generic Matrix aliases."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Compact, but overloads a head with distinct transformations and requires shape-dependent precedence."
+          },
+          {
+            "key": "C",
+            "reason": "Clear verbs, but reopens destination ownership and explicit call-site dimension arguments."
+          },
+          {
+            "key": "D",
+            "reason": "Strong and consistent; A avoids a separate reshape API until direct calls justify it."
+          }
+        ],
+        "tradeoff": "A little adapter notation in exchange for fewer matrix-specific conversion mechanisms."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT-6-1 Sol. Fresh agent: OdinBallotReview. GPT-6.1 Sol found the recommendation holds within limits after restoring explicit crop ownership and distinguishing Tensor layout. Added direct destination reshape and the missing Mat2-to-Mat4 growth pair."
+      },
+      "checkInstructions": "The review checks Mat4{m} and Mat3.reshape failures and runs the existing array/transpose path. Acceptance must cover every widening pair, homogeneous entries, owned versus borrowed crops, non-square equal-count reshape, count mismatch, alias cutover and tier agreement. No zero-copy or rotation-extraction claim is approved.",
+      "surface": {
+        "gist": "How should matrices crop, grow or change shape?",
+        "lesson": "Copy a selected block explicitly. Growth adds identity entries. Reshape keeps the same entry count and column sequence.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Reuse places and arrays",
+            "gist": "Copy blocks; name growth; reshape arrays.",
+            "gains": [
+              "Uses existing ownership rules."
+            ],
+            "losses": [
+              "Longer reshape expression."
+            ],
+            "proposed": {
+              "code": "corner: ~m4[0..<3, 0..<3]\ngrown: Mat4.from_mat3(m3)\nwide: Matrix<2, 8>.from_array(grown.to_array())"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Converting heads",
+            "gist": "The destination shape picks the action.",
+            "gains": [
+              "Very short calls."
+            ],
+            "losses": [
+              "One head means distinct transformations."
+            ],
+            "proposed": {
+              "code": "grown: Mat4{m3}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Source methods",
+            "gist": "Name resize and reshape on the source.",
+            "gains": [
+              "The action is explicit."
+            ],
+            "losses": [
+              "Amends destination and generic-call rules."
+            ],
+            "proposed": {
+              "code": "wide: m4.reshaped<2, 8>()"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Direct destination reshape",
+            "gist": "Use a named equal-count matrix converter.",
+            "gains": [
+              "No explicit array adapters."
+            ],
+            "losses": [
+              "One more public API."
+            ],
+            "proposed": {
+              "code": "wide: Matrix<2, 8>.from_matrix(m4)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It reuses existing ownership and conversion rules without hiding different transformations behind one head.",
+          "gains": [
+            "Owned copies are visible."
+          ],
+          "losses": [
+            {
+              "loss": "More adapter notation.",
+              "mitigation": "Keep fixed arrays inline; D remains a fair direct-call alternative."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Different shapes silently select different transformations."
+            },
+            {
+              "key": "C",
+              "reason": "Clear verbs, but reopens two ratified rules."
+            },
+            {
+              "key": "D",
+              "reason": "Consistent, but adds a dedicated reshape API."
+            }
+          ],
+          "tradeoff": "More notation, fewer matrix-specific rules."
+        },
+        "trio": {
+          "current": {
+            "note": "The resize head fails.",
+            "code": "grown: Mat4{m3} // E0303"
+          },
+          "wild": {
+            "lang": "glam",
+            "note": "The destination names its source shape.",
+            "code": "let grown = Mat4::from_mat3(small);"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "The draft treated a borrowed block as an owned Mat3.",
+          "attempts": [
+            "Apply the ratified ~ copy rule.",
+            "Separate Tensor's row-major copied reshape from fixed column-major reshape."
+          ],
+          "result": "Removed unproved ownership, rotation and zero-copy claims."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-17T02:38:57.879Z"
+    },
+    {
+      "id": "D-ARRAY-ROWMAJOR1",
+      "cardId": "c05gn07n",
+      "group": "syntax",
+      "title": "Keep small fixed matrices column-major; improve row input and packing",
+      "situation": "People usually write matrices as rows on paper, while Jet's small fixed matrices store columns. Row-friendly input does not require a second stored layout. We recommend from_rows and row access for those fixed matrices, keeping their column-major representation. This is not a claim that every Jet matrix is column-major: core.compute stores row-major Tensor data. The alternative layout parameter has real benefits for row-oriented buffers and traversal, not twice as much handwritten math.",
+      "gist": "Should small fixed matrices gain row-major storage, or just row-friendly input?",
+      "lesson": "Input order, stored order and an external buffer's layout are separate choices. A shader also needs the right scalar width, padding and stride.",
+      "explainer": "Beginner path: Mat3.from_rows(r0, r1, r2) accepts three Vec3 values in visual row order and stores columns. row(i) returns an owned Vec3, not a place or writable alias. Existing new, from_array and to_array retain their column sequence.\n\nExpert path: transpose().to_array() gives the original fixed matrix's scalars in row sequence. It is a copying adapter, not an ABI promise. Dedicated row-array packing could avoid an explicit transpose expression. Neither path makes nine Float values match an arbitrary F32 shader buffer or its alignment and matrix stride.",
+      "story": "Nina types a rotation by rows, then passes it to a renderer. The row constructor fixes the typing problem. She still checks the renderer's declared buffer layout instead of assuming that column-major means GPU-ready.",
+      "inWild": "// Eigen allows row-major storage without changing matrix algebra.\nEigen::Matrix<float, 3, 3, Eigen::RowMajor> m;\n// glam separates row input from column-major storage.\nlet m = Mat4::from_rows(r0, r1, r2, r3);",
+      "detail": "Core/Math/Math.jet:39470-39510 uses a nine-Float column array for Mat3; multiplication indexes k*3+row. :39536-39562 does the same for Mat4's sixteen values. current.jet runs both to_array and transpose().to_array(), printing their distinct column sequences. missing.jet reports E0311 for from_rows; edges.jet reports E0102 for row. Audit M19's API gap is real. Core/Compute/Compute.jet:13-20, :74-76 and :192-203 instead implement row-major Tensor matrices. A blanket one-layout claim would contradict today's code.\n\nD-ARRAY-MAT21=A requires the small names to become Matrix<N,N> aliases once that family exists. D-MATRIX-INDEX1=E governs bracket places, not a row() method. Any generalization must preserve the owning fixed representation without silently migrating Tensor. D-LANES1 and D-SHAPE-CONVERT1 do not ratify a GPU matrix ABI. Option B would add a type-level layout parameter, so the whole ballot receives full syntax review. Options A and D require no new bracket or row-place mechanism.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Column storage with row input",
+          "detail": "Add Mat2/3/4.from_rows with Vec2/3/4 rows and row(i) returning that row's owned vector. Keep existing fixed column storage and column-array adapters.",
+          "technical": "Bounds use the existing checked indexing behavior. Constructors accept exactly N rows, preserving scalar type. row() copies a value and is never an alternate writable place. Restrict the decision to small fixed matrices and their alias cutover; do not force row-major Tensor data to change. Use transpose().to_array() for row-sequence packing, with no zero-copy or GPU ABI promise.",
+          "code": "m: Mat3.from_rows(r0, r1, r2)\nsecond: m.row(1)\nrow_sequence: m.transpose().to_array()"
+        },
+        {
+          "key": "B",
+          "name": "Selectable stored layout",
+          "detail": "Give fixed Matrix a column or row storage parameter, with column as the default and small names retaining that default.",
+          "technical": "Matrix<3,3,.Rows> is proposed type-level syntax and must be specified with the generic Matrix owner. Row and column indexing keep the same mathematics; kernels may share generic implementations. Costs are more type combinations, layout-sensitive FFI, conversion and test coverage, not necessarily twice the handwritten methods. This does not authorize implicit mixed-layout allocation or change Tensor layout.",
+          "code": "m: Matrix<3, 3, .Rows>.from_rows(r0, r1, r2)\ncol: Matrix<3, 3, .Columns>.from_matrix(m)"
+        },
+        {
+          "key": "C",
+          "name": "Keep only column input",
+          "detail": "Add no row helpers. Build the same matrix with reordered scalar values or explicit columns. Existing transpose supports row-sequence extraction.",
+          "technical": "No API or representation changes. Small hand-written matrices cost more care, but callers can write a local row constructor. This is a complete same-program baseline, not a claim that row input is impossible.",
+          "code": "m: Mat3.new(r0.x, r1.x, r2.x, r0.y, r1.y, r2.y, r0.z, r1.z, r2.z)\nrow_sequence: m.transpose().to_array()"
+        },
+        {
+          "key": "D",
+          "name": "Row boundary arrays, not row storage",
+          "detail": "Add from_rows and explicit from_row_array/to_row_array packing, keeping one fixed stored layout. Callers exchange flat row-order buffers without constructing another matrix type.",
+          "technical": "Packed arrays contain exactly N*N values in row sequence with the same scalar type, not shader-specific padding. The adapters copy; no row-major view type is added. This directly serves external row buffers while leaving fast row traversal in stored matrices to a separate layout decision.",
+          "code": "m: Mat3.from_rows(r0, r1, r2)\nrow_sequence: m.to_row_array()\nround_trip: Mat3.from_row_array(row_sequence)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Odin",
+          "note": "#row_major changes matrix storage while preserving mathematical indexing. Useful for matching an existing row buffer without transposing it.",
+          "code": "m: #row_major matrix[3,3]f32",
+          "source": "https://odin-lang.org/docs/overview/#matrix-types"
+        },
+        {
+          "lang": "C++ / Eigen",
+          "note": "Row and column storage can mix and convert automatically; row traversal can benefit from row storage. Generic algorithms need not be duplicated by hand.",
+          "code": "Eigen::Matrix<float, 3, 3, Eigen::RowMajor> m;",
+          "source": "https://eigen.tuxfamily.org/dox/group__TopicStorageOrders.html"
+        },
+        {
+          "lang": "Rust / glam / nalgebra",
+          "note": "glam Mat4 offers both row and column boundary methods over column storage. nalgebra supports generic storage abstractions, a stronger route for borrowed external data.",
+          "code": "let packed = m.to_rows_array();",
+          "source": "https://docs.rs/glam/latest/glam/f32/struct.Mat4.html"
+        },
+        {
+          "lang": "Julia / numpy",
+          "note": "Julia's ordinary arrays are column-major; numpy reshape has C/F index orders and may copy. Neither storage preference proves a shader ABI.",
+          "code": "b = np.reshape(a, (3, 3), order='F')",
+          "source": "https://numpy.org/doc/stable/reference/generated/numpy.reshape.html"
+        },
+        {
+          "lang": "HLSL / GLSL",
+          "note": "Both support row/column buffer layout choices. GLSL separates matrix stride and block layout; HLSL storage and constructor order are distinct.",
+          "code": "layout(row_major) uniform Block { mat3 m; };",
+          "source": "https://github.com/KhronosGroup/GLSL/blob/master/chapters/variables.adoc"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It solves visual row input without multiplying fixed matrix representations. It does not decide Tensor storage or promise compatibility with every graphics API.",
+        "gains": [
+          "Rows can be typed naturally.",
+          "Existing fixed layout stays stable.",
+          "row reads have explicit value ownership."
+        ],
+        "losses": [
+          {
+            "loss": "Row-buffer packing still needs an adapter.",
+            "mitigation": "Use transpose().to_array(), or choose D when direct row-buffer exchange is common."
+          },
+          {
+            "loss": "Row-major traversal gains are not provided.",
+            "mitigation": "Measure representative row kernels before rejecting or adding a stored-layout choice."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Strong for existing buffers and row locality, but expands generic layout and ABI obligations beyond the input problem."
+          },
+          {
+            "key": "C",
+            "reason": "Works, but makes handwritten row data harder to inspect."
+          },
+          {
+            "key": "D",
+            "reason": "Strong for boundary exchange; A keeps the initial API smaller when transpose packing suffices."
+          }
+        ],
+        "tradeoff": "One small fixed representation, with measured evidence required before excluding other layouts more broadly."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT-6-1 Sol. Fresh agent: OdinBallotReview. GPT-6.1 Sol found the recommendation holds within limits for small fixed matrices, not row-major Tensor or arbitrary GPU buffers. Added row-array packing and removed unfair duplicate-code and universal-GPU claims."
+      },
+      "checkInstructions": "Review current.jet verifies fixed array order and transpose; missing.jet and edges.jet verify absent row APIs. Acceptance must cover row construction and round trips, bounds, owned rows, alias migration and non-square layouts. Validate external ABI width, alignment and stride independently, with no Tensor storage migration hidden here.",
+      "surface": {
+        "gist": "Should small fixed matrices add row storage or just row input?",
+        "lesson": "Input order, stored order and external buffer layout differ. Column storage alone does not make a shader buffer compatible.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Row input, column storage",
+            "gist": "Add row construction and owned row reads.",
+            "gains": [
+              "Easy visual row input."
+            ],
+            "losses": [
+              "Row packing needs a transpose."
+            ],
+            "proposed": {
+              "code": "m: Mat3.from_rows(r0, r1, r2)\nrow: m.row(1)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Layout parameter",
+            "gist": "Choose the stored order in the type.",
+            "gains": [
+              "Matches buffers and traversal order."
+            ],
+            "losses": [
+              "More layout and ABI cases."
+            ],
+            "proposed": {
+              "code": "m: Matrix<3, 3, .Rows>.from_rows(r0, r1, r2)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Existing column input",
+            "gist": "Reorder the scalars explicitly.",
+            "gains": [
+              "No new API."
+            ],
+            "losses": [
+              "Harder to inspect handwritten rows."
+            ],
+            "proposed": {
+              "code": "m: Mat3.new(a, d, g, b, e, h, c, f, i)"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Row-array adapters",
+            "gist": "Pack rows without another stored layout.",
+            "gains": [
+              "Direct boundary exchange."
+            ],
+            "losses": [
+              "More public adapter methods."
+            ],
+            "proposed": {
+              "code": "rows: m.to_row_array()"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It solves row input while keeping the small fixed layout stable.",
+          "gains": [
+            "No second fixed representation."
+          ],
+          "losses": [
+            {
+              "loss": "No row-storage locality gain.",
+              "mitigation": "Measure row kernels before making a broader layout decision."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Useful, but broader than input order."
+            },
+            {
+              "key": "C",
+              "reason": "Works, but row data is harder to read."
+            },
+            {
+              "key": "D",
+              "reason": "Strong for buffers; adds adapters beyond input."
+            }
+          ],
+          "tradeoff": "Small API now, no blanket rejection of row storage."
+        },
+        "trio": {
+          "current": {
+            "note": "Row construction is missing.",
+            "code": "Mat3.from_rows(r0, r1, r2) // E0311"
+          },
+          "wild": {
+            "lang": "Eigen",
+            "note": "Stored order can be selected independently of the math.",
+            "code": "Eigen::Matrix<float, 3, 3, Eigen::RowMajor> m;"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "The draft overstated GPU compatibility and duplicate implementation costs.",
+          "attempts": [
+            "Separate fixed matrices from existing row-major Tensor.",
+            "Add boundary packing as an alternative to stored-layout parameters."
+          ],
+          "result": "The recommendation is restricted to the small fixed family, not all matrix work."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-17T02:38:58.887Z"
+    },
+    {
+      "id": "D-ARRAY-SHUFFLE1",
+      "cardId": "c05gn07n",
+      "group": "syntax",
+      "title": "Pick slots by number with shuffle, without promising one instruction",
+      "situation": "A swizzle picks slots to make a new row, such as rgb to bgr. Jet currently supports letter swizzles on selected vector types, not fixed arrays or every lane type. Letters cannot name slot 7 or 15. Programs can already write indexed elements out by hand. We recommend shuffle with constant indexes on fixed arrays and exact lanes, sharing the operation name ratified for lanes. This chooses the call and result rules, not a machine-instruction count.",
+      "gist": "How should arrays and exact lanes pick slots by number?",
+      "lesson": "Write the source indexes in result order. Indexes may repeat; compile-time bounds checking does not imply that hardware can perform every permutation in one instruction.",
+      "explainer": "Beginner path: a.shuffle(2, 1, 0) produces those three slots. Fixed arrays return [T#K], where K is the argument count. The source is evaluated once. Existing letter swizzles remain available where supported.\n\nExpert path: accept compile-time Int expressions, including named constants, rather than literal tokens only. Reject negative and out-of-range indexes. Exact lanes return Lanes<T, K> only when K is a legal exact width; otherwise report the unsupported width and show the fixed-array adapter. This does not add dynamic gather, two-source selection, writes or sizeless-lane shuffle.",
+      "story": "Sam reverses the channels in a 32-byte pixel block. He lists all 32 destination picks, not just eight. A pick of 32 is out of bounds; 9 is valid. The target may need several instructions, especially across register sublanes.",
+      "inWild": "// Odin permits constant indexed swizzles.\nb := swizzle(a, 3, 2, 1, 0)\n// Zig also supports a constant mask selecting from TWO vectors.\nconst b = @shuffle(f32, a, other, mask);",
+      "detail": "Compiler/JetSema/Source/Sema/Expressions/Places.jet:1448-1491 limits letter reads to Vec2/3/4, F32x4 and F64x2, using x/y/z/w. Core/Math/Math.jet:40695-40706 makes a three-slot F32x4 letter read a Float Vec3, not three F32 lanes. Numeric shuffle deliberately preserves the source element type. Literals.jet:1120-1122 and :1164-1167 establish bounds diagnostics E0965.\n\nmissing.jet reports E0311 for the audit W8 method; edges.jet gives E0302 for fixed-array letters. Planned #6177 c3 is not current support. D-LANES1=A ratifies shuffle on exact widths, but not this argument syntax or an instruction guarantee. The generic family replaces the current twenty names rather than preserving another family.\n\nNumeric and letter forms must share selection semantics where their result types agree. This ballot needs full syntax review because it introduces constant-argument and result-shape rules, despite using ordinary method tokens.",
+      "options": [
+        {
+          "key": "A",
+          "name": "shuffle with constant arguments",
+          "detail": "a.shuffle(2, 1, 0) returns picks in that order. At least one constant Int argument is required. Arrays preserve T and return length K. Exact lanes preserve T and require a legal result width.",
+          "technical": "Bounds are 0 <= i < N. Constants may be expressions. Evaluation reads an unchanged source once; repeats are allowed. Non-copy element types are rejected rather than duplicated or implicitly moved out of a read place. Empty calls are errors, without inventing a Random API fix. Reuse the same selector lowering as letter projections; code generation chooses a legal instruction sequence.",
+          "code": "rgb: [Float#3]{0.9, 0.5, 0.1}\nbgr: rgb.shuffle(2, 1, 0)\neight: [Int#8]{0, 1, 2, 3, 4, 5, 6, 7}\npicks: eight.shuffle(7, 6, 5, 4)"
+        },
+        {
+          "key": "B",
+          "name": "swizzle with constant arguments",
+          "detail": "Exactly A, named swizzle. This aligns numeric calls with letter-swizzle terminology and Odin.",
+          "technical": "Amend D-LANES1's shuffle operation name in the same cutover. Do not ship both method names. All A bounds, copy, width and evaluation rules apply.",
+          "code": "bgr: rgb.swizzle(2, 1, 0)\npicks: eight.swizzle(7, 6, 5, 4)"
+        },
+        {
+          "key": "C",
+          "name": "Explicit indexed construction",
+          "detail": "Add no numeric method on arrays. Build the result from indexed reads; fixed-array helpers can use a constant index table for reusable picks.",
+          "technical": "D-ARRAY-INIT1=A already ratifies from_fn. A typed index table and result length make a same-program alternative without a new selector API. The lane shuffle remains independently required by D-LANES1.",
+          "code": "picks: [Int#4]{eight[7], eight[6], eight[5], eight[4]}\norder: [Int#4]{7, 6, 5, 4}\npicks2: [Int#4].from_fn(fn(i) { eight[order[i]] })"
+        },
+        {
+          "key": "D",
+          "name": "shuffle with a constant index array",
+          "detail": "Pass one fixed array of indexes instead of a variable number of arguments. This makes selection tables reusable and generated masks natural.",
+          "technical": "The mask must be known at compile time, with [Int#K] and K > 0. All A bounds and result rules apply. This is a competing signature, not an additional overload; it avoids a new scalar argument count for every result length.",
+          "code": "picks: eight.shuffle([Int#4]{7, 6, 5, 4})\nbgr: rgb.shuffle([Int#3]{2, 1, 0})"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Odin",
+          "note": "swizzle permits reordered and repeated constant picks; compact and familiar beside letter swizzles.",
+          "code": "b := swizzle(a, 2, 1, 0)",
+          "source": "https://odin-lang.org/docs/overview/#swizzle-operations"
+        },
+        {
+          "lang": "Zig",
+          "note": "@shuffle's constant mask combines two vectors. That is stronger than the one-source proposal and useful for interleaving.",
+          "code": "const b = @shuffle(f32, a, other, mask);",
+          "source": "https://ziglang.org/documentation/master/#shuffle"
+        },
+        {
+          "lang": "Swift SIMD",
+          "note": "Index-vector subscripts allow reusable dynamic masks and wrap indexes modulo the input length. Jet's proposal instead rejects bad constants.",
+          "code": "let b = a[SIMD2<Int>(1, 0)]",
+          "source": "https://github.com/swiftlang/swift/blob/main/stdlib/public/core/SIMDVector.swift"
+        },
+        {
+          "lang": "HLSL / GLSL",
+          "note": "Letter swizzles are short for graphics vectors and support repeated reads. They do not express an arbitrary long-array permutation.",
+          "code": "float3 b = a.zyx;",
+          "source": "https://learn.microsoft.com/en-us/windows/win32/direct3dhlsl/dx-graphics-hlsl-per-component-math"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It keeps the ratified lane operation name and makes short selections easy to read. Bounds and result types are explicit; hardware cost is not promised.",
+        "gains": [
+          "One numeric operation name.",
+          "Checked constant indexes.",
+          "Supports repeated picks."
+        ],
+        "losses": [
+          {
+            "loss": "shuffle can suggest random order.",
+            "mitigation": "Require indexes and describe deterministic selection in the method documentation."
+          },
+          {
+            "loss": "Large permutations can need multiple instructions.",
+            "mitigation": "Inspect representative masks on each target; no fixed instruction count is part of the contract."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A fair name for graphics users, but requires amending the ratified lane name."
+          },
+          {
+            "key": "C",
+            "reason": "Works without a new array API, but repeats source names and leaves reusable picks less direct."
+          },
+          {
+            "key": "D",
+            "reason": "Stronger for generated masks; A favors small hand-written selections without an extra mask literal."
+          }
+        ],
+        "tradeoff": "A small hand-written selector API, not a replacement for two-source shuffle or dynamic gather."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT-6-1 Sol. Fresh agent: OdinBallotReview. GPT-6.1 Sol agrees within limits after removing guaranteed single-instruction lowering and correcting the 32-byte example. Added the constant-mask alternative and specified result widths, copy restrictions and invalid indexes."
+      },
+      "checkInstructions": "Review missing.jet gives W8's E0311 and edges.jet gives E0302 for fixed letters. Acceptance must cover repeats, constant expressions, negative and N indexes, empty calls, single evaluation, non-copy refusal and unsupported widths. Check applicable tiers and target code before stating instruction counts.",
+      "surface": {
+        "gist": "How should arrays and lanes pick slots by number?",
+        "lesson": "List source indexes in result order. Bounds can be checked while compiling; instruction count still depends on the target.",
+        "options": [
+          {
+            "key": "A",
+            "name": "shuffle arguments",
+            "gist": "Constant indexes follow the source.",
+            "gains": [
+              "Short selections read directly."
+            ],
+            "losses": [
+              "Not a dynamic gather."
+            ],
+            "proposed": {
+              "code": "picks: a.shuffle(2, 1, 0)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "swizzle arguments",
+            "gist": "The same operation under Odin's name.",
+            "gains": [
+              "Matches graphics terminology."
+            ],
+            "losses": [
+              "Amends the lane operation name."
+            ],
+            "proposed": {
+              "code": "picks: a.swizzle(2, 1, 0)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Indexed construction",
+            "gist": "Use existing indexing and literals.",
+            "gains": [
+              "No new array method."
+            ],
+            "losses": [
+              "Repeats the source name."
+            ],
+            "proposed": {
+              "code": "picks: [Int#3]{a[2], a[1], a[0]}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Constant mask",
+            "gist": "Pass one index array.",
+            "gains": [
+              "Reusable selection tables."
+            ],
+            "losses": [
+              "Extra mask notation."
+            ],
+            "proposed": {
+              "code": "picks: a.shuffle([Int#3]{2, 1, 0})"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It keeps the lane name and makes short constant selections direct.",
+          "gains": [
+            "Checked indexes and repeated picks."
+          ],
+          "losses": [
+            {
+              "loss": "May need several instructions.",
+              "mitigation": "Measure target lowering; do not promise one instruction."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Fair terminology, but changes the lane name."
+            },
+            {
+              "key": "C",
+              "reason": "Works, but repeats indexed reads."
+            },
+            {
+              "key": "D",
+              "reason": "Better for generated masks; more notation for short selections."
+            }
+          ],
+          "tradeoff": "Compact constant selection, not dynamic gather."
+        },
+        "trio": {
+          "current": {
+            "note": "The numeric method is missing.",
+            "code": "a.swizzle(2, 1, 0) // E0311"
+          },
+          "wild": {
+            "lang": "Odin",
+            "note": "Constant swizzle picks and repeats slots.",
+            "code": "b := swizzle(a, 2, 1, 0)"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Unspecified edge cases and overstated speed.",
+          "attempts": [
+            "Define negative, empty, non-copy and unsupported-width cases.",
+            "Remove the one-instruction promise and incorrect U8x32 example."
+          ],
+          "result": "Semantics are target-independent; performance must be established separately."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-17T02:38:59.861Z"
+    },
+    {
+      "id": "D-ARRAY-ZIPCOLUMNS1",
+      "cardId": "c05gn07n",
+      "group": "syntax",
+      "title": "Adopt owned column buffers and extract them explicitly",
+      "situation": "Two separate field buffers may already contain the data for a columnar list. Rebuilding rows copies that data. The draft proposed from_columns without distinguishing taking buffers from borrowing them, and treated read column windows as owned extraction. Those are different promises. We recommend an explicitly taking constructor plus consuming extraction, built into the approved compiler-provided Columns family. A borrowed join is a strong alternative when the original buffers must remain owned by their callers.",
+      "gist": "Should Columns adopt separate owned buffers, borrow them, or copy rows?",
+      "lesson": "A read column window borrows data; it is not an independent owned buffer. Joining borrowed slices and adopting whole lists require different ownership contracts.",
+      "explainer": "Beginner path: Columns<P>.from_columns(x: xs.move(), v: vs.move()) takes the two whole lists. Equal lengths are required. ps.x remains the ratified read window. ps.into_columns() consumes ps and returns owned field lists, with no element copying.\n\nExpert path: synthesize the constructor's labels and list types from P's stored fields as part of the existing compiler-provided Columns mechanism. Each parameter takes &&[FieldType]. This is not an ordinary Core function whose signature can be written once without field-dependent typing. Preserve each buffer's ownership and allocator; do not combine them into a single allocation.",
+      "story": "Rae receives two independently allocated Float lists and wants one columnar owner. She hands both over, then later consumes the owner to retrieve them. If she only wanted a temporary borrowed view, option B would avoid transfer altogether.",
+      "inWild": "// Odin soa_zip joins borrowed slices, not their allocations.\nview := soa_zip(x=xs[:], v=vs[:])\n// Zig MultiArrayList supplies field slices over its own allocation.\nconst x = list.slice().items(.x);",
+      "detail": "Review missing.jet reports E0102 for zip_columns, agreeing with audit O5's missing helper. The audit's source shape is an older columnar spelling; D-SOA-SITE1=A instead ratifies compiler-provided Columns<T> and removes #Layout(columnar) at cutover. D-ARRAY-COLUMNS1=A supplies bare read windows, & write windows and ~ copies, with column(.len) for method-name collisions. Those windows cannot resize a single column and are not consuming extraction. Neither decision alone approves importing arbitrary owned buffers.\n\nCurrent ownership is established by D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A: signatures use &&T for taking, calls are plain, and an early move uses x.move(). Historical ^ forms are retired. See Docs/Spec/syntax-decisions.md:3581-3607 and Compiler/JetSema/Source/Sema/Ownership/Copy.jet's ordinary ownership machinery. The review separately probes list-taking and disjoint field moves; no Columns implementation is inferred from those witnesses. Field-dependent named arguments and multi-buffer views require compiler work and full syntax review, even though their call tokens are ordinary.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Take lists; consume to extract",
+          "detail": "from_columns takes one list per stored field. into_columns consumes the owner and returns a named record of the original owned lists. Ordinary field reads remain borrowed windows.",
+          "technical": "Each generated input is &&[FieldType], keyed by field name; unknown, missing and duplicate labels fail while compiling. Length mismatch returns ColumnError.LengthMismatch, consuming and dropping all taken inputs once. Callers needing preservation validate lengths before calling. Successful transfer allocates no element buffers and copies no elements.\n\nDifferent capacities are allowed; reported capacity is their minimum. Growth preserves per-buffer allocation ownership. Empty-field T accepts from_columns() with length zero; ordinary pushes can represent nonzero rows. into_columns returns every field once and invalidates the owner; no live window may outlive extraction.\n\nPreserve non-copy elements, destructors and each allocator. A field called len remains constructor label len; read collision uses column(.len). No reserved metadata label is added. For zero stored fields, capacity is zero on construction and follows ordinary capacity after growth.",
+          "code": "ps: Columns<P>.from_columns(x: xs.move(), v: vs.move())\nread_x: ps.x // borrowed, not an owned split\nprint(read_x[0])\nowned: ps.into_columns()\nprint(owned.x[0])"
+        },
+        {
+          "key": "B",
+          "name": "Borrowed column join",
+          "detail": "over_columns borrows existing column windows and returns a read-only Columns view. Original buffers retain ownership and there is nothing to consume or unzip.",
+          "technical": "Reuse ordinary read-window lifetime and conflict rules across all input owners. The generated view descriptor holds one column window per stored field and a shared length, with no element copying. It cannot grow, own its inputs, escape them, or support into_columns. Reject unequal lengths with ColumnError.LengthMismatch without consuming sources. Empty-field input gives length zero. This adds multi-owner Columns view support, not a second owning container or an already-working Core helper.",
+          "code": "view: Columns<P>.over_columns(x: xs, v: vs)\nprint(view.x[0])\nprint(xs[0]) // xs still owns its list"
+        },
+        {
+          "key": "C",
+          "name": "Rebuild rows with existing list operations",
+          "detail": "Add no join or extraction API. Validate lengths, push rows into the approved Columns list, and copy individual columns when separate owned lists are wanted.",
+          "technical": "A complete Float-field baseline under the ratified Columns family, not today's implementation. It costs element copies and new buffers but introduces no field-dependent call signature. Non-copy fields require ownership-aware row moves and may not support the simple indexed version; do not claim equivalence for arbitrary owning elements.",
+          "code": "if xs.len() != vs.len() -> panic(\"column lengths differ\")\nps := Columns<P>{}\nloop i in 0..<xs.len() -> ps.push(P{x: xs[i], v: vs[i]})\nowned_x: ~ps.x\nowned_v: ~ps.v"
+        },
+        {
+          "key": "D",
+          "name": "Copying constructor; borrowed field access",
+          "detail": "from_columns reads the field lists and copies them into owned Columns storage. Callers keep their originals; separate owned outputs use the existing ~ column-copy rule.",
+          "technical": "Generated labels and shared-length validation are still compiler work. Restrict to copyable field values and propagate allocation failures through existing allocation policy. Unlike A, unequal lengths leave the source lists untouched. This matches the common non-consuming constructor intuition but is not zero-copy adoption and does not supply ownership transfer.",
+          "code": "ps: Columns<P>.from_columns(x: xs, v: vs)\nprint(xs[0]) // originals remain owned here\nowned_x: ~ps.x"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Odin",
+          "note": "soa_zip and soa_unzip operate on slices: useful zero-copy borrowed views without transferring ownership of independent dynamic arrays. That differs from an owning import/export pair.",
+          "code": "view := soa_zip(x=xs[:], v=vs[:])",
+          "source": "https://odin-lang.org/docs/overview/#soa-zip"
+        },
+        {
+          "lang": "Zig",
+          "note": "MultiArrayList stores field regions inside one managed byte allocation and exposes slices. It is not a direct example of adopting independently allocated field lists.",
+          "code": "const xs = list.slice().items(.x);",
+          "source": "https://github.com/ziglang/zig/blob/master/lib/std/multi_array_list.zig"
+        },
+        {
+          "lang": "Rust / nalgebra",
+          "note": "Storage-generic matrix views show how borrowed storage can be separate from owned storage. Ownership constraints must be explicit; a borrowed view is not an owned unzip.",
+          "code": "let view = matrix.as_view();",
+          "source": "https://docs.rs/nalgebra/latest/nalgebra/base/struct.Matrix.html"
+        },
+        {
+          "lang": "numpy",
+          "note": "View-or-copy behavior is an explicit API concern, not implied by an operation's shape. reshape documents when copying is allowed and can reject a requested no-copy transformation.",
+          "code": "b = np.reshape(a, shape, copy=False)",
+          "source": "https://numpy.org/doc/stable/reference/generated/numpy.reshape.html"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Adoption plus consuming extraction solves owned buffer interchange end to end. It reuses move and window rules instead of pretending that borrowed columns transfer ownership.",
+        "gains": [
+          "No element copies on successful transfer.",
+          "Owned extraction is explicit.",
+          "No user reflection feature."
+        ],
+        "losses": [
+          {
+            "loss": "Failure consumes the imported lists.",
+            "mitigation": "State this in the signature and validate lengths before transfer when the caller needs recovery."
+          },
+          {
+            "loss": "Field-dependent signatures need compiler support.",
+            "mitigation": "Implement them inside the approved Columns family and test field collisions and ownership together."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Best when callers must retain buffers; it does not provide an owning import/export path."
+          },
+          {
+            "key": "C",
+            "reason": "Complete for copyable fields, but rebuilds data and cannot simply copy arbitrary owning elements."
+          },
+          {
+            "key": "D",
+            "reason": "Preserves inputs and is easy to reason about, but pays the copying cost the motivating program avoids."
+          }
+        ],
+        "tradeoff": "Explicit ownership transfer and compiler-generated signatures, not an ordinary borrowed zip helper."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT-6-1 Sol. Fresh agent: OdinBallotReview. GPT-6.1 Sol rejects the original ownership argument and replaces it with explicit taking construction and consuming extraction. Added borrowed and copying alternatives, mismatch ownership, empty fields, capacities, allocator and field-name collision rules."
+      },
+      "checkInstructions": "Review checks missing zip_columns and separately probes ordinary list-taking and disjoint field ownership. Acceptance must test mismatch cleanup, zero fields, non-copy fields, unequal capacities, distinct allocators, label collisions, escaped windows, source reuse after take and allocation-free successful adoption/extraction. Run applicable tiers and measure transfers before advertising zero-copy implementation.",
+      "surface": {
+        "gist": "Should Columns take separate buffers, borrow them, or copy rows?",
+        "lesson": "A read column window borrows; it does not return an owned buffer. Taking construction and consuming extraction form a different contract.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Owned transfer",
+            "gist": "Take lists and consume the owner to extract them.",
+            "gains": [
+              "No element copying on transfer."
+            ],
+            "losses": [
+              "Mismatch consumes the inputs."
+            ],
+            "proposed": {
+              "code": "ps: Columns<P>.from_columns(x: xs.move(), v: vs.move())\nowned: ps.into_columns()"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Borrowed view",
+            "gist": "Join windows; originals retain ownership.",
+            "gains": [
+              "No transfer or element copying."
+            ],
+            "losses": [
+              "Cannot grow or outlive the sources."
+            ],
+            "proposed": {
+              "code": "view: Columns<P>.over_columns(x: xs, v: vs)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Rebuild rows",
+            "gist": "Use approved list operations.",
+            "gains": [
+              "No join API."
+            ],
+            "losses": [
+              "Copies data into new buffers."
+            ],
+            "proposed": {
+              "code": "loop i in 0..<xs.len() -> ps.push(P{x: xs[i], v: vs[i]})"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Copying constructor",
+            "gist": "Read and copy the inputs.",
+            "gains": [
+              "Original lists remain owned."
+            ],
+            "losses": [
+              "Not zero-copy adoption."
+            ],
+            "proposed": {
+              "code": "ps: Columns<P>.from_columns(x: xs, v: vs)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It solves owned import and export without mistaking read windows for owned buffers.",
+          "gains": [
+            "Ownership is explicit end to end."
+          ],
+          "losses": [
+            {
+              "loss": "Failure consumes the lists.",
+              "mitigation": "Check lengths before transfer when recovery needs the original inputs."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Best for borrowing, not owning exchange."
+            },
+            {
+              "key": "C",
+              "reason": "Works for copyable fields, but rebuilds data."
+            },
+            {
+              "key": "D",
+              "reason": "Keeps inputs, but copies their elements."
+            }
+          ],
+          "tradeoff": "Taking signatures and compiler work, not implicit ownership magic."
+        },
+        "trio": {
+          "current": {
+            "note": "The proposed zip helper is absent.",
+            "code": "zip_columns(xs, vs) // E0102"
+          },
+          "wild": {
+            "lang": "Odin",
+            "note": "soa_zip borrows slices rather than adopting allocations.",
+            "code": "view := soa_zip(x=xs[:], v=vs[:])"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "The draft confused owned adoption, borrowed zip and read-window splitting.",
+          "attempts": [
+            "Add consuming into_columns and an explicit taking signature.",
+            "Offer a separate borrowed-view alternative with ordinary lifetime rules."
+          ],
+          "result": "The original incomplete ownership recommendation fails; the paired owned transfer is a repaired recommendation."
+        }
+      ],
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-17T02:39:00.851Z"
     }
   ],
   "questions": [
@@ -221068,6 +222812,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T02:58:37.363Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c00fktgk",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T02:51:30.673Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c05gn07n",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T02:39:00.851Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ARRAY-ZIPCOLUMNS1",
+      "note": "Adopt owned column buffers and extract them explicitly"
+    },
+    {
+      "at": "2026-11-17T02:38:59.861Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ARRAY-SHUFFLE1",
+      "note": "Pick slots by number with shuffle, without promising one instruction"
+    },
+    {
+      "at": "2026-11-17T02:38:58.887Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ARRAY-ROWMAJOR1",
+      "note": "Keep small fixed matrices column-major; improve row input and packing"
+    },
+    {
+      "at": "2026-11-17T02:38:57.879Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ARRAY-MATRESIZE1",
+      "note": "Keep matrix cropping, identity growth and reshape distinct"
+    },
+    {
+      "at": "2026-11-17T02:38:56.858Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ARRAY-LANEBCAST1",
+      "note": "Add lane-scalar arithmetic through typed hooks, not broader mirroring"
+    },
+    {
+      "at": "2026-11-17T02:38:55.837Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ARRAY-CONVERT1",
+      "note": "Convert fixed arrays with length-preserving map; lanes use their arrays"
+    },
+    {
+      "at": "2026-11-17T02:38:54.830Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ARRAY-CONJ1",
+      "note": "Add Complex.conj without adding a synonym"
+    },
+    {
+      "at": "2026-11-17T02:38:53.734Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ARRAY-COMPLEXT1",
+      "note": "Offer F32 complex values without requiring generic default syntax"
+    },
     {
       "at": "2026-11-17T02:29:22.555Z",
       "by": "Main",
