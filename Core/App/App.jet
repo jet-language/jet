@@ -4248,6 +4248,55 @@ priv app_background_once: fn(run: fn() Notice!) Never! {
     if run() == .Err(notice) -> __keep_notice(notice)
 }
 
+// What the app last observed of itself (`phase`). `instance` numbers the
+// app's run, from 1 at the process's first `launch`; `sequence` counts the
+// run's observations, from 0 at its start; `visibility` gathers the app's
+// windows and `execution` follows the machine's sleep. It is the latest
+// observation published, not a promise about now: a platform may hide,
+// freeze or end the app with no word first, so an app saves its changes as
+// they happen, never only when it hears it is going.
+Phase: struct {
+    instance: Int,
+    sequence: Int,
+    visibility: Visibility,
+    execution: Execution,
+}
+
+// Whether the app shows (`Phase.visibility`): `Visible` when the
+// compositor shows a window the app owns (mapped, not minimized, not
+// suspended), `Hidden` when it shows none, or the app has no window, and
+// `Unknown` before its window's first frame and when no window that
+// shows can tell (minimized on a compositor that never says when it comes
+// back). Focus never decides it, and the platform doesn't say when another
+// window covers one.
+Visibility: enum {
+    Visible,
+    Hidden,
+    Unknown,
+}
+
+// Whether the app runs (`Phase.execution`): `Suspending` from the machine
+// saying it prepares to sleep until it says it woke, which doesn't mean the
+// process is frozen yet, and `Unknown` where nothing says.
+Execution: enum {
+    Running,
+    Suspending,
+    Unknown,
+}
+
+// Why the app's phase moved (`LifecycleEvent`): its visibility changed,
+// the machine prepares to sleep or woke, its window took the focus again
+// after it lost it or after the app was asleep, or its window closed,
+// which ends the app. A focus regained and a wake are each heard, even
+// when the phase stays the same.
+LifecycleReason: enum {
+    VisibilityChanged,
+    SleepPreparing,
+    Woke,
+    FocusRegained,
+    Closing,
+}
+
 // The moments the runtime follows while the app runs: its window took or
 // lost the focus, and the machine went to sleep or woke. They stay inside
 // the runtime; the app hears only that it came back (`App.lifecycle`).
