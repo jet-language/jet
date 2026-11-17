@@ -3438,9 +3438,14 @@ Fixed-size vectors and matrices use `Float` components. `Vec2`, `Vec3`, and
 indexing, vector addition and subtraction, element-wise multiplication,
 multiplication and division by a `Float` on either side, and the `dot`,
 `length`, `length_sq`, `distance`, `distance_sq`, and `normalize` operations;
-`Vec3` also has `cross`. `Mat3` and `Mat4` constructors
-use column-major storage; they provide `from_array`, `to_array`, addition,
-subtraction, matrix multiplication, `matmul`, `transform`, and `transpose`.
+`Vec3` also has `cross`. `Mat2`, `Mat3` and `Mat4` constructors
+use column-major storage; they provide `identity`, `from_array`, `to_array`,
+addition, subtraction, matrix multiplication, `matmul`, `transform`,
+`transpose`, `determinant` and `inverse` (D-ARRAY-MAT21, D-ARRAY-INVERSE1).
+`inverse` returns `MatrixError!`: a matrix whose determinant is not finite, or
+is within 2.2e-16 of zero, fails with `MatrixError.Singular`, the rule
+`Transform.inverse()` uses. See
+[`LinearAlgebra.jet`](../../../Examples/Math/LinearAlgebra.jet).
 Reductions use a scalar left-to-right fold, so the reduction order is part of
 the reproducible fixed-array contract (D-LINALG1; `to_array` is the fixed-array bridge, D-FIXARR1).
 Arithmetic results are ordinary math values: lane reads, swizzles, and methods
