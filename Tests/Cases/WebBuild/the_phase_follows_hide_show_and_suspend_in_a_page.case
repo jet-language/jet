@@ -1,0 +1,19 @@
+# A page app's phase follows the page, as a Linux app's follows its window
+# and the machine (NativeApp/the_phase_follows_hide_show_and_suspend_on_linux).
+# Before launch the app has no phase; launch starts its run, which hears
+# that the document shows. The page (page.mjs) hides the document and shows
+# it again (visibilitychange), the browser freezes the page and resumes it
+# (the Page Lifecycle API's freeze and resume), and the page goes away
+# (pagehide). The app's lifecycle listener hears each change in order, one
+# at a time, with the phase already published.
+requires: tool:node
+fixture: ThePhaseFollowsHideShowAndSuspendInAPage.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --target web main.jet
+exit: 0
+copy: page.mjs .jet/build/page.mjs
+step: node page.mjs
+cwd: .jet/build
+exit: 0
+stdout: = "before launch: no phase\n1 VisibilityChanged: Unknown Running -> Visible Running, run 1, phase 1\nlaunched\n2 VisibilityChanged: Visible Running -> Hidden Running, run 1, phase 2\n3 VisibilityChanged: Hidden Running -> Visible Running, run 1, phase 3\n4 SleepPreparing: Visible Running -> Visible Suspending, run 1, phase 4\n5 Woke: Visible Suspending -> Visible Running, run 1, phase 5\n6 Closing: Visible Running -> Hidden Running, run 1, phase 6\n"

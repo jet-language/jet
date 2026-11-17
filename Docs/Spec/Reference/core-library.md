@@ -5783,12 +5783,12 @@ tasks never read or change the process registry. The module source is
 | `graph.app_links(domain: String) -> App` | graph | Make the web links of `domain` the app's own: `https://{domain}/tasks/7` opens what `/tasks/7` opens; give back the graph. See below. |
 | `graph.open_link(link: String) -[Net, FS.Read]> Bool` | opened | Open the screen state `link` addresses through the graph's route set, or the not-found state; true when a screen opened. See below. |
 | `graph.lost_link() -> String?` | link | The link the not-found state shows; `None` while a screen is open. |
-| `graph.launch() -[Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. See below. |
+| `graph.launch() -[Browser, Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. In a page, start the app's run and follow the page's lifecycle, and be true. See below. |
 | `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
 | `graph.menu_bar(menus: fn() -> [Menu] Notice!) -> App` | graph | Give the app's window the menus `menus` makes, kept current: on Linux the window's menu, and each item's key equivalent in the window; give back the graph. See below. |
-| `graph.lifecycle(on_resume: fn() Notice!) -> App` | graph | Run `on_resume` each time the app comes back: on Linux when its window takes the focus again, and when the machine wakes from sleep, as `LIFECYCLE` hears them; give back the graph. See below. |
+| `graph.lifecycle(on_resume: fn() Notice!) -> App` | graph | Run `on_resume` each time the app comes back: on Linux when its window takes the focus again, and when the machine wakes from sleep; in a page when it takes the focus again, and when the browser resumes it; as `LIFECYCLE` hears them; give back the graph. See below. |
 | `phase() -> Phase?` | phase | The app's phase: its run (`instance`), the observation's `sequence`, its `visibility` (`Visibility`: `Visible`, `Hidden`, `Unknown`) and `execution` (`Execution`: `Running`, `Suspending`, `Unknown`); `None` before `graph.launch()` and once the app's window closed. See below. |
 | `LIFECYCLE: Event<LifecycleEvent>` | event | Each change of the app's phase, in order, one at a time: a `LifecycleEvent` with its `instance`, `sequence`, `reason` (`LifecycleReason`: `VisibilityChanged`, `SleepPreparing`, `Woke`, `FocusRegained`, `Closing`) and the phases `before` and `after`. See below. |
 | `graph.window(width: Int, height: Int) -> App` | graph | Show the app in a Linux desktop window from `launch` on, drawing the current screen's tree; give back the graph. See below. |
@@ -6459,6 +6459,17 @@ from logind's `PrepareForSleep(true)` on the system bus until its
 `PrepareForSleep(false)`. Before the launch, and once the window closed,
 there is no phase (`None`).
 
+In a page (a web build), `graph.launch()` starts the app's run and
+follows the page's lifecycle into it: there is no other copy, desktop
+entry or window, and the launch is true. The run starts `Unknown` and
+hears at once whether the document shows. The document is `Visible`
+while the browser shows it and `Hidden` while it doesn't
+(`visibilitychange`). The page is `Suspending` from the Page Lifecycle
+API's `freeze`, or a `pagehide` that keeps the page in the back-forward
+cache, until its `resume` or the `pageshow` that gives it back, which is
+`Woke`. The page's window taking the focus again after it lost it is
+`FocusRegained`, and a `pagehide` that discards the page is `Closing`.
+
 `app.LIFECYCLE` is the event each change of the phase goes to, as a
 `LifecycleEvent`: the run, the new sequence number, the `reason`, and the
 phase `before` and `after` it. The window being shown or hidden is
@@ -6476,7 +6487,9 @@ does (core.event).
 back, as a `LIFECYCLE` listener for the graph's life. Losing the focus or
 the machine preparing to sleep takes the app away; the focus regained or
 the wake after that brings it back. The window being shown again does
-not. A resume runs in a task of its own, so the window never waits on it.
+not. In a page the same holds for the page's focus and for the browser
+freezing the page and resuming it. A resume runs in a task of its own,
+so the window never waits on it.
 
 Each resume, with or without `on_resume`, first sends the writes the
 device queued (`graph.offline(.Queue)`), then re-runs every live binding
@@ -6484,9 +6497,9 @@ at its next read, so the screen shows what changed while the app was
 away; the app writes no code for this. Only then does `on_resume` run. When
 `on_resume` fails, its `Notice` shows on a red bar over the top of the
 window that came back, until a click on the bar dismisses it; with no
-window open it joins `app.notices()`. A launched app follows the
-machine's sleep. A desktop with no system bus or no logind resumes on the
-focus alone.
+window open (always, in a page) it joins `app.notices()`. A launched app
+follows the machine's sleep. A desktop with no system bus or no logind
+resumes on the focus alone.
 
 `graph.window(width:, height:)` shows the app in a Linux desktop window of
 `width` by `height` logical pixels from `graph.launch()` on, titled the
@@ -6629,16 +6642,21 @@ than a file outside the folder. The person canceling is `None` with no
 notice. No dialog to ask with is `None`, and a notice in the app's notice
 list says why. On Linux the desktop portal's open dialog
 (org.freedesktop.portal.FileChooser), asked for a directory, chooses it.
-The other native targets keep that notice. `folder.keep(key)` keeps access
-to the folder under `key` in the device store, and `app.kept_folder(key)`
-gives it back in that run and every later one. A folder the document
-portal shares into a sandbox, under `$XDG_RUNTIME_DIR/doc/`, is kept by its
-document portal ID, so a later run finds it under its own runtime
-directory. Any other folder is kept by its path. A key with no folder kept,
-or a folder that is gone, is `None`. A browser gives a page the files the
-person picks, never a folder it can list or keep, so `app.open_folder` and
-`app.kept_folder` in code whose target is the web output are a compile
-error, E-APP-TARGET-FEATURE.
+In a page the browser's directory picker (`showDirectoryPicker`, asked for
+reading and writing) chooses it, and the page keeps its handle: `files()`
+lists it through the browser and `write` writes a new copy of the file
+that replaces the old one only once it is whole. The picker opens only
+inside the person's click or key press, and a browser without it, or one
+that refuses it, is `None` with a notice. The other native targets keep
+that notice. `folder.keep(key)` keeps access to the folder under `key` in
+the device store, and `app.kept_folder(key)` gives it back in that run and
+every later one. A folder the document portal shares into a sandbox, under
+`$XDG_RUNTIME_DIR/doc/`, is kept by its document portal ID, so a later run
+finds it under its own runtime directory. Any other folder is kept by its
+path. A key with no folder kept, or a folder that is gone, is `None`. A
+page's browser keeps the folder's handle in the page's IndexedDB
+(`jet-app-folders`); in a later visit the browser asks the person again
+before `kept_folder` gives the folder, and their refusal is `None`.
 
 `app.drop_files(body, types:, on_drop:)` gives `body` back, taking the files
 the person drops on it: each one of a kind in `types` goes to `on_drop` as a
@@ -6721,7 +6739,8 @@ app's window (`graph.window`) carries every move; the other native targets
 keep a notice saying their drag and drop is not built yet and give `body`
 back as it is. The page runtime can't carry the app's values in a
 browser's drag yet, so either call in code whose target is the web output
-is a compile error, E-APP-TARGET-FEATURE.
+is a compile error, E-APP-TARGET-FEATURE, whether it is spelled
+`app.draggable(…)` or `draggable(…)` through `use { app.[draggable] }`.
 
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file

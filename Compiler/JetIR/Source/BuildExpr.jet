@@ -8386,12 +8386,19 @@ ir_closure_key: fn(b: &IRBuilder, kind: String) -> String Never! {
 // (`task_body`) runs once, so it owns each capture the box holds by value:
 // the body closes and drops what it does not move on (ir_build_lambda), and
 // the box's release helper ends those captures only when the body never
-// started (IR_TASK_STARTED, the word before a task box's captures).
+// started (IR_TASK_STARTED, the word before a task box's captures). The box
+// of a lambda that writes its captures starts with its invocation lock
+// free (IR_CLOSURE_LOCK, ir_lambda_locked).
 ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: BodyLambda, task_body: Bool, span: Span) -> Int Never! {
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     captures := [IRCaptureSlot]{}
     takes := [Bool]{}
-    offset := if task_body -> IR_TASK_STARTED + 8 else -> 24
+    locked: ir_lambda_locked(lambda, task_body)
+    offset := if {
+        task_body -> IR_TASK_STARTED + 8
+        locked -> IR_CLOSURE_LOCK + 8
+        else -> 24
+    }
     loop (index, capture) in lambda.captures {
         binding: ir_lookup_binding(b, capture.source) ?? ir_lookup_binding(b, capture.local.name) ?? return ir_fail_slot(b, span, "capture of unknown local {capture.source}")
         moved: lambda.capture_facts.moved.contains(capture.source) || lambda.capture_facts.moved.contains(capture.local.name)
@@ -8425,6 +8432,10 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
         offset += size
     }
     boxed: ir_closure_box(m, b, row, offset, captures)
+    if locked {
+        free: ir_word_const(m, b, 0)
+        ir_emit(b.f, IROp.Store, -1, boxed, IR_CLOSURE_LOCK, free, b.line)
+    }
     loop (index, capture) in lambda.captures {
         slot: captures[index]
         source: if ir_lookup_binding(b, capture.source) != None -> capture.source else -> capture.local.name
@@ -8470,6 +8481,14 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
     ir_emit(b.f, IROp.FunctionAddress, code, id, -1, -1, b.line)
     ir_emit(b.f, IROp.Store, -1, boxed, 8, code, b.line)
     boxed
+}
+
+// Whether a call of `lambda` holds its box's invocation lock
+// (IR_CLOSURE_LOCK) while its body runs: a lambda that writes its captures,
+// as one function value two tasks call may (a `task.group` child and its
+// owner, or two children), but not a task body, which runs once.
+ir_lambda_locked: fn(lambda: BodyLambda, task_body: Bool) -> Bool Never! {
+    !task_body && lambda.capture_facts.needs_fn_mut
 }
 
 // The function of `lambda`, queued for ir_build_lambda: it takes the closure
@@ -8617,6 +8636,15 @@ ir_build_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob)
         }
     }
     b.ret = returned
+    // The lock is taken before the body and left by every return and stop
+    // edge (ir_tx_leave_scopes).
+    if ir_lambda_locked(lambda, job.task_body) {
+        pointer_row: ir_pointer_row(m)
+        lock: ir_temp(m, b, pointer_row)
+        ir_emit(b.f, IROp.Offset, lock, env, IR_CLOSURE_LOCK, -1, b.line)
+        _: ir_runtime(m, b, "jet_rt_memo_lock", [Int]{lock}, -1)
+        b.transactions.push(IRTxFrame{handle: -1, stm: -1, snapshots: [IRTxSnapshot]{}, loops: 0, shield: false, deadline: -1, closure_lock: lock})
+    }
     ir_effect_scope_frame(m, b, lambda.effect_scope)
     if lambda.executable == {
         .Expr(value) -> { ir_return(m, p, b, Val(value), span) }

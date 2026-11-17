@@ -3663,6 +3663,11 @@ sema_expr_check_direct_call: fn(call: Call, expected: Type?, environment: SemaSc
     if sema_expr_callable_local_index(environment, scopes, call.name) != None {
         return sema_expr_check_indirect_call(Expr.Ident{name: call.name, span: call.name_span, id: AST_NODE_GENERATED}, call.args, sema_expr_local_call_span(call), expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
+    // A device call through a member import of `app` gets the checks its
+    // qualified spelling gets, whichever route then checks the call.
+    if sema_app_imported_member(call.name, environment, program) == .Val(member) {
+        sema_call_app_device(SEMA_APP_MARKER_MODULE, member, SEMA_APP_MARKER_MODULE, call.name_span, call.args, environment, program, context.function_name, diagnostics)
+    }
     // A loaded declaration owns the call even when Core also imports the name.
     if sema_expr_declared_function_named(scopes, call.name) {
         return sema_expr_check_declared_direct_call(call, expected, environment, program, scopes, state, tail_store, context, diagnostics)

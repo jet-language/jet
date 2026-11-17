@@ -63,12 +63,14 @@ has promise integration (`WebAssembly.Suspending` and
 `WebAssembly.promising`), a wait, such as `time.sleep`, a lock or a
 channel, suspends the waiting thread on a promise the host settles at the
 wake or the deadline, and the page goes on meanwhile: its timers, its
-rendering and its other scripts run. The program's run, each click and
-each drop is one entry, and entries take turns: a click or drop that
-arrives while one is suspended runs once that one has ended. A device
+rendering and its other scripts run. The program's run, each click, each
+drop and each change of the page's lifecycle a launched app hears
+(`graph.launch`) is one entry, and entries take turns: one that arrives
+while another is suspended runs once that one has ended. A device
 request the browser answers later (`app.ask`, `app.take_photo`,
-`app.location`, `app.open_file`, the reads of a file the page keeps, and
-each reading `app.location_updates`, `app.orientation_updates` and
+`app.location`, `app.open_file`, `app.open_folder`, `app.kept_folder`, the
+reads of a file the page keeps, a folder's listing and writes, and each
+reading `app.location_updates`, `app.orientation_updates` and
 `app.heading_updates` give, through the page's UI provider) suspends the
 program the same way until the browser's promise settles.
 

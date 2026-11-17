@@ -1,0 +1,14 @@
+make_counter: fn() -> fn(Int) -> Int {
+    seen := [Int]{}
+    fn(value: Int) {
+        seen.push(value)
+        seen.len() * 100 + value
+    }
+}
+
+run: fn() {
+    counter: make_counter()
+    worker: task counter(1)
+    print(counter(2))
+    print(worker.join() ?? 0)
+}

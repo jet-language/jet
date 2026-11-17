@@ -1,0 +1,18 @@
+// A detached task takes the function value it calls: the value writes the
+// list it captured, and it has no copy to give, so the owner can't call it
+// beside the task.
+
+make_counter: fn() -> fn(Int) -> Int {
+    seen := [Int]{}
+    fn(value: Int) {
+        seen.push(value)
+        seen.len() * 100 + value
+    }
+}
+
+run: fn() {
+    counter: make_counter()
+    worker: task counter(1)
+    print(counter(2))
+    print(worker.join() ?? 0)
+}

@@ -13,6 +13,7 @@ package: {
 // records of that registry under LIVE_SYNC_SOURCE.
 use {
     auth: core.auth
+    base64: core.encoding.base64
     unicode: core.text
     http: core.http
     crypto: core.crypto
@@ -2644,28 +2645,19 @@ App: struct {
     // Then it opens the link the launch was given (`open_link`), else,
     // when the graph has a window (`window`), the address `/`, opens the
     // window, and is true. That link is the first argument that is one, as
-    // the desktop passes the link the entry's `%u` names.
-    launch: fn(self) -[Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool Never! {
-        link := ""
-        loop given in process.args() {
-            if app_link_address(given) == None -> next
-            link = given.copy()
-            break
+    // the desktop passes the link the entry's `%u` names. In a page there
+    // is no other copy, desktop entry or window to open: a launch starts
+    // the app's run and follows the page's lifecycle into it
+    // (`app_launch_page`), and is true.
+    launch: fn(self) -[Browser, Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool Never! {
+        #if #build.target.os == {
+            .Linux -> { return app_launch_desktop(self) }
+            .MacOS -> { return app_launch_desktop(self) }
+            .Windows -> { return app_launch_desktop(self) }
+            .Web -> { return app_launch_page() }
+            .Wasm -> { return app_launch_desktop(self) }
+            .Freestanding -> { return app_launch_desktop(self) }
         }
-        socket: "{app_runtime_dir()}/{app_desktop_id(self.title)}.link"
-        token: sys.get("XDG_ACTIVATION_TOKEN") ?? sys.get("DESKTOP_STARTUP_ID") ?? ""
-        if app_launch_hand(socket, link, token) -> return false
-        if app_graph_schemes().len() > 0 -> app_link_register(self.title)
-        app_launch_listen(App{title: self.title.copy()}, socket)
-        app_background_start(self.title)
-        app_tray_start(self.title)
-        app_lifecycle_start(app_graph_window() != None)
-        app_sleep_start()
-        if link != "" -> _: self.open_link(link) else if app_graph_window() != None {
-            _: self.open_link("/")
-        }
-        app_window_start(self.title)
-        true
     }
 
     // The activation token of each later launch that handed this running
@@ -4165,6 +4157,63 @@ priv app_link_register: fn(title: String) -[Env, FS.Read, FS.Write]> Never! {
 // next text (`App.launch`).
 C_APP_HANDOFF_WAIT_NS: 5000000000
 
+// `App.launch` on a desktop: hands the launch's link to the running copy
+// and is false, or becomes that copy, starts its run and opens its window.
+priv app_launch_desktop: fn(graph: App) -[Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool Never! {
+    link := ""
+    loop given in process.args() {
+        if app_link_address(given) == None -> next
+        link = given.copy()
+        break
+    }
+    socket: "{app_runtime_dir()}/{app_desktop_id(graph.title)}.link"
+    token: sys.get("XDG_ACTIVATION_TOKEN") ?? sys.get("DESKTOP_STARTUP_ID") ?? ""
+    if app_launch_hand(socket, link, token) -> return false
+    if app_graph_schemes().len() > 0 -> app_link_register(graph.title)
+    app_launch_listen(App{title: graph.title.copy()}, socket)
+    app_background_start(graph.title)
+    app_tray_start(graph.title)
+    app_lifecycle_start(app_graph_window() != None)
+    app_sleep_start()
+    if link != "" -> _: graph.open_link(link) else if app_graph_window() != None {
+        _: graph.open_link("/")
+    }
+    app_window_start(graph.title)
+    true
+}
+
+// `App.launch` in a page: starts the app's run, its visibility unknown
+// until the page says, and has the page tell it each change of its
+// lifecycle (`app_page_moments`).
+priv app_launch_page: fn() -[Browser, Net, Time]> Bool Never! {
+    app_lifecycle_start(true)
+    hook: ui.button("", fn() { app_page_moments() })
+    _: ui_rt.device(WEB_DEVICE_LIFECYCLE, "{hook.__click_slot()}")
+    app_page_moments()
+    true
+}
+
+// Takes the moments of the page's lifecycle the page holds for the app,
+// oldest first, each one observed (`app_moment`): the page shown or
+// hidden, its window taking or losing the focus, the page frozen or
+// resumed, and the page going away.
+priv app_page_moments: fn() -[Net, Time]> Never! {
+    loop {
+        said: ui_rt.device(WEB_DEVICE_MOMENT, "") ?? return
+        moment: if said == {
+            "visible" -> AppMoment.Shown(.Visible)
+            "hidden" -> AppMoment.Shown(.Hidden)
+            "focus" -> AppMoment.Foreground
+            "blur" -> AppMoment.Background
+            "freeze" -> AppMoment.Suspend
+            "resume" -> AppMoment.Wake
+            "gone" -> AppMoment.Closed
+            else -> next
+        }
+        app_moment(moment)
+    }
+}
+
 // The directory of the app's link socket (`App.launch`): `$XDG_RUNTIME_DIR`
 // when it is an absolute path, else the temporary directory.
 priv app_runtime_dir: fn() -[Env]> String Never! {
@@ -4324,7 +4373,12 @@ LifecycleEvent: struct {
 // The app's lifecycle, from `launch` on: on a Linux desktop its window is
 // shown or hidden (the compositor's configure and the window's
 // `minimize`), takes the focus again, or closes, and the machine prepares
-// to sleep or wakes (logind's PrepareForSleep on the system bus). Each
+// to sleep or wakes (logind's PrepareForSleep on the system bus). In a
+// page the document is shown or hidden (`visibilitychange`), the page's
+// window takes the focus again, the browser freezes the page or resumes
+// it (the Page Lifecycle API's `freeze` and `resume`, and a page kept in
+// the back-forward cache), and the page goes away (`pagehide`), which
+// ends the app as a closed window does. Each
 // listener (`.on(scope, handler)`) hears the observations one at a time,
 // in the order they arrived, never two at once; `phase` gives each one's
 // `after` before its listeners hear it, and an observation made while
@@ -4876,7 +4930,7 @@ PickedFile: struct {
     }
 }
 
-// Where a picked file's bytes are: a path on this device, or a file a page's
+// Where a picked file or folder is: a path on this device, or one a page's
 // browser holds for the app, under the number its UI provider gave it.
 priv PickedSource: enum {
     Path(String),
@@ -4933,6 +4987,20 @@ priv WEB_DEVICE_SHARE: 8
 priv WEB_DEVICE_OPEN: 9
 
 priv WEB_DEVICE_DROPPED: 10
+
+priv WEB_DEVICE_FOLDER: 11
+
+priv WEB_DEVICE_LIST: 12
+
+priv WEB_DEVICE_WRITE: 13
+
+priv WEB_DEVICE_KEEP: 14
+
+priv WEB_DEVICE_KEPT: 15
+
+priv WEB_DEVICE_LIFECYCLE: 16
+
+priv WEB_DEVICE_MOMENT: 17
 
 // The `size` bytes of the file a page holds under `number` for the app.
 priv app_page_whole: fn(number: Int, name: String, size: Int) -> [U8] IOError! {
@@ -5000,7 +5068,59 @@ priv app_page_reading: fn(watch: String) -> [String]? Never! {
 // Stops the page following the sensor under `watch`.
 priv app_page_unwatch: fn(watch: String) Never! { _: ui_rt.device(WEB_DEVICE_STOP, watch) }
 
-#Test("a page's answers read as a grant, a place, a file and a sensor's reading, and a page's file reads only in its page") {
+// The folder a page's answer holds from its field `from` on: the number
+// the page keeps its handle under and its name. None when it has none.
+priv app_page_folder: fn(fields: [String], from: Int) -> PickedFolder? Never! {
+    if fields.len() < from + 2 -> return None
+    number: Int.parse(fields[from]) ?? return None
+    Val(PickedFolder{name: fields[from + 1].copy(), source: .Page(number)})
+}
+
+// The files directly in the folder a page keeps under `number` (`name`),
+// in name order, each one the page then keeps as a picked file's. A folder
+// the page no longer holds, or one the browser no longer lets it list, is
+// an error.
+priv app_page_listed: fn(number: Int, name: String) -> [PickedFile] IOError! {
+    fields: app_page_answer(WEB_DEVICE_LIST, "{number}")
+    if app_page_first(fields) != .Val("listed") {
+        return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(name), os_code: None, cause: Val("the browser no longer lets the page list the folder")}))
+    }
+    found := [PickedFile]{}
+    at := 1
+    loop at + 3 <= fields.len() {
+        found.push(app_page_file(fields, at) ?? return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(name), os_code: None, cause: Val("the page listed a file without its number and size")})))
+        at += 3
+    }
+    Ok(found)
+}
+
+// Writes `bytes` as the file `file` in the folder a page keeps under
+// `number` (`name`): the browser writes them all to a new copy of the file
+// and only then replaces it, so a failed write leaves the file as it was.
+priv app_page_write: fn(number: Int, name: String, file: String, bytes: [U8]) IOError! {
+    said: ui_rt.device(WEB_DEVICE_WRITE, "{number} {base64.encode(bytes)} {file}") ?? ""
+    if said != "written" {
+        return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(file), os_code: None, cause: Val("the browser did not let the page write to {name}")}))
+    }
+    Ok()
+}
+
+// Has the page's browser keep the folder it holds under `number` under
+// `key`, for `kept_folder` in a later visit.
+priv app_page_keep: fn(number: Int, key: String) Never! {
+    _: ui_rt.device(WEB_DEVICE_KEEP, "{number} {key}")
+}
+
+// `kept_folder` in a page: the folder whose handle the browser keeps under
+// `key`. The browser may ask the person again before the page reaches it;
+// a refusal, or no folder kept under `key`, is `None`.
+priv app_page_kept_folder: fn(key: String) -> PickedFolder? Never! {
+    fields: app_page_answer(WEB_DEVICE_KEPT, key)
+    if app_page_first(fields) != .Val("granted") -> return None
+    app_page_folder(fields, 1)
+}
+
+#Test("a page's answers read as a grant, a place, a file, a folder and a sensor's reading, and a page's file and folder are reached only in their page") {
     assert_eq(app_page_first([String]{}), None)
     assert_eq(app_page_first([String]{"denied"}), Val("denied"))
     assert_eq(app_page_place([String]{"granted", "52.52", "13.405", "20"}, 1), Val(Place{latitude: 52.52, longitude: 13.405, accuracy_m: 20.0}))
@@ -5027,6 +5147,18 @@ priv app_page_unwatch: fn(watch: String) Never! { _: ui_rt.device(WEB_DEVICE_STO
     if photo.read() == {
         .Ok(_) -> { panic("a page's file reads only in its page") }
         .Err(_) -> {}
+    }
+    if app_page_folder([String]{"granted", "3", "exports"}, 1) == .Val(folder) {
+        assert_eq(folder.name, "exports")
+    } else { panic("an answer with a folder gives it") }
+    if app_page_folder([String]{"granted"}, 1) == .Val(_) {
+        panic("an answer without a folder gives none")
+    }
+    assert(app_page_kept_folder("exports") == PickedFolder?{None}, "with no page, no folder is kept")
+    held: PickedFolder{name: "exports", source: .Page(3)}
+    if held.files() == .Ok(_) -> panic("a page's folder lists only in its page")
+    if held.write("board.csv", [U8]{}) == .Ok(_) {
+        panic("a page's folder is written only in its page")
     }
 }
 
@@ -5138,16 +5270,14 @@ priv app_chosen_path: fn(uri: String) -> String? Never! {
 // (`kept_folder`).
 PickedFolder: struct {
     name: String,
-    priv path: String,
+    priv source: PickedSource,
 
     // The files directly in the folder, each a PickedFile, in name order.
     files: fn(self) -[FS.Read]> [PickedFile] IOError! {
-        found := [PickedFile]{}
-        loop entry in files.list_dir(self.path) ?? return Err(err) {
-            if entry.is_dir -> next
-            found.push(app_picked(entry.path) ?? return Err(err))
+        if self.source == {
+            .Path(path) -> app_folder_files(path)
+            .Page(number) -> app_page_listed(number, self.name)
         }
-        Ok(found)
     }
 
     // Writes `bytes` as the file `name` in the folder, all at once, so a
@@ -5157,53 +5287,90 @@ PickedFolder: struct {
         if name == "" || name == "." || name == ".." || name.contains("/") {
             return Err(IOError.InvalidInput(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("a file in a folder is named without a `/`, and is not `.` or `..`")}))
         }
-        files.write_atomic("{self.path}/{name}", bytes)
+        if self.source == {
+            .Path(path) -> { files.write_atomic("{path}/{name}", bytes) }
+            .Page(number) -> app_page_write(number, self.name, name, bytes)
+        }
     }
 
-    // Keeps access to the folder under `key` in the device store
-    // (`device_cell_load`): `kept_folder(key)` gives it back in this run and
-    // every later one, until another folder is kept under `key`. It keeps
-    // the folder's path or, for one the document portal shares into a
-    // sandbox, its document portal ID (`app_folder_form`).
+    // Keeps access to the folder under `key`: `kept_folder(key)` gives it
+    // back in this run and every later one, until another folder is kept
+    // under `key`. On this device the device store (`device_cell_load`)
+    // keeps the folder's path or, for one the document portal shares into a
+    // sandbox, its document portal ID (`app_folder_form`). A page's browser
+    // keeps the folder's handle (`app_page_keep`).
     keep: fn(self, key: String) -[Env]> Never! {
-        form: app_folder_form(self.path, sys.get("XDG_RUNTIME_DIR") ?? "")
-        loop {
-            seen: device_cell_load(FOLDER_STORE, FOLDER_CELL)
-            listed: live_fields(seen) ?? [String]{}
-            kept := [U8]{}
-            at := 0
-            loop at + 1 < listed.len() {
-                if listed[at] != key {
-                    live_put(kept, listed[at])
-                    live_put(kept, listed[at + 1])
-                }
-                at += 2
-            }
-            live_put(kept, key)
-            live_put(kept, form)
-            if device_cell_replace(FOLDER_STORE, FOLDER_CELL, seen, kept) {
-                return
-            }
+        if self.source == {
+            .Path(path) -> { app_keep_folder(key, path) }
+            .Page(number) -> app_page_keep(number, key)
         }
     }
 }
 
-// The folders `keep` kept, as length-prefixed fields: each key, then its
-// folder's form (`app_folder_form`).
+// The files directly in the folder at `path`, in name order.
+priv app_folder_files: fn(path: String) -[FS.Read]> [PickedFile] IOError! {
+    found := [PickedFile]{}
+    loop entry in files.list_dir(path) ?? return Err(err) {
+        if entry.is_dir -> next
+        found.push(app_picked(entry.path) ?? return Err(err))
+    }
+    Ok(found)
+}
+
+// Keeps the folder at `path` under `key` in the device store
+// (`PickedFolder.keep`).
+priv app_keep_folder: fn(key: String, path: String) -[Env]> Never! {
+    form: app_folder_form(path, sys.get("XDG_RUNTIME_DIR") ?? "")
+    loop {
+        seen: device_cell_load(FOLDER_STORE, FOLDER_CELL)
+        listed: live_fields(seen) ?? [String]{}
+        kept := [U8]{}
+        at := 0
+        loop at + 1 < listed.len() {
+            if listed[at] != key {
+                live_put(kept, listed[at])
+                live_put(kept, listed[at + 1])
+            }
+            at += 2
+        }
+        live_put(kept, key)
+        live_put(kept, form)
+        if device_cell_replace(FOLDER_STORE, FOLDER_CELL, seen, kept) {
+            return
+        }
+    }
+}
+
+// The folders `keep` kept on this device, as length-prefixed fields: each
+// key, then its folder's form (`app_folder_form`).
 priv FOLDER_CELL: Shared{LiveCell{bytes: [U8]{}}}
 
 priv FOLDER_STORE: "app.folders"
 
 // The folder kept under `key` (`PickedFolder.keep`), in this run or an
-// earlier one; `None` when none is, or it is no longer a folder.
+// earlier one; `None` when none is, or it is no longer a folder. A page
+// asks its browser (`app_page_kept_folder`), which may ask the person
+// again for access to it.
 kept_folder: fn(key: String) -[Env, FS.Read]> PickedFolder? {
+    #if #build.target.os == {
+        .Linux -> { return app_kept_folder(key) }
+        .MacOS -> { return app_kept_folder(key) }
+        .Windows -> { return app_kept_folder(key) }
+        .Web -> { return app_page_kept_folder(key) }
+        .Wasm -> { return app_kept_folder(key) }
+        .Freestanding -> { return app_kept_folder(key) }
+    }
+}
+
+// `kept_folder` on this device: the folder's form in the device store.
+priv app_kept_folder: fn(key: String) -[Env, FS.Read]> PickedFolder? Never! {
     listed: live_fields(device_cell_load(FOLDER_STORE, FOLDER_CELL)) ?? return None
     at := 0
     loop at + 1 < listed.len() {
         if listed[at] == key {
             path: app_folder_path(listed[at + 1], sys.get("XDG_RUNTIME_DIR") ?? "") ?? return None
             if !files.is_dir(path) -> return None
-            return Val(PickedFolder{name: files.basename(path), path: path})
+            return Val(PickedFolder{name: files.basename(path), source: .Path(path)})
         }
         at += 2
     }
@@ -5235,16 +5402,34 @@ priv app_folder_path: fn(form: String, runtime: String) -> String? Never! {
 // Asks the person for a folder and gives it, or `None` when they cancel.
 // No dialog to ask with, or a choice that is not a local folder, is `None`
 // with a notice. On Linux the desktop portal's open dialog asks for a
-// directory (org.freedesktop.portal.FileChooser); the other native targets
+// directory (org.freedesktop.portal.FileChooser); in a page the browser's
+// directory picker asks (`app_open_folder_web`); the other native targets
 // keep that notice.
 open_folder: fn() -[Env, FS.Read, Net, Time]> PickedFolder? {
     #if #build.target.os == {
         .Linux -> { return app_open_folder_linux() }
         .MacOS -> { return app_no_folder(OPEN_UNBUILT) }
         .Windows -> { return app_no_folder(OPEN_UNBUILT) }
-        .Web -> { return app_no_folder(OPEN_UNBUILT) }
+        .Web -> { return app_open_folder_web() }
         .Wasm -> { return app_no_folder(OPEN_UNBUILT) }
         .Freestanding -> { return app_no_folder(OPEN_UNBUILT) }
+    }
+}
+
+// `open_folder` in a page: the browser's directory picker asks for a
+// folder the page may read and write, and the page keeps its handle, which
+// the folder's files, writes and `keep` go through. The person closing the
+// picker is `None`. A browser without a directory picker, a picker it
+// opens only inside the person's gesture, one it refuses, or no page to
+// ask in keeps the notice of why.
+priv app_open_folder_web: fn() -> PickedFolder? Never! {
+    fields: app_page_answer(WEB_DEVICE_FOLDER, "")
+    grant: app_page_first(fields) ?? return app_no_folder("there is no page to ask in")
+    if grant == {
+        "granted" -> app_page_folder(fields, 1)
+        "restricted" -> app_no_folder("this browser gives a page no folder to pick")
+        "gesture" -> app_no_folder("the browser opens its folder picker only inside a click or a key press")
+        else -> app_no_folder("the browser refused the page a folder")
     }
 }
 
@@ -5261,7 +5446,7 @@ priv app_open_folder_linux: fn() -[Env, FS.Read, Net, Time]> PickedFolder? Never
     if !files.is_dir(path) {
         return app_no_folder("the dialog chose {files.basename(path)}, which is not a folder")
     }
-    Val(PickedFolder{name: files.basename(path), path: path})
+    Val(PickedFolder{name: files.basename(path), source: .Path(path)})
 }
 
 // Keeps the notice that no folder was opened, and why; gives `None`.
@@ -7285,7 +7470,7 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
     folder: "{sys.temp_dir()}/jet-folder-{sys.getpid()}"
     files.create_dir_all("{folder}/Exports") ?? panic("folder: {err}")
     assert(kept_folder("exports") == PickedFolder?{None}, "nothing is kept under a new key")
-    PickedFolder{name: "Exports", path: "{folder}/Exports"}.keep("exports")
+    PickedFolder{name: "Exports", source: .Path("{folder}/Exports")}.keep("exports")
     kept: kept_folder("exports") ?? panic("the folder kept as `exports` is found")
     assert_eq(kept.name, "Exports")
     kept.write("board.csv", "title\nFix the gate\n".bytes()) ?? panic("write: {err}")

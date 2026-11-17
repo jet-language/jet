@@ -1,0 +1,33 @@
+// A page app that prints its phase (`app.phase`) before launch, and each
+// change of it its lifecycle's listeners hear (`app.LIFECYCLE`): the
+// reason, the phase before and after, and the phase the listener reads
+// then. The page (page.mjs) hides the document and shows it again, the
+// browser freezes the page and resumes it, and the page goes away.
+use {
+    app
+    event: core.event
+    core.event.[EventScope]
+}
+
+Listening: struct {
+    scope: EventScope?,
+}
+
+// The listener's scope, kept past the run: the page goes on after it, and
+// a scope's listeners stop with it.
+LISTENING: Shared{Listening{scope: None}}
+
+said: fn(phase: app.Phase) -> String { "{phase.visibility} {phase.execution}" }
+
+run: fn() {
+    print(if app.phase() == None -> "before launch: no phase" else -> "before launch: a phase")
+    graph: app.new("Phases")
+    listening: event.scope()
+    app.LIFECYCLE.on(listening, fn(heard: app.LifecycleEvent) {
+        now: if app.phase() == .Val(phase) -> "{phase.sequence}" else -> "none"
+        print("{heard.sequence} {heard.reason}: {said(heard.before)} -> {said(heard.after)}, run {heard.instance}, phase {now}")
+    })
+    held := LISTENING.guard_edit()
+    held.value.scope = Val(listening)
+    print(if graph.launch() -> "launched" else -> "not launched")
+}

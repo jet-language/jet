@@ -30,9 +30,11 @@ use jet_foundation.[Span, SymbolID, BodyCallArg, BodyContextGuard, CONTEXT_ON_ST
 // taking raw addresses one with only `sentry_frame`, its sentry stack frame
 // (BuildSentry.jet). A function with an effect-scope descriptor
 // (FnBody.effect_scope) is a frame with only `effect_scope`, the
-// effect-scope frame its entry replaced, and a `#MaxDepth(n)` function one
+// effect-scope frame its entry replaced, a `#MaxDepth(n)` function one
 // with only `depth_site`, the site word its count lives under
-// (BuildDepth.jet): an early exit leaves them.
+// (BuildDepth.jet), and a lambda that writes its captures one with only
+// `closure_lock`, its box's invocation lock (IR_CLOSURE_LOCK): an early
+// exit leaves them.
 IRTxFrame: struct {
     handle: Int,
     stm: Int,
@@ -48,6 +50,7 @@ IRTxFrame: struct {
     terminal: Bool{false},
     effect_scope: Int{-1},
     depth_site: Int{-1},
+    closure_lock: Int{-1},
     values: Int{0},
     allocator: Int{-1},
     bindings: Int{0},
@@ -682,7 +685,8 @@ ir_tx_unwind: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, loops: Int, span: Sp
 // allocator carrier (pushed last, so restored first), the session Shield,
 // the replaced deadline, the pushed context values, the replaced sentry
 // gate, the sentry stack frame, the replaced terminal mode, the replaced
-// effect scope and a `#MaxDepth(n)` call's count.
+// effect scope, a `#MaxDepth(n)` call's count and a lambda's invocation
+// lock.
 ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
     if frame.allocator >= 0 {
         _: ir_runtime(m, b, "jet_ctx_pop_allocator", [Int]{frame.allocator}, -1)
@@ -705,6 +709,9 @@ ir_tx_leave_scopes: fn(m: &IRModule, b: &IRBuilder, frame: IRTxFrame) Never! {
     }
     if frame.depth_site >= 0 {
         _: ir_runtime(m, b, "jet_rt_depth_leave", [Int]{frame.depth_site}, -1)
+    }
+    if frame.closure_lock >= 0 {
+        _: ir_runtime(m, b, "jet_rt_memo_unlock", [Int]{frame.closure_lock}, -1)
     }
 }
 

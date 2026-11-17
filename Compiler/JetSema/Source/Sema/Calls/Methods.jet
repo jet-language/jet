@@ -1565,8 +1565,9 @@ sema_app_feature_target: fn(environment: SemaScopeEnvironment, graph: SemaRegist
 // sensor streams, the open dialogs, a kept folder, a drop target, a drag
 // and a notification on this device): the web output has none of them but
 // `ask`, `open_settings`, the photo, the location, the sensor streams, the
-// clipboard, the share sheet, the file chooser and the files dropped on a
-// body, which a page answers (sema_call_app_device_target), and one that
+// clipboard, the share sheet, the file chooser, the files dropped on a
+// body and a picked or kept folder, which a page answers
+// (sema_call_app_device_target), and one that
 // may ask for a permission needs its purpose
 // (sema_call_app_permission_purpose): `ask` those its argument names, the
 // photo the camera's, the location's calls its, a notification its own.
@@ -1586,7 +1587,7 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
         "location" | "location_updates" -> {
             sema_call_app_permission_purpose(member, alias, Val("Location"), span, program, diagnostics)
         }
-        "open_folder" | "kept_folder" | "draggable" | "drop_zone" -> {
+        "draggable" | "drop_zone" -> {
             sema_call_app_device_target(member, alias, span, environment, program, function_name, diagnostics)
         }
         "notify" -> {
@@ -1600,11 +1601,32 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
     }
 }
 
-// A browser shows a page's notification only while the page is open; it
-// gives a page no folder it can list or keep; and the page runtime carries
-// no drag of the app's. So such a device call on an app whose resolved
-// target is the web output is refused, never dropped or answered for the
-// browser.
+// The `app` member a bare call names through a member import (`use
+// app.[draggable]` then `draggable(…)`), so the call gets the device checks
+// (sema_call_app_device) its qualified spelling gets; None for a name no
+// member import of `app` binds.
+sema_app_imported_member: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? Never! {
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        module_index: sema_scope_caller_index(environment, graph) ?? return None
+        loop registration in graph.modules[module_index].imports {
+            loop binding in registration.bindings {
+                if binding.local != name || (binding.declaration_position == None && binding.symbol.kind == SymbolKind.Import) {
+                    next
+                }
+                target_index: binding.target_module_index ?? next
+                if graph.modules[target_index].module_name != SEMA_APP_MARKER_MODULE -> next
+                return Val(binding.original)
+            }
+        }
+    }
+    None
+}
+
+// A browser shows a page's notification only while the page is open, and
+// the page runtime carries no drag of the app's. So such a device call on
+// an app whose resolved target is the web output is refused, never dropped
+// or answered for the browser.
 sema_call_app_device_target: fn(member: String, alias: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
     // Read in place through the pattern: a `??` binding copies the graph.
     if program.registration_graph == .Val(graph) {
@@ -1619,10 +1641,6 @@ sema_call_app_device_target: fn(member: String, alias: String, span: Span, envir
         if member == "notify" {
             why = "A browser shows a page's notification only while the page is open, so the web output has no `{alias}.notify` for this device; one for a closed page would be lost."
             fix = "Send it from the server: `{alias}.notify(to:, title:, body:, open:)` reaches each browser the account registered, through Web Push. Keep `{alias}.notify(title:, body:, open:)` for a native build."
-        }
-        if member == "open_folder" || member == "kept_folder" {
-            why = "A browser gives a page the files the person picks, never a folder it can list or keep, so the web output has no `{alias}.{member}` to run; answering for the person would make the choice up."
-            fix = "On the web, let the person pick the files with `{alias}.open_file` or drop them with `{alias}.drop_files`. Keep `{alias}.{member}` for a native build."
         }
         diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, why, fix))
     }

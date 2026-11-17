@@ -1,0 +1,47 @@
+// Crewboard in a page that refreshes the board each time the app comes
+// back (`lifecycle(on_resume:)`), as the Linux app does. Its lifecycle's
+// listener (`app.LIFECYCLE`) prints why each change came, and the refresh
+// prints how many resumes the board has seen. The second refresh finds the
+// server offline; the app keeps that notice, and the listener prints the
+// app's notices when the page goes away.
+use {
+    app
+    event: core.event
+    core.event.[EventScope]
+}
+
+Board: struct {
+    resumes: Int,
+}
+
+BOARD: Shared{Board{resumes: 0}}
+
+refresh: fn() app.Notice! {
+    held := BOARD.guard_edit()
+    held.value.resumes += 1
+    print("resumed {held.value.resumes}")
+    if held.value.resumes == 2 -> return Err(app.Notice{text: "The board is offline"})
+    Ok()
+}
+
+Listening: struct {
+    scope: EventScope?,
+}
+
+// The listener's scope, kept past the run: the page goes on after it, and
+// a scope's listeners stop with it.
+LISTENING: Shared{Listening{scope: None}}
+
+run: fn() {
+    graph: app.new("Crewboard").lifecycle(on_resume: fn() app.Notice! { refresh() })
+    listening: event.scope()
+    app.LIFECYCLE.on(listening, fn(heard: app.LifecycleEvent) {
+        print("heard {heard.reason}")
+        if heard.reason == .Closing {
+            loop notice in app.notices() -> print("notice: {notice.text}")
+        }
+    })
+    held := LISTENING.guard_edit()
+    held.value.scope = Val(listening)
+    print(if graph.launch() -> "launched" else -> "not launched")
+}
