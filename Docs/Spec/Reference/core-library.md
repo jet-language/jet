@@ -1134,7 +1134,7 @@ runs each of these cases.
 | `[T]` | `update_first(fn(item) { Bool }, item)` | exclusive, in place | Decide | false | current |
 | `[T]` | `split_write(Int)` | exclusive, in place | Disjoint | Ok(two empty write views) at zero | current |
 | `[T]` | `get_disjoint_write([Int])` | exclusive, in place | Disjoint | Ok(empty view list) for no indexes | current |
-| `[T]` | `edit_disjoint([Int], (ViewMut<item>, ViewMut<item>) -> T)` | exclusive, in place | Disjoint | Err for a selection that does not name two items | current |
+| `[T]` | `edit_disjoint([Int], fn(ViewMut<item>, ViewMut<item>) { T })` | exclusive, in place | Disjoint | Err for a selection that does not name two items | current |
 | `[T]` | `replace(item, item)` | exclusive, in place | Decide | false | current |
 | `[T]` | `binary_search(item)` | borrows | Lookup | None | current |
 | `[T]` | `binary_search_by(fn(item) { T })` | borrows | Search | None | current |
