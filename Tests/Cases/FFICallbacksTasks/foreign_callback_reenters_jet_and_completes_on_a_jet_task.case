@@ -1,14 +1,12 @@
 # tests/ffi_callbacks_tasks.rs::foreign_callback_reenters_jet_and_completes_on_a_jet_task
 # ORACLE-LITERAL; PENDING-SAME-HEAD. Generated Rust C trampoline text/rustc link machinery RETIRE; actual C thread callback/runtime proof retained.
+# The C dependency is a source directory (deps callback: c@"c"), which jet build compiles and links with its own toolchain, so no host C compiler or archiver is required.
+# C calls a named Jet function and a lambda from a thread of its own, then a Jet task calls C, which does its work on another C thread.
 requires: os:unix
-requires: tool:cc|gcc|clang
-requires: tool:ar
 fixture: ForeignCallbackReentersJetAndCompletesOnAJetTask.fixture
-step: {tool:cc|gcc|clang} -pthread -c callback.c -o callback.o
-exit: 0
-step: ar rcs libcallback.a callback.o
-exit: 0
-write: package.jet package.template
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
 step: jet build main.jet
 exit: 0
 step: built
