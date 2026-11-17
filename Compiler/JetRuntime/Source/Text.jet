@@ -91,7 +91,7 @@ rt_text_builder_from: fn(cap: I64, carrier: I64) -> I64 {
     rt_text_store(wrapping(header + I64{24}), I64{0})
     if (cap <= RT_TEXT_INLINE) { return header }
     data: if (carrier == I64{0}) -> alloc_bytes(cap) else -> alloc_user_need(carrier, cap, I64{1})
-    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) {
+    if (data == I64{0} && scheduler_stop_pending() != I64{0}) {
         rt_text_header_free(header)
         return I64{0}
     }
@@ -185,14 +185,14 @@ rt_text_from_word: fn(word: I64, len: I64) -> I64 {
 // Every in-place writer starts here: a builder is written only while its
 // creator holds the sole reference (clone before finish would share it).
 // The writer is about to change the bytes, so the cache word is cleared.
-// False means the stop was published and the writer must not touch target.
+// A shared target is the compiler's defect, which ends the process.
 rt_text_writable: fn(target: I64) -> Bool {
     if jet_rt_rc_unique(wrapping(target - I64{8})) {
         rt_text_store(wrapping(target + I64{24}), I64{0})
         return true
     }
-    message: rt_static_text("internal: shared text written in place")
-    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    reason: rt_static_text("shared text written in place")
+    jet_rt_unreachable(rt_text_data(reason), rt_text_len(reason))
     false
 }
 
@@ -259,15 +259,6 @@ rt_text_valid_width: fn(ptr: I64, remaining: I64, stride: I64) -> I64 {
     width
 }
 
-rt_text_capacity_stop: fn() {
-    message: jet_rt_string_builder_new()
-    rt_text_push_word(message, I64{7142822732922778707}, I64{8})
-    rt_text_push_word(message, I64{2340029477383401569}, I64{8})
-    rt_text_push_word(message, I64{8606216600190023279}, I64{8})
-    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
-    jet_rt_string_drop(message)
-}
-
 // The bytes the heap block serving a `bytes`-byte text buffer holds: its
 // size class's block less the block's header (alloc_bytes), or `bytes`
 // itself for a buffer mapped directly past the largest class.
@@ -286,7 +277,7 @@ rt_text_buffer_fill: fn(bytes: I64) -> I64 {
 rt_text_reserve_extra: fn(target: I64, old: I64, used: I64, extra: I64) -> I64 {
     if !rt_text_writable(target) -> return I64{0}
     if (extra > I64{9223372036854775807} - used) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     needed: used + extra
@@ -308,11 +299,11 @@ rt_text_reserve_extra: fn(target: I64, old: I64, used: I64, extra: I64) -> I64 {
     // A buffer a `#Context(allocator:)` block served grows from its
     // allocator (Alloc.jet alloc_grow_try).
     data: alloc_grow_bytes(old, capacity)
-    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) { return I64{0} }
+    if (data == I64{0} && scheduler_stop_pending() != I64{0}) { return I64{0} }
     rt_text_bytes_copy(data, old, used)
     before: jet_rt_session_status()
     if separate -> free_bytes(old, cap)
-    if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) {
+    if (jet_rt_session_status() != before && scheduler_stop_pending() != I64{0}) {
         jet_rt_free(data, capacity, I64{1})
         return I64{0}
     }
@@ -424,7 +415,7 @@ rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
     if at == len -> return rt_text_copy(ptr, len)
     result: jet_rt_string_builder_new()
     rt_text_append(result, ptr, at)
-    if (jet_rt_session_propagate() != I64{0}) {
+    if (scheduler_stop_pending() != I64{0}) {
         jet_rt_string_drop(result)
         return I64{0}
     }
@@ -442,7 +433,7 @@ rt_text_lossy: fn(ptr: I64, len: I64) -> I64 {
                 rt_text_append(result, ptr + start, at - start)
             }
         }
-        if (jet_rt_session_propagate() != I64{0}) {
+        if (scheduler_stop_pending() != I64{0}) {
             jet_rt_string_drop(result)
             return I64{0}
         }
@@ -495,7 +486,7 @@ rt_text_concat: fn(left: I64, right: I64, carrier: I64) -> I64 {
     left_len: rt_text_len(left)
     right_len: rt_text_len(right)
     if (right_len > I64{9223372036854775807} - left_len) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     len: left_len + right_len
@@ -618,7 +609,7 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
     data: rt_text_data(value)
     tail: rt_text_len(value) - resume
     if (extra > I64{9223372036854775807} - keep - tail) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     len: keep + extra + tail
@@ -735,7 +726,7 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
         return value
     }
     if (extra > I64{9223372036854775807} - used) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     header: rt_text_builder_with_capacity(used + extra)
@@ -775,7 +766,7 @@ rt_text_spliced: fn(value: I64, keep: I64, source: I64, extra: I64, resume: I64)
     if !rt_text_inline(value, data) {
         before: jet_rt_session_status()
         free_bytes(data, rt_text_word(wrapping(value + I64{16})))
-        if (jet_rt_session_status() != before && jet_rt_session_propagate() != I64{0}) {
+        if (jet_rt_session_status() != before && scheduler_stop_pending() != I64{0}) {
             return
         }
     }
@@ -1397,7 +1388,7 @@ rt_text_push_word: fn(target: I64, word: I64, len: I64) {
     at := I64{0}
     loop at < len {
         rt_text_push_scalar(target, rest & I64{255})
-        if (jet_rt_session_propagate() != I64{0}) {
+        if (scheduler_stop_pending() != I64{0}) {
             return
         }
         rest = rest >> I64{8}
@@ -1677,7 +1668,7 @@ rt_c_string_stop: fn(kind: I64) {
         at += I64{1}
     }
     data: jet_rt_alloc(len + I64{1}, I64{1})
-    if (data == I64{0} && jet_rt_session_propagate() != I64{0}) { return I64{0} }
+    if (data == I64{0} && scheduler_stop_pending() != I64{0}) { return I64{0} }
     rt_text_bytes_copy(data, source, len)
     rt_text_put(wrapping(data + len), I64{0})
     data

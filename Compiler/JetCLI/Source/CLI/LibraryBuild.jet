@@ -81,7 +81,7 @@ jet_cli_build_library: fn(file: String, source: String, color: Bool, options: &&
             if problems.len() > 0 {
                 jet_cli_finish(jet_cli_report_output("", "E1341", problems.join("; "), jet_cli_why("E1341"), "export only functions whose parameters and result are C scalars (`Int`, `Float`, `F32`, `Bool`, `I8`-`I64`, `U8`-`U64`)", color, JET_DRIVER_EXIT_USER_ERROR), trace_sink)
             }
-            built := jet_cli_library_ir(checked, rows, [String]{}, opt, compiler_threads, trace_sink)
+            built := jet_cli_library_ir(checked, rows, [String]{}, opt, false, compiler_threads, trace_sink)
             if built.refused {
                 jet_cli_finish(jet_cli_report_output("", "E1341", built.issues.join("; "), jet_cli_why("E1341"), "give each export its own C symbol, and export only functions a C host can call", color, JET_DRIVER_EXIT_USER_ERROR), trace_sink)
             }

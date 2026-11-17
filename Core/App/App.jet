@@ -545,7 +545,8 @@ remote: fn<S>(service: &&S, client: String{""}) -> Remote<S> Never! {
 
 // The Remote of a service a server mounts at `address`, its mount prefix
 // (`http://127.0.0.1:8080/api`): each call posts its JSON arguments to
-// `{address}/{method}`. `client` is as for `remote`.
+// `{address}/{method}`. In a page an address with no origin (`/api`) is on
+// the page's own. `client` is as for `remote`.
 remote_at: fn<S>(address: String, client: String{""}) -> Remote<S> Never! {
     Remote<S>{service: None, address: address, client: client, local: false}
 }
@@ -933,29 +934,80 @@ priv remote_send: fn(address: String, local: Bool, method: String, body: String,
 priv remote_send_as: fn(address: String, method: String, body: String, key: String, bearer: String) -[Net, Time]> String CallError! {
     seed: "{rt.clock_mono_ns()}:{trace_next()}:{key}"
     trace: make_trace_id("trace:{seed}", 16)
+    headers := [http.Header]{
+        http.Header{name: "traceparent", value: "00-{trace}-{make_trace_id("span:{seed}", 8)}-01"},
+        http.Header{name: "x-request-id", value: trace},
+        http.Header{name: "idempotency-key", value: key},
+    }
+    if bearer != "" -> headers.push(http.Header{name: "authorization", value: "Bearer {bearer}"})
     lost := ""
     loop sends in 0..<REMOTE_SENDS {
         if sends > 0 -> tasks.sleep(REMOTE_RESEND_MS * sends)
-        sent := http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{make_trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_header("idempotency-key", key).__with_body(body)
-        if bearer != "" -> sent = sent.__with_header("authorization", "Bearer {bearer}")
-        response: sent.send() ?? {
-            lost = "{err}"
-            next
-        }
-        text: response.body.text(REMOTE_MAX_REPLY) ?? {
-            lost = "{err}"
+        reply: remote_send_once("{address}/{method}", headers, body)
+        if reply.status == 0 {
+            lost = reply.text
             next
         }
         return if {
-            response.status == 200 -> Ok(text)
-            response.status == 401 -> Err(.SignedOut)
-            response.status == 422 -> Err(.Invalid(remote_invalid(text)))
-            response.status == 426 -> Err(.UpdateRequired)
-            response.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {response.header("retry-after") ?? "?"} s"))
-            else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
+            reply.status == 200 -> Ok(reply.text)
+            reply.status == 401 -> Err(.SignedOut)
+            reply.status == 422 -> Err(.Invalid(remote_invalid(reply.text)))
+            reply.status == 426 -> Err(.UpdateRequired)
+            reply.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {reply.retry_after ?? "?"} s"))
+            else -> Err(.Unreachable("{address}/{method} answered {reply.status}"))
         }
     }
     Err(.Unreachable("{address}/{method}: {lost}"))
+}
+
+// One reply to a send of a remote call: its status, its `retry-after`, and
+// its body's text; status 0 when no reply came, and then `text` says why.
+priv RemoteReply: struct {
+    status: Int,
+    retry_after: String?,
+    text: String,
+}
+
+// One send of a remote call: POST `body` to `url` with `headers`. A page
+// sends it through the browser's fetch (`remote_send_page`), every other
+// target through core.http (`remote_send_http`).
+priv remote_send_once: fn(url: String, headers: [http.Header], body: String) -[Net, Time]> RemoteReply Never! {
+    #if #build.target.os == {
+        .Linux -> { return remote_send_http(url, headers, body) }
+        .MacOS -> { return remote_send_http(url, headers, body) }
+        .Windows -> { return remote_send_http(url, headers, body) }
+        .Web -> { return remote_send_page(url, headers, body) }
+        .Wasm -> { return remote_send_http(url, headers, body) }
+        .Freestanding -> { return remote_send_http(url, headers, body) }
+    }
+}
+
+priv remote_send_http: fn(url: String, headers: [http.Header], body: String) -[Net, Time]> RemoteReply Never! {
+    sent := http.__request("POST", url).__with_body(body)
+    loop header in headers -> sent = sent.__with_header(header.name, header.value)
+    response: sent.send() ?? return RemoteReply{status: 0, retry_after: None, text: "{err}"}
+    text: response.body.text(REMOTE_MAX_REPLY) ?? return RemoteReply{status: 0, retry_after: None, text: "{err}"}
+    RemoteReply{status: response.status, retry_after: response.header("retry-after"), text: text}
+}
+
+// `remote_send_once` in a page: the browser's fetch posts `body` to `url`
+// with `headers` (device request 18), and the page answers the reply's
+// status, its `retry-after` ("" for none) and its body's text, or why no
+// reply came. A reply over `REMOTE_MAX_REPLY` bytes is lost, as core.http
+// loses it.
+priv remote_send_page: fn(url: String, headers: [http.Header], body: String) -> RemoteReply Never! {
+    lines := [String]{url}
+    loop header in headers -> lines.push("{header.name}: {header.value}")
+    fields: app_page_answer(WEB_DEVICE_POST, "{lines.join("\n")}\n\n{body}")
+    if fields.len() < 3 {
+        why: if fields.len() == 1 -> fields[0] else -> "There is no page to send it from"
+        return RemoteReply{status: 0, retry_after: None, text: why}
+    }
+    status: Int.parse(fields[0]) ?? return RemoteReply{status: 0, retry_after: None, text: "The page answered no status"}
+    if fields[2].len() > REMOTE_MAX_REPLY {
+        return RemoteReply{status: 0, retry_after: None, text: "The reply is over {REMOTE_MAX_REPLY} bytes"}
+    }
+    RemoteReply{status: status, retry_after: if fields[1] == "" -> None else -> Val(fields[1]), text: fields[2]}
 }
 
 // ---- native sessions
@@ -5002,6 +5054,8 @@ priv WEB_DEVICE_LIFECYCLE: 16
 
 priv WEB_DEVICE_MOMENT: 17
 
+priv WEB_DEVICE_POST: 18
+
 // The `size` bytes of the file a page holds under `number` for the app.
 priv app_page_whole: fn(number: Int, name: String, size: Int) -> [U8] IOError! {
     if size == 0 -> return Ok([U8]{})
@@ -5841,16 +5895,17 @@ priv app_context_draw: fn(frame: ui.Frame, menu: AppOpenMenu) Never! {
 // Enter drops it on the one shown and Escape puts it back. A long press on
 // it (half a second, then letting go where it began) opens a menu of the
 // drop zones to move it to. On Linux the app's window (`App.window`)
-// carries the move; the other native targets keep a notice that says
-// their drag and drop is not built yet and give `body` back as it is. The
-// page runtime can't carry a drag yet, so a call in code whose target is
-// the web output is a compile error.
+// carries the move; in a web build the page does, with the browser's drag
+// and drop, the same keys and, on its `contextmenu` (a long press on a
+// touch screen, or the menu key), the same menu (`app_drag_web`). The
+// other native targets keep a notice that says their drag and drop is not
+// built yet and give `body` back as it is.
 draggable: fn<V: Encode>(body: UINode, value: V, label: String) -> UINode Never! {
     #if #build.target.os == {
         .Linux -> { return app_drag_source(body, value.encode(), Type{V}, label) }
         .MacOS -> { return app_no_drag(body) }
         .Windows -> { return app_no_drag(body) }
-        .Web -> { return app_no_drag(body) }
+        .Web -> { return app_drag_web(body, value.encode(), Type{V}, label) }
         .Wasm -> { return app_no_drag(body) }
         .Freestanding -> { return app_no_drag(body) }
     }
@@ -5861,10 +5916,9 @@ draggable: fn<V: Encode>(body: UINode, value: V, label: String) -> UINode Never!
 // joins the app's notices, as a button's does, and the window shows it.
 // A value of another type, and a file or text another program drops on
 // it, is refused with a notice and goes nowhere. On Linux the app's
-// window (`App.window`) delivers the drops; the other native targets keep
-// a notice that says their drag and drop is not built yet and give `body`
-// back as it is. The page runtime can't carry a drag yet, so a call in
-// code whose target is the web output is a compile error.
+// window (`App.window`) delivers the drops, and in a web build the page
+// (`app_zone_web`); the other native targets keep a notice that says
+// their drag and drop is not built yet and give `body` back as it is.
 drop_zone: fn<V: Decode>(body: UINode, label: String, on_drop: &&fn(V) Notice!) -> UINode {
     #if #build.target.os == {
         .Linux -> {
@@ -5872,7 +5926,7 @@ drop_zone: fn<V: Decode>(body: UINode, label: String, on_drop: &&fn(V) Notice!) 
         }
         .MacOS -> { return app_no_drag(body) }
         .Windows -> { return app_no_drag(body) }
-        .Web -> { return app_no_drag(body) }
+        .Web -> { return app_zone_web(body, label, Type{V}, app_zone_decoding<V>(on_drop.move())) }
         .Wasm -> { return app_no_drag(body) }
         .Freestanding -> { return app_no_drag(body) }
     }
@@ -5954,6 +6008,70 @@ priv app_no_drag: fn(body: UINode) -> UINode Never! {
     body.copy()
 }
 
+// What a page's drag picked up last (`app_drag_web`), which the drop zone
+// it moves onto takes (`app_zone_web`); None for nothing.
+priv APP_WEB_PICKED: Shared{AppWebPicked{moved: None}}
+
+priv AppWebPicked: struct {
+    moved: AppDrag?,
+}
+
+// The kinds of value a page's dragged bodies and drop zones move
+// (`Type{V}`), each one's key its index, so the page offers a body only
+// the drop zones that take its kind.
+priv APP_WEB_KINDS: Shared{[Type]{}}
+
+// The key of the kind `kind` in a page (`APP_WEB_KINDS`).
+priv app_web_kind: fn(kind: Type) -> Int Never! {
+    held: APP_WEB_KINDS.guard_edit()
+    loop index in 0..<held.value.len() {
+        if held.value[index] == kind -> return index
+    }
+    held.value.push(kind.copy())
+    held.value.len() - 1
+}
+
+// `body` as one a page drags `value`, of the type `kind`, with
+// (`UINode.__dragging_in_page`): a move picks it up first, through a
+// handler that holds what it moves.
+priv app_drag_web: fn(body: UINode, value: Dyn, kind: Type, label: String) -> UINode Never! {
+    moved: AppDrag{label: label.copy(), kind: kind.copy(), value: value.copy()}
+    pick: ui.button("", fn() { app_web_pick(moved) })
+    body.__dragging_in_page(pick, app_web_kind(kind), label)
+}
+
+// `body` as one whose drops in a page of a value of the type `kind` go to
+// `run` (`UINode.__taking_drops_in_page`), through a handler that takes
+// what the move picked up.
+priv app_zone_web: fn(body: UINode, label: String, kind: Type, run: &&fn(Dyn) Notice!) -> UINode Never! {
+    target: AppZone{label: label.copy(), kind: kind.copy(), run: Shared{AppZoneRun{run: run.move()}}}
+    taker: ui.button("", fn() { app_web_take(target) })
+    body.__taking_drops_in_page(taker, app_web_kind(kind), label)
+}
+
+// Picks up what a page moves.
+priv app_web_pick: fn(moved: AppDrag) Never! {
+    held := APP_WEB_PICKED.guard_edit()
+    held.value.moved = Val(moved.copy())
+}
+
+// A page's drop on the drop zone `target`: what the move picked up goes
+// there (`app_move`), and with nothing picked up, a drop from elsewhere,
+// the drop is refused (`app_refuse`).
+priv app_web_take: fn(target: AppZone) Never! {
+    picked: app_web_taken()
+    if picked == .Val(moved) -> app_move(moved, target) else -> app_refuse(target)
+}
+
+// What the move picked up, which no longer is; None for nothing. Its guard
+// ends before the drop zone's `on_drop` runs.
+priv app_web_taken: fn() -> AppDrag? Never! {
+    held := APP_WEB_PICKED.guard_edit()
+    picked: held.value.moved.copy()
+    held.value.moved = None
+    picked
+}
+
 // Starts the window's dragged bodies and drop zones over, for a tree
 // opened anew.
 priv app_drags_clear: fn() Never! {
@@ -5983,12 +6101,18 @@ priv app_zones: fn() -> Int Never! {
     held.value.len()
 }
 
-// Drops the value of the dragged body `drag` on the drop zone `zone`: its
-// `on_drop` takes it when it is of the zone's type, and its failure joins
-// the app's notices; a value of another type is refused with a notice.
+// Drops the value of the dragged body `drag` on the drop zone `zone`
+// (`app_move`).
 priv app_drag_drop: fn(drag: Int, zone: Int) Never! {
     moved: app_drag(drag) ?? return
     target: app_zone(zone) ?? return
+    app_move(moved, target)
+}
+
+// Drops the value `moved` carries on the drop zone `target`: its
+// `on_drop` takes it when it is of the zone's type, and its failure joins
+// the app's notices; a value of another type is refused with a notice.
+priv app_move: fn(moved: AppDrag, target: AppZone) Never! {
     if moved.kind != target.kind {
         __keep_notice(Notice{text: "Couldn't move {moved.label} to {target.label}: it doesn't take that"})
         return
@@ -6003,11 +6127,17 @@ priv app_zone_once: fn(run: fn(Dyn) Notice!, value: Dyn) Never! {
     if run(value) == .Err(notice) -> __keep_notice(notice)
 }
 
-// A drop from another program on the drop zone `zone` (0 for none): a
-// drop zone takes only what the app's own bodies carry, so it is refused
-// with a notice.
+// A drop from another program on the drop zone `zone` (0 for none)
+// (`app_refuse`).
 priv app_zone_refuse: fn(zone: Int) Never! {
     target: app_zone(zone) ?? return
+    app_refuse(target)
+}
+
+// A drop from another program on the drop zone `target`: a drop zone
+// takes only what the app's own bodies carry, so it is refused with a
+// notice.
+priv app_refuse: fn(target: AppZone) Never! {
     __keep_notice(Notice{text: "Couldn't drop that on {target.label}: it takes only what you move there in this app"})
 }
 
@@ -7381,6 +7511,23 @@ priv app_lifecycle_test_hear: fn(moment: AppMoment) -> [String] Never! {
     assert_eq(shown[shown.len() - 1].text, "Doing took 7")
     app_drags_clear()
     assert_eq(app_zones(), 0)
+}
+
+#Test("a page's drop zone takes what the move picked up, refuses another type, and refuses a drop with nothing picked up") {
+    assert_eq(app_web_kind(Type{Int}), app_web_kind(Type{Int}))
+    assert(app_web_kind(Type{Int}) != app_web_kind(Type{String}))
+    doing: AppZone{label: "Doing", kind: Type{Int}, run: Shared{AppZoneRun{run: app_zone_decoding<Int>(fn(task: Int) Notice! { Err(Notice{text: "Doing took {task}"}) })}}}
+    app_web_pick(AppDrag{label: "Ship it", kind: Type{Int}, value: 7.encode()})
+    app_web_take(doing)
+    shown := notices()
+    assert_eq(shown[shown.len() - 1].text, "Doing took 7")
+    app_web_take(doing)
+    shown = notices()
+    assert_eq(shown[shown.len() - 1].text, "Couldn't drop that on Doing: it takes only what you move there in this app")
+    app_web_pick(AppDrag{label: "Standup notes", kind: Type{String}, value: "Standup notes".encode()})
+    app_web_take(doing)
+    shown = notices()
+    assert_eq(shown[shown.len() - 1].text, "Couldn't move Standup notes to Doing: it doesn't take that")
 }
 
 #Test("a menu bar's menus hold their items with their keys, and a key equivalent names its keys") {

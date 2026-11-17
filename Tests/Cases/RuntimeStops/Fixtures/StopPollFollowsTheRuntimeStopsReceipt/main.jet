@@ -1,0 +1,17 @@
+use time: core.time
+
+// One call to the runtime's Int text conversion, which reaches no stop.
+shown: fn(value: Int) -> String { "{value}" }
+
+// One text builder: its new, push and finish calls only grow and fill a
+// buffer, which reaches no stop.
+joined: fn(left: String, right: String) -> String { "{left}, {right}" }
+
+// One call to the sleep, which waits on the scheduler and can deliver a
+// cancellation or a deadline.
+wait: fn(deadline: time.Instant) { time.sleep_until(deadline) }
+
+run: fn() {
+    print(joined(shown(4), shown(2)))
+    wait(time.instant())
+}

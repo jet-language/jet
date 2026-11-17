@@ -343,7 +343,8 @@ appends text (a String or a borrowed text view); ordinary text construction
 still uses interpolation, not binary `+`. The append preserves explicitly
 copied values. The place must be mutable or reached through an `&` parameter.
 Fields, including fields reached through list elements, support text append;
-direct indexed compound updates remain E0164 (copy, update, then store).
+direct indexed compound updates remain E0164 (copy, update, then store), and a
+map slot with a starting value takes them in place: `counts[w, or: 0] += 1`.
 User-record compound arithmetic requires the same operator hook as its binary
 form; without that hook sema reports E0360, before any execution tier runs.
 Operator implementation identity includes the left type, trait, and right type
@@ -2153,6 +2154,13 @@ OOB/missing key; `xs.get(i) -> (?T)` safe access; `m[k] = v` inserts. `Dyn`
 follows the same rule (D-DATATREE-PATH1=A): `d[key]` reads an object member,
 `d[i]` an array item, `d.get(key)` / `d.get(i)` give `Dyn?`, and writes on a
 mutable binding insert or replace without creating missing containers.
+The map slot `m[k, or: start]` (D-MAP-SLOT1=A) looks `k` up once. As a value
+it reads the stored value, or `start` for a missing key, and adds no entry. As
+a place it adds `start` under a missing key first: `counts[w, or: 0] += 1`,
+`&groups[w, or: [String]{}].push(w)` and `slot: &m[k, or: start]` each insert
+at most once. `start` runs only for a missing key, and a plain
+`m[k, or: start] = v` sets `k` without running it. It is the one upsert
+spelling.
 
 **D-INDEXOF1=A — `index_of` searches by value** *(ratified 2026-10-01, card
 #4010; owner: "d-indexof1 by value, A")*: `[T].index_of(item: T) -> Int?` and
@@ -5817,7 +5825,7 @@ index, not a substitute for that law.
 - **D-IOERROR-TREE1=A**: every `core.term.Reader`/`Writer` adapter returns one
   closed `IOError` tree: `InvalidInput(IOContext)`, `NotFound(IOContext)`,
   `PermissionDenied(IOContext)`, `TimedOut(IOContext)`,
-  `Cancelled(IOContext)`, `Closed(IOContext)`, `Protocol(IOContext)`, or
+  `Canceled(IOContext)`, `Closed(IOContext)`, `Protocol(IOContext)`, or
   `Other(IOContext)`.
   `IOContext` has `operation: IOOperation`, `resource: ?String`,
   `os_code: ?Int`, and `cause: ?String`. `IOOperation` is exactly `Read`,

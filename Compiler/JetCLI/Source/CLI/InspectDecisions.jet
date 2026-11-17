@@ -110,6 +110,7 @@ jet_cli_decisions: fn(inputs: &&JetDriverLoweringInputs, build: BuildOptions, th
     checked := inputs.move()
     declarations := jet_driver_checked_declarations(checked)
     checks := ir_checks_stock()
+    checks.quiet_routes = jet_cli_runtime_quiet_routes(jet_cli_runtime_exports(jet_cli_runtime_dir()))
     checks.release = profile == "release" || profile == "hardened"
     checks.harden = harden || profile == "hardened"
     timing_host := ""

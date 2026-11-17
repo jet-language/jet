@@ -834,8 +834,9 @@ trap_host_fault: fn(message: I64, length: I64) {
     trap_defect_exit(EXIT_ICE)
 }
 
-// IR Never is not a program-side stop. The Rust host's thread/source/backtrace
-// prefix is not Jet semantics; preserve the unreachable! body and status 101.
+// IR Never and the runtime's own defects (a shared text written in place) are
+// not a program-side stop. The Rust host's thread/source/backtrace prefix is
+// not Jet semantics; preserve the unreachable! body and status 101.
 #Export(c) jet_rt_unreachable: fn(reason: I64, length: I64) {
     trap_stop(I64{1}, reason, length, I64{0}, I64{0})
     trap_defect_prepare()
@@ -848,6 +849,9 @@ trap_host_fault: fn(message: I64, length: I64) {
 
 // Vec::with_capacity(capacity as usize) and growth overflow are foreign
 // Rust String panics under CAbi guard: body + newline, exit 101, not a Jet stop.
+// Every runtime capacity past I64's range ends here: a sequence's, a text's
+// (whose bytes could never be addressed) and an owner count's (more owners
+// than memory holds, where Rust's Arc aborts).
 rt_seq_capacity_overflow_stop: fn() {
     reason: rt_static_text("capacity overflow")
     trap_stop(I64{1}, rt_text_data(reason), rt_text_len(reason), I64{0}, I64{0})

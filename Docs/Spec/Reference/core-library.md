@@ -822,6 +822,20 @@ beside a loop is E0445: build the two apart and join them, as in
 `[0].concat(loop x in xs -> x)`. The other collection types build from the
 loop's list through their constructors, such as `Tally.from(loop …)`.
 
+A map index with a starting value, `m[k, or: start]`, is a writable slot that
+looks `k` up once, on every tier from the same lowering. As a value it reads
+the stored value, or `start` when `k` is missing, and adds no entry, so it
+reads an immutable map too. As a place it first adds `start` under a missing
+`k`, then updates the stored value. The counter idiom is
+`counts[w, or: 0] += 1`, and `&groups[w, or: [String]{}].push(w)` groups
+values under their key. `slot: &m[k, or: start]` binds the entry the same way.
+`start` has the map's value type and runs only when `k` is missing, at most
+once per slot use. A plain `m[k, or: start] = v` sets `k` as `m[k] = v` does,
+and `start` does not run. A starting value on anything but a map is E0505, and
+a compound assignment on a plain map index, `m[k] += 1`, stays E0164, whose
+fix is this slot. It is the one upsert spelling; Map has no other method that
+inserts a default.
+
 The naming law in [`stdlib-api-laws.md`](../stdlib-api-laws.md) owns verb
 choices; this table records the shipped surface without adding aliases:
 
@@ -1092,7 +1106,6 @@ runs each of these cases.
 | `[K:V]` | `add(key, value)` | exclusive, in place | Mutate | None | current |
 | `[K:V]` | `try_insert(key, value)` | exclusive, in place | TryMutate | Ok(None) | current |
 | `[K:V]` | `add_new(key, value)` | exclusive, in place | Mutate | true | current |
-| `[K:V]` | `setdefault(key, value)` | exclusive, in place | Mutate | the default | current |
 | `[K:V]` | `remove(key)` | exclusive, in place | Mutate | None | current |
 | `[K:V]` | `pop(key)` | exclusive, in place | Mutate | None | current |
 | `[K:V]` | `get(key)` | borrows | Lookup | None | current |
@@ -5808,8 +5821,8 @@ tasks never read or change the process registry. The module source is
 | `copy_text(text: String)` | — | Puts `text` on the clipboard, for this app and every other program to paste. Delivered by the Linux app window (Wayland) and the web page's Clipboard API. See below. |
 | `paste_text() -[Env, Net, Time]> String?` | text | The clipboard's text; `None` when it holds none, or a page's browser refuses the read. Delivered by the Linux app window (Wayland) and, inside the person's gesture, the web page's Clipboard API. See below. |
 | `share(url: String)` | — | Shares `url` through the system's share sheet; on Linux, which has none, and in a browser without the Web Share API, copies it and says so. Delivered by the Linux app window (Wayland) and the web page. See below. |
-| `draggable<V: Encode>(body: UINode, value: V, label: String) -> UINode` | node | `body` as one a person drags `value` with, named `label`; a drop zone that takes a `V` gets it. The keyboard and a long press move it too. Delivered by the Linux app window. See below. |
-| `drop_zone<V: Decode>(body: UINode, label: String, on_drop: fn(V) Notice!) -> UINode` | node | `body`, named `label`, giving each `V` a person drops on it to `on_drop`; anything else dropped on it is refused with a notice. Delivered by the Linux app window. See below. |
+| `draggable<V: Encode>(body: UINode, value: V, label: String) -> UINode` | node | `body` as one a person drags `value` with, named `label`; a drop zone that takes a `V` gets it. The keyboard and a long press move it too. Delivered by the Linux app window and a web build's page. See below. |
+| `drop_zone<V: Decode>(body: UINode, label: String, on_drop: fn(V) Notice!) -> UINode` | node | `body`, named `label`, giving each `V` a person drops on it to `on_drop`; anything else dropped on it is refused with a notice. Delivered by the Linux app window and a web build's page. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
@@ -5896,7 +5909,11 @@ Remote, which no code outside `app` reads. A call through the Remote that
 `remote(service)` makes runs the method on that service directly.
 
 A call through the Remote that `remote_at(address)` makes is a POST of the
-arguments, encoded as one JSON array, to `{address}/{method}`. A Public
+arguments, encoded as one JSON array, to `{address}/{method}`. In a page the
+browser's `fetch` sends it, so the browser's rules for a page's requests
+apply (another origin's server must allow the page through CORS), and an
+address with no origin (`/api`) is on the page's own; every other target
+sends it through core.http. A Public
 method answers `{"ok": value}` or `{"err": error}`, which the call returns as
 the method's value or error. `web.app().mount(prefix, service)` registers
 each marked method of the service as that POST route `{prefix}/{method}`.
@@ -6735,12 +6752,14 @@ joins the focus ring. Space picks it up, the arrow keys step it through the
 drop zones, a bar over the top of the window naming the one shown, Enter
 drops it there and Escape puts it back. A long press, half a second let go
 where it began, opens a menu of the drop zones that take it. On Linux the
-app's window (`graph.window`) carries every move; the other native targets
-keep a notice saying their drag and drop is not built yet and give `body`
-back as it is. The page runtime can't carry the app's values in a
-browser's drag yet, so either call in code whose target is the web output
-is a compile error, E-APP-TARGET-FEATURE, whether it is spelled
-`app.draggable(…)` or `draggable(…)` through `use { app.[draggable] }`.
+app's window (`graph.window`) carries every move. In a web build the page
+does: the browser's drag and drop drops a dragged body's value on a drop
+zone, the same keys move it, an outline in place of the bar marking the
+drop zone shown, and the body's `contextmenu`, which a long press on a
+touch screen or the menu key opens, offers the drop zones that take it,
+after the body's own `context_menu` items. The other native targets keep
+a notice saying their drag and drop is not built yet and give `body` back
+as it is.
 
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file

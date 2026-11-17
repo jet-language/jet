@@ -2892,11 +2892,11 @@ DIAGNOSTIC_ROWS: #run { [DiagnosticRegistryRow]{
         meaning: "Compound assignment can't target an indexed slot",
         what: "Compound assignment can't target an indexed slot.",
         why: "A compound update reads an indexed slot before it writes; that read can panic when a map key is missing.",
-        fix: "Write a total update, such as `map[key] = (map.get(key) ?? 0) {{op}} 1`",
+        fix: "Give the slot a starting value, such as `map[key, or: 0] {{op}}= 1`",
         detail: true,
         structured_fix: None,
         fix_safety: None,
-        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Use a supported integer update, such as `map[key] = (map.get(key) ?? 0) + 1`."}),
+        no_fix_reason: Val(DiagnosticNoFixReason{kind: DiagnosticNoFixReasonKind.Design, next: "Give the map slot a starting value, such as `map[key, or: 0] += 1`."}),
     },
     {
         code: "E0165",

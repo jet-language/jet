@@ -1344,12 +1344,12 @@ front: fn(lane: &Lane, args: [String], prefix: String, cwd: String, extra: [Sett
 
 // Lower `file` as a native library through `jet doc`, the runtime-library
 // seam (`jet check` lowers no #Export(c) body): the front-end hook writes its
-// object, exports, ABI, thread and issue files beside `prefix`.
+// object, exports, ABI, thread, stops and issue files beside `prefix`.
 library: fn(lane: &Lane, file: String, prefix: String, lifecycle: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     if !files.exists(lifecycle) {
         return Err(problem("native library lifecycle list `{lifecycle}` is missing"))
     }
-    loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads", ".issues"}) {
+    loop suffix in ([String]{".o", ".exports", ".abi.json", ".threads", ".stops", ".issues"}) {
         if files.exists("{prefix}{suffix}") {
             files.remove("{prefix}{suffix}") ?? return Err(problem("`{prefix}{suffix}` cannot be removed: {err}"))
         }

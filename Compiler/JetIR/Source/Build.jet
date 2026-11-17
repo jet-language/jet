@@ -432,6 +432,10 @@ IRChecks: struct {
     // is a global symbol of the program's object (IRModule.hooks), so the
     // link binds the runtime's calls of the hook to it.
     hooks: [IRLibraryExportRow]{[IRLibraryExportRow]{}},
+    // The runtime routes the runtime's stops receipt proves deliver no stop
+    // (JetCLI Host.jet jet_cli_runtime_quiet_routes), which no stop poll
+    // follows (ir_route_can_stop); empty without a receipt.
+    quiet_routes: [String:Bool]{[String:Bool]{}},
 }
 
 // An argv-selectable job: the checked function `key` that the program word
@@ -1227,8 +1231,8 @@ ir_spawn_sites: fn(functions: [FnBody]) -> [String:Int] Never! {
         }
     }
     sites := [String:Int]{}
-    loop (file, starts) in files {
-        ordered := starts.copy()
+    loop (file, starts) in files.move() {
+        ordered := starts
         ordered.sort()
         ordinal := 0
         loop start in ordered {
@@ -1273,6 +1277,7 @@ ir_module_for: fn(p: IRProgram) -> IRModule Never! {
     loop _ in 0..<p.functions.len() -> m.ids.push(-1)
     m.stop_points = p.stop_points
     m.user_values = p.user_values
+    m.quiet_routes = p.checks.quiet_routes.copy()
     m
 }
 
@@ -2925,7 +2930,7 @@ ir_runtime: fn(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], ty: Int
     dst: if ty >= 0 -> ir_fresh_temp(m, b, ty) else -> -1
     start: ir_args(b.f, args)
     ir_emit(b.f, IROp.CallRuntime, dst, ir_intern_name(m, symbol), start, args.len(), b.line)
-    if ir_route_can_stop(symbol) -> ir_stop_check(m, b)
+    if ir_route_can_stop(m, symbol) -> ir_stop_check(m, b)
     dst
 }
 
@@ -2939,57 +2944,12 @@ ir_runtime: fn(m: &IRModule, b: &IRBuilder, symbol: String, args: [Int], ty: Int
 // returns with no result written. Every frame up to the boundary that
 // takes the stop (jet_rt_main's root, a task's runner) cleans up in turn.
 
-// Whether runtime route `symbol` can deliver a stop: all but the ones that
-// only allocate, free, copy, count or read (an allocation failure is fatal,
-// or a fallible take answers 0), and the stop rail's own calls.
-ir_route_can_stop: fn(symbol: String) -> Bool Never! {
-    if symbol.ends_with("_drop") || symbol.starts_with("jet_rt_handle_drop_") || symbol.contains("_clone") {
-        return false
-    }
-    if symbol.starts_with("jet_rt_string_builder_") || symbol.starts_with("jet_rt_block_") || symbol.starts_with("jet_rt_memo_") {
-        return false
-    }
-    // A word lane's atomic (Runtime Atomic.jet) only reads and writes its word.
-    if symbol.starts_with("jet_rt_atomic_") && !symbol.starts_with("jet_rt_atomic_int_") {
-        return false
-    }
-    if symbol == {
-        "jet_rt_alloc" | "jet_rt_alloc_try" | "jet_rt_alloc_8" | "jet_rt_alloc_value" | "jet_rt_alloc_value_grow" | "jet_rt_free" | "jet_rt_mem_move" | "jet_rt_mem_fill" | "jet_rt_mem_fill_bytes" | "memcmp" | "jet_int_owned_to_i64" | "jet_int_owned_from_i64" -> false
-        "jet_rt_mem_region_reserve" | "jet_rt_mem_region_release" -> false
-        "jet_rt_string_from_static" | "jet_rt_string_byte_len" | "jet_rt_string_compare" | "jet_rt_string_clear" | "jet_journey_reset" -> false
-        // A failure's Err value and its journey hops (ir_journey_origin, ir_journey_hop)
-        // only allocate and copy texts (Err.jet, JourneyTLS.jet).
-        "jet_rt_record_new_jet_err" | "jet_err_from_message" | "jet_err_with_context_frame" | "jet_journey_origin" | "jet_journey_frame_text" -> false
-        "jet_rt_cleanup_enter" | "jet_rt_cleanup_leave" | "jet_rt_session_propagate" | "jet_rt_session_status" -> false
-        "jet_ctx_push_deadline_after_ns" | "jet_ctx_push_deadline_at_ns" | "jet_ctx_pop_deadline" | "jet_ctx_deadline_present" | "jet_ctx_deadline_ms" | "jet_ctx_thread" | "jet_rt_context_trace" -> false
-        "jet_ctx_push_allocator" | "jet_ctx_push_arena" | "jet_ctx_pop_allocator" | "jet_ctx_scratch" | "jet_ctx_allocator_take" | "jet_ctx_allocator_give" | "jet_ctx_allocator_room" -> false
-        "jet_rt_move_enter" | "jet_rt_move_enter_at" | "jet_rt_move_leave" | "jet_rt_move_needed" | "jet_rt_string_move" | "jet_rt_string_serve" -> false
-        // A pop may run the last owner's drop of the value (Runtime Context.jet), which can stop.
-        "jet_ctx_value_push" | "jet_ctx_value_find" -> false
-        // Only stores the stop handler's code address (Runtime Context.jet).
-        "jet_ctx_on_stop_arm" -> false
-        "jet_term_mode_enter" | "jet_term_mode_leave" -> false
-        "jet_rt_sentry_scope_enter" | "jet_rt_sentry_policy_enter" | "jet_rt_sentry_scope_leave" | "jet_rt_sentry_frame_enter" | "jet_rt_sentry_frame_leave" | "jet_rt_sentry_register_stack_allocation" -> false
-        "jet_rt_effect_scope_enter" | "jet_rt_effect_scope_leave" -> false
-        "jet_rt_depth_leave" -> false
-        "jet_rt_coverage_function" -> false
-        "jet_rt_native_closure_retain" | "jet_rt_native_closure_unref" -> false
-        "jet_rt_native_shared_downgrade" | "jet_rt_native_shared_weak_upgrade" | "jet_rt_shared_owner_strong_count" -> false
-        // A rollback hook's failure is taken by _leave (BuildTransact.jet ir_transaction_walk).
-        "jet_rt_transaction_hook_enter" | "jet_rt_transaction_hook_leave" -> false
-        else -> true
-    }
-}
-
-#Test("A word lane's atomic delivers no stop, so no poll follows it") {
-    assert(!ir_route_can_stop("jet_rt_atomic_i64_add"))
-    assert(!ir_route_can_stop("jet_rt_atomic_bool_compare_exchange"))
-    assert(!ir_route_can_stop("jet_rt_atomic_u32_store"))
-    assert(ir_route_can_stop("jet_rt_atomic_int_add"))
-}
-
-#Test("A fallible heap take delivers no stop, so no poll follows it") {
-    assert(!ir_route_can_stop("jet_rt_alloc_try"))
+// Whether runtime route `symbol` can deliver a stop: every route but those
+// the runtime's stops receipt proves never publish one (IRModule.quiet_routes,
+// BuildLibrary.jet ir_stop_exports), so without a receipt, and for a Core
+// export or any symbol the runtime does not export, every call polls.
+ir_route_can_stop: fn(m: IRModule, symbol: String) -> Bool Never! {
+    m.quiet_routes.get(symbol) == None
 }
 
 // After a call that can deliver a stop: the poll (IR_STOP_POLL_KEY) returns

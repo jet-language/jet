@@ -44,6 +44,7 @@ use {
         AST_EMPTY_CALL_ARG_FLAGS,
         ast_empty_lambda_meta,
         core_enum_cases,
+        core_enum_payload_spelling,
         core_enum_payload_variants,
         core_enum_variant_payload,
         core_module_enum_cases,
@@ -1361,7 +1362,8 @@ sema_expression_enum_constructor_taken: fn(display: String, label: String, ty: T
 }
 
 // A variant of a Core enum without a loaded declaration: unit variants take no
-// payload and payload variants take one positional value per row type.
+// payload and payload variants take one positional value per row type. The
+// tree names the row a bridged spelling names.
 sema_expression_core_enum_literal: fn(enum_name: String, display_name: String, variants: [String], variant: String, args: [EnumLitArg], variant_span: Span?, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     payload_types: core_enum_variant_payload(enum_name, variant) ?? {
         diagnostics.push(sema_enum_unknown_variant(enum_name, variant, variants, span, variant_span))
@@ -1371,7 +1373,7 @@ sema_expression_core_enum_literal: fn(enum_name: String, display_name: String, v
         diagnostics.push(sema_enum_unit_payload(enum_name, variant, span))
         return None
     }
-    sema_expression_core_enum_positional_literal(enum_name, display_name, variant, payload_types, Type.Named{name: enum_name}, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    sema_expression_core_enum_positional_literal(enum_name, display_name, core_enum_payload_spelling(enum_name, variant), payload_types, Type.Named{name: enum_name}, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
 // `HookDecision` is compiler-owned: core.event exports it as a generic leaf,

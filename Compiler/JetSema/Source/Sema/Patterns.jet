@@ -33,6 +33,7 @@ use {
         VariantPayload,
         core_enum_payload_variants,
         measure_literal_value,
+        core_enum_payload_spelling,
         core_enum_variant_payload,
         core_enum_cases,
         diagnostic_with_edit,
@@ -73,8 +74,9 @@ SemaPatternPayload: struct {
     known: Bool,
     group: Bool,
     range_forbidden: Bool,
-    // The tag of the union member a union arm names, which the checked tree
-    // carries in place of the arm's written name.
+    // The tag of the union member a union arm names, or the Core row a
+    // bridged spelling names, which the checked tree carries in place of the
+    // arm's written name.
     tag: String?,
 }
 
@@ -365,6 +367,8 @@ sema_pattern_core_enum_payload: fn(owner_name: String, variant: String, span: Sp
     }
     result.types = payload
     result.known = true
+    spelled: core_enum_payload_spelling(owner_name, variant)
+    if spelled != variant -> result.tag = Val(spelled)
     result
 }
 

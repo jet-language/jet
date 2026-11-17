@@ -25,6 +25,7 @@ Run a lesson from the repository root, for example `jet run Examples/Collections
 - [MapCompositeKey](MapCompositeKey.jet) — Tuples and structs with key-eligible fields are value-semantic ordered map keys.
 - [MapMerge](MapMerge.jet) — Map.merge - right wins by default; optional conflict callback.
 - [MapSetMethods](MapSetMethods.jet) — Every Map and Set method once, the in-place `update` forms among them (`m.update(other)`, `s.update(t)`, `s.difference_update(t)` and so on).
+- [MapSlot](MapSlot.jet) — `counts[w, or: 0] += 1` counts with one lookup: `or:` names the value a missing key starts with, and only a missing key runs it.
 - [MapsNested](MapsNested.jet)
 - [MemberSpread](MemberSpread.jet) — Member spread expands a shared prefix into field reads.
 - [OperationContract](OperationContract.jet) — Each collection operation follows its checked row in the operation contract (Docs/Spec/Reference/core-library.md).

@@ -23,7 +23,7 @@ normal_buffer_push: fn(buffer: I64, value: I64) {
     length: rt_text_len(buffer)
     capacity: rt_text_word(wrapping(buffer + I64{16}))
     if length == capacity {
-        if (capacity > I64{576460752303423487}) { rt_text_capacity_stop() }
+        if (capacity > I64{576460752303423487}) { rt_seq_capacity_overflow_stop() }
         grown: if (capacity == I64{0}) -> I64{16} else -> capacity * I64{2}
         data: jet_rt_alloc(grown * I64{8}, I64{8})
         rt_text_bytes_copy(data, rt_text_data(buffer), length * I64{8})
@@ -190,7 +190,7 @@ native_text_normalize_nfc: fn(value: I64) -> I64 {
             (cp < I64{65536}) -> I64{3}
             else -> I64{4}
         }
-        if (output_bytes > I64{9223372036854775807} - width) { rt_text_capacity_stop() }
+        if (output_bytes > I64{9223372036854775807} - width) { rt_seq_capacity_overflow_stop() }
         output_bytes += width
         at += I64{1}
     }

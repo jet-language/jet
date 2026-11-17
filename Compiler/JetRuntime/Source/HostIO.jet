@@ -193,6 +193,18 @@ host_error_with_context: fn(context: I64, kind: I64) -> I64 {
     value
 }
 
+// Seed bridge, deleted by the sweep that renames the remaining British case
+// names: the seed that builds this runtime's compiler still names
+// `IOError`'s fifth case `Cancelled`, so its record routes reach the
+// `Canceled` exports under the British atom too.
+#Export(c) jet_rt_record_get_io_error_cancelled: fn(error: I64) -> I64 {
+    jet_rt_record_get_io_error_canceled(error)
+}
+
+#Export(c) jet_rt_record_new_io_error_cancelled: fn(context: I64) -> I64 {
+    jet_rt_record_new_io_error_canceled(context)
+}
+
 #Export(c) jet_rt_record_get_io_error_resource_limit: fn(value: I64) -> I64 {
     // `value` borrows an initialized ResourceLimit error.
     if (rt_text_word(value) != HOST_IO_KIND_RESOURCE_LIMIT) {
@@ -292,10 +304,7 @@ host_io_kind_debug: fn(target: I64, kind: I64) {
             rt_text_push_word(target, I64{7234304299306872431}, I64{8})
         }
         (kind == I64{3}) -> rt_text_push_word(target, I64{8391700773291780436}, I64{8})
-        (kind == I64{4}) -> {
-            rt_text_push_word(target, I64{7308335478031147331}, I64{8})
-            rt_text_push_word(target, I64{100}, I64{1})
-        }
+        (kind == I64{4}) -> rt_text_push_word(target, I64{7234307559156244803}, I64{8})
         (kind == I64{5}) -> rt_text_push_word(target, I64{110386891156547}, I64{6})
         (kind == I64{6}) -> rt_text_push_word(target, I64{7813573208857080400}, I64{8})
         (kind == I64{8}) -> {

@@ -1,0 +1,19 @@
+// `counts[w, or: 0] += 1` counts with one lookup: `or:` names the value a missing key starts with, and only a missing key runs it.
+new_group: fn(size: Int) -> [String] {
+    print("new group for {size} letters")
+    [String]{}
+}
+
+run: fn() {
+    counts := [String:Int]{}
+    groups := [Int:[String]]{}
+    loop w in "the quick the brown the fox".split(" ") {
+        counts[w, or: 0] += 1
+        &groups[w.len(), or: new_group(w.len())].push(w)
+    }
+    loop w in ["the", "quick", "brown", "fox"] -> print("{w}: {counts[w]}")
+    print("3 letters: {groups[3].join(",")}")
+    print("5 letters: {groups[5].join(",")}")
+    // As a value the slot reads its starting value and adds no entry.
+    print("zebra: {counts["zebra", or: 0]}, entries: {counts.len()}")
+}

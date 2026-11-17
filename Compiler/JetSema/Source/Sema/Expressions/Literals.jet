@@ -21,6 +21,7 @@ use jet_foundation.[
     TBinaryOp,
     TComptimeValue,
     TGenericParam,
+    TIndexKind,
     TIndexProof,
     TupleField,
     Type,
@@ -28,6 +29,7 @@ use jet_foundation.[
     UnOp,
     UnitRatio,
     AST_EMPTY_CALL_ARG_FLAGS,
+    expr_is_map_slot_or,
     expr_source_span,
     expr_span,
     is_compute_tensor_family,
@@ -1014,7 +1016,32 @@ sema_expression_char: fn(text: String, span: Span, expected: Type?, environment:
     sema_expr_expected_owned(sema_node(context, Type.Char, NodeKind.CharLit{value: value}, span), expected, environment, program, diagnostics)
 }
 
+// `map[key, or: start]`: the value under `key`, which starts as `start` when
+// the key is missing. The index is the key and the starting value as one
+// pair (TIndexKind.MapOr), so every walk of the node reaches both; the
+// lowering finds the key once and runs `start` only on a miss.
+sema_expression_map_slot: fn(base: Expr, key: Expr, start: Expr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    checked_base: sema_check_expression(base, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    map_ty: sema_expr_unwrap_tag(checked_base.ty)
+    if map_ty == .Map(key_ty, _, value_ty) {
+        checked_key: sema_check_expression(key, Val(key_ty), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        checked_start: sema_check_expression(start, Val(value_ty), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+        owned_start: sema_expr_expected_owned(checked_start, Val(value_ty), environment, program, diagnostics) ?? return None
+        pair_ty: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "key", ty: key_ty}, TypeTupleField{name: "start", ty: value_ty}}}
+        pair: sema_tree_node(pair_ty, TExprKind.Tuple{values: [TExpr]{checked_key, owned_start}}, span)
+        slot: sema_tree_node(value_ty, TExprKind.Index{base: checked_base, index: pair, kind: TIndexKind.MapOr, access: AccessConvention.Read, checked_call: None, location: sema_expression_panic_location(environment, program, scopes, span)}, span)
+        return sema_expr_expected(slot, expected, environment, program, diagnostics)
+    }
+    diagnostics.push(sema_error("E0505", span, "only a map slot takes a starting value, not an index of {type_name(checked_base.ty)}", "`or:` names the value a missing map key starts with; other collections have no missing keys", "drop `, or: …`, or index a Map"))
+    None
+}
+
 sema_expression_index: fn(base: Expr, index: Expr, ast_kind: IndexKind, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if index == .Call(call, _) {
+        if expr_is_map_slot_or(call) {
+            return sema_expression_map_slot(base, call.args[0].expr, call.args[1].expr, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
+    }
     checked_base := sema_check_expression(base, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     base_ty := sema_expr_unwrap_tag(checked_base.ty)
     index_expected: if base_ty == {

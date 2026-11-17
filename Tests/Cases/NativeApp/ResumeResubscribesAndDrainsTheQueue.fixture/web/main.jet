@@ -1,0 +1,72 @@
+// Crewboard in a page, on a device that queues its writes
+// (`offline(.Queue)`) and has no resume code of its own. Before launch,
+// the phone adds a task while the server is down, so the write waits in
+// the device's queue, and a live read of the server's task count fails.
+// The browser freezes the page, the server comes up in the meantime, and
+// the browser resumes the page. Coming back, the app sends the queued
+// write and re-runs every live binding. When the page goes away, its
+// lifecycle's listener prints the queue and the count. The server is the
+// page's own origin, so its address has none.
+use {
+    app
+    event: core.event
+    core.event.[EventScope]
+}
+
+#Error
+BoardError: enum {
+    Unreachable(String),
+}
+
+impl app.CallError -> BoardError {
+    if self == {
+        .Unreachable(why) -> BoardError.Unreachable(why)
+        .Invalid(errors) -> BoardError.Unreachable("{errors.len()} invalid arguments")
+        .SignedOut -> BoardError.Unreachable("signed out")
+        .UpdateRequired -> BoardError.Unreachable("update required")
+    }
+}
+
+// The server's side (server/main.jet serves it).
+Board: struct {
+    #App.Public add: fn(self, title: String) BoardError! { Ok() }
+
+    #App.Public count: fn(self) -> Int BoardError! { Ok(0) }
+}
+
+// The server's mount on the page's origin.
+ADDRESS: "/api"
+
+// The board as a live read of the server's task count shows it.
+board: fn() -> String Never! {
+    desk: app.remote_at<Board>(ADDRESS, client: "desk")
+    if app.state(app.live(fn() { desk.count() })) == {
+        .Loaded(count) -> "{count} tasks"
+        .Failed(_) -> "unreachable"
+        .Idle | .Loading -> "loading"
+    }
+}
+
+Listening: struct {
+    scope: EventScope?,
+}
+
+// The listener's scope, kept past the run: the page goes on after it, and
+// a scope's listeners stop with it.
+LISTENING: Shared{Listening{scope: None}}
+
+run: fn() {
+    graph: app.new("Crewboard").offline(.Queue)
+    phone: app.remote_at<Board>(ADDRESS, client: "phone")
+    if phone.add("ship it") == .Err(failure) {
+        panic("the add failed instead of queueing: {failure}")
+    }
+    print("queued {app.pending()}, board: {board()}")
+    listening: event.scope()
+    app.LIFECYCLE.on(listening, fn(heard: app.LifecycleEvent) {
+        if heard.reason == .Closing -> print("queued {app.pending()}, board: {board()}")
+    })
+    held := LISTENING.guard_edit()
+    held.value.scope = Val(listening)
+    print(if graph.launch() -> "launched" else -> "not launched")
+}

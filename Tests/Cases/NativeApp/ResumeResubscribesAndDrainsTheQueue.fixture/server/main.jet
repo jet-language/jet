@@ -1,0 +1,60 @@
+// The board's server, on $CREW_PORT. It writes server.up once it runs,
+// and listens from the moment the page is frozen (the page writes
+// asleep): it writes server.ready once it listens, and served.txt with the
+// titles it holds once a task has come. It ends at the first request
+// after the page writes done.
+use {
+    app
+    files: core.files
+    net: core.net
+    sys: core.sys
+    tasks: core.tasks
+    web: core.web
+}
+
+#Error
+BoardError: enum {
+    Unreachable(String),
+}
+
+// The titles of the tasks the server holds.
+TITLES: Shared{[String]{}}
+
+Board: struct {
+    // Adds a task titled `title`.
+    #App.Public add: fn(self, title: String) BoardError! {
+        held := TITLES.guard_edit()
+        held.value.push(title.copy())
+        Ok()
+    }
+
+    // The number of tasks.
+    #App.Public count: fn(self) -> Int BoardError! {
+        held: TITLES.guard_read()
+        Ok(held.value.len())
+    }
+}
+
+run: fn() {
+    port: sys.get("CREW_PORT") ?? panic("CREW_PORT names the server's port")
+    files.write("server.up", "") ?? panic("write server.up: {err}")
+    loop _ in 0..<12000 {
+        if files.exists("asleep") -> break
+        tasks.sleep(10)
+    }
+    served: web.app().mount("/api", Board{})
+    server: net.tcp_listen("127.0.0.1:{port}") ?? panic("listen: {err}")
+    files.write("server.ready", "") ?? panic("write server.ready: {err}")
+    written := false
+    loop {
+        served.serve_once(server) ?? return
+        if files.exists("done") {
+            return
+        }
+        if written -> next
+        held: TITLES.guard_read()
+        if held.value.len() == 0 -> next
+        files.write("served.txt", held.value.join("\n")) ?? panic("write served.txt: {err}")
+        written = true
+    }
+}

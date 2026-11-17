@@ -239,7 +239,7 @@ byte_buffer_find: fn(buffer: I64, needle: I64, some: I64, last: Bool) -> I64 {
 // A [Text] of `count` words built by the caller: storage at `output`.
 byte_buffer_text_words: fn(count: I64, output: I64) -> I64 {
     if (count > I64{1152921504606846975}) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     words: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * I64{8}, I64{8})

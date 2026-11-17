@@ -11,7 +11,7 @@
 #Export(c) jet_rt_native_closure_retain: fn(boxed: I64) {
     loop {
         count: sync_load(boxed)
-        if (count == I64{9223372036854775807}) { jet_rt_panic_overflow() }
+        if (count == I64{9223372036854775807}) { rt_seq_capacity_overflow_stop() }
         if (sync_cas(boxed, count, count + I64{1}) == count) {
             return
         }

@@ -2133,7 +2133,7 @@ alloc_user_call: fn(carrier: I64, op: I64, x: I64, y: I64) -> I64 {
     jet_rt_int_drop(second)
     jet_rt_int_drop(third)
     if (slot != I64{0}) { sync_store(slot, saved) }
-    if (jet_rt_session_propagate() != I64{0}) { return I64{0} }
+    if (scheduler_stop_pending() != I64{0}) { return I64{0} }
     word: jet_int_owned_to_i64(answer)
     jet_rt_int_drop(answer)
     word
@@ -2156,10 +2156,10 @@ alloc_user_take: fn(carrier: I64, size: I64, align: I64) -> I64 {
     }
     requested: if (size == I64{0}) -> I64{1} else -> size
     if (requested > wrapping(I64{9223372036854775807} - ALLOC_USER_HEADER)) { return I64{0} }
-    if (jet_rt_session_propagate() != I64{0}) { return alloc_try_reserved(size, align) }
+    if (scheduler_stop_pending() != I64{0}) { return alloc_try_reserved(size, align) }
     bytes: wrapping(requested + ALLOC_USER_HEADER)
     block: alloc_user_call(carrier, ALLOC_USER_TAKE, bytes, I64{8})
-    if (jet_rt_session_propagate() != I64{0}) { return alloc_try_reserved(size, align) }
+    if (scheduler_stop_pending() != I64{0}) { return alloc_try_reserved(size, align) }
     if (block == I64{0}) { return I64{0} }
     record: if (block & I64{7} != I64{0}) -> I64{0} else -> alloc_page_region(block)
     if (record == I64{0} || alloc_page_region(wrapping(block + wrapping(bytes - I64{1}))) != record) {

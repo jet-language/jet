@@ -488,8 +488,10 @@ IRDataReloc: struct {
 // `stop_points`: calls that can deliver a
 // runtime stop are followed by a stop check (Build.jet ir_stop_check); the
 // runtime library manages its own stops and has none, nor has a program that
-// owns its main. `owned_main`: the program's entry runs under a main of its
-// own, with no process root (EntryOwned.jet ir_entry_own). `owned_attach`:
+// owns its main. `quiet_routes`: the runtime routes no stop check follows,
+// from the build's IRChecks (Build.jet ir_route_can_stop). `owned_main`:
+// the program's entry runs under a main of its own, with no process root
+// (EntryOwned.jet ir_entry_own). `owned_attach`:
 // that main attaches its thread first (IR_OWNED_ATTACH_ROUTES).
 // `single_thread`: the program provably never runs a second thread (JetCLI
 // Host.jet jet_cli_single_thread), so x86-64 selection updates its RC
@@ -563,6 +565,7 @@ IRModule: struct {
     helper_errors: NameRows,
     helper_messages: [String],
     stop_points: Bool{false},
+    quiet_routes: [String:Bool]{[String:Bool]{}},
     owned_main: Bool{false},
     owned_attach: Bool{false},
     single_thread: Bool{false},

@@ -180,7 +180,7 @@ text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
     length: rt_text_len(value)
     zeros: target - count
     if (zeros > I64{9223372036854775807} - length) {
-        rt_text_capacity_stop()
+        rt_seq_capacity_overflow_stop()
         return I64{0}
     }
     lead: if (length == I64{0}) -> I64{0} else -> rt_text_byte(data)

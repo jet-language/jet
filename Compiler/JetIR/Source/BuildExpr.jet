@@ -1306,7 +1306,7 @@ ir_scalar_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, p
 // variable, a pool slot or a Shared guard's value.
 ir_pin_place_in_storage: fn(p: IRProgram, b: IRBuilder, place: Int) -> Bool Never! {
     if ir_body_node(p, b, place).kind == {
-        .Index(_, _, kind, _, _, _) -> return kind == .List || kind == .FixedListProof || kind == .Map
+        .Index(_, _, kind, _, _, _) -> return kind == .List || kind == .FixedListProof || kind == .Map || kind == .MapOr
         .Field(receiver, _) -> return ir_body_node(p, b, receiver).kind == .Local(_) || ir_pin_place_in_storage(p, b, receiver)
         .PoolSlot(_, _, _, _, _, _) | .SharedGuardValue(_) -> return true
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> return false
@@ -1672,6 +1672,7 @@ ir_assign_place: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, op: T
     }
     if ir_body_node(p, b, place).kind == .Index(base, index, kind, _, _, _) {
         if kind == .Map -> return ir_map_index_assign(m, p, b, base, index, op, value, span)
+        if kind == .MapOr -> return ir_map_slot_assign(m, p, b, base, index, op, value, span)
         if kind != .List && kind != .FixedListProof {
             return ir_fail(b, span, "assignment to an index of kind {kind}")
         }
@@ -2592,6 +2593,7 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
         .ClosureMethod(receiver, operation, args) -> return ir_closure_method(m, p, b, expression_ty, receiver, operation, args, span)
         .Index(base, index, kind, _, _, _) -> {
             if kind == .Map -> return ir_map_index(m, p, b, base, index, span)
+            if kind == .MapOr -> return ir_map_slot_read(m, p, b, base, index, span)
             if kind != .List && kind != .FixedListProof {
                 return ir_fail_slot(b, span, "index of kind {kind}")
             }
@@ -4738,7 +4740,7 @@ ir_place_needs_address: fn(m: &IRModule, p: IRProgram, b: IRBuilder, place: Int)
         .Borrow(inner, _) -> return ir_place_needs_address(m, p, b, inner)
         .Move(inner) -> return ir_place_needs_address(m, p, b, inner)
         .Field(receiver, field) -> return ir_place_boxed_member(m, p, b, receiver, field.name) || ir_place_needs_address(m, p, b, receiver)
-        .Index(_, _, kind, _, _, _) -> return kind == .List || kind == .FixedListProof || kind == .Map
+        .Index(_, _, kind, _, _, _) -> return kind == .List || kind == .FixedListProof || kind == .Map || kind == .MapOr
         .PoolSlot(_, _, _, _, _, _) -> return true
         .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .GlobalShared(_, _) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .TraitBox(_, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .StaticCall(_, _, _, _, _) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) | .NumberParam(_) | .CopyPhase(_, _, _, _) -> return false
     }
@@ -4800,7 +4802,9 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
         return address
     }
     if ir_body_node(p, b, place).kind == .Index(base, index, kind, _, _, _) {
-        if kind == .Map -> return ir_map_place_address(m, p, b, base, index, backs, span)
+        if kind == .Map || kind == .MapOr {
+            return ir_map_place_address(m, p, b, base, index, kind == .MapOr, backs, span)
+        }
         // `&list[i]`: the checked element's address.
         if kind != .List && kind != .FixedListProof {
             return ir_fail_slot(b, span, "write of an index of kind {kind}")

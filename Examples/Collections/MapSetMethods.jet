@@ -1,4 +1,4 @@
-// Every Map and Set method once, the in-place `update` forms among them (`m.update(other)`, `s.update(t)`, `s.difference_update(t)` and so on).
+// Every Map and Set method once, the in-place `update` forms among them (`m.update(other)`, `s.update(t)`, `s.difference_update(t)` and so on), and the map slot `m[key, or: start]`, the one way to insert a default.
 ints: fn(xs: [Int]) -> String { xs.map(fn(n) { "{n}" }).join(",") }
 
 maps: fn() {
@@ -9,7 +9,8 @@ maps: fn() {
         .Err(_) -> print("try_insert: out of memory")
     }
     print("add_new: {m.add_new("e", 6)} {m.add_new("e", 7)}")
-    print("setdefault: {m.setdefault("e", 8)} {m.setdefault("f", 9)} {m.get("f") ?? 0}")
+    m["f", or: 0] += 9
+    print("slot: {m["e", or: 8]} {m["f", or: 0]} {m.get("f") ?? 0}")
     print("remove: {m.remove("f") ?? 0}, pop: {m.pop("e") ?? 0}, pop missing: {m.pop("zz") ?? -1}")
     print("get: {m.get("a") ?? 0}, has_key: {m.has_key("b")}, contains_value: {m.contains_value(5)}")
     m.update([String:Int]{"b": 20, "g": 7})

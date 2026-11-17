@@ -2,6 +2,16 @@
 
 Date: 2026-11-17. Author family: Claude Opus. Reviewer family: GPT. Fresh reviewer: BallotReview2 (`BallotReview2-2`).
 
+## Dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| FNVAL-COPY1 ready after repair | card | #6548 holds the posted ballot D-FNVAL-COPY1 |
+| CALLBACK-ONCE1 ready after repair | no-action | posted on Tower as D-CALLBACK-ONCE1 for the owner to vote on |
+| creator and task call one writing function value | card | #6048 criterion 5 makes the calls take turns |
+<!-- /audit-dispositions -->
+
 ## Result
 
 - D-FNVAL-COPY1: Ready (validator PASS), as `D-FNVAL-COPY1.r2.json`.

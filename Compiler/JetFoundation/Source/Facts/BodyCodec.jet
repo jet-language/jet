@@ -4040,12 +4040,13 @@ body_codec_put_tindexkind: fn(out: &BodyCodecOut, value: TIndexKind) Never! {
             body_codec_put_tag(out, 6)
             body_codec_put_string(out, p0)
         }
-        .Pool -> body_codec_put_tag(out, 7)
+        .Pool -> { body_codec_put_tag(out, 7) }
+        .MapOr -> body_codec_put_tag(out, 8)
     }
 }
 
 body_codec_get_tindexkind: fn(bytes: [U8], input: &BodyCodecIn) -> TIndexKind Never! {
-    position: body_codec_get_tag(bytes, input, 8, 0)
+    position: body_codec_get_tag(bytes, input, 9, 0)
     if position == {
         1 -> TIndexKind.Range
         2 -> TIndexKind.FixedListProof
@@ -4063,6 +4064,7 @@ body_codec_get_tindexkind: fn(bytes: [U8], input: &BodyCodecIn) -> TIndexKind Ne
             TIndexKind.LayoutField{name: f0}
         }
         7 -> TIndexKind.Pool
+        8 -> TIndexKind.MapOr
         else -> TIndexKind.List
     }
 }
@@ -5386,156 +5388,155 @@ body_codec_put_tbuiltinop: fn(out: &BodyCodecOut, value: TBuiltinOp) Never! {
         .PriorityQueuePop -> { body_codec_put_tag(out, 13) }
         .InsertMap -> { body_codec_put_tag(out, 14) }
         .AddNewMap -> { body_codec_put_tag(out, 15) }
-        .MapSetDefault -> { body_codec_put_tag(out, 16) }
-        .MapUpdate -> { body_codec_put_tag(out, 17) }
-        .MapMerge -> { body_codec_put_tag(out, 18) }
-        .MapMergeWith -> { body_codec_put_tag(out, 19) }
-        .InsertList -> { body_codec_put_tag(out, 20) }
-        .RemoveMap -> { body_codec_put_tag(out, 21) }
+        .MapUpdate -> { body_codec_put_tag(out, 16) }
+        .MapMerge -> { body_codec_put_tag(out, 17) }
+        .MapMergeWith -> { body_codec_put_tag(out, 18) }
+        .InsertList -> { body_codec_put_tag(out, 19) }
+        .RemoveMap -> { body_codec_put_tag(out, 20) }
         .RemoveList(p0, p1) -> {
-            body_codec_put_tag(out, 22)
+            body_codec_put_tag(out, 21)
             body_codec_put_int(out, p0)
             body_codec_put_tlistremovemode(out, p1)
         }
-        .CountList -> { body_codec_put_tag(out, 23) }
-        .Counts -> { body_codec_put_tag(out, 24) }
-        .ExtendList -> { body_codec_put_tag(out, 25) }
-        .ConcatList -> { body_codec_put_tag(out, 26) }
-        .GetMap -> { body_codec_put_tag(out, 27) }
-        .GetList -> { body_codec_put_tag(out, 28) }
-        .First -> { body_codec_put_tag(out, 29) }
-        .Last -> { body_codec_put_tag(out, 30) }
-        .Contains -> { body_codec_put_tag(out, 31) }
-        .IndexOf -> { body_codec_put_tag(out, 32) }
-        .Reverse -> { body_codec_put_tag(out, 33) }
-        .SwapList -> { body_codec_put_tag(out, 34) }
-        .ListFill -> { body_codec_put_tag(out, 35) }
-        .ListFillRepeat -> { body_codec_put_tag(out, 36) }
-        .Sort -> { body_codec_put_tag(out, 37) }
-        .SortDesc -> { body_codec_put_tag(out, 38) }
-        .OrderingThen -> { body_codec_put_tag(out, 39) }
-        .OrderingReverse -> { body_codec_put_tag(out, 40) }
-        .JoinSep -> { body_codec_put_tag(out, 41) }
+        .CountList -> { body_codec_put_tag(out, 22) }
+        .Counts -> { body_codec_put_tag(out, 23) }
+        .ExtendList -> { body_codec_put_tag(out, 24) }
+        .ConcatList -> { body_codec_put_tag(out, 25) }
+        .GetMap -> { body_codec_put_tag(out, 26) }
+        .GetList -> { body_codec_put_tag(out, 27) }
+        .First -> { body_codec_put_tag(out, 28) }
+        .Last -> { body_codec_put_tag(out, 29) }
+        .Contains -> { body_codec_put_tag(out, 30) }
+        .IndexOf -> { body_codec_put_tag(out, 31) }
+        .Reverse -> { body_codec_put_tag(out, 32) }
+        .SwapList -> { body_codec_put_tag(out, 33) }
+        .ListFill -> { body_codec_put_tag(out, 34) }
+        .ListFillRepeat -> { body_codec_put_tag(out, 35) }
+        .Sort -> { body_codec_put_tag(out, 36) }
+        .SortDesc -> { body_codec_put_tag(out, 37) }
+        .OrderingThen -> { body_codec_put_tag(out, 38) }
+        .OrderingReverse -> { body_codec_put_tag(out, 39) }
+        .JoinSep -> { body_codec_put_tag(out, 40) }
         .Sum(p0, p1) -> {
-            body_codec_put_tag(out, 42)
+            body_codec_put_tag(out, 41)
             body_codec_put_bool(out, p0)
             body_codec_put_bool(out, p1)
         }
         .Product(p0) -> {
-            body_codec_put_tag(out, 43)
+            body_codec_put_tag(out, 42)
             body_codec_put_bool(out, p0)
         }
         .Min(p0) -> {
-            body_codec_put_tag(out, 44)
+            body_codec_put_tag(out, 43)
             body_codec_put_bool(out, p0)
         }
         .Max(p0) -> {
-            body_codec_put_tag(out, 45)
+            body_codec_put_tag(out, 44)
             body_codec_put_bool(out, p0)
         }
-        .Flatten -> { body_codec_put_tag(out, 46) }
-        .Intersperse -> { body_codec_put_tag(out, 47) }
-        .Unzip -> { body_codec_put_tag(out, 48) }
-        .Clear -> { body_codec_put_tag(out, 49) }
-        .Chars -> { body_codec_put_tag(out, 50) }
+        .Flatten -> { body_codec_put_tag(out, 45) }
+        .Intersperse -> { body_codec_put_tag(out, 46) }
+        .Unzip -> { body_codec_put_tag(out, 47) }
+        .Clear -> { body_codec_put_tag(out, 48) }
+        .Chars -> { body_codec_put_tag(out, 49) }
         .Bytes(p0) -> {
-            body_codec_put_tag(out, 51)
+            body_codec_put_tag(out, 50)
             body_codec_put_bool(out, p0)
         }
-        .StringFromBytes -> { body_codec_put_tag(out, 52) }
-        .StringFromBytesLossy -> { body_codec_put_tag(out, 53) }
-        .StringWithCapacity -> { body_codec_put_tag(out, 54) }
-        .Trim -> { body_codec_put_tag(out, 55) }
-        .TrimStart -> { body_codec_put_tag(out, 56) }
-        .TrimEnd -> { body_codec_put_tag(out, 57) }
-        .PadStart -> { body_codec_put_tag(out, 58) }
-        .PadEnd -> { body_codec_put_tag(out, 59) }
-        .StringIndexOf -> { body_codec_put_tag(out, 60) }
-        .StringCount -> { body_codec_put_tag(out, 61) }
-        .StringIsAlphabetic -> { body_codec_put_tag(out, 62) }
-        .StringIsNumeric -> { body_codec_put_tag(out, 63) }
-        .StringIsWhitespace -> { body_codec_put_tag(out, 64) }
-        .StringIsASCII -> { body_codec_put_tag(out, 65) }
-        .StringToTitle -> { body_codec_put_tag(out, 66) }
+        .StringFromBytes -> { body_codec_put_tag(out, 51) }
+        .StringFromBytesLossy -> { body_codec_put_tag(out, 52) }
+        .StringWithCapacity -> { body_codec_put_tag(out, 53) }
+        .Trim -> { body_codec_put_tag(out, 54) }
+        .TrimStart -> { body_codec_put_tag(out, 55) }
+        .TrimEnd -> { body_codec_put_tag(out, 56) }
+        .PadStart -> { body_codec_put_tag(out, 57) }
+        .PadEnd -> { body_codec_put_tag(out, 58) }
+        .StringIndexOf -> { body_codec_put_tag(out, 59) }
+        .StringCount -> { body_codec_put_tag(out, 60) }
+        .StringIsAlphabetic -> { body_codec_put_tag(out, 61) }
+        .StringIsNumeric -> { body_codec_put_tag(out, 62) }
+        .StringIsWhitespace -> { body_codec_put_tag(out, 63) }
+        .StringIsASCII -> { body_codec_put_tag(out, 64) }
+        .StringToTitle -> { body_codec_put_tag(out, 65) }
         .StringMethod(p0) -> {
-            body_codec_put_tag(out, 67)
+            body_codec_put_tag(out, 66)
             body_codec_put_string(out, p0)
         }
-        .StringSplitOnce -> { body_codec_put_tag(out, 68) }
-        .StringCutLast -> { body_codec_put_tag(out, 69) }
-        .Split -> { body_codec_put_tag(out, 70) }
-        .Lines -> { body_codec_put_tag(out, 71) }
-        .ParseInt -> { body_codec_put_tag(out, 72) }
-        .ParseFloat -> { body_codec_put_tag(out, 73) }
-        .IntToRadix -> { body_codec_put_tag(out, 74) }
-        .IntFromRadix -> { body_codec_put_tag(out, 75) }
-        .StartsWith -> { body_codec_put_tag(out, 76) }
-        .EndsWith -> { body_codec_put_tag(out, 77) }
-        .Replace -> { body_codec_put_tag(out, 78) }
-        .ToUpper -> { body_codec_put_tag(out, 79) }
-        .ToLower -> { body_codec_put_tag(out, 80) }
-        .ToASCIILower -> { body_codec_put_tag(out, 81) }
-        .ToASCIIUpper -> { body_codec_put_tag(out, 82) }
-        .Repeat -> { body_codec_put_tag(out, 83) }
+        .StringSplitOnce -> { body_codec_put_tag(out, 67) }
+        .StringCutLast -> { body_codec_put_tag(out, 68) }
+        .Split -> { body_codec_put_tag(out, 69) }
+        .Lines -> { body_codec_put_tag(out, 70) }
+        .ParseInt -> { body_codec_put_tag(out, 71) }
+        .ParseFloat -> { body_codec_put_tag(out, 72) }
+        .IntToRadix -> { body_codec_put_tag(out, 73) }
+        .IntFromRadix -> { body_codec_put_tag(out, 74) }
+        .StartsWith -> { body_codec_put_tag(out, 75) }
+        .EndsWith -> { body_codec_put_tag(out, 76) }
+        .Replace -> { body_codec_put_tag(out, 77) }
+        .ToUpper -> { body_codec_put_tag(out, 78) }
+        .ToLower -> { body_codec_put_tag(out, 79) }
+        .ToASCIILower -> { body_codec_put_tag(out, 80) }
+        .ToASCIIUpper -> { body_codec_put_tag(out, 81) }
+        .Repeat -> { body_codec_put_tag(out, 82) }
         .Slice(p0) -> {
-            body_codec_put_tag(out, 84)
+            body_codec_put_tag(out, 83)
             body_codec_put_int(out, p0)
         }
-        .After -> { body_codec_put_tag(out, 85) }
-        .Before -> { body_codec_put_tag(out, 86) }
-        .TrimView -> { body_codec_put_tag(out, 87) }
-        .AfterView -> { body_codec_put_tag(out, 88) }
-        .BeforeView -> { body_codec_put_tag(out, 89) }
-        .Keys -> { body_codec_put_tag(out, 90) }
-        .Values -> { body_codec_put_tag(out, 91) }
-        .ContainsKey -> { body_codec_put_tag(out, 92) }
-        .ToString -> { body_codec_put_tag(out, 93) }
-        .Take -> { body_codec_put_tag(out, 94) }
-        .Skip -> { body_codec_put_tag(out, 95) }
-        .IterToList -> { body_codec_put_tag(out, 96) }
-        .IterCollect -> { body_codec_put_tag(out, 97) }
-        .ListLazy -> { body_codec_put_tag(out, 98) }
-        .StepBy -> { body_codec_put_tag(out, 99) }
-        .Dedup -> { body_codec_put_tag(out, 100) }
-        .Chunks -> { body_codec_put_tag(out, 101) }
-        .Windows -> { body_codec_put_tag(out, 102) }
-        .IterRepeat -> { body_codec_put_tag(out, 103) }
-        .IterCycle -> { body_codec_put_tag(out, 104) }
-        .IterDropLast -> { body_codec_put_tag(out, 105) }
-        .IterNext -> { body_codec_put_tag(out, 106) }
-        .IterShuffle -> { body_codec_put_tag(out, 107) }
-        .IterIsSorted -> { body_codec_put_tag(out, 108) }
-        .IterLastIndexOf -> { body_codec_put_tag(out, 109) }
+        .After -> { body_codec_put_tag(out, 84) }
+        .Before -> { body_codec_put_tag(out, 85) }
+        .TrimView -> { body_codec_put_tag(out, 86) }
+        .AfterView -> { body_codec_put_tag(out, 87) }
+        .BeforeView -> { body_codec_put_tag(out, 88) }
+        .Keys -> { body_codec_put_tag(out, 89) }
+        .Values -> { body_codec_put_tag(out, 90) }
+        .ContainsKey -> { body_codec_put_tag(out, 91) }
+        .ToString -> { body_codec_put_tag(out, 92) }
+        .Take -> { body_codec_put_tag(out, 93) }
+        .Skip -> { body_codec_put_tag(out, 94) }
+        .IterToList -> { body_codec_put_tag(out, 95) }
+        .IterCollect -> { body_codec_put_tag(out, 96) }
+        .ListLazy -> { body_codec_put_tag(out, 97) }
+        .StepBy -> { body_codec_put_tag(out, 98) }
+        .Dedup -> { body_codec_put_tag(out, 99) }
+        .Chunks -> { body_codec_put_tag(out, 100) }
+        .Windows -> { body_codec_put_tag(out, 101) }
+        .IterRepeat -> { body_codec_put_tag(out, 102) }
+        .IterCycle -> { body_codec_put_tag(out, 103) }
+        .IterDropLast -> { body_codec_put_tag(out, 104) }
+        .IterNext -> { body_codec_put_tag(out, 105) }
+        .IterShuffle -> { body_codec_put_tag(out, 106) }
+        .IterIsSorted -> { body_codec_put_tag(out, 107) }
+        .IterLastIndexOf -> { body_codec_put_tag(out, 108) }
         .IterAverage(p0) -> {
-            body_codec_put_tag(out, 110)
+            body_codec_put_tag(out, 109)
             body_codec_put_bool(out, p0)
         }
-        .IterCompare -> { body_codec_put_tag(out, 111) }
-        .IterSplit -> { body_codec_put_tag(out, 112) }
-        .ListSlice -> { body_codec_put_tag(out, 113) }
-        .ListEqual -> { body_codec_put_tag(out, 114) }
-        .ListBinarySearch -> { body_codec_put_tag(out, 115) }
-        .ListUnion -> { body_codec_put_tag(out, 116) }
-        .ListIntersection -> { body_codec_put_tag(out, 117) }
-        .ListDifference -> { body_codec_put_tag(out, 118) }
-        .ListRandom -> { body_codec_put_tag(out, 119) }
-        .ListMinMax -> { body_codec_put_tag(out, 120) }
-        .MapEqual -> { body_codec_put_tag(out, 121) }
-        .MapFirst -> { body_codec_put_tag(out, 122) }
-        .MapToList -> { body_codec_put_tag(out, 123) }
-        .MapTopN -> { body_codec_put_tag(out, 124) }
-        .MapMin -> { body_codec_put_tag(out, 125) }
-        .MapMax -> { body_codec_put_tag(out, 126) }
-        .MapIntersection -> { body_codec_put_tag(out, 127) }
-        .MapSliceKeys -> { body_codec_put_tag(out, 128) }
-        .MapFromKeys -> { body_codec_put_tag(out, 129) }
-        .MapContainsValue -> { body_codec_put_tag(out, 130) }
-        .MapPopFirst -> { body_codec_put_tag(out, 131) }
-        .ListReplace -> { body_codec_put_tag(out, 132) }
-        .Indexed -> { body_codec_put_tag(out, 133) }
-        .Indexes -> { body_codec_put_tag(out, 134) }
+        .IterCompare -> { body_codec_put_tag(out, 110) }
+        .IterSplit -> { body_codec_put_tag(out, 111) }
+        .ListSlice -> { body_codec_put_tag(out, 112) }
+        .ListEqual -> { body_codec_put_tag(out, 113) }
+        .ListBinarySearch -> { body_codec_put_tag(out, 114) }
+        .ListUnion -> { body_codec_put_tag(out, 115) }
+        .ListIntersection -> { body_codec_put_tag(out, 116) }
+        .ListDifference -> { body_codec_put_tag(out, 117) }
+        .ListRandom -> { body_codec_put_tag(out, 118) }
+        .ListMinMax -> { body_codec_put_tag(out, 119) }
+        .MapEqual -> { body_codec_put_tag(out, 120) }
+        .MapFirst -> { body_codec_put_tag(out, 121) }
+        .MapToList -> { body_codec_put_tag(out, 122) }
+        .MapTopN -> { body_codec_put_tag(out, 123) }
+        .MapMin -> { body_codec_put_tag(out, 124) }
+        .MapMax -> { body_codec_put_tag(out, 125) }
+        .MapIntersection -> { body_codec_put_tag(out, 126) }
+        .MapSliceKeys -> { body_codec_put_tag(out, 127) }
+        .MapFromKeys -> { body_codec_put_tag(out, 128) }
+        .MapContainsValue -> { body_codec_put_tag(out, 129) }
+        .MapPopFirst -> { body_codec_put_tag(out, 130) }
+        .ListReplace -> { body_codec_put_tag(out, 131) }
+        .Indexed -> { body_codec_put_tag(out, 132) }
+        .Indexes -> { body_codec_put_tag(out, 133) }
         .Zip(p0, p1, p2, p3, p4, p5) -> {
-            body_codec_put_tag(out, 135)
+            body_codec_put_tag(out, 134)
             body_codec_put_tzipmode(out, p0)
             body_codec_put_list_string(out, p1)
             body_codec_put_bool(out, p2)
@@ -5544,108 +5545,108 @@ body_codec_put_tbuiltinop: fn(out: &BodyCodecOut, value: TBuiltinOp) Never! {
             body_codec_put_list_type(out, p5)
         }
         .OptionZip(p0) -> {
-            body_codec_put_tag(out, 136)
+            body_codec_put_tag(out, 135)
             body_codec_put_type(out, p0)
         }
-        .SetFrom -> { body_codec_put_tag(out, 137) }
-        .SetInsert -> { body_codec_put_tag(out, 138) }
-        .SetUpdate -> { body_codec_put_tag(out, 139) }
-        .SetDifferenceUpdate -> { body_codec_put_tag(out, 140) }
-        .SetIntersectionUpdate -> { body_codec_put_tag(out, 141) }
-        .SetSymmetricDifferenceUpdate -> { body_codec_put_tag(out, 142) }
-        .SetRemove -> { body_codec_put_tag(out, 143) }
-        .SetToList -> { body_codec_put_tag(out, 144) }
-        .SetUnion -> { body_codec_put_tag(out, 145) }
-        .SetIntersection -> { body_codec_put_tag(out, 146) }
-        .SetDifference -> { body_codec_put_tag(out, 147) }
-        .SetSymmetricDifference -> { body_codec_put_tag(out, 148) }
-        .SetIsSubset -> { body_codec_put_tag(out, 149) }
-        .SetIsSuperset -> { body_codec_put_tag(out, 150) }
-        .SetIsDisjoint -> { body_codec_put_tag(out, 151) }
-        .SetEqual -> { body_codec_put_tag(out, 152) }
-        .SetCapacity -> { body_codec_put_tag(out, 153) }
-        .SetFirst -> { body_codec_put_tag(out, 154) }
-        .SetValues -> { body_codec_put_tag(out, 155) }
-        .SetPop -> { body_codec_put_tag(out, 156) }
-        .SetReplace -> { body_codec_put_tag(out, 157) }
-        .SetSort -> { body_codec_put_tag(out, 158) }
-        .SetShuffle -> { body_codec_put_tag(out, 159) }
-        .SortedSetFrom -> { body_codec_put_tag(out, 160) }
-        .SortedSetInsert -> { body_codec_put_tag(out, 161) }
-        .SortedSetRemove -> { body_codec_put_tag(out, 162) }
-        .SortedSetToList -> { body_codec_put_tag(out, 163) }
-        .SortedSetUnion -> { body_codec_put_tag(out, 164) }
-        .SortedSetIntersection -> { body_codec_put_tag(out, 165) }
-        .SortedSetDifference -> { body_codec_put_tag(out, 166) }
-        .SortedSetSymmetricDifference -> { body_codec_put_tag(out, 167) }
-        .SortedSetIsSubset -> { body_codec_put_tag(out, 168) }
-        .SortedSetIsSuperset -> { body_codec_put_tag(out, 169) }
-        .SortedSetIsDisjoint -> { body_codec_put_tag(out, 170) }
-        .PriorityQueueFrom -> { body_codec_put_tag(out, 171) }
-        .PriorityQueuePeek -> { body_codec_put_tag(out, 172) }
-        .PriorityQueueToSortedList -> { body_codec_put_tag(out, 173) }
+        .SetFrom -> { body_codec_put_tag(out, 136) }
+        .SetInsert -> { body_codec_put_tag(out, 137) }
+        .SetUpdate -> { body_codec_put_tag(out, 138) }
+        .SetDifferenceUpdate -> { body_codec_put_tag(out, 139) }
+        .SetIntersectionUpdate -> { body_codec_put_tag(out, 140) }
+        .SetSymmetricDifferenceUpdate -> { body_codec_put_tag(out, 141) }
+        .SetRemove -> { body_codec_put_tag(out, 142) }
+        .SetToList -> { body_codec_put_tag(out, 143) }
+        .SetUnion -> { body_codec_put_tag(out, 144) }
+        .SetIntersection -> { body_codec_put_tag(out, 145) }
+        .SetDifference -> { body_codec_put_tag(out, 146) }
+        .SetSymmetricDifference -> { body_codec_put_tag(out, 147) }
+        .SetIsSubset -> { body_codec_put_tag(out, 148) }
+        .SetIsSuperset -> { body_codec_put_tag(out, 149) }
+        .SetIsDisjoint -> { body_codec_put_tag(out, 150) }
+        .SetEqual -> { body_codec_put_tag(out, 151) }
+        .SetCapacity -> { body_codec_put_tag(out, 152) }
+        .SetFirst -> { body_codec_put_tag(out, 153) }
+        .SetValues -> { body_codec_put_tag(out, 154) }
+        .SetPop -> { body_codec_put_tag(out, 155) }
+        .SetReplace -> { body_codec_put_tag(out, 156) }
+        .SetSort -> { body_codec_put_tag(out, 157) }
+        .SetShuffle -> { body_codec_put_tag(out, 158) }
+        .SortedSetFrom -> { body_codec_put_tag(out, 159) }
+        .SortedSetInsert -> { body_codec_put_tag(out, 160) }
+        .SortedSetRemove -> { body_codec_put_tag(out, 161) }
+        .SortedSetToList -> { body_codec_put_tag(out, 162) }
+        .SortedSetUnion -> { body_codec_put_tag(out, 163) }
+        .SortedSetIntersection -> { body_codec_put_tag(out, 164) }
+        .SortedSetDifference -> { body_codec_put_tag(out, 165) }
+        .SortedSetSymmetricDifference -> { body_codec_put_tag(out, 166) }
+        .SortedSetIsSubset -> { body_codec_put_tag(out, 167) }
+        .SortedSetIsSuperset -> { body_codec_put_tag(out, 168) }
+        .SortedSetIsDisjoint -> { body_codec_put_tag(out, 169) }
+        .PriorityQueueFrom -> { body_codec_put_tag(out, 170) }
+        .PriorityQueuePeek -> { body_codec_put_tag(out, 171) }
+        .PriorityQueueToSortedList -> { body_codec_put_tag(out, 172) }
         .PriorityQueueRemove(p0, p1) -> {
-            body_codec_put_tag(out, 174)
+            body_codec_put_tag(out, 173)
             body_codec_put_int(out, p0)
             body_codec_put_tlistremovemode(out, p1)
         }
         .KeyOrdered(p0, p1) -> {
-            body_codec_put_tag(out, 175)
+            body_codec_put_tag(out, 174)
             body_codec_put_bool(out, p0)
             body_codec_put_bool(out, p1)
         }
-        .LRUPut -> { body_codec_put_tag(out, 176) }
-        .LRUAddNew -> { body_codec_put_tag(out, 177) }
-        .LRUGet -> { body_codec_put_tag(out, 178) }
-        .LRURemove -> { body_codec_put_tag(out, 179) }
-        .LRUCapacity -> { body_codec_put_tag(out, 180) }
-        .LRUKeys -> { body_codec_put_tag(out, 181) }
-        .BitSetAdd -> { body_codec_put_tag(out, 182) }
-        .BitSetRemove -> { body_codec_put_tag(out, 183) }
-        .BitSetCount -> { body_codec_put_tag(out, 184) }
-        .BitSetToList -> { body_codec_put_tag(out, 185) }
-        .ByteBufferFrom -> { body_codec_put_tag(out, 186) }
+        .LRUPut -> { body_codec_put_tag(out, 175) }
+        .LRUAddNew -> { body_codec_put_tag(out, 176) }
+        .LRUGet -> { body_codec_put_tag(out, 177) }
+        .LRURemove -> { body_codec_put_tag(out, 178) }
+        .LRUCapacity -> { body_codec_put_tag(out, 179) }
+        .LRUKeys -> { body_codec_put_tag(out, 180) }
+        .BitSetAdd -> { body_codec_put_tag(out, 181) }
+        .BitSetRemove -> { body_codec_put_tag(out, 182) }
+        .BitSetCount -> { body_codec_put_tag(out, 183) }
+        .BitSetToList -> { body_codec_put_tag(out, 184) }
+        .ByteBufferFrom -> { body_codec_put_tag(out, 185) }
         .ByteBufferWrite(p0) -> {
-            body_codec_put_tag(out, 187)
+            body_codec_put_tag(out, 186)
             body_codec_put_string(out, p0)
         }
-        .ByteBufferToBytes -> { body_codec_put_tag(out, 188) }
+        .ByteBufferToBytes -> { body_codec_put_tag(out, 187) }
         .ByteBufferMethod(p0) -> {
-            body_codec_put_tag(out, 189)
+            body_codec_put_tag(out, 188)
             body_codec_put_string(out, p0)
         }
-        .ByteBufferWithCapacity -> { body_codec_put_tag(out, 190) }
-        .BagAdd -> { body_codec_put_tag(out, 191) }
-        .BagRemove -> { body_codec_put_tag(out, 192) }
-        .BagHas -> { body_codec_put_tag(out, 193) }
-        .BagCount -> { body_codec_put_tag(out, 194) }
-        .DequePushFront -> { body_codec_put_tag(out, 195) }
-        .DequePushBack -> { body_codec_put_tag(out, 196) }
-        .DequePopFront -> { body_codec_put_tag(out, 197) }
-        .DequePopBack -> { body_codec_put_tag(out, 198) }
-        .DequePeekFront -> { body_codec_put_tag(out, 199) }
-        .DequePeekBack -> { body_codec_put_tag(out, 200) }
-        .DequeCapacity -> { body_codec_put_tag(out, 201) }
-        .DequeContains -> { body_codec_put_tag(out, 202) }
-        .DequeGet -> { body_codec_put_tag(out, 203) }
-        .DequeDelete -> { body_codec_put_tag(out, 204) }
-        .DequeToList -> { body_codec_put_tag(out, 205) }
-        .DequeJoin -> { body_codec_put_tag(out, 206) }
-        .DequeReverse -> { body_codec_put_tag(out, 207) }
-        .DequeSplit -> { body_codec_put_tag(out, 208) }
-        .DequeFrom -> { body_codec_put_tag(out, 209) }
-        .TryCollect -> { body_codec_put_tag(out, 210) }
+        .ByteBufferWithCapacity -> { body_codec_put_tag(out, 189) }
+        .BagAdd -> { body_codec_put_tag(out, 190) }
+        .BagRemove -> { body_codec_put_tag(out, 191) }
+        .BagHas -> { body_codec_put_tag(out, 192) }
+        .BagCount -> { body_codec_put_tag(out, 193) }
+        .DequePushFront -> { body_codec_put_tag(out, 194) }
+        .DequePushBack -> { body_codec_put_tag(out, 195) }
+        .DequePopFront -> { body_codec_put_tag(out, 196) }
+        .DequePopBack -> { body_codec_put_tag(out, 197) }
+        .DequePeekFront -> { body_codec_put_tag(out, 198) }
+        .DequePeekBack -> { body_codec_put_tag(out, 199) }
+        .DequeCapacity -> { body_codec_put_tag(out, 200) }
+        .DequeContains -> { body_codec_put_tag(out, 201) }
+        .DequeGet -> { body_codec_put_tag(out, 202) }
+        .DequeDelete -> { body_codec_put_tag(out, 203) }
+        .DequeToList -> { body_codec_put_tag(out, 204) }
+        .DequeJoin -> { body_codec_put_tag(out, 205) }
+        .DequeReverse -> { body_codec_put_tag(out, 206) }
+        .DequeSplit -> { body_codec_put_tag(out, 207) }
+        .DequeFrom -> { body_codec_put_tag(out, 208) }
+        .TryCollect -> { body_codec_put_tag(out, 209) }
         .ViewNew(p0) -> {
-            body_codec_put_tag(out, 211)
+            body_codec_put_tag(out, 210)
             body_codec_put_int(out, p0)
         }
-        .SplitWrite -> { body_codec_put_tag(out, 212) }
-        .GetDisjointWrite -> body_codec_put_tag(out, 213)
+        .SplitWrite -> { body_codec_put_tag(out, 211) }
+        .GetDisjointWrite -> body_codec_put_tag(out, 212)
     }
 }
 
 body_codec_get_tbuiltinop: fn(bytes: [U8], input: &BodyCodecIn) -> TBuiltinOp Never! {
-    position: body_codec_get_tag(bytes, input, 214, 1)
+    position: body_codec_get_tag(bytes, input, 213, 1)
     if position == {
         0 -> {
             f0: body_codec_get_string(bytes, input)
@@ -5668,155 +5669,154 @@ body_codec_get_tbuiltinop: fn(bytes: [U8], input: &BodyCodecIn) -> TBuiltinOp Ne
         13 -> TBuiltinOp.PriorityQueuePop
         14 -> TBuiltinOp.InsertMap
         15 -> TBuiltinOp.AddNewMap
-        16 -> TBuiltinOp.MapSetDefault
-        17 -> TBuiltinOp.MapUpdate
-        18 -> TBuiltinOp.MapMerge
-        19 -> TBuiltinOp.MapMergeWith
-        20 -> TBuiltinOp.InsertList
-        21 -> TBuiltinOp.RemoveMap
-        22 -> {
+        16 -> TBuiltinOp.MapUpdate
+        17 -> TBuiltinOp.MapMerge
+        18 -> TBuiltinOp.MapMergeWith
+        19 -> TBuiltinOp.InsertList
+        20 -> TBuiltinOp.RemoveMap
+        21 -> {
             f0: body_codec_get_int(bytes, input)
             f1: body_codec_get_tlistremovemode(bytes, input)
             TBuiltinOp.RemoveList{line: f0, mode: f1}
         }
-        23 -> TBuiltinOp.CountList
-        24 -> TBuiltinOp.Counts
-        25 -> TBuiltinOp.ExtendList
-        26 -> TBuiltinOp.ConcatList
-        27 -> TBuiltinOp.GetMap
-        28 -> TBuiltinOp.GetList
-        29 -> TBuiltinOp.First
-        30 -> TBuiltinOp.Last
-        31 -> TBuiltinOp.Contains
-        32 -> TBuiltinOp.IndexOf
-        33 -> TBuiltinOp.Reverse
-        34 -> TBuiltinOp.SwapList
-        35 -> TBuiltinOp.ListFill
-        36 -> TBuiltinOp.ListFillRepeat
-        37 -> TBuiltinOp.Sort
-        38 -> TBuiltinOp.SortDesc
-        39 -> TBuiltinOp.OrderingThen
-        40 -> TBuiltinOp.OrderingReverse
-        41 -> TBuiltinOp.JoinSep
-        42 -> {
+        22 -> TBuiltinOp.CountList
+        23 -> TBuiltinOp.Counts
+        24 -> TBuiltinOp.ExtendList
+        25 -> TBuiltinOp.ConcatList
+        26 -> TBuiltinOp.GetMap
+        27 -> TBuiltinOp.GetList
+        28 -> TBuiltinOp.First
+        29 -> TBuiltinOp.Last
+        30 -> TBuiltinOp.Contains
+        31 -> TBuiltinOp.IndexOf
+        32 -> TBuiltinOp.Reverse
+        33 -> TBuiltinOp.SwapList
+        34 -> TBuiltinOp.ListFill
+        35 -> TBuiltinOp.ListFillRepeat
+        36 -> TBuiltinOp.Sort
+        37 -> TBuiltinOp.SortDesc
+        38 -> TBuiltinOp.OrderingThen
+        39 -> TBuiltinOp.OrderingReverse
+        40 -> TBuiltinOp.JoinSep
+        41 -> {
             f0: body_codec_get_bool(bytes, input)
             f1: body_codec_get_bool(bytes, input)
             TBuiltinOp.Sum{float: f0, f32: f1}
         }
-        43 -> {
+        42 -> {
             f0: body_codec_get_bool(bytes, input)
             TBuiltinOp.Product{float: f0}
         }
-        44 -> {
+        43 -> {
             f0: body_codec_get_bool(bytes, input)
             TBuiltinOp.Min{float: f0}
         }
-        45 -> {
+        44 -> {
             f0: body_codec_get_bool(bytes, input)
             TBuiltinOp.Max{float: f0}
         }
-        46 -> TBuiltinOp.Flatten
-        47 -> TBuiltinOp.Intersperse
-        48 -> TBuiltinOp.Unzip
-        49 -> TBuiltinOp.Clear
-        50 -> TBuiltinOp.Chars
-        51 -> {
+        45 -> TBuiltinOp.Flatten
+        46 -> TBuiltinOp.Intersperse
+        47 -> TBuiltinOp.Unzip
+        48 -> TBuiltinOp.Clear
+        49 -> TBuiltinOp.Chars
+        50 -> {
             f0: body_codec_get_bool(bytes, input)
             TBuiltinOp.Bytes{owned: f0}
         }
-        52 -> TBuiltinOp.StringFromBytes
-        53 -> TBuiltinOp.StringFromBytesLossy
-        54 -> TBuiltinOp.StringWithCapacity
-        55 -> TBuiltinOp.Trim
-        56 -> TBuiltinOp.TrimStart
-        57 -> TBuiltinOp.TrimEnd
-        58 -> TBuiltinOp.PadStart
-        59 -> TBuiltinOp.PadEnd
-        60 -> TBuiltinOp.StringIndexOf
-        61 -> TBuiltinOp.StringCount
-        62 -> TBuiltinOp.StringIsAlphabetic
-        63 -> TBuiltinOp.StringIsNumeric
-        64 -> TBuiltinOp.StringIsWhitespace
-        65 -> TBuiltinOp.StringIsASCII
-        66 -> TBuiltinOp.StringToTitle
-        67 -> {
+        51 -> TBuiltinOp.StringFromBytes
+        52 -> TBuiltinOp.StringFromBytesLossy
+        53 -> TBuiltinOp.StringWithCapacity
+        54 -> TBuiltinOp.Trim
+        55 -> TBuiltinOp.TrimStart
+        56 -> TBuiltinOp.TrimEnd
+        57 -> TBuiltinOp.PadStart
+        58 -> TBuiltinOp.PadEnd
+        59 -> TBuiltinOp.StringIndexOf
+        60 -> TBuiltinOp.StringCount
+        61 -> TBuiltinOp.StringIsAlphabetic
+        62 -> TBuiltinOp.StringIsNumeric
+        63 -> TBuiltinOp.StringIsWhitespace
+        64 -> TBuiltinOp.StringIsASCII
+        65 -> TBuiltinOp.StringToTitle
+        66 -> {
             f0: body_codec_get_string(bytes, input)
             TBuiltinOp.StringMethod{symbol: f0}
         }
-        68 -> TBuiltinOp.StringSplitOnce
-        69 -> TBuiltinOp.StringCutLast
-        70 -> TBuiltinOp.Split
-        71 -> TBuiltinOp.Lines
-        72 -> TBuiltinOp.ParseInt
-        73 -> TBuiltinOp.ParseFloat
-        74 -> TBuiltinOp.IntToRadix
-        75 -> TBuiltinOp.IntFromRadix
-        76 -> TBuiltinOp.StartsWith
-        77 -> TBuiltinOp.EndsWith
-        78 -> TBuiltinOp.Replace
-        79 -> TBuiltinOp.ToUpper
-        80 -> TBuiltinOp.ToLower
-        81 -> TBuiltinOp.ToASCIILower
-        82 -> TBuiltinOp.ToASCIIUpper
-        83 -> TBuiltinOp.Repeat
-        84 -> {
+        67 -> TBuiltinOp.StringSplitOnce
+        68 -> TBuiltinOp.StringCutLast
+        69 -> TBuiltinOp.Split
+        70 -> TBuiltinOp.Lines
+        71 -> TBuiltinOp.ParseInt
+        72 -> TBuiltinOp.ParseFloat
+        73 -> TBuiltinOp.IntToRadix
+        74 -> TBuiltinOp.IntFromRadix
+        75 -> TBuiltinOp.StartsWith
+        76 -> TBuiltinOp.EndsWith
+        77 -> TBuiltinOp.Replace
+        78 -> TBuiltinOp.ToUpper
+        79 -> TBuiltinOp.ToLower
+        80 -> TBuiltinOp.ToASCIILower
+        81 -> TBuiltinOp.ToASCIIUpper
+        82 -> TBuiltinOp.Repeat
+        83 -> {
             f0: body_codec_get_int(bytes, input)
             TBuiltinOp.Slice{line: f0}
         }
-        85 -> TBuiltinOp.After
-        86 -> TBuiltinOp.Before
-        87 -> TBuiltinOp.TrimView
-        88 -> TBuiltinOp.AfterView
-        89 -> TBuiltinOp.BeforeView
-        90 -> TBuiltinOp.Keys
-        91 -> TBuiltinOp.Values
-        92 -> TBuiltinOp.ContainsKey
-        93 -> TBuiltinOp.ToString
-        94 -> TBuiltinOp.Take
-        95 -> TBuiltinOp.Skip
-        96 -> TBuiltinOp.IterToList
-        97 -> TBuiltinOp.IterCollect
-        98 -> TBuiltinOp.ListLazy
-        99 -> TBuiltinOp.StepBy
-        100 -> TBuiltinOp.Dedup
-        101 -> TBuiltinOp.Chunks
-        102 -> TBuiltinOp.Windows
-        103 -> TBuiltinOp.IterRepeat
-        104 -> TBuiltinOp.IterCycle
-        105 -> TBuiltinOp.IterDropLast
-        106 -> TBuiltinOp.IterNext
-        107 -> TBuiltinOp.IterShuffle
-        108 -> TBuiltinOp.IterIsSorted
-        109 -> TBuiltinOp.IterLastIndexOf
-        110 -> {
+        84 -> TBuiltinOp.After
+        85 -> TBuiltinOp.Before
+        86 -> TBuiltinOp.TrimView
+        87 -> TBuiltinOp.AfterView
+        88 -> TBuiltinOp.BeforeView
+        89 -> TBuiltinOp.Keys
+        90 -> TBuiltinOp.Values
+        91 -> TBuiltinOp.ContainsKey
+        92 -> TBuiltinOp.ToString
+        93 -> TBuiltinOp.Take
+        94 -> TBuiltinOp.Skip
+        95 -> TBuiltinOp.IterToList
+        96 -> TBuiltinOp.IterCollect
+        97 -> TBuiltinOp.ListLazy
+        98 -> TBuiltinOp.StepBy
+        99 -> TBuiltinOp.Dedup
+        100 -> TBuiltinOp.Chunks
+        101 -> TBuiltinOp.Windows
+        102 -> TBuiltinOp.IterRepeat
+        103 -> TBuiltinOp.IterCycle
+        104 -> TBuiltinOp.IterDropLast
+        105 -> TBuiltinOp.IterNext
+        106 -> TBuiltinOp.IterShuffle
+        107 -> TBuiltinOp.IterIsSorted
+        108 -> TBuiltinOp.IterLastIndexOf
+        109 -> {
             f0: body_codec_get_bool(bytes, input)
             TBuiltinOp.IterAverage{float: f0}
         }
-        111 -> TBuiltinOp.IterCompare
-        112 -> TBuiltinOp.IterSplit
-        113 -> TBuiltinOp.ListSlice
-        114 -> TBuiltinOp.ListEqual
-        115 -> TBuiltinOp.ListBinarySearch
-        116 -> TBuiltinOp.ListUnion
-        117 -> TBuiltinOp.ListIntersection
-        118 -> TBuiltinOp.ListDifference
-        119 -> TBuiltinOp.ListRandom
-        120 -> TBuiltinOp.ListMinMax
-        121 -> TBuiltinOp.MapEqual
-        122 -> TBuiltinOp.MapFirst
-        123 -> TBuiltinOp.MapToList
-        124 -> TBuiltinOp.MapTopN
-        125 -> TBuiltinOp.MapMin
-        126 -> TBuiltinOp.MapMax
-        127 -> TBuiltinOp.MapIntersection
-        128 -> TBuiltinOp.MapSliceKeys
-        129 -> TBuiltinOp.MapFromKeys
-        130 -> TBuiltinOp.MapContainsValue
-        131 -> TBuiltinOp.MapPopFirst
-        132 -> TBuiltinOp.ListReplace
-        133 -> TBuiltinOp.Indexed
-        134 -> TBuiltinOp.Indexes
-        135 -> {
+        110 -> TBuiltinOp.IterCompare
+        111 -> TBuiltinOp.IterSplit
+        112 -> TBuiltinOp.ListSlice
+        113 -> TBuiltinOp.ListEqual
+        114 -> TBuiltinOp.ListBinarySearch
+        115 -> TBuiltinOp.ListUnion
+        116 -> TBuiltinOp.ListIntersection
+        117 -> TBuiltinOp.ListDifference
+        118 -> TBuiltinOp.ListRandom
+        119 -> TBuiltinOp.ListMinMax
+        120 -> TBuiltinOp.MapEqual
+        121 -> TBuiltinOp.MapFirst
+        122 -> TBuiltinOp.MapToList
+        123 -> TBuiltinOp.MapTopN
+        124 -> TBuiltinOp.MapMin
+        125 -> TBuiltinOp.MapMax
+        126 -> TBuiltinOp.MapIntersection
+        127 -> TBuiltinOp.MapSliceKeys
+        128 -> TBuiltinOp.MapFromKeys
+        129 -> TBuiltinOp.MapContainsValue
+        130 -> TBuiltinOp.MapPopFirst
+        131 -> TBuiltinOp.ListReplace
+        132 -> TBuiltinOp.Indexed
+        133 -> TBuiltinOp.Indexes
+        134 -> {
             f0: body_codec_get_tzipmode(bytes, input)
             f1: body_codec_get_list_string(bytes, input)
             f2: body_codec_get_bool(bytes, input)
@@ -5825,104 +5825,104 @@ body_codec_get_tbuiltinop: fn(bytes: [U8], input: &BodyCodecIn) -> TBuiltinOp Ne
             f5: body_codec_get_list_type(bytes, input)
             TBuiltinOp.Zip{mode: f0, fields: f1, flatten: f2, input_count: f3, fill_mode: f4, field_types: f5}
         }
-        136 -> {
+        135 -> {
             f0: body_codec_get_type(bytes, input)
             TBuiltinOp.OptionZip{elem_ty: f0}
         }
-        137 -> TBuiltinOp.SetFrom
-        138 -> TBuiltinOp.SetInsert
-        139 -> TBuiltinOp.SetUpdate
-        140 -> TBuiltinOp.SetDifferenceUpdate
-        141 -> TBuiltinOp.SetIntersectionUpdate
-        142 -> TBuiltinOp.SetSymmetricDifferenceUpdate
-        143 -> TBuiltinOp.SetRemove
-        144 -> TBuiltinOp.SetToList
-        145 -> TBuiltinOp.SetUnion
-        146 -> TBuiltinOp.SetIntersection
-        147 -> TBuiltinOp.SetDifference
-        148 -> TBuiltinOp.SetSymmetricDifference
-        149 -> TBuiltinOp.SetIsSubset
-        150 -> TBuiltinOp.SetIsSuperset
-        151 -> TBuiltinOp.SetIsDisjoint
-        152 -> TBuiltinOp.SetEqual
-        153 -> TBuiltinOp.SetCapacity
-        154 -> TBuiltinOp.SetFirst
-        155 -> TBuiltinOp.SetValues
-        156 -> TBuiltinOp.SetPop
-        157 -> TBuiltinOp.SetReplace
-        158 -> TBuiltinOp.SetSort
-        159 -> TBuiltinOp.SetShuffle
-        160 -> TBuiltinOp.SortedSetFrom
-        161 -> TBuiltinOp.SortedSetInsert
-        162 -> TBuiltinOp.SortedSetRemove
-        163 -> TBuiltinOp.SortedSetToList
-        164 -> TBuiltinOp.SortedSetUnion
-        165 -> TBuiltinOp.SortedSetIntersection
-        166 -> TBuiltinOp.SortedSetDifference
-        167 -> TBuiltinOp.SortedSetSymmetricDifference
-        168 -> TBuiltinOp.SortedSetIsSubset
-        169 -> TBuiltinOp.SortedSetIsSuperset
-        170 -> TBuiltinOp.SortedSetIsDisjoint
-        171 -> TBuiltinOp.PriorityQueueFrom
-        172 -> TBuiltinOp.PriorityQueuePeek
-        173 -> TBuiltinOp.PriorityQueueToSortedList
-        174 -> {
+        136 -> TBuiltinOp.SetFrom
+        137 -> TBuiltinOp.SetInsert
+        138 -> TBuiltinOp.SetUpdate
+        139 -> TBuiltinOp.SetDifferenceUpdate
+        140 -> TBuiltinOp.SetIntersectionUpdate
+        141 -> TBuiltinOp.SetSymmetricDifferenceUpdate
+        142 -> TBuiltinOp.SetRemove
+        143 -> TBuiltinOp.SetToList
+        144 -> TBuiltinOp.SetUnion
+        145 -> TBuiltinOp.SetIntersection
+        146 -> TBuiltinOp.SetDifference
+        147 -> TBuiltinOp.SetSymmetricDifference
+        148 -> TBuiltinOp.SetIsSubset
+        149 -> TBuiltinOp.SetIsSuperset
+        150 -> TBuiltinOp.SetIsDisjoint
+        151 -> TBuiltinOp.SetEqual
+        152 -> TBuiltinOp.SetCapacity
+        153 -> TBuiltinOp.SetFirst
+        154 -> TBuiltinOp.SetValues
+        155 -> TBuiltinOp.SetPop
+        156 -> TBuiltinOp.SetReplace
+        157 -> TBuiltinOp.SetSort
+        158 -> TBuiltinOp.SetShuffle
+        159 -> TBuiltinOp.SortedSetFrom
+        160 -> TBuiltinOp.SortedSetInsert
+        161 -> TBuiltinOp.SortedSetRemove
+        162 -> TBuiltinOp.SortedSetToList
+        163 -> TBuiltinOp.SortedSetUnion
+        164 -> TBuiltinOp.SortedSetIntersection
+        165 -> TBuiltinOp.SortedSetDifference
+        166 -> TBuiltinOp.SortedSetSymmetricDifference
+        167 -> TBuiltinOp.SortedSetIsSubset
+        168 -> TBuiltinOp.SortedSetIsSuperset
+        169 -> TBuiltinOp.SortedSetIsDisjoint
+        170 -> TBuiltinOp.PriorityQueueFrom
+        171 -> TBuiltinOp.PriorityQueuePeek
+        172 -> TBuiltinOp.PriorityQueueToSortedList
+        173 -> {
             f0: body_codec_get_int(bytes, input)
             f1: body_codec_get_tlistremovemode(bytes, input)
             TBuiltinOp.PriorityQueueRemove{line: f0, mode: f1}
         }
-        175 -> {
+        174 -> {
             f0: body_codec_get_bool(bytes, input)
             f1: body_codec_get_bool(bytes, input)
             TBuiltinOp.KeyOrdered{descending: f0, from: f1}
         }
-        176 -> TBuiltinOp.LRUPut
-        177 -> TBuiltinOp.LRUAddNew
-        178 -> TBuiltinOp.LRUGet
-        179 -> TBuiltinOp.LRURemove
-        180 -> TBuiltinOp.LRUCapacity
-        181 -> TBuiltinOp.LRUKeys
-        182 -> TBuiltinOp.BitSetAdd
-        183 -> TBuiltinOp.BitSetRemove
-        184 -> TBuiltinOp.BitSetCount
-        185 -> TBuiltinOp.BitSetToList
-        186 -> TBuiltinOp.ByteBufferFrom
-        187 -> {
+        175 -> TBuiltinOp.LRUPut
+        176 -> TBuiltinOp.LRUAddNew
+        177 -> TBuiltinOp.LRUGet
+        178 -> TBuiltinOp.LRURemove
+        179 -> TBuiltinOp.LRUCapacity
+        180 -> TBuiltinOp.LRUKeys
+        181 -> TBuiltinOp.BitSetAdd
+        182 -> TBuiltinOp.BitSetRemove
+        183 -> TBuiltinOp.BitSetCount
+        184 -> TBuiltinOp.BitSetToList
+        185 -> TBuiltinOp.ByteBufferFrom
+        186 -> {
             f0: body_codec_get_string(bytes, input)
             TBuiltinOp.ByteBufferWrite{symbol: f0}
         }
-        188 -> TBuiltinOp.ByteBufferToBytes
-        189 -> {
+        187 -> TBuiltinOp.ByteBufferToBytes
+        188 -> {
             f0: body_codec_get_string(bytes, input)
             TBuiltinOp.ByteBufferMethod{symbol: f0}
         }
-        190 -> TBuiltinOp.ByteBufferWithCapacity
-        191 -> TBuiltinOp.BagAdd
-        192 -> TBuiltinOp.BagRemove
-        193 -> TBuiltinOp.BagHas
-        194 -> TBuiltinOp.BagCount
-        195 -> TBuiltinOp.DequePushFront
-        196 -> TBuiltinOp.DequePushBack
-        197 -> TBuiltinOp.DequePopFront
-        198 -> TBuiltinOp.DequePopBack
-        199 -> TBuiltinOp.DequePeekFront
-        200 -> TBuiltinOp.DequePeekBack
-        201 -> TBuiltinOp.DequeCapacity
-        202 -> TBuiltinOp.DequeContains
-        203 -> TBuiltinOp.DequeGet
-        204 -> TBuiltinOp.DequeDelete
-        205 -> TBuiltinOp.DequeToList
-        206 -> TBuiltinOp.DequeJoin
-        207 -> TBuiltinOp.DequeReverse
-        208 -> TBuiltinOp.DequeSplit
-        209 -> TBuiltinOp.DequeFrom
-        210 -> TBuiltinOp.TryCollect
-        211 -> {
+        189 -> TBuiltinOp.ByteBufferWithCapacity
+        190 -> TBuiltinOp.BagAdd
+        191 -> TBuiltinOp.BagRemove
+        192 -> TBuiltinOp.BagHas
+        193 -> TBuiltinOp.BagCount
+        194 -> TBuiltinOp.DequePushFront
+        195 -> TBuiltinOp.DequePushBack
+        196 -> TBuiltinOp.DequePopFront
+        197 -> TBuiltinOp.DequePopBack
+        198 -> TBuiltinOp.DequePeekFront
+        199 -> TBuiltinOp.DequePeekBack
+        200 -> TBuiltinOp.DequeCapacity
+        201 -> TBuiltinOp.DequeContains
+        202 -> TBuiltinOp.DequeGet
+        203 -> TBuiltinOp.DequeDelete
+        204 -> TBuiltinOp.DequeToList
+        205 -> TBuiltinOp.DequeJoin
+        206 -> TBuiltinOp.DequeReverse
+        207 -> TBuiltinOp.DequeSplit
+        208 -> TBuiltinOp.DequeFrom
+        209 -> TBuiltinOp.TryCollect
+        210 -> {
             f0: body_codec_get_int(bytes, input)
             TBuiltinOp.ViewNew{line: f0}
         }
-        212 -> TBuiltinOp.SplitWrite
-        213 -> TBuiltinOp.GetDisjointWrite
+        211 -> TBuiltinOp.SplitWrite
+        212 -> TBuiltinOp.GetDisjointWrite
         else -> TBuiltinOp.LenString
     }
 }

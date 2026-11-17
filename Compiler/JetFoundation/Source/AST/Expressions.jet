@@ -576,6 +576,30 @@ expr_optional_method_call_as_call: fn(receiver: Expr, method: String, method_spa
     Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, id: AST_NODE_GENERATED}
 }
 
+// The index of `m[key, or: start]` is a call of this internal name with the
+// key and the starting value, so no source name can spell it.
+expr_map_slot_or_name: fn() -> String Never! {
+    nul: String.from_bytes([U8]{U8{0}}) ?? ""
+    "{nul}jet.map.or"
+}
+
+// The index `key, or: start` of a map slot that starts at `start` when the
+// key is missing; `label` is the span of the written `or`.
+expr_map_slot_or: fn(key: Expr, start: Expr, label: Span, id: Int) -> Expr Never! {
+    key_span: expr_span(key)
+    start_span: expr_span(start)
+    span: Span{start: key_span.start, end: start_span.end}
+    key_arg: CallArg{convention: AccessConvention.Read, expr: key, span: key_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}
+    start_arg: CallArg{convention: AccessConvention.Read, expr: start, span: start_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: Val(CallLabel{name: "or", span: label}), spread: false}
+    Expr.Call{call: Call{name: expr_map_slot_or_name(), name_span: span, type_args: [Type]{}, args: [CallArg]{key_arg, start_arg}}, id: id}
+}
+
+// Whether `call` is the index of a map slot with a starting value
+// (expr_map_slot_or): its arguments are the key and the starting value.
+expr_is_map_slot_or: fn(call: Call) -> Bool Never! {
+    call.args.len() == 2 && call.name == expr_map_slot_or_name()
+}
+
 expr_span: fn(expr: Expr) -> Span {
     if expr == {
         .Str(_, span, _) -> return span

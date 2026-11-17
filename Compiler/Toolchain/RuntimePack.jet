@@ -311,18 +311,19 @@ pack_recipe: fn(source: String, backend: String, lifecycle: String, compiler: St
     )
 }
 
-// The pack's content identity, native.key (format jet-native-runtime/v5):
-// the runtime's source, ABI, thread receipt, backend and lifecycle, and
-// `core`, the digests of the Core library's object, export list and thread
-// receipt, which the image links beside the runtime.
-pack_identity: fn(source: String, abi: String, threads: String, backend: String, lifecycle: String, core: String) -> String {
+// The pack's content identity, native.key (format jet-native-runtime/v6):
+// the runtime's source, ABI, thread receipt, stops receipt, backend and
+// lifecycle, and `core`, the digests of the Core library's object, export
+// list and thread receipt, which the image links beside the runtime.
+pack_identity: fn(source: String, abi: String, threads: String, stops: String, backend: String, lifecycle: String, core: String) -> String {
     sha256_json(
         Dyn.Object(
             [String:Dyn]{
-                "format": Dyn.Text("jet-native-runtime/v5"),
+                "format": Dyn.Text("jet-native-runtime/v6"),
                 "source": Dyn.Text(source.copy()),
                 "abi": Dyn.Text(abi.copy()),
                 "threads": Dyn.Text(threads.copy()),
+                "stops": Dyn.Text(stops.copy()),
                 "backend": Dyn.Text(backend.copy()),
                 "lifecycle": Dyn.Text(lifecycle.copy()),
                 "core": Dyn.Text(core.copy()),
@@ -607,11 +608,23 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     exports: export_names(files.read("{prefix}.exports") ?? fail("cannot read the runtime exports: {err}"))
     if symbols != exports -> fail("runtime ABI and checked exports disagree")
     abi_sha256 := sha256_file("{prefix}.abi.json")
+    // The stops receipt (Request.jet ir_stop_exports): the exports whose
+    // call can publish a stop. The runtime's scheduler always has some, so an
+    // empty one means the stop publisher it is read from was renamed away.
+    stops: files.read("{prefix}.stops") ?? fail("cannot read the runtime stops receipt: {err}")
+    if stops.trim() == "" {
+        fail("the runtime stops receipt is empty: no export reaches the stop publisher (JetIR BuildLibrary.jet IR_STOP_PUBLISH)")
+    }
+    loop name in stops.split("\n") {
+        if name != "" && !exports.contains(name) {
+            fail("runtime stops receipt names a symbol the checked exports lack")
+        }
+    }
     // The thread receipt (Request.jet ir_thread_exports): the exports that can
     // start a second thread, or `*` when a lifecycle hook can.
     threads: files.read("{prefix}.threads") ?? fail("cannot read the runtime thread receipt: {err}")
     thread_rows: threads.split("\n").to_list()
-    thread_names: loop name in thread_rows if name != "" -> name.copy()
+    thread_names: loop name in thread_rows.move() if name != "" -> name
     if !(thread_names.len() == 1 && thread_names[0] == "*") && thread_names.any(fn(name) { !exports.contains(name) }) {
         fail("runtime thread receipt names a symbol the checked exports lack")
     }
@@ -628,6 +641,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         fail("`{RUNTIME_INTERFACE}` disagrees with the interface the runtime source renders; copy `{stale}` over it")
     }
     threads_sha256 := sha256_file("{prefix}.threads")
+    stops_sha256 := sha256_file("{prefix}.stops")
     core_exports_sha256: digest_of(hashed[4])
     core_facts_sha256: digest_of(hashed[5])
     core_seal_sha256: digest_of(hashed[6])
@@ -636,7 +650,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     core_bodies_sha256: digest_of(hashed[9])
     // The Core object's, export list's, facts', seal's, thread receipt's, interface's and bodies' digests.
     core_sha256: "{core_object_sha256} {core_exports_sha256} {core_facts_sha256} {core_seal_sha256} {core_threads_sha256} {core_interface_sha256} {core_bodies_sha256}"
-    key: pack_identity(source.sha256, abi_sha256, threads_sha256, backend.sha256, lifecycle.sha256, core_sha256)
+    key: pack_identity(source.sha256, abi_sha256, threads_sha256, stops_sha256, backend.sha256, lifecycle.sha256, core_sha256)
     out: tool.out
     files.create_dir_all(out) ?? fail("cannot create `{out}`: {err}")
     web_sha256: digest_of(hashed[10])
@@ -644,6 +658,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
     move_into("{prefix}.abi.json", files.join(out, "runtime.abi.json"))
     move_into("{prefix}.exports", files.join(out, "runtime.exports"))
     move_into("{prefix}.threads", files.join(out, "runtime.threads"))
+    move_into("{prefix}.stops", files.join(out, "runtime.stops"))
     move_into("{core}.o", files.join(out, "jet_core.o"))
     move_into("{core}.exports", files.join(out, "core.exports"))
     move_into("{core}.facts", files.join(out, "core.facts"))
@@ -666,6 +681,7 @@ build: fn(tool: Toolchain, work: String, source: Inventory, backend: Inventory, 
         "llvmObjects": Dyn.Int(0),
         "abiSha256": Dyn.Text(abi_sha256.move()),
         "threadsSha256": Dyn.Text(threads_sha256.move()),
+        "stopsSha256": Dyn.Text(stops_sha256.move()),
         "source": inventory_value(source),
         "backendInputs": inventory_value(backend),
         "lifecycle": inventory_value(lifecycle),

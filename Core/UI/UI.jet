@@ -168,6 +168,12 @@ UINode: struct {
     // The click slot of the handler a page runs for files dropped on the
     // node's leaves (`__taking_web_files`); 0 for none.
     priv web_files: Int,
+    // What a page moves when a person drags the node's leaves
+    // (`__dragging_in_page`); None for nothing.
+    priv web_drag: UIWebMove?,
+    // What a page does with what is moved onto the node's leaves
+    // (`__taking_drops_in_page`); None for nothing.
+    priv web_zone: UIWebMove?,
 
     // The tree as a server sends it (`html.node`), as a screen whose view
     // gives a tree shows it.
@@ -210,6 +216,28 @@ UINode: struct {
     __taking_web_files: fn(self, handler: UINode) -> UINode Never! {
         result := self.copy()
         result.web_files = handler.click
+        result
+    }
+
+    // The tree as a body a person drags in a page (`app.draggable` in a web
+    // build), named `label`: a drag of one of its leaves, or a move the
+    // keyboard or its menu makes without one, first clicks `pick`, a button
+    // whose handler picks the value up. `kind` is the value's kind: its menu
+    // offers the bodies that take the same kind.
+    __dragging_in_page: fn(self, pick: UINode, kind: Int, label: String) -> UINode Never! {
+        result := self.copy()
+        result.web_drag = Val(UIWebMove{click: pick.click, kind: kind, label: label.copy()})
+        result
+    }
+
+    // The tree as a body that takes what is moved onto it in a page
+    // (`app.drop_zone` in a web build), named `label`: a drop on one of its
+    // leaves clicks `taker`, a button whose handler takes the value picked
+    // up, if any, and refuses the drop otherwise. `kind` is the kind of
+    // value it takes.
+    __taking_drops_in_page: fn(self, taker: UINode, kind: Int, label: String) -> UINode Never! {
+        result := self.copy()
+        result.web_zone = Val(UIWebMove{click: taker.click, kind: kind, label: label.copy()})
         result
     }
 
@@ -362,6 +390,8 @@ box: fn(children: [UINode]) -> UINode Never! {
         zone: 0,
         entries: [UINode]{},
         web_files: 0,
+        web_drag: None,
+        web_zone: None,
     }
 }
 
@@ -532,17 +562,36 @@ UIBackendState: struct {
 }
 
 // A leaf of a tree, the frame a paint lays it out in
-// (`internal.placed_leaves`), the innermost dragged body that holds it
-// (`UINode.__dragging`), 0 for none, the click slot of the innermost body
-// that takes files in a page and holds it (`UINode.__taking_web_files`), 0
-// for none, and the entries of the innermost body with a web menu that
-// holds it (`UINode.__with_web_menu`), none for none.
+// (`internal.placed_leaves`) and the bodies that hold it.
 priv UIPlaced: struct {
     node: UINode,
     frame: Rect,
+    held: UIHolders,
+}
+
+// The bodies that hold a node: the innermost dragged body
+// (`UINode.__dragging`), 0 for none; the click slot of the innermost body
+// that takes files in a page (`UINode.__taking_web_files`), 0 for none;
+// the entries of the innermost body with a web menu
+// (`UINode.__with_web_menu`), none for none; and what the innermost body a
+// person drags in a page and the innermost body that takes what is moved
+// onto it in a page move (`UINode.__dragging_in_page`,
+// `UINode.__taking_drops_in_page`), None for none.
+priv UIHolders: struct {
     drag: Int,
     files: Int,
     menu: [UINode],
+    web_drag: UIWebMove?,
+    web_zone: UIWebMove?,
+}
+
+// A body a page moves (`UINode.__dragging_in_page`) or one that takes what
+// it moves (`UINode.__taking_drops_in_page`): the click slot of its
+// handler, the kind of value it moves or takes, and its name.
+priv UIWebMove: struct {
+    click: Int,
+    kind: Int,
+    label: String,
 }
 
 // What `internal.held_at` looks for under a point: a body that takes
@@ -1958,6 +2007,8 @@ priv internal: module {
             zone: 0,
             entries: [UINode]{},
             web_files: 0,
+            web_drag: None,
+            web_zone: None,
         }
     }
 
@@ -2015,9 +2066,7 @@ priv internal: module {
         loop leaf in leaves -> paint_leaf(state, leaf.node, leaf.frame)
         if core.ui.__web_attached() {
             records := [String]{}
-            loop leaf in leaves {
-                records.push(scene_record(leaf.node, leaf.frame, leaf.files, leaf.menu))
-            }
+            loop leaf in leaves { records.push(scene_record(leaf.node, leaf.frame, leaf.held)) }
             core.ui.__web_scene(records.join(""))
         }
         found := [UINode]{}
@@ -2028,41 +2077,33 @@ priv internal: module {
         }
     }
 
-    // The leaves of `node` in paint order, each with its frame, the
-    // innermost dragged body (`UINode.__dragging`) that holds it, the click
-    // slot of the innermost body that takes files in a page
-    // (`UINode.__taking_web_files`) that holds it and the entries of the
-    // innermost body with a web menu that holds it
-    // (`UINode.__with_web_menu`): a box stacks its children down its frame,
-    // each its own height across the frame's width; every other node is a
-    // leaf painted into its frame. Every backend lays a tree out this way.
+    // The leaves of `node` in paint order, each with its frame and the
+    // bodies that hold it (`UIHolders`): a box stacks its children down
+    // its frame, each its own height across the frame's width; every other
+    // node is a leaf painted into its frame. Every backend lays a tree out
+    // this way.
     placed_leaves: fn(node: UINode, frame: Rect, leaves: &[UIPlaced]) Never! {
-        placed_under(node, frame, 0, 0, [UINode]{}, leaves)
+        placed_under(node, frame, UIHolders{drag: 0, files: 0, menu: [UINode]{}, web_drag: None, web_zone: None}, leaves)
     }
 
-    // `placed_leaves` within the dragged body `drag` (0 for none), the body
-    // that takes files in a page through the click slot `files` (0 for
-    // none) and the body whose web menu entries are `menu`.
-    placed_under: fn(node: UINode, frame: Rect, drag: Int, files: Int, menu: [UINode], leaves: &[UIPlaced]) Never! {
-        inner: if node.drag != 0 -> node.drag else -> drag
-        taking: if node.web_files != 0 -> node.web_files else -> files
-        if node.entries.len() > 0 -> placed_within(node, frame, inner, taking, node.entries, leaves) else {
-            placed_within(node, frame, inner, taking, menu, leaves)
+    // `placed_leaves` within the bodies `outer`.
+    placed_under: fn(node: UINode, frame: Rect, outer: UIHolders, leaves: &[UIPlaced]) Never! {
+        held: UIHolders{
+            drag: if node.drag != 0 -> node.drag else -> outer.drag,
+            files: if node.web_files != 0 -> node.web_files else -> outer.files,
+            menu: if node.entries.len() > 0 -> node.entries.copy() else -> outer.menu.copy(),
+            web_drag: if node.web_drag == None -> outer.web_drag.copy() else -> node.web_drag.copy(),
+            web_zone: if node.web_zone == None -> outer.web_zone.copy() else -> node.web_zone.copy(),
         }
-    }
-
-    // `placed_under` once the node's own dragged body, body that takes
-    // files and menu are known.
-    placed_within: fn(node: UINode, frame: Rect, drag: Int, files: Int, menu: [UINode], leaves: &[UIPlaced]) Never! {
         if node.kind == .Box {
             at := frame.y
             loop child in node.children {
-                placed_under(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, drag, files, menu, leaves)
+                placed_under(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, held, leaves)
                 at += child.height
             }
             return
         }
-        leaves.push(UIPlaced{node: node.copy(), frame: frame, drag: drag, files: files, menu: menu.copy()})
+        leaves.push(UIPlaced{node: node.copy(), frame: frame, held: held})
     }
 
     paint_leaf: fn(state: &UIBackendState, node: UINode, frame: Rect) Never! {
@@ -2195,8 +2236,8 @@ priv internal: module {
             role: placed.node.role
             if role == Val(UIAriaRole.Button) || role == Val(UIAriaRole.TextInput) {
                 ring.push(index)
-            } else if placed.drag != 0 && !reached.contains(placed.drag) {
-                reached.push(placed.drag)
+            } else if placed.held.drag != 0 && !reached.contains(placed.held.drag) {
+                reached.push(placed.held.drag)
                 ring.push(index)
             }
         }
@@ -2223,7 +2264,7 @@ priv internal: module {
         placed: leaves[ring[focused]]
         role: placed.node.role
         if role == Val(UIAriaRole.Button) || role == Val(UIAriaRole.TextInput) -> return 0
-        placed.drag
+        placed.held.drag
     }
 
     // `UINode.__set_focused_text`.
@@ -2482,22 +2523,33 @@ priv internal: module {
     }
 
     // A leaf's record in a paint's web scene, which has one per leaf in paint
-    // order (`placed_leaves`). A record is its fields separated by tabs, kind
-    // (`scene_kind`), click slot, drop slot and the click slot of the
-    // innermost body that takes files and holds it (`files`) (each 0 for
-    // none), the number of entries of the context menu the page opens on it
-    // (`menu`, the entries of the innermost body with a web menu that holds
-    // it), x, y, width, height, color (its `to_hex` text, empty for none)
-    // and the label's UTF-8 byte length, then the label and a newline; then
+    // order (`placed_leaves`), as the bodies `held` hold it. A record is its
+    // fields separated by tabs, kind (`scene_kind`), click slot, drop slot
+    // and the click slot of the innermost body that takes files and holds
+    // it (`files`) (each 0 for none), the number of entries of the context
+    // menu the page opens on it (`menu`, the entries of the innermost body
+    // with a web menu that holds it), the click slot and kind of the
+    // innermost body a person drags in a page that holds it (`web_drag`)
+    // and those of the innermost body that takes what is moved onto it in a
+    // page that holds it (`web_zone`) (each slot 0 for none), x, y, width,
+    // height, color (its `to_hex` text, empty for none) and the label's
+    // UTF-8 byte length, then the label and a newline; then, for a body a
+    // person drags and then for a body that takes what is moved, one line
+    // of its name's byte length and a tab, then its name and a newline; then
     // one line for each menu entry, in order: its kind, click slot and
     // label's byte length, separated by tabs, then the label and a newline.
     // A web build's host (JetWeb Host.jet) turns it into the page's
     // elements.
-    scene_record: fn(node: UINode, frame: Rect, files: Int, menu: [UINode]) -> String Never! {
+    scene_record: fn(node: UINode, frame: Rect, held: UIHolders) -> String Never! {
         color: if node.color == .Val(fill) -> fill.to_hex() else -> ""
         place: "{float_text(frame.x)}\t{float_text(frame.y)}\t{float_text(frame.width)}\t{float_text(frame.height)}"
-        record := "{scene_kind(node)}\t{node.click}\t{node.drop}\t{files}\t{menu.len()}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n"
-        loop entry in menu {
+        moving: held.web_drag ?? UIWebMove{click: 0, kind: 0, label: ""}
+        taking: held.web_zone ?? UIWebMove{click: 0, kind: 0, label: ""}
+        moves: "{moving.click}\t{moving.kind}\t{taking.click}\t{taking.kind}"
+        record := "{scene_kind(node)}\t{node.click}\t{node.drop}\t{held.files}\t{held.menu.len()}\t{moves}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n"
+        if moving.click != 0 -> record = "{record}{moving.label.bytes().len()}\t{moving.label}\n"
+        if taking.click != 0 -> record = "{record}{taking.label.bytes().len()}\t{taking.label}\n"
+        loop entry in held.menu {
             record = "{record}{scene_kind(entry)}\t{entry.click}\t{entry.label.bytes().len()}\t{entry.label}\n"
         }
         record

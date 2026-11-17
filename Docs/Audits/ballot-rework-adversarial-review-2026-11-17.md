@@ -2,6 +2,23 @@
 
 Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview.
 
+## Dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| GUARD-LINT1 ready after repair | card | #6326 holds the posted ballot D-GUARD-LINT1 |
+| FORMAT-TRAIT1 ready after repair | no-action | posted on Tower as D-FORMAT-TRAIT1 for the owner to vote on |
+| ARRAY-CONVERT1 ready after repair | card | #6177 holds the posted ballot D-ARRAY-CONVERT1 |
+| ARRAY-MATRESIZE1 ready after repair | card | #6177 holds the posted ballot D-ARRAY-MATRESIZE1 |
+| ARRAY-ROWMAJOR1 repeats a ratified choice | no-action | the ballot was deleted because the ratified matrix operations decision already rules its question |
+| ARRAY-ZIPCOLUMNS1 lacks its evidence | card | #6177 criterion 17 measures the prototype before the ballot is posted |
+| HOOK-POINT1 ready after repair | card | #5009 holds the posted ballot D-HOOK-POINT1 |
+| RUNTIME-HANDLE1 repeats a ratified choice | no-action | the ballot was deleted because the ratified Core layout decision already rules its question |
+| ITERATOR-FAIL1 ready after repair | no-action | posted on Tower as D-ITERATOR-FAIL1 for the owner to vote on |
+| BUILTIN-METHOD1 ready after repair | no-action | posted on Tower as D-BUILTIN-METHOD1 for the owner to vote on |
+<!-- /audit-dispositions -->
+
 ## Posting result
 
 Seven revised proposals are ready to post. Three must not be posted: ROWMAJOR and RUNTIME-HANDLE repeat ratified choices; ZIPCOLUMNS lacks its inherited performance/correctness evidence. All ten have complete `.r2.json` replacements with adversarial findings and an explicit verdict. Ready means a supportable design ballot, not an implemented feature or a passed implementation gate.
