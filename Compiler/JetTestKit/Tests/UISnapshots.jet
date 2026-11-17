@@ -138,7 +138,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(call.core_after, "\"Kind: enum {{\"")
     assert_eq(kit_ui_invocation("// @check_core Builtins/Builtins.jet\n", "Tests/UI/roles/main.jet", false).core_after, "")
     below: "// kinds\nKind: enum {{\n    First,\n}}\n"
-    assert_eq(kit_ui_core_insert("    Probe\n", below, "Builtins/Builtins.jet", "\"Kind: enum {{\"") ?? "", "// kinds\nKind: enum {{\n    Probe,\n    First,\n}}\n")
+    assert_eq(kit_ui_core_insert("    Probe,\n", below, "Builtins/Builtins.jet", "\"Kind: enum {{\"") ?? "", "// kinds\nKind: enum {{\n    Probe,\n    First,\n}}\n")
     assert_eq(kit_ui_core_insert("    Probe\n", "Kind: enum {{", "B.jet", "\"Kind: enum {{\"") ?? "", "Kind: enum {{\n    Probe\n")
     // An error comes back as its text, never as a prepended file.
     missing: kit_ui_core_insert("    Probe\n", below, "Builtins/Builtins.jet", "\"Mode: enum {{\"") ?? "{err}"
@@ -225,7 +225,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
         kit_exec_write(files.join(root, path), "Error [jet.UnknownName]: other\n")
     }
     kit_exec_write(files.join(root, "Tests/UI/stale.stderr"), "Error [jet.OperatorTypeMismatch]: mismatch\n")
-    kit_exec_write(kit_test_ledger(root), "# repo-relative ID\tcard\treason\ntests/ui/owned\t#4868\towned ui mismatch\ntests/ui/stale\t#4869\tstale ui row\ntests/ui/dir_owned\t#4870\towned ui project\n")
+    kit_exec_write(kit_test_ledger(root), "# repo-relative ID\tcard\treason\nTests/UI/owned\t#4868\towned ui mismatch\nTests/UI/stale\t#4869\tstale ui row\nTests/UI/dir_owned\t#4870\towned ui project\n")
     kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
     entries: kit_ui_discover(kit_ui_test_context(root, "discovery"))
     assert_eq(entries.len(), 4)
@@ -254,7 +254,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
         kit_exec_write(files.join(root, "Tests/UI/{stem}.fixed.jet"), "run: fn() {{}}\n")
         kit_exec_write(files.join(root, "Tests/UI/{stem}.stderr"), "(no errors)\n")
     }
-    kit_exec_write(kit_test_ledger(root), "Tests/UI/clean_crash.fixed\towner\tcompanion crash\ntests/ui/clean_crash_entry\towner\tentry row only\n")
+    kit_exec_write(kit_test_ledger(root), "Tests/UI/clean_crash.fixed\towner\tcompanion crash\nTests/UI/clean_crash_entry\towner\tentry row only\n")
     kit_ui_stage(root, root, true, kit_test_checkout_options(root).ui_corpora)
     entries: kit_ui_discover(kit_ui_test_context(root, "discovery"))
     assert_eq(entries.len(), 2)
