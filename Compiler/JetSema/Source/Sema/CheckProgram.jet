@@ -1946,7 +1946,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     // waits of its whole body, as a `#Deadline` block around it would.
     marker_position_free: scopes.position_free
     scopes.position_free = true
-    markers_valid: sema_marker_rules_check_rule_signatures(func.markers, updated, program, scopes, state, tail_store, context, diagnostics)
+    markers_valid: sema_marker_rules_check_function_markers(func, updated, program, scopes, state, tail_store, context, diagnostics)
     deadline_guards := [TContextGuard]{}
     loop marker in func.markers {
         if stand_in != None || !markers_valid || !sema_marker_is_hook(marker, MarkerHook.Deadline) || marker.negated || marker.args.len() != 1 {

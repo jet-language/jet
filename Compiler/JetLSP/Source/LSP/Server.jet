@@ -2,6 +2,7 @@
 // each publication covered, and the check each publication read.
 use {
     core.encoding.[Dyn]
+    jet_driver.[JetDriverToolStageItem, jet_driver_tool_stage_plan]
     jet_lexer.[Lexed, lex]
     jet_foundation.[foundation_json_integer]
     jet_pkg_model.[pkg_mask_inline_package_source]
@@ -19,11 +20,32 @@ LSPServer: struct {
 
     // Every open document is overlaid, so a check sees unsaved imports too.
     check: fn(self, doc: LSPDocument) -> LSPChecked {
+        self.checker.check(doc.path, self.overlays())
+    }
+
+    // The answer rows of `stage`'s hooks on the document `view` reads: the
+    // calls the `#On(stage, Marker)` hooks of the packages it imports make
+    // on its marked blocks (JetDriver ToolStages.jet), only on the block
+    // holding byte `at` when one is given. None until the check read the
+    // document's current text, whose offsets the rows name.
+    stage_items: fn(self, view: LSPView, stage: String, at: Int{-1}) -> [JetDriverToolStageItem] {
+        items := [JetDriverToolStageItem]{}
+        module_path: view.module_path ?? return items
+        index: lsp_module_index(view.checked, module_path) ?? return items
+        plan := jet_driver_tool_stage_plan(view.checked.modules, index, stage, at: at)
+        if plan.bodies.len() == 0 -> return items
+        loop rows in self.checker.stage(view.doc.path, self.overlays(), stage, plan.bodies, plan.program.move()) {
+            loop row in rows -> items.push(row)
+        }
+        items
+    }
+
+    overlays: fn(self) -> [LSPOverlay] Never! {
         overlays := [LSPOverlay]{}
         loop (_, open) in self.diagnostic_state.docs {
             overlays.push(LSPOverlay{path: open.path.copy(), source: open.text.copy()})
         }
-        self.checker.check(doc.path, overlays)
+        overlays
     }
 
     lex: fn(self, doc: LSPDocument) -> Lexed Never! { lsp_lex_source(doc.text) }

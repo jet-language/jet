@@ -6,6 +6,7 @@ use jet_foundation.[
     Expr,
     Func,
     Item,
+    MARKER_ON,
     Marker,
     MarkerDecl,
     MarkerDeclParam,
@@ -28,6 +29,7 @@ use jet_foundation.[
     TextEdit,
     Type,
     UnOp,
+    TOOL_STAGES,
     diagnostic_from_registry,
     diagnostic_with_edit,
     diagnostic_with_label,
@@ -36,6 +38,7 @@ use jet_foundation.[
     symbol_find,
     symbol_key_text,
     symbol_table_key,
+    tool_stage_hook,
     type_name,
     module_text,
 ]
@@ -1072,6 +1075,70 @@ sema_marker_rules_check_rule_signatures: fn(markers: [Marker], environment: Sema
         }
     }
     valid
+}
+
+// A function's markers through sema_marker_rules_check_rule_signature, except
+// its `#On`: at the function site `#On(stage, Marker)` joins a tool stage
+// (ToolStages.jet), so the stage and the hook's shape are checked, not the
+// statement site's `build` condition. True when all of them bind.
+sema_marker_rules_check_function_markers: fn(func: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool {
+    valid := true
+    loop marker in func.markers {
+        bound: if marker.name == MARKER_ON && marker.declaration_module == None -> sema_marker_rules_check_tool_stage(func, marker, diagnostics) else -> sema_marker_rules_check_rule_signature(marker, environment, program, scopes, state, tail_store, context, diagnostics)
+        if !bound -> valid = false
+    }
+    valid
+}
+
+// A tool-stage hook names a stage of TOOL_STAGES and the marker whose blocks
+// it reads, takes the one `compiler.MarkerBlock` the tool hands it, and
+// answers with the stage's type (E0930).
+sema_marker_rules_check_tool_stage: fn(func: Func, marker: Marker, diagnostics: &[Diagnostic]) -> Bool {
+    stages: (loop row in TOOL_STAGES -> "`{row.name}`").join(", ")
+    hook: tool_stage_hook(marker) ?? {
+        diagnostics.push(sema_error("E0930", marker.span, "`#On` on a function names a tool stage and a marker", "a function joins a tool stage with `#On(stage, Marker)`; the stages are {stages}", "write the stage and the marker whose blocks the function reads, such as `#On(fmt.block, SQL)`"))
+        return false
+    }
+    known := -1
+    loop (index, row) in TOOL_STAGES {
+        if row.name == hook.stage -> known = index
+    }
+    if known < 0 {
+        diagnostics.push(sema_error("E0930", marker.span, "`{hook.stage}` is not a tool stage", "a function joins a tool stage with `#On(stage, Marker)`; the stages are {stages}", "name one of the tool stages"))
+        return false
+    }
+    answer: TOOL_STAGES[known].answer
+    shape: "`{func.name}: fn(block: compiler.MarkerBlock) -> {answer}`"
+    takes_block: func.params.len() == 1 && func.type_params.len() == 0 && sema_marker_rules_unqualified_type(type_name(func.params[0].ty)) == "MarkerBlock"
+    returned: if func.return_type == .Val(ty) -> sema_marker_rules_unqualified_type(type_name(ty)) else -> ""
+    if !takes_block || returned != sema_marker_rules_unqualified_type(answer) {
+        diagnostics.push(sema_error("E0930", func.name_span, "a `{hook.stage}` hook takes one `compiler.MarkerBlock` and answers `{answer}`", "the tool calls the function with each `#{hook.marker}` block it reads and reads the stage's answer", "declare {shape}"))
+        return false
+    }
+    true
+}
+
+// A written type with its module qualifiers dropped: `[core.compiler.Token]`
+// and `[compiler.Token]` are both `[Token]`.
+sema_marker_rules_unqualified_type: fn(text: String) -> String Never! {
+    out := [U8]{}
+    word := [U8]{}
+    loop byte in text.bytes() {
+        code: Int{byte}
+        if code == 46 {
+            word = [U8]{}
+            next
+        }
+        if (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57) || code == 95 {
+            word.push(byte)
+            next
+        }
+        loop kept in word -> out.push(kept)
+        word = [U8]{}
+        out.push(byte)
+    }
+    loop kept in word -> out.push(kept)
+    String.from_bytes(out) ?? text
 }
 
 // Rust `take_statement_rule_fact` then `validate_rule_signature`: the marker of

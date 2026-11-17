@@ -1,0 +1,22 @@
+# An app asks the person for a device permission with `app.ask`, and the
+# system shows the package's `purposes:` line for it when it asks. `jet
+# check` refuses an `ask` whose permission has no purpose
+# (E-APP-PERMISSION-PURPOSE) at the argument: a literal permission needs
+# its own line, and one chosen at run time needs a line for every
+# permission. The location, which has its purpose, checks. The web output
+# checks the same purposes.
+fixture: PermissionWithoutAPurposeFailsTheBuild.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: nonzero
+stderr: ~ "`app.ask` may ask for the `camera` permission, but the package's `purposes:` doesn't say why." # the photo
+stderr: ~ "main.jet:8:54" # on the permission it names
+stderr: ~ "`app.ask` may ask for the `camera` and `notifications` permissions" # the run-time choice
+stderr: ~ "main.jet:11:80"
+stderr: !~ "`location`" # the tag checks
+stderr: ~ "2 problems found"
+step: jet build --target web main.jet
+exit: nonzero
+stderr: ~ "`app.ask` may ask for the `camera` permission, but the package's `purposes:` doesn't say why." # the web output needs the same purposes
+stderr: ~ "main.jet:8:54"
+stderr: ~ "`app.ask` may ask for the `camera` and `notifications` permissions"

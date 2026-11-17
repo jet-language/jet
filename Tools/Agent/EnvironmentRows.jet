@@ -143,18 +143,19 @@ read_row: fn(line: String) -> EnvironmentRow? Never! {
     Val(EnvironmentRow{name: name.text, section: section, reader: reader.text, value: value.text, meaning: meaning.text})
 }
 
-// The cases of the registry's section enum, in order.
+// The cases of the registry's section enum, in order: one or more to a line,
+// each a word with or without its trailing comma, up to the closing brace.
 read_sections: fn(registry: String) -> [String] EnvironmentRowsError! {
     opened: registry.partition(SECTION_ENUM_OPEN)
     if opened.sep == "" {
         return Err(rows_fail("{REGISTRY_PATH} declares no JetEnvironmentSection enum"))
     }
     sections := [String]{}
-    loop word in opened.tail.partition("\n").head.replace(",", " ").split(" ") {
+    loop word in opened.tail.partition("\n}}").head.replace(",", " ").replace("\n", " ").split(" ") {
         if word != "" -> sections.push(word.copy())
     }
     if sections.len() == 0 {
-        return Err(rows_fail("{REGISTRY_PATH}: JetEnvironmentSection lists no cases on its first line"))
+        return Err(rows_fail("{REGISTRY_PATH}: JetEnvironmentSection lists no cases"))
     }
     Ok(sections)
 }

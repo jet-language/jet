@@ -1,0 +1,11 @@
+// A field app tags tasks with where they were done and attaches photos.
+// Its package says why it wants the location and says nothing about the
+// camera, so the person would be asked for the camera with no reason.
+use app
+
+tag_task: fn() -[Env, Net, Time]> Bool { app.ask(.Location) == .Granted }
+
+attach_photo: fn() -[Env, Net, Time]> Bool { app.ask(app.Permission.Camera) == .Granted }
+
+// A permission chosen at run time may be any of them.
+ask_for: fn(permission: app.Permission) -[Env, Net, Time]> app.Grant { app.ask(permission) }

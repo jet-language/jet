@@ -171,6 +171,7 @@ use {
         pkg_package_marker_source,
         pkg_package_markers,
         pkg_package_markers_masked,
+        pkg_parse_purposes,
         pkg_workspace_head_possible,
     ]
     jetpack_foundation.[DEFAULT_ENTRY_FILE]
@@ -1400,6 +1401,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     // inline package that names none is a single program and its own kernel.
     policy_memory_kernel := if inline_carrier == None -> Val([String]{}) else -> [String]?{None}
     boundaries := [ImportBoundary]{}
+    purposes := [String]{}
     policy_expert := Bool?{None}
     policy_lints_deny := [String]{}
     policy_harden := false
@@ -1415,6 +1417,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     outputs_seen := false
     policy_seen := false
     boundaries_seen := false
+    purposes_seen := false
     settings_seen := false
     build_seen := false
     brace_depth := 0
@@ -1565,6 +1568,23 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
                         }
                     }
                     index = boundaries_value.next_index - 1
+                }
+                "purposes" -> {
+                    if purposes_seen {
+                        diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, PackageParseError.Composition("`purposes` is declared more than once")))
+                    }
+                    purposes_seen = true
+                    purposes_value: jet_driver_manifest_field_value(source, tokens, value_index)
+                    if pkg_parse_purposes(purposes_value.text) == {
+                        .Ok(read) -> {
+                            purposes.clear()
+                            loop purpose in read.move() -> purposes.push(purpose.key.move())
+                        }
+                        .Err(error) -> {
+                            diagnostics.push(pkg_manifest_parse_diagnostic(manifest_path, error))
+                        }
+                    }
+                    index = purposes_value.next_index - 1
                 }
                 "allocator" -> {
                     if allocator_seen {
@@ -1747,7 +1767,7 @@ jet_driver_parse_package_root: fn(snapshot: JetDriverAuthorizedSourceSnapshot, r
     identity: jet_driver_package_identity(name, version ?? "")
     manifest_directory: jet_driver_dependency_path(root.canonical_path, "{root.files[manifest].relative_path}/..")
     read_scope: jet_driver_package_read_scope(authority_allow, if manifest_directory.valid -> manifest_directory.path else -> root.canonical_path)
-    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), authority_read_scope: read_scope, entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_memory_kernel: policy_memory_kernel.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move(), markers: markers.move()}
+    JetDriverPackageInfo{root_index: root_index, root_path: root.canonical_path, identity: identity, name: name, version: version, edition: edition, runtime_ceiling: runtime_ceiling, allocator_policy: allocator_policy, log_filter: log_filter, authority_allow: authority_allow, authority_deny: authority_deny, authority_needs: authority_needs, authority_grants: authority_grants.move(), authority_read_scope: read_scope, entry: entry, manifest_path: Val(manifest_path), policy_declarations: policy_declarations.move(), policy_unsafe_paths: policy_unsafe_paths.move(), policy_memory_kernel: policy_memory_kernel.move(), policy_expert: policy_expert, policy_lints_deny: policy_lints_deny.move(), policy_harden: policy_harden, inline_package: inline_carrier != None, configs: configs.move(), dependencies: dependencies, outputs: outputs, settings: settings.move(), profile_settings: profile_settings.move(), boundaries: boundaries.move(), purposes: purposes.move(), markers: markers.move()}
 }
 
 // The header markers of `package.jet` as the Jet parser reads them, each

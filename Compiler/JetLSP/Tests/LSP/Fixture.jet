@@ -2,12 +2,14 @@
 // parses into a module and the semantic index is built over them, so the
 // server's features read real index facts. Without type checking the index
 // resolves declarations, impl heads and free calls, which the feature tests
-// lean on.
+// lean on. Its tool stages answer each hook call without running it: a
+// `SELECT` completion, a `keyword` token over the body's first word, and a
+// `: block` hint at the body's end.
 use {
     core.encoding.[Dyn]
-    jet_foundation.[Diagnostic, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json]
+    jet_foundation.[Diagnostic, Span, TOOL_STAGE_LSP_COMPLETION, TOOL_STAGE_LSP_SEMANTIC_TOKENS, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json]
     jet_parser.[parse_source]
-    jet_driver.[JetDriverDocModule]
+    jet_driver.[JetDriverDocModule, JetDriverToolStageItem]
     jet_semindex.[SemEffectProjection, semindex_build, semindex_build_symbols]
     jet_lsp.[LSPChecked, LSPChecker, LSPOverlay, LSPServer, lsp_handle_request, lsp_member, lsp_server, lsp_update_document]
 }
@@ -38,6 +40,31 @@ LSPFixtureChecker: struct {
             index: semindex_build(modules, SemEffectProjection{required: [String]{}, granted: [String]{}, denied: [String]{}, authority: ""})
             symbols: semindex_build_symbols(index, modules)
             LSPChecked{diagnostics: diagnostics, modules: modules, index: Val(index), symbols: symbols}
+        }
+
+        stage: fn(self, entry: String, overlays: &&[LSPOverlay], stage: String, bodies: [Span], program: &&String) -[FS, Env, Exec, IO, Time, Net, FFI.Asm]> [[JetDriverToolStageItem]] Never! {
+            bytes := [U8]{}
+            loop overlay in overlays.move() {
+                if overlay.path == entry -> bytes = overlay.source.bytes()
+            }
+            answers := [[JetDriverToolStageItem]]{}
+            loop body in bodies {
+                lead := body.start
+                loop lead < body.end && (bytes[lead] == (U8{32}) || bytes[lead] == (U8{10})) {
+                    lead += 1
+                }
+                word := lead
+                loop word < body.end && bytes[word] != (U8{32}) && bytes[word] != (U8{10}) {
+                    word += 1
+                }
+                row: if {
+                    stage == TOOL_STAGE_LSP_COMPLETION -> JetDriverToolStageItem{at: body.start, length: 0, label: "SELECT", detail: "hook"}
+                    stage == TOOL_STAGE_LSP_SEMANTIC_TOKENS -> JetDriverToolStageItem{at: lead, length: word - lead, label: "", kind: "keyword"}
+                    else -> JetDriverToolStageItem{at: body.end, length: 0, label: ": block"}
+                }
+                answers.push([JetDriverToolStageItem]{row})
+            }
+            answers
         }
     }
 }

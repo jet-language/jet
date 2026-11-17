@@ -50,6 +50,9 @@ use {
         module_none,
         module_is_none,
         module_text,
+        Measure,
+        TypedLitBody,
+        measure_literal_value,
         PipeStep,
         expr_source_start,
         pipe_value_name,
@@ -800,7 +803,7 @@ sema_expression_field: fn(field: Expr, base: Expr, member: String, span: Span, e
             rewritten = sema_expression_computed_field_read(base, member, span, probe_value.ty, environment, program, scopes)
         }
         if rewritten == None {
-            swizzle: sema_expression_core_vector_swizzle(base, member, span, probe_value.ty, environment, program, diagnostics)
+            swizzle: sema_expression_swizzle_read(base, member, span, probe_value.ty, environment, program, diagnostics)
             if swizzle.invalid -> return None
             rewritten = swizzle.read
         }
@@ -1391,95 +1394,204 @@ sema_expression_method_read_without_call: fn(owner_name: String, member: String,
     diagnostic_with_edit(diagnostic, TextEdit{span: Span{start: span.end, end: span.end}, new_text: "()"})
 }
 
-// A swizzle read on a Core vector or swizzleable lane type (`v.x`, `v.zyx`)
-// is a call of the declaration's own lane reads: `lane` for one lane,
-// `__swizzleN` for N. A write is `__swizzle_setN` (Statements.jet).
-SemaCoreVectorSwizzle: struct {
+// `.xyzw` and `.rgba` name the slots of a value whose type has them: every
+// slot of a fixed array of one to four, or the first four lanes of a Core
+// vector or lane type. That is a Core struct that stores its lanes as
+// `lanes: [T#N]` and reads one with `lane(index)`; a matrix stores `lanes`
+// but reads no lane. One letter reads that slot. Several read the
+// declaration's own `__swizzleK` when it has one, so `Vec3.zyx` is a `Vec3`
+// and `F32x4.xy` a `Vec2`; otherwise they read `[T#K]` of those slots, with
+// the value evaluated once. A write is the declaration's `__swizzle_setK`,
+// else a write of the slots (Statements.jet).
+SemaSwizzleSlots: struct {
+    // The type as diagnostics name it.
+    shown: String,
+    element: Type,
+    // How many slots the value has, and how many of them letters reach.
+    length: Int,
+    reach: Int,
+    // Whether the slots are the value's `lanes` field.
+    lanes: Bool,
+    // Bit K: the declaration has `__swizzleK`; bit
+    // SEMA_SWIZZLE_SET_BIT + K: it has `__swizzle_setK`.
+    declared: Int,
+}
+
+SEMA_SWIZZLE_SET_BIT: 8
+
+SemaSwizzleRead: struct {
     read: Expr?,
     invalid: Bool,
 }
 
-sema_expression_core_vector_swizzle: fn(base: Expr, member: String, span: Span, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaCoreVectorSwizzle {
-    none: SemaCoreVectorSwizzle{read: None, invalid: false}
-    vector: sema_expression_core_vector_name(ty, environment, program) ?? return none
-    parsed: sema_expression_math_swizzle_parse(vector, member, span, diagnostics)
+sema_expression_swizzle_read: fn(base: Expr, member: String, span: Span, ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> SemaSwizzleRead {
+    none: SemaSwizzleRead{read: None, invalid: false}
+    slots: sema_expression_swizzle_slots(ty, environment, program) ?? return none
+    parsed: sema_expression_math_swizzle_parse(slots, member, span, diagnostics)
     if parsed == {
-        .NotSwizzle -> return none
-        .InvalidLane -> return SemaCoreVectorSwizzle{read: None, invalid: true}
-        .Lanes(packed, count, _) -> {
-            args := [CallArg]{}
-            loop index in 0..<count {
-                lane: (packed >> (index * 2)) & 3
-                args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Int{value: lane, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
-            }
-            method: if count == 1 -> "lane" else -> "__swizzle{count}"
-            // copy: the generated call owns its receiver; `base` stays the field's.
-            read: Expr.MethodCall{receiver: base.copy(), method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}
-            return SemaCoreVectorSwizzle{read: Val(read), invalid: false}
-        }
+        .NotSwizzle -> none
+        .InvalidLane -> SemaSwizzleRead{read: None, invalid: true}
+        // copy: the generated read owns its receiver; `base` stays the field's.
+        .Lanes(packed, count, _) -> SemaSwizzleRead{read: Val(sema_expression_swizzle_read_expr(base.copy(), slots, packed, count, span)), invalid: false}
     }
 }
 
-// The Core vector or swizzleable lane type (`Vec2`, `Vec3`, `Vec4`, `F32x4`,
-// `F64x2`) a value of `ty` is, when Core's source declares it.
-sema_expression_core_vector_name: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
-    leaf: sema_expr_math_leaf_name(ty) ?? return None
-    if leaf != "Vec2" && leaf != "Vec3" && leaf != "Vec4" && leaf != "F32x4" && leaf != "F64x2" {
-        return None
+// The read of `count` lanes, packed two bits each, of `base`.
+sema_expression_swizzle_read_expr: fn(base: Expr, slots: SemaSwizzleSlots, packed: Int, count: Int, span: Span) -> Expr {
+    if slots.lanes && (count == 1 || slots.declared & (1 << count) != 0) {
+        args := [CallArg]{}
+        loop index in 0..<count {
+            lane: (packed >> (index * 2)) & 3
+            args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Int{value: lane, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
+        }
+        method: if count == 1 -> "lane" else -> "__swizzle{count}"
+        return Expr.MethodCall{receiver: base, method: method, method_span: span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}
+    }
+    if count == 1 -> return sema_expression_swizzle_slot(base, slots, packed & 3, span)
+    // A name is read in place; any other value is bound once, as a pipe binds
+    // its head.
+    name: if base == .Ident(local, _, _) -> "{local}" else -> pipe_value_name(span.start)
+    elements := [Expr]{}
+    loop index in 0..<count {
+        elements.push(sema_expression_swizzle_slot(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}, slots, (packed >> (index * 2)) & 3, span))
+    }
+    sema_expression_swizzle_bound(base, name, count, sema_expression_swizzle_literal(slots.element, elements, span), span)
+}
+
+// The array holding the slots of `value`: its `lanes` field, or itself.
+sema_expression_swizzle_owner: fn(value: Expr, slots: SemaSwizzleSlots, span: Span) -> Expr Never! {
+    if slots.lanes -> Expr.Field{base: value, member: "lanes", span: span, id: AST_NODE_GENERATED} else -> value
+}
+
+// Slot `lane` of `value`.
+sema_expression_swizzle_slot: fn(value: Expr, slots: SemaSwizzleSlots, lane: Int, span: Span) -> Expr Never! {
+    Expr.Index{base: sema_expression_swizzle_owner(value, slots, span), index: Expr.Int{value: lane, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, kind: IndexKind.Unknown, id: AST_NODE_GENERATED}
+}
+
+// `[T#N]{elements…}`.
+sema_expression_swizzle_literal: fn(element: Type, elements: [Expr], span: Span) -> Expr Never! {
+    head: Type.FixedList{elem: element, len: Measure.Literal{kind: "length", value: elements.len()}}
+    Expr.TypedLit{head: Val(head), body: TypedLitBody.Elements{elements: elements}, span: span, id: AST_NODE_GENERATED}
+}
+
+// `head |> value`, where `value` reads `head` as `name` `reads` times.
+sema_expression_swizzle_bound: fn(head: Expr, name: String, reads: Int, value: Expr, span: Span) -> Expr Never! {
+    Expr.Pipe{head: head, steps: [PipeStep]{PipeStep{name: name, value: value, reads: reads, span: span}}, span: span, id: AST_NODE_GENERATED}
+}
+
+// The slots `.xyzw` and `.rgba` name on a value of `ty`, or None when it has
+// none.
+sema_expression_swizzle_slots: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaSwizzleSlots? {
+    if ty == .FixedList(element, measure) {
+        length: measure_literal_value(measure) ?? return None
+        if length < 1 || length > 4 -> return None
+        return Val(SemaSwizzleSlots{shown: type_name(ty), element: element, length: length, reach: length, lanes: false, declared: 0})
     }
     if program.registration_graph == .Val(graph) {
         row: sema_type_resolve_nominal_row(graph, ty, environment.module_identity) ?? return None
-        if core_source_owns_type("{module_text(graph.module_table, graph.modules[row.module_index].nominals[row.row].symbol.module_identity)}::{graph.modules[row.module_index].nominals[row.row].symbol.name}") {
-            return Val(leaf)
+        return sema_expression_swizzle_lane_slots(graph, graph.modules[row.module_index].nominals[row.row], ty)
+    }
+    None
+}
+
+// The lanes of a Core vector or lane type `nominal` declares, or None for any
+// other declaration.
+sema_expression_swizzle_lane_slots: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, ty: Type) -> SemaSwizzleSlots? {
+    if !core_source_owns_type("{module_text(graph.module_table, nominal.symbol.module_identity)}::{nominal.symbol.name}") {
+        return None
+    }
+    reads_lane := false
+    declared := 0
+    loop function in nominal.methods {
+        if function.symbol.name == "lane" -> reads_lane = true
+        declared |= sema_expression_swizzle_method_bit(function.symbol.name)
+    }
+    if !reads_lane -> return None
+    loop field in nominal.fields {
+        if field.symbol.name != "lanes" -> next
+        if field.ty == .FixedList(element, measure) {
+            length: measure_literal_value(measure) ?? return None
+            shown: sema_expr_math_leaf_name(ty) ?? type_name(ty)
+            return Val(SemaSwizzleSlots{shown: shown, element: element, length: length, reach: if length < 4 -> length else -> 4, lanes: true, declared: declared})
         }
     }
     None
 }
 
-// (Rust `infer_field`, `parse_swizzle_member`): `v.xy` names up to
-// four x/y/z/w lanes of a vector or swizzleable SIMD lane type. One lane reads
-// the scalar; several build a VecN, or the same lane type when all are named.
+// The `declared` bit of a declaration's own swizzle method, or 0.
+sema_expression_swizzle_method_bit: fn(name: String) -> Int Never! {
+    if name == {
+        "__swizzle2" -> 1 << 2
+        "__swizzle3" -> 1 << 3
+        "__swizzle4" -> 1 << 4
+        "__swizzle_set1" -> 1 << (SEMA_SWIZZLE_SET_BIT + 1)
+        "__swizzle_set2" -> 1 << (SEMA_SWIZZLE_SET_BIT + 2)
+        "__swizzle_set3" -> 1 << (SEMA_SWIZZLE_SET_BIT + 3)
+        "__swizzle_set4" -> 1 << (SEMA_SWIZZLE_SET_BIT + 4)
+        else -> 0
+    }
+}
+
+// A swizzle letter: x, y, z and w name slots 0 to 3, as 0 to 3; r, g, b and a
+// name them too, as 4 to 7. None for any other byte.
+sema_expression_swizzle_letter: fn(code: Int) -> Int? Never! {
+    if code == {
+        120 -> Val(0)
+        121 -> Val(1)
+        122 -> Val(2)
+        119 -> Val(3)
+        114 -> Val(4)
+        103 -> Val(5)
+        98 -> Val(6)
+        97 -> Val(7)
+        else -> None
+    }
+}
+
+// The letter `sema_expression_swizzle_letter` reads as `named`.
+sema_expression_swizzle_letter_name: fn(named: Int) -> String Never! {
+    if named == {
+        0 -> "x"
+        1 -> "y"
+        2 -> "z"
+        3 -> "w"
+        4 -> "r"
+        5 -> "g"
+        6 -> "b"
+        else -> "a"
+    }
+}
+
+// (Rust `infer_field`, `parse_swizzle_member`): `v.xy` names up to four
+// slots, with letters of one set. One lane reads the scalar; several read
+// as the declaration says, or a fixed array.
 SemaMathSwizzleParse: enum {
     NotSwizzle,
     InvalidLane,
     Lanes(packed: Int, count: Int, overlaps: Bool),
 }
 
-sema_expression_math_swizzle_parse: fn(type_name_value: String, member: String, span: Span, diagnostics: &[Diagnostic]) -> SemaMathSwizzleParse {
-    swizzleable: type_name_value == "F32x4" || type_name_value == "F64x2" || type_name_value == "Vec2" || type_name_value == "Vec3" || type_name_value == "Vec4"
-    if !swizzleable || member.len() == 0 || member.len() > 4 -> return .NotSwizzle
-    arity: sema_call_math_arity(type_name_value)
+sema_expression_math_swizzle_parse: fn(slots: SemaSwizzleSlots, member: String, span: Span, diagnostics: &[Diagnostic]) -> SemaMathSwizzleParse {
+    if member.len() == 0 || member.len() > 4 -> return .NotSwizzle
     // Four two-bit lane indexes fit in one scalar. Write validation needs
     // no temporary collection; reads allocate only their final checked lane list.
     packed := 0
     count := 0
     seen := 0
     overlaps := false
+    letters := -1
     loop byte in member.bytes() {
-        code: Int{byte}
-        lane: if code == {
-            120 -> 0
-            121 -> 1
-            122 -> 2
-            119 -> 3
-            else -> {
-                return .NotSwizzle
-            }
-        }
-        letter: if lane == {
-            0 -> "x"
-            1 -> "y"
-            2 -> "z"
-            else -> "w"
-        }
-        if lane >= arity {
-            valid: if arity == {
-                2 -> "x and y"
-                3 -> "x, y, and z"
-                4 -> "x, y, z, and w"
-                else -> "x/y/z/w"
-            }
-            diagnostics.push(sema_error("E3110", span, "lane `{letter}` isn't valid on `{type_name_value}`", "swizzle members name lanes with x/y/z/w — `{type_name_value}` only has {valid}", "use only the lanes defined for `{type_name_value}`"))
+        named: sema_expression_swizzle_letter(Int{byte}) ?? return .NotSwizzle
+        set: named >> 2
+        if letters >= 0 && set != letters -> return .NotSwizzle
+        letters = set
+        lane: named & 3
+        if lane >= slots.reach {
+            valid := loop slot in 0..<slots.reach -> sema_expression_swizzle_letter_name(set * 4 + slot)
+            last: valid.pop() ?? ""
+            listed: if valid.len() == 0 -> last else if valid.len() == 1 -> "{valid[0]} and {last}" else -> "{valid.join(", ")}, and {last}"
+            family: if set == 0 -> "x/y/z/w" else -> "r/g/b/a"
+            diagnostics.push(sema_error("E3110", span, "lane `{sema_expression_swizzle_letter_name(named)}` isn't valid on `{slots.shown}`", "swizzle members name lanes with {family} — `{slots.shown}` only has {listed}", "use only the lanes defined for `{slots.shown}`"))
             return .InvalidLane
         }
         bit: 1 << lane

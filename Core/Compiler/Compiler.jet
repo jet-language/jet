@@ -36,12 +36,51 @@ ExtensionPoint: struct {
 
 /// Every extension point and its row. A marker whose `expand` writes its own
 /// row may narrow it to `-[]>`, which makes it a lint: it reads the program and
-/// may reject or warn, but writes no declarations.
+/// may reject or warn, but writes no declarations. A tool stage hook runs when
+/// a tool (`jet fmt`, the language server) reads a block of its marker in a
+/// file that imports its package.
 EXTENSION_POINTS: [ExtensionPoint]{
     ExtensionPoint{name: "Compile-time value", entry: `#run { … }`, row: [String]{}},
     ExtensionPoint{name: "Marker expansion", entry: "Marker.expand(self, target: Target)", row: [String]{"Meta.Generate"}},
     ExtensionPoint{name: "Derive", entry: "Derive.expand(target: Target)", row: [String]{"Meta.Generate"}},
     ExtensionPoint{name: "Lint", entry: "Marker.expand(self, target: Target)", row: [String]{}},
+    ExtensionPoint{name: "Tool stage", entry: "#On(stage, Marker) fn(block: MarkerBlock)", row: [String]{}},
+}
+
+/// One block of a marker as a tool stage hands it to a package's
+/// `#On(stage, Marker)` function: the marker as the file writes it
+/// (`Tools.Query`, `SQL`), the text between the block's braces, and where that
+/// text starts in the file (1-based line and column).
+MarkerBlock: struct {
+    marker: String,
+    text: String,
+    line: Int,
+    column: Int,
+}
+
+/// A name an `lsp.completion` hook offers inside its marker's blocks; the
+/// editor filters them by the word under the cursor.
+Completion: struct {
+    label: String,
+    detail: String{""},
+}
+
+/// A highlighted run of a block's text (`lsp.semantic_tokens`): it starts
+/// `at` bytes into `MarkerBlock.text`, is `length` bytes long, and shows as
+/// the editor's token type `kind` (`keyword`, `type`, `function`, `variable`,
+/// `parameter`, `property`, `enumMember`, `string`, `number`, `comment`,
+/// `operator`, `namespace` or `decorator`).
+SemanticToken: struct {
+    at: Int,
+    length: Int,
+    kind: String,
+}
+
+/// A label the editor shows `at` bytes into a block's text
+/// (`lsp.inlay_hints`).
+InlayHint: struct {
+    at: Int,
+    label: String,
 }
 
 /// The compiler stage that makes a checked fact available. This is not the

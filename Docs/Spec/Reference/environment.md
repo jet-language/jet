@@ -69,9 +69,14 @@ one exists instead of adding another spelling for the same job.
 | `JET_ROOT` | path | Overrides the installed Jet runtime-data root. |
 | `JET_SCHEDULER_THREADS` | positive integer | Sets the generated program's scheduler worker count. |
 | `JET_TARGET` | target triple | The target an environment's task facts, its entry receipt and a foreign bridge record, instead of the host's. |
+| `JET_TEST_BROWSERS` | engines, comma-separated | Selects the engines browser tests open, instead of browser-tests.conf's `browsers`; prefer `jet test --browser`. |
+| `JET_TEST_BROWSER_UI` | `1` | Records every browser test attempt with its page payloads and writes the report.html viewer beside the report; prefer `jet test --browser-ui`. |
 | `JET_TEST_FILTER` | test-name substring | Selects generated `jet test` cases; prefer the corresponding CLI flag. |
+| `JET_TEST_REPORTER` | `text`, `json` or `html` | Selects the browser test report format, instead of browser-tests.conf's `reporter`; prefer `jet test --browser-reporter`. |
+| `JET_TEST_RETRIES` | 0 to 5 | Retries each failed browser test attempt up to this many times, instead of browser-tests.conf's `retries`; prefer `jet test --browser-retries`. |
 | `JET_TEST_SERIAL` | `1` | Runs generated `jet test` cases serially; prefer the corresponding CLI flag. |
 | `JET_TEST_SHUFFLE_SEED` | unsigned integer | Replays a shuffled generated test run. |
+| `JET_TEST_TRACE` | `1` | Records every browser test attempt, not only a retry; prefer `jet test --browser-trace`. |
 | `JET_TOOLCHAIN_ENDPOINT` | URL | Names the toolchain update endpoint, instead of the project's configured one and `https://dl.jet-lang.dev`. |
 | `JET_TZDB_DIR` | path | Overrides the timezone database read by generated programs. |
 <!-- END GENERATED ENVIRONMENT VARIABLES: User -->
@@ -181,7 +186,7 @@ object. A URL's user and password never appear in that list.
 | `JET_TEST_SHARD_COUNT` | count | How many shards `Tools/Agent/VerifyFull.jet` splits the native suites into. Unset, 1. |
 | `JET_TEST_TOOLCHAIN_ROOT` | path | Names the toolchain tree the rows of a corpus suite (`golden`, `run`, `ui`, `ui_lint`, `cases`) read their Core from; the testkit hands it to each row as its `JET_TOOLCHAIN_ROOT` and passes on no `JET_TEST_TOOLCHAIN_ROOT`. Unset, the rows get the kit's `JET_TOOLCHAIN_ROOT`, else the nearest tree at or above the kit's directory. The `jet` running the kit still reads `JET_TOOLCHAIN_ROOT`, so a newer runner can test an older `jet` against that jet's own tree, as the release gate does for the current release (`Tools/Release/Admit.jet`). |
 | `JET_TIMING_QUIET` | `1` | Says the machine is quiet enough to time: the run is pinned to idle CPUs, isolated ones when the kernel has them. Cases that measure wall time against a fixed limit (`requires: env:JET_TIMING_QUIET=1`), such as the Wayland 1 ms frame-time case, run only under it and skip elsewhere; their correctness twins run in every batch. `jet Tools/Perf/FrameTime/Main.jet` sets it and pins the run to the kernel's isolated CPUs (`/sys/devices/system/cpu/isolated`) or, when there are none, to the CPUs its `--cpu LIST` names; with neither it exits 2. |
-| `JET_TOOLCHAIN_ROOT` | path | Names the Jet toolchain source tree, the directory holding `Core/` and `Compiler/Prelude/`, that the Core library bodies are read from. Unset, an entry under a tree's `Core/` or `Compiler/` (a `jet check Core`, a Core test run, a compiler package build) names that tree; any other compile, inside a checkout or not, compiles against the Core sources built into `jet`. A `toolchain:` comptime input with no tree named reads the tree that holds the reading file, from that tree's own packages only. Checkout tools that read the tree's other files (`jet devtools grammars`, the diagnostic coverage report) refuse (E2105) and name both places. |
+| `JET_TOOLCHAIN_ROOT` | path | Names the Jet toolchain source tree, the directory holding `Core/` and `Compiler/Prelude/`, that the Core library bodies are read from. Unset, `jet` uses the nearest directory at or above the input that holds both; with none, it compiles against the Core sources built into it. Checkout tools that read the tree's other files (`jet devtools grammars`, the diagnostic coverage report) refuse (E2105) and name both places. |
 | `JET_TOWER_HYGIENE_REPORT` | path | The report the Tower hygiene audit (`Tools/CI/TowerHygiene.jet`) writes, never under Tower data. Unset, `.tmp/tower-hygiene/<candidate>-<shard>.txt` in the checkout. |
 | `JET_TOWER_LINT_SCOPE` | path | The directory the Tower hygiene audit lints. Unset, `docs`. |
 | `JET_TRUST_OUTPUT` | path | The directory `Tools/JetpackInfra/StageTrustRoot.jet` stages the public trust files in. Unset, the checkout's `Docs/Site/Dist/keys`. |

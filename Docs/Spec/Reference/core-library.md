@@ -505,6 +505,33 @@ SCHEMA: #run compiler.schema()
 MARKERS: #run (compiler.query(compiler.FactSource.Schema{snapshot: SCHEMA}, compiler.FactKind.Marker) ?? panic("schema")).len()
 ```
 
+#### Tool-stage hooks
+
+A package function marked `#On(stage, Marker)` answers a tool for each
+`#Marker { … }` block, the package's own marker or a prelude one such as
+`#SQL(User) { … }`, of a file that imports the package. It takes one
+`MarkerBlock { marker, text, line, column }`: the marker as written, the
+body between the braces, and the body's 1-based line and byte column. Its
+answer's type is the stage's:
+
+| Stage | Answer | Fields |
+| --- | --- | --- |
+| `fmt.block` | `String?` | The body's new text; None keeps it. |
+| `lsp.completion` | `[Completion]` | `label`, `detail` (default `""`). |
+| `lsp.semantic_tokens` | `[SemanticToken]` | `at` and `length` in body bytes, `kind` a protocol token type (`keyword`, `string`, …). |
+| `lsp.inlay_hints` | `[InlayHint]` | `at` in body bytes, `label`. |
+
+The hook runs as a compile-time value, under the same rules. A row outside its
+block, or a token of an unknown kind, is left out.
+
+```jet
+use compiler: core.compiler
+
+#On(fmt.block, SQL) shape: fn(block: compiler.MarkerBlock) -> String? {
+    Val(" {block.text.trim()} ")
+}
+```
+
 ### `core.meta` — module and package metadata
 
 Every module has a `Module` value and every package a `Package` value, and the
@@ -4961,9 +4988,10 @@ The compiler fills `module` at every `#here` and `#caller` site; its `""`
 default only covers a record built by hand. `core.log` filters records by it.
 
 `DebugView` is the trait a type implements to choose what `jet debug` shows
-for its values: `debug_view: fn(self) -> [DebugItem]`, one `DebugItem` (a
-`label` and a `value`, both text) a row. A ring buffer lists its items oldest
-first instead of its slots and start index:
+for its values: `debug_view: fn(self) -> [DebugItem] Never!`, one `DebugItem`
+(a `label` and a `value`, both text) a row. The view can't fail: the debugger
+calls it the way the program calls any infallible method. A ring buffer lists
+its items oldest first instead of its slots and start index:
 
 ```jet
 Ring: struct {
@@ -4972,7 +5000,7 @@ Ring: struct {
     count: Int
 
     impl DebugView {
-        debug_view: fn(self) -> [DebugItem] {
+        debug_view: fn(self) -> [DebugItem] Never! {
             loop k in 0..<self.count -> DebugItem{label: "{k}", value: "{self.slots[(self.start + k) % self.slots.len()]}"}
         }
     }
@@ -5595,6 +5623,7 @@ tasks never read or change the process registry. The module source is
 | `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.desktop_entry(exec: String) -> String` | text | The app's Linux desktop entry, running `exec` with the link it opens. |
+| `ask(permission: Permission) -[Env, Net, Time]> Grant` | grant | Ask the person for the device permission `permission` and give their answer, once per process. The package's `purposes:` says why the app wants it. See below. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
 | `notify(to: auth.AccountID, title: String, body: String, open: state) -[Net]>` | — | Push `title` and `body` to each device `to` registered; tapping the notice opens `url_of(open)`. See below. |
@@ -6126,6 +6155,37 @@ other value panics. A browser runs nothing for a page that is closed, so
 On the web, the work is a server job: a service method marked
 `#App.Every(cron: …)` runs on its schedule, and an `#App.Job` method is
 work a call queues.
+
+`app.ask(permission)` asks the person for a device permission and gives
+their answer. `Permission` is `.Camera`, `.Location` or `.Notifications`;
+`Grant` is `.Granted`, `.Denied` or `.Restricted`, the last when the
+person could not answer: the device has no such hardware, or nothing on it
+can ask. A process asks once for each permission, and a later call gives
+the first answer. On Linux the desktop portal asks
+(`org.freedesktop.portal.Camera`, after it reports a camera, and
+`org.freedesktop.portal.Location`, through a location session it closes
+after the answer) and remembers the person's choice across runs. A request
+the person dismisses, or leaves unanswered for five minutes, is `.Denied`.
+Notifications need no permission there and are `.Granted`. Without a
+session bus or a portal, and on the other native targets, the answer is
+`.Restricted`.
+
+The system shows the person why the app wants a permission when it asks,
+so the package says why in its `purposes:` field, one line for each
+permission it asks for:
+
+```jet
+purposes: {
+    camera: "Attach photos to tasks.",
+    location: "Tag each task with where it was done.",
+}
+```
+
+A key is `camera`, `location` or `notifications`, named once, and its
+value is non-empty quoted text. `jet check` refuses an `app.ask` whose
+permission has no line, at its argument, E-APP-PERMISSION-PURPOSE: a
+literal permission (`.Camera`, `app.Permission.Camera`) needs its own line,
+and a permission chosen at run time needs a line for every permission.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or

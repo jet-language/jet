@@ -108,11 +108,16 @@ use {
         ENV_JET_PROP_SEED,
         ENV_JET_READ_SCOPE,
         ENV_JET_RUN_JSON,
+        ENV_JET_TEST_BROWSERS,
+        ENV_JET_TEST_BROWSER_UI,
         ENV_JET_TEST_CAPTURE,
         ENV_JET_TEST_FILTER,
         ENV_JET_TEST_MEASURE,
+        ENV_JET_TEST_REPORTER,
+        ENV_JET_TEST_RETRIES,
         ENV_JET_TEST_SERIAL,
         ENV_JET_TEST_SHUFFLE_SEED,
+        ENV_JET_TEST_TRACE,
         ENV_JET_TEST_TRACE_TIERS,
         ENV_JET_UPDATE_SNAPSHOTS,
         ENV_JET_X64_EMIT_LOG,
@@ -2934,6 +2939,24 @@ jet_cli_test_result: fn(file: String, source: String, doctests: [JetCLIDoctestFi
     if generated_seed == .Val(seed) -> spec = spec.env(ENV_JET_PROP_SEED, seed)
     spec = spec.env(ENV_JET_TEST_CAPTURE, options.capture)
     if measure != None -> spec = spec.env(ENV_JET_TEST_MEASURE, "1")
+    // core.browser's test config reads the run's browser settings from these
+    // variables over browser-tests.conf, so a flag, the package's test
+    // profile or a `t.browser_*` call overrides the conf.
+    if test_settings_get(options.settings, "browser") == .Val(engines) {
+        spec = spec.env(ENV_JET_TEST_BROWSERS, engines)
+    }
+    if test_settings_get(options.settings, "browser_retries") == .Val(retries) {
+        spec = spec.env(ENV_JET_TEST_RETRIES, retries)
+    }
+    if test_settings_get(options.settings, "browser_reporter") == .Val(reporter) {
+        spec = spec.env(ENV_JET_TEST_REPORTER, reporter)
+    }
+    if test_settings_on(options.settings, "browser_ui") {
+        spec = spec.env(ENV_JET_TEST_BROWSER_UI, "1")
+    }
+    if test_settings_on(options.settings, "browser_trace") {
+        spec = spec.env(ENV_JET_TEST_TRACE, "1")
+    }
     // Every test process appends the lines it entered to one file.
     coverage_path: "{build_dir}/{stem}.coverage"
     if coverage -> spec = spec.env(JET_CLI_COVERAGE_ENV, coverage_path)
@@ -3759,7 +3782,7 @@ jet_cli_fmt_format_source: fn(source: String, origin: String, explicit_copies: B
     if result.structure_change == .Val(change) {
         return JetCLIFmtSource{text: "", diagnostics: [Diagnostic]{}, report: Val(jet_cli_fmt_structure_report(origin, change))}
     }
-    if result.ok -> return jet_cli_fmt_formatted(result.text)
+    if result.ok -> return jet_cli_fmt_block_hooks(result.text, origin, color)
     // The source checked clean, so marks that do not parse are a defect in
     // the copy-site data (E0122), never carets on the user's source.
     if copy_marks_inserted {

@@ -1,0 +1,26 @@
+// Inlay hints: the `lsp.inlay_hints` hooks of a marked block's package label
+// places in its body; a request's range keeps the hints inside it.
+use {
+    core.encoding.[Dyn]
+    jet_foundation.[TOOL_STAGE_LSP_INLAY_HINTS, foundation_json_quote]
+}
+
+lsp_inlay_hint_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
+    view: lsp_view(server, params) ?? return lsp_response(id, "null")
+    bytes: view.doc.text.bytes()
+    table: lsp_line_table_bytes(bytes)
+    start := 0
+    end := bytes.len()
+    if lsp_param(params, "range") == .Val(range) {
+        requested: lsp_range_from_json(range) ?? return lsp_error_response(id, -32602, "range is malformed")
+        start = lsp_checked_offset_bytes(table, bytes, requested.start) ?? return lsp_error_response(id, -32602, "range is outside the document")
+        end = lsp_checked_offset_bytes(table, bytes, requested.end) ?? return lsp_error_response(id, -32602, "range is outside the document")
+    }
+    hints := [String]{}
+    loop row in server.stage_items(view, TOOL_STAGE_LSP_INLAY_HINTS) {
+        if row.at < start || row.at > end -> next
+        at: lsp_byte_offset_in_table(bytes, table, row.at)
+        hints.push("{{\"position\":{{\"line\":{at.line},\"character\":{at.character}}},\"label\":{foundation_json_quote(row.label)}}}")
+    }
+    lsp_response(id, "[{hints.join(",")}]")
+}

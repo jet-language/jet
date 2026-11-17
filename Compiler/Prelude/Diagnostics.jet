@@ -7314,6 +7314,30 @@ CollectionLiteralMixesItemsAndLoop: struct {
     }
 }
 
+FixedArrayElementwiseMismatch: struct {
+    impl Diagnostic {
+        code: "E0446",
+        safety_class: .Soundness,
+        safety_reason: "A slot-by-slot operator pairs each slot with a partner of the slot's type, so a missing slot or another type leaves a slot with no operation to run.",
+        expert_path: "none: both arrays have one shape, or the value has the slots' type",
+        meaning: "A fixed-array operator meets an operand of another length or element type",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String {
+            "`+` needs two arrays of one length, but these are `[Int#3]` and `[Int#4]`"
+        }
+
+        why: fn(self) -> String {
+            "An operator on two fixed arrays pairs each slot of one with the same slot of the other, so every slot needs a partner"
+        }
+
+        fix: fn(self) -> String {
+            "Make both arrays the same length, or take a slice of the longer one"
+        }
+    }
+}
+
 UntypedEmptyList: struct {
     impl Diagnostic {
         code: "E0501",
@@ -22919,6 +22943,34 @@ AppFeatureNotOnTarget: struct {
 
         fix: fn(self) -> String {
             "Choose a build target that supports `.{self.feature}` (for example `#Target(JS)` for browser features or a native target for server features), or remove that feature."
+        }
+    }
+}
+
+AppPermissionPurpose: struct {
+    call: String,
+    permissions: String,
+    lines: String,
+
+    impl Diagnostic {
+        code: "E-APP-PERMISSION-PURPOSE",
+        safety_class: .Soundness,
+        safety_reason: "The system asks the person for the permission with the package's purpose, so a call with no purpose would ask without saying why.",
+        expert_path: "none: the package gives each permission it asks for a purpose",
+        meaning: "A call needs a device permission the package gives no purpose for",
+        detail: true,
+        fix_next: "Add the permission's line to the package's `purposes:`, or remove the call.",
+
+        what: fn(self) -> String {
+            "`{self.call}` may ask for {self.permissions}, but the package's `purposes:` doesn't say why."
+        }
+
+        why: fn(self) -> String {
+            "When the app asks for a device permission, the system shows the person why the app wants it, and a phone build writes the same text into its manifest; a permission the app asks for with no purpose has nothing to show. During `jet check`, Jet reports this diagnostic."
+        }
+
+        fix: fn(self) -> String {
+            "Say why in the package's `purposes:` (for example `{self.lines}`), or remove the call."
         }
     }
 }

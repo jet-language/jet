@@ -1,0 +1,63 @@
+// The tool stages a package joins with `#On(stage, Marker)` on a function: a
+// tool (`jet fmt`, the language server) hands the function each block of
+// `Marker` in a file that imports the function's package, as a
+// `core.compiler.MarkerBlock`, and reads its answer. The table is the one list
+// of tool stages; sema checks a function's `#On` against it, and the tools run
+// only the stages it names. Each stage keys its hooks by the marker whose
+// blocks they read, so a new marker needs no tool change.
+ToolStage: struct {
+    name: String,
+    // The return type a hook of the stage declares, as written in a package
+    // that imports `core.compiler` as `compiler`.
+    answer: String,
+}
+
+TOOL_STAGE_FMT_BLOCK: "fmt.block"
+
+TOOL_STAGE_LSP_COMPLETION: "lsp.completion"
+
+TOOL_STAGE_LSP_SEMANTIC_TOKENS: "lsp.semantic_tokens"
+
+TOOL_STAGE_LSP_INLAY_HINTS: "lsp.inlay_hints"
+
+TOOL_STAGES: [ToolStage]{
+    ToolStage{name: TOOL_STAGE_FMT_BLOCK, answer: "String?"},
+    ToolStage{name: TOOL_STAGE_LSP_COMPLETION, answer: "[compiler.Completion]"},
+    ToolStage{name: TOOL_STAGE_LSP_SEMANTIC_TOKENS, answer: "[compiler.SemanticToken]"},
+    ToolStage{name: TOOL_STAGE_LSP_INLAY_HINTS, answer: "[compiler.InlayHint]"},
+}
+
+// A function's `#On(stage, Marker)`: the stage it joins and the marker whose
+// blocks it reads, each as written (`lsp.completion`, `Query`).
+ToolStageHook: struct {
+    stage: String,
+    marker: String,
+}
+
+// The stage and marker `marker` names, when it is an `#On` written as
+// `#On(stage, Marker)` with a dotted stage path and a marker name. Whether
+// the stage is in TOOL_STAGES is the caller's question.
+tool_stage_hook: fn(marker: Marker) -> ToolStageHook? Never! {
+    if marker.name != MARKER_ON || marker.negated || marker.args.len() != 2 -> return None
+    loop label in marker.arg_labels {
+        if label != None -> return None
+    }
+    stage: tool_stage_path(marker.args[0]) ?? return None
+    key: tool_stage_path(marker.args[1]) ?? return None
+    if !stage.contains(".") -> return None
+    Val(ToolStageHook{stage: stage, marker: key})
+}
+
+// The dotted name an argument writes (`lsp.completion`, `Query`), or None for
+// any other expression.
+tool_stage_path: fn(arg: MarkerCallArg) -> String? Never! {
+    if arg == .Expr(value) -> return tool_stage_expr_path(value, "")
+    None
+}
+
+// The dotted name `value` writes, followed by `tail`.
+tool_stage_expr_path: fn(value: Expr, tail: String) -> String? Never! {
+    if value == .Ident(name, _, _) -> return Val("{name}{tail}")
+    if value == .Field(base, member, _, _) -> return tool_stage_expr_path(base, ".{member}{tail}")
+    None
+}

@@ -1,0 +1,203 @@
+// Fixed arrays of numbers combine slot by slot. `a + b` on two `[T#N]`, `a * k`
+// and `k * a` with one number `k`, and `-a` and `~a` are each the hand-written
+// `[T#N]{a[0] + b[0], …, a[N-1] + b[N-1]}`: each operand is evaluated once
+// into a local of its own, and each slot is checked as the scalar operator on
+// that slot's elements. So a slot means what the scalar operator means, on
+// every tier: its overflow stop, its zero-divisor stop, and `Int / Int` making
+// a Fraction. A number literal beside an array is read as an element, as in
+// `[T#N]{k, …}`. Two arrays of different lengths or element types, or an
+// array beside a value that is not one of its elements, are E0446. `==` and
+// `!=` compare whole arrays and are not slot by slot.
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    AccessConvention,
+    BinOp,
+    Diagnostic,
+    Expr,
+    IndexKind,
+    Measure,
+    Span,
+    Symbol,
+    SymbolKind,
+    TLetTy,
+    Type,
+    UnOp,
+    checked_symbol_local,
+    measure_literal_value,
+    symbol_key_text,
+    type_identity_equal,
+    type_name,
+]
+
+// A fixed array of numbers whose length is known while building.
+SemaFixedShape: struct {
+    element: Type,
+    length: Int,
+    measure: Measure,
+}
+
+sema_expr_fixed_shape: fn(ty: Type) -> SemaFixedShape? {
+    if ty == .FixedList(element, measure) {
+        if !sema_expr_is_numeric(element) && sema_expr_precise_name(element) == None -> return None
+        length: measure_literal_value(measure) ?? return None
+        return Val(SemaFixedShape{element: element, length: length, measure: measure})
+    }
+    None
+}
+
+// The bit operators, which need integer slots.
+sema_expr_fixed_integer_operator: fn(op: BinOp) -> Bool Never! {
+    op == BinOp.BitAnd || op == BinOp.BitOr || op == BinOp.BitXor || op == BinOp.Shl || op == BinOp.Shr
+}
+
+// Whether `op` on these operands works slot by slot: an arithmetic operator
+// beside a fixed array of numbers, or a bit operator beside one of integers.
+sema_expr_fixed_elementwise_applies: fn(op: BinOp, left: Type, right: Type) -> Bool {
+    arithmetic: op == BinOp.Add || op == BinOp.Sub || op == BinOp.Mul || op == BinOp.Div || op == BinOp.FloorDiv || op == BinOp.Mod || op == BinOp.Rem || op == BinOp.Pow
+    integer: sema_expr_fixed_integer_operator(op)
+    if !arithmetic && !integer -> return false
+    shape: sema_expr_fixed_shape(left) ?? sema_expr_fixed_shape(right) ?? return false
+    !integer || sema_expr_is_integer(shape.element)
+}
+
+// Whether a prefix operator works slot by slot on `ty`: `-` on a fixed array
+// of numbers, `~` on one of integers.
+sema_expr_fixed_unary_applies: fn(op: UnOp, ty: Type) -> Bool {
+    shape: sema_expr_fixed_shape(ty) ?? return false
+    if op == {
+        .Neg -> true
+        .Complement -> sema_expr_is_integer(shape.element)
+        .Not -> false
+    }
+}
+
+// A number literal, which a slot reads as it would beside one element.
+sema_expr_fixed_number_literal: fn(expr: Expr) -> Bool {
+    if expr == .Int(_, _, _, _, _) || expr == .Float(_, _, _, _, _) -> return true
+    if expr == .Paren(inner, _, _) -> return sema_expr_fixed_number_literal(inner)
+    if expr == .Unary(op, inner, _, _) {
+        return op == UnOp.Neg && sema_expr_fixed_number_literal(inner)
+    }
+    false
+}
+
+// E0446 for an operand that can't combine with a fixed array slot by slot,
+// or None when the pair can.
+sema_expr_fixed_mismatch: fn(op: BinOp, lhs: Type, rhs: Type, left: Expr, right: Expr, span: Span) -> Diagnostic? {
+    operator: sema_expr_binary_name(op)
+    left_shape: sema_expr_fixed_shape(lhs)
+    right_shape: sema_expr_fixed_shape(rhs)
+    if left_shape == .Val(left_array) && right_shape == .Val(right_array) {
+        if left_array.length != right_array.length {
+            return Val(sema_error("E0446", span, "`{operator}` needs two arrays of one length, but these are `{type_name(lhs)}` and `{type_name(rhs)}`", "an operator on two fixed arrays pairs each slot of one with the same slot of the other, so every slot needs a partner", "make both arrays the same length, or take a slice of the longer one"))
+        }
+        if !type_identity_equal(left_array.element, right_array.element) {
+            return Val(sema_error("E0446", span, "`{operator}` needs two arrays of one element type, but these are `{type_name(lhs)}` and `{type_name(rhs)}`", "each slot is the scalar `{operator}` on two elements, and that needs one number type on both sides", "convert one array's elements to the other's type first"))
+        }
+        return None
+    }
+    array: if left_shape == .Val(shape) -> shape else -> right_shape ?? return None
+    array_type: if left_shape != None -> lhs else -> rhs
+    other_type: if left_shape != None -> rhs else -> lhs
+    other: if left_shape != None -> right else -> left
+    if sema_expr_fixed_number_literal(other) -> return None
+    shift_count: (op == BinOp.Shl || op == BinOp.Shr) && left_shape != None && sema_expr_is_integer(other_type)
+    if shift_count || type_identity_equal(other_type, array.element) -> return None
+    Val(sema_error("E0446", span, "`{operator}` combines `{type_name(array_type)}` with another `{type_name(array_type)}` or with one `{type_name(array.element)}`, but this is `{type_name(other_type)}`", "a value beside a fixed array is applied to every slot, so it needs the slots' type", "convert the value to `{type_name(array.element)}`, or make it an array of the same shape"))
+}
+
+// One operand of a slot-by-slot operator as a local of the block the
+// operator becomes.
+sema_expr_fixed_bind: fn(name: String, value: &&TExpr, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext) -> TStmt {
+    owner: sema_scope_local_owner_key(scopes)
+    key: symbol_key_text(SymbolKind.Local, sema_scope_environment_module_text(environment, program), owner, name)
+    id: sema_symbol_id_of(program, context, key)
+    symbol: Symbol{id: id, kind: SymbolKind.Local, name: name, module_identity: environment.module_identity, owner: Val(owner), span: span, ty: Val(value.ty), visibility: 0}
+    _ := sema_scope_declare_local(scopes, symbol, key, false, AccessConvention.Read, None, false)
+    sema_ownership_declare_binding(state, symbol, false)
+    local := checked_symbol_local(name, span, id, value.ty)
+    local.generated = true
+    TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: value, gc_promotion: None, gc_transferred: false, span: span}
+}
+
+// What a slot reads of one operand's local: its element at `slot` when the
+// operand is an array, else the operand.
+sema_expr_fixed_slot: fn(name: String, slot: Int?, span: Span) -> Expr {
+    read: Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED}
+    at: slot ?? return read
+    Expr.Index{base: read, index: Expr.Int{value: at, span: span, width: None, raw: None, id: AST_NODE_GENERATED}, span: span, kind: IndexKind.Unknown, id: AST_NODE_GENERATED}
+}
+
+// One operand of `lhs op rhs` as written (`written`) and checked
+// (`checked`), bound to the local `name`. A number literal beside an array is
+// checked again as one of its elements.
+sema_expr_fixed_operand: fn(name: String, written: Expr, checked: &&TExpr, shape: SemaFixedShape, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
+    if sema_expr_fixed_shape(checked.ty) != None || !sema_expr_fixed_number_literal(written) {
+        return Val(sema_expr_fixed_bind(name, checked, span, environment, program, scopes, state, context))
+    }
+    element: sema_check_expression(written, Val(shape.element), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    Val(sema_expr_fixed_bind(name, element, span, environment, program, scopes, state, context))
+}
+
+// The slots `[T#N]{…}` of a slot-by-slot operator, each checked in the block
+// that holds the operand locals in `body`, as the value of that block.
+sema_expr_fixed_slots: fn(slots: [Expr], shape: SemaFixedShape, body: &&[TStmt], mark: SemaScopeMark, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    values := [TExpr]{}
+    loop slot in slots {
+        // Every slot has one type, so a slot the operator refuses is
+        // reported once, at the first.
+        value: sema_check_expression(slot, None, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+            sema_scope_leave(scopes, state)
+            return None
+        }
+        values.push(value)
+    }
+    sema_single_use_leave_scope(scopes, state, diagnostics)
+    sema_scope_rollback(scopes, mark)
+    element: if values.len() > 0 -> values[0].ty else -> shape.element
+    list: sema_tree_node(Type.FixedList{elem: element, len: shape.measure}, TExprKind.List{values: values, trait_coercion: None}, span)
+    statements := body.move()
+    statements.push(TStmt.ExprStmt{value: list, span: span})
+    sema_expr_expected_owned(sema_tree_node(list.ty, TExprKind.InlineBlock{body: statements}, span), expected, environment, program, diagnostics)
+}
+
+// `lhs op rhs` slot by slot, where sema_expr_fixed_elementwise_applies holds;
+// `left` and `right` are the operands as written.
+sema_expr_check_fixed_binary: fn(op: BinOp, left: Expr, right: Expr, lhs: &&TExpr, rhs: &&TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if sema_expr_fixed_mismatch(op, lhs.ty, rhs.ty, left, right, span) == .Val(refused) {
+        diagnostics.push(refused)
+        return None
+    }
+    left_shape: sema_expr_fixed_shape(lhs.ty)
+    right_array: sema_expr_fixed_shape(rhs.ty) != None
+    left_array: left_shape != None
+    shape: left_shape ?? sema_expr_fixed_shape(rhs.ty) ?? return None
+    at: "{span.start}_{span.end}"
+    left_name: "__jet_slots_left_{at}"
+    right_name: "__jet_slots_right_{at}"
+    mark: sema_scope_mark(scopes)
+    sema_scope_enter(scopes, state, "elementwise@{at}")
+    left_bound: sema_expr_fixed_operand(left_name, left, lhs, shape, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+        sema_scope_leave(scopes, state)
+        return None
+    }
+    right_bound: sema_expr_fixed_operand(right_name, right, rhs, shape, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? {
+        sema_scope_leave(scopes, state)
+        return None
+    }
+    body: [TStmt]{left_bound, right_bound}
+    slots: loop slot in 0..<shape.length -> Expr.Binary{op: op, left: sema_expr_fixed_slot(left_name, if left_array -> Val(slot) else -> None, span), right: sema_expr_fixed_slot(right_name, if right_array -> Val(slot) else -> None, span), span: span, id: AST_NODE_GENERATED}
+    sema_expr_fixed_slots(slots, shape, body, mark, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+// `-a` or `~a` slot by slot, where sema_expr_fixed_unary_applies holds.
+sema_expr_check_fixed_unary: fn(op: UnOp, value: &&TExpr, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    shape: sema_expr_fixed_shape(value.ty) ?? return None
+    at: "{span.start}_{span.end}"
+    mark: sema_scope_mark(scopes)
+    sema_scope_enter(scopes, state, "elementwise@{at}")
+    name: "__jet_slots_operand_{at}"
+    body: [TStmt]{sema_expr_fixed_bind(name, value, span, environment, program, scopes, state, context)}
+    slots: loop slot in 0..<shape.length -> Expr.Unary{op: op, operand: sema_expr_fixed_slot(name, Val(slot), span), span: span, id: AST_NODE_GENERATED}
+    sema_expr_fixed_slots(slots, shape, body, mark, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
