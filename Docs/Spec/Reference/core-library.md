@@ -6003,6 +6003,17 @@ Push's `Topic` header and the notification's `tag`. So a retried run sends
 each push with the key it had before, whatever order its query gives the
 rows in, and the repeat replaces the earlier copy; two pushes of one run
 never share a key.
+`app.notify(title:, body:, open: state)`, written without `to:`, shows a
+notification on this device with no server. On Linux the desktop's
+notification service (org.freedesktop.Notifications on the session bus)
+shows it, with the body escaped where the service reads markup, and while
+the app runs a click on it opens `state` through the graph's route set, as
+the link `url_of(state)` does. The package must give `purposes:` a
+`notifications` purpose (E-APP-PERMISSION-PURPOSE). A notification the
+desktop can't show adds a notice to `app.notices()`; it is never dropped.
+The web output has no notification of its own for a page, so this form is
+E-APP-TARGET-FEATURE there; a server's `app.notify(to:, …)` reaches the
+browser through Web Push.
 `app.current<BoardView>()` gives the current screen's state, made back from
 its address, when it is a `BoardView`, and None otherwise or before a
 screen opens. A value that is no struct declared outside Core is E2821

@@ -2656,6 +2656,25 @@ App: struct {
             } else { push_note(false, device.service, account, outcome.reason) }
         }
     }
+
+    // A notification on this device, as the compiler lowers
+    // `app.notify(title:, body:, open:)` written without `to:`. `open_route`
+    // is the address of the state a click on it opens (`__url_of`). On a
+    // Linux desktop the desktop's notification service shows it, with no
+    // server, and while the app runs a click on it opens that state through
+    // the graph's route set (`open_link`). A notification that can't be
+    // shown is never dropped: a notice saying so joins the app's notice
+    // list (`notices`).
+    __notify_here: fn(title: String, body: String, open_route: String) -[Env, FS.Read, Net, Time]> Never! {
+        #if #build.target.os == {
+            .Linux -> { app_notify_linux(title, body, open_route) }
+            .MacOS -> { app_notify_unshown(title, NOTIFY_UNBUILT) }
+            .Windows -> { app_notify_unshown(title, NOTIFY_UNBUILT) }
+            .Web -> { app_notify_unshown(title, "a page shows no notification of its own") }
+            .Wasm -> { app_notify_unshown(title, "a page shows no notification of its own") }
+            .Freestanding -> { app_notify_unshown(title, "there is no desktop to show it") }
+        }
+    }
 }
 
 // A field of a screen's state that the address carries after `?`:
@@ -3963,6 +3982,51 @@ priv app_orientation: fn(reading: dbus.DbusValue?) -> Orientation? Never! {
         }
     }
     None
+}
+
+// How long showing a notification may take.
+priv NOTIFY_WAIT_NS: 5000000000
+
+// Why a notification isn't shown on a native system whose notification
+// service the app can't reach yet.
+priv NOTIFY_UNBUILT: "this system's notifications are not built yet"
+
+// Shows a notification through the desktop's notification service on the
+// session bus (`App.__notify_here`), in a task that keeps the bus
+// connection until the person clicks the notification or it closes.
+priv app_notify_linux: fn(title: String, body: String, open_route: String) -[Env, FS.Read, Net, Time]> Never! {
+    showing: task { app_notify_show(title, body, open_route) }
+    showing.detach()
+}
+
+// Shows the notification and waits until the person clicks it or it
+// closes; a click opens `open_route` (`open_link`).
+priv app_notify_show: fn(title: String, body: String, open_route: String) -[Env, FS.Read, Net, Time]> Never! {
+    bus := dbus.session(ASK_BUS_WAIT_NS) ?? {
+        app_notify_unshown(title, "{err}")
+        return
+    }
+    app: app_graph_title()
+    shown: dbus.notify(bus, app, app_desktop_id(app), title, body, NOTIFY_WAIT_NS) ?? {
+        app_notify_unshown(title, "{err}")
+        return
+    }
+    loop {
+        ended: if dbus.notification_end(bus, shown, UPDATE_WAIT_NS) == {
+            .Err(_) -> {
+                return
+            }
+            .Ok(got) -> got
+        }
+        clicked: ended ?? next
+        if clicked -> _: App{title: app_graph_title()}.open_link(open_route)
+        return
+    }
+}
+
+// Keeps a notice that the notification `title` couldn't be shown, and why.
+priv app_notify_unshown: fn(title: String, why: String) Never! {
+    __keep_notice(Notice{text: "Couldn't show the notification \"{title}\": {why}"})
 }
 
 // A photo from the camera through PipeWire, kept in a directory of this

@@ -1,0 +1,139 @@
+// The session bus for the app in ../main.jet, with the desktop's
+// notification service on it. It is its own package, so the app's package
+// does not hold it. It listens at bus.sock in the directory it runs in and
+// writes bus.ready once it listens. After each call the app makes it
+// answers with that call's part of the conversation. Once the app has
+// closed the connection it writes heard.txt: a line with the members the
+// app called, in order, and a line with the texts of the notification the
+// app asked for.
+use {
+    files: core.files
+    net: core.net
+}
+
+// The answer to each call: Hello, two AddMatch (the service's
+// ActionInvoked and NotificationClosed), GetCapabilities (body,
+// body-markup and actions), and Notify (the notification 7), which comes
+// with the ActionInvoked signal of a click on it (the action "default").
+CONVERSATION: [String]{
+    "6c0200010a000000010000002f000000050175000100000007017300140000006f72672e667265656465736b746f702e44427573000000000801670001730000050000003a312e343800",
+    "6c020001000000000200000025000000050175000200000007017300140000006f72672e667265656465736b746f702e4442757300000000",
+    "6c020001000000000300000025000000050175000300000007017300140000006f72672e667265656465736b746f702e4442757300000000",
+    "6c0200012c0000000400000030000000050175000400000007017300140000006f72672e667265656465736b746f702e444275730000000008016700026173002800000004000000626f6479000000000b000000626f64792d6d61726b75700007000000616374696f6e7300",
+    "6c02000104000000050000002f000000050175000500000007017300140000006f72672e667265656465736b746f702e44427573000000000801670001750000070000006c04000110000000060000009000000001016f001e0000002f6f72672f667265656465736b746f702f4e6f74696669636174696f6e730000020173001d0000006f72672e667265656465736b746f702e4e6f74696669636174696f6e73000000030173000d000000416374696f6e496e766f6b656400000007017300140000006f72672e667265656465736b746f702e44427573000000000801670002757300070000000700000064656661756c7400",
+}
+
+run: fn() -[FS, Net, Time]> {
+    listener: net.unix_listen("bus.sock") ?? panic("listen on bus.sock: {err}")
+    files.write("bus.ready", "") ?? panic("write bus.ready: {err}")
+    stream := net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
+    members := [String]{}
+    shown := ""
+    said := [U8]{}
+    authenticated := false
+    loop {
+        got: net.unix_receive(stream, 4096) ?? break
+        if got.bytes.len() == 0 -> break
+        loop b in got.bytes -> said.push(b)
+        if !authenticated {
+            // The credentials byte and the AUTH line come first, then
+            // BEGIN and the calls.
+            line_end: crlf_at(said, 0)
+            if line_end < 0 -> next
+            net.unix_write_all_bytes(stream, "OK 0123456789abcdef0123456789abcdef\r\n".bytes()) ?? panic("answer AUTH: {err}")
+            said = said[line_end..<said.len()].copy()
+            authenticated = true
+        }
+        if said.len() >= 7 && String.from_bytes_lossy(said[0..<7].copy()) == "BEGIN\r\n" {
+            said = said[7..<said.len()].copy()
+        }
+        loop said.len() >= 16 && said.len() >= message_length(said) {
+            n: message_length(said)
+            message: said[0..<n].copy()
+            member: member_of(message)
+            if member == "Notify" {
+                shown = texts_of(message[(16 + aligned(word(message, 12), 8))..<n].copy()).join(" | ")
+            }
+            members.push(member)
+            said = said[n..<said.len()].copy()
+            at: members.len() - 1
+            if at < CONVERSATION.len() {
+                net.unix_write_all_bytes(stream, bytes_of(CONVERSATION[at])) ?? panic("answer the app: {err}")
+            }
+        }
+    }
+    files.write("heard.txt", "{members.join(" ")}\n{shown}\n") ?? panic("write heard.txt: {err}")
+}
+
+// The runs of two or more printable ASCII bytes in `body`: the texts of a
+// message body whose numbers are not printable.
+texts_of: fn(body: [U8]) -> [String] {
+    found := [String]{}
+    run := [U8]{}
+    loop b in body {
+        n: Int{b}
+        if n >= 32 && n < 127 {
+            run.push(b)
+            next
+        }
+        if run.len() >= 2 -> found.push(String.from_bytes_lossy(run.copy()))
+        run = [U8]{}
+    }
+    if run.len() >= 2 -> found.push(String.from_bytes_lossy(run.copy()))
+    found
+}
+
+// Where the CR LF that ends the first line of `bytes` after `from` ends, or
+// -1.
+crlf_at: fn(bytes: [U8], from: Int) -> Int {
+    loop i in from..<(bytes.len() - 1) {
+        if (Int{bytes[i]}) == 13 && (Int{bytes[i + 1]}) == 10 -> return i + 2
+    }
+    -1
+}
+
+// The length of the message `m` starts with: its fixed header, its header
+// fields padded to 8 bytes, and its body.
+message_length: fn(m: [U8]) -> Int { 16 + aligned(word(m, 12), 8) + word(m, 4) }
+
+// The member the header of the message `m` names (field 3), or "".
+member_of: fn(m: [U8]) -> String {
+    end: 16 + word(m, 12)
+    at := 16
+    loop at < end {
+        code: Int{m[at]}
+        kind: Int{m[at + 2]}
+        at += 4
+        if kind == 103 {
+            // A signature: a length byte, the text and a NUL.
+            at += Int{m[at]} + 2
+        } else if kind == 117 { at = aligned(at, 4) + 4 } else {
+            // A string or an object path: a length word, the text and a NUL.
+            at = aligned(at, 4)
+            n: word(m, at)
+            if code == 3 -> return String.from_bytes_lossy(m[(at + 4)..<(at + 4 + n)].copy())
+            at += 4 + n + 1
+        }
+        at = aligned(at, 8)
+    }
+    ""
+}
+
+aligned: fn(at: Int, to: Int) -> Int { (at + to - 1) /% to * to }
+
+// The little-endian 32-bit word at `at` of `bytes`.
+word: fn(bytes: [U8], at: Int) -> Int {
+    Int{bytes[at]} + (Int{bytes[at + 1]}) * 256 + (Int{bytes[at + 2]}) * 65536 + (Int{bytes[at + 3]}) * 16777216
+}
+
+// The bytes the lowercase hex text `hex` spells.
+bytes_of: fn(hex: String) -> [U8] {
+    digits: hex.bytes()
+    out := [U8]{}
+    loop i in 0..<(digits.len() /% 2) {
+        out.push(U8{nibble(Int{digits[2 * i]}) * 16 + nibble(Int{digits[2 * i + 1]})})
+    }
+    out
+}
+
+nibble: fn(b: Int) -> Int { if b >= 97 -> b - 87 else -> b - 48 }

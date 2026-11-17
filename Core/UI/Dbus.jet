@@ -1296,8 +1296,9 @@ next_place: fn(c: &DbusConnection, session: String, timeout_ns: Int) -[Net, Time
     Ok(None)
 }
 
-// The first signal `member` of `interface` from the object at `path` (any,
-// when it is "") whose first argument is `first`, here or arriving within
+// The first signal `member` of `interface` (any of its signals, when
+// `member` is "") from the object at `path` (any, when it is "") whose
+// first argument is `first`, here or arriving within
 // `timeout_ns`. The signals before it go; those after it stay queued, in
 // order, for the next read.
 next_signal: fn(c: &DbusConnection, interface: String, member: String, path: String, first: DbusValue, timeout_ns: Int) -[Net, Time]> DbusMessage? DbusError! {
@@ -1306,9 +1307,8 @@ next_signal: fn(c: &DbusConnection, interface: String, member: String, path: Str
     loop {
         got: signals(c, wait) ?? return Err(err)
         loop i in 0..<got.len() {
-            if got[i].interface != interface || got[i].member != member || got[i].body.len() == 0 {
-                next
-            }
+            if got[i].interface != interface || got[i].body.len() == 0 -> next
+            if member != "" && got[i].member != member -> next
             if path != "" && got[i].path != path -> next
             if got[i].body[0] != first -> next
             loop later in got[(i + 1)..<got.len()] -> c.queued.push(later.copy())
@@ -1485,6 +1485,71 @@ response_code: fn(m: DbusMessage, request: String) -> Int {
     }
     if m.body[0] == .Uint32(code) -> return code
     NO_VALUE
+}
+
+// ---- notifications
+
+NOTIFICATIONS: "org.freedesktop.Notifications"
+
+NOTIFICATIONS_PATH: "/org/freedesktop/Notifications"
+
+// The action a click on the notification itself invokes.
+OPEN_ACTION: "default"
+
+// Shows a notification through the desktop's notification service and
+// gives its ID, waiting at most `timeout_ns`. `app` names the app it comes
+// from and `desktop_id` the app's desktop entry. `title` is the summary,
+// and `body` is the text under it, escaped when the service reads markup
+// in it. A click on the notification invokes its `OPEN_ACTION`. Before it
+// shows anything, it asks the bus for the service's ActionInvoked and
+// NotificationClosed signals, which `notification_end` reads.
+notify: fn(c: &DbusConnection, app: String, desktop_id: String, title: String, body: String, timeout_ns: Int) -[Net, Time]> Int DbusError! {
+    deadline: now() + timeout_ns
+    watch(c, NOTIFICATIONS, "ActionInvoked", NOTIFICATIONS_PATH, deadline) ?? return Err(err)
+    watch(c, NOTIFICATIONS, "NotificationClosed", NOTIFICATIONS_PATH, deadline) ?? return Err(err)
+    told: call_until(c, NOTIFICATIONS, NOTIFICATIONS_PATH, NOTIFICATIONS, "GetCapabilities", [DbusValue]{}, deadline) ?? return Err(err)
+    marked := false
+    if told.body.len() == 1 {
+        if told.body[0] == .Array(_, items) {
+            marked = items.contains(DbusValue.Text("body-markup"))
+        }
+    }
+    text: if marked -> markup_text(body) else -> body
+    actions: DbusValue.Array{signature: "s", items: [DbusValue]{DbusValue.Text(OPEN_ACTION), DbusValue.Text("Open")}}
+    // The app's name, no notification to replace, no icon, the summary,
+    // the body, the actions, the hints, and the service's own timeout.
+    shown: call_until(c, NOTIFICATIONS, NOTIFICATIONS_PATH, NOTIFICATIONS, "Notify", [DbusValue]{DbusValue.Text(app), DbusValue.Uint32(0), DbusValue.Text(""), DbusValue.Text(title), DbusValue.Text(text), actions, string_option("desktop-entry", desktop_id), DbusValue.Int32(-1)}, deadline) ?? return Err(err)
+    if shown.body.len() == 1 {
+        if shown.body[0] == .Uint32(id) -> return Ok(id)
+    }
+    Err(DbusError.Protocol("Notify answered {shown.signature}, not a notification ID"))
+}
+
+// `text` as notification markup shows it: `&`, `<` and `>` escaped.
+markup_text: fn(text: String) -> String {
+    text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+}
+
+// What became of the notification `id`, read from a signal that is here or
+// arrives within `timeout_ns`: true when the person clicked the
+// notification itself (its `OPEN_ACTION`), false when it closed or they
+// chose another action, and `None` when neither came.
+notification_end: fn(c: &DbusConnection, id: Int, timeout_ns: Int) -[Net, Time]> Bool? DbusError! {
+    deadline: now() + timeout_ns
+    loop {
+        found: if next_signal(c, NOTIFICATIONS, "", NOTIFICATIONS_PATH, DbusValue.Uint32(id), deadline - now()) == {
+            .Err(err) -> {
+                return Err(err)
+            }
+            .Ok(got) -> got
+        }
+        m: found ?? return Ok(None)
+        if m.member == "NotificationClosed" -> return Ok(Val(false))
+        if m.member == "ActionInvoked" && m.body.len() == 2 {
+            return Ok(Val(m.body[1] == DbusValue.Text(OPEN_ACTION)))
+        }
+    }
+    Ok(None)
 }
 
 // ---- test fixtures
@@ -2063,6 +2128,74 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(calls_heard(none.server), [String]{"org.freedesktop.DBus.Hello", "org.freedesktop.DBus.Properties.Get"})
 }
 
+#Test("a notification is shown, escaped where the service reads markup, and read until it ends") {
+    ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+    said: "Fix <b>the gate</b> & ship"
+    bus := test_bus("notify")
+    script := ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.51")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{}), 3))
+    append(script, wire(reply_to(4, [DbusValue]{texts([String]{"body", "body-markup", "actions"})}), 4))
+    append(script, wire(reply_to(5, [DbusValue]{DbusValue.Uint32(7)}), 5))
+    // Another notification's click, then this one's, then it closes.
+    append(script, wire(signal(NOTIFICATIONS_PATH, NOTIFICATIONS, "ActionInvoked", [DbusValue]{DbusValue.Uint32(6), DbusValue.Text(OPEN_ACTION)}), 6))
+    append(script, wire(signal(NOTIFICATIONS_PATH, NOTIFICATIONS, "ActionInvoked", [DbusValue]{DbusValue.Uint32(7), DbusValue.Text(OPEN_ACTION)}), 7))
+    append(script, wire(signal(NOTIFICATIONS_PATH, NOTIFICATIONS, "NotificationClosed", [DbusValue]{DbusValue.Uint32(7), DbusValue.Uint32(2)}), 8))
+    bus_says(bus.server, script)
+    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    shown: notify(c, "Crew", "crew", "Due today", said, 1000000000) ?? panic("notify: {err}")
+    assert_eq(shown, 7)
+    assert_eq(found_flag(notification_end(c, 7, 1000000000)), Val(true))
+    assert_eq(found_flag(notification_end(c, 7, 1000000000)), Val(false))
+    assert_eq(found_flag(notification_end(c, 7, 0)), Bool?{None})
+    heard: messages_heard(bus.server)
+    asked: [String]{
+        "org.freedesktop.DBus.Hello",
+        "org.freedesktop.DBus.AddMatch",
+        "org.freedesktop.DBus.AddMatch",
+        "org.freedesktop.Notifications.GetCapabilities",
+        "org.freedesktop.Notifications.Notify",
+    }
+    assert_eq(heard.len(), asked.len())
+    loop i in 0..<asked.len() -> assert_eq("{heard[i].interface}.{heard[i].member}", asked[i])
+    sent: heard[4].body
+    assert_eq(sent.len(), 8)
+    assert_eq(sent[0], DbusValue.Text("Crew"))
+    assert_eq(sent[3], DbusValue.Text("Due today"))
+    assert_eq(sent[4], DbusValue.Text("Fix &lt;b&gt;the gate&lt;/b&gt; &amp; ship"))
+    assert_eq(sent[5], texts([String]{OPEN_ACTION, "Open"}))
+    assert_eq(sent[6], string_option("desktop-entry", "crew"))
+    // A service that shows the body as plain text gets it as it is.
+    plain := test_bus("notify-plain")
+    script = ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.52")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{}), 3))
+    append(script, wire(reply_to(4, [DbusValue]{texts([String]{"body"})}), 4))
+    append(script, wire(reply_to(5, [DbusValue]{DbusValue.Uint32(8)}), 5))
+    bus_says(plain.server, script)
+    d := start(plain.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    assert_eq(notify(d, "Crew", "crew", "Due today", said, 1000000000) ?? panic("notify: {err}"), 8)
+    assert_eq(messages_heard(plain.server)[4].body[4], DbusValue.Text(said))
+}
+
+// An array of strings.
+texts: fn(items: [String]) -> DbusValue {
+    values := [DbusValue]{}
+    loop item in items -> values.push(DbusValue.Text(item))
+    DbusValue.Array{signature: "s", items: values}
+}
+
+// What a read of a notification's end gave, or the test fails with its
+// error.
+found_flag: fn(got: Bool? DbusError!) -> Bool? {
+    if got == {
+        .Err(err) -> panic("notification: {err}")
+        .Ok(found) -> found
+    }
+}
+
 // A LocationUpdated signal's options: latitude, longitude and accuracy.
 place_options: fn(values: [Float]) -> DbusValue {
     names: [String]{"Latitude", "Longitude", "Accuracy"}
@@ -2099,13 +2232,20 @@ found_value: fn(got: DbusValue? DbusError!) -> DbusValue? {
 // The interface and member of each call the client made after it
 // authenticated as uid 1000.
 calls_heard: fn(server: &net.UnixStream) -[Net, Time]> [String] {
+    out := [String]{}
+    loop m in messages_heard(server) -> out.push("{m.interface}.{m.member}")
+    out
+}
+
+// Each message the client sent after it authenticated as uid 1000.
+messages_heard: fn(server: &net.UnixStream) -[Net, Time]> [DbusMessage] {
     heard: bus_heard(server)
     rest := heard[(1 + "AUTH EXTERNAL 31303030\r\nBEGIN\r\n".bytes().len())..<heard.len()].copy()
-    out := [String]{}
+    out := [DbusMessage]{}
     loop rest.len() > 0 {
         decoded: decode(rest) ?? panic("decode: {err}")
         if decoded.used == 0 -> break
-        if decoded.message == .Val(m) -> out.push("{m.interface}.{m.member}")
+        if decoded.message == .Val(m) -> out.push(m.copy())
         rest = rest[decoded.used..<rest.len()].copy()
     }
     out

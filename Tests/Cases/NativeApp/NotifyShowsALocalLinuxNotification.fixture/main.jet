@@ -1,0 +1,32 @@
+// A crew app reminds the person of a task with no server: the desktop's
+// notification service shows the reminder, and a click on it opens the
+// task. A reminder the desktop can't show leaves a notice instead.
+use {
+    app
+    time: core.time
+}
+
+TaskView: struct {
+    id: String,
+}
+
+task: fn(view: TaskView) -> String Never! { "task {view.id}" }
+
+remind: fn(id: String, what: String) -[Env, FS.Read, Net, Time]> {
+    app.notify(title: "Due today", body: what, open: TaskView{id: id})
+}
+
+run: fn() -[Env, FS.Read, Net, Time]> {
+    _: app.new("Crew").screen("/tasks/:id", task)
+    remind("7", "Fix <b>the gate</b> & ship")
+    // The app waits up to a minute for the click.
+    loop _ in 0..<6000 {
+        if app.notices().len() > 0 -> break
+        if app.current<TaskView>() == .Val(view) {
+            print("opened: task {view.id}")
+            break
+        }
+        time.sleep(10ms)
+    }
+    loop notice in app.notices() -> print("notice: {notice.text}")
+}

@@ -1,0 +1,33 @@
+# `app.notify(title:, body:, open:)`, written without `to:`, shows a
+# notification on this device with no server: on Linux the desktop's
+# notification service (org.freedesktop.Notifications) on the session bus
+# shows it, and a click on it opens the state `open` names through the
+# graph's route set. The body goes as markup where the service reads
+# markup, so its text is escaped. A notification the desktop can't show
+# leaves a notice in the app's notice list; it is never dropped. The web
+# output has no notification of its own for a page, so the same app built
+# for it is an E-APP-TARGET-FEATURE compile error at the call.
+fixture: NotifyShowsALocalLinuxNotification.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+spawn bus: jet run bus/fake_bus.jet
+stdout: file bus.stdout
+stderr: file bus.stderr
+await: file bus.ready timeout 120s every 10ms # the fake bus listens
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+exit: 0
+stdout: = "opened: task 7\n"
+wait: bus timeout 60s
+exit: 0
+file: heard.txt = "Hello AddMatch AddMatch GetCapabilities Notify\nCrew | Due today | Fix &lt;b&gt;the gate&lt;/b&gt; &amp; ship | default | Open | desktop-entry | crew\n"
+step: jet run main.jet
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+exit: 0
+stdout: ~ "notice: Couldn't show the notification" # no bus, so a notice instead
+stdout: ~ "Due today" # naming the notification
+step: jet build --target web main.jet
+exit: nonzero
+stderr: ~ "App feature `.notify` needs target `native`, but the resolved target is `Web`." # not shown for a closed page
+stderr: ~ "main.jet:16:" # at the call
+stderr: ~ "Web Push" # the fix sends it from the server
