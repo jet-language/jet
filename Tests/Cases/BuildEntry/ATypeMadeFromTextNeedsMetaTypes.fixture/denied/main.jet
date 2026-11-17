@@ -1,5 +1,7 @@
-// The same type factory under a row that denies `Meta.Types`.
-build: fn(b: Build) -[!Meta.Types]> {
+// The same type factory under a row that denies `Meta.Code.Types`.
+package: { name: "main", authority: { allow: [Meta.Code.Raw] } }
+
+build: fn(b: Build) -[!Meta.Code.Types]> {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
     fields: [String]{"flag: U8", "id: I64", "count: I32"}

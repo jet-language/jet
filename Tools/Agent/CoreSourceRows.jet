@@ -306,14 +306,16 @@ replace_operation_section: fn(doc: String, section: String) -> String CoreRowsEr
 // One row per effect name the types of `source` declare, in source order:
 // a type's own name, then each case of an enum family. The text is read in
 // its constrained form: `Name: struct {` or `Name: enum {`, case lines, and an
-// `impl Effect {}` block or one holding the one-line
-// `irreversible: fn(self) -> Bool { … }` whose body is `true`, `false`,
-// `self == .Case` or an `||` of those. A family is irreversible when any of
-// its cases is. With `machine` (the rows of EFFECTS_PATH), `source` is
-// CORE_EFFECTS_PATH or META_EFFECTS_PATH: each type has a `#FX(…)` line right
-// above it, its entries machine effects, which become the `kernel` of its
-// rows; a bare `#FX` lists none, so a row naming the type admits no machine
-// effect.
+// `impl Effect {}` block or one holding, in order, a family's
+// `parent: Root.Case`, the one-line `irreversible: fn(self) -> Bool { … }`
+// and the one-line `expert: fn(self) -> Bool { … }`, each body `true`,
+// `false`, `self == .Case` or an `||` of those. A family under a parent case
+// declares that case's children (`Root.Case.Child`) and no name of its own.
+// A family is irreversible when any of its cases is. With `machine` (the rows
+// of EFFECTS_PATH), `source` is CORE_EFFECTS_PATH or META_EFFECTS_PATH: each
+// type has a `#FX(…)` line right above it, its entries machine effects, which
+// become the `kernel` of its rows; a bare `#FX` lists none, so a row naming
+// the type admits no machine effect.
 effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectRow] CoreRowsError! {
     rows := [EffectRow]{}
     lines: source.split("\n").to_list()
@@ -321,6 +323,8 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
     family := false
     cases := [String]{}
     body := String?{None}
+    expert_body := String?{None}
+    parent := String?{None}
     impl_seen := false
     in_impl := false
     kernel := [String]{}
@@ -366,6 +370,8 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
             family = fields[1] == "enum"
             cases = [String]{}
             body = None
+            expert_body = None
+            parent = None
             impl_seen = false
             next
         }
@@ -374,8 +380,28 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
                 in_impl = false
                 next
             }
-            if body != None || !line.starts_with("irreversible: fn(self) -> Bool {{ ") || !line.ends_with(" }}") {
-                return Err(rows_fail("{place}: expected one `irreversible: fn(self) -> Bool {{ … }}` line in `impl Effect`"))
+            if line.starts_with("parent: ") && parent == None && family && cases.len() > 0 && body == None && expert_body == None {
+                written: byte_tail(line, "parent: ".len()).removesuffix(",").trim()
+                declared: loop row in rows {
+                    if row.name == written {
+                        break true
+                    }
+                } ?? false
+                if written.split(".").to_list().len() != 2 || !declared {
+                    return Err(rows_fail("{place}: `parent: {written}` names no `Root.Case` effect declared above it"))
+                }
+                parent = Val(written)
+                next
+            }
+            if line.starts_with("expert: fn(self) -> Bool {{ ") && line.ends_with(" }}") && expert_body == None {
+                expert_body = Val(byte_slice(line, "expert: fn(self) -> Bool {{ ".len(), line.len() - 2).trim())
+                if effect_fact(expert_body, cases, if family -> Val(cases[0]) else -> None) == None {
+                    return Err(rows_fail("{place}: `{type_name}`'s `expert` body is not `true`, `false`, `self == .Case` or an `||` of those"))
+                }
+                next
+            }
+            if body != None || expert_body != None || !line.starts_with("irreversible: fn(self) -> Bool {{ ") || !line.ends_with(" }}") {
+                return Err(rows_fail("{place}: expected `parent: Root.Case`, then one `irreversible: fn(self) -> Bool {{ … }}` line, then one `expert: fn(self) -> Bool {{ … }}` line in `impl Effect`"))
             }
             body = Val(byte_slice(line, "irreversible: fn(self) -> Bool {{ ".len(), line.len() - 2).trim())
             next
@@ -397,16 +423,20 @@ effect_rows: fn(source: String, path: String, machine: [EffectRow]?) -> [EffectR
             }
             case_rows := [EffectRow]{}
             any := false
+            // A family under a parent case names its cases below that case.
+            prefix: parent ?? type_name
             loop member in cases {
                 irreversible: effect_fact(body, cases, Val(member)) ?? return Err(rows_fail("{place}: `{type_name}`'s `irreversible` body is not `true`, `false`, `self == .Case` or an `||` of those"))
                 if irreversible -> any = true
-                case_rows.push(EffectRow{name: "{type_name}.{member}", irreversible: irreversible})
+                case_rows.push(EffectRow{name: "{prefix}.{member}", irreversible: irreversible})
             }
             root := any
             if !family {
                 root = effect_fact(body, cases, None) ?? return Err(rows_fail("{place}: `{type_name}`'s `irreversible` body is not `true` or `false`"))
             }
-            rows.push(EffectRow{name: type_name, irreversible: root, kernel: kernel.copy()})
+            if parent == None {
+                rows.push(EffectRow{name: type_name, irreversible: root, kernel: kernel.copy()})
+            }
             loop row in case_rows {
                 rows.push(EffectRow{name: row.name, irreversible: row.irreversible, kernel: kernel.copy()})
             }

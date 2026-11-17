@@ -1,5 +1,7 @@
-// The same reflected factory under a row that denies `Meta.Raw`: no source
+// The same reflected factory under a row that denies `Meta.Code.Raw`: no source
 // text is parsed, so it builds.
+package: { name: "main", authority: { allow: [Meta.Code.Types] } }
+
 Source: struct {
     flag: U8,
     id: I64,
@@ -7,7 +9,7 @@ Source: struct {
     count: I32,
 }
 
-build: fn(b: Build) -[!Meta.Raw]> {
+build: fn(b: Build) -[!Meta.Code.Raw]> {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
     source: Source.reflect()

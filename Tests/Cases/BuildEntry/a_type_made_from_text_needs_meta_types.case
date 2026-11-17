@@ -1,13 +1,14 @@
 # A type made from values or text is a type factory. `meta.add`
 # takes source text as well as a `Code` value; the `made` build joins a list
 # of fields into the text of `Shape`, so the add uses `Meta.Generate`,
-# `Meta.Types` and `Meta.Raw`. The type's identity and layout depend only on
-# its text: O0, O1 and O2 optimization give the same identity, size,
-# alignment and offsets, and a second build gives them again. A row that
-# denies `Meta.Types` or `Meta.Raw` refuses the text, and nothing is built.
-# A `#code` value's type is written where the value is, like a marker's, so
-# denying `Meta.Types` leaves it alone. Ordinary types and generic instances
-# need no `Compiler` value and no Meta effect.
+# `Meta.Code.Types` and `Meta.Code.Raw`, expert effects its root names in
+# `authority.allow`. The type's identity and layout depend only on its
+# text: O0, O1 and O2 optimization give the same identity, size, alignment
+# and offsets, and a second build gives them again. A row that denies
+# `Meta.Code.Types` or `Meta.Code.Raw` refuses the text, and nothing is
+# built. A `#code` value's type is written where the value is, like a
+# marker's, so denying `Meta.Code.Types` leaves it alone. Ordinary types
+# and generic instances need no `Compiler` value and no Meta effect.
 fixture: ATypeMadeFromTextNeedsMetaTypes.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
@@ -34,14 +35,14 @@ exit: 0
 stdout: = a_type_made_from_text_needs_meta_types.out
 step: jet inspect graph made/main.jet --json
 exit: 0
-json: stdout doc $.build.generated[0].authority = "Meta.Generate, Meta.Types, Meta.Raw"
+json: stdout doc $.build.generated[0].authority = "Meta.Generate, Meta.Code.Types, Meta.Code.Raw"
 step: jet build denied/main.jet
 exit: 1
-stderr: ~ "reaches the `Meta.Types` effect, which it prohibits with `-[!Meta.Types]>`" # the row's denial wins over the factory
+stderr: ~ "reaches the `Meta.Code.Types` effect, which it prohibits with `-[!Meta.Code.Types]>`" # the row's denial wins over the factory
 file: denied/.jet/build/app absent
 step: jet build raw_denied/main.jet
 exit: 1
-stderr: ~ "reaches the `Meta.Raw` effect, which it prohibits with `-[!Meta.Raw]>`" # source text is unparsed code
+stderr: ~ "reaches the `Meta.Code.Raw` effect, which it prohibits with `-[!Meta.Code.Raw]>`" # source text is unparsed code
 file: raw_denied/.jet/build/app absent
 step: jet build written/main.jet
 exit: 0

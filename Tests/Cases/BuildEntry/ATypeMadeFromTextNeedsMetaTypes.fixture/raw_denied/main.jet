@@ -1,5 +1,7 @@
-// Source text is unparsed code, so a row that denies `Meta.Raw` refuses it.
-build: fn(b: Build) -[!Meta.Raw]> {
+// Source text is unparsed code, so a row that denies `Meta.Code.Raw` refuses it.
+package: { name: "main", authority: { allow: [Meta.Code.Types] } }
+
+build: fn(b: Build) -[!Meta.Code.Raw]> {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
     meta.add("Shape: struct {{\n    id: I64,\n}}\n", scope: "shape")

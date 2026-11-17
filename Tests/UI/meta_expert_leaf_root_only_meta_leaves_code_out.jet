@@ -1,0 +1,22 @@
+// @programmable_build
+// @cli_build
+// E0777: `allow: [Meta]` holds `Meta.Generate` and `Meta.Include` but none of
+// the expert effects under `Meta`, so rewriting a body still needs
+// `Meta.Code.Rewrite` (or `Meta.Code`) named in the row.
+package: { name: "main", authority: { allow: [Meta] } }
+
+build: fn(b: Build) {
+    app: b.add_executable("app", ["meta_expert_leaf_root_only_meta_leaves_code_out.jet"], [])
+    meta: b.compiler(app)
+    meta.rewrite_body(
+        greeting,
+        #code {
+            print("rewritten")
+        },
+    )
+    b.default(app)
+}
+
+greeting: fn() { print("hello") }
+
+run: fn() { greeting() }

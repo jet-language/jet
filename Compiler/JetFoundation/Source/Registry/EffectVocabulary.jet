@@ -3,8 +3,12 @@
 // (the machine effects), then Core/Effects/Effects.jet (Core's service
 // effects), then Core/Compiler/Meta.jet (the metaprogramming effects). Each
 // declares `Name: struct {` or `Name: enum {` types that implement `Effect`;
-// an enum is a family, each case a `Root.Case` leaf. A family is irreversible
-// when any of its cases is. A Core or Meta effect has a `#FX` or `#FX(…)` line
+// an enum is a family, each case a `Root.Case` leaf. A family whose
+// `impl Effect` names a `parent: Root.Case` declared above it holds that
+// case's children instead, `Root.Case.Child`, and declares no name of its
+// own. A family is irreversible when any of its cases is. An `expert` fact
+// marks the effects only the main package holds, and only by naming them
+// (authority_expert). A Core or Meta effect has a `#FX` or `#FX(…)` line
 // right above it, its entries machine effects: the `kernel` a row naming it
 // may use. A source that breaks this form stops the build (E3010) naming the
 // file and line.
@@ -21,6 +25,9 @@ EffectVocabularyRow: struct {
     // Empty for a machine effect; for a Core effect, the machine effects
     // the `#FX(…)` above its declaration lists.
     kernel: [String],
+    // Never held by default nor through a parent: only a package that names
+    // it, or an expert effect above it, holds it.
+    expert: Bool{false},
 }
 
 // Every declared root and leaf, in source order.
@@ -178,11 +185,15 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
     cases := [String]{}
     case_spans := [Span]{}
     body := String?{None}
+    expert_body := String?{None}
+    parent := String?{None}
     impl_seen := false
     in_impl := false
     kernel := [String]{}
     listed := false
     impl_head: "irreversible: fn(self) -> Bool {{ "
+    expert_head: "expert: fn(self) -> Bool {{ "
+    parent_head: "parent: "
     offset := base
     loop index in 0..<lines.len() {
         raw: lines[index]
@@ -230,6 +241,8 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             cases = [String]{}
             case_spans = [Span]{}
             body = None
+            expert_body = None
+            parent = None
             impl_seen = false
             next
         }
@@ -238,8 +251,23 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                 in_impl = false
                 next
             }
-            if body != None || !line.starts_with(impl_head) || !line.ends_with(" }}") {
-                panic("{place}: expected one `irreversible: fn(self) -> Bool {{ … }}` line in `impl Effect`")
+            if line.starts_with(parent_head) && parent == None && family && cases.len() > 0 && body == None && expert_body == None {
+                written: line.removeprefix(parent_head).removesuffix(",").trim()
+                if written.split(".").to_list().len() != 2 || effect_vocabulary_row_at(rows, written) < 0 {
+                    panic("{place}: `parent: {written}` names no `Root.Case` effect declared above it")
+                }
+                if effect_vocabulary_row_at(rows, "{written}.{cases[0]}") >= 0 {
+                    panic("{place}: `{written}` already has cases")
+                }
+                parent = Val(written)
+                next
+            }
+            if line.starts_with(expert_head) && line.ends_with(" }}") && expert_body == None {
+                expert_body = Val(line.removeprefix(expert_head).removesuffix(" }}").trim())
+                next
+            }
+            if body != None || expert_body != None || !line.starts_with(impl_head) || !line.ends_with(" }}") {
+                panic("{place}: expected `parent: Root.Case`, then one `irreversible: fn(self) -> Bool {{ … }}` line, then one `expert: fn(self) -> Bool {{ … }}` line in `impl Effect`")
             }
             body = Val(line.removeprefix(impl_head).removesuffix(" }}").trim())
             next
@@ -257,17 +285,24 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
             }
             case_rows := [EffectVocabularyRow]{}
             any := false
+            // A family under a parent case names its cases below that case.
+            prefix: parent ?? type_name
             loop member in cases {
                 irreversible: effect_vocabulary_fact(body, cases, Val(member)) ?? panic("{place}: `{type_name}`'s `irreversible` body is not `true`, `false`, `self == .Case` or an `||` of those")
+                expert: effect_vocabulary_fact(expert_body, cases, Val(member)) ?? panic("{place}: `{type_name}`'s `expert` body is not `true`, `false`, `self == .Case` or an `||` of those")
                 if irreversible -> any = true
-                case_rows.push(EffectVocabularyRow{name: "{type_name}.{member}", irreversible: irreversible, kernel: kernel.copy()})
+                case_rows.push(EffectVocabularyRow{name: "{prefix}.{member}", irreversible: irreversible, kernel: kernel.copy(), expert: expert})
             }
             root := any
+            root_expert := false
             if !family {
                 root = effect_vocabulary_fact(body, cases, None) ?? panic("{place}: `{type_name}`'s `irreversible` body is not `true` or `false`")
+                root_expert = effect_vocabulary_fact(expert_body, cases, None) ?? panic("{place}: `{type_name}`'s `expert` body is not `true` or `false`")
             }
-            rows.push(EffectVocabularyRow{name: type_name.copy(), irreversible: root, kernel: kernel.copy()})
-            decls.push(EffectDecl{name: "{type_name}", name_span: type_span, irreversible: root, span: type_span})
+            if parent == None {
+                rows.push(EffectVocabularyRow{name: type_name.copy(), irreversible: root, kernel: kernel.copy(), expert: root_expert})
+                decls.push(EffectDecl{name: "{type_name}", name_span: type_span, irreversible: root, span: type_span})
+            }
             loop (at, row) in case_rows {
                 decls.push(EffectDecl{name: "{row.name}", name_span: case_spans[at], irreversible: row.irreversible, span: case_spans[at]})
                 rows.push(row.copy())
@@ -309,6 +344,14 @@ effect_vocabulary_kernel: fn(line: String, machine: [EffectVocabularyRow], place
     }
     if kernel.len() == 0 -> panic("{place}: the `#FX(…)` line lists no machine effect")
     kernel
+}
+
+// The position of the row named `name` in `rows`, or -1.
+effect_vocabulary_row_at: fn(rows: [EffectVocabularyRow], name: String) -> Int {
+    loop (at, row) in rows {
+        if row.name == name -> return at
+    }
+    -1
 }
 
 // An `irreversible` body's value for one case (None for a struct), or None

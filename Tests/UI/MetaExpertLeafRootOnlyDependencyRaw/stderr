@@ -1,0 +1,13 @@
+Error [jet.ExpertEffectNotHeld]: `shapes` needs `Meta.Code.Raw`: `install` uses it, and the main package doesn't grant it
+  --> Tests/UI/MetaExpertLeafRootOnlyDependencyRaw/shapes/shapes.jet:1:36
+    |
+  1 | install: fn(meta: Compiler) { meta.add("Shape: struct {{\n    id: I64,\n}}\n", scope: "shape") }
+    |                                    ^^^
+ Why: Only the main package holds an expert effect; a dependency uses one only where the main package lends it with `authority.grants`
+ Fix: Add `authority: { grants: { "shapes": [Meta.Code.Raw] } }` to the main package's manifest, or stop using `Meta.Code.Raw` in `install`
+ Denial: expert
+ Call chain: install
+More: jet-lang.dev/e/E0777
+
+1 problem found
+run `jet explain E0777` to learn more

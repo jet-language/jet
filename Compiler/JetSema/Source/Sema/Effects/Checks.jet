@@ -15,8 +15,13 @@ use jet_foundation.[
     EFFECT_VOCABULARY_ROWS,
     JET_FRAME_ALLOWANCE,
     MARKER_MEMO,
+    authority_covers_any,
+    authority_expert,
+    authority_expert_answer,
+    authority_expert_left_out,
     authority_grantable_roots,
     authority_is_deny_only,
+    AuthorityVerdict,
     BodyCallArg,
     BodyContract,
     BodyCoreClosureKind,
@@ -1276,6 +1281,36 @@ sema_effect_package_denied_diagnostic: fn(node: SemaEffectNode, reached: [String
     row: if organization == "" -> "a package `deny` row" else -> "an organization `deny` row"
     diagnostic: sema_error("E0749", node.name_span, "`{node.name}` reaches the `{reached_list}` effect, which {denier} denies with `authority: {{ deny: [{denied}] }}`", "{row} means every function in the package and every callee it can reach must not use `{reached_list}`", "remove the call that introduces `{reached_list}`, or {undo}")
     diagnostic_with_rights(diagnostic, "invocation", [String]{node.name}, [String]{}, None)
+}
+
+// A function that uses the expert effect `right` at `span` where its package
+// doesn't hold it (authority_expert_answer). The main package holds one by
+// naming it, or an expert effect above it, in its `authority.allow` row; a
+// dependency holds one only through the main package's `authority.grants`
+// line for it. An `allow` entry that is not itself expert (`Meta`) holds
+// none of the expert effects under it, and the report names those it left
+// out.
+sema_effect_expert_not_held_diagnostic: fn(node: SemaEffectNode, right: String, span: Span, policy: SemaRegistrationPackagePolicy, main: Bool, verdict: AuthorityVerdict) -> Diagnostic {
+    if verdict == AuthorityVerdict.Denied {
+        diagnostic: sema_error("E0777", span, "`{node.name}` uses the expert effect `{right}`, which a `deny` row refuses its package", "deny always wins over a grant, and denying an effect denies every effect under it", "stop using `{right}` in `{node.name}`, or drop it from the `authority.deny` row that names it")
+        return diagnostic_with_rights(diagnostic, "expert", [String]{node.name}, [String]{}, None)
+    }
+    if !main {
+        package: if policy.grant_name == "" -> policy.package_identity else -> policy.grant_name
+        diagnostic: sema_error("E0777", span, "`{package}` needs `{right}`: `{node.name}` uses it, and the main package doesn't grant it", "only the main package holds an expert effect; a dependency uses one only where the main package lends it with `authority.grants`", "add `authority: {{ grants: {{ \"{package}\": [{right}] }} }}` to the main package's manifest, or stop using `{right}` in `{node.name}`")
+        return diagnostic_with_rights(diagnostic, "expert", [String]{node.name}, [String]{}, None)
+    }
+    why := "no package holds an expert effect by default: the main package holds one only where its `authority.allow` row names it or an expert effect above it"
+    allowed: policy.authority_allow ?? [String]{}
+    loop entry in allowed {
+        if !effect_scope_covers(entry, right) -> next
+        left_out: authority_expert_left_out(entry)
+        if left_out.len() > 0 {
+            why = "`allow: [{entry}]` holds only the effects under `{entry}` that are not expert; it leaves out the expert effects `{left_out.join("`, `")}`, which must be named"
+        }
+    }
+    diagnostic: sema_error("E0777", span, "`{node.name}` uses the expert effect `{right}`, which the main package doesn't hold", why, "add `{right}` to the main package's `authority: {{ allow: [...] }}` row, or stop using it in `{node.name}`")
+    diagnostic_with_rights(diagnostic, "expert", [String]{node.name}, [String]{}, None)
 }
 
 sema_effect_pure_diagnostic: fn(node: SemaEffectNode, reached: [String]) -> Diagnostic {
@@ -6187,8 +6222,12 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // which seals each call through a function value to the program's own
 // functions and lambdas (sema_effect_stack_seal). `seal`, the Core
 // library's check, also summarizes each Core function for a bound program
-// (SemaEffectGraphResult.core_seal).
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}) -> SemaEffectGraphResult {
+// (SemaEffectGraphResult.core_seal). `package_policies` are the loaded
+// packages' rows, `expert_modules` each graph module's row among them (-1:
+// none, as for Core) and `main_package` the identity of the package being
+// built: a function's own use of an expert effect needs its package to hold
+// it (sema_effect_expert_not_held_diagnostic).
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}, package_policies: [SemaRegistrationPackagePolicy]{[SemaRegistrationPackagePolicy]{}}, expert_modules: [Int]{[Int]{}}, main_package: String{""}) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -6432,6 +6471,37 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
             denial_diagnostics.push(sema_effect_with_instance_notes(sema_effect_package_denied_diagnostic(nodes[node_index], reached, denied, panic_steps, unsafe_reach, denial.organization), sema_effect_instance_notes(nodes, solved, nodes[node_index]), reached))
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, denial_diagnostics)
         }
+    }
+    // A function's own use of an expert effect needs its package to hold
+    // it: the main package by naming it in `authority.allow`, a dependency
+    // by the main package's `authority.grants` line for it. A call into
+    // another function leaves the callee's use with the callee's package, so
+    // a grant to a dependency is not undone at its caller. Deny wins: the
+    // package's own `deny` row, the main package's and the organization's
+    // each bind it. A denial of the main package's own use, by its `deny` row
+    // or the function's own `-[!E]>`, is the report above or E0749 at the
+    // row; `direct_spans` names each effect once.
+    loop node_index in 0..<nodes.len() {
+        graph_module: inputs[nodes[node_index].module_index].module_index
+        if graph_module >= expert_modules.len() || expert_modules[graph_module] < 0 -> next
+        policy: package_policies[expert_modules[graph_module]]
+        main: policy.package_identity == main_package
+        expert_diagnostics := [Diagnostic]{}
+        loop used in nodes[node_index].direct_spans {
+            if !authority_expert(used.name) -> next
+            row_denied := false
+            loop bound in nodes[node_index].prohibited {
+                if sema_effect_covers(bound, used.name) -> row_denied = true
+            }
+            if row_denied -> next
+            denied: authority_covers_any(package_denials, used.name) || authority_covers_any(organization_denials, used.name) || authority_covers_any(policy.authority_deny ?? [String]{}, used.name)
+            verdict: authority_expert_answer(policy.expert_held, denied, used.name)
+            if verdict == AuthorityVerdict.Allowed || (main && verdict == AuthorityVerdict.Denied) {
+                next
+            }
+            expert_diagnostics.push(sema_effect_expert_not_held_diagnostic(nodes[node_index], used.name, used.span, policy, main, verdict))
+        }
+        sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, expert_diagnostics)
     }
     // A module's `#FX(…)` caps bind every function inside it: a file
     // module's from the module graph, an inline module's from the function.

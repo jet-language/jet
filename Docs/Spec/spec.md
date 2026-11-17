@@ -6937,8 +6937,10 @@ refused, and a function its package doesn't declare with a braced body fails
 the build (E3502). One build rewrites a function's body once. A line
 `#{f.body}` of the new body pastes the function's original body there, at
 that line's indentation, so a rewrite can wrap the body it replaces. Replacing
-a body uses the `Meta.Rewrite` effect, denied the same way
-(`-[!Meta.Rewrite]>`). The root package's own functions need no consent; a
+a body uses the expert effect `Meta.Code.Rewrite`, which the main package
+names in `authority.allow` or lends a dependency in `authority.grants`
+(E0777 otherwise) and a row denies the same way
+(`-[!Meta.Code.Rewrite]>`). The root package's own functions need no consent; a
 dependency's function is rewritten only after the root writes
 `meta.allow_rewrite(package: "orm")` on its value, and otherwise the call
 fails the build (E3514). The consent names the dependency the build loads at

@@ -3,9 +3,10 @@
 # the statements of a `#code { … }` block. The `good` build rewrites
 # `greeting`; the program runs the new body, and the function after it in the
 # same file is unchanged. The rewritten function is the generated module
-# `rewrite_body/greeting.jet`. Replacing a body uses `Meta.Rewrite`, so the
-# `denied` build's `-[!Meta.Rewrite]>` row refuses the call and nothing is
-# built. The `unnamed` build passes a local value, not a top-level function.
+# `rewrite_body/greeting.jet`. Replacing a body uses `Meta.Code.Rewrite`, an
+# expert effect each rewriting root names in `authority.allow`, so the
+# `denied` build's `-[!Meta.Code.Rewrite]>` row refuses the call and nothing
+# is built. The `unnamed` build passes a local value, not a top-level function.
 # The `wrapped` build pastes the original body with `#{greeting.body}` between
 # two new statements, keeping its nested indentation.
 fixture: RewriteBodyReplacesAFunctionBody.fixture
@@ -19,7 +20,7 @@ exit: 0
 stdout: = "rewritten by the build\nthe rest of the file stays\n"
 step: jet build denied/main.jet
 exit: 1
-stderr: ~ "reaches the `Meta.Rewrite` effect, which it prohibits with `-[!Meta.Rewrite]>`" # the row's denial wins
+stderr: ~ "reaches the `Meta.Code.Rewrite` effect, which it prohibits with `-[!Meta.Code.Rewrite]>`" # the row's denial wins
 file: denied/.jet/build/app absent
 step: jet build unnamed/main.jet
 exit: 1

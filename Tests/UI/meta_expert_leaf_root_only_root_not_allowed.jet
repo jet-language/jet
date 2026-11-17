@@ -1,0 +1,20 @@
+// @programmable_build
+// @cli_build
+// E0777: the main package rewrites its own `greeting` without naming
+// `Meta.Code.Rewrite` in `authority.allow`; no package holds an expert effect
+// by default.
+build: fn(b: Build) {
+    app: b.add_executable("app", ["meta_expert_leaf_root_only_root_not_allowed.jet"], [])
+    meta: b.compiler(app)
+    meta.rewrite_body(
+        greeting,
+        #code {
+            print("rewritten")
+        },
+    )
+    b.default(app)
+}
+
+greeting: fn() { print("hello") }
+
+run: fn() { greeting() }

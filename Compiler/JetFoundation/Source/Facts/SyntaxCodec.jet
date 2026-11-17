@@ -5747,6 +5747,8 @@ body_codec_put_effectimpl: fn(out: &BodyCodecOut, value: EffectImpl) Never! {
     body_codec_put_opt_span(out, value.method_span)
     body_codec_put_opt_namedspan(out, value.parent)
     body_codec_put_list_effectdecl(out, value.decls)
+    body_codec_put_opt_expr(out, value.expert)
+    body_codec_put_opt_span(out, value.expert_span)
 }
 
 body_codec_get_effectimpl: fn(bytes: [U8], input: &BodyCodecIn) -> EffectImpl Never! {
@@ -5755,7 +5757,9 @@ body_codec_get_effectimpl: fn(bytes: [U8], input: &BodyCodecIn) -> EffectImpl Ne
     f2: body_codec_get_opt_span(bytes, input)
     f3: body_codec_get_opt_namedspan(bytes, input)
     f4: body_codec_get_list_effectdecl(bytes, input)
-    EffectImpl{span: f0, irreversible: f1, method_span: f2, parent: f3, decls: f4}
+    f5: body_codec_get_opt_expr(bytes, input)
+    f6: body_codec_get_opt_span(bytes, input)
+    EffectImpl{span: f0, irreversible: f1, method_span: f2, parent: f3, decls: f4, expert: f5, expert_span: f6}
 }
 
 body_codec_put_effectdecl: fn(out: &BodyCodecOut, value: EffectDecl) Never! {

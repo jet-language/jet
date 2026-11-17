@@ -1,10 +1,16 @@
 // The metaprogramming effects: the compiler operations library code running
 // inside the compiler may perform. Reading the program needs no Meta effect,
 // so a read-only lint's row is `-[]>`; a marker or derive that writes checked
-// declarations is `-[Meta.Generate]>`, and replacing a declaration's body is
-// `Meta.Rewrite`. Adding a type from text checks `Generate`, `Types` and `Raw`
-// together. The bare `#FX` lists no machine effect: host work keeps its own
-// machine effects and gates.
+// declarations is `-[Meta.Generate]>`. Changing the program beyond adding
+// checked declarations is the `Meta.Code` family: replacing a declaration's
+// body is `Meta.Code.Rewrite`, and adding a type from text checks `Generate`,
+// `Code.Types` and `Code.Raw` together. The bare `#FX` lists no machine
+// effect: host work keeps its own machine effects and gates.
+//
+// An expert effect is never held by default, and holding its parent never
+// covers it: only the main package holds one, by naming it (or an expert
+// node above it) in `authority.allow`, and it lends one to a dependency with
+// `authority.grants`.
 // The form is that of Compiler/Prelude/Effects.jet, and
 // Tools/Agent/CoreSourceRows.jet reads it into the compiler after
 // Core/Effects/Effects.jet.
@@ -12,9 +18,23 @@
 Meta: enum {
     Generate,
     Include,
-    Rewrite,
-    Types,
-    Raw,
+    Code,
 
-    impl Effect {}
+    impl Effect {
+        expert: fn(self) -> Bool { self == .Code }
+    }
+}
+
+// The cases of `Meta.Code`: `Meta.Code.Raw`, `Meta.Code.Types` and
+// `Meta.Code.Rewrite`.
+#FX
+MetaCode: enum {
+    Raw,
+    Types,
+    Rewrite,
+
+    impl Effect {
+        parent: Meta.Code,
+        expert: fn(self) -> Bool { true }
+    }
 }

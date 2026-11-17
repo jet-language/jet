@@ -168,6 +168,64 @@ authority_answer: fn(held: [String], denied: [String], right: String) -> Authori
     AuthorityVerdict.Missing
 }
 
+// Whether `right` is an expert effect: its own vocabulary row, or a row
+// above it, says `expert` (`Meta.Code.Raw` under `Meta.Code`). No package
+// holds an expert effect until the main package names it.
+authority_expert: fn(right: String) -> Bool Never! {
+    canonical: effect_scope_base(authority_parse_right(right) ?? right.trim())
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if row.expert && (row.name == canonical || canonical.starts_with("{row.name}.")) {
+            return true
+        }
+    }
+    false
+}
+
+// Whether `rights` names expert entries and nothing else. An expert entry
+// only holds expert effects (authority_expert_answer), so an `allow` row or
+// a grant line of nothing else sets no ceiling, and every other effect stays
+// held unless denied.
+authority_expert_only: fn(rights: [String]) -> Bool Never! {
+    loop right in rights {
+        if !authority_expert(right) -> return false
+    }
+    rights.len() > 0
+}
+
+// The verdict on the expert effect `right` for a package that names the
+// entries `held` (the main package's `allow` row, or the main package's
+// `authority.grants` line for a dependency); `denied` says whether a `deny`
+// row that binds the package covers it, and deny wins. An entry holds an
+// expert effect only when the entry is itself expert: `allow: [Meta]` holds
+// none of `Meta.Code`'s leaves, while `allow: [Meta.Code]` holds all three.
+authority_expert_answer: fn(held: [String], denied: Bool, right: String) -> AuthorityVerdict Never! {
+    if denied -> return AuthorityVerdict.Denied
+    loop bound in held {
+        if authority_expert(bound) && authority_covers(bound, right) {
+            return AuthorityVerdict.Allowed
+        }
+    }
+    AuthorityVerdict.Missing
+}
+
+// The expert effects a named entry that is not itself expert leaves out:
+// each topmost expert row under it (`Meta.Code` and `Meta.Host` under
+// `Meta`); none for an expert entry.
+authority_expert_left_out: fn(bound: String) -> [String] Never! {
+    if authority_expert(bound) -> return [String]{}
+    canonical: effect_scope_base(authority_parse_right(bound) ?? bound.trim())
+    out := [String]{}
+    loop row in EFFECT_VOCABULARY_ROWS {
+        if !row.expert || !row.name.starts_with("{canonical}.") -> next
+        topmost := true
+        loop above in out {
+            if row.name.starts_with("{above}.") -> topmost = false
+        }
+        if topmost -> out.push(row.name)
+    }
+    out
+}
+
 // Rights in `used` not covered by any held right.
 authority_uncovered: fn(used: [String], held: [String]) -> [String] Never! {
     out := [String]{}

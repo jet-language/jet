@@ -1,6 +1,8 @@
 // The same `Shape` joined into source text, under the row that lets the
-// reflected factory build: text is unparsed code, so it needs `Meta.Raw`.
-build: fn(b: Build) -[!Meta.Raw]> {
+// reflected factory build: text is unparsed code, so it needs `Meta.Code.Raw`.
+package: { name: "main", authority: { allow: [Meta.Code.Types] } }
+
+build: fn(b: Build) -[!Meta.Code.Raw]> {
     app: b.add_executable("app", ["main.jet"], [])
     meta: b.compiler(app)
     fields: [String]{"flag: U8", "id: I64", "total: I32"}
