@@ -598,10 +598,14 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
             else -> None
         }
         "core.plugin" -> Val("Exec")
-        // core.ui's leaves are the window host's, shared by the web page and a
-        // native window (a web page's scene, a click or a drop slot's
-        // handler), so they need no `Browser`: one would pull every Core
-        // helper a native window shares with a paint into the page.
+        // A web page's scene is the browser's, so core.ui's leaves use
+        // `Browser`, but for the two the window host shares with the page:
+        // a native window routes a click or a drop to its slot's handler
+        // through them, as the page does.
+        "core.ui" -> if member == {
+            "__click" | "__drop" -> None
+            else -> Val("Browser")
+        }
         "core.browser.host" | "core.browser.storage.local" | "core.browser.storage.session" -> Val("Browser")
         "core.crypto.vault" -> if member == {
             "get" | "current" | "versions" | "load" | "status" | "prepare_generate" | "prepare_store" | "prepare_rotate" | "prepare_retire" | "prepare_revoke" | "authorize_write" | "commit_generate" | "commit_store" | "commit_rotate" | "commit_retire" | "commit_revoke" | "export_to_recipients" | "export_to_passphrase" | "prepare_import_wrapped" | "authorize_wrapped_import" | "commit_import_wrapped" | "prepare_import_signing" | "prepare_import_x25519" | "commit_import_signing" | "commit_import_x25519" -> Val("Secret")

@@ -3,7 +3,8 @@
 // `Browser` effect, the inline-module or file `#Target` ceiling, a `Stream`
 // result, then the Wasm default. Unpinned functions follow their call edges
 // until the graph is closed: a Wasm caller of a JS function becomes JS, and so
-// does an unpinned Wasm callee of a JS caller. Once a program opts in (a web
+// does an unpinned Wasm callee of a JS caller, unless it is a Core helper
+// that uses no `Browser`, which serves both buckets. Once a program opts in (a web
 // marker or a `#Target` ceiling), a `#Export(wasm)` signature must be ABI-safe
 // (E-WEB-ABI-TYPE), a Wasm function must not use `Browser`
 // (E-WEB-TARGET-BROWSER), and a call must stay in its bucket unless it is the
@@ -79,8 +80,14 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
     // A method the server runs, which sema_web_placement_check checks in any
     // program.
     any_server := false
+    // Whether each meta is a Core helper that uses no `Browser`. It serves
+    // both buckets, so a JS caller does not move it; were it moved, every
+    // other caller would follow it into JS (a native window's frame shares
+    // the page's layout walk).
+    shared := [Bool]{}
     loop meta in metas {
         browser: sema_web_uses_browser(modules, meta)
+        shared.push(!browser && module_is_core(graph.modules[meta.registration].module_identity))
         bucket: sema_web_bucket(meta, browser: browser)
         if bucket == .JS -> any_js = true
         if meta.row >= 0 && (modules[meta.slot].functions[meta.row].endpoint != "" || modules[meta.slot].functions[meta.row].system_run != "") {
@@ -120,7 +127,7 @@ sema_web_partition_check: fn(modules: &[SemaGraphModuleResult], graph: SemaRegis
                     buckets[caller] = WebBucket.JS
                     if active -> reasons[caller] = "calls `{metas[callee].name}`, which runs in JS"
                     changed = true
-                } else if buckets[caller] == .JS && buckets[callee] == .Wasm && metas[callee].marker == None && metas[callee].ceiling == None {
+                } else if buckets[caller] == .JS && buckets[callee] == .Wasm && metas[callee].marker == None && metas[callee].ceiling == None && !shared[callee] {
                     buckets[callee] = WebBucket.JS
                     if active {
                         reasons[callee] = "called by `{metas[caller].name}`, which runs in JS"
