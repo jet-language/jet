@@ -2,13 +2,14 @@
 // in Jet types. Each member is a runtime binding (Guest.jet
 // sema_guest_runtime_binding) of the runtime export that is its one body
 // (UiHostProvider.jet). Each is `priv`: only core.ui.host calls them, but
-// for `save_file`, `device` and `device_bytes`, which the app module calls,
-// and the core.ui.host function that reaches a capability's service carries
-// its `UI.<capability>` requirement (Compiler/Prelude/Core.rows
-// `.with_ui_capabilities`, E2937). Each reads or writes the provider's live
-// state, so each is run-time only (RUNTIME_ONLY_READS): the compiler never
-// computes one while building, where its answer would stand in for every
-// run's clipboard, events, dialogs, saved files and device answers.
+// for `clipboard_set`, `save_file`, `device` and `device_bytes`, which the
+// app module calls, and the core.ui.host function that reaches a
+// capability's service carries its `UI.<capability>` requirement
+// (Compiler/Prelude/Core.rows `.with_ui_capabilities`, E2937). Each reads
+// or writes the provider's live state, so each is run-time only
+// (RUNTIME_ONLY_READS): the compiler never computes one while building,
+// where its answer would stand in for every run's clipboard, events,
+// dialogs, saved files and device answers.
 ui: module {
     // Whether the provider has the capability with code `code`
     // (core.ui.host's provider capability codes).
@@ -38,9 +39,9 @@ ui: module {
     #Import(c) priv save_file: fn(name: String, media: String, bytes: [U8]) -> Bool = "jet_ui_host_save_file"
 
     // The provider's answer to the app's device request `request` of kind
-    // `kind` (0: app.ask's permission, 1: the location, 2: a photo), None
-    // when it has none. A page's browser answers later; the program waits
-    // for the answer where its entry can wait.
+    // `kind` (JetWeb Host.jet deviceRequest names the kinds), None when it
+    // has none. A page's browser answers later; the program waits for the
+    // answer where its entry can wait.
     #Import(c) priv device: fn(kind: Int, request: String) -> String? = "jet_ui_host_device"
 
     // `device` for a request whose answer is bytes (3: a part of a file the

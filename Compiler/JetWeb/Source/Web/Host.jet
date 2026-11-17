@@ -450,13 +450,41 @@ function stopWatch(watches, number) {
   return "";
 }
 
+// The clipboard's text through the Clipboard API, for app.paste_text: a
+// promise of the text, or of null when the browser refuses the read. A
+// browser lends the live clipboard only inside the person's gesture, so a
+// read outside one is refused without asking.
+function pasteText() {
+  const browser = globalThis.navigator;
+  if (!browser?.clipboard?.readText) return null;
+  if (browser.userActivation && !browser.userActivation.isActive) return null;
+  return browser.clipboard.readText().then(
+    (text) => String(text),
+    () => null,
+  );
+}
+
+// The link `url` shared through the Web Share API, for app.share: a promise
+// of `shared`, `canceled` when the person dismissed the share sheet, or
+// `copy` when the browser has no share sheet or refused this one, so the
+// app copies the link instead.
+function shareLink(url) {
+  const browser = globalThis.navigator;
+  if (!browser?.share) return "copy";
+  return browser.share({ url }).then(
+    () => "shared",
+    (error) => (error?.name === "AbortError" ? "canceled" : "copy"),
+  );
+}
+
 // The provider's answer to the app's device request `request` of kind
 // `kind` (UIHostProvider.jet jet_ui_provider_device): 0 app.ask's grant, 1
 // the location's record, 2 the photo's record (its grant and, when taken,
 // the number the provider keeps it under and its size), 3 the bytes of the
 // kept file `<number> <offset> <limit>` names, 4 a sensor stream's start
 // (watchSensor), 5 its next reading and 6 its stop, each naming the watch's
-// number. An answer may be a promise.
+// number, 7 the clipboard's text (pasteText) and 8 a share of the link
+// `request` (shareLink). An answer may be a promise.
 function deviceRequest(doc, kept, watches, kind, request) {
   if (kind === 0) return askPermission(request);
   if (kind === 1) return findPlace().then(providerRecord);
@@ -477,6 +505,8 @@ function deviceRequest(doc, kept, watches, kind, request) {
   if (kind === 4) return watchSensor(watches, request);
   if (kind === 5) return nextReading(watches, Number(request));
   if (kind === 6) return stopWatch(watches, Number(request));
+  if (kind === 7) return pasteText();
+  if (kind === 8) return shareLink(request);
   return null;
 }
 

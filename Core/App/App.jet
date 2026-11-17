@@ -4926,6 +4926,10 @@ priv WEB_DEVICE_NEXT: 5
 
 priv WEB_DEVICE_STOP: 6
 
+priv WEB_DEVICE_PASTE: 7
+
+priv WEB_DEVICE_SHARE: 8
+
 // The `size` bytes of the file a page holds under `number` for the app.
 priv app_page_whole: fn(number: Int, name: String, size: Int) -> [U8] IOError! {
     if size == 0 -> return Ok([U8]{})
@@ -5216,16 +5220,15 @@ priv app_no_folder: fn(why: String) -> PickedFolder? Never! {
 // window (`App.window`) puts it there before its next frame, since the
 // display server takes a copy only from a window: a copy while the app
 // has no window, or one the display server refuses, adds a notice to
-// `notices()` and copies nothing. The other native targets keep a notice
-// that says their clipboard is not built yet. The page runtime can't reach
-// the browser's clipboard yet, so a call in code whose target is the web
-// output is a compile error.
+// `notices()` and copies nothing. A page writes it through the browser's
+// Clipboard API; a browser without one adds a notice instead. The other
+// native targets keep a notice that says their clipboard is not built yet.
 copy_text: fn(text: String) Never! {
     #if #build.target.os == {
         .Linux -> { app_window_copy(text) }
         .MacOS -> { app_no_clipboard() }
         .Windows -> { app_no_clipboard() }
-        .Web -> { app_no_clipboard() }
+        .Web -> { app_page_copy(text) }
         .Wasm -> { app_no_clipboard() }
         .Freestanding -> { app_no_clipboard() }
     }
@@ -5235,15 +5238,18 @@ copy_text: fn(text: String) Never! {
 // when the clipboard holds no text. On Linux the app's window reads it,
 // waiting up to 2 s for another program's copy: a read while the app has
 // no window, or one that fails, adds a notice to `notices()` and gives
-// None. The other native targets keep a notice that says their clipboard
-// is not built yet and give None. A call in code whose target is the web
-// output is a compile error, as `copy_text`'s is.
+// None. A page reads it through the browser's Clipboard API, which lends
+// it only inside the person's gesture, such as a click's handler: the
+// program waits for the browser's answer, and a read the browser refuses,
+// or one outside a gesture, adds a notice and gives None. The other native
+// targets keep a notice that says their clipboard is not built yet and
+// give None.
 paste_text: fn() -[Env, Net, Time]> String? Never! {
     #if #build.target.os == {
         .Linux -> { return app_window_paste() }
         .MacOS -> { return app_no_paste() }
         .Windows -> { return app_no_paste() }
-        .Web -> { return app_no_paste() }
+        .Web -> { return app_page_paste() }
         .Wasm -> { return app_no_paste() }
         .Freestanding -> { return app_no_paste() }
     }
@@ -5260,20 +5266,43 @@ priv app_no_paste: fn() -> String? Never! {
     None
 }
 
+// `copy_text` in a page: the provider writes the browser's clipboard
+// (Host.jet clipboardSet); whether it could.
+priv app_page_copied: fn(text: String) -> Bool Never! {
+    if ui_rt.clipboard_set(text) -> return true
+    __keep_notice(Notice{text: "Couldn't copy: the browser gives the page no clipboard"})
+    false
+}
+
+priv app_page_copy: fn(text: String) Never! { _: app_page_copied(text) }
+
+// `paste_text` in a page (Host.jet pasteText): None, with no notice, when
+// the clipboard holds no text.
+priv app_page_paste: fn() -> String? Never! {
+    text: ui_rt.device(WEB_DEVICE_PASTE, "") ?? {
+        __keep_notice(Notice{text: "Couldn't paste: the browser lends the clipboard only inside a click or a key press, and refused it here"})
+        return None
+    }
+    if text == "" -> return None
+    Val(text)
+}
+
 // Shares `url` through the system's share sheet. On Linux, which has none,
 // the app's window copies `url` to the clipboard, as `copy_text` does, and
 // then keeps a notice that says so, for the person to paste the link where
-// they would share it; a copy that fails keeps its own notice instead. The
+// they would share it; a copy that fails keeps its own notice instead. A
+// page shares it through the browser's Web Share API, which opens the
+// share sheet only inside the person's gesture, such as a click's handler;
+// a browser without one, or one that refuses this share, copies `url` and
+// says so, as on Linux. A share the person dismisses is no failure. The
 // other native targets keep a notice that says their share sheet is not
-// built yet. A browser's Web Share API runs only inside the person's
-// gesture, which the page runtime can't run the call in yet, so a call in
-// code whose target is the web output is a compile error.
+// built yet.
 share: fn(url: String) Never! {
     #if #build.target.os == {
         .Linux -> { app_window_share(url) }
         .MacOS -> { app_no_share() }
         .Windows -> { app_no_share() }
-        .Web -> { app_no_share() }
+        .Web -> { app_page_share(url) }
         .Wasm -> { app_no_share() }
         .Freestanding -> { app_no_share() }
     }
@@ -5282,6 +5311,15 @@ share: fn(url: String) Never! {
 // Keeps the notice that this target has no share sheet yet.
 priv app_no_share: fn() Never! {
     __keep_notice(Notice{text: "Couldn't share: this system's share sheet is not built yet"})
+}
+
+// `share` in a page (Host.jet shareLink).
+priv app_page_share: fn(url: String) Never! {
+    said: ui_rt.device(WEB_DEVICE_SHARE, url) ?? "copy"
+    if said != "copy" {
+        return
+    }
+    if app_page_copied(url) -> __keep_notice(Notice{text: "Copied the link to share it: {url}"})
 }
 
 // `body`, taking the files a person drops on it: each one of a kind in
