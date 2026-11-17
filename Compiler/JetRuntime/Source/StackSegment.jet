@@ -134,7 +134,10 @@ stack_main_bytes: fn() -> I64 {
     sync_store(wrapping(tcb + STACK_TCB_LIMIT), I64{0})
     record: stack_segment_take(tcb, need)
     if (record == I64{0}) {
-        sync_store(wrapping(tcb + STACK_TCB_LIMIT), limit)
+        // Refused: the limit stays 0, so the recursion runs on in place
+        // without calling here again and faults at the guard page in its
+        // own body, the frame the fault report names (E3012). A shrink back
+        // to the stack this one grew from restores that stack's limit.
         return I64{0}
     }
     sync_store(record, limit)

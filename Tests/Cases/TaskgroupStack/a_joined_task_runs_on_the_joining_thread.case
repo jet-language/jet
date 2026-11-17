@@ -5,8 +5,9 @@
 # the compiler, whose own threads depend on the compiler that built it);
 # parks.jet's task sleeps, so a carrier resumes it; cancel.jet cancels a task
 # while it runs such a task inline, which never parks, and the cancel reaches
-# it; overflow.jet's task outgrows its group's stack and stops the program
-# with E3012. The overflow is checked at -O0, where every call keeps its frame.
+# it; overflow.jet's task recurses without end, past its group's stack and
+# the stack budget, and stops the program with E3012. The overflow is
+# checked at -O0, where every call keeps its frame.
 requires: os-name:linux
 requires: tool:strace
 fixture: Fixtures/Joined

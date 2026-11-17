@@ -3660,8 +3660,9 @@ jet_cli_fmt_after_last: fn(text: String, needle: String) -> String? Never! {
     Val(parts[parts.len() - 1])
 }
 
-// `skip_fmt_walk_path`: diagnostic snapshot trees and the syntax catalog are
-// not valid Jet by construction; directory walks skip them.
+// `skip_fmt_walk_path`: diagnostic snapshot trees, the syntax catalog and the
+// unparseable inputs a test pins byte for byte (Tests/AgentWorkloads/SHA256SUMS)
+// are not valid Jet by construction; directory walks skip them.
 jet_cli_fmt_skip_walk_path: fn(path: String) -> Bool Never! {
     normalized: path.replace("\\", "/")
     rel := normalized
@@ -3680,7 +3681,7 @@ jet_cli_fmt_skip_walk_path: fn(path: String) -> Bool Never! {
         if !rel.ends_with(".jet") -> return false
         return !rel.ends_with(".fixed.jet")
     }
-    rel.starts_with("Tests/Fixtures/JetpackConfig/") || rel.starts_with("Tests/Fixtures/JetpackConfigReal/") || rel == "Tests/Fixtures/JetpackProject/functional-env.jet" || rel.starts_with("Tests/Fixtures/PolicyPackageUnsafeAllow/") || rel == "Tests/AgentWorkloads/inputs/build-test-recovery/invalid.jet" || rel.ends_with("/ex_concurrency_detached_task.jet")
+    rel.starts_with("Tests/Fixtures/JetpackConfig/") || rel.starts_with("Tests/Fixtures/JetpackConfigReal/") || rel == "Tests/Fixtures/JetpackProject/functional-env.jet" || rel.starts_with("Tests/Fixtures/PolicyPackageUnsafeAllow/") || rel == "Tests/AgentWorkloads/inputs/build-test-recovery/invalid.jet" || rel == "Tests/AgentWorkloads/inputs/mcp/denied/env.jet" || rel.ends_with("/ex_concurrency_detached_task.jet")
 }
 
 jet_cli_fmt_file_name: fn(path: String) -> String Never! {

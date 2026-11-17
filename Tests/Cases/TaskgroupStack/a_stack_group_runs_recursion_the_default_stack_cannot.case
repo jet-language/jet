@@ -1,10 +1,12 @@
 # `task.group g(stack: bytes)` gives its tasks, and the groups and tasks
-# they open, at least that much stack; every other task gets the program's
-# stack size, 8 MiB here (D-THREAD-STACK1=A). deep.jet recurses
-# 400,000 calls in the group, in a group opened inside it and in a loose task
-# started from it; shallow.jet's same recursion outside any `stack:` group
-# stops with E3012, whose fix names `stack:`. The overflow is checked at -O0,
-# where every call keeps its frame.
+# they open, at least that much stack of their own; every other task starts
+# on the program's stack size, 8 MiB here, and runs deeper only on stack
+# segments up to the stack budget. deep.jet recurses 400,000 calls in the
+# group, in a group opened inside it and in a loose task started from it;
+# shallow.jet's recursion, which never ends, in a task outside any `stack:`
+# group passes its 8 MiB and the budget and stops with E3012, whose fix
+# names `stack:`. The overflow is checked at -O0, where every call keeps its
+# frame.
 fixture: Fixtures/Stack
 env: NO_COLOR=1
 env: JET_SCHEDULER_THREADS=2
