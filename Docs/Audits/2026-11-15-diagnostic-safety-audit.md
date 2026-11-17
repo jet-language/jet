@@ -633,7 +633,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3216 | InvalidForeignBoundaryEvidence | Compiler/JetSema/Source/Sema/Registration/Checked.jet:571 | the evidence is fixed |
 | E3217 | CBindingMemberMissing | Compiler/JetSema/Source/Sema/Calls/Core.jet:517 | generate the binding or declare an overlay |
 | E3218 | CallbackReadsContext | Compiler/JetSema/Source/Sema/Calls/Checking.jet:457 | pass the value to the callback through C |
-| E3220 | UnsupportedForeignLanguage | Compiler/JetSema/Source/Sema/Registration/Checked.jet:1610 | `c`, `cpp` or `asm` |
+| E3220 | NoInlineForeignBinder | Compiler/JetSema/Source/Sema/Registration/Checked.jet:1610 | `c`, `cpp` or `asm` |
 | E3222 | InlineForeignBuildFailed | Compiler/JetSema/Source/Sema/Registration/Checked.jet:1626 | the foreign code or signature is fixed |
 | E3223 | AsmOperandMismatch | Compiler/JetSema/Source/Sema/InlineAssembly.jet:22 | operands match the signature |
 | E3260 | ComWithoutWindows | Compiler/JetCLI/Source/CLI/InspectB.jet:1031 | build for Windows |
@@ -1568,7 +1568,7 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E3216 | InvalidForeignBoundaryEvidence | soundness | The foreign boundary evidence is invalid, so nothing shows the boundary is safe to cross. |
 | E3217 | CBindingMemberMissing | soundness | No binding declares the member, so the name has no foreign symbol. |
 | E3218 | CallbackReadsContext | soundness | C calls the callback on a thread it chooses, where no Jet task runs, so the read would find no task context. |
-| E3220 | UnsupportedForeignLanguage | soundness | The language has no inline foreign binder, so the body has no code. |
+| E3220 | NoInlineForeignBinder | soundness | The language has no inline foreign binder, so the body has no code. |
 | E3221 | AsmUnencodedMnemonic | soundness | The template assembler has no encoding for the mnemonic, so the line has no bytes to emit. |
 | E3222 | InlineForeignBuildFailed | soundness | The foreign bridge did not compile or link, so the function has no code. |
 | E3223 | AsmOperandMismatch | soundness | The asm operands do not match the Jet signature, so values would land in the wrong registers. |

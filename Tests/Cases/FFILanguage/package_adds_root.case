@@ -1,0 +1,13 @@
+# A language is a type that implements Core's `Language` trait, and its
+# `root` is reserved like Core's own (`c`, `py`, …): no local module may take
+# it as its alias (E1002). A package adds `zig` with no compiler change by
+# declaring `ZigLanguage` in its own file; without that declaration the same
+# import of `./helper` as `zig` checks clean.
+fixture: PackageAddsRoot.fixture
+env: NO_COLOR=1
+step: jet check declares.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1002"] #= 1 # the package's own `zig` root is refused as an alias
+step: jet check plain.jet --json
+exit: 0
+json: stdout doc $.reports[?code="E1002"] #= 0 # `zig` is no root until a package declares it

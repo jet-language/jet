@@ -1,0 +1,41 @@
+// The foreign languages Core declares, read while the compiler builds: the
+// `root` of each `impl Language` block of Core/Prelude/Prelude.jet, in source
+// order. A package declares a language the same way, and the loader reads
+// its blocks from the program it loads, so a new root needs no compiler
+// change. No local module may take a language's root as its name or alias
+// (E1002).
+CORE_LANGUAGE_ROOTS: #run language_roots(embed_file("toolchain:Core/Prelude/Prelude.jet"))
+
+// The `root: "…",` value of each `impl Language {` block of `text`, in source
+// order; a block without one, or a text with no block, stops the build.
+language_roots: fn(text: String) -> [String] {
+    roots := [String]{}
+    open := false
+    found := false
+    loop line in text.split("\n").to_list() {
+        trimmed: line.trim()
+        if {
+            trimmed == "impl Language {{" -> {
+                open = true
+                found = false
+            }
+            open && trimmed.starts_with("root: \"") && trimmed.ends_with("\",") -> {
+                roots.push(trimmed.slice(7, trimmed.len() - 2))
+                found = true
+            }
+            open && trimmed == "}}" -> {
+                if !found -> panic("an `impl Language` block has no `root: \"…\",` line")
+                open = false
+            }
+            else -> {}
+        }
+    }
+    if roots.len() == 0 -> panic("the text declares no `impl Language` block")
+    roots
+}
+
+#Test("the language roots are each `impl Language` block's root, in order") {
+    text: "Language: trait {{\n    root: String,\n}}\n\nGoLanguage: struct {{\n    impl Language {{\n        root: \"go\",\n    }}\n}}\n\nCLanguage: struct {{\n    impl Language {{\n        root: \"c\",\n    }}\n}}\n"
+    assert_eq(language_roots(text), [String]{"go", "c"})
+    assert(CORE_LANGUAGE_ROOTS.contains("c") && CORE_LANGUAGE_ROOTS.contains("py") && !CORE_LANGUAGE_ROOTS.contains("zig"))
+}

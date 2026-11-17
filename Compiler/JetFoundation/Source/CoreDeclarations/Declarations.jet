@@ -1231,7 +1231,6 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
     }
     declared: CoreDeclarations{source_rows: rows, parts: core_decl_parts(parts) ?? return Err(err), runtime: core_decl_runtime_units(runtime) ?? return Err(err), modules: resolved, bootstraps: bootstraps, root_types: root_types, namespace_only: namespace_only, error_types: error_types, dispatchers: dispatchers, formats: formats}
     roots: effect_vocabulary_names(effects, false)
-    languages: loop leaf in effect_vocabulary_names(effects, true) if leaf.starts_with("FFI.") -> leaf.removeprefix("FFI.")
     problems: [String]{
         core_decl_problem(declared),
         core_decl_public_problem(declared, expressions, constants) ?? return Err(err),
@@ -1239,7 +1238,6 @@ core_declarations_read: fn(core: String, parts: String, syntax: [CoreDeclaration
         core_decl_names_problem(declared),
         core_decl_mem_problem(declared, syntax, constants) ?? return Err(err),
         core_decl_lang_type_problem(declared, "Effect", roots, "the effect vocabulary's roots"),
-        core_decl_lang_type_problem(declared, "FFILanguage", languages, "the `FFI` effect family's cases"),
     }
     found: loop problem in problems if problem != "" -> problem
     if found.len() > 0 -> return Err(core_decl_fail(found.join("\n")))

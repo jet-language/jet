@@ -345,7 +345,7 @@ use the same names.
 
 | Declaration | Kind | Purpose |
 | --- | --- | --- |
-| `ABI`, `FFILanguage`, `Target`, `Track` | enum | Calling convention, foreign language, code-generation target, and tracking policy values |
+| `ABI`, `Target`, `Track` | enum | Calling convention, code-generation target, and tracking policy values |
 | `InlineMode`, `JobScope`, `KernelMode`, `Layout`, `MemoBound`, `OverflowMode`, `RuntimeMode` | enum | Inlining, publication scope, parallel-kernel, representation, memoization, fixed-width overflow, and compile-time evaluation choices |
 | `Effect`, `NamingCase`, `ObligationMode`, `PolicySetting` | enum | Effect roots, field naming, proof obligations, and policy values |
 | `Path`, `State` | struct | Marker path text and compiler-threaded typestate names |
@@ -366,6 +366,22 @@ module contains `JobScope`, `KernelMode`, `MemoBound`, `OverflowMode`, and
 `RuntimeMode`;
 it does not export the retired `IntType` declaration. Marker sites are the
 prelude's `Site` enum.
+
+Foreign languages are no menu here. A language is a type that implements the
+prelude's `Language` trait, whose `root` is the root its modules are imported
+under: Core's own languages (`c`, `cpp`, `py`, …) are declared that way in
+`Core/Prelude/Prelude.jet`, and a package adds one the same way. No local
+module may take a language's root as its name or alias (E1002):
+
+```jet
+ZigLanguage: struct {
+    impl Language {
+        root: "zig",
+    }
+}
+```
+
+`#FFI(<lang>)` names an inline foreign body's language by that root.
 
 ### `core.compiler` — compiler-owned package views
 

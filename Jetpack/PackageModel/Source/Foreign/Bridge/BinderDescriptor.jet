@@ -33,7 +33,7 @@ use {
         SWIFT_MODULE_ROOT,
         TCL_MODULE_ROOT,
     ]
-    jet_foundation.[EFFECT_VOCABULARY_LEAVES, Namespace]
+    jet_foundation.[CORE_LANGUAGE_ROOTS, EFFECT_VOCABULARY_LEAVES, Namespace]
     jetpack_trust_root.[CacheProvenance]
 }
 
@@ -47,9 +47,11 @@ FOREIGN_ABI_CONTRACT_VERSION: 1
 // While the compiler builds, FOREIGN_LANGUAGE_COUNT checks the table's
 // languages against the `FFI.*` leaves the toolchain tree's
 // Compiler/Prelude/Effects.jet declares (JetFoundation
-// EFFECT_VOCABULARY_LEAVES), and a difference stops the build (E3010)
-// naming each missing and extra language.
-FOREIGN_LANGUAGE_COUNT: #run pkg_foreign_language_count(EFFECT_VOCABULARY_LEAVES)
+// EFFECT_VOCABULARY_LEAVES) and its roots against the languages Core
+// declares (`impl Language` in Core/Prelude/Prelude.jet, JetFoundation
+// CORE_LANGUAGE_ROOTS), and a difference stops the build (E3010) naming each
+// missing and extra language.
+FOREIGN_LANGUAGE_COUNT: #run pkg_foreign_language_count(EFFECT_VOCABULARY_LEAVES, CORE_LANGUAGE_ROOTS)
 
 // The registered root `root`, or `None` when no binder owns it.
 pkg_foreign_language: fn(root: String) -> String? Never! {
@@ -64,23 +66,26 @@ pkg_foreign_language_roots: fn() -> [String] Never! {
 }
 
 // The number of binder languages, once the table names the `FFI.*` leaves
-// of `leaves` in their order; else the build stops naming the difference.
-pkg_foreign_language_count: fn(leaves: [String]) -> Int {
+// of `leaves` and binds the roots of `roots` (Core's languages), both in
+// their order; else the build stops naming the difference.
+pkg_foreign_language_count: fn(leaves: [String], roots: [String]) -> Int {
     named: loop descriptor in pkg_foreign_binders() -> descriptor.name
-    problem: pkg_foreign_language_problem(named, leaves)
+    declared: loop leaf in leaves if leaf.starts_with("FFI.") -> leaf.removeprefix("FFI.")
+    problem: pkg_foreign_language_problem(named, declared, "the `FFI` cases of Compiler/Prelude/Effects.jet")
     if problem != "" -> panic(problem)
+    bound: pkg_foreign_language_problem(pkg_foreign_language_roots(), roots, "the roots of Core's `impl Language` types (Core/Prelude/Prelude.jet)")
+    if bound != "" -> panic(bound)
     named.len()
 }
 
-// What is wrong with `named` (the binder table's languages) against the
-// `FFI.*` leaves of `leaves`, naming each missing and each extra language,
-// or "".
-pkg_foreign_language_problem: fn(named: [String], leaves: [String]) -> String {
-    declared: loop leaf in leaves if leaf.starts_with("FFI.") -> leaf.removeprefix("FFI.")
+// What is wrong with `named` (the binder table's languages) against
+// `declared` (`source`'s languages), naming each missing and each extra
+// language, or "".
+pkg_foreign_language_problem: fn(named: [String], declared: [String], source: String) -> String {
     if named == declared -> return ""
     missing: loop name in declared if !named.contains(name) -> name.copy()
     extra: loop name in named if !declared.contains(name) -> name.copy()
-    "BinderDescriptor.jet: the binder table's languages differ from the `FFI` cases of Compiler/Prelude/Effects.jet: missing [{missing.join(", ")}], extra [{extra.join(", ")}] (the order must match too)"
+    "BinderDescriptor.jet: the binder table's languages differ from {source}: missing [{missing.join(", ")}], extra [{extra.join(", ")}] (the order must match too)"
 }
 
 // `bindings/<root>`: where the language's generated bindings live.

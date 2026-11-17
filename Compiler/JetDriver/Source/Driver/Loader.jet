@@ -54,6 +54,7 @@ use {
         core_module_has_member,
         lint_auto_derive_name,
         owned_trait,
+        CORE_LANGUAGE_ROOTS,
         core_module_has_type,
         diagnostic_with_source_path,
         effect_scope_argument_valid,
@@ -74,6 +75,7 @@ use {
         name_pool_fold,
         ImportedItem,
         TextEdit,
+        TraitImplBlock,
         diagnostic_with_migration_edit,
         effect_list_entry_removal,
         effect_root_removed,
@@ -183,30 +185,10 @@ use {
 JET_DRIVER_EDITION: "2026"
 
 // S51 (Rust `Syntax::FIRST_PARTY_RESERVED`): first-party short names reserved
-// before packages land. A local module may not take one as its alias or root.
+// before packages land.
 JET_DRIVER_FIRST_PARTY_RESERVED: #run { [String]{
     "core",
     "jet",
-    "c",
-    "rust",
-    "py",
-    "js",
-    "swift",
-    "go",
-    "java",
-    "cs",
-    "tcl",
-    "lua",
-    "fortran",
-    "cobol",
-    "ada",
-    "pascal",
-    "dart",
-    "pwsh",
-    "perl",
-    "r",
-    "octave",
-    "com",
     "http",
     "regex",
     "csv",
@@ -214,6 +196,12 @@ JET_DRIVER_FIRST_PARTY_RESERVED: #run { [String]{
     "crypto",
     "archive",
 } }
+
+// Every root no local module may take as its alias or root: the first-party
+// names, then the roots of Core's languages (CORE_LANGUAGE_ROOTS). A
+// package's own languages join them per program
+// (jet_driver_check_package_languages).
+JET_DRIVER_RESERVED_ROOTS: #run JET_DRIVER_FIRST_PARTY_RESERVED.concat(CORE_LANGUAGE_ROOTS)
 
 JetDriverFilePath: struct {
     path: String,
@@ -3591,28 +3579,83 @@ jet_driver_core_import_module: fn(declaration: ImportDecl) -> String? {
 }
 
 // Rust `check_reserved_import`: a file or local module import may not bind a
-// first-party or foreign root (E1002). Selective imports load nothing, Core
+// root of `reserved` (E1002): JET_DRIVER_RESERVED_ROOTS as each unit loads, then the
+// roots of the languages the loaded packages declare
+// (jet_driver_check_package_languages). Selective imports load nothing, Core
 // paths are resolved by the Core unit lookup (E1001), and target profiles are
 // compiler-owned namespaces.
-jet_driver_check_reserved_import: fn(declaration: ImportDecl, diagnostics: &[Diagnostic]) -> Bool {
+jet_driver_check_reserved_import: fn(declaration: ImportDecl, reserved: [String], diagnostics: &[Diagnostic]) -> Bool {
     if declaration.kind == .Unqualified(_, _, _, _, _) -> return true
     if jet_driver_core_import_module(declaration) != None -> return true
     if declaration.kind == .Module(profile, _) {
         if profile == "board.sensor_v1" || profile == "board.virt_aarch64" -> return true
     }
     alias: declaration.alias
-    if JET_DRIVER_FIRST_PARTY_RESERVED.contains(alias) {
+    if reserved.contains(alias) {
         diagnostics.push(jet_driver_diagnostic("E1002", declaration.alias_span, "`{alias}` is reserved for first-party or foreign packages", "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules", "rename the module, or import it as `other_name: …`"))
         return false
     }
     if declaration.kind == .Module(name, span) {
         root: name.split(".").to_list()[0]
-        if JET_DRIVER_FIRST_PARTY_RESERVED.contains(root) {
+        if reserved.contains(root) {
             diagnostics.push(jet_driver_diagnostic("E1002", span, "`{root}` is reserved for first-party or foreign packages", "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules", "choose a different module name"))
             return false
         }
     }
     true
+}
+
+// A language a package declares (a top-level type's `impl Language` block)
+// reserves its root as Core's do: once every unit is loaded, the roots
+// JET_DRIVER_RESERVED_ROOTS does not already hold, then E1002 for each import of a
+// package's module that binds one, wherever the declaring package loaded.
+// Returns whether no import took one.
+jet_driver_check_package_languages: fn(modules: [JetDriverLoadedModule], source_units: [JetDriverSourceUnit], diagnostics: &[Diagnostic]) -> Bool {
+    languages := [String]{}
+    loop loaded in modules {
+        if loaded.source_unit_index < 0 || jet_driver_unit_is_core(source_units[loaded.source_unit_index]) {
+            next
+        }
+        loop item in loaded.program.items {
+            if item == .Struct(definition) {
+                loop block in definition.trait_impls {
+                    root: jet_driver_language_root(block) ?? next
+                    if !JET_DRIVER_RESERVED_ROOTS.contains(root) && !languages.contains(root) {
+                        languages.push(root)
+                    }
+                }
+            }
+        }
+    }
+    if languages.len() == 0 -> return true
+    clean := true
+    loop loaded in modules {
+        if loaded.source_unit_index < 0 -> next
+        unit: source_units[loaded.source_unit_index]
+        if jet_driver_unit_is_core(unit) -> next
+        scoped_imports := [JetDriverScopedImport]{}
+        jet_driver_scoped_imports(loaded.program.imports, loaded.program.items, "", true, scoped_imports)
+        loop scoped in scoped_imports {
+            if jet_driver_is_foreign_provider_import(scoped.declaration) -> next
+            start: diagnostics.len()
+            if !jet_driver_check_reserved_import(scoped.declaration, languages, diagnostics) {
+                diagnostics[start] = diagnostic_with_source_path(diagnostics[start], unit.path, 0)
+                clean = false
+            }
+        }
+    }
+    clean
+}
+
+// The root an `impl Language` block supplies as one plain string, else None.
+jet_driver_language_root: fn(block: TraitImplBlock) -> String? {
+    if block.trait_name != "Language" -> return None
+    loop constant in block.constants {
+        if constant.name == "root" && constant.value == .Str(parts, _, _) {
+            if parts.len() == 1 && parts[0] == .Lit(text) -> return Val(text)
+        }
+    }
+    None
 }
 
 // The one leading `package: { … }` carrier of a source
@@ -6417,7 +6460,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         aliases := [String:Int]{}
         loop scoped in scoped_imports {
             if jet_driver_is_foreign_provider_import(scoped.declaration) -> next
-            if !jet_driver_check_reserved_import(scoped.declaration, diagnostics) {
+            if !jet_driver_check_reserved_import(scoped.declaration, JET_DRIVER_RESERVED_ROOTS, diagnostics) {
                 failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
                 next
             }
@@ -6761,6 +6804,9 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
         loop import_diagnostic_index in import_diagnostic_start..<diagnostics.len() {
             diagnostics[import_diagnostic_index] = diagnostic_with_source_path(diagnostics[import_diagnostic_index], unit.path, 0)
         }
+    }
+    if !jet_driver_check_package_languages(modules, source_units, diagnostics) {
+        failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Load)
     }
     // The held declarations the load reached take their stubs' places, then
     // the unreached rest of each Core module leaves it (CoreReach.jet), and
