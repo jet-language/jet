@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 111919,
+    "rev": 111925,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -60857,20 +60857,20 @@
         {
           "n": 4,
           "text": "`jet doc` writes to `<project>/.jet/doc/` and prints that path, and never writes docs/ in the source tree. Proof: `jet test Compiler --profile cases --filter JetDoc/writes_under_state_dir`. (was #3421 c11)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:57:38.408Z"
+          "evidence": "Landed f98f2f3a2e (p273). On batch compiler p273 (dev 049dc799ed): cases JetDoc/writes_under_state_dir PASS.",
+          "at": "2026-11-17T19:38:07.221Z"
         },
         {
           "n": 5,
           "text": "`jet doc --out <dir>` never overwrites a file that lacks the generated-file header: with a hand-written docs/index.md, `jet doc --out docs` exits non-zero with a registered error naming docs/index.md and leaves the file unchanged. Proof: `jet test Compiler --profile cases --filter JetDoc/out_refuses_hand_written_file`. (was #3421 c12)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:57:39.638Z"
+          "evidence": "Landed f98f2f3a2e (p273). On batch compiler p273 (dev 049dc799ed): cases JetDoc/out_refuses_hand_written_file PASS.",
+          "at": "2026-11-17T19:38:08.300Z"
         }
       ],
       "refs": [],
@@ -60882,7 +60882,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:13.858Z",
-      "updated": "2026-11-17T01:41:18.456Z",
+      "updated": "2026-11-17T19:38:08.301Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -111765,7 +111765,7 @@
       "track": "epoch",
       "epoch": "e20",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -111773,25 +111773,31 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 and c2 proved on p272 with Jetpack rebuilt."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "Realization progress renders in a single bottom-anchored status region, and errors print atomically above it with no interleaved or torn lines. Proof: `jet test Compiler --profile cases --filter CLIOutput/progress_region_no_torn_lines` (pty).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:06.164Z"
+          "evidence": "Landed 03ea375bc4 (p272). On batch compiler p272 (dev c2737a2a81) with Jetpack rebuilt from that tree: cases CLIOutput/progress_region_no_torn_lines PASS (pty).",
+          "at": "2026-11-17T19:12:34.494Z"
         },
         {
           "n": 2,
           "text": "Non-TTY, NO_COLOR and CI runs use the plain sequential fallback, and a test asserts no ANSI cursor movement in that mode.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:07.245Z",
+          "evidence": "Landed 03ea375bc4 (p272). On batch compiler p272 (dev c2737a2a81) with Jetpack rebuilt from that tree: cases CLIOutput/plain_fallback_no_cursor_moves PASS (piped with color forced, pty with NO_COLOR, pty under CI: zero cursor-moving or erasing controls).",
+          "at": "2026-11-17T19:12:36.187Z",
           "proof": {
             "profile": "cases",
             "filter": "CLIOutput/plain_fallback_no_cursor_moves"
@@ -111806,8 +111812,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:06:32.867Z",
-      "updated": "2026-11-17T01:49:54.517Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-17T19:12:38.863Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-17T19:12:38.863Z"
     },
     {
       "id": "c0rn7rnu",
@@ -117863,11 +117870,11 @@
         {
           "n": 2,
           "text": "The stack-segment change leaves the suite green. p271 found three new failures. Cases TaskgroupStack/a_joined_task_runs_on_the_joining_thread and a_stack_group_runs_recursion_the_default_stack_cannot now complete (reached 8000006000010) where they expected exit 70: their expectation has to follow the new meaning, so a stack overflow is reached only past the stack budget. UI E3012_comptime_stack_overflow_names_its_function lost the function name ('Stack overflow' instead of 'Stack overflow in deep'). Proof: those three pass on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T18:42:12.520Z"
+          "evidence": "Landed 049dc799ed (p273). On batch compiler p273 (dev 049dc799ed): cases TaskgroupStack/ 4/4 PASS and ui E3012_comptime_stack_overflow_names_its_function PASS. RuntimeStops/stack_overflow_under_jet_run…4_gib (1s limit) is the #6963 follow-up in DeclTypes-6-1-p272-fixes (huge-page segments), queued for p274.",
+          "at": "2026-11-17T19:38:09.399Z"
         }
       ],
       "refs": [],
@@ -117878,7 +117885,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:23:49.254Z",
-      "updated": "2026-11-17T18:42:12.520Z",
+      "updated": "2026-11-17T19:38:09.400Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -215793,6 +215800,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T19:38:09.400Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vucs0t",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T19:38:08.301Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vzmbkk",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-17T19:38:07.221Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vzmbkk",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-17T19:12:38.863Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yhga63",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T19:12:36.188Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0yhga63",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T19:12:34.494Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0yhga63",
+      "note": "#1"
+    },
     {
       "at": "2026-11-17T19:11:16.225Z",
       "by": "Main",
