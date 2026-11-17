@@ -1192,7 +1192,15 @@ sema_expression_lambda_bound_escapes: fn(binding: Binding, statements: [Stmt], s
         }
         tail_index += 1
     }
-    if !saw_use -> return Val(true)
+    if !saw_use {
+        // No use reaches the lambda, so no call can run it: like a direct-call
+        // lambda it borrows the locals it writes rather than keeping a copy
+        // whose writes the owner never sees.
+        if binding.init == .Lambda(lambda, _) {
+            sema_ownership_note_direct_call_lambda(state, lambda.span)
+        }
+        return Val(true)
+    }
     if binding.init == .Lambda(lambda, _) {
         sema_ownership_note_direct_call_lambda(state, lambda.span)
         return sema_expression_lambda_bound_capture_escapes(lambda, [String]{}, environment, program, scopes, context, diagnostics)
@@ -2704,6 +2712,9 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             found_capture_keys := [SymbolID]{}
             index = 0
             copied_writes := [String]{}
+            // A `#Reactive` body writes its registration's clone of the root
+            // it reads: its owner keeps its own value.
+            reactive_body: sema_ownership_is_reactive_body(state, lambda.span)
             // Only a capture key can match; a capture-free lambda skips the table walk.
             loop capture_keys.len() > 0 && index < lambda_scopes.bindings.len() {
                 binding: lambda_scopes.bindings[index]
@@ -2730,7 +2741,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                     // An escaping lambda writes its own copy of a captured
                     // name, except a write parameter's, whose caller's
                     // storage it holds by address (ir_lambda_box).
-                    if escapes && !task_body && !(borrowed && binding.access == AccessConvention.Write) && sema_expression_lambda_name_contains(lambda_work.meta.mut_captures, binding.symbol.name) {
+                    if escapes && !task_body && !reactive_body && !(borrowed && binding.access == AccessConvention.Write) && sema_expression_lambda_name_contains(lambda_work.meta.mut_captures, binding.symbol.name) {
                         sema_expression_lambda_append_name(copied_writes, binding.symbol.name)
                     }
                     atomic_walk := [String]{}

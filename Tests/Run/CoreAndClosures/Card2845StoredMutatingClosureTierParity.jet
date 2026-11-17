@@ -1,3 +1,6 @@
+// A stored lambda writes its own copy of `count` (spec "Captures and
+// escaping lambdas"): each call sees the last one's write, on every tier.
+// `count` itself can't be read after the lambda is stored (E0204).
 run: fn() {
     count := 0
     step: fn() -> Int {
@@ -6,5 +9,5 @@ run: fn() {
     }
     items: [step]
     print(items[0]())
-    print(count)
+    print(items[0]())
 }

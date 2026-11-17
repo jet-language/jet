@@ -1,0 +1,8 @@
+Error [jet.UseWhileWriteActive]: `tally` is changed by a stored lambda that holds its own copy, so it can't be used here
+  --> Tests/UI/stored_closure_capture_write_field_read.jet:18:11
+    |
+ 18 |     print(tally.count)
+    |           ^^^^^^^^^^^
+ Why: A stored lambda owns its captures: its writes land on its copy of `tally` and never reach `tally` itself
+ Fix: Call the lambda only where it is bound so it borrows `tally`, or keep the value in a `Shared` or `Cell` the lambda and this code both reach
+More: jet-lang.dev/e/E0204

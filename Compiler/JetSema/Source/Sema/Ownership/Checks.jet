@@ -3051,14 +3051,11 @@ sema_ownership_check_use: fn(state: &SemaOwnershipState, expr: Expr, scopes: Sem
     }
     places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
     if places.len() == 0 -> return true
+    if sema_ownership_report_stored_lambda_write(state, places, expr_source_span(expr), diagnostics) {
+        return false
+    }
     if sema_ownership_report_own_place_moved(state, expr, scopes, diagnostics) -> return false
     loop place in places {
-        // A stored lambda changes its own copy of the name (spec "Captures
-        // and escaping lambdas"): this use would never see those changes.
-        if sema_ownership_lambda_write_borrow_active(state, place.root) {
-            diagnostics.push(sema_ownership_diag_stored_lambda_write(place.root, expr_span(expr)))
-            return false
-        }
         if sema_ownership_place_moved(state, place) == .Val(origin) {
             sema_ownership_report_moved(state, origin, place, expr_span(expr), diagnostics)
             return false
@@ -3102,8 +3099,12 @@ sema_ownership_report_own_place_moved: fn(state: &SemaOwnershipState, expr: Expr
 // a move of the place, of a part of it, or of an owner it lies in is a use
 // after move. Read windows and loans are judged by the caller's own checks.
 sema_ownership_check_moved_place_use: fn(state: &SemaOwnershipState, expr: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> Bool {
+    places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
+    if sema_ownership_report_stored_lambda_write(state, places, expr_source_span(expr), diagnostics) {
+        return false
+    }
     if sema_ownership_report_own_place_moved(state, expr, scopes, diagnostics) -> return false
-    loop place in sema_ownership_places_from_expr_in_state(expr, scopes, state) {
+    loop place in places {
         if sema_ownership_place_moved(state, place) == .Val(origin) {
             sema_ownership_report_moved(state, origin, place, expr_span(expr), diagnostics)
             return false
@@ -3120,7 +3121,11 @@ sema_ownership_check_root_base_use: fn(state: &SemaOwnershipState, expr: Expr, s
     if sema_ownership_report_invalidated_view(state, expr, scopes, expr_span(expr), diagnostics) {
         return false
     }
-    loop place in sema_ownership_places_from_expr_in_state(expr, scopes, state) {
+    places := sema_ownership_places_from_expr_in_state(expr, scopes, state)
+    if sema_ownership_report_stored_lambda_write(state, places, expr_source_span(expr), diagnostics) {
+        return false
+    }
+    loop place in places {
         if sema_ownership_place_moved_ancestor(state, place) == .Val(origin) {
             sema_ownership_report_moved(state, origin, place, expr_span(expr), diagnostics)
             return false
@@ -4300,10 +4305,31 @@ sema_ownership_lambda_write_borrow_active: fn(state: SemaOwnershipState, name: S
     false
 }
 
+// A use of a place rooted in a name a stored lambda writes its own copy of
+// (spec "Captures and escaping lambdas") would never see those writes: E0204.
+sema_ownership_report_stored_lambda_write: fn(state: SemaOwnershipState, places: [SemaOwnershipPlace], span: Span, diagnostics: &[Diagnostic]) -> Bool {
+    if state.lambda_write_borrows.len() == 0 -> return false
+    loop place in places {
+        if sema_ownership_lambda_write_borrow_active(state, place.root) {
+            diagnostics.push(sema_ownership_diag_stored_lambda_write(place.root, span))
+            return true
+        }
+    }
+    false
+}
+
 // True when `span` lies inside a checked `#Reactive` body.
 sema_ownership_in_reactive_body: fn(state: SemaOwnershipState, span: Span) -> Bool Never! {
     loop body in state.reactive_bodies {
         if span.start >= body.start && span.end <= body.end -> return true
+    }
+    false
+}
+
+// True when `span` is a checked `#Reactive` body itself.
+sema_ownership_is_reactive_body: fn(state: SemaOwnershipState, span: Span) -> Bool Never! {
+    loop body in state.reactive_bodies {
+        if sema_ownership_span_same(body, span) -> return true
     }
     false
 }
