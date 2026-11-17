@@ -54,7 +54,11 @@ TCostSite: struct {
     line: Int{0},
 }
 
+// The functions a projection covered (each generic one by the
+// specialization's name, JetDriverCostCovered), in cover order, and their
+// sites.
 TCostReport: struct {
+    functions: [String]{[String]{}},
     sites: [TCostSite]{[TCostSite]{}},
 }
 
@@ -169,11 +173,12 @@ jet_driver_cost_gap_diagnostic: fn(load: JetDriverLoadResult, caller: FnBody, ca
     jet_driver_diagnostic_at_loaded_site(load, caller.module_identity, "E2104", span, "`{caller.name}` calls `{callee}`, which has no checked body, so the typed cost projection is incomplete", "every function a checked body reaches has a checked body or a foreign row, and the typed cost report reads them", "report this as a compiler defect: checking lost the body of `{callee}`")
 }
 
-// The cost report of the `covered` functions of `functions`: each one's
-// sites, in cover order.
+// The cost report of the `covered` functions of `functions`: each one's name
+// and sites, in cover order.
 jet_driver_cost_report: fn(functions: [FnBody], covered: [JetDriverCostCovered]) -> TCostReport Never! {
     report := TCostReport{}
     loop row in covered {
+        report.functions.push(row.name)
         jet_driver_cost_function_sites(functions[row.position], row.name, jet_driver_cost_nodes(functions[row.position]), report.sites)
     }
     report

@@ -6,9 +6,12 @@
 # gives a Place: the first location the portal's location session reports.
 # The fake session bus here allows both, and those answers are the asks'
 # answers, so `app.ask` prompts nobody again. With no session bus neither
-# device is there, and the photo and the place are none. The web output
-# has neither call, so the same app built for it is an E-APP-TARGET-FEATURE
-# compile error at each call.
+# device is there, and the photo and the place are none. In a page the
+# browser asks: the photo comes from its camera through getUserMedia and
+# ImageCapture, and the page keeps it for `read`; the place is its
+# Geolocation position. A page that allows both gives the same values as
+# Linux, asks for the camera once and leaves no camera running. With no
+# page to ask in, as under plain node, neither device is there.
 fixture: CameraAndLocationGiveTypedValuesAfterAGrant.fixture
 requires: os-name:linux
 env: NO_COLOR=1
@@ -31,9 +34,16 @@ env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
 env: PATH={work}/bin:{env:PATH}
 exit: 0
 stdout: = "photo: none\nplace: none\nasked: camera restricted, location restricted\n"
+when tool node
 step: jet build --target web main.jet
-exit: nonzero
-stderr: ~ "App feature `.take_photo` needs target `native`, but the resolved target is `Web`." # not answered for the browser
-stderr: ~ "main.jet:15:" # at the photo call
-stderr: ~ "App feature `.location` needs target `native`, but the resolved target is `Web`." # the browser asks for the location itself
-stderr: ~ "main.jet:23:" # at the location call
+exit: 0
+copy: page.mjs .jet/build/page.mjs
+step: node page.mjs
+cwd: .jet/build
+exit: 0
+stdout: = "photo: photo-1.jpg, 4 bytes, an image, first byte 255\nplace: 52.52 13.405 within 20.0 m\nasked: camera granted, location granted\ncamera asks: 1, cameras running: 0\n" # the browser's camera and position
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "photo: none\nplace: none\nasked: camera restricted, location restricted\n" # no page to ask in
+end when

@@ -84,7 +84,10 @@ jet_cli_lint_cost: fn(file: String, source: String, color: Bool, json: Bool) -> 
 // `jet explain --cost <file>`: every typed cost site of the file's checked
 // program, one line each (or the `explain.cost` envelope under `--json`): its
 // line, function, kind, whether it remains, and its loop depth. A site in
-// another file of the program names that file.
+// another file of the program names that file. Each function the projection
+// covered without a site gets its own line, a generic function's under the
+// name of each specialization the program reaches (the envelope's
+// `functions` names every covered one).
 jet_cli_explain_cost: fn(file: String, source: String, color: Bool, json: Bool, threads: Int?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, None, capture_cost_report: true)
@@ -102,6 +105,7 @@ jet_cli_explain_cost: fn(file: String, source: String, color: Bool, json: Bool, 
             // entry's own sites name it as it was typed.
             entry: jet_driver_display_path(if snapshot.roots.len() > 0 -> snapshot.roots[0].canonical_path else -> "", snapshot.entry_path)
             rows := [JetCLIStatusValue]{}
+            sited := [String:Bool]{}
             stdout := ""
             loop site in report.sites {
                 kind: jet_driver_cost_kind_label(site.kind)
@@ -112,10 +116,19 @@ jet_cli_explain_cost: fn(file: String, source: String, color: Bool, json: Bool, 
                     place: if site.path == entry -> file else -> site.path
                     stdout = "{stdout}{place}:{site.line} fn {site.function} — {kind} — {state} (loop depth {site.loop_depth}; tier={JET_CLI_COST_TIER})\n"
                 }
+                sited[site.function] = true
             }
             if json {
-                stdout = "{jet_cli_status_render("explain.cost", true, [JetCLIStatusField]{jet_cli_status_field("file", jet_cli_status_text(file)), jet_cli_status_field("sites", jet_cli_status_array(rows))})}\n"
-            } else if report.sites.len() == 0 { stdout = "No typed cost sites in `{file}`\n" }
+                names: loop name in report.functions -> jet_cli_status_text(name)
+                stdout = "{jet_cli_status_render("explain.cost", true, [JetCLIStatusField]{jet_cli_status_field("file", jet_cli_status_text(file)), jet_cli_status_field("functions", jet_cli_status_array(names)), jet_cli_status_field("sites", jet_cli_status_array(rows))})}\n"
+            } else {
+                loop name in report.functions {
+                    if sited.get(name) == None {
+                        stdout = "{stdout}No typed cost sites in fn {name} (tier={JET_CLI_COST_TIER})\n"
+                    }
+                }
+                if stdout == "" -> stdout = "No typed cost sites in `{file}`\n"
+            }
             jet_cli_finish(JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK})
         }
     }

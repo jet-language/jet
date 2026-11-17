@@ -1427,9 +1427,12 @@ does not report L2510. Findings exit 1 on stderr (diagnostic JSON Lines under
 `--json`) with a `N hidden dynamic cost warnings found` line; clean
 invocations exit 0. `explain --cost` lists every cost site, removed ones
 included, one `file:line fn name — kind — state (loop depth N;
-tier=shared-tir)` line each, or the `explain.cost` status envelope under
-`--json` with a `sites` list of `{function, line, kind, state, loop_depth,
-tier}`.
+tier=shared-tir)` line each, then one `No typed cost sites in fn name
+(tier=shared-tir)` line for each covered function without a site, a generic
+function named per specialization (`name__generic__<type arguments>`); or the
+`explain.cost` status envelope under `--json` with a `functions` list of every
+covered function's name and a `sites` list of `{function, line, kind, state,
+loop_depth, tier}`.
 Bare `inspect explain-build <file>` selects the authorized invocation entry
 under its authenticated workspace root, then reads the authenticated last-run
 record. It always reports the planned steps the compiler knows: the JSON

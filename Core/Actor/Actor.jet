@@ -1,0 +1,137 @@
+package: {
+    name: "core.actor"
+    version: "0.0.1"
+    edition: "2026"
+    description: "Actors over tasks and channels: spawn, send, ask with typed replies, supervision."
+    license: "MIT"
+    outputs: {
+        actor: .Library{ entry: actor }
+    }
+}
+
+// An actor is a task that owns its state and takes messages from one
+// channel, its mailbox, one at a time. Nothing here is new syntax: the
+// mailbox is a `channel`, the actor is a detached `task`, and a message
+// crosses into it under the ordinary sendability rules. The state never
+// leaves the actor's task; other tasks reach it only through messages.
+
+/// The handle to a running actor that takes messages of type `M`:
+/// `counter: actor.spawn(0, count)`.
+Actor: struct<M> {
+    priv inbox: Sender<Envelope<M>>,
+
+    /// Queues `message` for the actor. Fails with the message back once the
+    /// actor has stopped.
+    send: fn(self, message: &&M) -[Time.Wait]> SendError<M>! {
+        self.inbox.send(Envelope<M>{message: message, done: None}) ?? return Err(SendError<M>{value: err.value.message})
+    }
+
+    /// Sends the message `request` builds around a fresh `Reply<R>` and
+    /// waits until the actor has handled it: the answer the handler gave,
+    /// or None when the actor stopped first or its handler failed or
+    /// returned without answering. A failure of `request` is this call's,
+    /// unchanged, and sends nothing. `counter.ask(Count.Total)`.
+    ask: fn<R, E>(self, request: fn(Reply<R>) -> M E!) -[Time.Wait]> R? E! {
+        { sender: reply, receiver: answer }: channel<R>(capacity: 1)
+        { sender: done, receiver: handled }: channel<Bool>(capacity: 1)
+        message: request(Reply<R>{sender: reply})
+        self.inbox.send(Envelope<M>{message: message, done: Val(done)}) ?? return None
+        _: handled.receive() ?? false
+        answer.try_receive()
+    }
+
+    /// Stops the actor once it has handled the messages already queued;
+    /// later sends fail.
+    stop: fn(self) { self.inbox.close() }
+}
+
+/// Where a handler answers one `ask`, typed by what the asker waits for.
+/// A message carries it as a payload (`Total(actor.Reply<Int>)`); the
+/// handler answers while it handles that message.
+Reply: struct<R> {
+    priv sender: Sender<R>,
+
+    /// Gives the asker `value`. Only the first answer counts.
+    answer: fn(self, value: &&R) -[Time.Wait]> { self.sender.send(value) ?? return }
+}
+
+/// What a supervised actor does when its handler fails: stop, or restart
+/// from a fresh state at most `limit` times and then stop.
+Strategy: enum {
+    Stop,
+    Restart(limit: Int),
+}
+
+/// Starts an actor whose state begins as `state`; each message replaces the
+/// state with `handler(state, message)`. The actor stops when its handler
+/// fails or when it is stopped.
+spawn: fn<S, M>(state: &&S, handler: &&fn(S, M) -> S) -> Actor<M> {
+    { sender: inbox, receiver: mailbox }: channel<Envelope<M>>()
+    worker: task &&mailbox {
+        current := state
+        loop envelope in mailbox {
+            if !turn(current, handler, envelope) -> break
+        }
+        drain(mailbox)
+    }
+    worker.detach()
+    Actor<M>{inbox: inbox}
+}
+
+/// Starts a supervised actor whose state begins as `start()`. When its
+/// handler fails, the message is dropped and `strategy` decides: `.Stop`
+/// stops the actor, `.Restart(limit)` starts again from `start()` until it
+/// has restarted `limit` times, then stops.
+supervise: fn<S, M>(start: &&fn() -> S, handler: &&fn(S, M) -> S, strategy: Strategy) -> Actor<M> {
+    { sender: inbox, receiver: mailbox }: channel<Envelope<M>>()
+    worker: task &&mailbox {
+        current := start()
+        restarts := 0
+        loop envelope in mailbox {
+            if !turn(current, handler, envelope) {
+                retry: if strategy == .Restart(limit) -> restarts < limit else -> false
+                if !retry -> break
+                restarts += 1
+                current = start()
+            }
+        }
+        drain(mailbox)
+    }
+    worker.detach()
+    Actor<M>{inbox: inbox}
+}
+
+// A queued message; an ask's envelope also carries the channel the actor
+// closes once it has handled the message, so the asker never waits on a
+// reply that will not come.
+priv Envelope: struct<M> {
+    message: M,
+    done: Sender<Bool>?,
+
+    finish: fn(self) {
+        if self.done == .Val(done) -> done.close()
+    }
+}
+
+// Handles one message: whether the handler succeeded, the state replaced
+// when it did.
+priv turn: fn<S, M>(current: &S, handler: fn(S, M) -> S, envelope: Envelope<M>) -> Bool {
+    handled: if handler(current, envelope.message) == {
+        .Ok(next) -> {
+            current = next
+            true
+        }
+        .Err(_) -> false
+    }
+    envelope.finish()
+    handled
+}
+
+// Refuses later sends, then releases every ask still queued.
+priv drain: fn<M>(mailbox: Receiver<Envelope<M>>) {
+    mailbox.close()
+    loop {
+        envelope: mailbox.try_receive() ?? break
+        envelope.finish()
+    }
+}

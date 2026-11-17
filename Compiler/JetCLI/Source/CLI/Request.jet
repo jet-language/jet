@@ -3441,11 +3441,12 @@ jet_cli_trace_drain: fn(target: String, state: &JetCLITraceState) Never! {
 }
 
 // Ends the buffering of `sink`'s trace once its compile is over, whether it
-// returned, failed or panicked (Host.jet jet_cli_compile_on_worker): the
-// `trace.bytes` counter (every event's bytes before it) and `trace.flushes`
-// (the blocks written, this last one included), the readable stream's
-// summary (jet_cli_trace_summary), then every waiting event. An event after
-// it is written at once.
+// returned, failed or panicked (Host.jet jet_cli_compile_on_worker), or its
+// verb ends the process from inside the compile (Host.jet jet_cli_finish):
+// the `trace.bytes` counter (every event's bytes before it) and
+// `trace.flushes` (the blocks written, this last one included), the readable
+// stream's summary (jet_cli_trace_summary), then every waiting event. An
+// event after it is written at once.
 jet_cli_trace_finish: fn(sink: JetCLITraceSink) -[Env, FS, Time]> Never! {
     totals: jet_cli_trace_totals(sink.state)
     sink.counter("counters.trace.bytes", totals.bytes)

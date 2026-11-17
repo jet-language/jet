@@ -314,12 +314,150 @@ async function takePhoto(doc) {
   }
 }
 
+// How long a sensor stream waits for its sensor's first reading: a browser
+// on a device without the sensor gives none, or one without values.
+const SENSOR_WAIT_MS = 1000;
+
+// How many readings a sensor stream keeps that the app has not taken; past
+// that, the oldest goes.
+const SENSOR_QUEUE = 64;
+
+// How the device is held, from the browser's tilt angles in degrees (beta
+// front to back, gamma left to right), named as the Linux sensor proxy
+// names it: the edge of the device that faces up, or `undefined` when it
+// lies nearly flat.
+function heldWay(beta, gamma) {
+  const up = Math.sin((beta * Math.PI) / 180);
+  const left = Math.cos((beta * Math.PI) / 180) * Math.sin((gamma * Math.PI) / 180);
+  if (Math.max(Math.abs(up), Math.abs(left)) < 0.5) return "undefined";
+  if (Math.abs(up) >= Math.abs(left)) return up > 0 ? "normal" : "bottom-up";
+  return left > 0 ? "left-up" : "right-up";
+}
+
+// Follows `sensor` (`place`, `orientation` or `heading`) for one of the
+// app's streams: a promise of its grant and, once the sensor gives a first
+// reading, the number `watches` keeps the watch under. Each reading that
+// differs from the one before queues as its fields' record: a place's
+// latitude, longitude and accuracy in meters (watchPosition); how the device
+// is held (heldWay); where it points, in degrees clockwise from north (an
+// absolute device orientation, or Safari's compass heading). A place the
+// person leaves unanswered for five minutes is `denied`; a sensor that gives
+// no reading within a second, or the browser's empty one, `restricted`.
+// Either way nothing stays listening.
+function watchSensor(watches, sensor) {
+  return new Promise((resolve) => {
+    const watch = { readings: [], waiting: null, last: null, gone: false, stop: () => {} };
+    let wait = null;
+    let answered = false;
+    const answer = (grant) => {
+      if (answered) return;
+      answered = true;
+      clearTimeout(wait);
+      if (grant !== "granted") {
+        watch.stop();
+        resolve(providerRecord([grant]));
+        return;
+      }
+      watches.count += 1;
+      watches.held.set(watches.count, watch);
+      resolve(providerRecord([grant, String(watches.count)]));
+    };
+    const waitFor = (milliseconds, grant) => {
+      clearTimeout(wait);
+      wait = setTimeout(() => answer(grant), milliseconds);
+    };
+    const reading = (fields) => {
+      const record = providerRecord(fields);
+      if (record !== watch.last) {
+        watch.last = record;
+        const waiting = watch.waiting;
+        watch.waiting = null;
+        if (waiting) waiting(record);
+        else {
+          if (watch.readings.length === SENSOR_QUEUE) watch.readings.shift();
+          watch.readings.push(record);
+        }
+      }
+      answer("granted");
+    };
+    if (sensor === "place") {
+      const geolocation = globalThis.navigator?.geolocation;
+      if (!geolocation?.watchPosition) return answer("restricted");
+      waitFor(ASK_WAIT_MS, "denied");
+      const id = geolocation.watchPosition(
+        ({ coords }) => reading([String(coords.latitude), String(coords.longitude), String(coords.accuracy ?? 0)]),
+        (error) => {
+          if (error?.code !== 1) return answer("granted");
+          if (!answered) return answer("denied");
+          // Refused after the grant: the stream ends.
+          watch.stop();
+          watch.gone = true;
+          const waiting = watch.waiting;
+          watch.waiting = null;
+          waiting?.(null);
+        },
+      );
+      watch.stop = () => geolocation.clearWatch(id);
+      return;
+    }
+    const events = globalThis.addEventListener ? globalThis : null;
+    if (!events || (sensor !== "orientation" && sensor !== "heading")) return answer("restricted");
+    const type = sensor === "heading" && "ondeviceorientationabsolute" in globalThis ? "deviceorientationabsolute" : "deviceorientation";
+    const listen = (event) => {
+      if (sensor === "orientation") {
+        if (event.beta == null || event.gamma == null) return answer("restricted");
+        return reading([heldWay(event.beta, event.gamma)]);
+      }
+      const degrees = event.webkitCompassHeading ?? (event.absolute && event.alpha != null ? (360 - event.alpha) % 360 : null);
+      if (degrees == null) return answer("restricted");
+      reading([String(degrees)]);
+    };
+    // A browser that asks before it gives the tilt (Safari's
+    // requestPermission) asks the person here.
+    const asking = globalThis.DeviceOrientationEvent?.requestPermission;
+    waitFor(ASK_WAIT_MS, "denied");
+    Promise.resolve(asking ? asking.call(globalThis.DeviceOrientationEvent) : "granted")
+      .catch(() => "denied")
+      .then((state) => {
+        if (answered) return;
+        if (state !== "granted") return answer("denied");
+        events.addEventListener(type, listen);
+        watch.stop = () => events.removeEventListener(type, listen);
+        waitFor(SENSOR_WAIT_MS, "restricted");
+      });
+  });
+}
+
+// The next reading of the watch `number`: its record now, or a promise of
+// it; null once the watch is gone.
+function nextReading(watches, number) {
+  const watch = watches.held.get(number);
+  if (watch === undefined) return null;
+  if (watch.readings.length > 0) return watch.readings.shift();
+  if (watch.gone) return null;
+  return new Promise((resolve) => (watch.waiting = resolve));
+}
+
+// Stops the watch `number`, so nothing listens for its sensor any more.
+function stopWatch(watches, number) {
+  const watch = watches.held.get(number);
+  if (watch === undefined) return "";
+  watches.held.delete(number);
+  watch.stop();
+  const waiting = watch.waiting;
+  watch.waiting = null;
+  waiting?.(null);
+  return "";
+}
+
 // The provider's answer to the app's device request `request` of kind
 // `kind` (UIHostProvider.jet jet_ui_provider_device): 0 app.ask's grant, 1
 // the location's record, 2 the photo's record (its grant and, when taken,
 // the number the provider keeps it under and its size), 3 the bytes of the
-// kept file `<number> <offset> <limit>` names. Each answer is a promise.
-function deviceRequest(doc, kept, kind, request) {
+// kept file `<number> <offset> <limit>` names, 4 a sensor stream's start
+// (watchSensor), 5 its next reading and 6 its stop, each naming the watch's
+// number. An answer may be a promise.
+function deviceRequest(doc, kept, watches, kind, request) {
   if (kind === 0) return askPermission(request);
   if (kind === 1) return findPlace().then(providerRecord);
   if (kind === 2) {
@@ -336,6 +474,9 @@ function deviceRequest(doc, kept, kind, request) {
       .arrayBuffer()
       .then((bytes) => new Uint8Array(bytes));
   }
+  if (kind === 4) return watchSensor(watches, request);
+  if (kind === 5) return nextReading(watches, Number(request));
+  if (kind === 6) return stopWatch(watches, Number(request));
   return null;
 }
 
@@ -344,8 +485,9 @@ function defaultUiProvider(doc) {
   const claims = new Set();
   let clipboard = null;
   // The files the app was given (a photo), by number; each lives as long as
-  // the page.
+  // the page. The sensors its streams follow, by number, until each stops.
   const kept = [];
+  const watches = { count: 0, held: new Map() };
   const enqueue = (queue, fields) => {
     const records = queues[queue];
     if (records.length < UI_QUEUE) records.push(providerRecord(fields));
@@ -406,7 +548,7 @@ function defaultUiProvider(doc) {
     eventPop: (queue) => queues[queue]?.shift() ?? null,
     dialogRequest: () => -1,
     dialogResult: () => null,
-    device: (kind, request) => deviceRequest(doc, kept, kind, request),
+    device: (kind, request) => deviceRequest(doc, kept, watches, kind, request),
     keyClaim: (claim) => {
       claims.add(claim);
       return true;

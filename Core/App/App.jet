@@ -4248,6 +4248,55 @@ priv app_background_once: fn(run: fn() Notice!) Never! {
     if run() == .Err(notice) -> __keep_notice(notice)
 }
 
+// What the app last observed of itself (`phase`). `instance` numbers the
+// app's run, from 1 at the process's first `launch`; `sequence` counts the
+// run's observations, from 0 at its start; `visibility` gathers the app's
+// windows and `execution` follows the machine's sleep. It is the latest
+// observation published, not a promise about now: a platform may hide,
+// freeze or end the app with no word first, so an app saves its changes as
+// they happen, never only when it hears it is going.
+Phase: struct {
+    instance: Int,
+    sequence: Int,
+    visibility: Visibility,
+    execution: Execution,
+}
+
+// Whether the app shows (`Phase.visibility`): `Visible` when the
+// compositor shows a window the app owns (mapped, not minimized, not
+// suspended), `Hidden` when it shows none, or the app has no window, and
+// `Unknown` before its window's first frame and when no window that
+// shows can tell (minimized on a compositor that never says when it comes
+// back). Focus never decides it, and the platform doesn't say when another
+// window covers one.
+Visibility: enum {
+    Visible,
+    Hidden,
+    Unknown,
+}
+
+// Whether the app runs (`Phase.execution`): `Suspending` from the machine
+// saying it prepares to sleep until it says it woke, which doesn't mean the
+// process is frozen yet, and `Unknown` where nothing says.
+Execution: enum {
+    Running,
+    Suspending,
+    Unknown,
+}
+
+// Why the app's phase moved (`LifecycleEvent`): its visibility changed,
+// the machine prepares to sleep or woke, its window took the focus again
+// after it lost it or after the app was asleep, or its window closed,
+// which ends the app. A focus regained and a wake are each heard, even
+// when the phase stays the same.
+LifecycleReason: enum {
+    VisibilityChanged,
+    SleepPreparing,
+    Woke,
+    FocusRegained,
+    Closing,
+}
+
 // The moments the runtime follows while the app runs: its window took or
 // lost the focus, and the machine went to sleep or woke. They stay inside
 // the runtime; the app hears only that it came back (`App.lifecycle`).
@@ -4485,10 +4534,13 @@ priv ASKED: Shared{[AppAsked]{}}
 // once: a later call gives the first answer. On Linux the desktop portal
 // asks (org.freedesktop.portal.Camera, org.freedesktop.portal.Location) and
 // remembers the person's choice across runs; notifications need no
-// permission there, so they are `.Granted`. A request the person dismisses,
-// or leaves unanswered for five minutes, is `.Denied`. Without a session
-// bus or a portal, and on the other native targets, the answer is
-// `.Restricted`.
+// permission there, so they are `.Granted`. In a page the browser answers,
+// through its Permissions API and, for a permission it would still ask
+// for, its own request; the program waits for the answer while the page
+// goes on. A request the person dismisses, or leaves unanswered for five
+// minutes, is `.Denied`. Without a session bus or a portal, with no page to
+// ask in or a browser without the device, and on the other native targets,
+// the answer is `.Restricted`.
 ask: fn(permission: Permission) -[Env, Net, Time]> Grant {
     if app_asked(permission) == .Val(known) -> return known
     grant: app_ask_system(permission)
@@ -4519,7 +4571,9 @@ priv app_ask_system: fn(permission: Permission) -[Env, Net, Time]> Grant Never! 
         }
         .MacOS -> { return Grant.Restricted }
         .Windows -> { return Grant.Restricted }
-        .Web -> { return Grant.Restricted }
+        .Web -> {
+            return app_grant_web(ui_rt.device(WEB_DEVICE_ASK, app_permission_key(permission)))
+        }
         .Wasm -> { return Grant.Restricted }
         .Freestanding -> { return Grant.Restricted }
     }
@@ -4540,11 +4594,34 @@ priv app_grant: fn(said: dbus.PortalAnswer) -> Grant Never! {
     }
 }
 
-#Test("ask asks once per process and reads the portal's answer as a grant") {
+// The name `permission` has as a `purposes:` key, and in a page's request.
+priv app_permission_key: fn(permission: Permission) -> String Never! {
+    if permission == {
+        .Camera -> "camera"
+        .Location -> "location"
+        .Notifications -> "notifications"
+    }
+}
+
+// The grant a page's answer gives: none when there is no page to ask in, or
+// its entry can't wait for the browser.
+priv app_grant_web: fn(said: String?) -> Grant Never! {
+    answer: said ?? return Grant.Restricted
+    if answer == "granted" -> return Grant.Granted
+    if answer == "denied" -> return Grant.Denied
+    Grant.Restricted
+}
+
+#Test("ask asks once per process and reads the portal's or the page's answer as a grant") {
     assert_eq(app_grant(dbus.PortalAnswer.Allowed), Grant.Granted)
     assert_eq(app_grant(dbus.PortalAnswer.Refused), Grant.Denied)
     assert_eq(app_grant(dbus.PortalAnswer.Ended), Grant.Denied)
     assert_eq(app_grant(dbus.PortalAnswer.Absent), Grant.Restricted)
+    assert_eq(app_grant_web(Val("granted")), Grant.Granted)
+    assert_eq(app_grant_web(Val("denied")), Grant.Denied)
+    assert_eq(app_grant_web(Val("restricted")), Grant.Restricted)
+    assert_eq(app_grant_web(None), Grant.Restricted)
+    assert_eq(app_permission_key(Permission.Notifications), "notifications")
     app_remember(Permission.Location, Grant.Denied)
     assert_eq(ask(Permission.Location), Grant.Denied)
 }
@@ -4555,7 +4632,9 @@ priv app_grant: fn(said: dbus.PortalAnswer) -> Grant Never! {
 // (`gnome-control-center applications {id}`, `id` made from the graph's
 // title as `app_desktop_id` makes it), started apart from the app so it
 // stays open when the app exits. It is `false` when that program does not
-// start, and on the other native targets.
+// start, on the other native targets, and in a page: a browser keeps no
+// settings page of an app's, and the person changes a site's permissions in
+// the browser's own site settings.
 open_settings: fn() -[Env, Exec]> Bool {
     #if #build.target.os == {
         .Linux -> {
@@ -4578,33 +4657,156 @@ PickedFile: struct {
     name: String,
     bytes: Int,
     media: Media?,
-    priv path: String,
+    priv source: PickedSource,
 
     // The file's bytes.
-    read: fn(self) -[FS.Read]> [U8] IOError! { files.read_bytes(self.path) }
+    read: fn(self) -[FS.Read]> [U8] IOError! {
+        if self.source == {
+            .Path(path) -> files.read_bytes(path)
+            .Page(number) -> app_page_whole(number, self.name, self.bytes)
+        }
+    }
 
     // The file's text; an error when its bytes are not UTF-8.
-    text: fn(self) -[FS.Read]> String IOError! { files.read(self.path) }
+    text: fn(self) -[FS.Read]> String IOError! {
+        if self.source == {
+            .Path(path) -> files.read(path)
+            .Page(number) -> {
+                bytes: app_page_whole(number, self.name, self.bytes) ?? return Err(err)
+                text: String.from_bytes(bytes) ?? return Err(IOError.InvalidInput(IOContext{operation: .Codec, resource: Val(self.name), os_code: None, cause: Val("the file is not UTF-8 text")}))
+                Ok(text)
+            }
+        }
+    }
 
     // The file's bytes a part at a time, for a file too big to hold whole.
     stream: fn(self) -[FS.Read]> PickedStream IOError! {
-        Ok(PickedStream{file: files.open(self.path)})
+        if self.source == {
+            .Path(path) -> Ok(PickedStream{file: Val(files.open(path) ?? return Err(err)), page: -1, name: self.name, at: 0})
+            .Page(number) -> Ok(PickedStream{file: None, page: number, name: self.name, at: 0})
+        }
     }
 }
 
-// A picked file's bytes as a `Reader`, from its first byte to its last.
+// Where a picked file's bytes are: a path on this device, or a file a page's
+// browser holds for the app, under the number its UI provider gave it.
+priv PickedSource: enum {
+    Path(String),
+    Page(Int),
+}
+
+// A picked file's bytes as a `Reader`, from its first byte to its last: an
+// open file on this device, or the page's file `page` read a part at a time
+// from `at`.
 #[!Equatable, !Comparable]
 PickedStream: struct {
-    priv file: files.FileReader,
+    priv file: files.FileReader?,
+    priv page: Int,
+    priv name: String,
+    priv at: Int,
 
     impl Reader {
         read_bytes: fn(&self, limit: Int) -[Time.Wait]> [U8] IOError! {
-            self.file.read_bytes(limit)
+            if &self.file == .Val(reader) -> return reader.read_bytes(limit)
+            part: app_page_read(self.page, self.name, self.at, limit) ?? return Err(err)
+            self.at += part.len()
+            Ok(part)
         }
 
         read_into: fn(&self, buffer: &[U8], limit: Int) -[Time.Wait]> Int IOError! {
-            self.file.read_into(buffer, limit)
+            if &self.file == .Val(reader) -> return reader.read_into(buffer, limit)
+            part: app_page_read(self.page, self.name, self.at, limit) ?? return Err(err)
+            loop byte in part -> buffer.push(byte)
+            self.at += part.len()
+            Ok(part.len())
         }
+    }
+}
+
+// The page's kinds of device request (Host.jet deviceRequest).
+priv WEB_DEVICE_ASK: 0
+
+priv WEB_DEVICE_PLACE: 1
+
+priv WEB_DEVICE_PHOTO: 2
+
+priv WEB_DEVICE_READ: 3
+
+priv WEB_DEVICE_WATCH: 4
+
+priv WEB_DEVICE_NEXT: 5
+
+priv WEB_DEVICE_STOP: 6
+
+// The `size` bytes of the file a page holds under `number` for the app.
+priv app_page_whole: fn(number: Int, name: String, size: Int) -> [U8] IOError! {
+    if size == 0 -> return Ok([U8]{})
+    app_page_read(number, name, 0, size)
+}
+
+// Up to `limit` bytes from `at` of the file a page holds under `number`
+// for the app (`name`), none past its end. A limit below one is an error
+// before any read, as a Reader's is, and so is a file the page no longer
+// has.
+priv app_page_read: fn(number: Int, name: String, at: Int, limit: Int) -> [U8] IOError! {
+    if limit < 1 {
+        return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(name), os_code: None, cause: Val("a read takes at least one byte")}))
+    }
+    part: ui_rt.device_bytes(WEB_DEVICE_READ, "{number} {at} {limit}") ?? return Err(IOError.NotFound(IOContext{operation: .Read, resource: Val(name), os_code: None, cause: Val("the page no longer holds the file")}))
+    Ok(part)
+}
+
+// The fields of the page's answer to the device request `request` of kind
+// `kind`: none when there is no page to ask, or its entry can't wait for
+// the browser.
+priv app_page_answer: fn(kind: Int, request: String) -> [String] Never! {
+    said: ui_rt.device(kind, request) ?? return [String]{}
+    ui.host.provider_record_fields(said) ?? [String]{}
+}
+
+// The first field of a page's answer: a device request's grant.
+priv app_page_first: fn(fields: [String]) -> String? Never! {
+    if fields.len() == 0 -> return None
+    Val(fields[0])
+}
+
+// The place a page's answer holds from its field `from` on: latitude,
+// longitude and accuracy in meters. None when it has none.
+priv app_page_place: fn(fields: [String], from: Int) -> Place? Never! {
+    if fields.len() < from + 3 -> return None
+    latitude: Float.parse(fields[from]) ?? return None
+    longitude: Float.parse(fields[from + 1]) ?? return None
+    accuracy: Float.parse(fields[from + 2]) ?? return None
+    Val(Place{latitude: latitude, longitude: longitude, accuracy_m: accuracy})
+}
+
+// The fields of the next reading of the sensor the page follows under
+// `watch` for a stream, once there is one; none when the page no longer
+// follows it.
+priv app_page_reading: fn(watch: String) -> [String]? Never! {
+    said: ui_rt.device(WEB_DEVICE_NEXT, watch) ?? return None
+    ui.host.provider_record_fields(said)
+}
+
+// Stops the page following the sensor under `watch`.
+priv app_page_unwatch: fn(watch: String) Never! { _: ui_rt.device(WEB_DEVICE_STOP, watch) }
+
+#Test("a page's answers read as a grant, a place and a sensor's reading, and a page's file reads only in its page") {
+    assert_eq(app_page_first([String]{}), None)
+    assert_eq(app_page_first([String]{"denied"}), Val("denied"))
+    assert_eq(app_page_place([String]{"granted", "52.52", "13.405", "20"}, 1), Val(Place{latitude: 52.52, longitude: 13.405, accuracy_m: 20.0}))
+    assert_eq(app_page_place([String]{"granted"}, 1), None)
+    assert_eq(app_page_place([String]{"granted", "north", "13.405", "20"}, 1), None)
+    assert_eq(app_page_place([String]{"52.5201", "13.4051", "10"}, 0), Val(Place{latitude: 52.5201, longitude: 13.4051, accuracy_m: 10.0}))
+    assert_eq(app_orientation_named("left-up"), Val(Orientation.LeftUp))
+    assert_eq(app_orientation_named("undefined"), None)
+    assert_eq(app_page_reading("1"), None)
+    empty: PickedFile{name: "empty.csv", bytes: 0, media: None, source: .Page(1)}
+    assert_eq(empty.read() ?? panic("an empty file: {err}"), [U8]{})
+    photo: PickedFile{name: "photo-1.jpg", bytes: 4, media: Val(Media.Image), source: .Page(0)}
+    if photo.read() == {
+        .Ok(_) -> { panic("a page's file reads only in its page") }
+        .Err(_) -> {}
     }
 }
 
@@ -4666,7 +4868,7 @@ priv app_open_linux: fn(types: [FileType]) -[Env, FS.Read, Net, Time]> PickedFil
 priv app_picked: fn(path: String) -[FS.Read]> PickedFile IOError! {
     size: files.stat(path).size
     head: files.read_at(path, 0, BLOB_HEAD)
-    Ok(PickedFile{name: files.basename(path), bytes: size, media: blob_media(blob_type(head, size)), path: path})
+    Ok(PickedFile{name: files.basename(path), bytes: size, media: blob_media(blob_type(head, size)), source: .Path(path)})
 }
 
 // Keeps the notice that no file was opened, and why; gives `None`.
@@ -5515,11 +5717,15 @@ priv PHOTOS: Shared{0}
 // Takes a photo with the device's camera and gives it, or `None` when the
 // person does not allow the camera, there is none, or it gave no photo. It
 // asks for the camera as `ask(.Camera)` does when this process has not
-// asked yet, and the answer counts as that ask's. On Linux the camera
-// portal asks, and the photo comes from the camera through PipeWire:
-// GStreamer's `pipewiresrc` (`gst-launch-1.0`, with its PipeWire plugin)
-// takes a few frames and keeps the last as a JPEG, `photo-1.jpg` for the
-// process's first. On the other native targets it is `None`.
+// asked yet, and the answer counts as that ask's. A photo is named
+// `photo-1.jpg` for the process's first. On Linux the camera portal asks,
+// and the photo comes from the camera through PipeWire: GStreamer's
+// `pipewiresrc` (`gst-launch-1.0`, with its PipeWire plugin) takes a few
+// frames and keeps the last as a JPEG. In a page the browser asks
+// (`getUserMedia`), and the photo is the browser's `ImageCapture` photo, or
+// a frame of the camera's video as a JPEG where it has none; the page keeps
+// it, and `read` reads it from there. On the other native targets, and with
+// no page to ask in, it is `None`.
 take_photo: fn() -[Env, Exec, FS, Net, Time]> PickedFile? {
     if app_asked(Permission.Camera) == .Val(known) {
         if known != .Granted -> return None
@@ -5533,7 +5739,14 @@ take_photo: fn() -[Env, Exec, FS, Net, Time]> PickedFile? {
         }
         .MacOS -> { return None }
         .Windows -> { return None }
-        .Web -> { return None }
+        .Web -> {
+            fields: app_page_answer(WEB_DEVICE_PHOTO, "")
+            app_settle(Permission.Camera, app_grant_web(app_page_first(fields)))
+            if fields.len() < 3 -> return None
+            number: Int.parse(fields[1]) ?? return None
+            size: Int.parse(fields[2]) ?? return None
+            return Val(PickedFile{name: app_photo_name(), bytes: size, media: Val(Media.Image), source: .Page(number)})
+        }
         .Wasm -> { return None }
         .Freestanding -> { return None }
     }
@@ -5544,7 +5757,9 @@ take_photo: fn() -[Env, Exec, FS, Net, Time]> PickedFile? {
 // `ask(.Location)` does when this process has not asked yet, and the
 // answer counts as that ask's. On Linux it is the first location the
 // desktop portal's location session reports after the person allows it
-// (GeoClue finds it). On the other native targets it is `None`.
+// (GeoClue finds it). In a page it is the browser's position (the
+// Geolocation API's `getCurrentPosition`, which asks). On the other native
+// targets, and with no page to ask in, it is `None`.
 location: fn() -[Env, Net, Time]> Place? {
     if app_asked(Permission.Location) == .Val(known) {
         if known != .Granted -> return None
@@ -5560,7 +5775,11 @@ location: fn() -[Env, Net, Time]> Place? {
         }
         .MacOS -> { return None }
         .Windows -> { return None }
-        .Web -> { return None }
+        .Web -> {
+            fields: app_page_answer(WEB_DEVICE_PLACE, "")
+            app_settle(Permission.Location, app_grant_web(app_page_first(fields)))
+            return app_page_place(fields, 1)
+        }
         .Wasm -> { return None }
         .Freestanding -> { return None }
     }
@@ -5584,26 +5803,49 @@ priv UPDATE_WAIT_NS: 60000000000
 // answer other than `.Granted` the stream is empty. On Linux the desktop
 // portal's location session reports each place (GeoClue finds it), and the
 // stream closes the session, and its bus connection with it, when it stops.
-// On the other native targets the stream is empty.
+// In a page the browser's position watch reports each place, and the
+// stream clears the watch when it stops. On the other native targets the
+// stream is empty.
 location_updates: fn() -[Env, Net, Time]> Stream<Place> {
     // One pass: each `break` ends the stream.
     loop {
-        bus := app_location_bus() ?? break
-        session: dbus.open_location(bus, true, ASK_WAIT_NS) ?? dbus.PortalSession{answer: .Absent, path: ""}
-        app_settle(Permission.Location, app_grant(session.answer))
-        if session.path == "" -> break
-        defer dbus.close_location(bus, session.path)
-        if session.answer != .Allowed -> break
-        loop {
-            found: if dbus.next_place(bus, session.path, UPDATE_WAIT_NS) == {
-                .Err(_) -> {
-                    break
+        #if #build.target.os == {
+            .Linux -> {
+                bus := app_location_bus() ?? break
+                session: dbus.open_location(bus, true, ASK_WAIT_NS) ?? dbus.PortalSession{answer: .Absent, path: ""}
+                app_settle(Permission.Location, app_grant(session.answer))
+                if session.path == "" -> break
+                defer dbus.close_location(bus, session.path)
+                if session.answer != .Allowed -> break
+                loop {
+                    found: if dbus.next_place(bus, session.path, UPDATE_WAIT_NS) == {
+                        .Err(_) -> {
+                            break
+                        }
+                        .Ok(got) -> got
+                    }
+                    if found == .Val(at) {
+                        yield Place{latitude: at.latitude, longitude: at.longitude, accuracy_m: at.accuracy}
+                    }
                 }
-                .Ok(got) -> got
             }
-            if found == .Val(at) {
-                yield Place{latitude: at.latitude, longitude: at.longitude, accuracy_m: at.accuracy}
+            .MacOS -> {}
+            .Windows -> {}
+            .Web -> {
+                if app_location_refused() -> break
+                started: app_page_answer(WEB_DEVICE_WATCH, "place")
+                app_settle(Permission.Location, app_grant_web(app_page_first(started)))
+                if started.len() < 2 -> break
+                defer app_page_unwatch(started[1])
+                loop {
+                    reading: app_page_reading(started[1]) ?? break
+                    if app_page_place(reading, 0) == .Val(at) {
+                        yield at
+                    }
+                }
             }
+            .Wasm -> {}
+            .Freestanding -> {}
         }
         break
     }
@@ -5612,28 +5854,49 @@ location_updates: fn() -[Env, Net, Time]> Stream<Place> {
 // How the device is held, now and each time that changes, until the loop
 // reading the stream stops. On Linux the sensor proxy (iio-sensor-proxy)
 // reads the accelerometer for the app while the stream runs; the stream
-// gives it back, and closes its system bus connection, when it stops. A
-// device with no accelerometer, and the other native targets, give an
-// empty stream.
+// gives it back, and closes its system bus connection, when it stops. In a
+// page the browser's orientation events tell it, and the stream removes its
+// listener when it stops. A device with no accelerometer, and the other
+// native targets, give an empty stream.
 orientation_updates: fn() -[Env, Net, Time]> Stream<Orientation> {
     // One pass: each `break` ends the stream.
     loop {
-        bus := app_sensor_bus() ?? break
-        // No accelerometer, or no answer: nothing to give back.
-        first: dbus.claim_sensor(bus, dbus.Sensor.Accelerometer, ASK_BUS_WAIT_NS) ?? break
-        defer dbus.release_sensor(bus, dbus.Sensor.Accelerometer)
-        reading := dbus.DbusValue?{Val(first)}
-        loop {
-            held: app_orientation(reading)
-            if held == .Val(way) {
-                yield way
-            }
-            reading = if dbus.sensor_change(bus, dbus.Sensor.Accelerometer, UPDATE_WAIT_NS) == {
-                .Err(_) -> {
-                    break
+        #if #build.target.os == {
+            .Linux -> {
+                bus := app_sensor_bus() ?? break
+                // No accelerometer, or no answer: nothing to give back.
+                first: dbus.claim_sensor(bus, dbus.Sensor.Accelerometer, ASK_BUS_WAIT_NS) ?? break
+                defer dbus.release_sensor(bus, dbus.Sensor.Accelerometer)
+                reading := dbus.DbusValue?{Val(first)}
+                loop {
+                    held: app_orientation(reading)
+                    if held == .Val(way) {
+                        yield way
+                    }
+                    reading = if dbus.sensor_change(bus, dbus.Sensor.Accelerometer, UPDATE_WAIT_NS) == {
+                        .Err(_) -> {
+                            break
+                        }
+                        .Ok(got) -> got
+                    }
                 }
-                .Ok(got) -> got
             }
+            .MacOS -> {}
+            .Windows -> {}
+            .Web -> {
+                started: app_page_answer(WEB_DEVICE_WATCH, "orientation")
+                if started.len() < 2 -> break
+                defer app_page_unwatch(started[1])
+                loop {
+                    reading: app_page_reading(started[1]) ?? break
+                    held: app_orientation_named(app_page_first(reading) ?? "")
+                    if held == .Val(way) {
+                        yield way
+                    }
+                }
+            }
+            .Wasm -> {}
+            .Freestanding -> {}
         }
         break
     }
@@ -5643,28 +5906,47 @@ orientation_updates: fn() -[Env, Net, Time]> Stream<Orientation> {
 // time that changes, until the loop reading the stream stops. On Linux the
 // sensor proxy reads the compass for the app while the stream runs; the
 // stream gives it back, and closes its system bus connection, when it
-// stops. A device with no compass, and the other native targets, give an
-// empty stream.
+// stops. In a page the browser's absolute orientation events tell it, and
+// the stream removes its listener when it stops. A device with no compass,
+// and the other native targets, give an empty stream.
 heading_updates: fn() -[Env, Net, Time]> Stream<Float> {
     // One pass: each `break` ends the stream.
     loop {
-        bus := app_sensor_bus() ?? break
-        // No compass, or no answer: nothing to give back.
-        first: dbus.claim_sensor(bus, dbus.Sensor.Compass, ASK_BUS_WAIT_NS) ?? break
-        defer dbus.release_sensor(bus, dbus.Sensor.Compass)
-        reading := dbus.DbusValue?{Val(first)}
-        loop {
-            if reading == .Val(value) {
-                if value == .Double(degrees) {
+        #if #build.target.os == {
+            .Linux -> {
+                bus := app_sensor_bus() ?? break
+                // No compass, or no answer: nothing to give back.
+                first: dbus.claim_sensor(bus, dbus.Sensor.Compass, ASK_BUS_WAIT_NS) ?? break
+                defer dbus.release_sensor(bus, dbus.Sensor.Compass)
+                reading := dbus.DbusValue?{Val(first)}
+                loop {
+                    if reading == .Val(value) {
+                        if value == .Double(degrees) {
+                            yield degrees
+                        }
+                    }
+                    reading = if dbus.sensor_change(bus, dbus.Sensor.Compass, UPDATE_WAIT_NS) == {
+                        .Err(_) -> {
+                            break
+                        }
+                        .Ok(got) -> got
+                    }
+                }
+            }
+            .MacOS -> {}
+            .Windows -> {}
+            .Web -> {
+                started: app_page_answer(WEB_DEVICE_WATCH, "heading")
+                if started.len() < 2 -> break
+                defer app_page_unwatch(started[1])
+                loop {
+                    reading: app_page_reading(started[1]) ?? break
+                    degrees: Float.parse(app_page_first(reading) ?? "") ?? next
                     yield degrees
                 }
             }
-            reading = if dbus.sensor_change(bus, dbus.Sensor.Compass, UPDATE_WAIT_NS) == {
-                .Err(_) -> {
-                    break
-                }
-                .Ok(got) -> got
-            }
+            .Wasm -> {}
+            .Freestanding -> {}
         }
         break
     }
@@ -5694,9 +5976,7 @@ priv app_linux_place: fn() -[Env, Net, Time]> dbus.PortalFix Never! {
 // `.Granted`, and on targets other than Linux. With no session bus it is
 // `None` and the location counts as restricted, as `location` has it.
 priv app_location_bus: fn() -[Env, Net, Time]> dbus.DbusConnection? Never! {
-    if app_asked(Permission.Location) == .Val(known) {
-        if known != .Granted -> return None
-    }
+    if app_location_refused() -> return None
     #if #build.target.os == {
         .Linux -> {
             bus := dbus.session(ASK_BUS_WAIT_NS) ?? return app_no_location_bus()
@@ -5708,6 +5988,12 @@ priv app_location_bus: fn() -[Env, Net, Time]> dbus.DbusConnection? Never! {
         .Wasm -> { return None }
         .Freestanding -> { return None }
     }
+}
+
+// Whether this process's location ask had an answer other than `.Granted`.
+priv app_location_refused: fn() -> Bool Never! {
+    if app_asked(Permission.Location) == .Val(known) -> return known != .Granted
+    false
 }
 
 priv app_no_location_bus: fn() -> dbus.DbusConnection? Never! {
@@ -5735,13 +6021,18 @@ priv app_sensor_bus: fn() -[Env, Net, Time]> dbus.DbusConnection? Never! {
 // `None` for "undefined", when it cannot tell.
 priv app_orientation: fn(reading: dbus.DbusValue?) -> Orientation? Never! {
     if reading == .Val(value) {
-        if value == .Text(name) {
-            if name == "normal" -> return Val(Orientation.Upright)
-            if name == "bottom-up" -> return Val(Orientation.UpsideDown)
-            if name == "left-up" -> return Val(Orientation.LeftUp)
-            if name == "right-up" -> return Val(Orientation.RightUp)
-        }
+        if value == .Text(name) -> return app_orientation_named(name)
     }
+    None
+}
+
+// How the device is held, by the sensor proxy's name for it, which a page
+// gives too; `None` for "undefined" and any other name.
+priv app_orientation_named: fn(name: String) -> Orientation? Never! {
+    if name == "normal" -> return Val(Orientation.Upright)
+    if name == "bottom-up" -> return Val(Orientation.UpsideDown)
+    if name == "left-up" -> return Val(Orientation.LeftUp)
+    if name == "right-up" -> return Val(Orientation.RightUp)
     None
 }
 
@@ -6650,12 +6941,17 @@ priv app_graph_shows: fn(ids: [Int]) -> Bool Never! {
     assert(kept_folder("exports") == PickedFolder?{None}, "a folder that is gone is not found")
 }
 
+// The name of the process's next photo: `photo-1.jpg` for its first.
+priv app_photo_name: fn() -> String Never! {
+    held := PHOTOS.guard_edit()
+    held.value += 1
+    "photo-{held.value}.jpg"
+}
+
 // A photo from the camera through PipeWire, kept in a directory of this
 // process's under the temporary directory. The camera has 30 seconds.
 priv app_photo: fn() -[Env, Exec, FS, Time]> PickedFile? Never! {
-    held := PHOTOS.guard_edit()
-    held.value += 1
-    name: "photo-{held.value}.jpg"
+    name: app_photo_name()
     folder: "{sys.temp_dir()}/jet-photos-{sys.getpid()}"
     files.create_dir_all(folder) ?? return None
     path: "{folder}/{name}"
@@ -6664,7 +6960,7 @@ priv app_photo: fn() -[Env, Exec, FS, Time]> PickedFile? Never! {
     if ran.code != 0 -> return None
     photo: files.read_bytes(path) ?? return None
     if photo.len() == 0 -> return None
-    Val(PickedFile{name: name, bytes: photo.len(), media: Val(Media.Image), path: path})
+    Val(PickedFile{name: name, bytes: photo.len(), media: Val(Media.Image), source: .Path(path)})
 }
 
 #Test("a photo and a place are none once the person refused them") {

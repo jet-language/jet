@@ -4,9 +4,13 @@
 # Notifications need no permission on Linux. A process asks once for each
 # permission: the second camera ask gives the first answer, and the portal
 # hears one camera request. `app.open_settings` opens GNOME Settings' Apps
-# page for the app's desktop id. The web output has neither call, so the
-# same app built for it is an E-APP-TARGET-FEATURE compile error at each
-# call, never a silent no-op.
+# page for the app's desktop id. In a page the browser answers: its
+# Permissions API first, then the device asked for once (the camera through
+# getUserMedia, the location through the Geolocation API, notifications
+# through Notification.requestPermission), the program waiting for each
+# answer while the page goes on. A browser keeps no settings page of an
+# app's, so `open_settings` there is false. With no page (node runs the
+# build) each device is restricted.
 fixture: AskGivesATypedGrantOnEveryTarget.fixture
 requires: os-name:linux
 env: NO_COLOR=1
@@ -30,9 +34,16 @@ env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
 env: PATH={work}/bin:{env:PATH}
 exit: 0
 stdout: = "camera: restricted\ncamera again: restricted\nlocation: restricted\nnotifications: granted\nsettings opened: true\n"
+when tool node
 step: jet build --target web main.jet
-exit: nonzero
-stderr: ~ "App feature `.ask` needs target `native`, but the resolved target is `Web`." # not answered for the browser
-stderr: ~ "main.jet:15:" # at each ask
-stderr: ~ "App feature `.open_settings` needs target `native`, but the resolved target is `Web`." # no settings page of the app's in a browser
-stderr: ~ "main.jet:19:" # at the settings call
+exit: 0
+copy: page.mjs .jet/build/page.mjs
+step: node page.mjs
+cwd: .jet/build
+exit: 0
+stdout: = "camera: granted\ncamera again: granted\nlocation: denied\nnotifications: granted\nsettings opened: false\ncamera asks: 1\n" # the page's browser answers; one camera request
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "camera: restricted\ncamera again: restricted\nlocation: restricted\nnotifications: restricted\nsettings opened: false\n" # no page to ask in
+end when

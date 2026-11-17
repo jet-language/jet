@@ -3,6 +3,7 @@
 // carry the Net effect and fixed ABI. Plain module calls stay in CoreCall.
 use jet_foundation.[
     AccessConvention,
+    CORE_BUILTINS_MODULE,
     CallArg,
     Diagnostic,
     EffectRowEntry,
@@ -12,6 +13,7 @@ use jet_foundation.[
     Span,
     SymbolKind,
     Type,
+    core_call,
     core_identity_is,
     core_module_export,
     ir_runtime_handle_row,
@@ -31,17 +33,25 @@ SemaNetworkHandleParam: struct {
     write: Bool,
 }
 
-// One form of a handle method: its owner and the owner's Core module, the
-// operation the call lowers to, its result, the parameters, whose count is
-// the form's arity, and the effect the call records ("" for none).
+// One form of a handle method: its owner and the owner's Core module, how
+// the call lowers, its result, the parameters, whose count is the form's
+// arity, and the effect the call records ("" for none).
 SemaNetworkHandleMethod: struct {
     owner: String,
     module: String,
     method: String,
-    operation: THandleOp,
+    lowering: SemaNetworkHandleLowering,
     result: Type,
     params: [SemaNetworkHandleParam],
     effect: String,
+}
+
+// A handle method form lowers to a checked handle operation, or to a Core
+// call of its declared `jet_builtins` host leaf, whose row names the runtime
+// export every tier runs.
+SemaNetworkHandleLowering: enum {
+    Handle(operation: THandleOp),
+    HostLeaf(leaf: String),
 }
 
 SEMA_NETWORK_HANDLE_DEADLINE: SemaNetworkHandleParam{name: "deadline", ty: Type.Named{name: "Duration"}, label_only: true, write: false}
@@ -63,55 +73,56 @@ SEMA_NETWORK_HANDLE_INTEREST: SemaNetworkHandleParam{name: "interest", ty: Type.
 // Every method form of SEMA_NETWORK_HANDLE_OWNERS, an owner's forms of one
 // method in rising arity.
 SEMA_NETWORK_HANDLE_METHODS: [SemaNetworkHandleMethod]{
-    {owner: "TCPListener", module: "core.net", method: "accept", operation: THandleOp.TCPListenerAccept, result: Type.Result{ok: Type.Named{name: "TCPStream"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
-    {owner: "TCPListener", module: "core.net", method: "accept", operation: THandleOp.TCPListenerAcceptDeadline, result: Type.Result{ok: Type.Named{name: "TCPStream"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "TCPListener", module: "core.net", method: "local_addr", operation: THandleOp.TCPListenerLocalAddr, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "read", operation: THandleOp.TCPStreamRead, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "read", operation: THandleOp.TCPStreamReadText, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "read", operation: THandleOp.TCPStreamReadTextDeadline, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "read_bytes", operation: THandleOp.TCPStreamReadBytes{into: false}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "read_bytes", operation: THandleOp.TCPStreamReadBytesDeadline{into: false}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "read_into", operation: THandleOp.TCPStreamReadBytes{into: true}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BUFFER, SEMA_NETWORK_HANDLE_LIMIT}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "read_into", operation: THandleOp.TCPStreamReadBytesDeadline{into: true}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BUFFER, SEMA_NETWORK_HANDLE_LIMIT, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "write", operation: THandleOp.TCPStreamWriteText, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_TEXT}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "write", operation: THandleOp.TCPStreamWriteTextDeadline, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_TEXT, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "write_some", operation: THandleOp.TCPStreamWriteBytes, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "write_some", operation: THandleOp.TCPStreamWriteBytesDeadline, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "write_bytes", operation: THandleOp.TCPStreamWriteAllBytes, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "write_bytes", operation: THandleOp.TCPStreamWriteAllBytesDeadline, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "shutdown", operation: THandleOp.TCPStreamShutdown, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{{name: "how", ty: Type.Named{name: "NetShutdown"}, label_only: false, write: false}}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "ready", operation: THandleOp.TCPStreamReady, result: Type.Result{ok: Type.Named{name: "NetReady"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_INTEREST, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "peer_addr", operation: THandleOp.TCPStreamPeerAddr, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "local_addr", operation: THandleOp.TCPStreamLocalAddr, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
-    {owner: "TCPStream", module: "core.net", method: "close", operation: THandleOp.TCPStreamClose, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
-    {owner: "UDPSocket", module: "core.net", method: "ready", operation: THandleOp.UDPSocketReady, result: Type.Result{ok: Type.Named{name: "NetReady"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_INTEREST, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "UDPSocket", module: "core.net", method: "close", operation: THandleOp.UDPSocketClose, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
-    {owner: "UDPSocket", module: "core.net", method: "receive", operation: THandleOp.UDPSocketReceiveDeadline, result: Type.Result{ok: Type.Named{name: "UDPPacket"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "UDPSocket", module: "core.net", method: "send_to", operation: THandleOp.UDPSocketSendToDeadline, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, {name: "address", ty: Type.Named{name: "SocketAddr"}, label_only: false, write: false}, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "UnixListener", module: "core.net", method: "accept", operation: THandleOp.UnixListenerAcceptDeadline, result: Type.Result{ok: Type.Named{name: "UnixStream"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "UnixStream", module: "core.net", method: "read_bytes", operation: THandleOp.UnixStreamReadDeadline{into: false}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "UnixStream", module: "core.net", method: "read_into", operation: THandleOp.UnixStreamReadDeadline{into: true}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BUFFER, SEMA_NETWORK_HANDLE_LIMIT, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "UnixStream", module: "core.net", method: "write_bytes", operation: THandleOp.UnixStreamWriteAllDeadline, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "UnixStream", module: "core.net", method: "ready", operation: THandleOp.UnixStreamReady, result: Type.Result{ok: Type.Named{name: "NetReady"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_INTEREST, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
-    {owner: "UnixStream", module: "core.net", method: "close", operation: THandleOp.UnixStreamClose, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
-    {owner: "UnixStream", module: "core.net", method: "set_timeout", operation: THandleOp.UnixStreamSetTimeout, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{{name: "timeout", ty: Type.Named{name: "Duration"}, label_only: false, write: false}}, effect: "Net"},
-    {owner: "WsConn", module: "core.net.ws", method: "send_text", operation: THandleOp.HTTPServerMethod{kind: "WsConn", method: "send_text"}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_TEXT}, effect: "Net"},
-    {owner: "WsConn", module: "core.net.ws", method: "send_bytes", operation: THandleOp.HTTPServerMethod{kind: "WsConn", method: "send_bytes"}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES}, effect: "Net"},
-    {owner: "WsConn", module: "core.net.ws", method: "recv", operation: THandleOp.HTTPServerMethod{kind: "WsConn", method: "recv"}, result: Type.Result{ok: Type.Named{name: "WsMessage"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
-    {owner: "WsConn", module: "core.net.ws", method: "close", operation: THandleOp.HTTPServerMethod{kind: "WsConn", method: "close"}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{{name: "code", ty: Type.Int, label_only: false, write: false}, {name: "reason", ty: Type.String, label_only: false, write: false}}, effect: "Net"},
-    {owner: "WsMessage", module: "core.net.ws", method: "is_text", operation: THandleOp.HTTPServerMethod{kind: "WsMessage", method: "is_text"}, result: Type.Bool, params: [SemaNetworkHandleParam]{}, effect: ""},
-    {owner: "WsMessage", module: "core.net.ws", method: "is_binary", operation: THandleOp.HTTPServerMethod{kind: "WsMessage", method: "is_binary"}, result: Type.Bool, params: [SemaNetworkHandleParam]{}, effect: ""},
-    {owner: "WsMessage", module: "core.net.ws", method: "is_close", operation: THandleOp.HTTPServerMethod{kind: "WsMessage", method: "is_close"}, result: Type.Bool, params: [SemaNetworkHandleParam]{}, effect: ""},
-    {owner: "WsMessage", module: "core.net.ws", method: "text", operation: THandleOp.HTTPServerMethod{kind: "WsMessage", method: "text"}, result: Type.Result{ok: Type.String, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{}, effect: ""},
-    {owner: "WsMessage", module: "core.net.ws", method: "bytes", operation: THandleOp.HTTPServerMethod{kind: "WsMessage", method: "bytes"}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{}, effect: ""},
+    {owner: "TCPListener", module: "core.net", method: "accept", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPListenerAccept}, result: Type.Result{ok: Type.Named{name: "TCPStream"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "TCPListener", module: "core.net", method: "accept", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPListenerAcceptDeadline}, result: Type.Result{ok: Type.Named{name: "TCPStream"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPListener", module: "core.net", method: "local_addr", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPListenerLocalAddr}, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamRead}, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamReadText}, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamReadTextDeadline}, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read_bytes", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamReadBytes{into: false}}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read_bytes", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamReadBytesDeadline{into: false}}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read_into", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamReadBytes{into: true}}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BUFFER, SEMA_NETWORK_HANDLE_LIMIT}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "read_into", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamReadBytesDeadline{into: true}}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BUFFER, SEMA_NETWORK_HANDLE_LIMIT, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamWriteText}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_TEXT}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamWriteTextDeadline}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_TEXT, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write_some", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamWriteBytes}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write_some", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamWriteBytesDeadline}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write_bytes", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamWriteAllBytes}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "write_bytes", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamWriteAllBytesDeadline}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "shutdown", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamShutdown}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{{name: "how", ty: Type.Named{name: "NetShutdown"}, label_only: false, write: false}}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "ready", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamReady}, result: Type.Result{ok: Type.Named{name: "NetReady"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_INTEREST, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "peer_addr", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamPeerAddr}, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "local_addr", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamLocalAddr}, result: Type.Result{ok: Type.String, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "TCPStream", module: "core.net", method: "close", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.TCPStreamClose}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "UDPSocket", module: "core.net", method: "ready", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.UDPSocketReady}, result: Type.Result{ok: Type.Named{name: "NetReady"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_INTEREST, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UDPSocket", module: "core.net", method: "close", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.UDPSocketClose}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "UDPSocket", module: "core.net", method: "receive", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.UDPSocketReceiveDeadline}, result: Type.Result{ok: Type.Named{name: "UDPPacket"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UDPSocket", module: "core.net", method: "send_to", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.UDPSocketSendToDeadline}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, {name: "address", ty: Type.Named{name: "SocketAddr"}, label_only: false, write: false}, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixListener", module: "core.net", method: "accept", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.UnixListenerAcceptDeadline}, result: Type.Result{ok: Type.Named{name: "UnixStream"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "read_bytes", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.UnixStreamReadDeadline{into: false}}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_MAX_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "read_into", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.UnixStreamReadDeadline{into: true}}, result: Type.Result{ok: Type.Int, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BUFFER, SEMA_NETWORK_HANDLE_LIMIT, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "write_bytes", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.UnixStreamWriteAllDeadline}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "ready", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.UnixStreamReady}, result: Type.Result{ok: Type.Named{name: "NetReady"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_INTEREST, SEMA_NETWORK_HANDLE_DEADLINE}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "close", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.UnixStreamClose}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "UnixStream", module: "core.net", method: "set_timeout", lowering: SemaNetworkHandleLowering.Handle{operation: THandleOp.UnixStreamSetTimeout}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "NetError"}}, params: [SemaNetworkHandleParam]{{name: "timeout", ty: Type.Named{name: "Duration"}, label_only: false, write: false}}, effect: "Net"},
+    {owner: "WsConn", module: "core.net.ws", method: "send_text", lowering: SemaNetworkHandleLowering.HostLeaf{leaf: "ws_conn_send_text"}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_TEXT}, effect: "Net"},
+    {owner: "WsConn", module: "core.net.ws", method: "send_bytes", lowering: SemaNetworkHandleLowering.HostLeaf{leaf: "ws_conn_send_bytes"}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{SEMA_NETWORK_HANDLE_BYTES}, effect: "Net"},
+    {owner: "WsConn", module: "core.net.ws", method: "recv", lowering: SemaNetworkHandleLowering.HostLeaf{leaf: "ws_conn_recv"}, result: Type.Result{ok: Type.Named{name: "WsMessage"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{}, effect: "Net"},
+    {owner: "WsConn", module: "core.net.ws", method: "close", lowering: SemaNetworkHandleLowering.HostLeaf{leaf: "ws_conn_close"}, result: Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{{name: "code", ty: Type.Int, label_only: false, write: false}, {name: "reason", ty: Type.String, label_only: false, write: false}}, effect: "Net"},
+    {owner: "WsMessage", module: "core.net.ws", method: "is_text", lowering: SemaNetworkHandleLowering.HostLeaf{leaf: "ws_message_is_text"}, result: Type.Bool, params: [SemaNetworkHandleParam]{}, effect: ""},
+    {owner: "WsMessage", module: "core.net.ws", method: "is_binary", lowering: SemaNetworkHandleLowering.HostLeaf{leaf: "ws_message_is_binary"}, result: Type.Bool, params: [SemaNetworkHandleParam]{}, effect: ""},
+    {owner: "WsMessage", module: "core.net.ws", method: "is_close", lowering: SemaNetworkHandleLowering.HostLeaf{leaf: "ws_message_is_close"}, result: Type.Bool, params: [SemaNetworkHandleParam]{}, effect: ""},
+    {owner: "WsMessage", module: "core.net.ws", method: "text", lowering: SemaNetworkHandleLowering.HostLeaf{leaf: "ws_message_text"}, result: Type.Result{ok: Type.String, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{}, effect: ""},
+    {owner: "WsMessage", module: "core.net.ws", method: "bytes", lowering: SemaNetworkHandleLowering.HostLeaf{leaf: "ws_message_bytes"}, result: Type.Result{ok: Type.List{element: Type.IntN{signed: false, bits: 8}}, err: Type.Named{name: "WsError"}}, params: [SemaNetworkHandleParam]{}, effect: ""},
 }
 
 SEMA_NETWORK_HANDLE_METHODS_CHECKED: #run sema_network_handle_methods_checked(SEMA_NETWORK_HANDLE_OWNERS, SEMA_NETWORK_HANDLE_METHODS)
 
 // The number of forms in `methods` (SEMA_NETWORK_HANDLE_METHODS), once every
 // owner is a runtime handle with one Core module and at least one form, every
-// form's owner is one of `owners` and no two forms share an owner, a method
-// and an arity; else the build stops naming the first stray.
+// form's owner is one of `owners`, every host leaf form names a declared
+// `jet_builtins` leaf and no two forms share an owner, a method and an arity;
+// else the build stops naming the first stray.
 sema_network_handle_methods_checked: fn(owners: [String], methods: [SemaNetworkHandleMethod]) -> Int {
     loop owner in owners {
         if ir_runtime_handle_row(owner) == None {
@@ -133,6 +144,9 @@ sema_network_handle_methods_checked: fn(owners: [String], methods: [SemaNetworkH
         }
         if methods[index].module != sema_network_handle_owner_module(owner) {
             panic("SEMA_NETWORK_HANDLE_METHODS puts {owner} in two modules")
+        }
+        if methods[index].lowering == .HostLeaf(leaf) && core_call(CORE_BUILTINS_MODULE, leaf) == None {
+            panic("SEMA_NETWORK_HANDLE_METHODS lowers {owner}.{method} to jet_builtins.{leaf}, which Core does not declare")
         }
         loop earlier in 0..<index {
             if methods[earlier].owner == owner && methods[earlier].method == method && methods[earlier].params.len() == methods[index].params.len() {
@@ -302,13 +316,35 @@ sema_network_handle_checked_args: fn(method: String, params: [SemaCallParam], ar
     Val(values)
 }
 
-sema_network_handle_finish: fn(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
-    value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
-    checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_network_handle_effect_fact(environment, program, scopes, context, api, span, result_type, effect_name, diagnostics) {
-        return SemaMethodSpecialCheck{handled: true, value: None}
+sema_network_handle_finish: fn(receiver: TExpr, lowering: SemaNetworkHandleLowering, args: &&[TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    if lowering == {
+        .Handle(operation) -> {
+            value := sema_tree_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+            checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return rejected
+            if !sema_network_handle_effect_fact(environment, program, scopes, context, api, span, result_type, effect_name, diagnostics) {
+                return rejected
+            }
+            SemaMethodSpecialCheck{handled: true, value: Val(checked)}
+        }
+        .HostLeaf(leaf) -> {
+            // The leaf's Core call facts name the effects and its row names
+            // the runtime export every tier runs.
+            record: core_call(CORE_BUILTINS_MODULE, leaf) ?? panic("{api} has no jet_builtins.{leaf} host leaf")
+            fallibility: sema_expression_failure_carrier(result_type)
+            if !sema_call_core_record_effects_as(record, api, span, [Type]{}, result_type, fallibility, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
+                return rejected
+            }
+            call_args := [TExpr]{receiver}
+            widen := [Bool]{false}
+            loop argument in args.move() {
+                call_args.push(argument)
+                widen.push(false)
+            }
+            call: sema_call_core_tree(record, call_args, span, [Type]{}, widen, result_type, fallibility, None, environment, program, diagnostics) ?? return rejected
+            SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(call, expected, environment, program, context, diagnostics)}
+        }
     }
-    SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
 // Called before ordinary method candidate lookup with the already checked
@@ -332,5 +368,5 @@ sema_call_try_network_handle_method: fn(receiver: Expr, receiver_value: TExpr, m
     // has nothing to be compared with.
     sema_receiver_mark_forget(state, receiver)
     typed_args := checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_network_handle_finish(receiver_value, SEMA_NETWORK_HANDLE_METHODS[row].operation, typed_args, SEMA_NETWORK_HANDLE_METHODS[row].result, SEMA_NETWORK_HANDLE_METHODS[row].effect, "{owner}.{method}", span, expected, environment, program, scopes, context, diagnostics)
+    sema_network_handle_finish(receiver_value, SEMA_NETWORK_HANDLE_METHODS[row].lowering, typed_args, SEMA_NETWORK_HANDLE_METHODS[row].result, SEMA_NETWORK_HANDLE_METHODS[row].effect, "{owner}.{method}", span, expected, environment, program, scopes, context, diagnostics)
 }

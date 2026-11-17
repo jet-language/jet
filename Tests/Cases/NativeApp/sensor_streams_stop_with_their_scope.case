@@ -7,9 +7,12 @@
 # closes. The fake buses here take one connection at a time and a line in
 # heard.txt for each means the app closed it; the next stream could not
 # start before. The location's answer is the location ask's, so `app.ask`
-# prompts nobody again. The web output has none of these streams, so the
-# same app built for it is an E-APP-TARGET-FEATURE compile error at each
-# call.
+# prompts nobody again. In a page the browser gives the same streams: the
+# location through a Geolocation position watch, how the device is held
+# and where it points through its orientation events. Each stream clears
+# its watch or removes its listener when it stops, and a page that moves
+# and turns the device gives the same values as Linux. With no page to ask
+# in, as under plain node, each stream is empty.
 fixture: SensorStreamsStopWithTheirScope.fixture
 requires: os-name:linux
 env: NO_COLOR=1
@@ -25,11 +28,16 @@ stdout: = "place: 52.52 13.405 within 20.0 m\nplace: 52.5201 13.4051 within 10.0
 wait: portal timeout 60s
 exit: 0
 file: heard.txt = "Hello AddMatch AddMatch CreateSession Start Close\nHello Get AddMatch ClaimAccelerometer Get ReleaseAccelerometer\nHello Get AddMatch ClaimCompass Get ReleaseCompass\n" # each stream closed its session or gave its sensor back, then its connection
+when tool node
 step: jet build --target web main.jet
-exit: nonzero
-stderr: ~ "App feature `.location_updates` needs target `native`, but the resolved target is `Web`." # not answered for the browser
-stderr: ~ "main.jet:16:" # at the location stream
-stderr: ~ "App feature `.orientation_updates` needs target `native`, but the resolved target is `Web`." # nor the accelerometer
-stderr: ~ "main.jet:22:" # at the orientation stream
-stderr: ~ "App feature `.heading_updates` needs target `native`, but the resolved target is `Web`." # nor the compass
-stderr: ~ "main.jet:27:" # at the heading stream
+exit: 0
+copy: page.mjs .jet/build/page.mjs
+step: node page.mjs
+cwd: .jet/build
+exit: 0
+stdout: = "place: 52.52 13.405 within 20.0 m\nplace: 52.5201 13.4051 within 10.0 m\nheld: upright\nheld: left side up\nheading: 90.0\nheading: 180.5\nstopped, asked: true\nlistening: 0, watching places: 0\n" # the browser's position and orientation; nothing left listening
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = "stopped, asked: false\n" # no page to ask in
+end when

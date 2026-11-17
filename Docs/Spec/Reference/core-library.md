@@ -5062,6 +5062,34 @@ Compile-time code also runs natively at O0, but there the kernel uses one
 worker: a `para_*` call in a `#run` block, a `#run fn` or a value
 computed while building runs its chunks in order and returns the same value.
 
+### `core.actor` — actors over tasks and channels
+
+`core.actor` writes the actor model in Jet over `task` and `channel`, with no
+new syntax (D-ACTOR1). An actor is a detached task that owns its state and
+takes messages from its mailbox, a channel, one at a time; each message
+replaces the state with `handler(state, message)`. The state never leaves the
+actor's task, and a message crosses into it under the ordinary sendability
+rules. The implementation is in
+[`Core/Actor/Actor.jet`](../../../Core/Actor/Actor.jet).
+
+| Signature | Result | Description |
+|---|---|---|
+| `spawn<S, M>(state: S, handler: fn(S, M) -> S) -> Actor<M>` | actor | Start an actor whose state begins as `state`; it stops when `handler` fails or when it is stopped. |
+| `supervise<S, M>(start: fn() -> S, handler: fn(S, M) -> S, strategy: Strategy) -> Actor<M>` | actor | Start a supervised actor whose state begins as `start()`; when `handler` fails, the message is dropped and `strategy` decides what follows. |
+| `actor.send(message: M) -[Time.Wait]> SendError<M>!` | — | Queue `message`; fails with the message back once the actor has stopped. |
+| `actor.ask<R, E>(request: fn(Reply<R>) -> M E!) -[Time.Wait]> R? E!` | answer | Send the message `request` builds around a fresh `Reply<R>` and wait until the actor has handled it: the handler's answer, or None when the actor stopped first or the handler failed or did not answer. A failure of `request` is the call's, unchanged, and sends nothing. |
+| `actor.stop()` | — | Stop the actor once it has handled the messages already queued; later sends fail. |
+| `reply.answer(value: R) -[Time.Wait]>` | — | Answer the ask this reply belongs to; only the first answer counts. |
+| `Strategy.Stop`, `Strategy.Restart(limit: Int)` | strategy | Stop on the first failure, or start again from `start()` until the actor has restarted `limit` times, then stop. |
+
+A message type carries `Reply<R>` as a payload, so an enum constructor serves
+as the request: `counter.ask(Count.Total)` for `Total(actor.Reply<Int>)`. The
+handler answers while it handles that message; once the actor has handled it,
+the ask returns. A stopped actor releases every ask still queued, so an ask
+never waits on an actor that will not answer. Sends from one task arrive in the
+order they were sent. See
+[`Examples/Concurrency/Actors.jet`](../../../Examples/Concurrency/Actors.jet).
+
 ### `core.prelude` — small compiler-owned helpers
 
 `core.prelude` is available without a separate package import. Its functions
@@ -5483,6 +5511,12 @@ available. `clipboard.read_text` answers the clipboard text the page last
 observed (a paste, copy or cut, or its own `write_text`), because a browser
 lends the live clipboard only to a user gesture; before any is observed it
 fails with `HostFailure`. File dialogs and font shaping are absent there.
+The provider also answers the app's device requests (`app.ask`,
+`app.take_photo`, `app.location`, a page's photo's bytes, and the sensor
+streams' readings); one whose
+answer the browser gives later, a promise, is waited for where the
+program's entry can wait ([web-backend-wasm.md](web-backend-wasm.md)), and
+is no answer elsewhere.
 TUI capability selection, ASCII-only case folding, encoded-OS flag semantics,
 dimension parsing, and defaults are Jet policy. The private environment-byte
 leaf samples the same startup facts; the shared terminal leaf remains the
@@ -6441,9 +6475,15 @@ the first answer. On Linux the desktop portal asks
 `org.freedesktop.portal.Location`, through a location session it closes
 after the answer) and remembers the person's choice across runs. A request
 the person dismisses, or leaves unanswered for five minutes, is `.Denied`.
-Notifications need no permission there and are `.Granted`. Without a
-session bus or a portal, and on the other native targets, the answer is
-`.Restricted`.
+Notifications need no permission there and are `.Granted`. In a page the
+browser answers: its Permissions API first, and for a permission it would
+still ask the person for, its own request (the camera through
+`getUserMedia`, whose stream stops at once, the location through the
+Geolocation API, notifications through `Notification.requestPermission`).
+The program waits for the answer while the page goes on
+([web-backend-wasm.md](web-backend-wasm.md)). Without a session bus or a
+portal, with no page to ask in (node runs the build) or a browser without
+the device, and on the other native targets, the answer is `.Restricted`.
 
 The system shows the person why the app wants a permission when it asks,
 so the package says why in its `purposes:` field, one line for each
@@ -6469,8 +6509,10 @@ the person changes an answer they gave `app.ask`, and is true when one
 opened. On Linux it starts GNOME Settings on its Apps page for the app's
 desktop id (`gnome-control-center applications crew-board` for an app
 titled "Crew Board"), apart from the app, so the page stays open when the
-app exits. It is false when that program does not start, and on the other
-native targets.
+app exits. It is false when that program does not start, on the other
+native targets, and in a page: a browser keeps no settings page of an
+app's, and the person changes a site's permissions in the browser's own
+site settings.
 
 `app.take_photo()` takes a photo with the device's camera and gives it as a
 `PickedFile`: its `name` (`photo-1.jpg` for the process's first), its size
@@ -6488,7 +6530,14 @@ and keeps the last as a JPEG, so the camera has settled its exposure; the
 photo is `None` when that program does not run or gives no photo within 30
 seconds. The location is the first one the portal's location session
 reports (GeoClue finds it) after the person allows it, within five minutes
-of the ask. On the other native targets both are `None`.
+of the ask. In a page the browser asks: the photo comes from the camera
+through `getUserMedia`, as the browser's `ImageCapture` photo or, where it
+has none, a frame of the camera's video as a JPEG, and the camera stops
+once it is taken; the page keeps the photo, and `read()` reads it from
+there. The location is the browser's position (the Geolocation API's
+`getCurrentPosition`), and a request the person leaves unanswered for five
+minutes counts as refused. With no page to ask in, and on the other native
+targets, both are `None`.
 
 `app.location_updates()` is a stream of places: the first as the device is
 located, then one each time it moves. It asks as `app.location()` does, and
@@ -6503,7 +6552,14 @@ listening: on Linux the location stream closes its portal location session
 and each sensor stream gives its sensor back to the sensor proxy
 (iio-sensor-proxy, on the system bus), then each closes its bus
 connection. A device with no such sensor, or no bus to ask, gives an empty
-stream, as the other native targets do.
+stream, as the other native targets do. In a page the location stream
+follows a Geolocation position watch, and the sensor streams the browser's
+orientation events: how the device is held from its tilt, and where it
+points from an absolute orientation (Safari's compass heading where it
+gives one). A browser that asks before it gives the tilt asks the person
+when a sensor stream starts. Each stream clears its watch or removes its
+listener when it stops. A sensor stream whose browser gives no reading
+within a second is empty, as each stream is with no page to ask in.
 
 `app.open_file(types:)` asks the person for a file to open and gives it as
 a `PickedFile`: its `name`, its size in `bytes`, its `media` as its first
@@ -6636,12 +6692,6 @@ whether the person canceled the browser's dialog, so the call is true once
 the browser has the download. Run under node, with no page, it is false
 with a notice. macOS and Windows keep that notice too: their save dialogs
 are not built yet.
-
-A browser asks for a device permission itself, when a page first uses the
-device, and keeps no settings page of the app's, so `app.ask`,
-`app.open_settings`, `app.take_photo`, `app.location` and the three streams
-in code whose target is the web output are a compile error,
-E-APP-TARGET-FEATURE, never a made-up answer.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or
@@ -8182,6 +8232,7 @@ The built-module inventory is a source-facing registry, not a missing-domain led
 - `core.devtools`
 - `core.debug`
 - `core.context`
+- `core.actor`
 - `core.archive`
 - `core.archive.gzip`
 - `core.archive.zstd`

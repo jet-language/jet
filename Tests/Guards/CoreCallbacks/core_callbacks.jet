@@ -26,6 +26,8 @@ CC_KEPT_BY_APP: "kept: the app runs it later and shows its Notice"
 
 CC_RUN_BY_RUNTIME: "kept: the runtime calls it later, outside any caller"
 
+CC_RUN_BY_ACTOR: "kept: the actor's task calls it on each message after the call has returned; a failure stops the actor, or restarts it under `supervise`"
+
 CORE_CALLBACKS_REVIEWED: [CoreCallbackReviewed]{
     {name: "app.App.background", why: CC_KEPT_BY_APP},
     {name: "app.App.tray", why: CC_KEPT_BY_APP},
@@ -40,6 +42,8 @@ CORE_CALLBACKS_REVIEWED: [CoreCallbackReviewed]{
     {name: "core.sys.atexit", why: CC_RUN_BY_RUNTIME},
     {name: "core.sys.on_interrupt", why: CC_RUN_BY_RUNTIME},
     {name: "core.browser.host.on", why: CC_RUN_BY_RUNTIME},
+    {name: "core.actor.spawn", why: CC_RUN_BY_ACTOR},
+    {name: "core.actor.supervise", why: CC_RUN_BY_ACTOR},
     {name: "core.testing.world", why: "the runtime runs the body in a deterministic world and reports its failure as the test's"},
     {name: "core.service.worker", why: "kept by name: the started tree runs the worker's handler, outside the call that declares it"},
     {name: "core.ui.preview", why: "kept: the preview tool renders the body later"},

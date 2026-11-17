@@ -1247,7 +1247,17 @@ sema_expression_enum_constructor_value: fn(path: SemaExpressionEnumPath, type_ar
             policies: CallablePolicyChain{policies: [CallablePolicy]{}},
         })
     }
-    constructor_ty: Type.Fn{params: signature.params, ret: Val(signature.result), effect_bound: None, param_contract: contract, call_metadata: metadata, return_view_provenance: None}
+    // A slot whose function fails (`fn(Reply<R>) -> M E!`) takes the
+    // constructor as it takes the lambda written there: of that failing form,
+    // with a body that never fails.
+    slot_err := Type?{None}
+    if expected == .Val(required) {
+        if sema_expr_unwrap_tag(required) == .Fn(_, .Val(slot_ret), _, _, _, _) {
+            if sema_expr_unwrap_tag(slot_ret) == .Result(_, err) -> slot_err = Val(err)
+        }
+    }
+    returned: if slot_err == .Val(err) -> Type.Result{ok: signature.result, err: err} else -> signature.result
+    constructor_ty: Type.Fn{params: signature.params, ret: Val(returned), effect_bound: None, param_contract: contract, call_metadata: metadata, return_view_provenance: None}
     value: sema_check_expression(Expr.Lambda{lambda: lambda, id: AST_NODE_GENERATED}, Val(constructor_ty), environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
 }

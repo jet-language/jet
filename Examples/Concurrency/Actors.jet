@@ -1,0 +1,58 @@
+// A counter actor and a supervised worker, written with core.actor: an actor
+// is a detached task that owns its state and reads messages from a channel,
+// so nothing here is new syntax and every tier runs it the same way.
+use actor: core.actor
+
+Count: enum {
+    Add(Int),
+    Total(actor.Reply<Int>),
+}
+
+// The counter's state is its running total; `Total` answers an ask.
+count: fn(total: Int, message: Count) -> Int {
+    if message == {
+        .Add(amount) -> total + amount
+        .Total(reply) -> {
+            reply.answer(total)
+            total
+        }
+    }
+}
+
+// The worker refuses a negative amount by failing; its supervisor decides
+// what happens next.
+checked: fn(total: Int, message: Count) -> Int {
+    if message == {
+        .Add(amount) -> {
+            if amount < 0 -> return Err("negative amount {amount}")
+            total + amount
+        }
+        .Total(reply) -> {
+            reply.answer(total)
+            total
+        }
+    }
+}
+
+fresh: fn() -> Int { 100 }
+
+run: fn() {
+    // Sends are queued in order; an ask waits for its typed answer.
+    counter: actor.spawn(0, count)
+    counter.send(.Add(2)) ?? panic("counter stopped")
+    counter.send(.Add(5)) ?? panic("counter stopped")
+    print("counter: {counter.ask(Count.Total) ?? -1}")
+    counter.stop()
+    counter.send(.Add(1)) ?? print("counter refuses sends after stop")
+
+    // The supervisor restarts the worker from `fresh()` once, then stops it.
+    worker: actor.supervise(fresh, checked, .Restart{limit: 1})
+    worker.send(.Add(1)) ?? panic("worker stopped")
+    print("worker: {worker.ask(Count.Total) ?? -1}")
+    worker.send(.Add(-1)) ?? panic("worker stopped")
+    print("after a restart: {worker.ask(Count.Total) ?? -1}")
+    worker.send(.Add(-2)) ?? panic("worker stopped")
+    // A stopped actor answers no ask.
+    if worker.ask(Count.Total) == None -> print("worker stopped after its restart limit")
+    worker.send(.Add(3)) ?? print("worker refuses sends after stop")
+}
