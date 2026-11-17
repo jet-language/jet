@@ -45,18 +45,18 @@ Method: struct {
     slow_ms: Int,
     slow_warmup: Int,
     slow_runs: Int,
-    timeout_s: Int
+    timeout_s: Int,
 }
 
 Peer: struct {
     name: String,
     file: String,
-    argv: [String]
+    argv: [String],
 }
 
 Server: struct {
     port: Int,
-    delay_ms: Int
+    delay_ms: Int,
 }
 
 Workload: struct {
@@ -66,7 +66,7 @@ Workload: struct {
     cards: [String],
     args: [String],
     servers: [Server],
-    peers: [String]
+    peers: [String],
 }
 
 Manifest: struct {
@@ -76,7 +76,7 @@ Manifest: struct {
     path: [String],
     report_only: [String],
     peers: [Peer],
-    workloads: [Workload]
+    workloads: [Workload],
 }
 
 // One timed command: a Jet tier or a peer.
@@ -88,7 +88,7 @@ Command: struct {
     // the caller's.
     cache: String,
     // What hyperfine runs before each timed run ("" for nothing).
-    prepare: String
+    prepare: String,
 }
 
 // What the rounds measured for one command. wall is the median run, cpu the
@@ -98,7 +98,7 @@ Stat: struct {
     wall: Int,
     cpu: Int,
     rss: Int,
-    timed_out: Bool
+    timed_out: Bool,
 }
 
 Options: struct {
@@ -108,7 +108,7 @@ Options: struct {
     data: String,
     out: String,
     jet: String,
-    edit: String
+    edit: String,
 }
 
 fail: fn(message: String) -> Never {
@@ -379,7 +379,7 @@ check: fn(m: Manifest, opts: Options, c: Command, expected: String, wid: String)
 Sample: struct {
     walls: [Int],
     cpu: [Int],
-    rss: [Int]
+    rss: [Int],
 }
 
 // Times one command for one round with hyperfine, then runs it once more

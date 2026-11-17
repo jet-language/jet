@@ -55,26 +55,26 @@ Step: struct {
     name: String,
     rc: Dyn,
     signal: Dyn,
-    error: String?
+    error: String?,
 }
 
 #Codable(only: .Encode)
 Input: struct {
     file: String,
-    sha256: String
+    sha256: String,
 }
 
 #Codable(only: .Encode)
 SourceHashes: struct {
     driver: String,
-    rust: String
+    rust: String,
 }
 
 #Codable(only: .Encode)
 Inputs: struct {
     o0: Input,
     o1: Input,
-    remaining: Input
+    remaining: Input,
 }
 
 #[Codable(only: .Encode), Rename(.Camel)]
@@ -87,13 +87,13 @@ Pins: struct {
     final_e2: String,
     composed: String,
     source_hashes: SourceHashes,
-    inputs: Inputs
+    inputs: Inputs,
 }
 
 #Codable(only: .Encode)
 Build: struct {
     pins: Pins,
-    steps: [Step]
+    steps: [Step],
 }
 
 // One timed run's samples.jsonl line.
@@ -108,7 +108,7 @@ Sample: struct {
     stdout: String,
     stderr: String,
     error: String?,
-    verdict: String
+    verdict: String,
 }
 
 // An arm in result.json: its median, least and most only when every round
@@ -121,20 +121,20 @@ Measured: struct {
     samples: [Float],
     median_ms: Float?,
     min_ms: Float?,
-    max_ms: Float?
+    max_ms: Float?,
 }
 
 #Codable(only: .Encode)
 Arms: struct {
     #Rename("O0") o0: Measured,
     #Rename("O1") o1: Measured,
-    #Rename("Rust") rust: Measured
+    #Rename("Rust") rust: Measured,
 }
 
 #Codable(only: .Encode)
 Ratios: struct {
     #Rename("O0/Rust") o0: Float?,
-    #Rename("O1/Rust") o1: Float?
+    #Rename("O1/Rust") o1: Float?,
 }
 
 #[Codable(only: .Encode), Rename(.Camel)]
@@ -144,7 +144,7 @@ Result: struct {
     arms: Arms,
     ratios: Ratios,
     performance_admission: String,
-    verdict: String
+    verdict: String,
 }
 
 Arm: struct {
@@ -152,7 +152,7 @@ Arm: struct {
     binary: String,
     sha256: String,
     verdict: String,
-    samples: [Float]
+    samples: [Float],
 }
 
 // How one spawn ended, in spawnSync's terms.
@@ -161,7 +161,7 @@ Ended: struct {
     signal: String?,
     error: String?,
     output: String,
-    errors: String
+    errors: String,
 }
 
 run: fn() -> Never Err! {

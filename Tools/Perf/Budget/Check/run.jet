@@ -71,7 +71,7 @@ USAGE: "usage: jet Tools/Perf/Budget/Check <trace> [--column 225K|500K|1M] [--cl
 #Error
 CheckError: struct {
     lines: [String],
-    code: Int
+    code: Int,
 }
 
 usage: fn(message: String) -> CheckError Never! {
@@ -89,7 +89,7 @@ Options: struct {
     budget: String,
     strict: Bool,
     trace: String,
-    trace_given: Bool
+    trace_given: Bool,
 }
 
 // ---- JavaScript number text -------------------------------------------------
@@ -183,18 +183,18 @@ Span: struct {
     end: Float,
     closed: Bool,
     args: Dyn,
-    ancestors: [Int]
+    ancestors: [Int],
 }
 
 Counter: struct {
     name: String,
-    value: Float
+    value: Float,
 }
 
 Trace: struct {
     spans: [Span],
     counters: [Counter],
-    last_ts: Float
+    last_ts: Float,
 }
 
 // One event per line; the array may be unterminated and its last line half
@@ -324,7 +324,7 @@ span_ns: fn(span: Span, clock: String, notes: &[String]) -> Float Never! {
 
 Measure: struct {
     ns: Float,
-    count: Int
+    count: Int,
 }
 
 any_in: fn(indices: [Int], set: [Bool]) -> Bool Never! {
@@ -405,7 +405,7 @@ table: fn(header: [String], rows: [[String]]) -> String Never! {
 Measured: struct {
     row: Dyn,
     ns: Float,
-    present: Bool
+    present: Bool,
 }
 
 LabelEntry: struct {
@@ -413,7 +413,7 @@ LabelEntry: struct {
     sort: String,
     count: Int,
     ns: Float,
-    items: Float
+    items: Float,
 }
 
 detail: fn(spans: [Span], kind: String, clock: String, notes: &[String]) -> [LabelEntry] Never! {
@@ -441,13 +441,13 @@ detail: fn(spans: [Span], kind: String, clock: String, notes: &[String]) -> [Lab
 CensusItem: struct {
     name: String,
     kind: String,
-    labelled: Bool
+    labelled: Bool,
 }
 
 Outcome: struct {
     out: [String],
     err: [String],
-    code: Int
+    code: Int,
 }
 
 report: fn(options: Options, budget: Dyn, trace_text: String) -> Outcome Never! {
@@ -764,7 +764,7 @@ OUTPUT_LIMIT: 16777216
 HelloOptions: struct {
     jet: String,
     runs: Int,
-    doc: String
+    doc: String,
 }
 
 // One row of the limit table: `value` is bytes for a size, ns for a time.
@@ -772,18 +772,18 @@ GateLimit: struct {
     measure: String,
     text: String,
     value: Float,
-    time: Bool
+    time: Bool,
 }
 
 GateLimits: struct {
     size: GateLimit,
-    start: GateLimit
+    start: GateLimit,
 }
 
 // Hello's file size and its start times in ns, sorted.
 HelloMeasure: struct {
     bytes: Int,
-    starts: [Int]
+    starts: [Int],
 }
 
 gate_error: fn(message: String) -> CheckError Never! {

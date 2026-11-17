@@ -41,13 +41,13 @@ COUNT: Regex{"[0-9]+"}
 
 #Error
 Refusal: struct {
-    message: String
+    message: String,
 }
 
 Options: struct {
     trace: String,
     top: Int,
-    json: Bool
+    json: Bool,
 }
 
 // The event fields this report reads; the writer's others are not read.
@@ -55,7 +55,7 @@ Options: struct {
 Args: struct {
     file: String?,
     item: String?,
-    cpu_ns: Int?
+    cpu_ns: Int?,
 }
 
 #Codable(only: .Decode)
@@ -67,7 +67,7 @@ Event: struct {
     ts: Int{0},
     // A lane is the exact JSON value: 1 and "1" are two.
     tid: Dyn,
-    args: Args?
+    args: Args?,
 }
 
 // An open span: its kind (`cat`, else `name`), the begin's name, args and ts.
@@ -75,7 +75,7 @@ Open: struct {
     kind: String?,
     label: String?,
     args: Args?,
-    ts: Int
+    ts: Int,
 }
 
 // A closed span: wall µs and the end's CPU ns.
@@ -84,7 +84,7 @@ Span: struct {
     label: String?,
     args: Args?,
     wall: Int,
-    cpu: Int
+    cpu: Int,
 }
 
 #Codable(only: .Encode)
@@ -92,7 +92,7 @@ Kind: struct {
     kind: String,
     count: Int{0},
     wall: Int{0},
-    cpu: Int{0}
+    cpu: Int{0},
 }
 
 // A per-file or per-item row; `steps` is its wall per STEPS.
@@ -101,14 +101,14 @@ Row: struct {
     count: Int{0},
     wall: Float{0.0},
     cpu: Float{0.0},
-    steps: [Float]{[0.0, 0.0, 0.0, 0.0, 0.0]}
+    steps: [Float]{[0.0, 0.0, 0.0, 0.0, 0.0]},
 }
 
 Summary: struct {
     phase: Span?,
     kinds: [Kind],
     files: [Row],
-    items: [Row]
+    items: [Row],
 }
 
 #Codable(only: .Encode)
@@ -116,7 +116,7 @@ Report: struct {
     phase: Dyn,
     kinds: [Kind],
     files: [Dyn],
-    items: [Dyn]
+    items: [Dyn],
 }
 
 usage: fn(message: String) -[Exec, IO]> Never {
