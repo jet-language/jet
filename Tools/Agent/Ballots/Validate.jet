@@ -495,27 +495,31 @@ Dissent: struct {
     summary: String,
 }
 
-// `/^<prefix>([^.]+)\./`: the text after `prefix` up to the first `.` (at
-// least one character), and the text after that `.`.
-prefixed_field: fn(text: String, prefix: String) -> {value: String, rest: String}? Never! {
+// `/^<prefix>(.+?)<end>/`: the text after `prefix` up to the first `end` (at
+// least one character), and the text after that `end`.
+prefixed_field: fn(text: String, prefix: String, end: String) -> {value: String, rest: String}? Never! {
     if !text.starts_with(prefix) -> return None
     tail: text.remove_prefix(prefix)
-    if tail.find(".") <= 0 -> return None
-    parts: tail.partition(".")
+    if tail.find(end) <= 0 -> return None
+    parts: tail.partition(end)
     Val({value: parts.head.copy(), rest: parts.tail.copy()})
 }
 
-// store.mjs `dissentMetadata`.
+// store.mjs `dissentMetadata`. A family name may hold periods (`GPT-6.1
+// Sol`): the author family runs to `. Adversarial model family: `, and the
+// adversarial family to `. Fresh agent: ` when the pass names its reviewer,
+// else to the first period.
 dissent: fn(pass: Dyn) -> Dissent? Never! {
     if !is_text(pass) -> return None
     text: string_value(pass)
-    author: prefixed_field(text, DISSENT_AUTHOR) ?? return None
-    adversarial: prefixed_field(author.rest, DISSENT_ADVERSARIAL) ?? return None
-    body: adversarial.rest.trim()
-    if prefixed_field(body, FRESH_AGENT) == .Val(reviewer) {
-        return Val(Dissent{author: author.value.trim(), adversarial: adversarial.value.trim(), agent: reviewer.value.trim(), summary: reviewer.rest.trim()})
+    author: prefixed_field(text, DISSENT_AUTHOR, ".{DISSENT_ADVERSARIAL}") ?? return None
+    if prefixed_field(author.rest, "", ". {FRESH_AGENT}") == .Val(family) {
+        if prefixed_field(family.rest, "", ".") == .Val(reviewer) {
+            return Val(Dissent{author: author.value.trim(), adversarial: family.value.trim(), agent: reviewer.value.trim(), summary: reviewer.rest.trim()})
+        }
     }
-    Val(Dissent{author: author.value.trim(), adversarial: adversarial.value.trim(), agent: "", summary: body.copy()})
+    adversarial: prefixed_field(author.rest, "", ".") ?? return None
+    Val(Dissent{author: author.value.trim(), adversarial: adversarial.value.trim(), agent: "", summary: adversarial.rest.trim()})
 }
 
 // store.mjs `dissentMetadataGaps` for an open ballot (a fresh reviewer is required).
@@ -1065,6 +1069,13 @@ run: fn() {
     assert_eq(string_value(review_pass_summary("adversarial", field(field(payload, "reviewPasses"), "adversarial"))), "Fine.")
     stale: json.parse("{{\"reviewPasses\":{{\"adversarial\":\"Author model family: A. Adversarial model family: B. Fine.\"}}}}") ?? panic("json")
     assert_eq(dissent_metadata_gaps(stale), [String]{"reviewPasses.adversarial (model provenance must be followed by `Fresh agent: <agent-id>.`)"})
+    sol: json.parse("{{\"reviewPasses\":{{\"adversarial\":\"Author model family: GPT-6.1 Sol. Adversarial model family: GPT-6.1 Sol. Fresh agent: sol-reviewer-2. Fine.\"}}}}") ?? panic("json")
+    assert_eq(dissent_metadata_gaps(sol).len(), 0)
+    found: dissent(field(field(sol, "reviewPasses"), "adversarial")) ?? panic("dissent")
+    assert_eq(found.author, "GPT-6.1 Sol")
+    assert_eq(found.adversarial, "GPT-6.1 Sol")
+    assert_eq(found.agent, "sol-reviewer-2")
+    assert_eq(found.summary, "Fine.")
 }
 
 #Test("an empty payload names every required part") {

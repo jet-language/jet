@@ -36,7 +36,7 @@ test('cli end-to-end: init → epoch → milestone → card → decision → nex
 
   // decision via stdin-less file
   const ballot = JSON.stringify({
-    cardId: '#1', id: 'D-CLI1', title: 'Choose', ballotMode: 'full', situation: SITUATION,
+    cardId: '#1', id: 'D-CLI1', title: 'Choose', ballotMode: 'full', situation: SITUATION, reviewedBy: 'reader-2',
     reviewPasses: {
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
     },

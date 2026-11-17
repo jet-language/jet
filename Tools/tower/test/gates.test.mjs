@@ -49,7 +49,7 @@ const SITUATION = 'Tower is the shared project board, and a ballot is the page w
   + 'You are deciding which option this card should use. We recommend option A because it keeps behavior visible.';
 
 const ballot = (extra = {}) => ({
-  ballotMode: 'full', reviewPasses: reviewPasses(), surface: surface(), situation: SITUATION,
+  ballotMode: 'full', reviewPasses: reviewPasses(), reviewedBy: 'reader-2', surface: surface(), situation: SITUATION,
   gist: 'a plain sentence', lesson: 'This short paragraph explains the situation and stakes.', story: 'Dana hits this while shipping X.', inWild: 'real code here', rec: 'A',
   options: [{ key: 'A', name: 'Option A', detail: 'A is explicit.', code: 'a()' }, { key: 'B', name: 'Option B', detail: 'B is brief.', code: 'b()' }],
   recommendation: { why: 'A best serves this decision.', gains: ['Behavior stays visible'], losses: [{ loss: 'One more step', mitigation: 'Provide a short example to copy.' }], whyNot: [{ key: 'B', reason: 'B loses the needed guarantee.' }], tradeoff: 'A adds one explicit step, which keeps behavior visible.' },
@@ -139,11 +139,11 @@ test('addDecision accepts a full ballot', () => {
   assert.deepEqual(Object.keys(result.reviewPasses), ['adversarial']);
 });
 
-test('a draft with only the adversarial pass can be marked ready', () => {
+test('a reviewed draft with only the adversarial pass can be posted', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-ONE-PASS', title: 'Pick one', draft: true, ...ballot() }));
-  const { result } = st.mutate((s) => db.updateDecision(s, 'D-ONE-PASS', { ready: true }, 'agent'));
+  const { result } = st.mutate((s) => db.postDecision(s, 'D-ONE-PASS', 'agent'));
   assert.equal(result.draft, false);
   assert.equal(result.ballotProcessVersion, 5);
   assert.deepEqual(result.reviewPasses, reviewPasses());
@@ -253,6 +253,10 @@ test('adversarial review accepts a fresh reviewer from the same or another model
   assert.equal(same.result.reviewPasses.adversarial, sameFamily.adversarial);
   const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-RIVAL', title: 'Rival family', ...ballot() }));
   assert.equal(result.reviewPasses.adversarial, reviewPasses().adversarial);
+  const dotted = reviewPasses();
+  dotted.adversarial = 'Author model family: GPT-6.1 Sol. Adversarial model family: GPT-6.1 Sol. Fresh agent: sol-reviewer-2. The adversarial pass attacked the recommendation.';
+  const sol = st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-DOTTED', title: 'Dotted family', ...ballot({ reviewPasses: dotted }) }));
+  assert.equal(sol.result.reviewPasses.adversarial, dotted.adversarial, 'a family name with a period keeps its fresh agent');
 });
 
 test('technical code fences do not count as prose but surrounding text still does', () => {
@@ -510,18 +514,47 @@ test('--draft exempts validation and stays out of the decide lane + counts', () 
   assert.equal(proj.counts.decide, 0, 'draft decisions excluded from counts.decide');
 });
 
-test('decision update --ready validates then clears draft', () => {
+test('a ballot moves drafted → reviewed → posted; a rejection or an edit sends it back', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
-  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-R1', title: 'WIP', draft: true, ballotMode: 'full', reviewPasses: reviewPasses() }));
-  assert.throws(
-    () => st.mutate((s) => db.updateDecision(s, 'D-R1', { ready: true }, 'agent')),
-    (e) => e.code === 'E_BALLOT');
-  st.mutate((s) => db.updateDecision(s, 'D-R1', { ...ballot(), ready: true }, 'agent'));
+  st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-R1', title: 'WIP', draft: true, ballotMode: 'full', reviewPasses: reviewPasses(), by: 'author-1' }));
+  st.mutate((s) => db.addCriterion(s, '#1', 'wait for the vote', 'author-1', { blockedBy: 'D-R1' }));
+  const stage = () => db.decisionStage(st.load().decisions[0]);
+  assert.equal(stage(), 'drafted');
+  assert.throws(() => st.mutate((s) => db.postDecision(s, 'D-R1', 'author-1')), (e) => e.code === 'E_STAGE' && /drafted.*decision review/.test(e.message));
+  assert.throws(() => st.mutate((s) => db.reviewDecision(s, 'D-R1', { by: 'author-1' })), (e) => e.code === 'E_STAGE' && /another agent/.test(e.message));
+  st.mutate((s) => db.reviewDecision(s, 'D-R1', { by: 'reviewer-1', reject: true, reason: 'The options hide the cost.' }));
+  assert.equal(stage(), 'rejected');
+  assert.equal(st.load().cards[0].criteria[0].blockedBy, 'D-R1', 'a rejected ballot still holds its waiting criteria');
+  assert.throws(() => st.mutate((s) => db.reviewDecision(s, 'D-R1', { by: 'reviewer-1' })), (e) => e.code === 'E_STAGE' && /revise it/.test(e.message));
+  st.mutate((s) => db.updateDecision(s, 'D-R1', { title: 'Revised' }, 'author-1'));
+  assert.equal(stage(), 'drafted', 'the revision returns a rejected ballot to drafted');
+  st.mutate((s) => db.reviewDecision(s, 'D-R1', { by: 'reviewer-1' }));
+  assert.equal(stage(), 'reviewed');
+  assert.throws(() => st.mutate((s) => db.postDecision(s, 'D-R1', 'author-1')), (e) => e.code === 'E_BALLOT');
+  st.mutate((s) => db.updateDecision(s, 'D-R1', ballot(), 'author-1'));
+  assert.equal(stage(), 'drafted', 'an edit clears the review it outdated');
+  st.mutate((s) => db.reviewDecision(s, 'D-R1', { by: 'reviewer-2' }));
+  const waiting = db.ballotsReport(st.load()).find(x => x.stage === 'reviewed');
+  assert.deepEqual(waiting.ballots.map(b => [b.id, b.reviewedBy, b.waiting.criteria]), [['D-R1', 'reviewer-2', ['#1 c1']]]);
+  st.mutate((s) => db.postDecision(s, 'D-R1', 'author-1'));
   const s2 = st.load();
-  assert.equal(s2.decisions[0].draft, false);
-  const proj = db.project(s2);
-  assert.equal(proj.cards[0].lane.lane, 'decide', 'now-ready decision blocks like any other');
+  assert.equal(db.decisionStage(s2.decisions[0]), 'posted');
+  assert.equal(db.project(s2).cards[0].lane.lane, 'decide', 'a posted ballot blocks like any other');
+  assert.throws(() => st.mutate((s) => db.postDecision(s, 'D-R1', 'author-1')), (e) => e.code === 'E_STAGE' && /posted/.test(e.message));
+});
+
+test('a ballot added straight to the owner names its reviewer', () => {
+  const st = fresh();
+  st.mutate((s, cfg) => db.addCard(s, { title: 'A' }, cfg));
+  const { reviewedBy, ...unreviewed } = ballot();
+  assert.throws(() => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...unreviewed })),
+    (e) => e.code === 'E_STAGE' && /--reviewed-by/.test(e.message));
+  assert.throws(() => st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot(), by: 'reader-2' })),
+    (e) => e.code === 'E_STAGE' && /another agent/.test(e.message));
+  const { result } = st.mutate((s) => db.addDecision(s, { cardId: '#1', title: 'Pick one', ...ballot({ reviewedBy }), by: 'author-1' }));
+  assert.equal(db.decisionStage(result), 'posted');
+  assert.deepEqual([result.draftedBy, result.reviewedBy], ['author-1', 'reader-2']);
 });
 
 test('editing an open ready ballot re-runs the profile gate', () => {

@@ -139,6 +139,8 @@ const routes = {
   'card/criteria-move':   (s, p) => db.moveCriterion(s, p.id, p.n, { to: p.to, reason: p.reason, by: p.by }),
   'decision/add':    (s, p) => db.addDecision(s, p),
   'decision/update': (s, p) => db.updateDecision(s, p.id, p, p.by),
+  'decision/review': (s, p) => db.reviewDecision(s, p.id, { by: p.by, reject: p.reject === true, reason: p.reason }),
+  'decision/post':   (s, p) => db.postDecision(s, p.id, p.by),
   'decision/delete': (s, p) => db.deleteDecision(s, p.id, p.by),
   'clearance':       (s, p) => db.ratify(s, p.decisionId, p.outcome, p.comment, p.by, p.quote),
   'clearance/batch': (s, p) => (p.decisions || []).map(d => db.ratify(s, d.decisionId, d.outcome, d.comment, p.by, d.quote || p.quote)),

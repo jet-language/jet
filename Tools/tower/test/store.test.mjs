@@ -40,7 +40,7 @@ test('lane derivation follows phases and decisions', () => {
   assert.equal(db.laneOf(db.findCard(s, '#1'), s.decisions, s.cards).lane, 'plan');
 
   st.mutate((s2) => db.addDecision(s2, { cardId: '#1', id: 'D-T1', title: 'Pick one',
-    ballotMode: 'full', situation: SITUATION, reviewPasses: {
+    ballotMode: 'full', situation: SITUATION, reviewedBy: 'reader-2', reviewPasses: {
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
     },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',
@@ -82,7 +82,7 @@ test('deciding card auto-advances when last decision ratifies', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'A', phase: 'deciding', plan: 'plan' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-X', title: 't',
-    ballotMode: 'full', situation: SITUATION, reviewPasses: {
+    ballotMode: 'full', situation: SITUATION, reviewedBy: 'reader-2', reviewPasses: {
       adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2. The adversarial pass attacked the recommendation.',
     },
     gist: 'g', lesson: 'teach from zero', story: 's', inWild: 'w', rec: 'A',

@@ -127,6 +127,6 @@ tower decision scaffold '#12' --id D-CACHE1 --out $JET_STATE_ROOT/ballot.json
 ```
 
 Complete the fields and required reader evidence before submission, including
-for a full draft. Follow the [canonical submission and ready transition](../SKILL.md#mechanics).
-Adding the scaffold alone preserves its draft state; read back the non-draft
-decision and owner lane after `--ready`. The owner alone ratifies it.
+for a full draft. Follow the [canonical submission, review and post](../SKILL.md#mechanics).
+Adding the scaffold alone keeps it `drafted`; read back the posted
+decision and owner lane after `decision post`. The owner alone ratifies it.

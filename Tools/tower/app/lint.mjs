@@ -2,7 +2,7 @@
 // board. Each rule is its own function returning findings [{rule, ref, msg}];
 // `lint()` aggregates them. Read-only — never mutates the store. The
 // Docs/Spec reference scan lives in Tools/tower/Board.jet (`lint --docs`).
-import { ballotGaps, findCard } from './store.mjs';
+import { ballotGaps, decisionStage, findCard } from './store.mjs';
 import { isOpenCard, referenceLabel, referenceTokens } from './card-matching.mjs';
 
 // `updated`/`ratifiedAt` are 'YYYY-MM-DD' (today()); `created` on decisions
@@ -85,14 +85,20 @@ export function ruleBallotGaps(s) {
 }
 
 // ---- rule: stale-draft --------------------------------------------------------
-// A draft ballot nobody has finished in a week.
+// A draft ballot nobody has moved on in a week, with its stage's next step.
+const NEXT_STEP = {
+  drafted: 'get it reviewed (decision review)',
+  reviewed: 'post it (decision post)',
+  rejected: 'revise it (decision update)',
+};
 export function ruleStaleDraft(s) {
   const findings = [];
   for (const d of s.decisions) {
     if (!d.draft) continue;
     const age = daysSince(d.created);
+    const stage = decisionStage(d);
     if (age > 7) findings.push({ rule: 'stale-draft', ref: d.id,
-      msg: `${d.id} draft untouched ${Math.floor(age)}d — finish it (decision update --ready) or drop it` });
+      msg: `${d.id} draft (${stage}) untouched ${Math.floor(age)}d — ${NEXT_STEP[stage]} or drop it` });
   }
   return findings;
 }

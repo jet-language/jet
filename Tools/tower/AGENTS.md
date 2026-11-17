@@ -144,7 +144,10 @@ tower message done <id> --by owner
 tower epoch add e19 --name "…" --order 2 --exit-criteria "…" --exit-criteria "…" --by me
 tower epoch update e19 --order 3 --by me     # or --file plan.json with {"order":3,"exitCriteria":[…]}
 tower epoch remove e19 --by me                # refused while any card or milestone still points at it
-tower decision add --file ballot.json --by me # or --file - for stdin, --draft if unfinished
+tower decision add --file ballot.json --draft --by me  # or --file - for stdin; a new ballot starts drafted
+tower decision review D-ID --by reviewer      # a fresh agent passes it, or --reject --reason "…"
+tower decision post D-ID --by me             # a reviewed ballot enters the owner's queue
+tower ballots                                # every ballot by stage, with the work waiting on it
 tower decision list --open --drafts          # agent review: include drafts, hidden from owner views
 tower card update '#12' --phase done --log "criteria met" --by orchestrator
 tower card release '#12' --by me              # if you stop without finishing
@@ -427,6 +430,28 @@ jet Tools/tower/Board.jet lint --docs --json   # the same findings as JSON
 jet Tools/tower/Board.jet lint --docs --docs-root DIR  # override the docs root (default: <project>/Docs)
 ```
 
+### Ballot stages
+
+A ballot's stage is derived from its stored `draft`, `reviewedBy` and
+`status` fields:
+
+| Stage | Meaning | Next step |
+|---|---|---|
+| `drafted` | added with `--draft`, or edited since its last review | a fresh agent runs `decision review D-ID --by <reviewer>` |
+| `reviewed` | `reviewedBy` names an agent other than its author (`draftedBy`) | `decision post D-ID --by me` runs the ballot gate and posts it |
+| `posted` | in the owner's queue; blocks its card | the owner ratifies it |
+| `ratified` | decided | — |
+| `rejected` | the reviewer sent it back with `--reject --reason "…"` | the author revises it with `decision update`, which returns it to drafted |
+
+`decision post` refuses any stage but `reviewed`. Any content edit to a
+reviewed or rejected draft clears its review. `decision add` without
+`--draft` posts at once only with `--reviewed-by <reviewer>` and a complete
+ballot. A criterion waiting on a ballot (`--blocked-by D-ID`) waits until it
+is ratified; rejection does not end the wait. `tower ballots [--json]` lists
+each stage with the cards (`blockedBy`) and open criteria waiting on each
+ballot; ratified ballots are counted and listed only inside the retire
+window.
+
 ## Guards (agent-hard, owner-soft)
 
 Card closure and progression guards are agent-hard; `--by owner` may bypass
@@ -435,8 +460,9 @@ closeout token, criteria, command, and evidence. D-TWRGUARD1=C.
 
 | Guard | Trigger | Error | Escape |
 |---|---|---|---|
-| Ballot-ready | missing required fields, profile authority, ordered full-ballot reviews, complete recommendation rationale, or plain-language density limits | `E_BALLOT` | `--draft`, rewrite, then `decision update <id> --ready` |
-| Draft verdict | Ratification (even owner/quoted) or a verdict superseding a draft | `E_DRAFT` | Finish fresh-reader review and validation with zero gaps, then `decision update <id> --ready --by me`; no owner bypass |
+| Ballot-ready | missing required fields, profile authority, ordered full-ballot reviews, complete recommendation rationale, or plain-language density limits | `E_BALLOT` | `--draft`, rewrite, review, then `decision post <id>` |
+| Ballot stage | `decision post` of a ballot not `reviewed`, `decision add` without `--draft` or `--reviewed-by`, or a review by the ballot's own author | `E_STAGE` | `decision review <id> --by <another agent>`, then `decision post <id>` |
+| Draft verdict | Ratification (even owner/quoted) or a verdict superseding a draft | `E_DRAFT` | Review and post the ballot first; no owner bypass |
 | Owner-only ratify | `decision ratify` by a non-owner, for a non-acceptance ballot | `E_OWNER_ONLY` | `--quote "owner's words"` |
 | Owner acceptance provenance | Any generic ratify, clearance, quote, or batch attempt on `D-ACCEPT-*` | `E_ACCEPTANCE_OWNER_UI` | Owner uses the dedicated verification UI with its same-origin session and one-time challenge |
 | Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — owner moves it out with `tower card update --phase ... --by owner` |
@@ -453,7 +479,7 @@ closeout token, criteria, command, and evidence. D-TWRGUARD1=C.
 records an owner ruling as an already-ratified decision (never a mere log note)
 and is owner-only with no `--quote` escape — it IS the owner speaking. The
 superseded ballot must not be a draft. Drafts remain hidden from every owner
-ballot list, card panel, count, and Now view until they are marked ready.
+ballot list, card panel, count, and Now view until they are posted.
 
 Ratifying a `group: "syntax"` decision auto-appends the standard
 post-ratification chores to the card's `criteria[]`: Data/Syntax registry
@@ -576,7 +602,9 @@ GET  /api/gauntlet/standings        the one run shown: newest full or merged
 GET  /api/messages?card=&open=0|1   durable card messages; open=1 filters
 POST /api/card/add|update|claim|release|delete   (release: {handoff})
 POST /api/card/criteria-add|criteria-edit|criteria-unblock|criteria-remove|criteria-move|criteria-meet|criteria-verify|criteria-reopen   (add/edit: {proof, blockedBy}; unblock: {n, reason}; move: {n, to, reason})
-POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
+POST /api/decision/add|update|delete   (add: {draft, reviewedBy})
+POST /api/decision/review {id, reject, reason}       (by must not be the ballot's author)
+POST /api/decision/post {id}                         (stage reviewed only; runs the ballot gate)
 POST /api/clearance {decisionId,outcome,comment,quote}  (generic ballots only; quote = on-behalf-of)
 POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, same-origin session-bound, short TTL)
 POST /api/acceptance/resolve {challenge,decisionId,outcome,comment}  (single-use)

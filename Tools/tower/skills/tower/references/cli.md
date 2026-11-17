@@ -30,6 +30,7 @@ tower state --json
 tower card show '#12' --json
 tower question list --open
 tower decision list --json
+tower ballots --json
 tower brief --no-claim
 ```
 
