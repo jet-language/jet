@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 110925,
+    "rev": 110950,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -16,12 +16,9 @@
         "epoch:e4",
         "epoch:e5",
         "radar-remaining",
-        "radar:e6",
         "radar:e8",
-        "radar:e7",
         "radar-cards",
         "radar:e12",
-        "radar:e5",
         "radar:e4",
         "radar:e10",
         "radar:e13",
@@ -34,7 +31,10 @@
         "board-ideas",
         "radar:e3",
         "radar-sq",
-        "radar:e18"
+        "radar:e18",
+        "radar:e7",
+        "radar:e6",
+        "radar:e5"
       ]
     },
     "completionCursor": "2026-11-17T01:37:39.804Z"
@@ -3410,7 +3410,7 @@
           "at": "2026-09-12T16:52:19.534Z"
         }
       ],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-09-12T16:52:19.534Z"
     },
     {
@@ -3612,7 +3612,7 @@
           "at": "2026-09-12T16:54:31.741Z"
         }
       ],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-09-12T16:54:31.741Z"
     },
     {
@@ -3713,7 +3713,7 @@
           "at": "2026-09-12T16:54:34.108Z"
         }
       ],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-09-12T16:54:34.108Z"
     },
     {
@@ -3805,7 +3805,7 @@
           "at": "2026-09-12T16:54:36.452Z"
         }
       ],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-09-12T16:54:36.452Z"
     },
     {
@@ -26896,8 +26896,8 @@
       "body": "Measure flat enum layout, niches and collection locality.\n\nTag/payload overhead, niche opportunities and object-backed peer layouts depend on representation, optimizer and workload. The video and source inventory do not measure them.\n\nCreate a flat-layout/locality comparison card for unit, mixed-payload and optional/error-like sums in arrays and maps. Compare the best valid C/C++/Rust/Zig/Swift/Java/C# representation for the same job, pinning versions and optimization settings.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-enum-f16-flat-layout-locality. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": "e3-m20-enum-language-reflection",
+      "epoch": "e24",
+      "milestoneId": null,
       "phase": "ready",
       "priority": "P3",
       "plan": "## Goal\nMeasure flat enum layout, niche use and collection locality for three shapes: unit, mixed-payload and optional/error-like sums, each held in `[T]` and `[K: T]`. Compare with the best valid C, C++, Rust, Zig, Swift, Java and C# representation of the same job. Report size, alignment and working set separately from dispatch time, and label unavailable peers instead of claiming a universal zero-cost result.\n\n## Current state\n- The self-hosted layout engine computes the enum layout facts.\n  - `MirTypeDef.enum_layout: LayoutFacts?` and `c_layout_tag`: `Compiler/JetFoundation/Source/MIR/MIR.jet:1201-1204`.\n  - Reflection reads them at `Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:665-667`.\n  - `Compiler/JetCodegen/Source/Emit/Types.jet:197-208` emits the tag and payload types.\n- `jet inspect expand --facts layout <file>` already prints layout facts for the shipped chain.\n- #218 (log 2026-09-28): the Jet compiler does not yet build executables, so its layouts cannot be timed.\n- The finding is `Docs/research/mine-for-jet-2026-09-12.md#finding-enum-f16-flat-layout-locality`; the card cites the stale `docs/` path. The performance-admission-before-new-option chain applies.\n\n## Changes\n1. Add `Tools/gauntlet/entries/enum-layout-locality/` with Jet, C, C++, Rust, Zig, Swift, Java and C# sources. Each builds 1M elements of each shape into an array and a map with the same invalid-state constraints, then iterates with black-boxed dispatch and prints a checksum. Pin each compiler version and its optimization flags in entry.json.\n2. Record per shape: size/alignment (from `jet inspect expand --facts layout` and peer `sizeof`/`MemoryLayout`/JOL), allocations and object counts, peak working set, and dispatch/iteration medians. Warm up the JVM and .NET peers and note escape analysis.\n3. Record the generated layout and code of the self-hosted Jet pipeline once it runs. Any niche/layout improvement goes to a separate `Compiler/JetFoundation` Layout / `Emit/Types.jet` card and requires the paired two-program performance cell.\n\n## Proof\n- `node Tools/gauntlet/harness/run.mjs --entry enum-layout-locality --runs 11` produces identical checksums across peers. It writes the size/alignment, allocation, working-set and median columns to `Tools/gauntlet/results/`.\n- The card log lists pinned versions and flags, the jet binary and input hashes, and every unavailable peer by name.\n\n## Batch\n`batch-measure`: evidence only.\n\n## Dependencies\n#218. Self-hosted executables are needed for the Jet cells. The peer programs and harness can be written now.",
@@ -27062,7 +27062,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-09-12T13:26:48.809Z",
-      "updated": "2026-11-16T12:53:19.122Z",
+      "updated": "2026-11-17T01:38:18.751Z",
       "updatedBy": "Main",
       "workOrder": 303,
       "goals": [
@@ -27403,8 +27403,8 @@
       "body": "Expose bounded checked local obligations through the existing semantic index.\n\nPublic local definitions already carry type/mutability, references have targets, and callable/returned-view contracts exist. Private FlowFacts additionally holds moved places, open views, invalidation and reachability. The captured index builder publishes checked-definition derivations, not a complete per-source-point local-flow witness. A friendly callable view must not pretend these are the same coverage.\n\nUnder D-READ-STATE1, add a bounded source-point local-obligation projection to the existing checked semantic index and reasoning records, as D-READ-STATE1=A (ratified) chose. First prove the field-availability matrix on selected source points; reuse existing producers and avoid duplicating facts already exposed.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-read-f10. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nDeliver this existing canonical owner without a parallel mechanism. Preserve every existing acceptance criterion and ratified decision. Integrate its complete checked facts, source-version identity and observable errors into the reflection/compiler-session consumers in #3509.\n\n## Owned paths and integration\n\n- crates/jet-sema/src/Sema/mod.rs:1067-1286\n- crates/jet-sema/src/Sema/FlowFacts.rs:624-827\n- crates/jet-semindex/src/Types.rs:1-148,303-389,521-573\n- crates/jet-semindex/src/Build.rs:116-265\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\n1. Keep existing public type/mutability, reference targets, callable access/failure and returned-view provenance; do not call those absent.\n2. For one selected expression, identify its source/version, binding definition and precise before/after point. Cover mutable binding versus writable access, moved/partly moved ownership, active views and their owner/invalidation, scope cleanup obligations, and reachable versus unknown state only where the current checker establishes them.\n3. The finite availability matrix must account for every captured plane: binding/type/narrowing, initialization, frozen state, sendability, origin/ownership/moves, views/invalidation, reachable state, typestate, compile-time string/path constraints and cleanup. Distinguish public facts already available, checker-established candidates, unsupported projection and nonapplicability. Do not export raw runtime values or treat module/name liveness as statement-point local liveness.\n4. Use one compiler-owned fact source. Retain bounded facts from the existing check; do not re-check source in the renderer, create a second ownership analysis or expose mutable compiler internals.\n5. Use the existing semantic-index/check result and jet.reasoning route. Version the exported fact shape under D-SEMINDEX1; coordinate the typed/JSON facade with BIG-F17 and version authority with READ-F16. No new runtime core.compiler use.\n6. Discriminate current empty facts from unavailable, unsupported, invalid, stale and truncated coverage. An absent local-flow record is not proof that no obligation exists.\n7. Preserve the existing clean-check publication gate. Invalid editor input yields unavailable current facts or an explicitly stale last-good snapshot; do not publish recovered partial checker state as fresh valid local facts.\n8. Prove shadowing, branch joins, a moved place, a last-use read view, a Fixed backing that remains borrowed until close, invalid editor input and an edit that makes retained facts stale. Preserve static-versus-observed labels.\n9. READ-F01 may present currently available callable facts without this addition. The local-obligation API is this card's scope under D-READ-STATE1=A, not hidden scope inside that display.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": "e3-m24-checked-source-facts",
+      "epoch": "e20",
+      "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
       "plan": "## Goal\nUnder D-READ-STATE1=A, publish a bounded source-point local-obligation projection (mutable binding vs writable access, moved and partly moved places, active views with owner and invalidation, cleanup obligations, reachability) from the Jet checker's own ownership state into the existing checked semantic index, with no second analysis.\n\n## Current state\n- The previous attempt stalled because Rust FlowFacts are private (crates/jet-sema/src/Sema/FlowFacts.rs:626), and that path is archived.\n- Jet homes:\n  - `SemaOwnershipState` (Compiler/JetSema/Source/Sema/Ownership/Checks.jet:98) already holds declarations, moved places (`SemaOwnershipMovedPlace`:64 with origin and consumer), loans (:69) and view facts (:36).\n  - LastUse.jet and Crossings.jet hold last-use and sendability facts.\n  - The index is Compiler/JetSema/Source/Sema/SemanticIndex.jet:1570 `sema_compiler_semantic_index_from_checked`, which publishes definitions, references, calls, effects, view provenance (:195-233) and checked locals (:1543-1567).\n  - Source/LSP/Features.rs:454 is the callable-summary consumer.\n- The owned Rust paths (crates/jet-sema Sema/mod.rs, FlowFacts.rs, crates/jet-semindex) are archived. Evidence: Docs/research/mine-for-jet-2026-09-12.md#finding-read-f10.\n\n## Changes\n1. Produce the finite availability matrix first and log it on the card. Its planes are binding/type/narrowing, initialization, frozen, sendability, origin/ownership/moves, views/invalidation, reachability, typestate, compile-time string/path constraints and cleanup. Mark each plane public, checker-established, unsupported or not applicable.\n2. Ownership/Checks.jet: at each statement boundary where the checker already runs, snapshot a bounded `SemaLocalObligationFact` (point span, binding key, moved and partly moved places, open loans and views with owner, pending cleanups, reachable flag) into the check result. The snapshot comes from the same state, with no re-walk.\n3. CheckProgram.jet: carry the facts in the checked result, publishing them only when the check is clean. Invalid input yields `unavailable`, or an explicitly stale last-good snapshot with a revision.\n4. SemanticIndex.jet: add a versioned `CompilerLocalObligation` record (D-SEMINDEX1 version bump, coordinated with BIG-F17 and READ-F16). It separates empty, unavailable, unsupported, stale and truncated states. Runtime values are never exported.\n5. Add no Rust mirror. crates/jet-semindex and FlowFacts are archived, and the shipped LSP consumes the record only after the self-hosted index serves it.\n\n## Proof\n- The fixture Examples/features/tooling/local_obligations.jet covers shadowing, a branch join, a moved place, a last-use read view, a Fixed backing still borrowed until close, and an invalid-input twin. Run it through the self-hosted `jet inspect semindex <file> --json` and check every plane, including static vs observed labels, and the stale/unavailable states.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n\n## Batch\nbatch-jetc-sema: the facts come from JetSema ownership state and the semantic index.\n\n## Dependencies\nNo card blocker. The behavioral proof can only run once #218's execution route serves the Jet index; until then the card can land its code with check.sh proof and stays open. #3509 consumers integrate the record later (criterion 10).",
@@ -27585,7 +27585,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T13:27:32.883Z",
-      "updated": "2026-11-16T12:53:25.589Z",
+      "updated": "2026-11-17T01:38:22.968Z",
       "updatedBy": "Main",
       "workOrder": 15,
       "goals": [
@@ -27848,8 +27848,8 @@
       "body": "Choose structured source origin for public compiler diagnostics.\n\nA build/comptime tool receiving only a diagnostic byte span cannot safely identify an imported source snapshot. The current CLI location repair does not by itself change this public Core record.\n\nRecommend a versioned optional origin on CompilerDiagnostic with a source path when known and a source digest. Keep byte spans relative to that origin. Retain the existing read-only core.compiler module and mirror, not a new library or dependency. D-BIG-DIAGORIGIN1=A (ratified) settles the public record change.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-big-f20. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.\n\nExact final evidence boundary: Current public shape inspected; no runtime Core-API misattribution claimed. The related CLI import-origin failure is separately observed.\n\nOwner choice: A: add versioned source-origin data to existing stock core.compiler diagnostics. B: keep the current thin facade and require other tools for per-file attribution. A recommended; no new module/dependency. D-BIG-DIAGORIGIN1=A chose A.\n\n## Owner scope extension — 2026-09-21\n\n## Outcome\n\nDeliver this existing canonical owner without a parallel mechanism. Preserve every existing acceptance criterion and ratified decision. Integrate its complete checked facts, source-version identity and observable errors into the reflection/compiler-session consumers in #3509.\n\n## Owned paths and integration\n\n- crates/jet-semindex/src\n- crates/jet-driver/src\n\nOne implementer owns this coherent patch. Main owns integration and closure. Serialize shared AST, Reflect.rs, Driver and pipeline edits with their other owners; do not duplicate those models.\n\n## Scope limits\n\nThis is planned implementation, not completed behavior. Standard mode retains level 5; privileged operations require the owner's explicit opt-in contract. No new external dependency, unsafe exception, alternate parser, compatibility alias, or tier deferral is approved. Preserve ratified history and use the latest owner direction for current behavior.\n\n## Proof\n\n1. D-BIG-DIAGORIGIN1=A is ratified: versioned source-origin data on core.compiler diagnostics.\n2. Every source-bound diagnostic identifies its actual checked snapshot; pathless input still has a digest, while genuinely source-free diagnostics use no origin.\n3. No diagnostic inherits the entry path merely because its own origin is absent; imported/local contrasts identify the right document.\n4. Typed, Rust and CLI compiler values undergo one consistent versioned cutover; package-model schemas are not silently changed.\n5. Reuse originating source identity and compute/reuse a digest per snapshot, not once per diagnostic or from changed disk text.\n6. No new runtime compiler service, AST mutation, third-party dependency or optional Core library is introduced.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": "e4-m09-compiler-facade-build-facts",
+      "epoch": "e20",
+      "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
       "plan": "## Goal\nImplement D-BIG-DIAGORIGIN1=A (ratified; criterion 1 met). Every source-bound compiler diagnostic identifies the checked source snapshot it came from with a versioned optional `origin {path: String?, source_digest: String}`, and byte spans are relative to that origin. Source-free diagnostics carry no origin, and no diagnostic inherits the entry file's path. The public `core.compiler` CompilerDiagnostic, the host DiagnosticCodec and the CLI/LSP report cut over together. There is no new module, service or dependency. Source: BIG-F20. Integrates with #3509's compiler-session consumers.\n\n## Current state\n- The model exists but nothing sets it:\n  - `Compiler/JetLexer/Source/Lexer/Tokens.jet:25-30` (`DiagnosticOrigin{display, path, source, revision}`) and `:149` (`Diagnostic.origin`).\n  - `:194-197` (`diagnostic_with_origin`) has zero callers in Compiler/.\n- Source segments already carry the file: `Compiler/JetSema/Source/Sema/Diagnostics.jet:14-72` (`sema_source_location_at`, `sema_diagnostic_with_source_location`) and `Compiler/JetDriver/Source/Driver/Loader.jet:915-916`.\n- A per-source digest is already computed for the semantic index: `Compiler/JetSema/Source/Sema/SemanticIndex.jet:1666` (`mir_sha256_hex(source)`).\n- The public value has no origin: `Compiler/JetEval/Source/CompilerServices.jet:69-79` (`code`, `severity`, `message`, `why`, `fix`, `span`), with sema typing in `Compiler/JetSema/Source/Sema/Calls/CompilerServices.jet`. The shipped Rust field table (`crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:951-954`) also lacks it.\n- The host round-trips origin already: `Compiler/Bootstrap/Host/DiagnosticCodec.rs:351-354`. The CLI report is `crates/jet-foundation/src/Report.rs` (`jet.report/v3`).\n\n## Changes\n1. **JetDriver.** Compute the digest once per loaded source snapshot, store it on the source unit (`Identity.jet` `JetDriverSourceUnit`), and reuse the semantic index's digest rather than hashing twice.\n2. **JetSema.** In `sema_diagnostic_with_source_location` (`Diagnostics.jet:72`), attach `DiagnosticOrigin` from the segment's own file and digest. Compiler-generated segments carry their generated path. A diagnostic with no segment stays `origin: None`.\n3. **JetEval and JetSema public value.** Add `origin: CompilerDiagnosticOrigin?` (`path: String?`, `source_digest: String`) to CompilerDiagnostic in `CompilerServices.jet`, and declare the type once in `Core/compiler`. Bump its schema version.\n4. **Shipped-binary mirror.** Make the same field in `core_types.rs`, the Rust diagnostic origin attach, and `Report.rs` JSON (`file` from the origin, plus `source_digest`). Update the LSP (`Source/LSP/Server.rs`) to publish per-origin URIs. Package-model schemas stay unchanged.\n5. Remove `crates/jet-semindex` from this card's owned paths; it is not the home.\n\n## Proof\n- `cargo test --test compiler_api diagnostic_origin_identifies_imported_snapshot`: pass.\n- `cargo test --test report diagnostic_origin_in_report_json`: pass.\n- `jet test Compiler --profile cases lsp/`: existing projections green.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh`: exit 0.\n\n## Batch\n`batch-jetc-sema`: origins are attached in JetSema/JetDriver diagnostics. This card batches with #3205, whose causes reuse these origins.\n\n## Dependencies\nNone. The ratified decision is in hand. #3205 consumes this card's origins.\n",
@@ -28182,7 +28182,7 @@
       "parentId": "c0yfcz0w",
       "needsAcceptance": false,
       "created": "2026-09-12T14:11:42.570Z",
-      "updated": "2026-11-16T12:53:36.682Z",
+      "updated": "2026-11-17T01:38:29.503Z",
       "updatedBy": "Main",
       "workOrder": 19,
       "goals": [
@@ -28629,8 +28629,8 @@
       "body": "Destination: a task's domain error reaches its joiner as that error, a checked failure inside a task becomes `TaskFailure.Panicked` for the joiner instead of stopping the process, Core declares the one `TaskFailure` enum sema and the runtime share, core.tasks has no sentinel values or silent drops, sending on a closed channel fails with SendError (D-SEND-ERROR1=A), and blocking task functions declare `Time.Wait`.\n\nWhy: a domain error reported as a panic, or a failure that vanishes, makes concurrent code impossible to reason about.\n\nSource: Docs/research/mine-for-jet-2026-09-12.md#finding-core-f012, with merged cards #1302, #3180, #3240, #3443, #3900, #3989, #4116 and #5468. Channels and streams went to #6926, cancellation and supervision to #6927, atomics to #6928, callback failures to #6929, and the release, view-trap and replay contracts to #5989, #4620 and #6012.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": "e3-m26-runtime-lifetimes-concurrency",
+      "epoch": "e22",
+      "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
       "plan": "## Goal\nProve task outcomes and structured cancellation (groups, all/race/any, timers/select, sibling drain, cooperative wait cancellation) with explicit task-failure versus domain-failure identity. Reconcile the two `TaskFailure` meanings into one owner, and stop ordinary `Err` from being flattened into a panic.\n\n## Current state\n- There are two meanings. Core has `pub struct TaskFailure { message: String, raised: Bool }` (`Core/tasks/tasks.jet:35-38`). The host and sema use an enum: `JetTaskFailure::{Cancelled, DeadlineBlown, Panicked(String)}` (`crates/jet-codegen/src/Prelude/TaskGroup.rs:40-83`) and `Type.Result(ok, Type.Named(\"TaskFailure\"))` (`Compiler/JetSema/Source/Sema/Calls/TaskGroups.jet:339-341`). `TaskFailure` is a registered error leaf in `Compiler/JetSema/Source/Sema/FailureLaw.jet:22`.\n- Err flattening: `jet_task_flatten_result` maps an ordinary body `Err(e)` to `jet_task_failure_from_code(\"TASK_BODY_FAILED\", …)`, which falls through to `Panicked(reason)` (TaskGroup.rs:44, :52-62). A domain error is therefore reported as a panic, which violates criterion 3 and the research warning.\n- Witnesses with goldens: `Examples/features/concurrency/{task_group,task_all,all_failfast(.err),select_channel,completion_order,release_join_failure,race_cancel,cancel_cleanup,task_panic(.err)}.jet`. The race_cancel and cancel_cleanup goldens now exist.\n- The finding is at `Docs/research/mine-for-jet-2026-09-12.md#finding-core-f012`.\n\n## Changes\n1. One owner: make `Core/tasks/tasks.jet` declare `TaskFailure` as the enum `Cancelled | DeadlineBlown | Panicked(message: String)` that sema and host already use, and delete the `{message, raised}` struct and `exception()`. Migrate callers.\n2. Domain errors: a task body typed `T E!` joins to `(E | TaskFailure)!`, so the domain `E` stays itself and is not rewrapped. Change `jet_task_flatten_result(s)` and the JIT and interpreter equivalents to propagate `E`. Add sema typing for the joined union in `TaskGroups.jet`.\n3. Add `Examples/features/concurrency/task_domain_error.jet` with a golden. A group child returns `Err(ParseError…)`; the parent matches it as `ParseError`, not `Panicked`; siblings are drained, which is observed through a cleanup print.\n\n## Proof\n- `JET_GOLDEN_FILTER=concurrency/ Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes.\n- `for f in task_group task_all select_channel completion_order release_join_failure race_cancel cancel_cleanup task_domain_error; do Tools/agent/jet-env jet run Examples/features/concurrency/$f.jet | diff - Examples/features/expected/concurrency/$f.out; done` gives empty diffs, and the same holds with `--interpret`.\n- `Tools/agent/jet-env cargo test --test task_control_tiers` and `--test taskgroup_parameter_tiers` pass.\n\n## Batch\nbatch-core-tasks: the tasks family Core source, sema and host flatten, retested with the concurrency goldens.\n\n## Dependencies\nNone.",
@@ -29203,7 +29203,7 @@
       "parentId": "c0j2afiq",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:16.660Z",
-      "updated": "2026-11-17T01:28:53.912Z",
+      "updated": "2026-11-17T01:38:32.603Z",
       "updatedBy": "Main",
       "workOrder": 94,
       "goals": [
@@ -72302,7 +72302,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6841 c13, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:55:41.984Z",
+          "at": "2026-11-17T01:38:13.065Z",
           "closure": "duplicate"
         },
         {
@@ -72312,7 +72312,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6642 c4, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:55:45.324Z",
+          "at": "2026-11-17T01:38:14.605Z",
           "closure": "duplicate"
         },
         {
@@ -72331,7 +72331,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6841 c14, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:55:48.058Z",
+          "at": "2026-11-17T01:38:15.802Z",
           "closure": "duplicate"
         },
         {
@@ -72341,7 +72341,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6841 c15, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:55:51.980Z",
+          "at": "2026-11-17T01:38:17.434Z",
           "closure": "duplicate"
         },
         {
@@ -72351,7 +72351,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6841 c16, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:55:54.453Z",
+          "at": "2026-11-17T01:38:19.709Z",
           "closure": "duplicate"
         },
         {
@@ -72361,38 +72361,38 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6841 c17, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:55:56.991Z",
+          "at": "2026-11-17T01:38:20.885Z",
           "closure": "duplicate"
         },
         {
           "n": 10,
           "text": "(was #6016) The ratified per-line cost view runs on the self-hosted toolchain: on the D-COSTLAW1 example (`out.push(log.lines().first())` in a loop) it reports the String copy repeating per loop turn on that line; golden output registered. (merged from #4727 c5)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6897 c3: the per-line cost view is D-COSTLAW1 work, now on its own card",
-          "at": "2026-11-15T03:51:19.049Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:22.038Z",
+          "closure": "duplicate"
         },
         {
           "n": 11,
           "text": "(was #6016) Each line shows allocations, copies, representation fallbacks and Int boxing; a fixture with a range-proven Int loop shows no boxing and one with an unbounded Int shows it. (merged from #4727 c6)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6897 c4: the per-line cost view is D-COSTLAW1 work, now on its own card",
-          "at": "2026-11-15T03:51:20.181Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:23.980Z",
+          "closure": "duplicate"
         },
         {
           "n": 12,
           "text": "(was #6016) The hidden-copy loop lint of D-COSTLAW1 fires on the self-hosted `jet check` with the repair named; UI snapshot. (merged from #4727 c7)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6897 c2: same hidden-copy loop error",
-          "at": "2026-11-15T03:51:21.265Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:25.508Z",
+          "closure": "duplicate"
         },
         {
           "n": 13,
@@ -72401,7 +72401,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6642 c5, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:55:59.302Z",
+          "at": "2026-11-17T01:38:27.020Z",
           "closure": "duplicate"
         }
       ],
@@ -72413,7 +72413,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:06.012Z",
-      "updated": "2026-11-16T00:55:59.302Z",
+      "updated": "2026-11-17T01:38:27.020Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -72799,7 +72799,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6446 c11, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:01.635Z",
+          "at": "2026-11-17T01:38:28.604Z",
           "closure": "duplicate"
         },
         {
@@ -72809,7 +72809,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6446 c12, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:04.474Z",
+          "at": "2026-11-17T01:38:30.510Z",
           "closure": "duplicate"
         },
         {
@@ -72826,31 +72826,31 @@
           "n": 9,
           "text": "(was #2468 c1) A `#CLI` declaration derives a guided field sequence whose values, defaults, environment inputs, and final typed result match the ordinary parser, proven by a tests/cases row.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6891 c1: guided input from #CLI gets its own card",
-          "at": "2026-11-15T03:36:36.904Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:31.684Z",
+          "closure": "duplicate"
         },
         {
           "n": 10,
           "text": "(was #2468 c2) A multi-page form validates on field change and submit, preserves the invalid value, and reports a semantic correction without invoking the command body, proven by a tests/cases row.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6891 c3: guided input from #CLI gets its own card",
-          "at": "2026-11-15T03:36:37.797Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:33.584Z",
+          "closure": "duplicate"
         },
         {
           "n": 11,
           "text": "(was #2468 c3) Single-line and multiline fields accept Unicode paste, cursor movement, and scrolling without splitting a code point or losing visible text, proven by a tests/cases row.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6891 c4: guided input from #CLI gets its own card",
-          "at": "2026-11-15T03:36:38.687Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:34.783Z",
+          "closure": "duplicate"
         },
         {
           "n": 12,
@@ -72891,7 +72891,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:29.864Z",
-      "updated": "2026-11-16T00:56:04.474Z",
+      "updated": "2026-11-17T01:38:34.783Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -217860,6 +217860,139 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:38:34.783Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-17T01:38:33.584Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-17T01:38:32.603Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06l1r0z",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:38:31.684Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-17T01:38:30.510Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-17T01:38:29.503Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dktg7a",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:38:28.604Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T01:38:27.020Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-17T01:38:25.508Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-17T01:38:23.980Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-17T01:38:22.968Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04lnbtj",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:38:22.039Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-17T01:38:20.885Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-17T01:38:19.709Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-17T01:38:18.752Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vow6jh",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:38:17.434Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-17T01:38:15.802Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-17T01:38:14.605Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-17T01:38:13.065Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0x9nq8j",
+      "note": "#3"
+    },
     {
       "at": "2026-11-17T01:38:11.713Z",
       "by": "Main",
