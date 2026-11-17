@@ -1304,7 +1304,7 @@ export function project(s, config = null, history = null) {
 
 // Board HTTP reads use this projection. Keep the initial payload useful for
 // navigation, but leave descriptions, logs, criteria, and ratified decisions
-// for the card detail endpoint. Closed-card content is in projectClosed().
+// for the card detail endpoint.
 export function projectBoard(s, config = null) {
   s = withoutDrafts(s);
   validateProjectedPhases(s);
@@ -1347,31 +1347,6 @@ export function projectBoard(s, config = null) {
     events: s.events.slice(0, 300), counts, recentlyDecided,
     briefings: s.briefings || [], statusSnapshot: s.statusSnapshot || null,
     notices: { cards: noticeCards, messages: noticeMessages }, radar: radarData(s),
-  };
-}
-
-// Closed cards for the board's "Show closed" list: the same summary rows as
-// the active board (no bodies, logs, or criteria). One card's full record
-// comes from projectCard() when it is opened.
-export function projectClosed(s, config = null, history = null) {
-  s = withoutDrafts(s);
-  validateProjectedPhases(s, history);
-  const h = withoutDrafts(history || emptyHistory());
-  const liveGroups = { decisions: byCardId(s.decisions), questions: byCardId(s.questions) };
-  const liveDone = s.cards.filter(c => c.phase === 'done')
-    .map(c => projectCardSummary(projectCardRecord(c, s.decisions, s.cards, s.questions, liveGroups)));
-  const archiveGroups = { decisions: byCardId(h.decisions) };
-  const archived = h.cards.map(c => ({
-    // Keep archive origin explicit for client cache/debugging. It is not used
-    // for lane or board semantics.
-    ...projectCardSummary(projectCardRecord(c, h.decisions, h.cards, c.questions || [], archiveGroups)), archived: true,
-  }));
-  const byMilestone = cardsByMilestone(s.cards, h.cards);
-  const milestones = s.milestones.map(m => projectMilestoneSummary(m, milestoneProgress(m, s.cards, h.cards, byMilestone)));
-  return {
-    rev: s.meta.rev, cards: [...liveDone, ...archived],
-    counts: { done: liveDone.length, archived: archived.length },
-    milestones, radar: radarData(s, h.cards),
   };
 }
 

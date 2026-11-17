@@ -134,7 +134,9 @@ active epoch's cards first. `tower chain [--json]` lists every epoch with its
 role, open cards and open criteria, each with today's change; `tower status`
 prints the board-wide `OPEN TODAY` line. `tower closest [--epoch E] [--limit N]
 [--json]` ranks open cards by open criteria, fewest first, with blocked rows
-counted apart.
+counted apart. `--sort KEY[:asc|desc]` on `tower closest` and `tower card list`
+orders cards by a board sort key: `workflow`, `workOrder`, `priority`, `open`,
+`updated`, `created`, `num`, `title`, `milestone` or `lane`.
 
 Only the owner starts `tower serve`. Agents use the non-serve CLI. Use HTTP
 only when the owner has already started the server and the task explicitly

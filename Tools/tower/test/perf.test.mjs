@@ -30,7 +30,7 @@ const post = async (route, payload) => {
   return { status: response.status, json: await response.json() };
 };
 
-test('board state is slim, closed content is lazy, and HTTP responses cache safely', async () => {
+test('board state is slim, a closed card loads on its own, and HTTP responses cache safely', async () => {
   const page = await fetch(url('/'), { headers: { 'accept-encoding': 'gzip' } });
   assert.equal(page.headers.get('content-encoding'), 'gzip');
   const pageTag = page.headers.get('etag');
@@ -62,23 +62,15 @@ test('board state is slim, closed content is lazy, and HTTP responses cache safe
   });
   assert.equal(stateCached.status, 304);
 
-  const closedResponse = await fetch(url('/api/closed'), { headers: { 'accept-encoding': 'gzip' } });
-  assert.equal(closedResponse.headers.get('content-encoding'), 'gzip');
-  const closed = await closedResponse.json();
-  assert.equal(closedResponse.status, 200, JSON.stringify(closed));
-  const closedCard = closed.cards.find(c => c.num === added.json.result.num);
-  assert.equal(closedCard.phase, 'done');
-  assert.equal(closedCard.title, 'Closed through API');
-  assert.equal(Object.hasOwn(closedCard, 'body'), false, 'closed list rows are summaries; bodies load per card');
-  assert.equal(Object.hasOwn(closedCard, 'log'), false);
+  assert.equal((await fetch(url('/api/closed'))).status, 404, 'the board has no closed-card list');
 
   const detail = await (await fetch(url(`/api/card?id=${encodeURIComponent(ref)}`))).json();
   assert.equal(detail.card.phase, 'done');
   assert.equal(detail.card.title, 'Closed through API');
   assert.equal(typeof detail.card.body, 'string');
   assert.equal(detail.card.criteria[0].status, 'met');
-  // The active board must not touch the closed-card store. A broken archive
-  // may break /api/closed, but it cannot make the default board unavailable.
+  // The active board must not touch the archive: a broken one cannot make
+  // the default board unavailable.
   writeFileSync(historyFile(dir), '{broken');
   const activeOnly = await fetch(url('/api/state'));
   assert.equal(activeOnly.status, 200);

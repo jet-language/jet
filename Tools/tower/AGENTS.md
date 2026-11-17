@@ -53,8 +53,9 @@ tower next --ready-across-epochs  # every unblocked card board-wide —
 tower chain [--json]         # epochs in order: active (3 agents), next (1
                               # agent), open cards and open criteria each, with
                               # today's change
-tower closest [--epoch E] [--limit N] [--json]   # open cards nearest to done:
-                              # fewest open criteria first, blocked counted apart
+tower closest [--epoch E] [--limit N] [--sort KEY[:asc|desc]] [--json]
+                              # open cards nearest to done: fewest open
+                              # criteria first, blocked counted apart
 tower docs list|show|add|update|archive|delete   # durable Docs/*.md + scratchpad
                               # (archive → Docs/archive/, hidden from Docs UI)
 tower lint [--json]          # durability sweeper over the live board; exit 1
@@ -76,6 +77,7 @@ tower epoch list [--json]    # epochs in `order`, labelled E18 <name>, with exit
 tower card show '#12'        # one card, with computed lane + decisions
 tower card list --tag needs-triage --json   # triage / wayfinder tag filter
 tower card list --parent '#12' --json       # wayfinder map children
+tower card list --epoch e18 --sort updated  # newest edits first (any board sort)
 tower card update '#12' --add-tag ready-for-agent --by me
 tower card split '#12' --criteria 5,6,7 --title "…" --by me  # move open rows
                               # onto a new card in the same epoch
@@ -362,6 +364,14 @@ same change.
 cards that have criteria by open rows, fewest first, then blocked rows, then
 chain order; a card with no open or blocked rows left reads `ready`. The UI's
 Closest view shows the same list with the chain above it.
+
+`--sort KEY[:asc|desc]` on `tower closest` and `tower card list` orders cards
+by one of the board's sort keys: `workflow`, `workOrder`, `priority`, `open`
+(workable open criteria), `updated`, `created`, `num`, `title`, `milestone`,
+`lane`. Each key has its usual direction (`updated` and `created` newest
+first); `:asc` or `:desc` overrides it. The UI offers the same keys on the
+board and the Closest view, and number, status or text for a card's criteria;
+each choice is kept per browser.
 
 ### Milestones
 
@@ -697,7 +707,6 @@ tower gauntlet standings [--table PATH] [--json]   # same table as text
 GET  /api/state                     board index (card summaries; ETag/304)
 GET  /api/card?id=&live=0|1         one full card; live=1 answers from memory
 GET  /api/card/history?id=          the card's events, newest first (card history)
-GET  /api/closed                    done + archived card summaries
 GET  /api/stream?rev=&boot=         SSE: `state` (full index), then `delta`
                                      patches per change; a client already at
                                      rev gets `hello` and only later deltas

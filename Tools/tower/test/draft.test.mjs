@@ -52,7 +52,6 @@ test('owner projections hide drafts, associated activity/questions and Now links
   const history = { ...db.emptyHistory(), cards: [{ ...card, phase: 'done' }], decisions: s.decisions };
   const live = db.empty('Archived');
   assert.deepEqual(db.projectCard(live, card.id, history).decisions.map(d => d.id), ['D-READY']);
-  assert.doesNotMatch(JSON.stringify(db.projectClosed(live, null, history)), /D-DRAFT/);
 });
 
 test('draft acceptance ballots never enter Now or its owner-check count, even in stale client data', () => {
@@ -111,7 +110,7 @@ test('HTTP board/card and mutation state hide drafts; clearance, batch and verdi
     `const { run } = await import(${JSON.stringify(cliModule)}); await run(process.argv.slice(1));`, ...args],
     { encoding: 'utf8', env: { ...process.env, TOWER_DATA: dir } });
   try {
-    for (const path of ['/api/state', `/api/card?id=${card.id}`, `/api/card?id=${card.id}&live=1`, '/api/closed']) {
+    for (const path of ['/api/state', `/api/card?id=${card.id}`, `/api/card?id=${card.id}&live=1`]) {
       const response = await fetch(base + path);
       assert.equal(response.status, 200);
       assert.doesNotMatch(await response.text(), /D-DRAFT|Unreviewed choice/);
