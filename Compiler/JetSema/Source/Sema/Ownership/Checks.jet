@@ -4845,7 +4845,6 @@ SemaOwnershipNestedCheck: struct {
 // A checked lambda's capture modes (TCaptureFacts), read back by its span.
 SemaOwnershipLambdaFacts: struct {
     escapes: Bool,
-    needs_fn_mut: Bool,
     cloned: [String],
     moved: [String],
 }
@@ -4881,7 +4880,7 @@ sema_ownership_note_lambda: fn(state: &SemaOwnershipState, body: SemaOwnershipSt
 // keyed by the lambda's span.
 sema_ownership_note_lambda_facts: fn(state: &SemaOwnershipState, span: Span, facts: TCaptureFacts) Never! {
     // copy: the capture name lists stay with `facts`, the checked lambda's own checked-tree facts.
-    state.lambda_facts[sema_ownership_span_key(span)] = SemaOwnershipLambdaFacts{escapes: facts.escapes, needs_fn_mut: facts.needs_fn_mut, cloned: facts.cloned.copy(), moved: facts.moved.copy()}
+    state.lambda_facts[sema_ownership_span_key(span)] = SemaOwnershipLambdaFacts{escapes: facts.escapes, cloned: facts.cloned.copy(), moved: facts.moved.copy()}
 }
 
 // Rust `place_expr_type` for a field read: the checked field type.
@@ -5182,9 +5181,11 @@ sema_ownership_collect_lvalue_access: fn(state: &SemaOwnershipState, target: LVa
 
 // Rust `collect_lambda_requirement_events`: the places the body reads and
 // writes become the lambda's construction requirements. A cloned capture is
-// read whole; an owned non-copy capture of a move closure moves the
-// captured place; a capture the closure retains (a view, or a write of a
-// non-escaping FnMut closure) stays lent through the call.
+// read whole; an owned non-copy capture the lambda moves (its body moves it,
+// or it escapes without a clone) moves the captured place; a non-escaping
+// lambda borrows what it only reads, so its captures stay reads; a capture
+// the closure retains (a view, or a write of a non-escaping FnMut closure)
+// stays lent through the call.
 sema_ownership_collect_lambda_requirement_events: fn(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, events: &[SemaOwnershipEvaluatedAccess]) {
     params: loop param in lambda.params -> param.name
     captured := [SemaOwnershipEvaluatedAccess]{}
@@ -5216,7 +5217,7 @@ sema_ownership_collect_lambda_requirement_events: fn(state: &SemaOwnershipState,
                 captured[index].place.projections = [String]{}
                 captured[index].place.typed_projections = [SemaOwnershipProjection]{}
                 captured[index].access = AccessConvention.Read
-            } else if (facts.moved.contains(name) || !facts.needs_fn_mut || facts.escapes) && !captured[index].capture_is_view && !sema_ownership_walk_type_is_copy(captured[index].capture_ty) && sema_ownership_walk_root_is_local(scopes, captured[index].site) {
+            } else if (facts.moved.contains(name) || facts.escapes) && !captured[index].capture_is_view && !sema_ownership_walk_type_is_copy(captured[index].capture_ty) && sema_ownership_walk_root_is_local(scopes, captured[index].site) {
                 captured[index].place = sema_ownership_place_snapshot(captured[index].capture_place)
                 captured[index].access = AccessConvention.Write
                 captured[index].moves_owner = true

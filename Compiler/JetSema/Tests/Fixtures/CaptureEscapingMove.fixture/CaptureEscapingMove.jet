@@ -1,0 +1,23 @@
+// A returned lambda escapes, so it owns its captures: a value it cannot
+// clone moves into it, and the old name is spent.
+Res: struct {
+    name: String,
+
+    impl Close {
+        close: fn(&&self) { print("close {self.name}") }
+    }
+}
+
+describe: fn(res: Res) { print(res.name) }
+
+make: fn() -> fn() {
+    owned: Res{name: "kept"}
+    show: fn() { describe(owned) }
+    describe(owned)
+    show
+}
+
+run: fn() {
+    shown: make()
+    shown()
+}
