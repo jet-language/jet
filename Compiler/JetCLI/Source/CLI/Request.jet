@@ -73,6 +73,7 @@ use {
         jet_driver_compile,
         jet_driver_compile_keep_going,
         jet_driver_lowering_inputs,
+        jet_driver_moment_hooks,
         jet_driver_checked_declarations,
         jet_driver_c_symbol,
         jet_driver_compile_escaped_failure,
@@ -2290,7 +2291,9 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             compiled_request := contributed.request.move()
             if entry != None -> compiled_request.selected_entry = entry.copy()
             compiled_request.deep_checks = options.deep_checks.copy()
-            compiled_request.compiler_events = options.compiler_events
+            // A package with moment hooks records its moments for them
+            // (Host.jet jet_cli_build_result).
+            compiled_request.compiler_events = options.compiler_events || jet_driver_moment_hooks(snapshot).len() > 0
             // `dead_code: remove` lowers only the entry package's reached
             // bodies; `keep` lowers them all, so the image can carry them
             // (Host.jet jet_cli_ir_checks).

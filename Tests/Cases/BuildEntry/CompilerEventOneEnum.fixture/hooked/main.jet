@@ -4,8 +4,11 @@ use {
 }
 
 // A hook of the settled moment takes the `compiler.Round` that
-// `compiler.Event.Settled` carries.
-#On(compiler.settled) settled: fn(round: compiler.Round) { print("settled {round.round}") }
+// `compiler.Event.Settled` carries. `jet build` runs it as compile-time code,
+// which can't print, so it only checks the round.
+#On(compiler.settled) settled: fn(round: compiler.Round) {
+    if round.round < 1 -> panic("a compile settles in round 1 or later")
+}
 
 // A hook of the link moment takes the `compiler.LinkInputs` that
 // `compiler.Event.Link` carries and returns the step that links the output,

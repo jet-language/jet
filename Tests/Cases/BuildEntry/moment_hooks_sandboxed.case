@@ -1,0 +1,39 @@
+# Claim: `jet build` runs the compiler and build moment hooks of the package
+# it builds (`#On(compiler.settled)`, `#On(build.planned)`,
+# `#On(build.after_write)` and the like), each as compile-time code in the
+# Jet sandbox: a hook that only reads its moment's payload runs and the build
+# goes on, while one that reads a file or prints reaches past its authority
+# and stops the build with the registered E3410, and one that panics stops it
+# with E3010. A stopped hook is named by its moment and path and leaves no
+# executable.
+fixture: MomentHooksSandboxed.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build app.jet
+cwd: pure
+exit: 0 # every hook only reads its payload
+file: pure/.jet/build/app exists
+step: jet build app.jet
+cwd: reads
+exit: nonzero
+stderr: ~ "the `compiler.settled` hook `tools.peek` did not run" # the hook stopped at its call
+stderr: ~ "jet-lang.dev/e/E3410" # with the refusal's own code
+file: reads/.jet/build/app absent
+step: jet build app.jet
+cwd: prints
+exit: nonzero
+stderr: ~ "the `build.after_write` hook `tools.announce` did not run" # the hook stopped at its call
+stderr: ~ "jet-lang.dev/e/E3410" # printing is past what compile-time code may do
+file: prints/.jet/build/app absent
+step: jet build app.jet
+cwd: panics
+exit: nonzero
+stderr: ~ "the `compiler.finished` hook `tools.refuse` did not run" # the hook stopped at its call
+stderr: ~ "jet-lang.dev/e/E3010" # a panicking hook stops the build
+file: panics/.jet/build/app absent
+step: jet build main.jet
+cwd: planned
+exit: nonzero
+stderr: ~ "the `build.planned` hook `tools.audit` did not run" # the plan's hook stopped before any target built
+stderr: ~ "jet-lang.dev/e/E3410" # with the refusal's own code
+file: planned/.jet/build/app absent

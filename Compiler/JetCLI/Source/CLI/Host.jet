@@ -78,6 +78,7 @@ use {
         jet_driver_ice_text,
         jet_driver_inline_package,
         jet_driver_mask_inline_package,
+        jet_driver_moment_hooks,
         jet_driver_report_problems,
         jet_driver_source_query,
         jet_driver_entry_root_path,
@@ -159,6 +160,7 @@ use {
         policy_key_name,
         sha256_hex,
         sha256_hex_bytes,
+        COMPILER_EVENT_BUILD_AFTER_WRITE,
         COMPILER_EVENT_EMITTED,
         compiler_event_json,
         compiler_event_record,
@@ -2185,6 +2187,13 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
         checked: jet_cli_lock_effect_rows(file, result, snapshot, true, color, json)
         if checked.exit_code != JET_DRIVER_EXIT_OK -> return checked
     }
+    // The package's moment hooks run on the moments the compile reached
+    // before anything is written, and on the executable once it is; a hook
+    // that stops leaves no executable.
+    hooks: jet_driver_moment_hooks(snapshot)
+    if jet_cli_moment_hooks_run(file, hooks, result.events, color) == .Val(stopped) {
+        return stopped
+    }
     summary: if json || quiet -> "" else -> "{jet_cli_effect_projection_line(jet_cli_effect_projection(authority))}\n"
     stripped_jobs: if json || quiet -> "" else -> jet_cli_release_job_summary(inputs, options)
     built := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
@@ -2201,6 +2210,16 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
                 log = lines
                 if json {
                     emitted = Val(compiler_event_record(COMPILER_EVENT_EMITTED, [TComptimeValue]{TComptimeValue.String{value: name}, TComptimeValue.String{value: path}, TComptimeValue.String{value: ""}}))
+                }
+                if hooks.len() > 0 {
+                    written: [CompilerEventRecord]{
+                        compiler_event_record(COMPILER_EVENT_EMITTED, [TComptimeValue]{TComptimeValue.String{value: name}, TComptimeValue.String{value: path}, TComptimeValue.String{value: ""}}),
+                        compiler_event_record(COMPILER_EVENT_BUILD_AFTER_WRITE, [TComptimeValue]{TComptimeValue.String{value: name}, TComptimeValue.String{value: path}, TComptimeValue.String{value: ""}}),
+                    }
+                    if jet_cli_moment_hooks_run(file, hooks, written, color) == .Val(stopped) {
+                        cli_files.remove(path).drop("an executable that is already gone is what a stopped hook leaves")
+                        return stopped
+                    }
                 }
                 if sbom -> built = jet_cli_build_sbom(file, name, source, path, color, quiet)
                 built.reused = reused

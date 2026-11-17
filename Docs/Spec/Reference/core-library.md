@@ -585,8 +585,18 @@ order whatever the thread count (Metaprogramming reference).
 A function hooks a moment with `#On(moment)`, such as
 `#On(compiler.settled) settled: fn(round: compiler.Round) { … }`. The
 compiler checks the hook against the moment's row: an unknown moment, or a
-hook that does not take exactly the moment's payload, is E0930. Running moment
-hooks during a compile or build is not built yet.
+hook that does not take exactly the moment's payload, is E0930. `jet build`
+runs the hooks of the moments that answer nothing, each function so marked
+in the sources of the package it builds: after a compile, on each moment it
+reached, in order, then on `compiler.emitted` and `build.after_write` once
+the executable is written. A package's `build: fn` plan runs them first on
+`build.planned` and on a `build.asset` for each of the plan's files, before
+any step runs, and each target's compile then runs them as above. The hooks
+of one point run in one compile-time program, so each runs as any
+compile-time code does and reaches only what compile-time code may: a hook
+that reads a file or prints is E3410, and one that panics is E3010. Either
+stops the build with that code, naming the moment and the hook, and leaves
+no executable.
 
 ### `core.meta` — module and package metadata
 

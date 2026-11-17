@@ -7,9 +7,13 @@
 // The host compiles the program beside the document (JetCLI ToolStages.jet),
 // so the hooks run as every compile-time value does. `jet build`'s link and
 // post-link steps call their `build.link` and `build.before_write` hooks the
-// same way (JetCLI LinkStep.jet).
+// same way (JetCLI LinkStep.jet), and so does `jet build` each hook of a
+// moment it reaches (jet_driver_moment_plan).
 use {
     jet_foundation.[
+        COMPILER_EVENTS,
+        COMPILER_EVENT_PAYLOADS,
+        CompilerEventRecord,
         ImportDecl,
         Span,
         TComptimeField,
@@ -18,6 +22,8 @@ use {
         TOOL_STAGE_LSP_COMPLETION,
         TOOL_STAGE_LSP_INLAY_HINTS,
         TOOL_STAGE_LSP_SEMANTIC_TOKENS,
+        compiler_event_payload,
+        compiler_event_payload_name,
         foundation_byte_text,
         jet_config_string_escape,
         sema_casing_marker_qualifier,
@@ -419,11 +425,12 @@ jet_driver_link_stage_declared: fn(snapshot: JetDriverAuthorizedSourceSnapshot, 
 // calls its hooks: its `{JET_DRIVER_LINK_STAGE_VALUE}` is the hook's answer.
 jet_driver_link_stage_program: fn(hook: String, inputs: JetDriverLinkInputs) -> String Never! {
     // Jet's own link reads the objects, then the libraries.
-    linked := jet_driver_link_stage_quoted(inputs.objects)
-    loop library in jet_driver_link_stage_quoted(inputs.libraries) -> linked.push(library)
-    output: "\"{jet_config_string_escape(inputs.output)}\""
-    default: "jet_link_build.BuildAction{{name: \"link\", run: [String]{{}}, inputs: [String]{{{linked.join(", ")}}}, outputs: [String]{{{output}}}, allow: [jet_link_lang.Effect]{{}}}}"
-    jet_driver_link_stage_call(hook, "jet_link_compiler.LinkInputs{{objects: {jet_driver_link_stage_strings(inputs.objects)}, libraries: {jet_driver_link_stage_strings(inputs.libraries)}, args: {jet_driver_link_stage_strings(inputs.args)}, output_name: \"{jet_config_string_escape(inputs.output_name)}\", output: {output}, default: {default}}}")
+    linked := [TComptimeValue]{}
+    loop object in inputs.objects -> linked.push(TComptimeValue.String{value: object})
+    loop library in inputs.libraries -> linked.push(TComptimeValue.String{value: library})
+    default: compiler_event_payload("BuildAction", [TComptimeValue]{TComptimeValue.String{value: "link"}, jet_driver_moment_strings([String]{}), TComptimeValue.List{values: linked}, jet_driver_moment_strings([String]{inputs.output}), TComptimeValue.List{values: [TComptimeValue]{}}})
+    payload: compiler_event_payload("LinkInputs", [TComptimeValue]{jet_driver_moment_strings(inputs.objects), jet_driver_moment_strings(inputs.libraries), jet_driver_moment_strings(inputs.args), TComptimeValue.String{value: inputs.output_name}, TComptimeValue.String{value: inputs.output}, default.move()})
+    jet_driver_link_stage_call(hook, jet_driver_moment_payload_source(payload, "LinkInputs"))
 }
 
 // The program that calls the post-link hook `hook` (`tools.sign`) on the
@@ -431,26 +438,173 @@ jet_driver_link_stage_program: fn(hook: String, inputs: JetDriverLinkInputs) -> 
 // core.compiler `Artifact`, whose `next` is the path the hook's step writes
 // the next file to. Each path is relative to the package root.
 jet_driver_post_link_stage_program: fn(hook: String, output_name: String, path: String, next: String) -> String Never! {
-    jet_driver_link_stage_call(hook, "jet_link_compiler.Artifact{{output: \"{jet_config_string_escape(output_name)}\", path: \"{jet_config_string_escape(path)}\", next: \"{jet_config_string_escape(next)}\"}}")
+    payload: compiler_event_payload("Artifact", [TComptimeValue]{TComptimeValue.String{value: output_name}, TComptimeValue.String{value: path}, TComptimeValue.String{value: next}})
+    jet_driver_link_stage_call(hook, jet_driver_moment_payload_source(payload, "Artifact"))
 }
 
 // The program whose `{JET_DRIVER_LINK_STAGE_VALUE}` is the answer of the
-// hook `hook` called on `given`, a payload literal of core.compiler
-// (`jet_link_compiler`) and core.build (`jet_link_build`) values.
+// hook `hook` called on `given`, a payload expression
+// (jet_driver_moment_payload_source).
 jet_driver_link_stage_call: fn(hook: String, given: String) -> String Never! {
     path: hook.rpartition(".")
-    uses: jet_driver_tool_stage_uses([String]{"jet_link_build: core.build", "jet_link_compiler: core.compiler", "jet_link_lang: core.compiler.lang", "jet_link_hook: {path.head}"})
-    "{uses}\n{JET_DRIVER_LINK_STAGE_VALUE}: #run {{ jet_link_hook.{path.tail}({given}) }}\n"
+    uses := jet_driver_moment_uses()
+    uses.push("jet_moment_hook_0: {path.head}")
+    "{jet_driver_tool_stage_uses(uses)}\n{JET_DRIVER_LINK_STAGE_VALUE}: #run {{ jet_moment_hook_0.{path.tail}({given}) }}\n"
 }
 
-// Each of `values` as a string literal.
-jet_driver_link_stage_quoted: fn(values: [String]) -> [String] Never! {
-    loop value in values -> "\"{jet_config_string_escape(value)}\""
+// The imports every hook program's payloads name: core.build, core.compiler
+// and core.compiler.lang, under the aliases jet_driver_moment_type spells.
+jet_driver_moment_uses: fn() -> [String] Never! {
+    [String]{"jet_moment_build: core.build", "jet_moment_compiler: core.compiler", "jet_moment_lang: core.compiler.lang"}
 }
 
-// `values` as a `[String]` literal.
-jet_driver_link_stage_strings: fn(values: [String]) -> String Never! {
-    "[String]{{{jet_driver_link_stage_quoted(values).join(", ")}}}"
+// `values` as a payload's `[String]`.
+jet_driver_moment_strings: fn(values: [String]) -> TComptimeValue Never! {
+    items := [TComptimeValue]{}
+    loop value in values -> items.push(TComptimeValue.String{value: value})
+    TComptimeValue.List{values: items}
+}
+
+// The Jet spelling, in a hook program, of the payload row type `ty`
+// (COMPILER_EVENT_PAYLOADS): a scalar as itself, an `Effect` as
+// core.compiler.lang's, and a payload struct as its home module's.
+jet_driver_moment_type: fn(ty: String) -> String Never! {
+    if ty == {
+        "String" | "Int" | "Bool" -> return "{ty}"
+        "Effect" -> return "jet_moment_lang.Effect"
+        else -> {}
+    }
+    loop row in COMPILER_EVENT_PAYLOADS {
+        if row.name == ty && row.home == "core.build" -> return "jet_moment_build.{ty}"
+    }
+    "jet_moment_compiler.{ty}"
+}
+
+// `value`, a payload value of row type `ty`, as the Jet expression that
+// makes it in a hook program: a list as `[T]{…}`, an `Effect` as its
+// variant and a payload struct as its literal, each field by its row's
+// type. A payload holds nothing else; anything else is the empty text,
+// which the program's check refuses.
+jet_driver_moment_payload_source: fn(value: TComptimeValue, ty: String) -> String Never! {
+    if ty.starts_with("[") && ty.ends_with("]") {
+        item: ty.removeprefix("[").removesuffix("]")
+        items := [String]{}
+        if value == .List(values) {
+            loop each in values -> items.push(jet_driver_moment_payload_source(each, item))
+        }
+        return "[{jet_driver_moment_type(item)}]{{{items.join(", ")}}}"
+    }
+    if value == {
+        .String(text) -> "\"{jet_config_string_escape(text)}\""
+        .Int(number) -> "{number}"
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Enum(_, variant, _) -> "{jet_driver_moment_type(ty)}.{variant}"
+        .Struct(_, fields) -> {
+            members := [String]{}
+            loop row in COMPILER_EVENT_PAYLOADS {
+                if row.name != ty -> next
+                loop (index, field) in row.fields {
+                    if index < fields.len() {
+                        members.push("{field.name}: {jet_driver_moment_payload_source(fields[index].value, field.ty)}")
+                    }
+                }
+            }
+            "{jet_driver_moment_type(ty)}{{{members.join(", ")}}}"
+        }
+        .Float(_, _) | .Char(_) | .BigInt(_) | .Bytes(_) | .List(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> ""
+    }
+}
+
+// The name of each call's value in a moment program, numbered by call.
+JET_DRIVER_MOMENT_STAGE_VALUE: "MOMENT_STAGE_CALL"
+
+// One function `#On(moment)` marks: the moment (`compiler.settled`) and the
+// hook, a module path and a function name joined by `.` (`tools.audit`).
+JetDriverMomentHook: struct {
+    moment: String,
+    hook: String,
+}
+
+// The calls a moment program makes, each the index of its hook in the hook
+// list, the byte offset in `program` where each call's line starts, and the
+// program, whose `{JET_DRIVER_MOMENT_STAGE_VALUE}_{n}` is call `n`.
+JetDriverMomentPlan: struct {
+    calls: [Int],
+    starts: [Int],
+    program: String,
+}
+
+// The hooks of the moments Jet only tells a hook about (no `answer`, unlike
+// `build.link`'s) that the sources of the package `snapshot` builds, its
+// first root, declare: each function marked `#On(moment)`, by file then
+// declaration order. A hook's module path is its file's path with `/` read
+// as `.` and `.jet` dropped (`lib/tools.jet` is `lib.tools`), as a link
+// hook's file is found (jet_driver_link_stage_declared). Read from a parse
+// of each source that spells `#On`, with no check; the program that calls
+// the hooks checks them.
+jet_driver_moment_hooks: fn(snapshot: JetDriverAuthorizedSourceSnapshot) -> [JetDriverMomentHook] Never! {
+    hooks := [JetDriverMomentHook]{}
+    if snapshot.roots.len() == 0 -> return hooks
+    loop file in snapshot.roots[0].files {
+        if !file.relative_path.ends_with(".jet") || !jet_driver_tool_stage_spells_on(file.source) {
+            next
+        }
+        home: file.relative_path.removesuffix(".jet").replace("/", ".")
+        parsed: parse_source(file.source.bytes())
+        loop item in parsed.program.items {
+            if item == .Func(func) {
+                loop marker in func.markers {
+                    hook: stage_hook(marker) ?? next
+                    if hook.marker == "" && jet_driver_moment_told(hook.stage) {
+                        hooks.push(JetDriverMomentHook{moment: hook.stage, hook: "{home}.{func.name}"})
+                    }
+                }
+            }
+        }
+    }
+    hooks
+}
+
+// Whether `moment` is a row of COMPILER_EVENTS whose hook answers nothing.
+jet_driver_moment_told: fn(moment: String) -> Bool Never! {
+    loop row in COMPILER_EVENTS {
+        if row.name == moment -> return row.answer == ""
+    }
+    false
+}
+
+// The program that calls each of `hooks` on each of `records` that its
+// moment names, in record then hook order, as a tool stage's program calls
+// its hooks; each hook module is imported once. No calls and no program when
+// no hook hooks a moment of `records`.
+jet_driver_moment_plan: fn(hooks: [JetDriverMomentHook], records: [CompilerEventRecord]) -> JetDriverMomentPlan Never! {
+    uses := jet_driver_moment_uses()
+    modules := [String]{}
+    calls := [Int]{}
+    starts := [Int]{}
+    body := ""
+    loop record in records {
+        loop (index, hook) in hooks {
+            if hook.moment != record.name -> next
+            path: hook.hook.rpartition(".")
+            slot := -1
+            loop (at, imported) in modules {
+                if imported == path.head -> slot = at
+            }
+            if slot < 0 {
+                slot = modules.len()
+                modules.push("{path.head}")
+                uses.push("jet_moment_hook_{slot}: {path.head}")
+            }
+            starts.push(body.count_bytes())
+            body = "{body}\n{JET_DRIVER_MOMENT_STAGE_VALUE}_{calls.len()}: #run {{ jet_moment_hook_{slot}.{path.tail}({jet_driver_moment_payload_source(record.data, compiler_event_payload_name(record.name))}) }}\n"
+            calls.push(index)
+        }
+    }
+    if calls.len() == 0 -> return JetDriverMomentPlan{calls: calls, starts: starts, program: ""}
+    head: jet_driver_tool_stage_uses(uses)
+    loop index in 0..<starts.len() -> starts[index] = starts[index] + head.count_bytes()
+    JetDriverMomentPlan{calls: calls, starts: starts, program: "{head}{body}"}
 }
 
 // The `BuildAction` a link stage's program answered, read from the values of

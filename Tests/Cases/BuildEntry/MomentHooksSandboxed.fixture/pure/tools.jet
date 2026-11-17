@@ -1,0 +1,21 @@
+use compiler: core.compiler
+
+// Hooks that only check what each moment carries, as compile-time code may:
+// the build runs each on its moment and goes on.
+#On(compiler.declared) declared: fn(declaration: compiler.Declaration) {
+    if declaration.name == "" -> panic("a declaration has a name")
+}
+
+#On(compiler.settled) settled: fn(round: compiler.Round) {
+    if round.round < 1 || round.program.declarations.len() == 0 {
+        panic("a settled program holds its declarations")
+    }
+}
+
+#On(compiler.finished) finished: fn(outcome: compiler.Outcome) {
+    if !outcome.ok -> panic("the compile succeeded")
+}
+
+#On(build.after_write) written: fn(artifact: compiler.Artifact) {
+    if artifact.path == "" -> panic("the executable has a path")
+}

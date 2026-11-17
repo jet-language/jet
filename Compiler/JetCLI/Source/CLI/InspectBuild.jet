@@ -24,8 +24,15 @@ use {
         JET_DRIVER_EXIT_USAGE,
         JET_DRIVER_EXIT_USER_ERROR,
         JetDriverCompileMode,
+        JetDriverMomentHook,
+        jet_driver_moment_hooks,
     ]
     jet_foundation.[
+        COMPILER_EVENT_BUILD_ASSET,
+        COMPILER_EVENT_BUILD_PLANNED,
+        CompilerEventRecord,
+        TComptimeValue,
+        compiler_event_record,
         BuildOptionChoice,
         BuildOptionLayer,
         BuildOptions,
@@ -194,6 +201,21 @@ jet_cli_workspace_package_entry: fn(file: String, color: Bool) -[FS, Env]> Strin
     file.copy()
 }
 
+// The moments a settled plan `graph` reaches: `build.planned`, its targets
+// and steps by name in plan order, then a `build.asset` for each of its
+// files, by path and kind.
+jet_cli_build_plan_moments: fn(graph: BuildPlanExecution) -> [CompilerEventRecord] Never! {
+    outputs := [TComptimeValue]{}
+    loop target in graph.targets -> outputs.push(TComptimeValue.String{value: target.name})
+    steps := [TComptimeValue]{}
+    loop action in graph.actions -> steps.push(TComptimeValue.String{value: action.name})
+    moments := [CompilerEventRecord]{compiler_event_record(COMPILER_EVENT_BUILD_PLANNED, [TComptimeValue]{TComptimeValue.List{values: outputs}, TComptimeValue.List{values: steps}})}
+    loop asset in graph.files {
+        moments.push(compiler_event_record(COMPILER_EVENT_BUILD_ASSET, [TComptimeValue]{TComptimeValue.String{value: asset.path}, TComptimeValue.String{value: asset.kind}}))
+    }
+    moments
+}
+
 // `jet_cli_build_package` of one package; `member` names the workspace member
 // a workspace build runs it for (jet_cli_build_run_graph).
 jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, build_args: [String], threads: Int?, invocation: JetCLIInvocationAuthority?, member: String?, locked: Bool, trace_sink: JetCLITraceSink?) -> JetDriverVerbOutput {
@@ -210,12 +232,15 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     if trace_sink == .Val(sink) -> sink.begin("build.plan", "", -1, -1)
     // What `build: fn` read through `find`, `embed_file` and `embed_bytes`.
     build_reads := [JetDriverComptimeInputRecord]{}
+    // The moment hooks the package's sources declare, run on its plan.
+    moment_hooks := [JetDriverMomentHook]{}
     prepared: jet_cli_prepare_overlays(file, file, [JetCLIOverlay]{}, color, threads, JetDriverCompileMode.Doc)
     refused := JetDriverVerbOutput?{None}
     if prepared.move() == {
         .Refused(output) -> { refused = Val(output) }
         .Prepared(request, snapshot) -> {
             scope := JetDriverBuildQueryScope{next_session_id: 1}
+            moment_hooks = jet_driver_moment_hooks(snapshot)
             query_request := request.move()
             query_request.build_args = build_args.copy()
             query_request.trace_sink = jet_cli_trace_boxed(trace_sink)
@@ -308,6 +333,13 @@ jet_cli_build_package_as: fn(file: String, color: Bool, options: BuildOptions, b
     missing: jet_cli_build_missing_sources(root, selected, generated, produced)
     if missing.len() > 0 {
         return jet_cli_build_failed("{if missing.len() == 1 -> "a build target source doesn't" else -> "{missing.len()} build target sources don't"} exist: {missing.join(", ")}", jet_cli_why("E2105"), "create the file, or remove it from the target's sources in `build: fn`", color)
+    }
+    // The package's moment hooks run on the settled plan before any step
+    // runs or anything is written (jet_cli_moment_hooks_run).
+    if moment_hooks.len() > 0 {
+        if jet_cli_moment_hooks_run(file, moment_hooks, jet_cli_build_plan_moments(graph), color) == .Val(stopped) {
+            return stopped
+        }
     }
     // `build: fn`'s own reads are locked beside what it generated, under the
     // same `--locked` check.

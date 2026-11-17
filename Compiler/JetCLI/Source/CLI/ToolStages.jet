@@ -5,20 +5,23 @@
 // value runs in the sealed comptime child, as a config value does
 // (ConfigEval.jet). A program that does not check answers nothing, and
 // `stop` is its first error. `jet build`'s link and post-link steps call
-// their hooks the same way (LinkStep.jet).
+// their hooks the same way (LinkStep.jet), and so does `jet build` the
+// package's moment hooks (jet_cli_moment_hooks_run).
 use {
     cli_files: core.files
     jet_driver.[
         JetDriverCompileMode,
+        JetDriverMomentHook,
         JetDriverToolStageItem,
         jet_driver_compile,
+        jet_driver_moment_plan,
         jet_driver_tool_stage_answers,
         jet_driver_tool_stage_blocks,
         jet_driver_tool_stage_hooked,
         jet_driver_tool_stage_plan,
         jet_driver_tool_stage_snapshot_markers,
     ]
-    jet_foundation.[DIAGNOSTIC_ERROR, Diagnostic, Span, TOOL_STAGE_FMT_BLOCK, diagnostic_from_registry, foundation_byte_text]
+    jet_foundation.[CompilerEventRecord, DIAGNOSTIC_ERROR, Diagnostic, Span, TOOL_STAGE_FMT_BLOCK, diagnostic_from_registry, foundation_byte_text]
     jet_parser.[jet_format_source, parse_source]
 }
 
@@ -79,6 +82,33 @@ jet_cli_tool_stage_stopped: fn(what: String) -> JetCLIToolStageValues Never! {
 
 jet_cli_tool_stage_file: fn(document: String) -> String Never! {
     jet_cli_entry_join(jet_cli_parent(jet_cli_overlay_path(document)) ?? ".", JET_CLI_TOOL_STAGE_FILE)
+}
+
+// Run each of `hooks`, the moment hooks of the package `file` builds
+// (jet_driver_moment_hooks), on each of `records` its moment names, in one
+// program beside `file` (jet_driver_moment_plan). The hooks run as
+// compile-time values, so a hook that reaches past what compile-time code
+// may do (E3410 for a file read) or fails (E3010 for a panic) stops the build
+// with that report's own code, naming the moment and the hook. None when
+// every call ran, or no hook hooks a moment of `records`.
+jet_cli_moment_hooks_run: fn(file: String, hooks: [JetDriverMomentHook], records: [CompilerEventRecord], color: Bool) -> JetDriverVerbOutput? Never! {
+    plan := jet_driver_moment_plan(hooks, records)
+    if plan.calls.len() == 0 -> return None
+    ran: jet_cli_tool_stage_values(file, [JetCLIOverlay]{}, plan.program.move())
+    if ran.stop == .Val(stop) {
+        named := "a moment hook of `{file}`"
+        if stop.span == .Val(span) && (stop.source_path ?? JET_CLI_TOOL_STAGE_FILE).ends_with(JET_CLI_TOOL_STAGE_FILE) {
+            at := -1
+            loop (index, start) in plan.starts {
+                if start <= span.start -> at = index
+            }
+            if at >= 0 {
+                named = "the `{hooks[plan.calls[at]].moment}` hook `{hooks[plan.calls[at]].hook}`"
+            }
+        }
+        return Val(jet_cli_build_refusal(stop.code, "{named} did not run: {stop.what}", stop.why, None, stop.fix, color))
+    }
+    None
 }
 
 // The hook markers of a tool stage that each package's sources declare
