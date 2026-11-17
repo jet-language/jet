@@ -613,7 +613,10 @@ sema_call_infer_method_candidate_from_types: fn(candidate: SemaCallMethodCandida
 }
 
 sema_call_collect_method_inference_facts: fn(candidate: SemaCallMethodCandidate, receiver_value: TExpr, params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallInferenceFacts Never! {
-    facts: sema_call_collect_inference_facts(params, binding, args, environment, program, scopes, state, tail_store, context)
+    // A lambda filling a method's failure parameter `E` binds it as it does
+    // for a direct call.
+    facts := sema_call_collect_inference_facts(params, binding, args, environment, program, scopes, state, tail_store, context)
+    sema_call_lambda_failure_facts(facts, candidate.generic_params, params, binding, args, environment, program, scopes, state, tail_store, context)
     parameter_types := [Type]{}
     argument_types := [Type]{}
     receiver_type := sema_call_method_receiver_type(candidate.signature, candidate.receiver_offset)
