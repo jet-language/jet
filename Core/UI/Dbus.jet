@@ -1743,6 +1743,191 @@ notification_end: fn(c: &DbusConnection, id: Int, timeout_ns: Int) -[Net, Time]>
     Ok(None)
 }
 
+// ---- the Secret Service
+
+// The Secret Service (org.freedesktop.secrets) keeps the desktop's secrets,
+// as libsecret and the desktop's keyring read and write them: each item
+// holds one secret and is found by its attributes. Secrets cross the bus
+// in a "plain" session, guarded by the bus socket's own permissions, as
+// libsecret's are by default.
+SECRETS: "org.freedesktop.secrets"
+
+SECRETS_PATH: "/org/freedesktop/secrets"
+
+SECRET_SERVICE: "org.freedesktop.Secret.Service"
+
+SECRET_PROMPT: "org.freedesktop.Secret.Prompt"
+
+// The collection secrets are kept in: the one the desktop names its
+// default (`login`, on most desktops).
+DEFAULT_COLLECTION: "/org/freedesktop/secrets/aliases/default"
+
+// Keeps `secret` in the default collection as the item `label` names,
+// with `attributes`, in place of any item with the same attributes,
+// waiting at most `timeout_ns`. When the collection is locked the desktop
+// may ask the person to unlock it; a dismissed prompt keeps nothing.
+secret_store: fn(c: &DbusConnection, label: String, attributes: [String:String], secret: String, timeout_ns: Int) -[Net, Time]> DbusError! {
+    deadline: now() + timeout_ns
+    session: secret_session(c, deadline) ?? return Err(err)
+    properties: options_of([DbusValue]{entry_of("org.freedesktop.Secret.Item.Label", DbusValue.Text(label)), entry_of("org.freedesktop.Secret.Item.Attributes", attributes_of(attributes))})
+    value: DbusValue.Struct([DbusValue]{DbusValue.Path(session), bytes_of(""), bytes_of(secret), DbusValue.Text("text/plain")})
+    made: call_until(c, SECRETS, DEFAULT_COLLECTION, "org.freedesktop.Secret.Collection", "CreateItem", [DbusValue]{properties, value, DbusValue.Bool(true)}, deadline) ?? return Err(err)
+    if made.body.len() == 2 {
+        if made.body[1] == .Path(prompt) -> return prompted(c, prompt, "CreateItem", deadline)
+    }
+    Err(DbusError.Protocol("CreateItem answered {made.signature}, not an item and a prompt"))
+}
+
+// The secret of the item with `attributes`, waiting at most `timeout_ns`;
+// `None` when there is no such item. A locked item is unlocked first, and
+// the desktop may ask the person to: a dismissed prompt fails.
+secret_lookup: fn(c: &DbusConnection, attributes: [String:String], timeout_ns: Int) -[Net, Time]> String? DbusError! {
+    deadline: now() + timeout_ns
+    item: if secret_item(c, attributes, deadline) == {
+        .Err(err) -> {
+            return Err(err)
+        }
+        .Ok(got) -> got
+    }
+    found: item ?? return Ok(None)
+    session: secret_session(c, deadline) ?? return Err(err)
+    got: call_until(c, SECRETS, SECRETS_PATH, SECRET_SERVICE, "GetSecrets", [DbusValue]{DbusValue.Array{signature: "o", items: [DbusValue]{DbusValue.Path(found)}}, DbusValue.Path(session)}, deadline) ?? return Err(err)
+    if got.body.len() == 1 {
+        if got.body[0] == .Array(_, entries) {
+            loop entry in entries {
+                if entry == .Entry(_, value) {
+                    if value == .Struct(parts) {
+                        if parts.len() == 4 {
+                            return Ok(Val(text_of_bytes(parts[2]) ?? return Err(DbusError.Protocol("the secret is not UTF-8 text"))))
+                        }
+                    }
+                }
+            }
+            return Ok(None)
+        }
+    }
+    Err(DbusError.Protocol("GetSecrets answered {got.signature}, not the secrets of its items"))
+}
+
+// Deletes the item with `attributes`, if there is one, waiting at most
+// `timeout_ns`.
+secret_clear: fn(c: &DbusConnection, attributes: [String:String], timeout_ns: Int) -[Net, Time]> DbusError! {
+    deadline: now() + timeout_ns
+    item: if secret_item(c, attributes, deadline) == {
+        .Err(err) -> {
+            return Err(err)
+        }
+        .Ok(got) -> got
+    }
+    found: item ?? return Ok()
+    gone: call_until(c, SECRETS, found, "org.freedesktop.Secret.Item", "Delete", [DbusValue]{}, deadline) ?? return Err(err)
+    if gone.body.len() == 1 {
+        if gone.body[0] == .Path(prompt) -> return prompted(c, prompt, "Delete", deadline)
+    }
+    Err(DbusError.Protocol("Delete answered {gone.signature}, not a prompt"))
+}
+
+// Opens a "plain" session with the Secret Service and gives its path.
+secret_session: fn(c: &DbusConnection, deadline: Int) -[Net, Time]> String DbusError! {
+    opened: call_until(c, SECRETS, SECRETS_PATH, SECRET_SERVICE, "OpenSession", [DbusValue]{DbusValue.Text("plain"), DbusValue.Variant(DbusValue.Text(""))}, deadline) ?? return Err(err)
+    if opened.body.len() == 2 {
+        if opened.body[1] == .Path(path) -> return Ok(path.copy())
+    }
+    Err(DbusError.Protocol("OpenSession answered {opened.signature}, not a session"))
+}
+
+// The path of the first item with `attributes`, unlocked: an item the
+// service holds locked is unlocked first, and a dismissed prompt fails.
+// `None` when there is none.
+secret_item: fn(c: &DbusConnection, attributes: [String:String], deadline: Int) -[Net, Time]> String? DbusError! {
+    searched: call_until(c, SECRETS, SECRETS_PATH, SECRET_SERVICE, "SearchItems", [DbusValue]{attributes_of(attributes)}, deadline) ?? return Err(err)
+    if searched.body.len() != 2 {
+        return Err(DbusError.Protocol("SearchItems answered {searched.signature}, not its unlocked and locked items"))
+    }
+    if first_path(searched.body[0]) == .Val(path) -> return Ok(Val(path))
+    path: first_path(searched.body[1]) ?? return Ok(None)
+    asked: call_until(c, SECRETS, SECRETS_PATH, SECRET_SERVICE, "Unlock", [DbusValue]{DbusValue.Array{signature: "o", items: [DbusValue]{DbusValue.Path(path.copy())}}}, deadline) ?? return Err(err)
+    if asked.body.len() == 2 {
+        if first_path(asked.body[0]) != None -> return Ok(Val(path))
+        if asked.body[1] == .Path(prompt) {
+            if prompt == "/" {
+                return Err(DbusError.Failed{name: "{SECRET_SERVICE}.Unlock", message: "the service left the item locked"})
+            }
+            prompted(c, prompt, "Unlock", deadline) ?? return Err(err)
+            return Ok(Val(path))
+        }
+    }
+    Err(DbusError.Protocol("Unlock answered {asked.signature}, not its unlocked items and a prompt"))
+}
+
+// The first object path of an `ao` array; `None` when it has none.
+first_path: fn(value: DbusValue) -> String? {
+    if value == .Array(_, items) {
+        loop item in items {
+            if item == .Path(path) -> return Val(path.copy())
+        }
+    }
+    None
+}
+
+// Shows the prompt at `prompt` that `member` answered, unless it is "/"
+// (none), and waits until `deadline` for it to complete: a dismissed
+// prompt fails.
+prompted: fn(c: &DbusConnection, prompt: String, member: String, deadline: Int) -[Net, Time]> DbusError! {
+    if prompt == "/" -> return Ok()
+    watch(c, SECRET_PROMPT, "Completed", prompt, deadline) ?? return Err(err)
+    _: call_until(c, SECRETS, prompt, SECRET_PROMPT, "Prompt", [DbusValue]{DbusValue.Text("")}, deadline) ?? return Err(err)
+    wait := 0
+    loop {
+        got: signals(c, wait) ?? return Err(err)
+        loop i in 0..<got.len() {
+            if got[i].interface != SECRET_PROMPT || got[i].member != "Completed" || got[i].path != prompt {
+                next
+            }
+            loop later in got[(i + 1)..<got.len()] -> c.queued.push(later.copy())
+            if got[i].body.len() > 0 && got[i].body[0] == DbusValue.Bool(false) -> return Ok()
+            return Err(DbusError.Failed{name: "{SECRET_PROMPT}.Dismissed", message: "the person dismissed the prompt {member} showed"})
+        }
+        wait = deadline - now()
+        if wait <= 0 {
+            return Err(DbusError.Timeout("the prompt {member} showed did not complete in time"))
+        }
+    }
+    Ok()
+}
+
+// `attributes` as an `a{ss}` dictionary, in the order of their names.
+attributes_of: fn(attributes: [String:String]) -> DbusValue {
+    names := [String]{}
+    loop name in attributes.keys() -> names.push(name.copy())
+    names.sort()
+    entries := [DbusValue]{}
+    loop name in names {
+        entries.push(DbusValue.Entry{key: DbusValue.Text(name.copy()), value: DbusValue.Text(attributes[name].copy())})
+    }
+    DbusValue.Array{signature: "{ascii(123)}ss{ascii(125)}", items: entries}
+}
+
+// The bytes of `text` as an `ay` array.
+bytes_of: fn(text: String) -> DbusValue {
+    items := [DbusValue]{}
+    loop b in text.bytes() -> items.push(DbusValue.Byte(Int{b}))
+    DbusValue.Array{signature: "y", items: items}
+}
+
+// The UTF-8 text an `ay` array holds; `None` for another value or bytes
+// that are not UTF-8.
+text_of_bytes: fn(value: DbusValue) -> String? {
+    if value == .Array(_, items) {
+        bytes := [U8]{}
+        loop item in items {
+            if item == .Byte(b) -> bytes.push(U8{b}) else -> return None
+        }
+        return Val(String.from_bytes(bytes) ?? return None)
+    }
+    None
+}
+
 // ---- the tray and the menus it and a window's menu bar serve
 
 WATCHER: "org.kde.StatusNotifierWatcher"
@@ -2682,6 +2867,103 @@ repeat: fn(text: String, times: Int) -> String {
     d := start(plain.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(notify(d, "Crew", "crew", "Due today", said, 1000000000) ?? panic("notify: {err}"), 8)
     assert_eq(messages_heard(plain.server)[4].body[4], DbusValue.Text(said))
+}
+
+#Test("a secret is kept, read back, unlocked, deleted and kept through a prompt in the Secret Service") {
+    ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+    item: "/org/freedesktop/secrets/collection/login/7"
+    session: DbusValue.Path("/org/freedesktop/secrets/session/1")
+    held: DbusValue.Array{signature: "{ascii(123)}o(oayays){ascii(125)}", items: [DbusValue]{DbusValue.Entry{key: DbusValue.Path(item), value: DbusValue.Struct([DbusValue]{session, bytes_of(""), bytes_of("refresh-1"), DbusValue.Text("text/plain")})}}}
+    items: fn(paths: [String]) -> DbusValue {
+        out := [DbusValue]{}
+        loop path in paths -> out.push(DbusValue.Path(path.copy()))
+        DbusValue.Array{signature: "o", items: out}
+    }
+    none: [String]{}
+    opened: [DbusValue]{DbusValue.Variant(DbusValue.Text("")), session}
+    bus := test_bus("secrets")
+    script := ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.60")}), 1))
+    // Kept: a session, then the item, with no prompt.
+    append(script, wire(reply_to(2, opened), 2))
+    append(script, wire(reply_to(3, [DbusValue]{DbusValue.Path(item), DbusValue.Path("/")}), 3))
+    // Read back from an unlocked item.
+    append(script, wire(reply_to(4, [DbusValue]{items([String]{item}), items(none)}), 4))
+    append(script, wire(reply_to(5, opened), 5))
+    append(script, wire(reply_to(6, [DbusValue]{held}), 6))
+    // Read from a locked item, which the service unlocks with no prompt.
+    append(script, wire(reply_to(7, [DbusValue]{items(none), items([String]{item})}), 7))
+    append(script, wire(reply_to(8, [DbusValue]{items([String]{item}), DbusValue.Path("/")}), 8))
+    append(script, wire(reply_to(9, opened), 9))
+    append(script, wire(reply_to(10, [DbusValue]{held}), 10))
+    // No such item.
+    append(script, wire(reply_to(11, [DbusValue]{items(none), items(none)}), 11))
+    // Deleted.
+    append(script, wire(reply_to(12, [DbusValue]{items([String]{item}), items(none)}), 12))
+    append(script, wire(reply_to(13, [DbusValue]{DbusValue.Path("/")}), 13))
+    // Kept once the person unlocks the collection at the prompt.
+    append(script, wire(reply_to(14, opened), 14))
+    append(script, wire(reply_to(15, [DbusValue]{DbusValue.Path("/"), DbusValue.Path("/org/freedesktop/secrets/prompt/u1")}), 15))
+    append(script, wire(reply_to(16, [DbusValue]{}), 16))
+    append(script, wire(reply_to(17, [DbusValue]{}), 17))
+    append(script, wire(signal("/org/freedesktop/secrets/prompt/u1", SECRET_PROMPT, "Completed", [DbusValue]{DbusValue.Bool(false), DbusValue.Variant(items([String]{item}))}), 18))
+    bus_says(bus.server, script)
+    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    attributes: [String:String]{"xdg:schema": "dev.jet.Session", "server": "http://127.0.0.1:8080"}
+    secret_store(c, "Crew session", attributes, "refresh-1", 1000000000) ?? panic("store: {err}")
+    assert_eq(found_text(secret_lookup(c, attributes, 1000000000)), Val("refresh-1"))
+    assert_eq(found_text(secret_lookup(c, attributes, 1000000000)), Val("refresh-1"))
+    assert_eq(found_text(secret_lookup(c, attributes, 1000000000)), String?{None})
+    secret_clear(c, attributes, 1000000000) ?? panic("clear: {err}")
+    secret_store(c, "Crew session", attributes, "refresh-2", 1000000000) ?? panic("store through the prompt: {err}")
+    asked: [String]{
+        "org.freedesktop.DBus.Hello",
+        "{SECRET_SERVICE}.OpenSession",
+        "org.freedesktop.Secret.Collection.CreateItem",
+        "{SECRET_SERVICE}.SearchItems",
+        "{SECRET_SERVICE}.OpenSession",
+        "{SECRET_SERVICE}.GetSecrets",
+        "{SECRET_SERVICE}.SearchItems",
+        "{SECRET_SERVICE}.Unlock",
+        "{SECRET_SERVICE}.OpenSession",
+        "{SECRET_SERVICE}.GetSecrets",
+        "{SECRET_SERVICE}.SearchItems",
+        "{SECRET_SERVICE}.SearchItems",
+        "org.freedesktop.Secret.Item.Delete",
+        "{SECRET_SERVICE}.OpenSession",
+        "org.freedesktop.Secret.Collection.CreateItem",
+        "org.freedesktop.DBus.AddMatch",
+        "{SECRET_PROMPT}.Prompt",
+    }
+    heard: messages_heard(bus.server)
+    assert_eq(heard.len(), asked.len())
+    loop i in 0..<asked.len() -> assert_eq("{heard[i].interface}.{heard[i].member}", asked[i])
+    assert_eq(heard[1].body, [DbusValue]{DbusValue.Text("plain"), DbusValue.Variant(DbusValue.Text(""))})
+    assert_eq(heard[2].path, DEFAULT_COLLECTION)
+    named: attributes_of(attributes)
+    assert_eq(heard[2].body, [DbusValue]{options_of([DbusValue]{entry_of("org.freedesktop.Secret.Item.Label", DbusValue.Text("Crew session")), entry_of("org.freedesktop.Secret.Item.Attributes", named)}), DbusValue.Struct([DbusValue]{session, bytes_of(""), bytes_of("refresh-1"), DbusValue.Text("text/plain")}), DbusValue.Bool(true)})
+    // The attributes go in the order of their names.
+    assert_eq(heard[3].body, [DbusValue]{DbusValue.Array{signature: "{ascii(123)}ss{ascii(125)}", items: [DbusValue]{DbusValue.Entry{key: DbusValue.Text("server"), value: DbusValue.Text("http://127.0.0.1:8080")}, DbusValue.Entry{key: DbusValue.Text("xdg:schema"), value: DbusValue.Text("dev.jet.Session")}}}})
+    assert_eq(heard[5].body, [DbusValue]{items([String]{item}), session})
+    assert_eq(heard[7].body, [DbusValue]{items([String]{item})})
+    assert_eq(heard[12].path, item)
+    assert_eq(heard[16].path, "/org/freedesktop/secrets/prompt/u1")
+    // A prompt the person dismisses keeps nothing.
+    dismissed := test_bus("secrets-dismissed")
+    script = ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.61")}), 1))
+    append(script, wire(reply_to(2, opened), 2))
+    append(script, wire(reply_to(3, [DbusValue]{DbusValue.Path("/"), DbusValue.Path("/org/freedesktop/secrets/prompt/u2")}), 3))
+    append(script, wire(reply_to(4, [DbusValue]{}), 4))
+    append(script, wire(reply_to(5, [DbusValue]{}), 5))
+    append(script, wire(signal("/org/freedesktop/secrets/prompt/u2", SECRET_PROMPT, "Completed", [DbusValue]{DbusValue.Bool(true), DbusValue.Variant(DbusValue.Text(""))}), 6))
+    bus_says(dismissed.server, script)
+    d := start(dismissed.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    refused: if secret_store(d, "Crew session", attributes, "refresh-3", 1000000000) == {
+        .Ok(_) -> "kept"
+        .Err(problem) -> "{problem}"
+    }
+    assert_eq(refused, "{SECRET_PROMPT}.Dismissed: the person dismissed the prompt CreateItem showed")
 }
 
 #Test("the portal's save dialog offers the file's name and kinds and gives the file the person chose") {
