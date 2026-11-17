@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111863,
+    "rev": 111875,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -53954,11 +53954,11 @@
         {
           "n": 1,
           "text": "A package declares a custom link step for one executable target whose inputs are the compiler's object files and libraries; `jet build` runs it on every build and reports its failure as a registered Jet diagnostic. Proof: `jet test Compiler --profile cases --filter custom_link_step` and `jet test Compiler --profile ui --filter custom_link_step_fails`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:45:54.418Z"
+          "evidence": "dev 6766318336 (p264), b34c036d67 (p265), 3c26300bc5 and 675525c555 (p266), 83c6c2cac7 (p268): a package declares a custom link step (#On(build.link) hook running a typed BuildAction over the compiler's objects and libraries), jet build runs it on every build, and a failing step is the registered E3506 jet.LinkStepFailed. On batch compiler p268, cases custom_link_step PASS and ui CustomLinkStepFails PASS (build_option_link_hooks PASS).",
+          "at": "2026-11-17T15:05:44.835Z"
         },
         {
           "n": 2,
@@ -54015,11 +54015,11 @@
         {
           "n": 6,
           "text": "Every typed compiler, build and tool hook stage (D-HOOK-STAGES1=A) runs inside the Jet sandbox with its declared authority only; a hook that reaches outside it is refused with a registered code.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:47.537Z",
+          "evidence": "dev 5d2a888b29 and 4cabf5af35 (p266), 83c6c2cac7 (p268): build-stage hooks run their actions in the Jet sandbox with only their declared authority (E3503 when an action needs an ungranted effect, with no ambient PATH), and compiler and build moment hooks (#On compiler.*) run in the comptime sandbox and are refused with E3410 or E3010 outside it. On batch compiler p268, cases hook_stages_sandboxed and moment_hooks_sandboxed PASS.",
+          "at": "2026-11-17T15:05:45.855Z",
           "proof": {
             "profile": "cases",
             "filter": "hook_stages_sandboxed"
@@ -54059,7 +54059,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:38.986Z",
-      "updated": "2026-11-17T12:30:29.445Z",
+      "updated": "2026-11-17T15:05:45.855Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -76921,6 +76921,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c154: jet build --lib landed (7c82de19f0, p267) and writes lib<name>.a plus <name>.h. The witness LibraryOutputs/guest_import_library_calls_native_c_and_cpp_hosts still fails (E1341: export call_host returns a type a C header can't spell), so MetaSuite J35 stays owed. 10 CLI help, man and completions snapshots changed with it; IfHole is fixing both in one SUB."
+        },
+        {
           "at": "2026-11-12",
           "by": "Main",
           "text": "c3 needs code (G5DevX-1, 2026-11-12). The KF row cli_parts_core/budget_bench_measurement_bootstraps... needs two features that are not built: (1) a BenchMeasurement provider that runs #Test(.measure) 20 times, and (2) RelativeTo baseline history with pooled_samples and history.report_ids. Budget.jet:217 and :219 refuse both with E2104 today."
@@ -78355,7 +78360,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T01:11:55.199Z",
-      "updated": "2026-11-17T01:42:32.003Z",
+      "updated": "2026-11-17T14:37:55.088Z",
       "updatedBy": "Main",
       "criteriaLastN": 154
     },
@@ -80621,6 +80626,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1 progress: the Gauntlet and Perf harness paths follow the TitleCase rename (5af7f0f21c, p268): measurement-manifest.test.mjs 25/0, run 17/0, standings 9/0, Coverage 6/0, status 10/0 (worker run). The peer-slot recording half still needs timed runs in the heavy slot."
+        },
+        {
           "at": "2026-10-31",
           "by": "Main",
           "text": "Main 2026-10-31: the gauntlet matrix gives each cell exactly one owning entry (measurement-manifest.test.mjs:744), and matrix.json is owner-approved. So the wordfreq 200k-unique-key variant (Codegen-1: gen.py seed 42, input sha256 43e32ccc…, matched Rust collect+sort_by) cannot be added as an entry without a new matrix cell plus a loss_owners source card. Until the owner approves a text.kernel scale-variant cell, its numbers live in the Codegen-1 Map patch msg as lane evidence. Baseline: Jet 26.45 s vs Rust 0.08 s at 200k; Jet 0.63 s vs Rust 0.05 s at 10k (wave-11 s1, --optimize=full)."
@@ -80642,7 +80652,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T16:40:33.121Z",
-      "updated": "2026-11-17T01:42:42.859Z",
+      "updated": "2026-11-17T15:06:01.415Z",
       "updatedBy": "Main"
     },
     {
@@ -90628,6 +90638,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c2 ruling (Main, within scope): cost_incomplete_generic.jet is byte-identical to the fixture cost_cli_projects_generic_specializations needs to pass, so both cases can't pass. Valid generic and foreign programs project completely. E2104 stays for a genuinely incomplete reachable projection (a reachable checked callable with no body row), forced by a dedicated fixture with its UI snapshot, and the rejects case is rewritten to use that fixture. Owner: Speed."
+        },
+        {
           "at": "2026-11-12",
           "by": "Main",
           "text": "Main, 2026-11-11, #4260 c29 cleanup (G5DevX-dead-codes-3): diagnostic code L2510 is removed from the registry because nothing emits it, and its known-failing cases go with it. When this card builds the behavior, it registers the code again with its emitter, what/why/fix text and a UI snapshot. The behavior the deleted cases expected: cli_parts_surface/cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs.case and tests/ui_lint/cost_hidden_in_loop.warn: hidden dynamic cost inside a loop is a lint and a --cost row."
@@ -90663,7 +90678,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:50:52.522Z",
-      "updated": "2026-11-17T01:44:04.054Z",
+      "updated": "2026-11-17T14:49:06.561Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -90685,6 +90700,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c6 progress: NarCodec workaround removed (0b8f8c0562, p268); the sema fix for non-escaping read captures landed (341cc6b01b, p268). The TUF half (tuf-lock-capture) lands in p269, which carries that fix in the seed; Jetpack/Publication tests pass on p268."
+        },
         {
           "at": "2026-11-14",
           "by": "Main",
@@ -90777,7 +90797,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:09:39.678Z",
-      "updated": "2026-11-17T01:44:05.594Z",
+      "updated": "2026-11-17T15:06:00.452Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -92888,7 +92908,7 @@
       "track": "epoch",
       "epoch": "e22",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -92896,25 +92916,31 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Closed: c1 and c2 met on p267 (7ab9b3958e)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "A generic call to a trait method declared `-[]> T? Never!` keeps the optional: the trait `Src { grab -[]> [U8]? Never!; grab2 -> Int? Never! }` called through `fn<H: Src>` builds and runs with no backend rejection (I2). Proof: `jet test Compiler --profile cases --filter generic_trait_method_optional_never_keeps_the_optional` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:37:51.359Z"
+          "evidence": "dev 7ab9b3958e (p267): ir_trait_propagate keeps a T? Never! call's optional. Case Traits/generic_trait_method_optional_never_keeps_the_optional (the Src trait through fn<H: Src>, steps on O0, O1 and O2) passes on batch compiler p267, with no backend rejection.",
+          "at": "2026-11-17T14:37:49.022Z"
         },
         {
           "n": 2,
           "text": "The core.db workaround is removed: Host.vtab_take_errmsg is declared with `Never!` again (Core/DB VdbeAux.jet:72, Prepare.jet:451, VdbeRun.jet:218). Proof: `git grep -n 'vtab_take_errmsg: fn' -- Core/DB` shows `Never!` on each declaration, and `jet test Compiler --profile cases --filter DB/` passes.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:03:45.740Z"
+          "evidence": "dev 7ab9b3958e (p267): git grep -n 'vtab_take_errmsg: fn' -- Core/DB shows Never! on all 3 declarations (Prepare.jet:595, VdbeAux.jet:76, VdbeRun.jet:229). In the p267 full cases run all 6 DB/ rows pass, and the core profile passes (rc 0).",
+          "at": "2026-11-17T14:37:50.743Z"
         }
       ],
       "refs": [],
@@ -92922,9 +92948,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-09T06:30:13.586Z",
-      "updated": "2026-11-17T01:44:36.335Z",
+      "updated": "2026-11-17T14:37:53.693Z",
       "updatedBy": "Main",
-      "criteriaLastN": 2
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-17T14:37:53.693Z"
     },
     {
       "id": "c09a7oci",
@@ -96646,7 +96673,7 @@
       "track": "epoch",
       "epoch": "e19",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -96655,6 +96682,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Closed: c1-c5 met (c3 on p268, 365aafa1c3)."
+        },
         {
           "at": "2026-11-17",
           "by": "Main",
@@ -96692,11 +96724,11 @@
         {
           "n": 3,
           "text": "native.context_menu opens on right click on the Linux desktop and on contextmenu on the web. An Err from an item's run goes to the app's error surface (section 3.7) and is never dropped.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T21:52:10.722Z",
+          "evidence": "dev 365aafa1c3 (p268). On batch compiler p268: case NativeApp/context_menu_opens_on_linux_and_reports_errors PASS (right click opens native.context_menu on the Linux desktop, and an item's Err reaches the app's error surface) and case WebBuild/web_context_menu_opens_on_contextmenu PASS (contextmenu opens it on the web, with the same error routing). Neighbouring WebBuild rows (click counter, scene counter, text input drop) pass.",
+          "at": "2026-11-17T15:05:57.559Z",
           "proof": {
             "profile": "cases",
             "filter": "NativeApp/context_menu_opens_on_linux_and_the_web_and_reports_errors"
@@ -96726,9 +96758,10 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:39.597Z",
-      "updated": "2026-11-17T10:00:35.291Z",
+      "updated": "2026-11-17T15:05:59.422Z",
       "updatedBy": "Main",
-      "criteriaLastN": 5
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-17T15:05:59.422Z"
     },
     {
       "id": "c0f4o904",
@@ -117692,7 +117725,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Plan decided (Main, within scope): stack safety comes from general on-demand stack segments, not TRMC or a new list shape. When the prologue's stack-limit check fails it calls a runtime leaf that continues the call on a heap segment (geometric growth, a per-thread cache, freed or cached on return). E3012 stays for a configured total-stack bound (default about 1 GiB per thread). Unwinding, fault reports and traces walk across segments, and fibers get the same. This makes every deep recursion safe, including the natural push builder (rest := build(n-1); rest.push(n)), which overflows at 1M on gate-p266 at O0 and O2. TRMC can't reach it: the work comes after the call, and Jet lists have no cons. Order: the runtime leaf SUB, then the codegen prologue SUB, then the cases. Owner: DeclTypes."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -117712,7 +117751,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:23:49.254Z",
-      "updated": "2026-11-17T01:52:33.878Z",
+      "updated": "2026-11-17T14:25:13.598Z",
       "updatedBy": "Main"
     },
     {
@@ -215577,6 +215616,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T15:06:01.415Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0y7kqfw",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T15:06:00.452Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m4deiq",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T15:05:59.422Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0prey1k",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T15:05:57.559Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0prey1k",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T15:05:45.855Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gmf0y4",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-17T15:05:44.835Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gmf0y4",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T14:49:06.562Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zlsxzv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T14:37:55.088Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hn7w1n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T14:37:53.693Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01xp5ri",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T14:37:50.743Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01xp5ri",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T14:37:49.022Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c01xp5ri",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T14:25:13.598Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vucs0t",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-17T14:09:43.220Z",
       "by": "Main",
