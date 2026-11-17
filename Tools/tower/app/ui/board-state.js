@@ -74,10 +74,11 @@ export function refLinks(html, { commitUrl = '' } = {}) {
   }).join('');
 }
 
-// Frozen cards sit in their epoch or sidequest section like any other card
-// (owner 2026-10-04); the `frozen` workflow filter narrows the board to them.
-export function cardMatches(card, { text = '', workflow = 'all', priority = 'all', kind = 'all', showClosed = false, milestone = null } = {}) {
-  if (card.phase === 'done' && !showClosed) return false;
+// The board lists unfinished cards. Frozen cards sit in their epoch or
+// sidequest section like any other card (owner 2026-10-04); the `frozen`
+// workflow filter narrows the board to them.
+export function cardMatches(card, { text = '', workflow = 'all', priority = 'all', kind = 'all', milestone = null } = {}) {
+  if (card.phase === 'done') return false;
   if (milestone && card.milestoneId !== milestone) return false;
   if (priority !== 'all' && card.priority !== priority) return false;
   if (kind !== 'all' && card.kind !== kind) return false;
@@ -94,10 +95,43 @@ const priorityRank = (card, priorities) => {
   return rank < 0 ? priorities.length : rank;
 };
 
+// The ways a card list sorts, each with the direction it starts in. The board,
+// the Closest view and `tower card list|closest --sort` share them.
+export const CARD_SORTS = [
+  { key: 'workflow', label: 'Workflow', dir: 'asc' },
+  { key: 'workOrder', label: 'Work order', dir: 'asc' },
+  { key: 'priority', label: 'Priority', dir: 'asc' },
+  { key: 'open', label: 'Open criteria', dir: 'asc' },
+  { key: 'updated', label: 'Modified', dir: 'desc' },
+  { key: 'created', label: 'Created', dir: 'desc' },
+  { key: 'num', label: 'Card number', dir: 'asc' },
+  { key: 'title', label: 'Title', dir: 'asc' },
+  { key: 'milestone', label: 'Milestone', dir: 'asc' },
+  { key: 'lane', label: 'Lane', dir: 'asc' },
+];
+
+// A card's criteria in the order the owner picks: by number, by status (open,
+// blocked, met, verified) or by text.
+export const CRITERIA_SORTS = [
+  { key: 'n', label: 'Number', dir: 'asc' },
+  { key: 'status', label: 'Status', dir: 'asc' },
+  { key: 'text', label: 'Text', dir: 'asc' },
+];
+
+// `key` or `key:asc|desc` → { col, dir }, from a --sort flag or a saved
+// choice; null for an unknown key or direction.
+export function parseSort(text, sorts) {
+  const [col, given] = String(text ?? '').split(':');
+  const known = sorts.find(s => s.key === col);
+  const dir = given ?? known?.dir;
+  return known && (dir === 'asc' || dir === 'desc') ? { col, dir } : null;
+}
+
 const value = (card, col, priorities) => {
   if (col === 'workflow') return workflowRank(card);
   if (col === 'workOrder') return card.workOrder ?? Infinity;
   if (col === 'priority') return priorityRank(card, priorities);
+  if (col === 'open') return (card.crit || criteriaCounts(card)).open;
   if (col === 'updated') return card.updated || '';
   if (col === 'created') return card.created || '';
   if (col === 'milestone') return card.milestoneId || '￿';  // unassigned sorts last
@@ -108,19 +142,36 @@ const value = (card, col, priorities) => {
 
 export function sortCards(cards, { col = 'workflow', dir = 'asc' } = {}, priorities = DEFAULT_PRIORITIES) {
   const direction = dir === 'asc' ? 1 : -1;
-  return [...cards].sort((a, b) => {
+  const keyed = cards.map(card => ({ card, key: value(card, col, priorities) }));
+  return keyed.sort(({ card: a, key: av }, { card: b, key: bv }) => {
     const rank = workflowRank(a) - workflowRank(b);
     if (col === 'workflow') {
       if (rank) return rank * direction;
       const laneRank = (AGENT_LANE_RANK[a.lane?.lane] ?? 4) - (AGENT_LANE_RANK[b.lane?.lane] ?? 4);
       if (laneRank) return laneRank * direction;
     }
-    const av = value(a, col, priorities), bv = value(b, col, priorities);
     if (av < bv) return -direction;
     if (av > bv) return direction;
     return (a.workOrder ?? Infinity) - (b.workOrder ?? Infinity)
       || priorityRank(a, priorities) - priorityRank(b, priorities)
       || (a.num ?? 0) - (b.num ?? 0);
+  }).map(({ card }) => card);
+}
+
+const CRITERION_RANK = { open: 0, blocked: 1, met: 2, verified: 3 };
+const criterionValue = (item, col) => {
+  if (col === 'status') return CRITERION_RANK[item.status === 'open' && item.blockedBy ? 'blocked' : item.status] ?? 4;
+  if (col === 'text') return String(item.text || '').toLowerCase();
+  return item.n ?? 0;
+};
+
+export function sortCriteria(items = [], { col = 'n', dir = 'asc' } = {}) {
+  const direction = dir === 'asc' ? 1 : -1;
+  return [...items].sort((a, b) => {
+    const av = criterionValue(a, col), bv = criterionValue(b, col);
+    if (av < bv) return -direction;
+    if (av > bv) return direction;
+    return (a.n ?? 0) - (b.n ?? 0);
   });
 }
 
@@ -215,29 +266,35 @@ export function epochChain(epochs = [], cards = []) {
 }
 
 // Cards nearest to done: unfinished, unfrozen cards with criteria, fewest
-// workable open criteria first, then fewest blocked, then chain order.
-export function closestCards(cards = [], epochs = [], { epoch = null, limit = Infinity } = {}) {
+// workable open criteria first, then fewest blocked, then chain order. Any
+// other card sort (CARD_SORTS) can order the same rows instead.
+export function closestCards(cards = [], epochs = [], { epoch = null, limit = Infinity, sort = null, priorities } = {}) {
   const rank = chainRank(epochs);
-  return cards
+  const rows = cards
     .map(c => ({ card: c, crit: c.crit || criteriaCounts(c) }))
-    .filter(({ card, crit }) => card.phase !== 'done' && card.phase !== 'frozen' && crit.total && (!epoch || card.epoch === epoch))
-    .sort((a, b) => a.crit.open - b.crit.open || a.crit.blocked - b.crit.blocked
+    .filter(({ card, crit }) => card.phase !== 'done' && card.phase !== 'frozen' && crit.total && (!epoch || card.epoch === epoch));
+  if (sort && sort.col !== 'open') {
+    const row = new Map(rows.map(r => [r.card, r]));
+    return sortCards(rows.map(r => r.card), sort, priorities).map(c => row.get(c)).slice(0, limit);
+  }
+  const direction = sort?.dir === 'desc' ? -1 : 1;
+  return rows
+    .sort((a, b) => (a.crit.open - b.crit.open || a.crit.blocked - b.crit.blocked) * direction
       || rank(a.card.epoch) - rank(b.card.epoch) || a.card.num - b.card.num)
     .slice(0, limit);
 }
 
 // The radar lists active epochs. A finished epoch still gets a section when
-// it holds frozen cards (always shown, like every card) or, with Show closed
-// on, done cards — a card is never left without its epoch section. Sections
-// follow epoch order.
-export function boardEpochs(radar, epochs, cards, milestones, showClosed) {
+// it holds frozen cards (shown like every unfinished card), so a card is never
+// left without its epoch section. Sections follow epoch order.
+export function boardEpochs(radar, epochs, cards, milestones) {
   const shown = new Set(radar.map(e => e.id));
   const extras = epochs.flatMap(epoch => {
     if (shown.has(epoch.id)) return [];
     const linked = cards.filter(c => c.epoch === epoch.id && c.track !== 'sidequest');
     const done = linked.filter(c => c.phase === 'done').length;
     const frozen = linked.some(c => c.phase === 'frozen');
-    if (!frozen && !(showClosed && done)) return [];
+    if (!frozen) return [];
     const active = linked.filter(c => !['done', 'frozen'].includes(c.phase)).length;
     const epochMilestones = sortMilestones(milestones.filter(m => m.epochId === epoch.id && m.status !== 'retired'));
     const milestonesMet = epochMilestones.filter(m => m.progress?.met === true).length;

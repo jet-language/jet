@@ -1,5 +1,5 @@
 import {
-  boardEpochs, cardMatches, cardNumberQuery, sortCards, ownerVerifyQueue, openAcceptanceBallot, ownerDecisions,
+  boardEpochs, cardMatches, cardNumberQuery, sortCards, sortCriteria, parseSort, CARD_SORTS, CRITERIA_SORTS, ownerVerifyQueue, openAcceptanceBallot, ownerDecisions,
   evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, proofCommand, epochChain, closestCards, refLinks,
 } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
@@ -18,9 +18,6 @@ let S = null;                 // projected state from /api/state
 let VIEW = 'now';
 let openCard = null;
 let focusIds = null, focusIdx = 0, focusFacet = null, askOpen = false, focusCompare = false;
-let closedCache = null;        // done/archived card summaries (/api/closed), newest fetched
-let closedRequest = null;
-let closedFetchedAt = 0;
 let detailShown = null;        // { id, json } of the card the modal currently shows
 let detailRequest = 0;         // newest /api/card request; older answers are dropped
 const pick = {};              // decisionId -> tentative option key
@@ -135,7 +132,6 @@ function applyState(next, { own = false } = {}) {
 let liveFrame = 0;
 function setBoard(next, { own = false } = {}) {
   const first = !S;
-  if (S && next.meta.rev !== S.meta.rev) closedRequest = null;
   S = next;
   if (first) return render();
   if (own) {
@@ -359,27 +355,9 @@ async function refresh() {
 
 // ---- derived --------------------------------------------------------------
 const noticeCards = () => S?.notices?.cards || [];
-// The closed list (/api/closed) is fetched on demand and kept across live
-// updates; a newer copy is fetched in the background when the board moves.
-// Live rows always win over a possibly older closed row for the same card.
-function cachedClosedCards() {
-  if (!closedCache) return [];
-  const live = new Set([...(S.cards || []).map(c => c.id)]);
-  return closedCache.cards.filter(c => !live.has(c.id));
-}
-function boardCards(showClosed = false) {
-  return showClosed ? [...(S.cards || []), ...cachedClosedCards()] : (S.cards || []);
-}
-const boardMilestones = (showClosed = false) => showClosed && closedCache
-  ? (closedCache.milestones || S.milestones || [])
-  : (S?.milestones || []);
-const boardRadar = (showClosed = false) => showClosed && closedCache
-  ? (closedCache.radar || S.radar || [])
-  : (S?.radar || []);
 function allCards() {
   const byId = new Map((S.cards || []).map(c => [c.id, c]));
   for (const c of noticeCards()) if (!byId.has(c.id)) byId.set(c.id, c);
-  for (const c of cachedClosedCards()) if (!byId.has(c.id)) byId.set(c.id, c);
   return [...byId.values()];
 }
 const questionsFor = (cardId) => (S.questions || []).filter(q => q.cardId === cardId);
@@ -497,10 +475,11 @@ function renderChrome() {
     tabs.appendChild(t);
   }
   const day = S.counts.today;
-  const change = (d) => d ? ` <span class="top__delta top__delta--${d > 0 ? 'up' : 'down'}" title="since the start of ${day.date}">${d > 0 ? '+' : ''}${d}</span>` : '';
-  $('#feed').innerHTML = `<b>${day.openCards}</b> open cards${change(day.openCardsDelta)} · <b>${day.openCriteria}</b> open criteria${change(day.openCriteriaDelta)} · <b>${S.counts.agentReady}</b> agent-ready`;
+  $('#feed').innerHTML = `<b>${day.openCards}</b> open cards${dayChange(day.openCardsDelta)} · <b>${day.openCriteria}</b> open criteria${dayChange(day.openCriteriaDelta)} · <b>${S.counts.agentReady}</b> agent-ready`;
   updatePill();
 }
+// Today's change in an open count, against the board at the first write of the day.
+const dayChange = (d) => d ? ` <span class="top__delta top__delta--${d > 0 ? 'up' : 'down'}" title="since the start of ${esc(S.counts.today.date)}">${d > 0 ? '+' : ''}${d}</span>` : '';
 function updatePill() {
   const decisions = openGenericDecisions().length;
   const checks = verifyQueue().length;
@@ -541,6 +520,24 @@ function saveReportFold(key, open) {
   folds[key] = open;
   try { localStorage.setItem(REPORT_STORE, JSON.stringify(folds)); } catch { /* storage full or disabled */ }
 }
+
+// Sort choices (board cards, Closest, a card's criteria) are per browser too.
+const SORT_STORE = 'tower.sort';
+function sortChoices() {
+  try { return JSON.parse(localStorage.getItem(SORT_STORE) || '{}') || {}; } catch { return {}; }
+}
+const savedSort = (name, sorts, fallback) => parseSort(sortChoices()[name], sorts) || parseSort(fallback, sorts);
+function saveSort(name, sort) {
+  const choices = sortChoices();
+  choices[name] = `${sort.col}:${sort.dir}`;
+  try { localStorage.setItem(SORT_STORE, JSON.stringify(choices)); } catch { /* storage full or disabled */ }
+}
+// Clicking the sorted column flips it; another column starts in its own direction.
+const nextSort = (sort, col, sorts) => sort.col === col
+  ? { col, dir: sort.dir === 'asc' ? 'desc' : 'asc' }
+  : parseSort(col, sorts);
+const sortOptions = (sorts, sort) => sorts.map(s => `<option value="${s.key}" ${sort.col === s.key ? 'selected' : ''}>Sort: ${esc(s.label)}</option>`).join('');
+const sortDirButton = (id, sort) => `<button class="btn btn--ghost" id="${id}" aria-label="Reverse sort" title="Reverse sort">${sort.dir === 'asc' ? '↑' : '↓'}</button>`;
 
 // ---- NOW ----------------------------------------------------------------------
 function viewNow() {
@@ -927,21 +924,6 @@ async function archivedCountFor(epochId) {
   return archivedCountCache[epochId];
 }
 
-async function loadClosedCards() {
-  if (!S) return [];
-  if (closedCache?.rev === S.meta.rev) return closedCache.cards;
-  if (closedRequest) return closedRequest;
-  const request = closedRequest = (async () => {
-    const r = await fetch('/api/closed');
-    if (!r.ok) throw new Error(`closed cards request failed: ${r.status}`);
-    const payload = await r.json();
-    closedFetchedAt = Date.now();
-    if (!closedCache || payload.rev >= closedCache.rev) closedCache = payload;
-    return closedCache.cards || [];
-  })().finally(() => { if (closedRequest === request) closedRequest = null; });
-  return request;
-}
-
 // #464/#merge: Board = Radar's body (roadmap ledger × ops table: per-epoch
 // burndown, milestone stalls, sortable/inline-editable/filterable card
 // table) fused with the old Board tab's idea-capture + new-card UI. See
@@ -950,35 +932,33 @@ let radarFilterText = '';
 let radarWorkflow = 'all';
 let radarPriority = 'all';
 let radarKind = 'all';       // card kind: task | feature | idea | bug
-let radarShowClosed = false;
 let radarMilestone = null;   // milestone id — drills the board down to one milestone
 let radarRecent = false;     // flatten all cards, newest first
-let radarSort = { col: 'workflow', dir: 'asc' };
+let radarSort = savedSort('cards', CARD_SORTS, 'workflow');
+function setRadarSort(sort) { radarSort = sort; saveSort('cards', sort); }
 
-const milestoneById = (id) => boardMilestones(radarShowClosed).find(m => m.id === id) || null;
-// A milestone filter narrows to that milestone's cards; done cards stay
-// hidden unless Show closed is on — the filter bar still counts them.
+const milestoneById = (id) => (S.milestones || []).find(m => m.id === id) || null;
+// A milestone filter narrows to that milestone's unfinished cards; the filter
+// bar still counts the done ones.
 function radarMatches(c, needle) {
   return cardMatches(c, {
     text: needle,
     workflow: radarWorkflow,
     priority: radarPriority,
     kind: radarKind,
-    showClosed: radarShowClosed,
     milestone: radarMilestone,
   });
 }
-
-const showRemaining = () => isOpen('radar-remaining', false);
 
 // ---- closest: the cards nearest to done --------------------------------------
 // Fewest workable open criteria first; blocked criteria count separately, so a
 // card whose last rows wait on other work does not pose as nearly done.
 let closestEpoch = '';
+let closestSort = savedSort('closest', CARD_SORTS, 'open');
 function viewClosest() {
   const v = $('#view');
   const chain = epochChain(S.epochs, S.cards);
-  const rows = closestCards(S.cards, S.epochs, { epoch: closestEpoch || null });
+  const rows = closestCards(S.cards, S.epochs, { epoch: closestEpoch || null, sort: closestSort, priorities: CFG().priorities });
   v.innerHTML = `<div class="viewhead"><h1 class="h1">Closest</h1>
       <span class="viewhead__sub">cards nearest to done — fewest open criteria first</span></div>
     <div class="chain">${chain.filter(e => e.role !== 'finished').map(e => `<span class="chain__step chain__step--${e.role}" title="${esc(e.name)}">
@@ -988,6 +968,8 @@ function viewClosest() {
         <option value="">All epochs</option>
         ${chain.map(e => `<option value="${esc(e.id)}" ${closestEpoch === e.id ? 'selected' : ''}>${esc(e.label)}${e.name ? ` ${esc(e.name)}` : ''}</option>`).join('')}
       </select>
+      <select id="closest-sort" aria-label="Sort cards">${sortOptions(CARD_SORTS, closestSort)}</select>
+      ${sortDirButton('closest-direction', closestSort)}
       <span class="viewhead__sub">${rows.length} card${rows.length === 1 ? '' : 's'}</span>
     </div>
     <div class="closest">${rows.map(({ card, crit }) => {
@@ -1001,7 +983,10 @@ function viewClosest() {
         <span class="closest__t">${esc(card.title)}</span>
       </button>`;
     }).join('') || '<div class="empty"><div class="empty__glyph">—</div><div>no open cards with criteria</div></div>'}</div>`;
+  const setClosestSort = (sort) => { closestSort = sort; saveSort('closest', sort); viewClosest(); };
   $('#closest-epoch').addEventListener('change', (ev) => { closestEpoch = ev.target.value; viewClosest(); });
+  $('#closest-sort').addEventListener('change', (ev) => setClosestSort(parseSort(ev.target.value, CARD_SORTS)));
+  $('#closest-direction').addEventListener('click', () => setClosestSort(nextSort(closestSort, closestSort.col, CARD_SORTS)));
   for (const row of v.querySelectorAll('[data-card-id]')) row.addEventListener('click', () => showDetail(row.dataset.cardId));
 }
 
@@ -1036,15 +1021,8 @@ function viewBoard() {
         <option value="all">All kinds</option>
         ${(CFG().kinds || ['task', 'feature', 'idea', 'bug']).map(k => `<option value="${esc(k)}" ${radarKind === k ? 'selected' : ''}>${esc(k)}</option>`).join('')}
       </select>
-      <select id="radar-sort" aria-label="Sort cards">
-        ${[
-          ['workflow', 'Workflow'], ['workOrder', 'Work order'], ['priority', 'Priority'],
-          ['updated', 'Modified'], ['created', 'Created'], ['num', 'Card number'], ['title', 'Title'],
-        ].map(([value, label]) => `<option value="${value}" ${radarSort.col === value ? 'selected' : ''}>Sort: ${label}</option>`).join('')}
-      </select>
-      <button class="btn btn--ghost" id="radar-direction" aria-label="Reverse sort" title="Reverse sort">${radarSort.dir === 'asc' ? '↑' : '↓'}</button>
-      <label class="radar-tools__check"><input id="radar-closed" type="checkbox" ${radarShowClosed ? 'checked' : ''}> Show closed</label>
-      <label class="radar-tools__check"><input id="radar-remaining" type="checkbox" ${showRemaining() ? 'checked' : ''}> Count remaining</label>
+      <select id="radar-sort" aria-label="Sort cards">${sortOptions(CARD_SORTS, radarSort)}</select>
+      ${sortDirButton('radar-direction', radarSort)}
     </div>
     <div id="radar-body"></div>`;
 
@@ -1062,22 +1040,15 @@ function viewBoard() {
   $('#radar-mode').addEventListener('click', () => toggleUi('radar-cards'));
   $('#radar-recent').addEventListener('click', () => {
     radarRecent = !radarRecent;
-    if (radarRecent && radarSort.col !== 'created' && radarSort.col !== 'updated') {
-      radarSort = { col: 'updated', dir: 'desc' };
-    }
+    if (radarRecent && radarSort.col !== 'created' && radarSort.col !== 'updated') setRadarSort({ col: 'updated', dir: 'desc' });
     viewBoard();
   });
   $('#radar-filter').addEventListener('input', (e) => { radarFilterText = e.target.value; renderRadarBody(); });
   $('#radar-workflow').addEventListener('change', (e) => { radarWorkflow = e.target.value; renderRadarBody(); });
   $('#radar-priority').addEventListener('change', (e) => { radarPriority = e.target.value; renderRadarBody(); });
   $('#radar-kind').addEventListener('change', (e) => { radarKind = e.target.value; renderRadarBody(); });
-  $('#radar-sort').addEventListener('change', (e) => { radarSort = { ...radarSort, col: e.target.value }; renderRadarBody(); });
-  $('#radar-direction').addEventListener('click', () => {
-    radarSort = { ...radarSort, dir: radarSort.dir === 'asc' ? 'desc' : 'asc' };
-    viewBoard();
-  });
-  $('#radar-closed').addEventListener('change', (e) => { radarShowClosed = e.target.checked; renderRadarBody(); });
-  $('#radar-remaining').addEventListener('change', () => toggleUi('radar-remaining'));
+  $('#radar-sort').addEventListener('change', (e) => { setRadarSort(parseSort(e.target.value, CARD_SORTS)); viewBoard(); });
+  $('#radar-direction').addEventListener('click', () => { setRadarSort(nextSort(radarSort, radarSort.col, CARD_SORTS)); viewBoard(); });
 
   // Ideas bay — the triage half of idea-capture, kept from Board so a
   // captured idea has somewhere to be promoted or dismissed.
@@ -1104,28 +1075,17 @@ function viewBoard() {
 }
 
 // One body per section, honoring the card/table mode toggle.
-const radarList = (key, cards, cardsMode) => cardsMode ? grid(sortCards(cards, radarSort, CFG().priorities)) : opsTable(key, cards);
+const radarList = (cards, cardsMode) => cardsMode ? grid(sortCards(cards, radarSort, CFG().priorities)) : opsTable(cards);
 
 function renderRadarBody() {
   const body = $('#radar-body');
   if (!body) return;
   const focused = document.activeElement === $('#radar-filter');
   body.innerHTML = '';
-  if (radarShowClosed && closedCache?.rev !== S.meta.rev && (!closedCache || Date.now() - closedFetchedAt > 10_000)) {
-    const pending = loadClosedCards();
-    if (!closedCache) {
-      body.appendChild(el('<p class="epoch__goal">Loading closed cards…</p>'));
-      pending.then(() => { if (radarShowClosed && VIEW === 'board') renderPreservingScroll(); })
-        .catch(() => { if (radarShowClosed) body.innerHTML = '<p class="epoch__goal">Closed cards unavailable.</p>'; });
-      return;
-    }
-    // Show the closed list we have now; swap in the newer one when it lands.
-    pending.then(() => { if (radarShowClosed && VIEW === 'board') renderPreservingScroll(); }).catch(() => {});
-  }
   const needle = radarFilterText.trim();
   const cardsMode = isOpen('radar-cards', false);
-  const cards = boardCards(radarShowClosed);
-  const radar = boardEpochs(boardRadar(radarShowClosed), S.epochs, cards, boardMilestones(radarShowClosed), radarShowClosed);
+  const cards = S.cards || [];
+  const radar = boardEpochs(S.radar || [], S.epochs, cards, S.milestones || []);
 
   // Milestone drill-down: a milestone belongs to exactly one epoch, so matching
   // on milestoneId already pins the epoch. Render one flat list, no sections —
@@ -1137,7 +1097,7 @@ function renderRadarBody() {
   if (drill) {
     body.appendChild(milestoneFilterBar(drill));
     const hits = cards.filter(c => radarMatches(c, needle));
-    body.appendChild(hits.length ? radarList('mile:' + drill.id, hits, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
+    body.appendChild(hits.length ? radarList(hits, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
     if (focused) $('#radar-filter')?.focus();
     return;
   }
@@ -1145,27 +1105,34 @@ function renderRadarBody() {
   const hits = cards.filter(c => radarMatches(c, needle));
   if (needle) {
     body.appendChild(searchFilterBar(needle, hits.length));
-    body.appendChild(hits.length ? radarList('search', hits, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
+    body.appendChild(hits.length ? radarList(hits, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
     if (focused) $('#radar-filter')?.focus();
     return;
   }
   if (radarRecent) {
     body.appendChild(recentFilterBar(hits.length));
-    body.appendChild(hits.length ? radarList('recent', hits, cardsMode) : el(`<p class="epoch__goal">no cards</p>`));
+    body.appendChild(hits.length ? radarList(hits, cardsMode) : el(`<p class="epoch__goal">no cards</p>`));
     if (focused) $('#radar-filter')?.focus();
     return;
   }
 
   // Sidequests: their own section — off-plan work, not part of any epoch.
-  // Frozen sidequests stay here too, badged like frozen epoch cards.
-  const sq = cards.filter(c => c.track === 'sidequest' && (radarShowClosed || c.phase !== 'done'));
+  // Frozen sidequests stay here too, badged like frozen epoch cards. Each
+  // epoch section gets its unfinished cards, frozen included (badged).
+  const sq = [];
+  const byEpoch = new Map();
+  for (const c of cards) {
+    if (c.phase === 'done') continue;
+    if (c.track === 'sidequest') sq.push(c);
+    else if (c.epoch) byEpoch.set(c.epoch, [...(byEpoch.get(c.epoch) || []), c]);
+  }
   if (sq.length) body.appendChild(radarListSection('radar-sq', TERM('sidequest', 'Sidequests'), 'off-plan work', sq.filter(c => radarMatches(c, needle)), sq.length, cardsMode, true));
 
   if (!radar.length && !sq.length) {
     body.appendChild(el(`<div class="empty"><div class="empty__glyph">—</div><div>no active epochs</div></div>`));
     return;
   }
-  for (const r of radar) body.appendChild(radarEpochSection(r, needle, cardsMode));
+  for (const r of radar) body.appendChild(radarEpochSection(r, byEpoch.get(r.id) || [], needle, cardsMode));
 
   if (focused) $('#radar-filter')?.focus();
 }
@@ -1178,7 +1145,7 @@ function setMilestoneFilter(id) {
 function milestoneFilterBar(m) {
   const done = m.progress?.done ?? 0;
   const total = m.progress?.total ?? 0;
-  const count = m.progress?.met === true ? 'milestone met' : m.progress?.reviewReady === true ? 'ready for review' : showRemaining() ? `${total - done} of ${total} cards left` : `${done}/${total} cards done`;
+  const count = m.progress?.met === true ? 'milestone met' : m.progress?.reviewReady === true ? 'ready for review' : `${done}/${total} cards done`;
   const bar = el(`<div class="milefilter">
       <span class="milefilter__tag">${esc(milestoneTag(m))}</span>
       <span class="milefilter__t">${esc(m.title)}</span>
@@ -1226,7 +1193,7 @@ const STAGE_HELP = [
   ['ready', 'Ready', 'Plan vetted, decisions cleared — implement it'],
   ['building', 'Building', 'Implementation in progress'],
   ['verify', 'Review', 'Owner visual review for flagged cards; no separate agent verify step'],
-  ['done', 'Done', 'Closed when exit criteria are met; hidden unless Show closed is on'],
+  ['done', 'Done', 'Closed when exit criteria are met; leaves the board'],
   ['frozen', 'Frozen', 'Owner-paused — stays in its epoch or sidequest section with a ❄ badge; the Frozen filter shows only these'],
 ];
 
@@ -1246,7 +1213,7 @@ function openLegend() {
       <div class="modal__h">Blue = finished</div>
       <p class="prose">A completed card reads <b style="color:var(--blue)">blue</b> on the beacon and in the Now queue. Blue is news, not a duty — nothing blue is waiting on you.</p>
       <div class="modal__h">Milestone tag</div>
-      <p class="prose">The <span class="card__mile">UL4</span>-style chip on a card is its milestone. Click a milestone row — or that chip in the table — to show only its cards. Typing a card number in Search does the same: matching cards come up in one list. “Count remaining” flips every milestone and epoch tally from done-of-total to work left.</p>
+      <p class="prose">The <span class="card__mile">UL4</span>-style chip on a card is its milestone. Click a milestone row — or that chip in the table — to show only its cards. Typing a card number in Search does the same: matching cards come up in one list.</p>
       <div class="modal__h">Priority chips</div>
       <div class="legend">
         <div class="legend__row"><span class="prio prio-P0">P0</span><span class="legend__desc">Urgent — red (glows)</span></div>
@@ -1267,29 +1234,22 @@ function radarListSection(key, name, sub, shown, total, cardsMode, defOpen) {
   return collapsible(key, defOpen,
     `<span class="epoch__tag" style="color:var(--frost)">${esc(name)}</span><span class="epoch__name">${esc(sub)}</span><span class="epoch__count">${total}</span>`,
     'epoch--off', (body) => {
-      body.appendChild(shown.length ? radarList(key, shown, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
+      body.appendChild(shown.length ? radarList(shown, cardsMode) : el(`<p class="epoch__goal">no match</p>`));
     });
 }
 
-// "Count remaining" answers "how much is left?" without the mental subtraction.
-function epochProgressLabel(r, { pct = false } = {}) {
-  const base = showRemaining()
-    ? `${r.milestoneTotal - r.milestonesMet} milestones left · ${r.active} cards left`
-    : `${r.milestonesMet}/${r.milestoneTotal} milestones · ${r.done}/${r.active + r.done} cards`;
-  return pct ? `${base} · ${r.pct}%` : base;
-}
-
-function radarEpochSection(r, needle, cardsMode) {
+// One header per epoch: its E label and name, its place in the chain, the
+// milestone progress bar, its tallies and today's change in open work.
+function radarEpochSection(r, cards, needle, cardsMode) {
   const e = S.epochs.find(x => x.id === r.id);
-  // Every card of the epoch, frozen included (badged); done only with Show closed.
-  const cards = boardCards(radarShowClosed).filter(c => c.epoch === r.id && c.track !== 'sidequest' && (radarShowClosed || c.phase !== 'done'));
   const frozen = cards.filter(c => c.phase === 'frozen').length;
   return collapsible('radar:' + r.id, true,
     `<span class="epoch__tag">${esc(e ? epochTag(e) : r.id)}</span><span class="epoch__name">${esc(r.name)}</span>${chainBadge(r)}
-     <span class="epoch__count">${epochProgressLabel(r, { pct: true })}${frozen ? ` · ${frozen} frozen` : ''}${criteriaLeftLabel(r)}</span>`,
+     <span class="epoch__bar" title="${r.milestonesMet}/${r.milestoneTotal} milestones met · ${r.pct}%"><i style="width:${r.pct}%"></i></span>
+     <span class="epoch__count">${r.milestonesMet}/${r.milestoneTotal} milestones · ${r.done}/${r.active + r.done} cards${frozen ? ` · ${frozen} frozen` : ''}${criteriaLeftLabel(r)}${epochToday(r)}</span>`,
     '', (body) => {
       if (r.goal) body.appendChild(el(`<p class="epoch__goal">${esc(r.goal)}</p>`));
-      body.appendChild(radarHead(r));
+      body.appendChild(radarSparkline(r.burndown));
       if (r.milestones.length) body.appendChild(radarMilestones(r.milestones));
       const retired = retiredMilestones(r.id);
       if (retired) body.appendChild(retired);
@@ -1300,7 +1260,7 @@ function radarEpochSection(r, needle, cardsMode) {
 
       const shown = cards.filter(c => radarMatches(c, needle));
       body.appendChild(el(`<div class="radar__subhead">Cards</div>`));
-      body.appendChild(shown.length ? radarList(r.id, shown, cardsMode) : el(`<p class="epoch__goal">${cards.length ? 'no match' : 'no cards'}</p>`));
+      body.appendChild(shown.length ? radarList(shown, cardsMode) : el(`<p class="epoch__goal">${cards.length ? 'no match' : 'no cards'}</p>`));
     });
 }
 
@@ -1312,12 +1272,10 @@ function chainBadge(r) {
 }
 const criteriaLeftLabel = (r) => r.openCriteria || r.blockedCriteria
   ? ` · ${r.openCriteria} open criteria${r.blockedCriteria ? `, ${r.blockedCriteria} blocked` : ''}` : '';
-
-function radarHead(r) {
-  const wrap = el(`<div class="radar__head"></div>`);
-  wrap.appendChild(el(`<div class="epoch__prog"><div class="epoch__bar"><i style="width:${r.pct}%"></i></div><span class="epoch__pct">${epochProgressLabel(r)}</span></div>`));
-  wrap.appendChild(radarSparkline(r.burndown));
-  return wrap;
+function epochToday(r) {
+  const day = S.counts.today?.epochs?.[r.id];
+  if (!day || (!day.openCardsDelta && !day.openCriteriaDelta)) return '';
+  return ` · today${day.openCardsDelta ? ` cards${dayChange(day.openCardsDelta)}` : ''}${day.openCriteriaDelta ? ` criteria${dayChange(day.openCriteriaDelta)}` : ''}`;
 }
 
 function radarSparkline(days) {
@@ -1336,7 +1294,7 @@ function radarMilestones(ms) {
   for (const m of ms) {
     const pct = m.total ? Math.round(m.done / m.total * 100) : 0;
     const stalled = m.stalledDays != null && m.stalledDays > 5;
-    const count = m.met ? 'met' : m.reviewReady ? 'ready for review' : showRemaining() ? `${m.total - m.done} left` : `${m.done}/${m.total}`;
+    const count = m.met ? 'met' : m.reviewReady ? 'ready for review' : `${m.done}/${m.total}`;
     const row = el(`<button class="mile ${m.met ? 'mile--met' : m.reviewReady ? 'mile--review' : ''}" type="button" title="${esc(m.goal || 'Show only this milestone')}">
         <span class="mile__dot">${m.met ? '✓' : m.reviewReady ? '!' : '◇'}</span>
         <span class="mile__t">${esc(m.title)}</span>
@@ -1375,59 +1333,55 @@ const OPS_COLS = [
   { k: 'created', label: 'Created' },
   { k: 'updated', label: 'Modified' },
 ];
-function sortOpsRows(key, cards) {
-  return sortCards(cards, radarSort, CFG().priorities);
-}
-
-function opsTable(key, cards) {
-  const sorted = sortOpsRows(key, cards);
+function opsTable(cards) {
+  const sorted = sortCards(cards, radarSort, CFG().priorities);
+  const milestones = new Map((S.milestones || []).map(m => [m.id, m]));
+  const priorities = CFG().priorities || ['P0', 'P1', 'P2', 'P3'];
   const wrap = el(`<div class="opswrap"><table class="ops"><thead><tr>
       ${OPS_COLS.map(c => `<th data-col="${c.k}">${esc(c.label)}${radarSort.col === c.k ? (radarSort.dir === 'asc' ? ' ▲' : ' ▼') : ''}</th>`).join('')}
-    </tr></thead><tbody></tbody></table></div>`);
+    </tr></thead><tbody>${sorted.map(c => opsRowHTML(c, milestones, priorities)).join('')}</tbody></table></div>`);
   wrap.querySelectorAll('th').forEach(th => th.addEventListener('click', () => {
-    const col = th.dataset.col;
-    radarSort = radarSort.col === col ? { col, dir: radarSort.dir === 'asc' ? 'desc' : 'asc' } : { col, dir: (col === 'created' || col === 'updated') ? 'desc' : 'asc' };
+    setRadarSort(nextSort(radarSort, th.dataset.col, CARD_SORTS));
     viewBoard();
   }));
+  // One listener per table, not per row: the board stays quick with hundreds of cards.
   const tbody = $('tbody', wrap);
-  for (const c of sorted) tbody.appendChild(opsRow(c));
+  tbody.addEventListener('click', (ev) => {
+    const mile = ev.target.closest('[data-mile]');
+    if (mile) return setMilestoneFilter(mile.dataset.mile);
+    if (/INPUT|SELECT|OPTION/.test(ev.target.tagName)) return;
+    const row = ev.target.closest('tr[data-card-id]');
+    if (row) showDetail(row.dataset.cardId);
+  });
+  tbody.addEventListener('change', (ev) => {
+    const input = ev.target;
+    const id = input.closest('tr[data-card-id]')?.dataset.cardId;
+    if (!id) return;
+    if (input.dataset.fld === 'priority') api('card/update', { id, priority: input.value, by: 'owner' });
+    if (input.dataset.fld === 'workOrder') {
+      input.defaultValue = input.value;
+      input.dataset.base = input.value;
+      delete input.dataset.conflict;
+      api('card/update', { id, workOrder: input.value === '' ? null : Number(input.value), by: 'owner' });
+    }
+  });
   return wrap;
 }
 
-function opsRow(c) {
+function opsRowHTML(c, milestones, priorities) {
   const title = c.title.length > 46 ? c.title.slice(0, 45) + '…' : c.title;
   const who = c.lane.who === 'owner' ? 'lane-owner' : c.lane.who === 'agent' ? 'lane-agent' : 'lane-none';
-  const ms = milestoneOf(c);
-  const tr = el(`<tr>
+  const ms = c.milestoneId ? milestones.get(c.milestoneId) : null;
+  return `<tr data-card-id="${esc(c.id)}">
       <td class="num">${ticket(c)}</td>
       <td class="ops__title" title="${esc(c.title)}">${c.phase === 'frozen' ? FROZEN_BADGE + ' ' : ''}${esc(title)}</td>
-      <td class="ops__mile">${ms ? `<button class="card__mile" data-mile title="${esc(ms.title)}">${esc(milestoneTag(ms))}</button>` : ''}</td>
+      <td class="ops__mile">${ms ? `<button class="card__mile" data-mile="${esc(ms.id)}" title="${esc(ms.title)}">${esc(milestoneTag(ms))}</button>` : ''}</td>
       <td><span class="card__lane ${who}"><span class="pip"></span>${esc(c.lane.label)}</span></td>
-      <td class="ops__prio"></td>
-      <td class="ops__wo"></td>
+      <td class="ops__prio"><select data-fld="priority" data-keep="prio:${esc(c.id)}">${priorities.map(p => `<option value="${esc(p)}" ${p === c.priority ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select></td>
+      <td class="ops__wo"><input data-fld="workOrder" data-keep="wo:${esc(c.id)}" data-base="${esc(c.workOrder ?? '')}" type="number" min="1" value="${esc(c.workOrder ?? '')}" placeholder="—"></td>
       <td class="num">${esc(dateDay(c.created))}</td>
       <td class="num">${esc(dateDay(c.updated))}</td>
-    </tr>`);
-
-  $('[data-mile]', tr)?.addEventListener('click', (ev) => { ev.stopPropagation(); setMilestoneFilter(c.milestoneId); });
-
-  const prioSel = el(`<select data-fld="priority" data-keep="prio:${esc(c.id)}">${(CFG().priorities || ['P0', 'P1', 'P2', 'P3']).map(p => `<option value="${esc(p)}" ${p === c.priority ? 'selected' : ''}>${esc(p)}</option>`).join('')}</select>`);
-  prioSel.addEventListener('click', (ev) => ev.stopPropagation());
-  prioSel.addEventListener('change', () => api('card/update', { id: c.id, priority: prioSel.value, by: 'owner' }));
-  $('.ops__prio', tr).appendChild(prioSel);
-
-  const woIn = el(`<input data-fld="workOrder" data-keep="wo:${esc(c.id)}" data-base="${esc(c.workOrder ?? '')}" type="number" min="1" value="${esc(c.workOrder ?? '')}" placeholder="—">`);
-  woIn.addEventListener('click', (ev) => ev.stopPropagation());
-  woIn.addEventListener('change', () => {
-    woIn.defaultValue = woIn.value;
-    woIn.dataset.base = woIn.value;
-    delete woIn.dataset.conflict;
-    api('card/update', { id: c.id, workOrder: woIn.value === '' ? null : Number(woIn.value), by: 'owner' });
-  });
-  $('.ops__wo', tr).appendChild(woIn);
-
-  tr.addEventListener('click', (ev) => { if (!/INPUT|SELECT/.test(ev.target.tagName)) showDetail(c.id); });
-  return tr;
+    </tr>`;
 }
 
 // ---- card modal ------------------------------------------------------------------
@@ -1438,6 +1392,7 @@ function opsRow(c) {
 // keeping scroll position and any field the owner is editing. A failed load
 // says so inside the modal with a retry; it never sits on "Loading".
 const detailCache = new Map();  // card id → last full card seen
+let criteriaSort = savedSort('criteria', CRITERIA_SORTS, 'n');
 let detailApplied = 0;
 
 async function showDetail(ref) {
@@ -1549,7 +1504,8 @@ function renderDetail(c) {
       <div class="fld" style="margin-bottom:16px"><div class="fld__k">Plan</div><input data-fld="plan" data-keep="fld:plan" data-base="${esc(c.plan || '')}" value="${esc(c.plan || '')}" placeholder="— (agents fill this in the plan lane)"></div>
       <div class="modal__h">Description</div>
       <div class="prose" contenteditable="plaintext-only" data-fld="body" data-keep="fld:body" data-base="${esc(c.body || '')}">${md(c.body)}</div>
-      <div class="modal__h">Exit criteria <span class="prose">Workers return a receipt. After integrated proof, the orchestrator marks each row met and closes the card.</span> <label class="crit__flag"><input type="checkbox" id="needs-acceptance" ${c.needsAcceptance ? 'checked' : ''}> needs owner visual/UX check</label></div>
+      <div class="modal__h">Exit criteria <span class="prose">Workers return a receipt. After integrated proof, the orchestrator marks each row met and closes the card.</span> <label class="crit__flag"><input type="checkbox" id="needs-acceptance" ${c.needsAcceptance ? 'checked' : ''}> needs owner visual/UX check</label>
+        <select id="crit-sort" class="crit__sort" aria-label="Sort criteria">${sortOptions(CRITERIA_SORTS, criteriaSort)}</select>${sortDirButton('crit-direction', criteriaSort)}</div>
       <div id="m-criteria"></div>
       <div class="modal__h">Decisions</div><div id="m-decisions"></div>
       <div class="modal__h">Notes &amp; questions</div><div id="m-q"></div>
@@ -1582,7 +1538,10 @@ function renderDetail(c) {
 
   const cb = $('#m-criteria', m);
   if (!(c.criteria || []).length) cb.appendChild(el(`<p class="prose">No exit criteria yet.</p>`));
-  for (const it of (c.criteria || [])) {
+  const setCriteriaSort = (sort) => { criteriaSort = sort; saveSort('criteria', sort); renderDetailKeeping(c); };
+  $('#crit-sort', m).addEventListener('change', (ev) => setCriteriaSort(parseSort(ev.target.value, CRITERIA_SORTS)));
+  $('#crit-direction', m).addEventListener('click', () => setCriteriaSort(nextSort(criteriaSort, criteriaSort.col, CRITERIA_SORTS)));
+  for (const it of sortCriteria(c.criteria, criteriaSort)) {
     const row = el(`<div class="critrow${it.blockedBy && it.status === 'open' ? ' critrow--blocked' : ''}" data-crit-n="${esc(it.n)}">
         <div class="critrow__head"><span class="critrow__n">#${esc(it.n)}</span>
           <span class="critrow__badge critrow__badge--${safeCriterionStatus(it.status)}">${esc(safeCriterionStatus(it.status))}</span>

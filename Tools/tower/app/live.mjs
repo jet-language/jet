@@ -53,14 +53,12 @@ export function createLiveBoard(store, { decorate = (index) => index } = {}) {
   let index = null;          // { rev, value, body }
   let archiveKey = null;
   let archive = null;
-  let closed = null;         // { rev, archiveKey, body }
   const ring = [];           // { base, rev, frame }
   const subscribers = new Set();
 
   const take = (next) => {
     if (state === next) return false;
     state = next;
-    closed = null;
     return true;
   };
 
@@ -108,7 +106,6 @@ export function createLiveBoard(store, { decorate = (index) => index } = {}) {
     const next = db.loadHistoryRaw(store.dataDir);
     archiveKey = key;
     archive = next;
-    closed = null;
     return archive;
   }
 
@@ -161,13 +158,6 @@ export function createLiveBoard(store, { decorate = (index) => index } = {}) {
     index() { sync(); return project(); },
     archive: loadArchive,
     adopt(next) { adopt(next); return project(); },
-    closed() {
-      sync();
-      const h = loadArchive();
-      if (closed && closed.rev === state.meta.rev && closed.archiveKey === archiveKey) return closed;
-      closed = { rev: state.meta.rev, archiveKey, body: encodeBody(db.projectClosed(state, store.config, h), 'closed') };
-      return closed;
-    },
     since,
     subscribe(fn) { subscribers.add(fn); return () => subscribers.delete(fn); },
     close() {

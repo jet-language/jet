@@ -23,7 +23,7 @@ import { applyRepairManifest } from './repair.mjs';
 import { machinePersonalInfo } from './personal-info.mjs';
 import { readGauntletStandings } from './gauntlet-standings.mjs';
 import { gauntletStandingsText, projectGauntletStandings } from './ui/gauntlet.js';
-import { closestCards, epochChain, epochLabel, proofCommand, sortEpochs, sortMilestones } from './ui/board-state.js';
+import { CARD_SORTS, closestCards, epochChain, epochLabel, parseSort, proofCommand, sortCards, sortEpochs, sortMilestones } from './ui/board-state.js';
 import { applyPlan } from './apply.mjs';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
@@ -79,7 +79,7 @@ export const COMMAND_FLAGS = {
   state: { flags: [] },
   help: { flags: ['check'] },
   card: { verbs: {
-    list: ['lane', 'phase', 'epoch', 'track', 'kind', 'milestone', 'tag', 'untagged', 'parent', 'hardeningDedupKey'],
+    list: ['lane', 'phase', 'epoch', 'track', 'kind', 'milestone', 'tag', 'untagged', 'parent', 'hardeningDedupKey', 'sort'],
     show: ['hardeningDedupKey'],
     add: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
       'checkSteps', 'probe', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force', 'overLimit',
@@ -148,7 +148,7 @@ export const COMMAND_FLAGS = {
   }},
   next: { flags: ['agent', 'epoch', 'track', 'limit', 'burndown', 'parallel', 'readyAcrossEpochs'] },
   chain: { flags: [] },
-  closest: { flags: ['epoch', 'limit'] },
+  closest: { flags: ['epoch', 'limit', 'sort'] },
   ballots: { flags: [] },
   brief: { flags: ['agent', 'noClaim', 'color'] },
   lint: { flags: ['proofs', 'tree', 'evidence', 'limits'] },
@@ -319,7 +319,7 @@ function checkRequired(cmd, verb, args, flags) {
 
 const FLAG_VALUE = {
   add: '"text"', edit: 'n', remove: 'n', move: 'n', to: 'REF', meet: 'n', verify: 'n', reopen: 'n', unblock: 'n', reason: '"…"', evidence: '"…"',
-  overLimit: '"reason"', criteria: 'N,N,…', limits: null,
+  overLimit: '"reason"', criteria: 'N,N,…', limits: null, sort: 'KEY[:asc|desc]',
   proof: '"jet test …"', proofs: null, jet: 'PATH', tree: 'DIR', yes: null,
   by: 'X', file: 'FILE', stdin: null, color: '=auto|always|never',
   sections: 'FILE',
@@ -609,6 +609,8 @@ function cmdCard(store, { pos, flags }) {
       if (flags.hardeningDedupKey !== undefined)
         cs = cs.filter(c => c.hardeningDedupKey === String(flags.hardeningDedupKey)
           || (c.hardeningDedupAliases || []).includes(String(flags.hardeningDedupKey)));
+      const sort = sortArg(flags);
+      if (sort) cs = sortCards(cs, sort, store.config.priorities);
       if (flags.json) return out(flags, null, cs);
       for (const c of cs) console.log(cardLine(c));
       if (!cs.length) console.log('(no cards match)');
@@ -1221,14 +1223,24 @@ function cmdChain(store, { flags }) {
 
 const signed = (n) => `${n > 0 ? '+' : ''}${n}`;
 
+// --sort KEY[:asc|desc] takes the card sorts the board offers.
+function sortArg(flags) {
+  if (flags.sort === undefined) return null;
+  const sort = parseSort(flags.sort, CARD_SORTS);
+  if (!sort) throw new TowerError('E_USAGE', `--sort takes one of ${CARD_SORTS.map(s => s.key).join(', ')}, optionally with :asc or :desc`);
+  return sort;
+}
+
 // Open cards nearest to done: fewest workable open criteria first; blocked
-// criteria are counted apart and do not count as progress.
+// criteria are counted apart and do not count as progress. --sort orders the
+// same cards another way.
 function cmdClosest(store, { flags }) {
   const proj = db.project(store.load());
   const limit = flags.limit === undefined ? 20 : Number(flags.limit);
   if (!Number.isInteger(limit) || limit < 1) throw new TowerError('E_USAGE', '--limit must be a positive whole number');
   const epoch = flags.epoch === undefined ? null : epochArg(proj, flags.epoch);
-  const rows = closestCards(proj.cards, proj.epochs, { epoch, limit }).map(({ card, crit }) => ({
+  const sort = sortArg(flags);
+  const rows = closestCards(proj.cards, proj.epochs, { epoch, limit, sort, priorities: store.config.priorities }).map(({ card, crit }) => ({
     num: card.num, id: card.id, title: card.title, epoch: card.epoch, phase: card.phase,
     open: crit.open, blocked: crit.blocked, settled: crit.settled, total: crit.total,
   }));

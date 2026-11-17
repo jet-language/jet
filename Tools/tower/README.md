@@ -110,7 +110,10 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   active (three agents), the next gets one. `tower next` follows the chain,
   `tower chain` lists it with each epoch's open cards and open criteria and
   today's change, and `tower closest` (and the UI's Closest view) ranks open
-  cards by open criteria, fewest first. `tower status` and the UI header show
+  cards by open criteria, fewest first; `--sort KEY[:asc|desc]` on `tower
+  closest` and `tower card list` orders cards by any key the board sorts by
+  (workflow, workOrder, priority, open, updated, created, num, title,
+  milestone, lane). `tower status` and the UI header show
   the board's open cards and open criteria with today's change.
 - **Decisions** — ballot-ready choices attached to a card; only the owner
   ratifies. New full ballots contain a complete base draft followed by one
@@ -318,7 +321,11 @@ and goes dark as you clear them. Two views:
   tower clear.
 - **Board** — idea capture, sidequests, epochs → milestones → cards (frozen
   cards stay in their epoch or sidequest section with a Frozen badge; the
-  Frozen filter shows only them); card modal for editing, decisions,
+  Frozen filter shows only them; done cards leave the board). Each epoch has
+  one header: its E label, chain role, milestone progress bar, tallies and
+  today's change in open work. The
+  board's cards, the Closest view and a card's criteria each sort by a chosen
+  key. Card modal for editing, decisions,
   questions, log, and delete (a card's ballots are listed and deleted with it).
 - **Radar** *(prototype, owner-acceptance pending)* — roadmap ledger ×
   ops-table hybrid: per active epoch, a 30-day burndown sparkline, milestone
@@ -326,7 +333,8 @@ and goes dark as you clear them. Two views:
   table of that epoch's active cards (+ its sidequests). Adds to Board/Now,
   changes neither.
 
-Durable collapse state, no localStorage, no framework, mobile bottom tabs.
+Durable collapse state on the board; sort choices and Now report folds are
+kept per browser in localStorage. No framework, mobile bottom tabs.
 
 ## Plugin skills
 

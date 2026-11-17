@@ -430,9 +430,6 @@ export function serve(store, port = 7878, open = false, { json = false } = {}) {
         const s = live.state();
         return send(res, 200, db.cardHistory(s, live.archive(), url.searchParams.get('id')), { revision: s.meta.rev });
       }
-      if (req.method === 'GET' && url.pathname === '/api/closed') {
-        return sendBody(req, res, live.closed().body);
-      }
       // #522 — belt+braces to the self-restart watcher: `start` is what
       // THIS process loaded at boot; `current` is a fresh read of what's on
       // disk right now. A mismatch means the process needs a restart.

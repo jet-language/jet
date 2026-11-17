@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardEpochs, cardMatches, sortCards, workflowRank, ownerVerifyQueue, openAcceptanceBallot, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, epochNumber, sortEpochs, refLinks } from '../app/ui/board-state.js';
+import { boardEpochs, cardMatches, sortCards, sortCriteria, parseSort, CARD_SORTS, CRITERIA_SORTS, closestCards, workflowRank, ownerVerifyQueue, openAcceptanceBallot, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, epochNumber, sortEpochs, refLinks } from '../app/ui/board-state.js';
 
 const card = (num, lane, phase = lane, extra = {}) => ({
   num, title: `Card ${num}`, phase, priority: 'P1', lane: { lane, label: lane }, ...extra,
@@ -19,11 +19,11 @@ test('workflow order is verify, building, ready, plan, blocked, closed', () => {
   assert.deepEqual(cards.map(workflowRank), [4, 3, 2, 1, 0, 0]);
 });
 
-test('closed cards are opt-in and filters compose', () => {
+test('done cards never show on the board and filters compose', () => {
   const done = card(9, 'done', 'done', { title: 'Closed parser', priority: 'P0' });
   assert.equal(cardMatches(done), false);
-  assert.equal(cardMatches(done, { showClosed: true, text: 'parser', priority: 'P0' }), true);
-  assert.equal(cardMatches(done, { showClosed: true, workflow: '0' }), false);
+  assert.equal(cardMatches(done, { text: 'parser', priority: 'P0' }), false);
+  assert.equal(cardMatches(done, { text: '#9' }), false);
 
   const ready = card(10, 'implement', 'ready', { title: 'Ready parser', priority: 'P0' });
   assert.equal(cardMatches(ready, { workflow: '1', priority: 'P0', text: '#10' }), true);
@@ -64,22 +64,58 @@ test('explicit sorts keep stable work-order, priority, and number ties', () => {
   ], { col: 'priority' }, ['Later', 'Urgent']).map(c => c.num), [5, 4]);
 });
 
-test('show closed adds finished epochs that the active radar omits', () => {
+test('a finished epoch holding only done cards gets no section', () => {
   const radar = [{ id: 'e1', name: 'Active' }];
   const epochs = [{ id: 'e1', name: 'Active' }, { id: 'e2', name: 'Finished', goal: 'shipped' }];
   const cards = [card(20, 'done', 'done', { epoch: 'e2', track: 'epoch' })];
   const milestones = [{ id: 'm1', epochId: 'e2', title: 'Shipped', status: 'met', progress: { total: 1, done: 1, reviewReady: true, met: true } }];
-  assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, false), radar);
-  assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, true).map(e => e.id), ['e1', 'e2']);
-  assert.deepEqual(boardEpochs(radar, epochs, cards, milestones, true)[1], {
-    id: 'e2', name: 'Finished', goal: 'shipped', role: 'finished', staff: 0, openCriteria: 0, blockedCriteria: 0, active: 0, done: 1,
-    milestoneTotal: 1, milestonesMet: 1, pct: 100, burndown: [],
-    milestones: [{
-      id: 'm1', epochId: 'e2', title: 'Shipped', status: 'met',
-      progress: { total: 1, done: 1, reviewReady: true, met: true },
-      total: 1, done: 1, reviewReady: true, met: true, stalledDays: null,
-    }],
-  });
+  assert.deepEqual(boardEpochs(radar, epochs, cards, milestones), radar);
+});
+
+test('card sorts: each key starts in its own direction, and :asc or :desc overrides it', () => {
+  assert.deepEqual(CARD_SORTS.map(s => s.key), ['workflow', 'workOrder', 'priority', 'open', 'updated', 'created', 'num', 'title', 'milestone', 'lane']);
+  for (const s of CARD_SORTS) assert.deepEqual(parseSort(s.key, CARD_SORTS), { col: s.key, dir: s.dir });
+  assert.equal(parseSort('updated', CARD_SORTS).dir, 'desc');
+  assert.deepEqual(parseSort('updated:asc', CARD_SORTS), { col: 'updated', dir: 'asc' });
+  assert.equal(parseSort('size', CARD_SORTS), null);
+  assert.equal(parseSort('num:sideways', CARD_SORTS), null);
+  assert.equal(parseSort(undefined, CARD_SORTS), null);
+});
+
+test('sort by open criteria counts workable open rows only, fewest first', () => {
+  const a = card(1, 'building', 'building', { criteria: [{ n: 1, status: 'open' }, { n: 2, status: 'open' }, { n: 3, status: 'met' }] });
+  const b = card(2, 'building', 'building', { criteria: [{ n: 1, status: 'open' }, { n: 2, status: 'open', blockedBy: '#9' }] });
+  const c = card(3, 'building', 'building', { crit: { open: 0, blocked: 0, settled: 1, total: 1 } });
+  assert.deepEqual(sortCards([a, b, c], parseSort('open', CARD_SORTS)).map(x => x.num), [3, 2, 1]);
+  assert.deepEqual(sortCards([a, b, c], parseSort('open:desc', CARD_SORTS)).map(x => x.num), [1, 2, 3]);
+});
+
+test('closest keeps nearest-to-done order by default and takes any card sort', () => {
+  const epochs = [{ id: 'e1', order: 1 }];
+  const a = card(1, 'building', 'building', { epoch: 'e1', priority: 'P2', updated: '2026-01-02', crit: { open: 2, blocked: 0, settled: 0, total: 2 } });
+  const b = card(2, 'building', 'building', { epoch: 'e1', priority: 'P0', updated: '2026-01-01', crit: { open: 1, blocked: 0, settled: 0, total: 1 } });
+  const done = card(3, 'done', 'done', { epoch: 'e1', crit: { open: 0, blocked: 0, settled: 1, total: 1 } });
+  const nums = (opts) => closestCards([a, b, done], epochs, opts).map(r => r.card.num);
+  assert.deepEqual(nums(), [2, 1]);
+  assert.deepEqual(nums({ sort: parseSort('open:desc', CARD_SORTS) }), [1, 2]);
+  assert.deepEqual(nums({ sort: parseSort('updated', CARD_SORTS) }), [1, 2]);
+  assert.deepEqual(nums({ sort: parseSort('priority', CARD_SORTS), limit: 1 }), [2]);
+  assert.equal(closestCards([a], epochs, { sort: parseSort('num', CARD_SORTS) })[0].crit.open, 2, 'rows keep their criteria counts');
+});
+
+test('criteria sort by number, status (open, blocked, met, verified) or text', () => {
+  const items = [
+    { n: 1, status: 'verified', text: 'b' },
+    { n: 2, status: 'open', blockedBy: '#9', text: 'a' },
+    { n: 3, status: 'met', text: 'c' },
+    { n: 4, status: 'open', text: 'D' },
+  ];
+  assert.deepEqual(CRITERIA_SORTS.map(s => s.key), ['n', 'status', 'text']);
+  assert.deepEqual(sortCriteria(items).map(i => i.n), [1, 2, 3, 4]);
+  assert.deepEqual(sortCriteria(items, parseSort('n:desc', CRITERIA_SORTS)).map(i => i.n), [4, 3, 2, 1]);
+  assert.deepEqual(sortCriteria(items, parseSort('status', CRITERIA_SORTS)).map(i => i.n), [4, 2, 3, 1]);
+  assert.deepEqual(sortCriteria(items, parseSort('text', CRITERIA_SORTS)).map(i => i.n), [2, 1, 3, 4]);
+  assert.deepEqual(items.map(i => i.n), [1, 2, 3, 4], 'sorting leaves the card\'s rows as they are');
 });
 
 // Owner 2026-10-04: frozen cards live in their epoch section, shown by
@@ -91,7 +127,7 @@ test('frozen cards show by default and the Frozen filter shows only them', () =>
   assert.equal(cardMatches(frozen), true);
   assert.equal(cardMatches(frozen, { workflow: 'frozen' }), true);
   assert.equal(cardMatches(ready, { workflow: 'frozen' }), false);
-  assert.equal(cardMatches(done, { workflow: 'frozen', showClosed: true }), false);
+  assert.equal(cardMatches(done, { workflow: 'frozen' }), false);
   assert.equal(cardMatches(frozen, { workflow: 'frozen', text: 'disks', priority: 'P2', kind: 'feature' }), true);
   assert.equal(cardMatches(frozen, { workflow: 'frozen', priority: 'P0' }), false);
   for (const workflow of ['0', '1', '2', '3']) assert.equal(cardMatches(frozen, { workflow }), false);
@@ -104,11 +140,11 @@ test('an epoch the active radar omits still gets a section for its frozen cards,
     card(40, 'frozen', 'frozen', { epoch: 'e2', track: 'epoch' }),
     card(41, 'frozen', 'frozen', { epoch: 'e3', track: 'sidequest' }),
   ];
-  const shown = boardEpochs(radar, epochs, cards, [], false);
+  const shown = boardEpochs(radar, epochs, cards, []);
   assert.deepEqual(shown.map(e => e.id), ['e2', 'e9']);
   assert.equal(shown[0].active, 0);
   assert.equal(shown[0].done, 0);
-  assert.equal(boardEpochs(radar, epochs, [cards[1]], [], false), radar, 'sidequest frozen cards stay in the sidequest section');
+  assert.equal(boardEpochs(radar, epochs, [cards[1]], []), radar, 'sidequest frozen cards stay in the sidequest section');
 });
 
 test('an epoch is labelled E plus its number, from num or else from the id', () => {
@@ -194,7 +230,6 @@ test('milestone filter narrows to one milestone and sorts unassigned last', () =
 
   const closed = card(23, 'done', 'done', { milestoneId: 'e3-ul4' });
   assert.equal(cardMatches(closed, { milestone: 'e3-ul4' }), false);
-  assert.equal(cardMatches(closed, { milestone: 'e3-ul4', showClosed: true }), true);
 
   // A frozen card still counts toward its milestone's total, so the drill-down
   // must show it — otherwise the milestone points at a card nobody can see.
