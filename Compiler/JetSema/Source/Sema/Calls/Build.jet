@@ -1,7 +1,7 @@
 // Exact compiler-value contract::build_context_method_*. This table is
 // arity-polymorphic; Core owns the session semantics, not sema.
 use {
-    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, AccessConvention, Binding, BuildOptionKind, BuildOptionRow, COMPILER_EVENT_TYPE, Call, CallArg, CtValue, DeriveBodyItem, Diagnostic, EffectRowEntry, EnumLitArg, Expr, ForKind, Item, Marker, MarkerDecl, NamedCtValue, ParamZone, Span, Stmt, StrPart, SymbolKind, TComptimeField, TComptimeValue, Type, ast_func, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, diagnostic_registry_row, expr_span, type_name]
+    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, AccessConvention, BUILD_OPTION_HOOK_DEFAULT, Binding, BuildOptionKind, BuildOptionRow, COMPILER_EVENT_TYPE, Call, CallArg, CtValue, DeriveBodyItem, Diagnostic, EffectRowEntry, EnumLitArg, Expr, ForKind, Item, Marker, MarkerDecl, NamedCtValue, ParamZone, Span, Stmt, StrPart, SymbolKind, TComptimeField, TComptimeValue, Type, ast_func, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, diagnostic_registry_row, expr_span, type_name]
     jet_parser.[jfmt_format_program_with_tokens]
     jet_lexer.[Token]
 }
@@ -1504,9 +1504,9 @@ sema_call_build_option: fn(receiver: Expr, receiver_value: TExpr, method: String
         return failed
     }
     // Only the value is an ordinary argument: a pin's option name is a row
-    // name, not an expression of the body; a List row's literal and a
-    // Duration row's Time literal read nothing.
-    if row.kind != BuildOptionKind.List && row.kind != BuildOptionKind.Duration {
+    // name, not an expression of the body; a List row's literal, a Duration
+    // row's Time literal and a Hook or Hooks row's hook names read nothing.
+    if row.kind != BuildOptionKind.List && row.kind != BuildOptionKind.Duration && row.kind != BuildOptionKind.Hook && row.kind != BuildOptionKind.Hooks {
         params: [SemaCallParam]{SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(Type.String), variadic: false}}
         ordinary := [CallArg]{argument.copy()}
         ownership: sema_ownership_check_method_call(state, "Build.{method}", receiver, AccessConvention.Read, params, ordinary, scopes, span, diagnostics)
@@ -1522,8 +1522,10 @@ sema_call_build_option: fn(receiver: Expr, receiver_value: TExpr, method: String
 
 // The row value `expr` writes: `false` for a Bool row, `.O2` for a Level or
 // Choice row, and, since the value reaches the build session as text, a string
-// literal for a Text row, a list literal of them for a List row and a Time
-// literal (`10min`) for a Duration row.
+// literal for a Text row, a list literal of them for a List row, a Time
+// literal (`10min`) for a Duration row, a hook function's path
+// (`tools.relink`) or `.Default` for a Hook row and a list literal of hook
+// paths for a Hooks row.
 sema_build_option_value: fn(row: BuildOptionRow, expr: Expr) -> String? {
     if row.kind == {
         .Bool -> {
@@ -1548,6 +1550,39 @@ sema_build_option_value: fn(row: BuildOptionRow, expr: Expr) -> String? {
             }
         }
         .Duration -> return sema_build_duration_literal(expr)
+        .Hook -> {
+            if expr == .EnumLit(_, variant, _, enum_args, leading_dot, _, _) {
+                if leading_dot && enum_args.len() == 0 && variant == "Default" {
+                    return Val(BUILD_OPTION_HOOK_DEFAULT)
+                }
+                return None
+            }
+            return sema_build_hook_path(expr)
+        }
+        .Hooks -> {
+            if expr == .ListLit(elements, _, _) {
+                items := [String]{}
+                loop element in elements {
+                    item: sema_build_hook_path(element) ?? return None
+                    items.push(item)
+                }
+                return Val(build_option_list_value(items))
+            }
+        }
+    }
+    None
+}
+
+// The path a hook function is named by (`tools.relink`): its module and its
+// name, read from the field chain as written.
+sema_build_hook_path: fn(expr: Expr) -> String? {
+    if expr == .Field(base, member, _, _) {
+        if base == .Ident(first, _, _) {
+            if first.len() == 0 -> return None
+            return Val("{first}.{member}")
+        }
+        head: sema_build_hook_path(base) ?? return None
+        return Val("{head}.{member}")
     }
     None
 }
@@ -1581,6 +1616,8 @@ sema_build_option_call_shape: fn(method: String, name: String, pinned: Bool) -> 
         .Text -> "\"dist\""
         .List -> "[\"z\"]"
         .Duration -> "10min"
+        .Hook -> "tools.relink"
+        .Hooks -> "[tools.sign]"
         .Choice | .Level | .Bool -> build_option_argument(row, values[values.len() - 1])
     }
     if pinned -> return "b.pin(.{name}, {example})"

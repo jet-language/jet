@@ -6049,6 +6049,19 @@ the oldest OS version the image runs on; a Linux ELF image has no versioned
 ABI floor, so any value is refused with E2104. Example:
 [`Examples/Tooling/Build/BuildLinkInputs`](../../Examples/Tooling/Build/BuildLinkInputs/run.jet).
 
+`link` (stock `default`) names the link step of each executable `jet build`
+writes, and `post_link` (stock none) the steps run on each linked executable,
+in order. `default` is Jet's own link. Any other value is a hook path: a
+module path and a function name joined by `.`, naming a `#On(build.link)`
+function for `link` and `#On(build.before_write)` functions for `post_link`.
+A profile writes `link: tools.relink` and `post_link: [tools.sign]`, unquoted;
+`build: fn` writes `b.link(tools.relink)` (`b.link(.Default)` for the stock)
+and `b.post_link([tools.sign])`; the flags write `--link=tools.relink` and
+one `--post-link=tools.sign` per step. A value that is no hook path, such as
+`--link=relink`, is refused with E2104. `jet run`, `jet test` and `jet dev`
+link their image in memory, and `jet build` runs no link hook yet, so every
+command refuses a hook in either row with E2104.
+
 ### Language server
 
 `jet self lsp` speaks JSON-RPC over standard input and output. It uses the same

@@ -965,10 +965,10 @@ jet_cli_flag_rows: fn() -> [JetCLIFlagSpec] Never! {
 }
 
 // How a build option's flag is written: a Bool row with no third value
-// (`--small`, `--small=false`) is Bool, a List row one flag per item, any
-// other row one value (`--bounds=off`, `--debug-info=split`).
+// (`--small`, `--small=false`) is Bool, a List or Hooks row one flag per
+// item, any other row one value (`--bounds=off`, `--debug-info=split`).
 jet_cli_build_option_value: fn(option: BuildOptionRow) -> JetCLIFlagValue Never! {
-    if option.kind == .List -> return JetCLIFlagValue.Repeated
+    if build_option_listed(option) -> return JetCLIFlagValue.Repeated
     if option.kind == .Bool && option.values.len() == 2 -> return JetCLIFlagValue.Bool
     JetCLIFlagValue.Value
 }

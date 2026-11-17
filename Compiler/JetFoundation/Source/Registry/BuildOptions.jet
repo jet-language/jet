@@ -20,7 +20,12 @@
 // one value, its items joined by newlines (build_options_list). A Duration
 // value is a positive Time literal written the same way everywhere
 // (`action_timeout: 10min`, `--action-timeout=10min`,
-// `b.action_timeout(10min)`), whole milliseconds or more.
+// `b.action_timeout(10min)`), whole milliseconds or more. A Hook value is
+// `default` or the path of a hook function, its module and its name
+// (`link: tools.relink`, `--link=tools.relink`, `b.link(tools.relink)`;
+// `b.link(.Default)` writes default). A Hooks value is hook paths
+// (`post_link: [tools.sign]`, `b.post_link([tools.sign])`), one flag per
+// item, kept as a List value is.
 BuildOptionKind: enum {
     Choice,
     Level,
@@ -28,6 +33,8 @@ BuildOptionKind: enum {
     Text,
     List,
     Duration,
+    Hook,
+    Hooks,
 }
 
 BuildOptionRow: struct {
@@ -116,6 +123,17 @@ JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
     // How long one build step (`b.run`) may run before it is stopped and the
     // build fails; a step's own `.timeout(...)` replaces it for that step.
     {name: "action_timeout", kind: BuildOptionKind.Duration, values: [String]{}, stock_build: "30s", stock_run: "30s", removes_check: [String]{}, help: "How long one build step may run, such as 10min"},
+    // The link step of each executable `jet build` writes: default is Jet's
+    // own link, and a hook path names a `#On(build.link)` function whose
+    // build action links the image instead. A run, a test and `jet dev` link
+    // their image in memory, and `jet build` doesn't run a link hook yet, so
+    // any other value is refused (E2104).
+    {name: "link", kind: BuildOptionKind.Hook, values: [String]{"default"}, stock_build: "default", stock_run: "default", removes_check: [String]{}, help: "The link step of each executable: default, or a link hook such as tools.relink"},
+    // The steps `jet build` runs on each linked executable, in order: each
+    // names a `#On(build.before_write)` function whose build action turns the
+    // linked file into the one written. It runs none yet, so a non-empty
+    // value is refused (E2104).
+    {name: "post_link", kind: BuildOptionKind.Hooks, values: [String]{}, stock_build: "", stock_run: "", removes_check: [String]{}, help: "The hooks run on each linked executable, in order, such as tools.sign"},
 } }
 
 // The runtime exports of the checked heap (JetRuntime Alloc.jet): its link
@@ -501,18 +519,36 @@ build_option_level_flags_text: fn(row: BuildOptionRow) -> String Never! {
 
 // A value as a `build: fn` argument: `min_size` -> `.MinSize` for a Choice
 // row, `O2` -> `.O2` for a Level row, `false` as it is for a Bool row,
-// `"dist"` for a Text row and `["z", "bz2"]` for a List row.
+// `"dist"` for a Text row, `["z", "bz2"]` for a List row, `tools.relink`
+// (`.Default` for default) for a Hook row and `[tools.sign]` for a Hooks row.
 build_option_argument: fn(row: BuildOptionRow, value: String) -> String {
+    if row.kind == BuildOptionKind.Hook && value == BUILD_OPTION_HOOK_DEFAULT -> return ".Default"
     if row.kind == {
-        .Bool | .Duration -> value.copy()
+        .Bool | .Duration | .Hook -> value.copy()
         .Text -> "\"{value}\""
         .List -> {
             items := [String]{}
             loop item in build_option_items(value) -> items.push("\"{item}\"")
             "[{items.join(", ")}]"
         }
+        .Hooks -> "[{build_option_items(value).join(", ")}]"
         .Choice | .Level -> ".{sema_casing_pascal_words(value)}"
     }
+}
+
+// The Hook value that keeps Jet's own step.
+BUILD_OPTION_HOOK_DEFAULT: "default"
+
+// Whether `value` is a hook path: a module path and a function name, each a
+// name of letters, digits and `_` not starting with a digit, joined by `.`
+// (`tools.relink`, `build.tools.relink`).
+build_option_hook_path: fn(value: String) -> Bool Never! {
+    value.contains(".") && log_filter_module(value)
+}
+
+// Whether a row's value is items, one flag per item: a List or Hooks row.
+build_option_listed: fn(row: BuildOptionRow) -> Bool Never! {
+    row.kind == BuildOptionKind.List || row.kind == BuildOptionKind.Hooks
 }
 
 // The row value a `build: fn` argument `.Variant` spells, if any.
@@ -526,14 +562,17 @@ build_option_value_of_variant: fn(row: BuildOptionRow, variant: String) -> Strin
 }
 
 // Whether `value` is a value of `row`: one of its spellings for a Choice,
-// Level or Bool row, any one-line text for a Text row, and items none of
-// which is empty for a List row.
+// Level or Bool row, any one-line text for a Text row, items none of which
+// is empty for a List row, `default` or a hook path for a Hook row, and
+// hook paths for a Hooks row.
 build_option_accepts: fn(row: BuildOptionRow, value: String) -> Bool Never! {
     if row.kind == {
         .Choice | .Level | .Bool -> row.values.contains(value)
         .Text -> !value.contains("\n")
         .List -> !build_option_items(value).contains("")
         .Duration -> build_option_duration_ms(value) != None
+        .Hook -> value == BUILD_OPTION_HOOK_DEFAULT || build_option_hook_path(value)
+        .Hooks -> !build_option_items(value).any(fn(item) { !build_option_hook_path(item) })
     }
 }
 
@@ -580,6 +619,8 @@ build_option_value_hint: fn(row: BuildOptionRow) -> String Never! {
         .Text -> "a path or other text"
         .List -> "one item per flag"
         .Duration -> "a positive duration such as 10min, 90s or 500ms"
+        .Hook -> "default or a hook path such as tools.relink"
+        .Hooks -> "one hook path such as tools.sign per flag"
     }
 }
 
@@ -590,15 +631,23 @@ build_option_profile_hint: fn(row: BuildOptionRow) -> String Never! {
         .Text -> "a string"
         .List -> "a list of strings, none empty"
         .Duration -> "a positive Time literal such as 10min"
+        .Hook -> "default or a hook path such as tools.relink"
+        .Hooks -> "a list of hook paths such as [tools.sign]"
     }
 }
 
 // `one of .Fatal, .Report or .Off`: the values as `build: fn` writes them; for
-// a Text or List row, the shape of its argument.
+// a Text, List, Duration, Hook or Hooks row, the shape of its argument.
 build_option_variants_text: fn(row: BuildOptionRow) -> String Never! {
     if row.kind == BuildOptionKind.Text -> return "a string literal"
     if row.kind == BuildOptionKind.List -> return "a list literal of strings"
     if row.kind == BuildOptionKind.Duration -> return "a positive Time literal such as `10min`"
+    if row.kind == BuildOptionKind.Hook {
+        return "`.Default` or a hook function such as `tools.relink`"
+    }
+    if row.kind == BuildOptionKind.Hooks {
+        return "a list literal of hook functions such as `[tools.sign]`"
+    }
     words := [String]{}
     loop value in build_option_method_values(row) -> words.push(build_option_argument(row, value))
     "one of {build_option_join(words)}"
@@ -724,11 +773,11 @@ build_option_flags: fn(argv: [String]) -> BuildOptionsResolved Never! {
             bare -> "true"
             else -> argument.slice(flag.len() + 1..<argument.len())
         }
-        if !build_option_accepts(row, value) || (row.kind == BuildOptionKind.List && value == "") {
+        if !build_option_accepts(row, value) || (build_option_listed(row) && value == "") {
             return BuildOptionsResolved.Refused{code: "E2104", what: "`{argument}` isn't a value of `{row.name}`", fix: "write `{flag}=<value>` with {build_option_value_hint(row)}"}
         }
-        // Each flag of a List row is one more item.
-        if row.kind == BuildOptionKind.List {
+        // Each flag of a List or Hooks row is one more item.
+        if build_option_listed(row) {
             merged := false
             loop at in 0..<flags.len() {
                 if flags[at].name != row.name -> next
@@ -814,6 +863,17 @@ build_options_resolve: fn(command: String, profile: String, written: [BuildOptio
         if !word.starts_with("-") && word.ends_with(".a") -> next
         return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(link_args)} passes `{word}`, and the native linker takes only `-L<dir>`, `-l<name>` and `.a` archive paths", fix: "drop `{word}`, or name the library or archive it links"}
     }
+    // A run, a test and `jet dev` link their image in memory, and `jet build`
+    // runs no link hook yet: each keeps Jet's own link and writes the image
+    // it links.
+    link: build_option_index("link")
+    if values[link].value != BUILD_OPTION_HOOK_DEFAULT {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[link])} names a link hook, and `jet {command}` links every image itself: it runs no link hook", fix: "drop it, or write `link: default`"}
+    }
+    post_link: build_option_index("post_link")
+    if values[post_link].value != "" {
+        return BuildOptionsResolved.Refused{code: "E2104", what: "{build_option_place(values[post_link])} names steps to run on each linked executable, and `jet {command}` runs none: it writes the image it links", fix: "drop it"}
+    }
     BuildOptionsResolved.Resolved{options: BuildOptions{command: command, profile: profile, written: written, values: values}, notes: notes}
 }
 
@@ -858,4 +918,50 @@ BUILD_REUSE_SAVED_WORK: false
 
 #Test("no command reuses work an earlier run saved") {
     assert(!BUILD_REUSE_SAVED_WORK)
+}
+
+#Test("a link row takes default or a hook path, and a command refuses a hook it doesn't run") {
+    link: build_option_row("link") ?? panic("no `link` row")
+    assert(build_option_accepts(link, "default"))
+    assert(build_option_accepts(link, "tools.relink"))
+    assert(!build_option_accepts(link, "relink"))
+    assert(!build_option_accepts(link, "tools..relink"))
+    assert_eq(build_option_argument(link, "default"), ".Default")
+    assert_eq(build_option_argument(link, "tools.relink"), "tools.relink")
+    assert_eq(build_options_value(build_options_stock("build"), "link"), "default")
+    post_link: build_option_row("post_link") ?? panic("no `post_link` row")
+    hooks: build_option_list_value([String]{"tools.sign", "tools.notarize"})
+    assert(build_option_accepts(post_link, ""))
+    assert(build_option_accepts(post_link, hooks))
+    assert(!build_option_accepts(post_link, "default"))
+    assert_eq(build_option_argument(post_link, hooks), "[tools.sign, tools.notarize]")
+    if build_option_flags([String]{"--post-link=tools.sign", "--post-link=tools.notarize"}) == {
+        .Resolved(given, _) -> {
+            assert_eq(given.written.len(), 1)
+            assert_eq(given.written[0].value, hooks)
+            if build_options_resolve("build", "", given.written) == {
+                .Resolved(_, _) -> { panic("`jet build` took a post_link hook it doesn't run") }
+                .Refused(code, what, _) -> {
+                    assert_eq(code, "E2104")
+                    assert(what.contains("`--post-link=tools.sign --post-link=tools.notarize` names steps"))
+                }
+            }
+        }
+        .Refused(_, what, _) -> panic(what)
+    }
+    if build_option_flags([String]{"--link=tools.relink"}) == {
+        .Resolved(given, _) -> {
+            if build_options_resolve("run", "", given.written) == {
+                .Resolved(_, _) -> { panic("`jet run` took a link hook") }
+                .Refused(_, what, _) -> {
+                    assert(what.contains("`--link=tools.relink` names a link hook, and `jet run` links every image itself"))
+                }
+            }
+        }
+        .Refused(_, what, _) -> panic(what)
+    }
+    if build_option_flags([String]{"--link=relink"}) == {
+        .Resolved(_, _) -> { panic("`--link=relink` names no module") }
+        .Refused(code, _, _) -> assert_eq(code, "E2104")
+    }
 }

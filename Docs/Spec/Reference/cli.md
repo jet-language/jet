@@ -643,6 +643,11 @@ none is E2102 too, never ignored: a switch takes no `=value`
   a named output; `--small` favors a smaller binary; `--checked-alloc` on
   `build`, `run` and `test` links the checked memory allocator, which stops at
   a bad free or a write after free.
+- `--link=<hook>` names the link step of each executable `build` writes
+  (`default` is Jet's own link), and each `--post-link=<hook>` adds one step
+  run on the linked executable; a hook is a module path and a function name,
+  such as `tools.relink`. No command runs a hook yet, so either flag with a
+  hook is refused with E2104.
 - `--json`, `--quiet`, `--color`, and `--verbose` select output detail.
 - `--watch`, `--docs`, `--coverage`, `--where`, and `--capture`
   control test or development execution; `--browser` selects browser engines;

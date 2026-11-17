@@ -24,7 +24,6 @@ use {
     ]
     jet_foundation.[
         BuildOptionChoice,
-        BuildOptionKind,
         BuildOptionLayer,
         BuildOptions,
         BuildSettingOverride,
@@ -35,6 +34,7 @@ use {
         build_options_check_removals,
         build_option_flag_row,
         build_option_flags,
+        build_option_listed,
         build_option_level_of_flag,
         build_option_profile_hint,
         build_option_refusal,
@@ -1521,7 +1521,7 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
                 }
                 row: build_option_row(field.name) ?? next
                 shown: if field.list -> build_option_argument(row, field.value) else -> field.value.copy()
-                if field.list != (row.kind == BuildOptionKind.List) || !build_option_accepts(row, field.value) {
+                if field.list != build_option_listed(row) || !build_option_accepts(row, field.value) {
                     return JetCLIBuildOptions.Refused{plan: jet_cli_fail("E2104", "`{field.name}: {shown}` {site} isn't a value of `{field.name}`", jet_cli_why("E2104"), "write `{field.name}:` with {build_option_profile_hint(row)}", color, JET_DRIVER_EXIT_USAGE)}
                 }
                 written.push(BuildOptionChoice{name: field.name.copy(), value: field.value.copy(), layer: BuildOptionLayer.Profile, written: "{field.name}: {shown}", site: site.copy(), pinned: false})
