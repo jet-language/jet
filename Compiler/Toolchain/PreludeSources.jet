@@ -60,15 +60,16 @@ TextFile: struct {
     text: String,
 }
 
-// One copy's block: its comment, its path constant and its raw string.
+// One copy's block: its comment, its path constant and its raw string, in the
+// form `jet fmt` keeps (a blank line after the path constant).
 render_copy: fn(row: PreludeCopy, source: String) -> String PreludeSourcesError! {
     if source.contains(FENCE) {
         return Err(sources_fail("{row.source} holds ``` and cannot be a raw string"))
     }
     lines := [String]{}
     loop line in row.comment.split("\n") -> lines.push("// {line}")
-    if row.path != "" -> lines.push("{row.constant}_PATH: \"{row.path}\"")
-    Ok("{lines.join("\n")}\n{row.constant}: #run {{ {FENCE}{source}{FENCE} }}\n")
+    path: if row.path == "" -> "" else -> "{row.constant}_PATH: \"{row.path}\"\n\n"
+    Ok("{lines.join("\n")}\n{path}{row.constant}: #run {{ {FENCE}{source}{FENCE} }}\n")
 }
 
 // Every target, generated whole from `copies`, whose sources `read` holds.
@@ -141,7 +142,7 @@ run: fn() { print(prelude_sources_main(process.args()) ?? process.fail(1, err.me
     out: render_targets(copies, read) ?? panic(err.message)
     assert_eq(out.len(), 2)
     assert_eq(out[0].path, "t.jet")
-    assert_eq(out[0].text, "// First.\n// Second.\nA: #run {{ ```a: 1\n``` }}\n\n// Bee.\nB_PATH: \"jet:b.jet\"\nB: #run {{ ```b: 2\n``` }}\n")
+    assert_eq(out[0].text, "// First.\n// Second.\nA: #run {{ ```a: 1\n``` }}\n\n// Bee.\nB_PATH: \"jet:b.jet\"\n\nB: #run {{ ```b: 2\n``` }}\n")
     assert_eq(out[1].text, "// Sea.\nC: #run {{ ```a: 1\n``` }}\n")
     if render_targets(copies, [TextFile]{TextFile{path: "a.jet", text: "has ``` inside"}, TextFile{path: "b.jet", text: ""}}) == .Ok(_) {
         panic("a fence in the source must fail")
