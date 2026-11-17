@@ -6119,7 +6119,13 @@ it. When a piece asks `at_login`, `launch` installs the app's XDG autostart
 entry, its desktop entry at `{config}/autostart/{id}.desktop`, and the
 desktop starts the app when the user logs in. A launch whose graph asks no
 piece to run at login removes that entry. `every` must be positive; any
-other value panics.
+other value panics. A browser runs nothing for a page that is closed, so
+`.background` in a graph built for the web output
+(`jet build --target web`, a `#Target(Web)` file, or code pinned to
+`#Target(JS)` or `#Target(Wasm)`) is a compile error, E-APP-TARGET-FEATURE.
+On the web, the work is a server job: a service method marked
+`#App.Every(cron: …)` runs on its schedule, and an `#App.Job` method is
+work a call queues.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or

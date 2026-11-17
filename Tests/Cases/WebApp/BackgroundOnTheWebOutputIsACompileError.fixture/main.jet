@@ -1,0 +1,11 @@
+// A graph with background work: a native build runs it on a timer, and the
+// web output, where a browser runs nothing for a closed page, refuses it.
+use app
+
+// One background refresh of the board.
+refresh: fn() app.Notice! { Ok() }
+
+run: fn() {
+    _: app.new("Crewboard").background(every: 30min, run: refresh)
+    print("built the graph")
+}

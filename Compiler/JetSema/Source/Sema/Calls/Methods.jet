@@ -55,6 +55,8 @@ use jet_foundation.[
     symbol_none,
     symbol_key_text,
     symbol_table_key,
+    TTargetOS,
+    target_os_name,
     type_name,
     checked_symbol_local,
     foundation_byte_text,
@@ -1496,35 +1498,63 @@ sema_web_type_marked: fn(ty: Type, name: String, environment: SemaScopeEnvironme
 }
 
 // The App capability check for a browser feature: `.csr`, `.island` and the
-// hydration modes need target JS (a `Web` or `JS` build). The target is the
-// enclosing function's `#Target(JS|Wasm)` pin, else its file's `#Target`;
-// an unpinned function has no resolved web target yet and is not checked.
+// hydration modes need target JS (a `Web` or `JS` build); a function with no
+// resolved web target is not checked.
 sema_call_app_browser_feature: fn(receiver_value: TExpr, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
     if !sema_app_is_route_table(receiver_value.ty, environment, program) {
         return
     }
-    graph: program.registration_graph ?? return
-    row: sema_app_module_row(environment, graph)
-    if row < 0 {
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        target: sema_app_feature_target(environment, graph, function_name)
+        if target == "" || target == "JS" || target == "Web" {
+            return
+        }
+        entry: diagnostic_registry_row("E-APP-TARGET-FEATURE") ?? panic("E-APP-TARGET-FEATURE must have a registry row")
+        what: entry.what.replace("{{feature}}", method).replace("{{required}}", "JS").replace("{{target}}", target)
+        diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, entry.why, entry.fix.replace("{{feature}}", method)))
+    }
+}
+
+// The App capability check for native background work: a browser runs
+// nothing for a page that is closed, so `.background` on an app graph whose
+// resolved target is the web output is refused, never dropped, and the fix
+// names the server jobs that replace it.
+sema_call_app_native_feature: fn(receiver_value: TExpr, method: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, function_name: String, diagnostics: &[Diagnostic]) {
+    if !sema_app_is_graph(receiver_value.ty, environment, program) {
         return
     }
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        target: sema_app_feature_target(environment, graph, function_name)
+        if target == "" {
+            return
+        }
+        entry: diagnostic_registry_row("E-APP-TARGET-FEATURE") ?? panic("E-APP-TARGET-FEATURE must have a registry row")
+        what: entry.what.replace("{{feature}}", method).replace("{{required}}", "native").replace("{{target}}", target)
+        why: "A browser runs nothing for a page that is closed, so the web output has no `.{method}` work to keep; dropping it silently would lose the work."
+        fix: "Run the work on the server: a service method marked `#App.Every(cron: …)` is a server job that runs on its schedule whether or not a page is open, and `#App.Job` is one a call queues; keep `.{method}` for a native build."
+        diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, why, fix))
+    }
+}
+
+// The web target an App feature resolves to inside `function_name`: the
+// function's `#Target(JS|Wasm)` pin, else its file's `#Target` ceiling, else
+// `Web` when the file's default backend or the build's target is the web
+// output; "" for a native build that nothing pins.
+sema_app_feature_target: fn(environment: SemaScopeEnvironment, graph: SemaRegistrationGraph, function_name: String) -> String {
+    row: sema_app_module_row(environment, graph)
+    if row < 0 -> return ""
     source: graph.modules[row].program
-    target := ""
     loop item in source.items {
         if item == .Func(function) && function.name == function_name && function.web_marker == .Val(marker) {
-            target = if marker == .JS -> "JS" else -> "Wasm"
+            return if marker == .JS -> "JS" else -> "Wasm"
         }
     }
-    if target == "" && source.web_target_ceiling == .Val(bucket) {
-        target = sema_web_bucket_name(bucket)
-    }
-    if target == "" && (source.default_target ?? "") == "web" -> target = "Web"
-    if target == "" || target == "JS" || target == "Web" {
-        return
-    }
-    entry: diagnostic_registry_row("E-APP-TARGET-FEATURE") ?? panic("E-APP-TARGET-FEATURE must have a registry row")
-    what: entry.what.replace("{{feature}}", method).replace("{{required}}", "JS").replace("{{target}}", target)
-    diagnostics.push(sema_error("E-APP-TARGET-FEATURE", span, what, entry.why, entry.fix.replace("{{feature}}", method)))
+    if source.web_target_ceiling == .Val(bucket) -> return sema_web_bucket_name(bucket)
+    web: target_os_name(TTargetOS.Web)
+    if (source.default_target ?? "") == "web" || graph.build_facts.os == web -> return web
+    ""
 }
 
 // `app.images` takes each setting as literal data: the image variants are
