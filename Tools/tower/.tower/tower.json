@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111325,
+    "rev": 111350,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -31113,7 +31113,7 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nImplement D-ONE-OPERATIONS1=A (ratified 2026-09-13) in the self-hosted compiler. Author one checked operation-contract row per collection/Iter operation and derive every repeated view from it: arity and access, callback types, result types, TBuiltinOp/TClosureOp selection, docs, completion and explain. Remove the replaced tables in one cutover. Keep D-CORE-EAGER1/2=A and the LAST ties from #2298.\n\n## Current state\n- The operation facts are split across four parallel `if method == …` tables in `Compiler/JetFoundation/Source/Collections.jet`:\n  - arity and access in `sema_collection_method_contract` (`:136-282`);\n  - callback and argument types in `sema_collection_method_argument_type` (`:301-420`);\n  - result types in `sema_collection_method_result_type` (`:423-667`);\n  - operation selection in `sema_collection_method_operation` (`:669-924`).\n- Each new Iter method (#3315, #3333, #3334, #3371 and others) must currently touch all four.\n- Core call facts also live in `Compiler/JetFoundation/Source/Registry/CoreCalls.jet` (565 lines) and `CoreCallRows.jet` (2011 lines). Their consumers are `Compiler/JetSema/Source/Sema/Calls/Collections.jet`, `Compiler/JetCodegen/Source/Codegen/BuiltinMethods.jet` and `ClosureMethods.jet`, and `Compiler/JetEval/Source/Routes`.\n- The host kernels (`crates/jet-codegen/src/Prelude/Core/Collections.rs`, `Prelude/Core.jet`) are retained runtime. The rows reference them without re-describing them.\n- The archived `crates/jet-foundation/src/Collections.rs` and `Syntax/core_calls.rs` are reference only, and this card does not edit them.\n- The finding is at Docs/research/mine-for-jet-2026-09-12.md#finding-iter-f013 (READ-F02/READ-F12).\n\n## Changes\n1. `Compiler/JetFoundation/Source/Collections.jet`:\n   - Define one `CollectionOperationRow`: receiver kinds, access, arity, callback shape, result projection, TIR op, eager/lazy timing, callback count/order, stop-item consumption, failure channel, empty result, buffering, and a status of current, proposed or source-only.\n   - Author every existing operation as a row.\n   - Rewrite the four functions as lookups over the rows, then delete the `if` chains.\n2. Cut every consumer over in the same pass: JetSema `Calls/Collections.jet`, JetCodegen `BuiltinMethods.jet`/`ClosureMethods.jet` (route rows keyed from the operation row), JetEval `Routes`, and the Web/JIT route inventories in Compiler/. Remove the replaced Path, owned-adapter and inclusion inventories.\n3. Generate the Core reference operation table and the explain/completion text from the rows, through the existing `Tools/agent/gen-core-tables.mjs` pipeline.\n   - Correct the all/any teaching: empty `all` is true and empty `any` is false.\n   - Rewrite `Docs/spec/reference/core-library.md:289-320` from the generated table.\n4. Add `Examples/features/collections/operation_contract.jet` with the criteria cells. The remainder-continuation cell uses the #3315 `next`.\n5. Criteria 1-6 and 7-12 duplicate each other (the pre-retarget and retargeted wording). Closing 7-12 closes 1-6.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `node Tools/agent/gen-core-tables.mjs --check` passes.\n- `jet test Compiler --profile golden collections/operation_contract` passes on O0, O1 and O2.\n- `jet test Compiler --profile golden collections/` passes, as a regression check that every existing collections golden is unchanged.\n\n## Batch\n`batch-jetc-sema`: JetFoundation tables consumed by JetSema first, then codegen and eval.\n\n## Dependencies\n#3315 is needed only for the remainder-continuation cell and can land in the same batch. Land this row refactor first within the batch: the new-method cards (#3315, #3333, #3334, #3371, #3329, #3354) then add rows, not four table edits.",
       "checkSteps": "1. Every operation states receiver/result ownership, eager/lazy timing, callback count/order, stop-item consumption, failure channel, empty result and required buffering.\n2. Examples cover empty all/any, zero, first failure, strict/short/pad zip and continuing the remainder; source errors are not advertised as valid successes.\n3. Named current versus proposed versus source-only behavior is distinguishable; LAST ties remain pinned by#2298 and eager defaults remain D-CORE-EAGER1/2=A.",
@@ -31122,6 +31122,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -31332,13 +31337,14 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:23.748Z",
-      "updated": "2026-11-17T01:47:33.592Z",
+      "updated": "2026-11-17T01:48:11.641Z",
       "updatedBy": "Main",
       "workOrder": 44,
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 21
+      "criteriaLastN": 21,
+      "completedAt": "2026-11-17T01:48:11.641Z"
     },
     {
       "id": "c0u913de",
@@ -34434,15 +34440,20 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "**Goal.** This is the foundations wave of #3690 (W1 plus part of W2). Each foundational Core member (text, collections, math, units, time, encoding, regex, args, files/path, io/mem, portable crypto) gets exactly one meaning: its Jet body in Core/*.jet, or a declared typed provider leaf. No Rust dispatcher row, JIT shim or interpreter route may duplicate it.\n\n**Current state.**\n- `crates/jet-codegen/src/Prelude/Core.jet` (2412 lines) holds 1,814 `dispatcher_row`s. 693 are in foundation modules, and 657 of those name members the module's `source_module … owns {…}` line already gives to Jet. Those are duplicate meanings and an I9 risk.\n\n| Module | Rows | Jet-owned |\n|---|---|---|\n| math | 220 | 219 |\n| text | 137 | 137 |\n| encoding | 124 | 123 |\n| collections | 52 | 52 |\n| time | 48 | 39 |\n| files | 45 | 38 |\n| crypto | 42 | 25 |\n| regex | 20 | 19 |\n| args | 3 | 3 |\n| mem | 2 | 2 |\n\n- The remaining 36 unowned rows (crypto 17, time 9, files 7, math/encoding/regex 1 each) need either a Jet body or a leaf declaration.\n- The self-hosted routing mirror is `Compiler/JetFoundation/Source/Registry/{CoreCallRows,CoreCalls,CoreHostSignatures}.jet`, `Compiler/JetCodegen/Source/Codegen/HandleMethods.jet` and `Compiler/JetEval/Source/Routes/`.\n- From merged #3517: the text/file source attempts were reverted on 2026-09-21 because the compiler rejected private source paths. `Core/text/string.jet` is now a private source part (`crates/jet-foundation/src/CoreSourceParts.rs:30`).\n- c4 is met, but #3584 (building) now requires ALL_CAPS module constants. c7 tracks that.\n\n**Changes (one module per patch, in dependency order).**\n1. **F1 route cut, per module:** delete the Jet-owned `dispatcher_row`/`ambient_route` lines in Core.jet. Regenerate with `node Tools/agent/gen-core-tables.mjs --write`, which rewrites `CoreModuleExports.rs` and `CoreCallRows.jet`. Remove the now-dead `crates/jet-codegen/src/Prelude/CoreLib/**` functions and JIT shims. Remove matching routes in `HandleMethods.jet`/`JetEval/Source/Routes`.\n2. Order: text + collections (confirm the `Core/text` and `Core/files` private helpers check first), then encoding/regex/args, then math/units/time, then files/path/io/mem, then crypto (hands off to #3667 for seal/open semantics).\n3. For each unowned row: write the Jet body, or keep it as a typed provider leaf marked in Core source (F4 once ratified; until then the existing `source_module` leaf convention).\n4. Migrate callers/examples/goldens in the same patch. Rename module constants to ALL_CAPS (#3584).\n5. Perf: text/collections are gate cells. Rerun the matched text/collections perf cells before deleting the Rust route. A loss keeps that route and goes on a card.\n\n**Proof.**\n- The commands in add_criteria.\n- `jet test Compiler --profile cases core_surface_ledger/`: passes.\n\n**Batch.** `batch-host-runtime`: deleting Prelude CoreLib Rust rows changes the embedded dispatcher. Proof needs one compiler build and one tier-parity golden pass.\n\n**Dependencies.** Parent #3690. Crypto overlaps #3667/#3668, which own the crypto semantics. None of these block the other modules.\n",
       "checkSteps": null,
       "probe": "scripts/agent/jet-env jet check Core/crypto/crypto.jet",
       "visualMedia": [],
       "blockedBy": [],
-      "assignee": "Main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -35235,13 +35246,13 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:02.908Z",
-      "updated": "2026-11-17T01:47:35.792Z",
+      "updated": "2026-11-17T01:48:14.563Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-17T01:39:09.406Z",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 64
+      "criteriaLastN": 64,
+      "completedAt": "2026-11-17T01:48:14.563Z"
     },
     {
       "id": "c0fi6uj5",
@@ -35252,15 +35263,20 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "## Goal\nEvery system Core module declaration has a Jet body or a typed, policy-free provider leaf (c1), proven per module on O0, O1 and O2 (c3).\n\n## Open steps\n- c11: FileReader, FileWriter and FileLock become opaque provider-owned values (D-FILES-HANDLE-ABI1=A).\n- c17: sys.set returns EnvError (Core/Sys/Sys.jet declares Never! today).\n- c18: raw-byte env values, after the ballot D-ENV-RAW-BYTES1 (on Main's ballot list (2026-11-15)).\n- c19: core.os facts computed once in Core.\n- Then run CoreSurfaceLedger --check for c1 and the per-module core profile for c3.",
       "checkSteps": null,
       "probe": "scripts/agent/jet-env cargo test -p jet --test core_net_tls tls_rejects_empty_dns_labels_before_transport_on_all_tiers -- --exact --nocapture",
       "visualMedia": [],
       "blockedBy": [],
-      "assignee": "Main",
+      "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-2",
@@ -35759,13 +35775,13 @@
       "parentId": "c0u1wtj7",
       "needsAcceptance": false,
       "created": "2026-09-22T00:15:03.647Z",
-      "updated": "2026-11-17T01:47:37.107Z",
+      "updated": "2026-11-17T01:48:17.254Z",
       "updatedBy": "Main",
-      "claimedAt": "2026-11-17T01:39:13.673Z",
       "goals": [
         "G3"
       ],
-      "criteriaLastN": 19
+      "criteriaLastN": 19,
+      "completedAt": "2026-11-17T01:48:17.254Z"
     },
     {
       "id": "c0qus24o",
@@ -40690,7 +40706,7 @@
       "track": "epoch",
       "epoch": "e23",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": "Build argv selection for parameter jobs and the top-level `jet <job>` lookup in the Jet driver, then turn the jetpack_tasks rows green. Each criterion names its case.",
       "checkSteps": null,
@@ -40699,6 +40715,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-06",
           "by": "Main",
@@ -40983,12 +41004,13 @@
       "parentId": "c0a59ow3",
       "needsAcceptance": false,
       "created": "2026-09-28T15:53:06.743Z",
-      "updated": "2026-11-17T01:47:40.483Z",
+      "updated": "2026-11-17T01:48:19.764Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
       ],
-      "criteriaLastN": 21
+      "criteriaLastN": 21,
+      "completedAt": "2026-11-17T01:48:19.764Z"
     },
     {
       "id": "c0ttcd0k",
@@ -41387,7 +41409,7 @@
       "track": "epoch",
       "epoch": "e20",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P0",
       "plan": "## Goal\nOwner-directed P0 (2026-09-28, learnability report F17). Every active diagnostic reads in plain words:\n- **What** names the learner's specific problem, using the names in their code.\n- **Why** gives the reason in one or two plain sentences, with no placeholder.\n- **Fix** gives a concrete edit or command.\n- No internal vocabulary: decision IDs, constant names, \"unit\", \"source bytes\", byte offsets, key=value dumps, stage names. That material moves to `jet explain CODE --verbose` and `--json`.\n\nThe rubric is enforced so the sweep cannot regress.\n\n## Current state\n- The authority is `crates/jet-codegen/src/Prelude/Diagnostics.jet`. `Compiler/Bootstrap/generate-diagnostic-rows.mjs:9-10` generates `Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet` from it.\n- The 2026-09-28 census found 813 active rows: 218 with the placeholder Why \"The registered <stage> rule applies here\" (for example `Diagnostics.jet:7-8`, E0001/E0002), 297 whose What repeats Meaning, and 287 with decision IDs in human text.\n- E0114 (probe p08) still says \"its final statement produces no value … statements and semicolon-terminated expressions yield unit\" (`tests/ui/missing_return.stderr`, `tests/ui/total_guard_missing_value.stderr`). It is produced only in Rust (`crates/jet-sema/src/Sema/Registration.rs:969`, `CheckerCore/blocks.rs:199`); JetSema has no E0114.\n- `tests/diagnostics_format.rs` already checks row completeness and sentence case (`:13-75`), but not placeholder text or decision IDs.\n- Rows owned by other open P0 cards are sequenced first: #3715 (E0121), #3718 (authority errors) and #3719 (unclosed delimiter).\n\n## Changes\n1. **Docs.** Write the rubric into `Docs/spec/diagnostics.md`.\n2. **Validator.** Add `every_active_diagnostic_reads_in_plain_words` to `tests/diagnostics_format.rs`, and apply the same checks in `generate-diagnostic-rows.mjs` so generation fails on a violation.\n3. **Rewrite.** Rewrite the rows in `Diagnostics.jet` using disjoint code-range lanes run by `opus-worker` (Claude Opus 5.5), with one integration owner. Update the dynamic message builders in `crates/jet-parser` and `crates/jet-sema` that fill those rows, then regenerate `DiagnosticRows.jet`.\n4. **E0114.** Add E0114 to JetSema (the final-statement check in the block/return analysis) and have it name the uncovered path's condition. Mirror the path-naming in `crates/jet-sema/.../blocks.rs` for the shipped binary.\n5. **Snapshots.** Re-bless every affected UI snapshot one fixture at a time (`JET_UI_FILTER=<f> UPDATE_EXPECT=<f>`, with `UPDATE_EXPECT_REASON`). The orchestrator reviews each change as text.\n6. **Probes.** Re-run the report's Appendix A probes on a fresh build. A probe that no longer reproduces is recorded on the card.\n\n## Proof\n- `cargo test --test diagnostics_format`: all tests pass, including the new rubric test, which is the census. Log its counts on the card.\n- `cargo test --test diagnostic_snapshots ui_snapshots` and `cargo test --test diagnostic_snapshots lint_snapshots`: pass after reviewed re-blessing.\n- `JET_UI_FILTER=tests/ui/missing_return.jet cargo test --test diagnostic_snapshots ui_snapshots`: pass.\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh`: exit 0.\n- Every lane returns `Tools/agent/lane-check.sh` `CHECK OK`, and the lanes are listed on the card.\n\n## Batch\n`batch-jetc-sema`: diagnostic registry text and sema message builders, proven by the UI/format suites in one retest pass.\n\n## Dependencies\n#3715, #3718 and #3719 (all P0, ready) own overlapping rows and land first.\n",
       "checkSteps": null,
@@ -41396,6 +41418,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -42239,12 +42266,13 @@
       "parentId": "c0xnvmrf",
       "needsAcceptance": false,
       "created": "2026-09-28T17:48:29.940Z",
-      "updated": "2026-11-17T01:47:43.986Z",
+      "updated": "2026-11-17T01:48:23.690Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
       ],
-      "criteriaLastN": 85
+      "criteriaLastN": 85,
+      "completedAt": "2026-11-17T01:48:23.690Z"
     },
     {
       "id": "c0jxsy7l",
@@ -47274,7 +47302,7 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -47283,6 +47311,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -47427,11 +47460,12 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-03T11:17:39.038Z",
-      "updated": "2026-11-17T01:47:47.034Z",
+      "updated": "2026-11-17T01:48:26.284Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
-      ]
+      ],
+      "completedAt": "2026-11-17T01:48:26.284Z"
     },
     {
       "id": "c0r2z34q",
@@ -60127,7 +60161,7 @@
       "track": "epoch",
       "epoch": "e24",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -60136,6 +60170,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-11",
           "by": "Main",
@@ -60417,12 +60456,13 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-28T10:49:58.414Z",
-      "updated": "2026-11-17T01:47:49.191Z",
+      "updated": "2026-11-17T01:48:29.243Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
       ],
-      "criteriaLastN": 25
+      "criteriaLastN": 25,
+      "completedAt": "2026-11-17T01:48:29.243Z"
     },
     {
       "id": "c050uwwc",
@@ -72261,7 +72301,7 @@
       "track": "epoch",
       "epoch": "e24",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -72270,6 +72310,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -72453,9 +72498,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:06.012Z",
-      "updated": "2026-11-17T01:47:50.979Z",
+      "updated": "2026-11-17T01:48:31.919Z",
       "updatedBy": "Main",
-      "criteriaLastN": 13
+      "criteriaLastN": 13,
+      "completedAt": "2026-11-17T01:48:31.919Z"
     },
     {
       "id": "c0vhdiiv",
@@ -72788,7 +72834,7 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -72797,6 +72843,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -72931,9 +72982,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:29.864Z",
-      "updated": "2026-11-17T01:47:53.018Z",
+      "updated": "2026-11-17T01:48:34.334Z",
       "updatedBy": "Main",
-      "criteriaLastN": 14
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-17T01:48:34.334Z"
     },
     {
       "id": "c0heplig",
@@ -73872,7 +73924,7 @@
       "track": "epoch",
       "epoch": "e24",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "Step 1a of the owner-ordered speed program; the full ordered plan is the plan of #5479. c22 (precompiled checked Core and Prelude in the jet binary, ruled toolchain not cache) is the top item, owned by G11Speed-4, in slices S1-S8 listed there. Size criteria c2-c6 ride the same root fixes.",
       "checkSteps": null,
@@ -73881,6 +73933,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "Main",
@@ -74713,9 +74770,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-17T01:47:54.710Z",
+      "updated": "2026-11-17T01:48:37.489Z",
       "updatedBy": "Main",
-      "criteriaLastN": 42
+      "criteriaLastN": 42,
+      "completedAt": "2026-11-17T01:48:37.489Z"
     },
     {
       "id": "c0l7lwif",
@@ -76147,7 +76205,7 @@
       "track": "epoch",
       "epoch": "e25",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": "Hill-climbing (G13), not current. Owner 2026-11-12 evening: finish the rest of the goals before trying to get to perfect codegen. When G13 starts: the kernel catalog worked backwards from hand-written code (c15), gaps closed largest first (c35), then every cell Jet/peer < 1.00 and Jet/ceiling <= 1.00 (c22, c29). The compile-speed program lives in the plan of #5479.",
       "checkSteps": null,
@@ -76156,6 +76214,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Every criterion is met; moved criteria recorded as duplicates of their new cards and older proofs cited at dev 5bea729463 (owner order 2026-11-16)."
+        },
         {
           "at": "2026-11-15",
           "by": "TowerKeeper-1",
@@ -76896,9 +76959,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-17T01:47:55.709Z",
+      "updated": "2026-11-17T01:48:40.155Z",
       "updatedBy": "Main",
-      "criteriaLastN": 57
+      "criteriaLastN": 57,
+      "completedAt": "2026-11-17T01:48:40.155Z"
     },
     {
       "id": "c0hn7w1n",
@@ -103951,8 +104015,8 @@
       "title": "Packages extend the editor, formatter, debugger and law tests through declared hooks",
       "body": "Destination: a package that adds a block marker, a container type or an open trait also teaches the tools about it through declared hooks: editor stages, a formatter stage for block bodies, a Core DebugView trait and law tests that `jet test` runs.\n\nWhy it matters: without hooks, every package feature needs a change to the LSP, the formatter or the debugger.\n\nDecisions: D-HOOK-STAGES1=A (the compiler and tool moments packages may hook), D-HOOK-ONE1 (an unattached hook emits nothing), D-EXTEND-ARCH1=A rule 3 (laws travel with the interface), D-CORE-LAWS1. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 4.17-4.20 and 6.2.\n\nSplit from #6202.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -104012,7 +104076,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:11.055Z",
-      "updated": "2026-11-16T09:23:37.930Z",
+      "updated": "2026-11-17T01:48:10.664Z",
       "updatedBy": "Main"
     },
     {
@@ -104021,8 +104085,8 @@
       "title": "Build tools, package sources and JetOS options are package providers",
       "body": "Destination: a foreign build tool, a package registry or service preset, and a JetOS module option are each one package implementing a provider trait or declaring rows, not an edit to the build session, Jetpack or JetOS.\n\nWhy it matters: today Session.jet:664 names cmake, make, gradle, npm and cargo; Jetpack's ServicePresetKind has 43 presets and its provider list sits in four places that disagree (#6217); JetOS options render from a closed table (OptionsRendering.jet:117).\n\nDecisions: D-EXTEND-ARCH1=A, D-CORE-PROVIDER1, D-INFRA1. Design: Docs/research/2026-10-29-extensibility-every-layer.md sections 4.24, 4.25, 4.29 and 6.2 (`b.toolchain`, `b.action`, a Jetpack provider trait). Frozen cards #470 (JetOS option merge law) and #323 (JetOS option schema) cover nearby ground and are not touched.\n\nSplit from #6202.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -104173,7 +104237,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:12.098Z",
-      "updated": "2026-11-16T13:07:00.106Z",
+      "updated": "2026-11-17T01:48:13.175Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -104183,8 +104247,8 @@
       "title": "Language-review cutovers: arrow-first signatures, brace records, brace layout and one program entry form",
       "body": "Destination: the owner's 2026-11-09/11 language-review rulings are the only spellings in the repository. Signatures put the arrow first (D-SIG-ARROW1), records use braces and paren tuples retire (D-RECORD-BRACE1), commas separate data members but not bodied methods (D-BRACE-LAYOUT1), and a program is either script style or one `run: fn` entry, never mixed (owner order 2026-11-11).\n\nWhy it matters: two spellings for one thing cost every reader and every tool; AGENTS.md Greenfield cutover requires one cutover per change with every in-repository caller migrated and no teaching of the retired form.\n\nEach cutover lands with its rewrite registered in `jet fix` (D-LANG-MIGRATE1, #6068) and its syntax row, syntax-decisions.md entry and regenerated grammars in the same change.\n\nSources: #6281 c127, c150, c180 and #6251 c12, c15 (split here 2026-11-14).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -104355,7 +104419,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.039Z",
-      "updated": "2026-11-17T00:24:53.628Z",
+      "updated": "2026-11-17T01:48:16.102Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -104365,8 +104429,8 @@
       "title": "Jet has no warnings: jet fmt rewrites style, tidy errors never stop run or dev (D-NO-WARNINGS1)",
       "body": "Destination: Jet prints no warnings. A style point `jet fmt` can rewrite is rewritten and never reported; everything else that matters is an error. Tidiness errors (an unused binding, an unused import, unreachable code) never stop `jet run` or `jet dev` and are not printed there; `jet check` and `jet build` list every one and exit non-zero, so the list works as a todo list.\n\nWhy it matters: the final-return and positional-Bool lints print thousands of lines when Jet's own runtime compiles, which hides real errors.\n\nDecision: D-NO-WARNINGS1=A (ratified 2026-11-10). Related: #4624 (member liveness findings follow the same rule) and #6326 c4 (state-machine lints L0529, L0302, gated on that design).\n\nSource: #6281 c129 (split here 2026-11-14).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -104460,7 +104524,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.937Z",
-      "updated": "2026-11-16T17:33:27.334Z",
+      "updated": "2026-11-17T01:48:18.841Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -104470,8 +104534,8 @@
       "title": "Module variables belong to the main task; a task that touches one is refused (D-MODULE-VAR1)",
       "body": "Destination: a plain module variable is owned by the main task. Each function type carries its touch set (the module variables it reads or writes) as a deny-only fact; a task spawn requires an empty touch set; functions may write module variables (the E0111 function-write ban goes); borrow exclusivity holds across calls that touch the same variable.\n\nWhy it matters: module state is easy for beginners and stays race-free without locks or annotations.\n\nDecision: D-MODULE-VAR1=A (ratified 2026-11-10). Each refusal is a registered error with what/why/fix and a UI snapshot; the example runs the same at O0, O1 and O2.\n\nSource: #6281 c158 (split here 2026-11-14).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -104532,8 +104596,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:42.821Z",
-      "updated": "2026-11-15T02:29:42.821Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-17T01:48:21.273Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c09qojqz",
@@ -104541,8 +104605,8 @@
       "title": "Library promise changes show in jet check, and publish computes the minimum version (D-API-SURFACE1)",
       "body": "Destination: a package records its public promises (signatures and effects) in package.api. `jet check` reports a changed promise and tells the author to accept it; `jet registry publish` computes the minimum semantic version from the promise diff, and the author may raise it but never lower it.\n\nWhy it matters: users can trust a minor release, and a new required effect on a released function is never shipped as a patch.\n\nDecision: D-API-SURFACE1=A (ratified 2026-11-11). Related: #5459 (capability diff on dependency update).\n\nSource: #6281 c179 (split here 2026-11-14).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -104629,8 +104693,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:43.716Z",
-      "updated": "2026-11-15T04:52:43.994Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-17T01:48:25.371Z",
+      "updatedBy": "Main",
       "criteriaLastN": 7
     },
     {
@@ -104639,8 +104703,8 @@
       "title": "TLS host reads are effects: clock, entropy and CA bundle reads show in the effect row and obey denials (D-NET-HOSTREADS1)",
       "body": "Destination: every host read TLS makes (wall clock, OS entropy, CA bundle files and directories, and the other ingress leaves the review lists) is an ordinary inferred effect on the TLS and HTTP calls that reach it. A denial of FS, Rand, Env or one CA file refuses the program with the registered effect diagnostic, and a denied override never falls back to another bundle.\n\nWhy it matters: an effect row that hides host reads is a false promise; a sandboxed HTTPS client must be able to deny entropy or its CA file and know it holds.\n\nDecision: D-NET-HOSTREADS1=A (ratified 2026-11-12), with its adversarial review (sol-reviewer, 2026-11-11). Probes: the seed-b5 probes (a local HTTPS client denying FS, Rand and Env; a scoped denial of its CA file; a server denying Rand).\n\nSource: #6615 c12, c14, c15 (split here 2026-11-15). Related: #3418 (one effect-policy model).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -104710,8 +104774,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:45:50.027Z",
-      "updated": "2026-11-15T02:45:50.027Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-17T01:48:27.747Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0rwl15m",
@@ -104719,8 +104783,8 @@
       "title": "Typed data loaders: deterministic snapshots, exact invalidation, no leaked credentials",
       "body": "Destination: a typed data loader (`file<T>(path, format, limits)` and the archive, parameter and provider forms) yields one canonical snapshot with provenance and schema identity, is invalidated by exactly its inputs, and never exposes credential-sensitive metadata.\n\nWhy it matters: notebooks, apps and data scripts all read data through loaders; a loader that caches wrongly or leaks a credential into public state breaks every one of them.\n\nDecisions: D-DATA-READER1=A (Arrow reader behind the format boundary), D-COLUMNAR-BOUNDARY1. Spec: Docs/spec/core-library.md (data loaders). Related: #5968 (dataframes), #6619 (notebook).\n\nSource: #5985 c9-c12 (archived #2448 c1-c4, re-added by the 2026-11 precut audit as unproven).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -104780,8 +104844,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:49:13.746Z",
-      "updated": "2026-11-15T02:49:13.746Z",
-      "updatedBy": "TowerKeeper-1"
+      "updated": "2026-11-17T01:48:30.772Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c07b6pyn",
@@ -104955,8 +105019,8 @@
       "title": "Endpoints: one checked contract drives dispatch, the typed client, schema, form and OpenAPI",
       "body": "Destination: an endpoint is declared once (a marked method or route) and its contract derives dispatch, the typed client, the JSON schema, the form and the OpenAPI document; all of them agree with an independent HTTP client.\n\nWhy it matters: hand-kept clients and schemas drift from the server; one derived contract removes that whole class of bug.\n\nDecisions: D-ENDPOINT-SHAPE1=A (contracts derived from typed handlers), D-ROUTE-ONE1=A, D-HTTP-ROUTE-EXPOSE1=A (route markers on struct methods, added with one call), D-FOUND-COREAPI1, D-WEBAPP-SHAPE1=A.\n\nSource: #6552 c20, c28, c29, c34 (from archived #2962, #3304, #2852). Parent: #6552.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -105080,7 +105144,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:52:16.627Z",
-      "updated": "2026-11-16T13:07:10.752Z",
+      "updated": "2026-11-17T01:48:33.401Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -105177,8 +105241,8 @@
       "title": "Offline write queue: request keys, row versions, shared tabs, session expiry and refused-write notices",
       "body": "Destination: an app's writes made offline are queued, replayed exactly once, never conflict with the device's own earlier edits, survive tabs and session expiry, and a refused write is never lost silently.\n\nWhy it matters: local-first apps (Linear, Convex) win on writes that just work offline; a queue that double-applies, conflicts with itself or drops a refusal loses user data.\n\nDecisions: D-SYNC2=A (typed local collections that work offline and sync), D-SYNC1=A (CRDT values), D-WEBAPP-SHAPE1=A (shape: Docs/proposals/2026-11-13-web-app-framework-shape.md). Gaps K1 come from the #6792 review round 2.\n\nSource: #3709 c6, c11, c14-c17, c23, c26. Parent: #3709.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -105334,7 +105398,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:54:09.432Z",
-      "updated": "2026-11-16T21:13:03.791Z",
+      "updated": "2026-11-17T01:48:35.813Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -105622,8 +105686,8 @@
       "title": "Lists edited in place: retain, drain, extract_if, splice and fixed-array init",
       "body": "Destination: Core List edits in place with exact ownership: retain keeps only some items without a new list, drain, extract_if and splice own their ranges even when dropped early, a live drain excludes other access, and fixed arrays initialize slot by slot.\n\nWhy it matters: ports of Vec::retain, drain and splice otherwise allocate a second list or do quadratic removes, and an early-dropped drain that leaves the list half-edited is a silent data bug.\n\nDecisions: D-LIST-RETAIN1=A, D-ARRAY-INIT1=A. Spec: Docs/spec/core-library.md (List). The frozen #4412 holds the original retain and dedup items.\n\nSource: #5976 c1, c83-c88 (archived #3371).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
@@ -105701,7 +105765,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:05.786Z",
-      "updated": "2026-11-16T13:07:26.942Z",
+      "updated": "2026-11-17T01:48:39.016Z",
       "updatedBy": "Main"
     },
     {
@@ -105710,8 +105774,8 @@
       "title": "Borrowed views over collections: [View<T>] results, chunks and windows, loans that cannot escape",
       "body": "Destination: selections and iteration over a collection (top-k, filters, groups, chunks, windows, text splits) can work through views that read or mutate the live storage without copying it, keep the source's provenance, and cannot outlive or survive an invalidating change to their source.\n\nWhy it matters: copying move-only records to rank or walk them is wrong (they cannot be copied) and slow; a view that outlives its source is a memory-safety hole.\n\nDecisions: D-MEM-COPYSEM1 (semantic copy for default read views), D-ITER-BORROW1=A, D-ITER-SLICEPRODUCERS1=A, D-ITER-MAPOWN1=A, D-ITER-VIEWCOLLECT1=A. Related: #3317 (iterator capabilities).\n\nSource: #5976 c69, c70, c72 (archived #3041 c2-c5; option A of its ballot); #3317 c25-c35 (archived #3318, #3340, #3359, #3391, #3393).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -105862,7 +105926,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:06.731Z",
-      "updated": "2026-11-16T13:07:38.148Z",
+      "updated": "2026-11-17T01:48:41.640Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -105872,8 +105936,8 @@
       "title": "Map upsert in one hash lookup, with one spelling",
       "body": "Destination: Map has one method that inserts or updates a value in one hash lookup (the counter idiom `counts[k] += 1` without a second lookup), chosen by ballot.\n\nWhy it matters: today Map.update takes an entries argument (a merge), so an upsert costs two lookups and every port writes it differently.\n\nSource: #5976 c63, c64, c66 (archived #1886).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -105915,7 +105979,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:07.715Z",
-      "updated": "2026-11-16T13:07:39.209Z",
+      "updated": "2026-11-17T01:48:43.162Z",
       "updatedBy": "Main"
     },
     {
@@ -105924,8 +105988,8 @@
       "title": "core.time: one now, one sleep, one format-pattern meaning, and time zone data",
       "body": "Destination: Core time has one Instant identity for now(), one sleep that takes a Duration, one meaning for date and time format patterns, and time zone and calendar data with exact DST behavior.\n\nWhy it matters: two sleeps (one unit-less) and two pattern meanings are the classic source of off-by-1000 and wrong-hour bugs.\n\nDecisions: D-TIME-FORMAT-CANONICAL1=A, D-CORE-ONE-NAME1=A.\n\nSource: #5976 c48, c49, c50.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -105994,7 +106058,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:08.645Z",
-      "updated": "2026-11-16T13:07:44.005Z",
+      "updated": "2026-11-17T01:48:44.683Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -217946,6 +218010,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:48:44.684Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0blttm0",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:43.162Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w8b7vb",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:41.641Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fyhb2p",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:40.155Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0i891tv",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:39.016Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00bn0zc",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:37.490Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08r6ogl",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:35.813Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m0czk2",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:34.334Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vqsfl8",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:33.401Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0sf9ixl",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:31.919Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x9nq8j",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:30.772Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0rwl15m",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:29.244Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wi8ere",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:27.747Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06r93ai",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:26.284Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jd9jl3",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:25.371Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c09qojqz",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:23.691Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0o8f1p4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:21.273Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uxxmpm",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:19.765Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c077ihdp",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:18.842Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gbe4aj",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:17.254Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fi6uj5",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:16.102Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01gyy9b",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:14.564Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c03ai7mm",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:13.175Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ho9o8j",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:48:11.642Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l0ygs4",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T01:48:10.664Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00fktgk",
+      "note": "track,epoch"
+    },
     {
       "at": "2026-11-17T01:48:08.776Z",
       "by": "Main",
