@@ -42,7 +42,7 @@
     |
   8 |     _rows: scope.query(text)
     |                        ^^^^
- Why: Interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Why: `SQL` is checked text, built only from a checked literal whose `{value}` holes its `CheckedText` impl encodes, so untrusted text can&#39;t change its meaning
  Fix: Write `SQL{&quot;...&quot;}` with `{value}` holes, or use `SQL.raw(&quot;…&quot;)` if you have audited the text
 More: jet-lang.dev/e/E0149
 
@@ -51,7 +51,7 @@ Error [jet.RuntimeStringAsCheckedText]: A runtime `String` can&#39;t be used as 
     |
   9 |     _one: scope.query_one(text)
     |                           ^^^^
- Why: Interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Why: `SQL` is checked text, built only from a checked literal whose `{value}` holes its `CheckedText` impl encodes, so untrusted text can&#39;t change its meaning
  Fix: Write `SQL{&quot;...&quot;}` with `{value}` holes, or use `SQL.raw(&quot;…&quot;)` if you have audited the text
 More: jet-lang.dev/e/E0149
 
@@ -60,7 +60,7 @@ Error [jet.RuntimeStringAsCheckedText]: A runtime `String` can&#39;t be used as 
     |
  10 |     _changed: scope.execute(text)
     |                             ^^^^
- Why: Interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Why: `SQL` is checked text, built only from a checked literal whose `{value}` holes its `CheckedText` impl encodes, so untrusted text can&#39;t change its meaning
  Fix: Write `SQL{&quot;...&quot;}` with `{value}` holes, or use `SQL.raw(&quot;…&quot;)` if you have audited the text
 More: jet-lang.dev/e/E0149
 
@@ -69,7 +69,7 @@ Error [jet.RuntimeStringAsCheckedText]: A runtime `String` can&#39;t be used as 
     |
  11 |     _live: scope.live(text)
     |                       ^^^^
- Why: Interpolating untrusted text into a query or page is how injection happens; only a checked literal (its `{value}` holes become bound parameters or escaped insertions) may build one
+ Why: `SQL` is checked text, built only from a checked literal whose `{value}` holes its `CheckedText` impl encodes, so untrusted text can&#39;t change its meaning
  Fix: Write `SQL{&quot;...&quot;}` with `{value}` holes, or use `SQL.raw(&quot;…&quot;)` if you have audited the text
 More: jet-lang.dev/e/E0149
 </pre>
