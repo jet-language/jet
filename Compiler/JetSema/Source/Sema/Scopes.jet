@@ -234,6 +234,10 @@ SemaCallSiteDetail: struct {
     // this call to a local, a parameter or nothing, so a `jet fix` rename
     // wouldn't call the replacement.
     replacement_hidden: Bool{false},
+    // The declared callee is `#Deprecated(inline: true)`: the edit that puts
+    // its body in place of this call (sema_lifecycle_inline_edit), None when
+    // that could change what the call does.
+    lifecycle_inline: TextEdit?{None},
     // The call is in a hole table's header, which runs once per arm tried:
     // the effect phase reports it when the callee has an effect (E0442),
     // with this fix, unless the call was already reported for a change.
@@ -260,7 +264,7 @@ sema_call_site_detail_of: fn(detail: SemaCallSiteDetail) -> SemaCallSiteDetail? 
     if detail.foreign_effect_root != None || detail.foreign_opaque || detail.unsafe_foreign_name != None || detail.audited_operation || detail.foreign_capability != None || detail.lifecycle != None {
         return Val(detail)
     }
-    if detail.replacement_hidden || detail.shared_lifetime != None || detail.shared_member != "" || detail.shared_source != "" || detail.intrinsic_api != None || detail.runtime_export != None || detail.operator != None || detail.hole_header != None {
+    if detail.replacement_hidden || detail.lifecycle_inline != None || detail.shared_lifetime != None || detail.shared_member != "" || detail.shared_source != "" || detail.intrinsic_api != None || detail.runtime_export != None || detail.operator != None || detail.hole_header != None {
         return Val(detail)
     }
     None

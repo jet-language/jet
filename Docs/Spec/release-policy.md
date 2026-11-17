@@ -67,6 +67,14 @@ removal edition is the final delta.
    The warning carries the replacement, and `jet fix` performs the plain
    replacement rename. For a qualified replacement such as `cbor.to_bytes`,
    the edit replaces the used member with `to_bytes`.
+   A function whose one-expression body is its replacement adds
+   `inline: true`: `jet fix` then replaces each call with that body, each
+   argument written where its parameter is read, and never renames the call.
+   An argument other than a name or literal must be read exactly once, before
+   the body calls anything, and in the order the arguments are written, so it
+   still runs once and in order; every other name the body uses must mean the
+   same at the call. A call that fails any of these gets no edit, and L2001
+   says to edit it by hand.
 3. `removed_in:` is dormant until editions own removal. Before that edition it
    affects only warning text; at or after it, use becomes E2002 and names the
    replacement. Without `removed_in:`, the item remains warning-only.

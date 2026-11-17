@@ -23,29 +23,38 @@ structure_lifecycle_require: fn(ok: Bool, message: String) Never! {
     span: Span{start: 10, end: 13}
     // One language edition: a `since:` label later than the package edition
     // still deprecates the use; only a reached removal edition is an error.
-    sema_lifecycle_record(payload, None, false, "early.jet", span, "2026", result, seen)
+    sema_lifecycle_record(payload, None, false, false, None, "early.jet", span, "2026", result, seen)
     structure_lifecycle_require(result.facts.len() == 1 && result.facts[0].status == "deprecated" && result.diagnostics.len() == 1, "a later since label still records a deprecated fact and its warning")
-    sema_lifecycle_record(payload, None, false, "deprecated.jet", span, "2027", result, seen)
+    sema_lifecycle_record(payload, None, false, false, None, "deprecated.jet", span, "2027", result, seen)
     structure_lifecycle_require(result.facts[1].status == "deprecated" && result.diagnostics.len() == 2, "the since edition keeps the migration warning")
     structure_lifecycle_require(result.facts[1].detail == "since 2027; use `cbor.to_bytes`; removed in 2028", "detail retains the complete marker payload")
     expected_edit: TextEdit{span: span, new_text: "to_bytes"}
     structure_lifecycle_require(result.diagnostics[1].edit == Val((expected_edit)), "fix replaces only the member leaf")
-    sema_lifecycle_record(payload, None, false, "removed.jet", span, "2028", result, seen)
+    sema_lifecycle_record(payload, None, false, false, None, "removed.jet", span, "2028", result, seen)
     structure_lifecycle_require(result.facts[2].status == "removed" && result.diagnostics[2].severity == DIAGNOSTIC_ERROR, "removed edition records its fact and error")
-    sema_lifecycle_record(payload, None, false, "removed.jet", span, "2028", result, seen)
+    sema_lifecycle_record(payload, None, false, false, None, "removed.jet", span, "2028", result, seen)
     structure_lifecycle_require(result.facts.len() == 3 && result.diagnostics.len() == 3, "one checked site has one fact and diagnostic")
     semantic: CoreMarkerApplication{member: "old", since: "1.2", replacement: "replacement", removed_in: None}
-    sema_lifecycle_record(semantic, None, false, "semver.jet", span, "2026", result, seen)
+    sema_lifecycle_record(semantic, None, false, false, None, "semver.jet", span, "2026", result, seen)
     structure_lifecycle_require(result.facts[3].status == "deprecated" && result.facts[3].detail == "since 1.2; use `replacement`", "semantic versions are retiring independent of edition")
     structure_lifecycle_require(!sema_lifecycle_edition_label("20x7") && sema_lifecycle_edition_label(" 2027 "), "edition labels use the Rust trimmed four-ASCII-digit grammar")
     // A replacement that doesn't take the same call is no rename: no edit,
     // and the Fix says to edit the use by hand.
-    sema_lifecycle_record(semantic, Val(false), false, "hand.jet", span, "2026", result, seen)
+    sema_lifecycle_record(semantic, Val(false), false, false, None, "hand.jet", span, "2026", result, seen)
     hand: result.diagnostics[result.diagnostics.len() - 1]
     structure_lifecycle_require(hand.edit == None && hand.fix.contains("by hand") && !hand.fix.contains("run `jet fix`"), "a changed call offers no `jet fix` rename")
     // A same-call rename whose name doesn't refer to the replacement at this
     // use (a local takes it, or nothing has it): no edit, and the Fix says why.
-    sema_lifecycle_record(semantic, Val(true), true, "hidden.jet", span, "2026", result, seen)
+    sema_lifecycle_record(semantic, Val(true), true, false, None, "hidden.jet", span, "2026", result, seen)
     hidden: result.diagnostics[result.diagnostics.len() - 1]
     structure_lifecycle_require(hidden.edit == None && hidden.fix.contains("doesn't refer to it") && !hidden.fix.contains("run `jet fix`"), "a hidden replacement offers no `jet fix` rename")
+    // `#Deprecated(inline: true)`: the call's edit is the inlined body, never
+    // the rename, and a call that can't be inlined is edited by hand.
+    inlined_edit: TextEdit{span: Span{start: 10, end: 20}, new_text: "replacement(x, 2)"}
+    sema_lifecycle_record(semantic, Val(true), false, true, Val(inlined_edit), "inline.jet", span, "2026", result, seen)
+    inlined: result.diagnostics[result.diagnostics.len() - 1]
+    structure_lifecycle_require(inlined.edit == Val((inlined_edit)) && inlined.fix.contains("put `old`'s body in place of this call"), "an inlined call's edit is its body")
+    sema_lifecycle_record(semantic, Val(true), false, true, None, "kept.jet", span, "2026", result, seen)
+    kept: result.diagnostics[result.diagnostics.len() - 1]
+    structure_lifecycle_require(kept.edit == None && kept.fix.contains("by hand") && kept.fix.contains("can't change what the call does"), "a call that can't be inlined offers no rename either")
 }

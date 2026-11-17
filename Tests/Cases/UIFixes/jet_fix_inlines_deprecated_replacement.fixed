@@ -1,0 +1,29 @@
+// `double` and `twice` retire with `inline: true`: each body is the
+// replacement. `jet fix` puts `double`'s body in place of each call, and
+// `twice`'s where its argument is a name or literal; `twice(seven())` would
+// run `seven` twice, so L2001 leaves that call to edit by hand.
+scaled: fn(a: Int, by: Int) -> Int {
+    a * by
+}
+
+#Deprecated(since: "1.2", use: "scaled", inline: true)
+double: fn(a: Int) -> Int {
+    scaled(a, 2)
+}
+
+#Deprecated(since: "1.2", use: "scaled", inline: true)
+twice: fn(a: Int) -> Int {
+    a + a
+}
+
+seven: fn() -> Int {
+    print("seven")
+    7
+}
+
+run: fn() {
+    print(scaled(4, 2))
+    print(scaled(seven(), 2))
+    print((3 + 3) * 2)
+    print(twice(seven()))
+}
