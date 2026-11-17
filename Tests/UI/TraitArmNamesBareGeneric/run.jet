@@ -1,0 +1,22 @@
+// E0305: a `Shape` value holds one instance of `Box`, and `Box<Int>` and
+// `Box<String>` are different types, so the arm spells which one it tests.
+Shape: trait {
+    area: fn(self) -> Int,
+}
+
+Box: struct<T> {
+    value: T,
+
+    impl Shape {
+        area: fn(self) -> Int { 1 }
+    }
+}
+
+size: fn(s: Shape) -> Int {
+    if s == {
+        .Box(_) -> 5
+        else -> s.area()
+    }
+}
+
+run: fn() { print(size(Box<Int>{value: 3})) }
