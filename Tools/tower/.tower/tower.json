@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111737,
+    "rev": 111744,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -54983,6 +54983,11 @@
         {
           "at": "2026-11-17",
           "by": "Main",
+          "text": "Plan (IfHole): c3a compiler.Event enum in core.compiler with the ratified payload structs plus JetFoundation COMPILER_EVENTS rows as the one list; c3b JetDriver emits parsed/imported/declared/checked/settled/emitted/finished through one sink from the registry kinds; c3c jet build --json prints one {event,data} line per event, CLI build moments through the same sink; c7 schema generated from the rows (jet inspect events --schema) plus guard compiler_event_names; c4a compiler.advanced.session().stages(), c4b --threads 1 vs 16 case; c3d #On(compiler.X|build.X) checked against the rows plus case compiler_event_one_enum; c1/c2 build.link and before/after_write hooks returning BuildAction with failure diagnostic, cases and example; c6 stage-hook runner under the comptime sandbox with a refusal code. Decision: compiler.Event carries the compiler.* and build.* session moments; fmt/lsp/test/doc tool views stay in the tool-stage table."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
           "text": "c5 needs a spelling for a library to declare a lowercase run-time hook point (module-level runtime values don't exist: E0643, E0357). Ballot to post: D-HOOK-POINT1. A: a bodyless function under a marker, #Point request: fn(r: Request) -> HookDecision<Request, Response>; calling web.request(req) is the dispatch, the compiler writes the body from the static attachments, none means no code. B: a lowercase module constant of a compile-time point type, request: event.decision_point<Request, Response>(), exempt from E0357; dispatch web.request.run(req, key: path). #On itself needs no ballot: one parse separates a .Member build condition on statements from a dotted point path on functions."
         },
         {
@@ -55115,7 +55120,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:38.986Z",
-      "updated": "2026-11-17T06:29:47.212Z",
+      "updated": "2026-11-17T06:31:43.038Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -83988,12 +83993,12 @@
         },
         {
           "n": 8,
-          "text": "A package marker refuses code with its own declared diagnostic, and `jet explain package.Name` prints that diagnostic's what/why/fix text. Proof: `jet test Compiler --profile ui --filter package_marker_own_diagnostic` and `jet test Compiler --profile cases --filter explain_package_diagnostic`.",
+          "text": "A package marker refuses code with its own declared diagnostic, and `jet explain package.Name` prints that diagnostic's what/why/fix text. Proof: `jet test Compiler --profile ui --filter PackageMarkerOwnDiagnostic` and `jet test Compiler --profile cases --filter explain_package_diagnostic`.",
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "dev 48aa519ddf: jet test Compiler --profile ui --filter package_marker_own_diagnostic PASS and --profile cases --filter explain_package_diagnostic PASS on the p248 batch compiler.",
-          "at": "2026-11-17T06:24:22.564Z"
+          "evidence": "dev 48aa519ddf + 732af2563f: jet test Compiler --profile ui --filter PackageMarkerOwnDiagnostic PASS on the p249 batch compiler; --profile cases --filter explain_package_diagnostic PASS on p248.",
+          "at": "2026-11-17T06:34:39.156Z"
         },
         {
           "n": 9,
@@ -84017,7 +84022,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:41.377Z",
-      "updated": "2026-11-17T06:25:52.386Z",
+      "updated": "2026-11-17T06:34:39.156Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -92139,105 +92144,6 @@
       "criteriaLastN": 6
     },
     {
-      "id": "c0kbej10",
-      "num": 6663,
-      "title": "Retired Rust test assertions with no Jet home: target dossier lens and a sema fuzz differential runner",
-      "body": "From #6096 c72 (PortsLead-2 triage at 8583f858a0). (c) Jet has no dossier-lens surface; only AuditPolicy.dossier_lens exists (Compiler TargetFacts.jet:218), and the retired Rust test asserted a target dossier view. (e) fuzz_sema asserted that rustc compiles the generated Rust; that backend is retired, and the tests/fuzz/sema corpus (338 files) has no runner.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "All criteria met (Lander5 holds run on gate-p55)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A user-visible target dossier view exists (e.g. jet inspect target <name> --json) built from AuditPolicy.dossier_lens, with a case pinning its output.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "df0322ae3c (on dev). On the gate-p55 jet (tree dev 9623399213), Lander5 holds run: cases inspect_target_shows_the_machine_dossier 1/0 (jet inspect target dossier, built from AuditPolicy.dossier_lens).",
-          "at": "2026-11-14T06:44:50.305Z"
-        },
-        {
-          "n": 2,
-          "text": "A Jet runner checks every tests/fuzz/sema file differentially (jet check verdict stable, no exit 101, same verdict across o0/o1/o2 where the program runs) and is part of a jet test profile.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 6c5cbcf2f6 (G5DevX-fuzz2, the runner) and fd79906166 (G5DevX-fuzz3, the 33 stale corpus programs regenerated, 2 hand-migrated, marker_file_groups deleted, the parallel_scan cwd fix). jet test Compiler --profile fuzz rc 0: 474 rows, 472 PASS and 2 KNOWN-FAILING, with 0 lost, changed or new. Every differential file checks with jet check, has no exit 101, and gives the same verdict on o0, o1 and o2. The only #6663 rows left in tests/known-failing.tsv are c3 (E0105) and c4 (E2111).",
-          "at": "2026-11-13T05:43:47.548Z"
-        },
-        {
-          "n": 3,
-          "text": "tests/fuzz/sema/invalid/ui_external_method_field_collision.E0105.jet matches current law. Since c21adb2388 fields have their own member namespace, so a field beside an external method or an operator hook of the same name is accepted (tests/ui/external_method_field_namespace pins \"(no errors)\"). The program therefore moves to tests/fuzz/sema/valid and passes there. E0105 stays the refusal for an ordinary method beside an operator hook of the same name, and syntax-decisions.md:289 is corrected to say so. Proof: the fuzz profile passes the moved row with no #6663 known-failing row, and a ui snapshot shows the method-beside-hook E0105.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev c003cb289e (G5DevX-fuzz4): the collision program moved to tests/fuzz/sema/valid and passes (fuzz --filter valid/ui_external_method_field_namespace rc 0). jet test Compiler --profile ui --filter member_namespace_operator_hook_method PASS 1 (an ordinary method beside a Mul hook is E0105). syntax-decisions.md is corrected (a field stands in its own namespace), and no #6663 row remains in tests/known-failing.tsv.",
-          "at": "2026-11-13T05:56:00.784Z"
-        },
-        {
-          "n": 4,
-          "text": "tests/fuzz/sema/invalid/ui_gc_escape_ownership.E2111.jet is refused with E2111: a GC-managed value escaping its ownership scope. Today sema accepts it, so this is an I1 gap. Proof: the fuzz invalid row passes and a UI snapshot pins the diagnostic.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev c003cb289e (G5DevX-fuzz4): jet test Compiler --profile fuzz --filter invalid/ui_gc_escape_ownership PASS 1 (E2111; the stale corpus program now marks the function with #Policy(gc) instead of the whole file). The full jet test Compiler --profile fuzz gives 474 rows, 474 PASS, 0 FAIL and 0 KNOWN-FAILING.",
-          "at": "2026-11-13T05:56:01.775Z"
-        },
-        {
-          "n": 5,
-          "text": "tests/fuzz/sema/differential/ex_text_dates.jet line 8 prints the value the Core date arithmetic contract defines. Today it prints 5 while the .out pins 3. Settle the correct value from the Core docs and spec, fix the wrong side (Core or the pin), and pin it on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev fd79906166 (G5DevX-fuzz3): ex_text_dates line 8 prints 5 and the pin is now 5. Weekdays count from Sunday as 0, and the date is a Friday, so Core was right and the old pin of 3 was stale. core-library.md now states the weekday convention. jet test Compiler --profile fuzz passes this row on o0, o1 and o2 (in the 472 PASS).",
-          "at": "2026-11-13T05:43:48.507Z"
-        },
-        {
-          "n": 6,
-          "text": "Found 2026-11-13 (G5DevX-1, D-INSPECT-TARGET1 research): a program built for a no-OS machine that uses a capability the machine lacks is never refused. E3311 (for example \"Target wasm.no-os lacks the required Time.Wall capability\") is built and unit-tested in JetFoundation, but jet_target_machine_validate has no caller, and jet_target_machine_denied_effects is empty for every machine except the browser one. Sema refuses such a program at check and build for the selected machine with E3311 or E1123 (one mechanism), with a UI snapshot and a cross/ case per no-OS machine.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "24e18393be (on dev). On the gate-p55 jet (tree dev 9623399213), Lander5 holds run: cases --filter cross/e3311_ 3/0 (one per no-OS machine) and ui target_missing_capability_e3311 1/0: sema refuses a no-OS program that uses a capability its machine lacks, with E3311 at check and build.",
-          "at": "2026-11-14T06:44:51.459Z"
-        },
-        {
-          "n": 7,
-          "text": "D-INSPECT-TARGET1=A is the shape of c1 (ratified 2026-11-13). `jet inspect target` lists every declared machine (triple, environment, where it runs), and `jet inspect target <machine> [--json]` prints its dossier (jet.status/v1, action inspect.target). It reads no project. E3302 refuses an unknown or lens-less machine, listing the declared ones, and E2104 refuses --live/--replay. help, man and completions list it (19 goldens gain one entry), and cli.md documents it. Proof: case target_machines/inspect_target_shows_the_machine_dossier plus ui snapshots for E3302 and E2104.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main goal sweep 2026-11-13 on the batch-15 jet (gate-p20, dev 734568e5cd): jet test Compiler --profile cases --filter target_machines/inspect_target_shows_the_machine_dossier gives PASS with 0 FAIL, 0 KNOWN-FAILING and 0 ERROR (Lander5 sweep, results row in $JET_SCRATCH_ROOT/lanes/Main/sweep/results.tsv).",
-          "at": "2026-11-14T00:45:16.797Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-07T08:39:11.469Z",
-      "updated": "2026-11-14T06:45:05.068Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 7,
-      "completedAt": "2026-11-14T06:45:05.068Z"
-    },
-    {
       "id": "c0b4rnem",
       "num": 6675,
       "title": "Transpile Jet to other languages through target libraries that implement one trait (C and Rust first-party, any language by a package)",
@@ -93260,352 +93166,6 @@
       "updated": "2026-11-17T01:44:16.501Z",
       "updatedBy": "Main",
       "criteriaLastN": 16
-    },
-    {
-      "id": "c0bnp1zw",
-      "num": 6694,
-      "title": "No C: port the mbedtls that Core uses to Jet (the pinned TLS 1.2 and 1.3 set, X.509, PSA crypto)",
-      "body": "Owner order 2026-11-08: \"We need to fix the issue blocking build.jet but also need to remove the C dependencies. Start by directly porting the functions being used but we also need full coverage of the libraries that are dependencies. Ensure all are tracked.\"\n\nCore/Net/Tls.jet uses c.mbedtls (Core/Vendor/Mbedtls, 272 C and header files). Port the whole library the vendored configuration builds: TLS 1.2 and 1.3 client and server, X.509 parsing and verification, and every cipher, hash, MAC, KDF, key exchange and signature it provides (AES-GCM, ChaCha20-Poly1305, SHA-1 and SHA-2, HMAC, HKDF, ECDHE on X25519 and the NIST curves, ECDSA, RSA PKCS#1 v1.5 and PSS). Constant-time code is required where mbedtls is constant-time. Security closure (Docs/spec/contributing/security-closure.md) applies.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "Every criterion met; the last proof was ctfix-d a800437c58 on batch compiler b3."
-        },
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "Reopened by the G1/G8 fresh-context closeout review (Review1); see the reopened criteria."
-        },
-        {
-          "at": "2026-11-11",
-          "by": "Main",
-          "text": "t17a landed TlsLead-72 (e75850d064..c2cecce162): B5 part 1, the timing admission (jet_rt_timing_admit before entry, refusal with the reason on unconfirmed hosts), __timing_host, E0744 jet.FixedTimingUnconfirmedTarget and the inspect plan row. c10 closes with TlsLead-72b (core.sys.timing_host() and the c10 proof) on t18b, built on integ/seed-t17a."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "t16a landed TlsLead-68 and 69 (+69fix) (D-SECRET-CT1 B2b/B2c), TlsLead-70 (B3: the IR fixed bit and the timing.fixed lint after every pass) and TlsLead-71 (B4: the final-instruction validator for x86-64 DOIT and wasm32 CT-Wasm tables) (8327f5ae47..e75850d064). c10 stays open for B5: TlsLead-72 rides t17, and 72b follows the reseed."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "D-SECRET-CT1 B5 is split in two. TlsLead-72 (B5a, t17) adds the policy.harden host admission (jet_rt_timing_admit), the __timing_host row and runtime probe, E0744 jet.FixedTimingUnconfirmedTarget for a hardened web or wasm32 build, and the inspect `timing host:` row, which shows the program`s admission plan. TlsLead-72b (after a reseed that carries 72) adds core.sys.timing_host() and TimingHost, plus the c10 closing proof. Decision (Main, recorded as fact): `jet inspect` shows no verdict for the build host, because the compiler calling the new export would need one more reseed. The host`s verdict comes from the one runtime probe at start-up. The c10(a) case constant_time_primitives_emit_no_secret_branch_or_index passes 1/1 on the 72 compiler."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "t15a landed TlsLead-66r + 66rfix (D-SECRET-CT1 B1: the timing:/protects: tag fields and E0737, E0738, E0739) and TlsLead-67 + 67fix (B2a: total branches on timing: .Fixed values are masked; the total-method set is read from BUILTIN_METHOD_ROWS) (01b86931e7..8327f5ae47). c10 stays open: B2b/B2c (68), 69, B3 (70) and B4 (71) ride t16, and B5 (72, then 72b after a reseed) follows."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "t14a landed TlsLead-65 (53805444ba..01b86931e7): the c10a emission case parses private keys, and their secret flows are fixed. c10 stays open for D-SECRET-CT1 B1-B5 (66r, 67, 68 and 69 ride t15 and t16)."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "t12c landed (4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)): TlsLead-59r (c4 I-4b error-exit wipes), 60r (c10(a) emission coverage for RSA-PSS and core.crypto, c4 dudect rows), 62r (c10 TLS 1.2 RSA premaster under the emission case, c4 dudect rows). c4 waits for TlsLead-63 (t13a); c10 waits for part (b), D-SECRET-CT1."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "c4 review half: the confirmation pass at dev c460ba91e5 (Docs/audits/2026-11-10-core-tls-crypto-security-rereview.md, \"Confirmation 2026-11-10\") closes F-ZERO-2 and I-3, and finds no new finding in TlsLead-51. One Info residual stays open, I-4b: in ECDSA.jet sign_core, four auto-propagated errors (derive_mpi, gen_privkey for k and t, ecp_mul) skip sign_failed, leaving the private-key limbs dl and work unwiped. TlsLead fixes it as TlsLead-59. c4 is met once that lands and the dudect coverage of every secret-dependent primitive is confirmed."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "c4 re-review done (SecReview2, security-reviewer, read-only, on dev 76955986d0); the audit is committed on master as Docs/audits/2026-11-10-core-tls-crypto-security-rereview.md (db09b00e4f). F-ZERO-1, F-CT-1, F-TLS13-1, I-1, I-2 and the c14 dudect gaps are fixed; the c16 CBC/Lucky13 fix is correct. There is one new finding, F-ZERO-2 (Low): the DRBG seed is never wiped. It is c17, assigned to TlsLead3. Info residuals I-3 to I-6 do not block. c4 stays open until F-ZERO-2 lands and a reviewer confirms it."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "c4 re-review done (SecReview2, security-reviewer, read-only, on dev 76955986d0); the audit is committed on master as Docs/audits/2026-11-10-core-tls-crypto-security-rereview.md. F-ZERO-1, F-CT-1, F-TLS13-1, I-1, I-2 and the c14 dudect gaps are fixed; the c16 CBC/Lucky13 fix is correct. There is one new finding, F-ZERO-2 (Low): the DRBG seed is never wiped. It is a new criterion, assigned to TlsLead3. Info residuals I-3 to I-6 (the unwiped gcd_modinv_odd copy, the early returns in sign_core that skip the wipe, the soak depth, and the record layer being outside the emission check) do not block. c4 stays open until F-ZERO-2 lands and the reviewer confirms it."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "TlsLead-45 (audit finding I-1, the verified peer identity) and TlsLead-46 (c10(a) emission coverage: bitsliced AES, portable GHASH, HKDF, the TLS 1.3 key schedule) landed in ecf04d985a..76955986d0. TlsLead-50 (c16, the Lucky13 fixes: MAC length bound from public pre-padding length, ct_hmac wipes; dudect bad-pad |t| 1.38-1.75, negative control 8.57) landed too; c16 is met together with c15 (record layer in the emission check)."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "c11: TlsLead-41 (the close and release wipe) landed in ecf04d985a. It is met once TlsLead-41b (the failed-handshake release and its loopback #Test, in train 6) lands too."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "c10 part (a) is done. TlsLead-36 (the emission-log check aid) and TlsLead-37 landed in 973d760c89. The case core_net_tls/constant_time_primitives_emit_no_secret_branch_or_index builds every secret-dependent primitive at O0, O1 and O2 and passes. Part (b) waits on D-SECRET-CT1, so c10 stays open."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "c4 security review done (SecReview, a read-only security-reviewer). Verdict: fails, with F-ZERO-1 Medium, F-CT-1 Low, F-TLS13-1 Low and I-1, I-2 Info, and the dudect coverage gaps. Each finding is a new criterion on this card. c4 is met when they are all met and a fresh review records no open finding. Audit: Docs/audits/2026-11-09-core-tls-crypto-security-review.md (master c17bd85280). TlsLead owns the fixes."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Decision (Main, 2026-11-09) c10(a) ECP jac_add_mixed: the infinity cases use constant-time masks; the R==+-T doubling branch keeps one declassify line whose reason is the comb invariant (odd digits keep R off +-T for every valid scalar, so the branch outcome is fixed by construction), cited by file and line, with a case that runs random scalars and asserts the branch is never taken. Any caller where the invariant does not hold gets a fully constant-time addition (always-double-and-select or a complete formula, whichever is cheaper)."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Decision (Main, 2026-11-09) for c10(a), reading the criterion as secret-dependent timing. (1) A stop branch (overflow, bounds, shift count, narrowing, tag drop) passes when its condition is public and is marked as a stop in the encoder log; it fails when its condition depends on a secret, and the fix is wrapping or explicit-width arithmetic at those Core/Crypto sites. (2) Leaks that mbedtls legacy Mpi accepts are removed where that is cheap: the private exponent is processed over the full modulus length with a fixed window. A declassify line in the check's spec is allowed only where the value carries no secret (an operand blinded by a fresh random, citing the blinding site), or once at key load for key checks that cannot run on public parts, each line stating its reason. Parity with mbedtls alone is never a reason."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Decision (Main, 2026-11-09) for c10(a): the emitted-code check is a post-optimizer IR taint pass joined with an emission log recorded at the x64 encoder, which tags every Jcc, Jmp, call and memory operand it writes with the IR instruction being lowered, at O0, O1 and O2. It does not use a hand-kept table of the branches instruction selection adds (that would describe the selector, not the emitted code), and it needs no x86 decoder. Inline asm in a secret function is refused and reported, never skipped. The JET_OPT_DUMP extension and the encoder log are separate SUBs; both variables are registered in the environment reference."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Decision (Main, 2026-11-09): c4 security review. security-closure.md governs Codex Security scan requests, and this card makes none, so c4 does not need an external scan. The review is a dated audit in Docs/audits by a fresh security reviewer that is not the author lane, covering every file on Core TLS and crypto path after TlsLead-30r2, 32, 33 and 34 land: secret-dependent timing (dudect and constant-flow results), memory safety of the parsers, handshake state machine, certificate validation, key and nonce handling and error paths. c4 is met when that audit records no open finding, or every finding is fixed and re-checked in the same audit."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "OWNER 2026-11-09 ~12:40: Core's TLS is pinned to the modern set. TLS 1.3: AES-128/256-GCM and ChaCha20-Poly1305. TLS 1.2: ECDHE-ECDSA/RSA with AES-GCM and ChaCha20-Poly1305. Groups: x25519, P-256 and P-384. Signatures: ECDSA P-256/384, RSA-PSS and PKCS#1 with SHA-256/384/512. CBC, CCM, ARIA, Camellia, DHE, PSK, brainpool, x448 and ffdhe leave Core's policy; their code stays in the engine for G3 (#6748 c3). c2-c4 cover the pinned set."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Owner rulings 2026-11-09 on licenses: (1) The Jet translation of mbedtls is a derivative of Apache-2.0 code. Keep it for now under Apache-2.0, with its headers and mbedtls's NOTICE; later the crypto and TLS get rewritten from scratch, keeping the same module boundaries, so they can be MIT. (2) Test vectors: commit only public-domain NIST CAVP vectors. Fetch Wycheproof at test time, pinned by SHA-256. No Apache-2.0 vector files go in the repository."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Batch b6d landed on dev (0073f4fc47): TlsLead-5r 6bbde9ccfc (AES in every mode, CMAC, KW/KWP, GCM, CCM, ChaCha20-Poly1305; all applicable mbedtls 3.6.7 and Wycheproof vectors pass; bitsliced AES and carry-less GHASH) and 7r 449b255bc5 (bignum, 9090/0 mbedtls vectors). c2 and c4 are partial; 9r2 to 17 are in b7."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Landed in b5: f3300b44c9 (TlsLead-6r: c1 partial, the core.crypto.Hasher stream; Jetpack StreamingSHA256 wraps it) and f9f1be3aa5 (TlsLead-8r: c4 partial, AES-NI/PCLMULQDQ leaves)."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner rulings 2026-11-08. Q10 A: public builtin U64.mul_wide(other) -> (U64, U64), lowered to one widening multiply on every tier. Q11 B: public core.net.dtls (DTLS 1.2) over the ported engine. Q12: agree, full functional coverage; mbedtls C plumbing (PSA key store, net_sockets, timing, threading, memory_buffer_alloc, debug strings) maps onto Jet own net, files, alloc and tasks."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "S1 landed b53a78981d (TlsLead; precommit passed; queued for the Main batch). One hash engine (priv hashes in Crypto.jet) for SHA-1, SHA-2, SHA-3, HMAC, HKDF and PBKDF2; old copies in Crypto.jet, Expert.jet and Service.jet deleted; public surface unchanged. Case core_crypto_api/digests_macs_and_kdfs_match_the_mbedtls_and_wycheproof_vectors_on_every_tier passes on jet run, run --release and dev with 0 failures: mbedtls shax 589, md 100, hkdf 3, pkcs5 7; wycheproof hmac_sha256 174, hkdf_sha256 86, pbkdf2 60. Pins in input/vectors/UPSTREAM.md. Cases crypto 44/0, uuid 2/0, service 75/0. Perf against mbedtls 3.6.7 (load about 30, noisy): sha256 5x faster (SHA-NI), pbkdf2 3x faster; sha1 12x, sha512 3.2x and sha3 7.5x slower, and hmac 64 B 2.1 us against 943 ns. c5 is open on those. MD5 and RIPEMD-160 move to R1 (__core_crypto_hash)."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "TlsLead plan accepted 2026-11-08. Scope from the vendored mbedtls 3.6.7 default config (129,589 C lines in 117 files): every hash, MAC, KDF, cipher and mode, AEAD, DRBG, constant-time bignum, 13 ECC curves, RSA, DHM, LMS, ASN.1, PEM, PK, PKCS#5/7/12, X.509 parse, verify and write, TLS 1.2 and 1.3 client and server with every key exchange and extension built, and DTLS 1.2. Slices: S1 hashes, S2 AES with every mode, S3 AEAD, S4 AES-NI and PCLMULQDQ leaves, S5 ARIA, Camellia, DES and DRBG, S6 bignum, S7 ECC, S8 RSA, DHM and LMS, S9 ASN.1, PEM and PK, S10 X.509, S11 record layer and TLS 1.3 key schedule, S12 TLS 1.3, S13 TLS 1.2, S14 tickets and DTLS, S15 the one-commit cutover. Main rulings: G-a uses private runtime leaves for the wide multiply (a public U64.mul_wide is an owner question); G-c TlsLead owns the X64 crypto forms and JetRuntime crypto leaves; O1 ports full function and maps the C plumbing onto Jet facilities (told the owner); O2 DTLS public API is an owner question; O3 vectors go in-repo with upstream pins and the Apache-2.0 license. Existing Core/Crypto is about 10x off the mbedtls throughput (ChaCha20-Poly1305 51 ms/MiB, SHA-256 18 ms/MiB scalar), so its cores move to fixed inline arrays."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Assigned 2026-11-08 by Main to TlsLead (spawned with owner approval). The brief is in the Main lane scratch, briefs/TlsLead.md."
-        },
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Assigned 2026-11-08 by Main: unstaffed: needs the owner's permission for another lead."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Core/Net/Tls.jet and every Core caller use the Jet implementation, and Core/Vendor/Mbedtls is deleted.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "ebea158575: core.net.tls and core.crypto run on the Jet port of Mbed TLS 3.6.7, and Core/Vendor/Mbedtls and the vendored-C build step are deleted. CoreSourceRows --check gave rc 0. At c057ea659d, git grep for mbedtls in Compiler/build.jet and Compiler/Toolchain/RuntimePack.jet finds nothing. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:09.496Z"
-        },
-        {
-          "n": 2,
-          "text": "Every algorithm that Core's TLS and crypto callers use passes the committed NIST CAVP vectors and the fetched Wycheproof vectors that apply to it.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "5ee8aa4dc8: 22 #Tests in Core/Net/SSL/TLS.jet run NIST CAVP and Wycheproof vectors against every algorithm Core's TLS and core.crypto reach. The SUB test jet test Core/Net/SSL/TLS.jet gave rc 0. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:11.032Z"
-        },
-        {
-          "n": 3,
-          "text": "Handshakes interoperate with OpenSSL on every version, suite and curve that Core's TLS enables (client and server, plus the ALPN, SNI and resumption paths that Core exposes), case-tested.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "ef6626b67e: the case tls_interoperates_with_openssl_servers_and_clients PASS: the Core client and server against OpenSSL on every pinned suite, group and certificate type, both ways. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:12.461Z"
-        },
-        {
-          "n": 4,
-          "text": "A constant-time check (a dudect-style timing test or equivalent) covers every secret-dependent primitive on Core's TLS and crypto path, and a security review of that path records no open finding.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev 53805444ba (train t13b, 00a2b37a42..53805444ba), SUB TlsLead-63 (with TlsLead-59r, 60r and 62r in t12c). Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t13b/REPORT.md: census rc=0; reruns with the train's integration fixes G6LeadD-5fix, 5fix2, G6Lead-4276bfix and G6LeadC-7fix noted there). dudect at 20000 samples, bound 4.5: the code before the fix fails, and the landed code gives |t| below 4.5 (the rerun on a quieter machine gives rc 0).",
-          "at": "2026-11-10T17:36:06.886Z"
-        },
-        {
-          "n": 8,
-          "text": "Every file translated from mbedtls carries an SPDX Apache-2.0 header naming its mbedtls origin, the repository carries mbedtls's license and NOTICE text beside them, and a guard refuses a translated file without the header (owner license ruling).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "ebea158575 (landed in t2c, dev c057ea659d). The guard tests/guards/translation_licenses.jet keeps a closed list of the 46 translated files in Core/Crypto and Core/Net/SSL. It requires the two-line header on each: SPDX-License-Identifier: Apache-2.0, then 'Translated from Mbed TLS 3.6.7 (...)'. It requires LICENSE-mbedtls and NOTICE-mbedtls in each folder; at c057ea659d both folders have them. It also refuses a file that names mbedtls but is not on the list. jet test tests/guards gave rc 0 in t2c (SqliteLead-15r2's test line).",
-          "at": "2026-11-10T02:38:53.177Z"
-        },
-        {
-          "n": 9,
-          "text": "Vector sources follow the owner ruling: committed vectors are public-domain NIST CAVP only; Wycheproof is fetched at test time, pinned by SHA-256 and cached outside the repository; no Apache-2.0 vector file is in the repository.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "5ee8aa4dc8: the committed vectors are NIST CAVP only, and Wycheproof is fetched at test time, pinned by SHA-256 and cached outside the repository. At c057ea659d, git ls-tree finds no path containing wycheproof. The Lander integrated t2c on e4096a0f3b; landed as dev e4096a0f3b..c057ea659d.",
-          "at": "2026-11-10T02:36:14.027Z"
-        },
-        {
-          "n": 10,
-          "text": "Found 2026-11-09 (TlsLead): Core TLS and crypto masks are branch-free today on O0 and O2 (dudect, disassembly and callgrind agree), but nothing in lowering stops an optimizer from turning a mask into a branch. (a) A case builds every secret-dependent primitive at O0, O1 and O2 and fails if its emitted code has a branch or a secret-indexed load. (b) The language gets one mechanism that makes this a compiler guarantee; its spelling and behavior are fixed by an owner ballot before it is built.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "TlsLead-6694ct1-d 740d40800c, ctb-d 76515fd6d2, ctc-d 3d21f3cb5d, s2-d 9b0dd64148, s3-d 9eb08a0831, s4-d faded48ebd, s5-d 0edce592a1 (8/8 proved), ctfix-d a800437c58 (5/5 proved on b3). (a) The case constant_time_primitives_emit_no_secret_branch_or_index builds every secret-dependent primitive at O0, O1 and O2 and passes on batch compiler b3 after ctfix-d made memcmp/memcmp_partial branch-free. (b) The mechanism is the ratified D-SECRET-CT1 #Secret fixed-timing check: Core's constant-time code takes secrets as #Secret parameters, the rule is in Docs/spec/spec.md, and tests/ui/taint/fixed_timing_secret_call_result_decides_an_error_return pins it. jet check Core, --filter=core_net_tls, ConstTime.jet and RSA.jet pass.",
-          "at": "2026-11-11T19:43:56.583Z"
-        },
-        {
-          "n": 11,
-          "text": "(c4 review, F-ZERO-1 Medium) Core TLS frees and wipes the engine secrets: __TLSState or SSLContext gets an impl Close that calls ssl_free and wipes buffer and pending. It runs on close and on handshake failure, and the TLS 1.3 handshake is freed at handshake wrapup. A case shows the session master, traffic secrets, IVs, premaster and record buffers are zeroed after close and after a failed handshake.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB TlsLead-41b. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). With TlsLead-41 (ecf04d985a): the failed handshake frees the engine and wipes its buffers; the loopback #Test passes.",
-          "at": "2026-11-10T10:26:00.884Z"
-        },
-        {
-          "n": 12,
-          "text": "(c4 review, F-CT-1 Low) ECDSA signing restores the mbedtls 3.6 t-blinding, s = (e + r*d)*t * (k*t)^-1 mod n, so no mod_mpi or mul_mpi sees an unblinded secret (Core/Crypto/ECDSA.jet:73-101). The CAVP and Wycheproof ECDSA vectors still pass.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev ecf04d985a (train t5b, 973d760c89..ecf04d985a), SUB TlsLead-41. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t5b/REPORT.md). jet test Core/Crypto/ECDSA.jet (with the RFC 6979 vector) and TLS.jet --filter=ECDSA (CAVP, Wycheproof, dudect) PASS.",
-          "at": "2026-11-10T06:06:42.379Z"
-        },
-        {
-          "n": 13,
-          "text": "(c4 review, F-TLS13-1 Low) The TLS 1.3 CertificateVerify algorithm must satisfy ssl_tls13_sig_alg_for_cert_verify_is_supported: RSA PKCS#1 v1.5 is refused in TLS 1.3 (RFC 8446 4.4.3). The ECDSA code point must name the key curve, and the false comment at TLS.jet:2468 is corrected. Cases cover a PKCS#1 v1.5 CertificateVerify and a curve mismatch.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev ecf04d985a (train t5b, 973d760c89..ecf04d985a), SUB TlsLead-41. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t5b/REPORT.md). TLS.jet --filter=CertificateVerify PASS: RSA-PSS and a matching-curve ECDSA are accepted; PKCS#1 v1.5 and a wrong-curve ECDSA are refused with decrypt_error.",
-          "at": "2026-11-10T06:06:44.315Z"
-        },
-        {
-          "n": 14,
-          "text": "(c4 review, dudect gaps) The constant-time tests also cover: the ECDSA nonce path (k varies; gen_privkey, the comb with k, gcd_modinv_odd, and the s reduction); variable-base ECDH on peer points for P-256 and P-384; RSA with varying private keys, and RSA-PSS signing; the bitsliced AES and ghash_portable fallbacks, forced on AES-NI hosts; AEAD with varying keys and seal; HKDF and the TLS 1.3 key schedule; the TLS 1.2 PRF and Finished; HMAC_DRBG generate; and ssl_decrypt_buf end to end. EC and RSA runs take enough measurements to detect small leaks (I-2), in a soak tier where needed.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB TlsLead-42. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). dudect 20/0 with |t| < 3.1 and soak 1/0 with |t| < 2.4, on RSA keys of one shape.",
-          "at": "2026-11-10T10:26:01.771Z"
-        },
-        {
-          "n": 15,
-          "text": "The constant-time emission check enters the record layer: ct_entry runs ssl_tls13_populate_transform and ssl_decrypt_buf (AES-128-GCM, and the TLS 1.2 CBC suites), and the case reports 0 findings on O0, O1 and O2. check.jet first gains the precision this needs, with no blanket exemption. That means a public-tag directive for an enum whose payload is secret (the CipherContext/CipherBase dispatch), and list header words and Bool fields of key-holding records (jet_rt_block_retain, the ssl.transforms elements) judged as public. The TLS 1.3 inner-plaintext padding scan (ssl_parse_inner_plaintext) branches on plaintext, not on key secrets, and is recorded as expected in secrets.txt with that reason.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "TlsLead-51 (9a08e7cf9a) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler: PASS cases --filter=constant_time_primitives_emit_no_secret_branch_or_index, with ct_entry through ssl_tls13_populate_transform and ssl_decrypt_buf and 0 findings on O0/O1/O2. ssl_parse_inner_plaintext is recorded as expected in secrets.txt with the plaintext-not-key reason. PASS jet test Core/Crypto/ConstTime, DES, Block, Cipher, CipherLayer.",
-          "at": "2026-11-10T12:14:16.889Z"
-        },
-        {
-          "n": 16,
-          "text": "TLS 1.2 CBC MAC-then-encrypt (Lucky13 class): ssl_decrypt_buf passes a length derived from the decrypted padding into ssl_ct_hmac, hash_update_range and memcpy_if. Each of those paths is read against mbedtls 3.6 mbedtls_ct_hmac and mbedtls_ct_memcpy_if. Every path that is a real leak is fixed to constant time. A dudect test on bad-padding and good-padding records of equal length shows |t| < 4.5. The emission check reports 0 findings for these functions.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "TlsLead-51 (9a08e7cf9a) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler: PASS jet test Core/Net/SSL/TLS.jet (45 tests, including both record dudect tests, bad against good padding at equal length, |t| < 4.5), and the emission check case reports 0 findings for ssl_ct_hmac, hash_update_range and memcpy_if.",
-          "at": "2026-11-10T12:14:18.562Z"
-        },
-        {
-          "n": 17,
-          "text": "F-ZERO-2 (Low, from the 2026-11-10 re-review in Docs/audits/2026-11-10-core-tls-crypto-security-rereview.md) is fixed: `__context_new` in Core/Net/Tls.jet wipes the 48-byte DRBG seed on every path; `material` (Tls.jet:617-618) and the ecdsa_sign_det data buffer (ECDSA.jet:163-166) are built at their exact capacity, so growth never frees an unwiped copy of a secret; a Tls.jet test seeds a context from a known buffer and asserts that the buffer is all zeros afterwards. The re-reviewer confirms the fix and the c4 verdict becomes \"no open finding\".",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "TlsLead-53 (f39b9ac11a) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler: the DRBG seed in __context_new is wiped after seeding. PASS jet test Core/Net/Tls.jet, Core/Crypto/ECDSA.jet, Core/Crypto/Bignum.jet.",
-          "at": "2026-11-10T12:14:20.213Z"
-        },
-        {
-          "n": 18,
-          "text": "(Found 2026-11-10 by G6Lead2 on dev 76955986d0) LaneCheck jetpack-bootstrap passes on a tree whose Core is newer than the seed: LaneCheck runs Tools/jetpack Assemble (CompilerPackages.jet sources) under the checked JET (JET_BIN=$JET), as Compiler/test.jet and Check.jet already do, so the seed's built-in Core part table (a0_042 predates __core_crypto_md) no longer gives E1001 \"no core module\". Proof: the LaneCheck #Test \"the Jetpack assembly check runs its Jet tool under the checked jet\" passes, and `JET=<admitted jet> jet Tools/agent/LaneCheck.jet` passes jetpack-bootstrap on the landed tree.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "TlsLead-55 (d9bed05996) landed on dev c460ba91e5 (train t9d), run with the t9d-built compiler: PASS jet test Tools/agent/LaneCheck.jet --filter=\"the Jetpack assembly check runs its Jet tool under the checked jet\" (1 passed); and the exact jetpack-bootstrap step LaneCheck runs (JETPACK_WORKER=lanecheck JET_BIN=$JET $JET Jetpack/Bootstrap/Assemble.jet check, on the landed tree whose Core is newer than seed a0_042) exits 0: assembled 885 Jet sources (2325 test claims), no E1001.",
-          "at": "2026-11-10T12:27:42.364Z"
-        },
-        {
-          "n": 19,
-          "text": "OAEP decryption (Core/Crypto/RSA.jet rsa_rsaes_oaep_decrypt, PKCS#1 v2.2 section 7.1.2) is constant time after its private operation. It uses U64 counts, a masked position, memmove_left and one CtCond verdict, with no secret-indexed read or secret-length branch. It is covered by the emission case at O0, O1 and O2, and by a dudect of good against bad OAEP blocks that fails on the current code and passes on the fix.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev 53805444ba (train t13b, 00a2b37a42..53805444ba), SUB TlsLead-64. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t13b/REPORT.md: census rc=0; reruns with the train's integration fixes G6LeadD-5fix, 5fix2, G6Lead-4276bfix and G6LeadC-7fix noted there). RSAES-OAEP decryption decodes in constant time after its private operation.",
-          "at": "2026-11-10T17:36:08.504Z"
-        },
-        {
-          "n": 20,
-          "text": "A struct field can be tagged #Secret: `Cond: struct { mask: #Secret U64 }` plus a run entry compiles with no diagnostic. Code the compiler derives for the struct either keeps fixed timing over the secret field or is exempt by construction, never reporting E0737 at end of file against code the user didn't write. A UI snapshot proves that a real variable-time use of the field is still refused. Defect found by TlsLead3 on seed-t22, 2026-11-11.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "TlsLead-6694ct1-d 740d40800c, ctb-d 76515fd6d2, ctc-d 3d21f3cb5d, s2-d 9b0dd64148, s3-d 9eb08a0831, s4-d faded48ebd, s5-d 0edce592a1 (8/8 proved), ctfix-d a800437c58 (5/5 proved on b3). A #Secret struct field compiles with no diagnostic; derived code is fixed-timing or exempt, and the UI snapshot refusing a real variable-time use passes; deferred lines pass on batch compiler b3.",
-          "at": "2026-11-11T19:43:57.710Z"
-        },
-        {
-          "n": 21,
-          "text": "The secret-timing analyzer (Compiler/.../Taint.jet:651 and :917, matched by loose name today) resolves callables by their resolved symbol, never by bare name. A user function named `select` isn't treated as ctime.select, and a #Scrub function doesn't scrub same-named user calls. Negative cases cover both collisions (a local `select`, as in Server12:456, and a same-named #Scrub). Defect found by TlsLead3 on seed-t22, 2026-11-11.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "TlsLead-6694ct1-d 740d40800c, ctb-d 76515fd6d2, ctc-d 3d21f3cb5d, s2-d 9b0dd64148, s3-d 9eb08a0831, s4-d faded48ebd, s5-d 0edce592a1 (8/8 proved), ctfix-d a800437c58 (5/5 proved on b3). Taint.jet resolves callables by resolved symbol, not by bare name; negative cases for a local select and a same-named #Scrub pass on batch compiler b3.",
-          "at": "2026-11-11T19:43:59.004Z"
-        },
-        {
-          "n": 22,
-          "text": "Regression from 0a13861243 (the fixed-timing instruction check): a web build that reaches Core/Crypto/Bignum.jet is an internal compiler error (exit 101, I2), reporting \"115 compiler faults: web select: core_bits_above instruction 129 (shr) at Bignum.jet:161: fixed timing: a fixed operand meets `if` (and `unreachable`), which the wasm32 table has no row for\", and the same at core_exp_mod Bignum.jet:515. Seen in tests/cases/web_build/forms_table_web_lowering_preserves_typed_form_contract on gate-p56 (and in b29proofs and b33proofs). Web select lowers a checked shift of a fixed operand to a branch and trap. Fix: lower it branch-free on wasm32 (mask the count, or prove it in range), so the table check passes, or have sema refuse the program with a registered diagnostic. Proof: that case passes `jet build --target=web`, and a web case that links the fixed-timing Bignum shift path builds and runs on node. No web-legal public API executes that path: core.net.tls is refused on web, and ClientIdentity.from_pem never reaches core_bits_above or core_exp_mod. A web check test refuses a fixed (secret) shift count.",
-          "status": "open",
-          "metBy": null,
-          "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-14T07:18:57.068Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "no-c",
-        "owner-direction",
-        "security"
-      ],
-      "parentId": "c0lscvc9",
-      "needsAcceptance": false,
-      "created": "2026-11-08T15:47:15.645Z",
-      "updated": "2026-11-14T07:18:57.068Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 22,
-      "completedAt": "2026-11-11T19:44:02.334Z"
     },
     {
       "id": "c0cs6xlg",
@@ -94680,51 +94240,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 1,
       "completedAt": "2026-11-14T22:52:30.393Z"
-    },
-    {
-      "id": "c0e4cn5v",
-      "num": 6709,
-      "title": "ICE: `o := Box?(Val(make(\"o0\")))` crashes sema.body totality (\"has no checked type\")",
-      "body": "Found by AllocLead with seed a0_040. An Option of a boxed value built inline in a local binding crashes the compiler in sema.body totality with \"has no checked type\" instead of checking. Under I2 and I3 this must be either a checked program or a registered diagnostic. Add a case under tests/cases.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "All criteria met (Lander5 holds run on gate-p55)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Comparing a value with None checks in sema on every type: a FileLock? (from files.try_lock) compared with None runs true or false on O0, O1 and O2, and a value whose type can never be None (for example the plain FileLock that `try_lock(p) ?? panic(..)` yields) is E0109 in sema, never an ir.build ICE. A case pins both sides.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "14844c35c0 and 07399ce8fa (on dev). On the gate-p55 jet (tree dev 9623399213), Lander5 holds run: `jet test Compiler --profile cases --filter file_lock_` 3/0: a FileLock? from files.try_lock compared with None runs at O0, O1 and O2, and comparing the plain FileLock from try_lock(p) ?? panic(..) with None is E0109 in sema, not an ir.build ICE.",
-          "at": "2026-11-14T06:44:40.618Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-08T22:39:37.102Z",
-      "updated": "2026-11-14T06:44:56.617Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-14T06:44:56.617Z"
     },
     {
       "id": "c018v880",
@@ -98194,51 +97709,6 @@
       "criteriaLastN": 3
     },
     {
-      "id": "c0xeyqjm",
-      "num": 6781,
-      "title": "JetTestKit: 13 #Tests fail on dev (golden, UI staging, no-nix and step-hook kits)",
-      "body": "Found by G5DevX-2 on dev fca00acc6d with seed-b14: `jet test Compiler/JetTestKit` gives 232 passed, 13 failed, and the patch it was testing did not change that. The 13, with their first errors, are in $JET_SCRATCH_ROOT/lanes/G5DevX2/testkit13.txt: 5 in GoldenStreams.jet (lines 71, 118, 143, 175, 237; mostly \"expected PASS, got FAIL\"), NoNix.jet:46, StepsParsing.jet:160, and 6 in UiSnapshots.jet (141, 168, 193, 226, 258, 278). Each test runs a nested compile, so some may fail only because the seed is older than dev; a dev-built jet decides which.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "All criteria met (Lander5 holds run on gate-p55)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Run with the next batch compiler built from dev, every one of the 13 tests is either green, or has its root named and fixed, so that `jet test Compiler/JetTestKit` reports 0 failed. No test is deleted or excused to get there.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On the gate-p55 jet (tree dev 9623399213, the batch 46b compiler), `jet test Compiler/JetTestKit` reports 248 passed, 0 failed (Lander5 holds run).",
-          "at": "2026-11-14T06:45:15.214Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-13T10:02:10.206Z",
-      "updated": "2026-11-14T06:45:15.214Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-14T06:45:00.869Z"
-    },
-    {
       "id": "c0g4h3r9",
       "num": 6782,
       "title": "Derive the runtime can-stop set from the runtime IR instead of the hand-kept ir_route_can_stop list",
@@ -98275,51 +97745,6 @@
       "updated": "2026-11-17T01:45:28.819Z",
       "updatedBy": "Main",
       "criteriaLastN": 1
-    },
-    {
-      "id": "c0c8uw1v",
-      "num": 6783,
-      "title": "JET_TARGET_CAP_GB=120 is in AGENTS.md but no tool enforces it",
-      "body": "AGENTS.md (Environment and proof) says to respect JET_TARGET_CAP_GB=120 for checkout-owned build targets. G5DevX-2 found that nothing reads the variable (2026-11-13, #6568 c5 Tools part 2), so the cap is prose only. The owner has made the 75% scratch-disk limit hard, and AGENTS.md and Chain.jet slot enforce it from dev 4604d0f017. This card makes the target cap real too, or retires it in AGENTS.md if the 75% gate covers it.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "c1 met by b8e3733d04."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "One outcome holds. Either the build-target writers (Chain.jet, Land.jet, Suite.jet) refuse to grow a checkout-owned target past JET_TARGET_CAP_GB and report its size, with a test for that, or AGENTS.md drops the variable because the 75% scratch gate covers its job, and no file names JET_TARGET_CAP_GB.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "b8e3733d04 (on dev): AGENTS.md drops JET_TARGET_CAP_GB because nothing read it and the 75% scratch gate does its job. On dev 9623399213, `git grep -n JET_TARGET_CAP origin/dev -- . \":!Tools/tower/.tower\"` prints nothing (run by Main).",
-          "at": "2026-11-14T06:35:14.555Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-13T10:32:46.131Z",
-      "updated": "2026-11-14T06:35:16.883Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-14T06:35:16.882Z"
     },
     {
       "id": "c0awq7vy",
@@ -98390,110 +97815,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 3,
       "completedAt": "2026-11-15T11:39:47.405Z"
-    },
-    {
-      "id": "c0lmfkg7",
-      "num": 6791,
-      "title": "Dev golden reds after the lambda-shape1 cutover: test histories, shared guard projection, fold association, RunColdContext capture ICE",
-      "body": "Golden reds on dev at 380c3fbf7a (they fail with the g6-cut3b dev jet as well; seen in g11-c1r2 cmds 7 and 10, outputs in $JET_SCRATCH_ROOT/lanes/Lander/probe/out/g11-c1r2/10.out and 7.out). The Metaprogramming reflection and derive reds are covered by #6786 and #6789. ReturnedFunctionCall is covered by #6790. OSTreeCPUTime and RequiredPostDecided are already carded. This card holds the remaining roots, one criterion each.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "All criteria met (Lander5 holds run on gate-p55)."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "Root (G3Core-2 and G6Meta-4, 2026-11-13): the lambda-shape1 sweep turned one-expression lambda bodies into a Block whose tail is a Return. Compiler sites that matched only an Expr body, or that treated Return, BreakValue or ForIn as leaves, broke. Known sites: JetIR ir_float_add_fold_step (c3), and Lambdas.jet sema_expression_lambda_collect_tree_statements, where captures are missed two lambdas down (c4). G3Core-2 owns one sweep with a shared helper (fold-step-block-r2). It covers c3 and c4, likely c2, and possibly c5."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Examples/Tooling/Testing/TestHistory and TestOutcomes pass their goldens on o0/o1/o2. Today o1/o2 fail with \"This call to `core.testing.histories` is missing `__variants`\" (MissingArgument). Proof: jet test Compiler --profile golden --filter Testing/TestHistory and --filter Testing/TestOutcomes.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "36918f41b5 (on dev). On the gate-p55 jet (tree dev 9623399213), Lander5 holds run: golden --filter Testing/TestHistory 3/0 and --filter Testing/TestOutcomes 3/0 (o0, o1 and o2).",
-          "at": "2026-11-14T06:44:42.891Z"
-        },
-        {
-          "n": 2,
-          "text": "Examples/Memory/Shared/SharedGuardProjection passes on o0/o1/o2. Today it fails with E InvalidGuardMap \"`SharedGuard.map` needs a stored field projection\". Proof: jet test Compiler --profile golden --filter SharedGuardProjection.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev e362a26399 (G3Core2-fold-step-block-r3). Lander5 proof g6-fsb3 (dev ce8d130533 plus r3, built jet): SharedGuardProjection golden 3/3, FoldAssociation golden 3/3, nested-lambda case 1/0, lines 6-9 1/0 each, CallableAccessContracts test 39/0; jet check rc 0 for JetFoundation, JetIR, JetSema, CallableAccessContracts and ViewFieldProvenance; RunColdContext run -- --help rc 0 and prints the help (no ICE); guards 152/0.",
-          "at": "2026-11-13T15:37:38.120Z"
-        },
-        {
-          "n": 3,
-          "text": "Examples/Collections/Iterators/FoldAssociation matches its .out snapshot on o0/o1/o2. Fix the program or the meaning, and update the snapshot only if the new output is the ratified meaning. Proof: jet test Compiler --profile golden --filter FoldAssociation.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev e362a26399 (G3Core2-fold-step-block-r3). Lander5 proof g6-fsb3 (dev ce8d130533 plus r3, built jet): SharedGuardProjection golden 3/3, FoldAssociation golden 3/3, nested-lambda case 1/0, lines 6-9 1/0 each, CallableAccessContracts test 39/0; jet check rc 0 for JetFoundation, JetIR, JetSema, CallableAccessContracts and ViewFieldProvenance; RunColdContext run -- --help rc 0 and prints the help (no ICE); guards 152/0.",
-          "at": "2026-11-13T15:37:39.125Z"
-        },
-        {
-          "n": 4,
-          "text": "Tools/agent-eval/RunColdContext.jet builds with no ICE. Today: \"ir.build unlowered: make_report.lambda… capture of unknown local r\". The fix goes in the lambda capture lowering (an I2 defect), not in the tool. Then PortBars run-cold-context parity is 26/26. Proof: the PortBars run-cold-context line, plus a case reproducing the capture shape.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev e362a26399 (G3Core2-fold-step-block-r3). Lander5 proof g6-fsb3 (dev ce8d130533 plus r3, built jet): SharedGuardProjection golden 3/3, FoldAssociation golden 3/3, nested-lambda case 1/0, lines 6-9 1/0 each, CallableAccessContracts test 39/0; jet check rc 0 for JetFoundation, JetIR, JetSema, CallableAccessContracts and ViewFieldProvenance; RunColdContext run -- --help rc 0 and prints the help (no ICE); guards 152/0.",
-          "at": "2026-11-13T15:37:40.260Z"
-        },
-        {
-          "n": 5,
-          "text": "A lambda nested two deep whose one-expression body reads outer locals, for example `[10].map(fn(step) { \"{mode}{count + step}\" })` inside two lambdas, checks and runs with no ICE. Today it ICEs in sema.body totality with \"checked incomplete without a report\" (G6Meta-4, 2026-11-13). Proof: a case with that shape on o0/o1/o2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev e362a26399 (G3Core2-fold-step-block-r3). Lander5 proof g6-fsb3 (dev ce8d130533 plus r3, built jet): SharedGuardProjection golden 3/3, FoldAssociation golden 3/3, nested-lambda case 1/0, lines 6-9 1/0 each, CallableAccessContracts test 39/0; jet check rc 0 for JetFoundation, JetIR, JetSema, CallableAccessContracts and ViewFieldProvenance; RunColdContext run -- --help rc 0 and prints the help (no ICE); guards 152/0.",
-          "at": "2026-11-13T15:37:41.310Z"
-        },
-        {
-          "n": 6,
-          "text": "No compiler-generated Jet source or unswept compiler package still spells a lambda the pre-lambda-shape1 way, `(…) -> {…}`. Known: the Calls/Histories.jet derived `__make` (the root of c1). Main grep, 2026-11-13: JetDevserver has `() -> {` lambdas in Source (BrowserWebAdapter 2, EditActions02 1, ProjectTransactions 5, WebHost/WebHost02/WebHost03 1 each) and Tests (EditActions 6, EditActions02 4). Proof: JET_KEEP_GOING jet check of every Compiler package incl. JetDevserver rc 0 with a jet that has lambda-shape1, and a git grep over string templates that feed a parser finds no old form.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev e362a26399 (G3Core2-fold-step-block-r3). Lander5 proof g6-fsb3 (dev ce8d130533 plus r3, built jet): SharedGuardProjection golden 3/3, FoldAssociation golden 3/3, nested-lambda case 1/0, lines 6-9 1/0 each, CallableAccessContracts test 39/0; jet check rc 0 for JetFoundation, JetIR, JetSema, CallableAccessContracts and ViewFieldProvenance; RunColdContext run -- --help rc 0 and prints the help (no ICE); guards 152/0.",
-          "at": "2026-11-13T15:37:42.403Z"
-        },
-        {
-          "n": 7,
-          "text": "Jetpack/PackageModel/Source/Manifest/PackageParse.jet tests pass (dev ae1f887838 gives 6/1: \"test profile `quick` has an unknown field `workers`\"), and `jet run Jetpack/Bootstrap/Assemble.jet slice` succeeds on dev. Proof: `jet test Jetpack/PackageModel/Source/Manifest/PackageParse.jet` and `jet run Jetpack/Bootstrap/Assemble.jet slice`, both with the batch jet.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Lander5 landed G5DevX2-6791c7-reds as dev 9abc4b1c72. Proof: jet test Jetpack/PackageModel/Source/Manifest/PackageParse.jet rc 0 (7/0), and jet run Jetpack/Bootstrap/Assemble.jet slice rc 0.",
-          "at": "2026-11-13T14:38:37.598Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-13T13:24:40.292Z",
-      "updated": "2026-11-14T06:44:58.803Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 7,
-      "completedAt": "2026-11-14T06:44:58.803Z"
     },
     {
       "id": "c0snkbac",
@@ -99166,6 +98487,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-17T06:11:43.006Z"
+        },
+        {
+          "n": 5,
+          "text": "The Linux app window redraws when a live binding its current view read is invalidated (a query or shared value changes with no input), through a wake of the Wayland frame loop, with no polling. Proof: jet test Compiler --profile cases --filter NativeApp/app_window_redraws_when_its_data_changes (a fake compositor sees a new frame after a background write).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T06:58:39.181Z"
         }
       ],
       "refs": [],
@@ -99173,9 +98503,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:39.597Z",
-      "updated": "2026-11-17T06:15:36.805Z",
+      "updated": "2026-11-17T06:58:39.181Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0f4o904",
@@ -99371,11 +98701,11 @@
         {
           "n": 1,
           "text": "native.open_file gives native.PickedFile values, never String paths. A PickedFile has a name, a size, a media type, read and stream. On the Linux desktop it is backed by a path through the XDG desktop portal file chooser; import_tasks in the Crewboard example imports a CSV through it. On a web build native.open_file and native.drop_files are an E-APP-TARGET-FEATURE compile error until #6556 c9.  proof: jet test Compiler --profile cases --filter NativeApp/picked_file_reads_the_same_bytes_on_linux_and_the_web",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T06:02:17.850Z",
+          "evidence": "dev 02e159f044 (open_file Linux), 1028647876 (Crewboard import_tasks), d05e77fd0f (drop_files web E-APP-TARGET-FEATURE refusal): jet test Compiler --profile cases --filter NativeApp/picked_file_reads_the_same_bytes_on_linux_and_the_web PASS on the p251 batch compiler (359a1dd3e6).",
+          "at": "2026-11-17T07:25:46.373Z",
           "proof": {
             "profile": "cases",
             "filter": "NativeApp/picked_file_reads_the_same_bytes_on_linux_and_the_web"
@@ -99414,7 +98744,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:43.767Z",
-      "updated": "2026-11-17T06:31:06.379Z",
+      "updated": "2026-11-17T07:25:46.373Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -105340,7 +104670,7 @@
       "track": "epoch",
       "epoch": "e18",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -105349,6 +104679,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "All five criteria met; c4 closed by the p251 batch compiler: a package-declared target profile selects its Scheduler provider through link-time run-queue hooks (no per-spawn cost), cases target_selects_package_scheduler and program_run_queue_hooks_take_every_spawn PASS."
+        },
         {
           "at": "2026-11-17",
           "by": "Main",
@@ -105398,11 +104733,11 @@
         {
           "n": 4,
           "text": "A target profile selects a package scheduler provider, with no per-call cost. Proof: `jet test Compiler --profile cases --filter target_selects_package_scheduler` (it checks the IR of a spawn is unchanged).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:25:10.153Z"
+          "evidence": "dev 2833eeefb5 (Scheduler trait), 00cca6ef48 (runtime hooks), e6c346d445 (program hooks), 4e8120c28a (profile selects provider), 359a1dd3e6 (hooks fix): jet test Compiler --profile cases --filter target_selects_package_scheduler PASS and --filter program_run_queue_hooks_take_every_spawn PASS on the p251 batch compiler.",
+          "at": "2026-11-17T07:25:48.873Z"
         },
         {
           "n": 5,
@@ -105423,9 +104758,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:10.153Z",
-      "updated": "2026-11-17T05:18:30.798Z",
+      "updated": "2026-11-17T07:25:58.476Z",
       "updatedBy": "Main",
-      "criteriaLastN": 5
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-17T07:25:58.476Z"
     },
     {
       "id": "c00fktgk",
@@ -200968,292 +200304,6 @@
       "ratifiedAt": "2026-11-11"
     },
     {
-      "id": "D-SECRET-CT1",
-      "cardId": "c0bnp1zw",
-      "group": "security",
-      "title": "Fixed-time rules for the Secret tag, from the checker to the final machine code",
-      "situation": "Code that handles keys must take the same time and touch the same memory whatever the key is. Otherwise an attacker who times it learns the key. Today Jet follows a Secret label through the program but checks nothing about timing, so an early-exit compare of a secret runs as written. This matters most to people who write crypto and login code, and it protects every program that uses theirs.\n\nYou are deciding whether the Secret label also makes the compiler refuse secret-dependent branches, lookups, divisions and stops, checked down to the final machine code. We recommend A: it does, and it rewrites simple secret branches into fixed-time code instead of refusing them.\n\nOne cost cannot be removed. On a chip whose maker publishes no fixed-time guarantee, or whose switch only the operating system can set, Jet checks its own code but cannot confirm the chip. The build report says so, and the hardened profile refuses such hosts.",
-      "gist": "Should the Secret tag forbid secret-dependent branches, indexes, divisions and stops, checked down to the final machine code?",
-      "lesson": "A timing leak needs no bug in the math, only a branch, a memory lookup, a division or a stop that depends on a secret. A compiler can refuse those only if it knows which values are secret, follows them everywhere, and checks the code it finally emits.",
-      "explainer": "Words used here. A tag is a label the compiler follows through the program, written #Secret before a value or a type. A secrecy tag protects what a value says; Secret, Credential and PII are secrecy tags. An integrity tag, such as Input, protects where a value goes.\n\nA branch is an if, a loop test or a match. A stop is a run-time halt, such as an overflow. Fixed time means the work does not depend on a value. To scrub is to release a tag on purpose, in a function marked #Scrub.",
-      "story": "Ana writes the check for the tag that proves a message was not changed. Her first version compares byte by byte and returns at the first mismatch. Correct-answer tests can miss this leak. An attacker sends forged tags and times the replies; a slower reply means one more byte was right. Today Jet accepts her code (c07), and nothing stops a later optimizer from turning a careful version back into a branch. Under A her first version compiles and runs in fixed time, because the compiler rewrites the early exit.",
-      "inWild": "// C (BoringSSL): the result is computed with masks, and only one bit leaves.\nint CRYPTO_memcmp(const void *a, const void *b, size_t len) {\n    uint8_t x = 0;\n    for (size_t i = 0; i < len; i++) x |= ((const uint8_t *)a)[i] ^ ((const uint8_t *)b)[i];\n    return x;\n}\n// Simplified illustration, not BoringSSL source. Its real helpers add barriers and validation.",
-      "detail": "What this ballot decides. Whether values with a fixed-time tag, Secret first, may steer branches, addresses, divisions, shifts, allocation sizes or stops, and how far down the compiler checks it. Protection of memory is D-MEM-WIPE1's ratified duty, and disclosure sinks are D-SECRETEDGE1's. This ballot changes neither; it adds timing.\n\nNo starting assurance is claimed. Core tags nothing #Secret today (census: 0 uses), so no checker sees its keys. Its crypto code is written with masks, and its tests check results, not timing. Nothing here claims that today's TLS or crypto code is constant-time.\n\nToday, on the t6c compiler (dev 76955986d0), with the same results as seed a0_042. Ana's early-exit compare, a secret table index, a secret divisor, a secret shift amount and a loop counted by a secret all check and run (c07). A Secret condition that picks untagged text reaches process.cmd with no report (c01, BallotReview4's attack).\n\nA Credential condition does the same (c06), though passing the token itself is E0721. A secret U8 plus one prints 1, then stops with E3010 at 255, exit 70 (c02). A compare over a shorter input stops with E3010 (c03). Under #Arithmetic(.Wrapping) the same addition prints 0 (c05).\n\nFlow fixes under every option. The tag checker loses tags in seven known ways, and ratified tags promise all of them. Stores into a list, field or & parameter must tag the container. A loop body must be walked until its tags stop changing. A call must walk its callee with the argument tags, receivers included. A branch's condition must tag its results. Every option below fixes all seven.\n\nImplicit flow, exactly. A branch on a secrecy tag sets a control tag for its arms. Every value an arm produces, assigns outside itself, stores or writes through & gets that tag. A call made in the arm is a use of each sink the tag denies. If an arm can leave by return, break, continue, ? or !, everything after the branch is under the control tag too.\n\nIntegrity tags such as Input get no control tag, because a branch on untrusted input that picks a constant query injects nothing. A tag says which kind it is with a new tag-only Marker constant, protects, of the Prelude enum TagProtects { Secrecy, Integrity }. Its default is .Secrecy, the stricter kind. The Prelude sets Input to .Integrity, and Secret, Credential and PII to .Secrecy.\n\nRun-time stops and loops that never end are not tracked for leak-only tags; that residue is named below. Migration: no tag on the seed is declared in D-TAG-MARKER1's form yet (no .TypeUse site), so only the four Prelude tags need constants. A user tag that omits protects gets implicit flow, and one that omits timing gets no timing rule.\n\nAlias, call and capture flow. A loan of a tagged value is tagged, and a write through it tags the owner. A callee is checked once per pattern of argument tags, cached, with recursion solved to a fixed point. Generic code is checked per instance. A closure that captures a tagged value tags its results.\n\nFunction and trait values. A function value cannot be walked, so passing a fixed-time value to one is refused unless its type names the tag, as in fn(#Secret U8) -> #Secret U8. A function becomes such a value only when its checked summary for that tag pattern has no refusal and tags its results at least as the type says.\n\nA trait method called through a trait value with a fixed-time argument follows the same rule: its signature must name the tag. Every impl is checked against that signature where it is declared. Under C, the function type must also say #ConstantTime, so only marked functions fit it; naming a Secret parameter is not enough.\n\nExported callbacks. A Jet function exported to foreign code may take a fixed-time parameter only with #Unsafe and a reason, listed in the build report, because its foreign caller is not checked. Its body is checked as usual.\n\nSeparate compilation. Each package's checked interface carries a tag summary for each public function: which argument tags reach which results and sinks, and whether it is fixed-time safe for each tag pattern. Callers in other packages use the summary instead of the body. The summary is part of the package's checked content identity, so a changed body changes the identity.\n\nLoaded code. A package loaded while running is reached only through function and trait values, whose types name the tags. The loader refuses a package whose checked summaries do not satisfy those types. Two boundaries stay outside the promise, and are named: a tampered binary, and foreign code behind an audited extern.\n\nUnder A, a tag declares fixed time with a second tag-only constant, timing, of the Prelude enum TagTiming { Free, Fixed }, default .Free. Branch, index and divide are not effects, so they stay out of D-TAG-MARKER1's #FX denial row. The Prelude Secret gets timing: .Fixed. Credential and PII keep .Free, because tokens and personal data are parsed by code that branches on their text.\n\nSeveral tags. A value may carry more than one tag. It follows the timing rules if any of its tags is .Fixed, and gets implicit flow if any is .Secrecy. A branch's results carry the union of its arms' tags plus its control tag; a container's element tags and its own tag are kept apart.\n\nWhat is refused for a fixed-time value, with E0737. In control: an if, while or loop-until condition, a match subject, the left side of && or ||, and the subject of ??, ? or !. In addressing: a range bound or loop count, a list index, map key or slice bound. Also either operand of / or %, a shift or rotate amount, an allocation size or capacity, and a call target.\n\nWidths, with E0738. A fixed-time scalar must be a fixed-width integer or a Bool. A fixed-time value may be any container of such scalars: a struct, a fixed or growable array, a String's bytes, or an Any payload. Int and Float, and any type that holds them, are refused. Int's exact routes branch on the value's size, and some hardware slows down on very small floats.\n\nStops, with E0739. Plain arithmetic on a fixed-time value would stop on overflow, and whether it stops depends on the secret. So the plain Stop policy and checked(...) are refused for fixed-time operands. wrapping(...), saturating(...) and #Overflow(.Wrapping) are accepted, all from ratified D-FIXED-WRAP1; saturating lowers to masks. A narrowing conversion T{x} follows the same rule.\n\nCode that needs to know whether a sum overflowed computes the carry bit with masks, as ConstTime.jet does today, and keeps it as a #Secret Bool. That closes the overflow-stop attack: next_counter must write wrapping(k + U8{1}), which gives 0 for 255 and never stops.\n\nWhat stays allowed. Comparisons such as == and < on fixed-time values give a fixed-time Bool, lowered to a branch-free compare. Bit operations, wrapping and saturating arithmetic, and selection by mask are allowed. A bounds check with a public index on a list of public length stays, because its stop depends only on public data.\n\nSecret branches that are rewritten, not refused. A branch on a fixed-time value compiles when both arms are total. Total means no stop, no loop with a secret count, no call with an effect, no allocation, and writes only to locals and & places. The compiler runs both arms and picks each result with a mask, as FaCT does. An early return or break in such a branch becomes a secret flag, and the code after it runs with its writes masked.\n\nIf the code an early exit would skip is not total, the early exit is refused. A function with a rewritten branch returns a fixed-time value, so check_fast below returns #Secret Bool. The build report lists every rewritten branch by line. Every other secret branch is refused with E0737, which names the first part of the arm that blocks the rewrite: the call, the allocation, the stop or the secret count.\n\nThe rewrite is not trusted for timing. The final-code validator below checks its output like any other code, so a rewrite bug is an internal compiler error, not a leak. Tier parity checks its answers: the forced interpreter runs the branch as written, and both tiers must agree.\n\nPublic lengths. Allocation sizes are never secret, so every buffer's capacity is public. [#Secret U8] tags each element, and its length and is_empty are public too. #Secret [U8] and #Secret String tag the whole value, so their length is secret and only their capacity is public. TlsLead's probe p4 shows the whole-value length is tagged today.\n\nA public length stays public only while no secret decides it. So push, pop, insert, remove, truncate or extend on a [#Secret U8] is refused under a secret control tag, with E0737, and their count arguments must be public. A call made under a control tag is checked as if each write it makes through & were inside that branch.\n\nThe length fact lives in the type, so it travels with every loan, parameter and capture. Turning #Secret [U8] into [#Secret U8] declares its length public, so it is done only in a #Scrub(Secret) function, listed for review. The other direction is a plain widening.\n\nThe seed accepts [#Secret U8] as a type but drops the element tag: a byte read from it reaches process.cmd with no report (c04). A builds element tags.\n\nComparing unequal lengths. Core's crypto.equal(expected: [#Secret U8], got: [U8]) -> Bool returns false at once when the lengths differ, which reveals only public lengths. Otherwise it reads every byte, combines the differences with masks, and reveals one Bool through its scrub. That closes the short-compare attack.\n\nThe attack's own hand-written loop is refused when expected is #Secret [U8], because its range bound is secret. With [#Secret U8] the loop compiles, and the stop on a short input depends only on public lengths; crypto.equal is the fix.\n\nDeclassifying. #Scrub(Secret) is the only place a fixed-time value becomes public, as D-SECRETEDGE1 already lists. A scrub lifts the timing and disclosure rules from its result only. It never ends D-MEM-WIPE1's protection of the values it read, and Credential and PII keep that duty in every option. Core ships reveal for one Bool and the outputs of seal, sign and public-key derivation.\n\nSecret text. Code over a #Secret String or #Secret [U8] works over the public capacity with masks and never stops at the secret length. Core's fixed-time operations on them are move, drop, copy, crypto.equal and its decoders for base64, hex and PEM. Any other String method reached with one is checked like any helper, and its first refused line reports E0737.\n\nSecret input. A keeps D-MEM-WIPE1's spelling, #Secret (sys.get(\"SIGNING_KEY\") ?? return). The tag applies to the read itself, so the value is protected and fixed-time from its first copy, with type #Secret String; key.bytes() gives #Secret [U8]. Core's decoders take tagged input and return tagged output, so no parser sees untagged secret text.\n\nBoxes and enums. A #Secret Any has secret contents and a public payload type, so type tests and take compare public identity and bind #Secret T. A box, or an enum whose cleanup depends on its variant, may not be made inside a Secret branch, with E0737: dropping it would choose cleanup by a secret. Other variants chosen there become secret, and matching them is refused.\n\nForeign code. Jet cannot see a foreign body, so passing a fixed-time value to an extern function is refused. An extern may accept one only when its declaration names the tag on that parameter and carries #Unsafe with a reason; each such crossing is listed in the build report. This matches D-MEM-WIPE1's audited owning receivers.\n\nKeeping the tag to the end. Today the IR builder strips tags (BuildTypes.jet:21, ir_untag), so the optimizer sees plain integers. Under A, a fixed bit rides every slot, temporary and register that holds a fixed-time value. Inlining, SSA, copy coalescing and scalar replacement keep the bit. An IR check after every optimizer pass, in every build mode, refuses a branch, address, divide, variable shift or call target that reads a fixed slot.\n\nThe leakage model. For code holding fixed-time values, A promises that the executed instruction sequence, every memory address and every branch outcome are independent of those values. Every instruction that reads one is in its target's table. The attacker may time the program and watch caches and branch predictors from the same machine.\n\nExcluded, and named. Power and electromagnetic readings, frequency changes driven by power use, speculative execution, and the timing of the operating system and other processes. A does not promise identical wall time. Jasmin's separate speculative check is a stronger model that A does not offer.\n\nThe per-target tables. Each supported target ships a table of exact instruction forms, and each entry cites the vendor document revision that names it; a form without a citation is not listed. The admitted classes are add and subtract with carry, bitwise logic, shifts and rotates by a public amount, multiply, compare and test, conditional select and set, and moves.\n\nNever admitted with fixed-time operands: division and remainder, branches on flags set from them, and loads or stores at addresses they decide. Bit scans, population counts and runtime-helper calls are refused too. Intel's data operand independent timing list governs x86-64, and Arm's DIT list governs AArch64. Compares lower to setcc or cset, and selection to cmov, csel or masks.\n\nAdmission on AArch64. Where the CPU reports FEAT_DIT, a function that holds fixed values sets the DIT bit on entry and restores it on exit; an ordinary program may do this itself. DIT is per-thread state, saved with the thread, so thread creation, moves between cores and signal handlers need nothing more. A foreign call made while DIT is set keeps it set.\n\nAdmission on x86-64. Intel's DOIT guidance (ID 768873, updated 2025-09-10) covers Core processors before Ice Lake and Atom processors before Gracemont. It says they run the listed instructions as if the mode were on, so those hosts are confirmed. Ice Lake, Gracemont and later need the DOITM bit of a model-specific register. Only the operating system can write it, and Intel advises against setting it for the whole machine. Those hosts are confirmed only where the operating system reports the bit on.\n\nIntel also says some vector forms depend on the MXCSR setting; the x86-64 table leaves those out. This repair read Intel's page but found no AMD list, so AMD processors are unconfirmed until AMD publishes one; the probe machine's Ryzen 9 7950X3D is one of them. A WebAssembly engine is always unconfirmed, because it compiles the module again.\n\nWhat an unconfirmed host does. By default the program runs, as programs built with BoringSSL, subtle or Go's crypto/subtle run on the same chip. The code half of the promise still holds, because the checker, the IR check and the validator all ran. The build report names each target whose hosts may be unconfirmed. sys.timing_host() returns .Confirmed, or .Unconfirmed with the missing control, so a server can log it or stop.\n\nUnder the hardened profile, policy: { harden: true } or --profile=hardened, an unconfirmed host refuses to start a program holding fixed-time values, and the error names the missing control. This adds one check to the ratified hardening fact of D-MEM-GUARANTEE1 and D-HARDENED1; it adds no new switch.\n\nFinal-code validation. After register allocation, a validator reads the final instructions of every function that holds fixed values. It follows fixed values through registers, condition flags and spill slots, whose addresses are frame offsets and so public. It checks that only listed instructions read them, and that none feeds a branch, an address, a divide or a variable shift.\n\nCompiler-made code is covered the same way. Inline copies, wide multiplies and stack probes are checked as instructions, and a runtime-helper call with a fixed operand fails validation. Unwinding, cancellation and early exits run only on public conditions, since stops on fixed values are refused, and their wipes loop over public capacities.\n\nA failed validation after sema is an internal compiler error, exit 101 under I2/I3, and no program is emitted. The emitted-code test from #6694 c10 (a) stays as a test of this validator. The checker rules are the same on every tier, and the fixed bit, IR check and validator run at O0, O1 and O2, including jet dev's JIT.\n\nFail closed, in two separate cases. A target without D-MEM-WIPE1's memory protection already refuses sensitive values under that ratified decision. Every supported target ships a timing table; wasm32-wasip2's covers the WebAssembly instructions Jet emits, which are only arithmetic and bit operations on fixed values. No target is carved out, so I9 holds. A new target gets its timing table before it is supported, as it gets its other tables.\n\nAllocation and memory. A fixed-time value cannot size an allocation, so allocation, growth and allocation failure depend only on public data. Storage for fixed-time values is D-MEM-WIPE1's protected storage, wiped and kept out of swap and crash output. The 270 manual wipe calls in 23 files of Core, Compiler and Examples stay until D-MEM-WIPE1 is built.\n\nHelper coverage. There is no allow list: every function reached with a fixed-time value is checked, Core included. ConstTime.jet has 38 functions, and 18 take Int parameters. BallotReview4 found that memmove_left, memcpy_offset and memcmp_partial handle secret offsets and skip counts as Int. Under A those become #Secret U64, with their totals and ranges public.\n\nBuild-time code. The timing rules apply to code in the shipped program; build-time code runs on the build machine and is not timed. A build-time result may not carry a secrecy tag, because the program image is not protected storage. That makes it a non-storable result type under D-COMPTIME-BLOCK1's E0944. It follows from D-MEM-WIPE1 and narrows neither D-COMPTIME-BLOCK1 nor D-META-PHASE1.\n\nBeginner path. Use core.crypto's seal, open, sign, verify and equal, and never write a tag. A natural early-exit compare of a tagged key compiles and runs in fixed time. A secret branch that prints or allocates gives E0737, whose fix names the masked form or crypto.equal.\n\nExpert path. Tag key material once as [#Secret U8] or #Secret U64, write the primitive with bit operations, wrapping arithmetic, mask selection or total branches, and publish results only through #Scrub(Secret) functions. The build report lists every scrub, every rewritten branch and every foreign crossing. The hardened profile adds the host check.\n\nDownsides of A, and what the design does about them. A secret branch with an effect, a secret index and a secret loop count are still refused, because no rewrite can hide an address or an effect. E0737 names the part that blocks the rewrite, and Core ships crypto.equal and fixed-time decoders for base64, hex and PEM. Secret arithmetic must name wrapping or saturating, and E0739's fix writes it.\n\nThe one cost that cannot be removed. On an unconfirmed host the chip's half of the promise is unknown, because its maker publishes no list or only the operating system can set the switch. Mitigation: AArch64 sets DIT itself, older Intel is covered by Intel's statement, the build report and sys.timing_host() say which hosts are unconfirmed, and the hardened profile refuses them.\n\nTwo smaller costs. Leak-only tags do not track run-time stops or endless loops in their branches, and timing and termination can reveal more than a branch outcome; a tag that needs that sets timing: .Fixed. Callees are checked again for each pattern of argument tags, and the summaries are cached.\n\nOther options. B adds core.ct types, such as ct.U8 and ct.Bool, that are always Secret and whose comparisons give a ct.Bool that no if accepts. Operators work on them, and they share A's lowering, validator and host policy. C applies A's timing rules only inside functions marked #ConstantTime, with the same whole-program tag flow. D adds no timing rule; an emitted-code test covers listed Core functions.\n\nE is A without the rewrite: every secret branch is refused, so Ana's early-exit compare must be written with masks. The trusted compiler stays smaller, and no code runs work the source seems to skip.\n\nF is the strictest form, the draft this repair replaced. Every unconfirmed host refuses to start a program holding fixed-time values, and wasm32-wasip2 cannot build one. D-WASISRV1 ratified wasm32-wasip2 as a full server target with no carve-out under I9, so F needs you to approve an I9 exception. A, B, C and E keep the target.\n\nThe forced interpreter is a test path, not a deployment target. It gives the same results, makes no timing promise, and says so when it starts.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Fixed-time rules on the Secret tag, with simple secret branches rewritten",
-          "detail": "Secret gains fixed time. A secret branch whose arms are total is rewritten to run both arms and pick by mask, so natural code works. A secret branch with an effect is refused. So are a secret index, division, shift amount, allocation size or call target, secret Int and Float, and arithmetic that could stop on a secret. A validator checks the final instructions on every target. Unconfirmed hosts run and are reported; the hardened profile refuses them.",
-          "technical": "Tag-only constants timing: TagTiming and protects: TagProtects, set on the Prelude tags. FaCT-style predication of total secret branches and early exits before lowering, listed in the build report. E0737, E0738 and E0739 at the line, with tag summaries in each package's checked interface. A fixed bit replaces ir_untag for fixed tags and is checked after every pass.\n\nCited per-target tables, wasm32-wasip2's included, and a final-instruction validator. Host admission follows each vendor's statement, with sys.timing_host(), and harden refuses unconfirmed hosts. No I9 exception. D-MEM-WIPE1, D-SECRETEDGE1, D-TAG-MARKER1, D-COMPTIME-BLOCK1 and D-META-PHASE1 unchanged.",
-          "code": "use crypto: core.crypto\n\n// Accepted: the secret early exit is rewritten into a flag and masks, so every byte is read.\ncheck_fast: fn(expected: [#Secret U8], got: [U8]) -> #Secret Bool {\n    if expected.len() != got.len() -> return false    // both lengths are public: a real branch\n    loop i in 0..<got.len() {\n        if expected[i] != got[i] -> return false    // rewritten; listed in the build report\n    }\n    true\n}\n\n// One Bool is revealed, on purpose.\ncheck: fn(expected: [#Secret U8], got: [U8]) -> Bool {\n    crypto.reveal(check_fast(expected, got))    // #Scrub(Secret), listed for review\n}\n\nnext_counter: fn(k: #Secret U8) -> #Secret U8 {\n    wrapping(k + U8{1})    // plain k + U8{1} is E0739: its stop would depend on k\n}\n\n// Refused: this arm has an effect, so it cannot be rewritten.\naudit: fn(k: #Secret U8) {\n    if k == U8{0} -> print(\"zero key\")    // E0737: a branch on a Secret value; its arm prints\n}\n// Proposed (A), not built. On an AMD host it builds and runs; the build report lists the host as unconfirmed."
-        },
-        {
-          "key": "B",
-          "name": "A family of always-secret integer types",
-          "detail": "core.ct adds U8, U32, U64 and Bool types that are always Secret. Their arithmetic wraps, their comparisons give a ct.Bool, and no if, index or division accepts one. Operators work on them. The type system alone refuses a secret branch. Host and target policy are A's.",
-          "technical": "ct types carry the Secret tag, so disclosure and protection rules apply unchanged, and A's flow fixes still cover Credential and PII. Lowering, the final-instruction validator, the tables and the host policy are A's; no branch is rewritten. Wrapper primitives still need checked lowering; calls and conversions must not launder secrecy. Generic code over U8 does not accept ct.U8 unless written over both.",
-          "code": "use ct: core.ct\n\n// Refused: ct.Bool is not a Bool, so it cannot be an if condition.\ncheck_fast: fn(expected: [ct.U8], got: [U8]) -> Bool {\n    if expected.len() != got.len() -> return false\n    loop i in 0..<got.len() {\n        if expected[i] != ct.U8{got[i]} -> return false    // type error: ct.Bool in an if\n    }\n    true\n}\n\ncheck: fn(expected: [ct.U8], got: [U8]) -> Bool {\n    if expected.len() != got.len() -> return false\n    diff := ct.U8{0}\n    loop i in 0..<got.len() -> diff = diff.bit_or(expected[i].bit_xor(ct.U8{got[i]}))\n    ct.reveal(diff == ct.U8{0})\n}\n\nnext_counter: fn(k: ct.U8) -> ct.U8 { k + ct.U8{1} }    // ct arithmetic always wraps\n// Proposed (B), not built."
-        },
-        {
-          "key": "C",
-          "name": "Timing rules inside #ConstantTime functions",
-          "detail": "A function marked #ConstantTime gets A's timing rules and rewrite, with the same whole-program tag flow. A marked function may pass fixed-time values only to marked callees. Unmarked code may branch on a secret, and the result keeps its tag.",
-          "technical": "The strongest scoped design: tags flow across functions, fields and lists as in A, and only the timing refusals are scoped. The rewrite, fixed bit, validator and host policy apply to marked functions. Key parsers need no fixed-time rewrite, but an unmarked early-exit compare compiles and leaks.",
-          "code": "use crypto: core.crypto\n\n// Accepted without the marker, and not fixed-time: the rules apply only in marked functions.\ncheck_fast: fn(expected: [#Secret U8], got: [U8]) -> Bool {\n    if expected.len() != got.len() -> return false\n    loop i in 0..<got.len() {\n        if expected[i] != got[i] -> return false    // a real branch; the result carries Secret\n    }\n    true\n}\n\n#ConstantTime\ncheck: fn(expected: [#Secret U8], got: [U8]) -> Bool {\n    if expected.len() != got.len() -> return false\n    diff := #Secret U8{0}\n    loop i in 0..<got.len() -> diff = diff.bit_or(expected[i].bit_xor(got[i]))\n    crypto.reveal(diff == U8{0})\n}\n\n#ConstantTime\nnext_counter: fn(k: #Secret U8) -> #Secret U8 { wrapping(k + U8{1}) }\n// Proposed (C), not built. check_fast's Bool carries Secret, so it cannot reach a denied sink."
-        },
-        {
-          "key": "D",
-          "name": "No timing rule, and an emitted-code test",
-          "detail": "No new language rule. The seven flow fixes, D-MEM-WIPE1 protection and D-SECRETEDGE1 sinks still apply. A test builds each listed Core primitive in every build mode and fails if its machine code branches on, indexes by or divides by a secret.",
-          "technical": "The #6694 c10 (a) test is the only timing check. User code and unlisted Core code are not checked, and secret arithmetic keeps the Stop policy.",
-          "code": "use crypto: core.crypto\n\n// Accepted: no timing rule. The result carries Secret by the flow fixes.\ncheck_fast: fn(expected: [#Secret U8], got: [U8]) -> Bool {\n    if expected.len() != got.len() -> return false\n    loop i in 0..<got.len() {\n        if expected[i] != got[i] -> return false\n    }\n    true\n}\n\ncheck: fn(expected: [#Secret U8], got: [U8]) -> Bool {\n    if expected.len() != got.len() -> return false\n    diff := #Secret U8{0}\n    loop i in 0..<got.len() -> diff = diff.bit_or(expected[i].bit_xor(got[i]))\n    crypto.reveal(diff == U8{0})\n}\n\nnext_counter: fn(k: #Secret U8) -> #Secret U8 { k + U8{1} }    // stops when k is 255\n// D changes no rule; an emitted-code test covers listed Core functions only."
-        },
-        {
-          "key": "E",
-          "name": "A, with every secret branch refused instead of rewritten",
-          "detail": "As A, but no secret branch is rewritten. Every if, loop test or match on a secret is refused with E0737, so early exits must be written with masks. Host and target policy are A's.",
-          "technical": "A without the predication pass. The fixed bit, tables, validator, admission and hardened check are A's. The trusted compiler is smaller, and source never hides work that always runs.",
-          "code": "use crypto: core.crypto\n\n// Refused: a branch on a Secret byte ends the loop early.\ncheck_fast: fn(expected: [#Secret U8], got: [U8]) -> Bool {\n    if expected.len() != got.len() -> return false\n    loop i in 0..<got.len() {\n        if expected[i] != got[i] -> return false    // E0737: a branch on a Secret value\n    }\n    true\n}\n\n// Accepted: every byte is read, and one Bool is revealed.\ncheck: fn(expected: [#Secret U8], got: [U8]) -> Bool {\n    if expected.len() != got.len() -> return false    // both lengths are public\n    diff := #Secret U8{0}\n    loop i in 0..<got.len() -> diff = diff.bit_or(expected[i].bit_xor(got[i]))\n    crypto.reveal(diff == U8{0})                        // #Scrub(Secret), listed for review\n}\n\nnext_counter: fn(k: #Secret U8) -> #Secret U8 {\n    wrapping(k + U8{1})    // plain k + U8{1} is E0739\n}\n// Proposed (E), not built."
-        },
-        {
-          "key": "F",
-          "name": "A, failing closed on every unconfirmed host and on server WebAssembly",
-          "detail": "As A, but a program holding fixed-time values refuses to start on any unconfirmed host, and wasm32-wasip2 cannot build one. This is the draft the repair replaced, and it needs an I9 exception.",
-          "technical": "A's rules, rewrite, tables and validator, with admission always fail-closed. Ice Lake and later Intel without DOITM, AMD without a published list, and every WebAssembly engine are refused. Asks for an I9 exception against D-WASISRV1's no-carve-out server target.",
-          "code": "use crypto: core.crypto\n\n// The same source as A.\ncheck: fn(expected: [#Secret U8], got: [U8]) -> Bool {\n    crypto.reveal(check_fast(expected, got))\n}\n\n// jet build --target=wasm32-wasip2: refused, no fixed-time programs on this target.\n// On an AMD host: the program refuses to start and names the missing vendor list.\n// Proposed (F), not built."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "C",
-          "note": "BoringSSL uses masks, optimization barriers and optional Valgrind secret-flow validation. These are real defenses, not a language-level guarantee, and it runs on every host without checking the CPU mode. Source: crypto/internal.h.",
-          "code": "x |= a[i] ^ b[i];\nreturn x;"
-        },
-        {
-          "lang": "Rust",
-          "note": "The subtle crate's Choice and ConditionallySelectable hide values behind an optimization barrier; it is a library promise, not a compiler check.",
-          "code": "let c: Choice = a.ct_eq(&b);\nlet v = u8::conditional_select(&x, &y, c);"
-        },
-        {
-          "lang": "Go",
-          "note": "crypto/subtle.WithDataIndependentTiming runs a function with the CPU's fixed-time mode on. It sets DIT on arm64 and does nothing on other architectures, so x86-64 hosts run unconfirmed. A's default matches it and adds the report and the hardened refusal. Source: crypto/subtle/dit.go, Go 1.24 release notes.",
-          "code": "subtle.WithDataIndependentTiming(func() {\n    ok = subtle.ConstantTimeCompare(mac, want) == 1\n})"
-        },
-        {
-          "lang": "FaCT",
-          "note": "A research language with secret and public types. It rewrites secret branches, early returns included, into masked operations, and refuses secret indexes. A's rewrite follows it. Source: Cauligi et al., PLDI 2019.",
-          "code": "secret uint8 x = ...;\nif (x == 0) { y = 1; }   // rewritten to a select"
-        },
-        {
-          "lang": "Jasmin",
-          "note": "Programs state security contracts; the checker runs after lowering, has a DOIT mode, and offers a separate speculative model that A lacks. Source: Almeida et al., CCS 2017; Barthe et al., CCS 2021.",
-          "code": "fn eq(reg u64 a, reg u64 b) -> reg u64 { ... }"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "A uses the Secret tag Jet already follows, so ordinary operators keep working. Simple secret branches are rewritten into fixed-time code, and only what no rewrite can hide is refused. It checks the final instructions on every supported target, keeps every target, and reports hosts it cannot confirm.",
-        "gains": [
-          "Ana's early-exit compare compiles and runs in fixed time; a secret overflow is refused.",
-          "No optimizer change can add a secret branch, because the final instructions are checked.",
-          "The same tag carries disclosure, protection and timing, so secret means one thing.",
-          "Every ratified target stays, with no I9 exception and no narrowing of build-time code."
-        ],
-        "losses": [
-          {
-            "loss": "On an unconfirmed host, such as AMD without a published list or newer Intel without the operating-system switch, the chip's half of the promise is unknown. This cannot be removed.",
-            "mitigation": "AArch64 sets DIT itself, older Intel is covered by Intel's statement, the build report and sys.timing_host() name unconfirmed hosts, and the hardened profile refuses them."
-          },
-          {
-            "loss": "A secret branch with an effect, a secret index and a secret loop count are still refused.",
-            "mitigation": "E0737 names the blocking part, and Core ships crypto.equal and fixed-time decoders for base64, hex and PEM."
-          },
-          {
-            "loss": "Leak-only tags such as Credential do not track stops or endless loops in their branches.",
-            "mitigation": "A tag that needs that sets timing: .Fixed."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B makes the timing distinction explicit, but natural branch code is a type error, and generic code over U8 needs a second version or a shared trait."
-          },
-          {
-            "key": "C",
-            "reason": "C keeps tags across functions, but an unmarked early-exit compare compiles and leaks, so safety is opt-in."
-          },
-          {
-            "key": "D",
-            "reason": "D checks only listed Core functions after the build, and secret arithmetic can still stop on a secret."
-          },
-          {
-            "key": "E",
-            "reason": "E keeps the compiler smaller, but every natural early exit must be rewritten by hand with masks."
-          },
-          {
-            "key": "F",
-            "reason": "F refuses to start on AMD and newer Intel hosts by default and needs an I9 exception for server WebAssembly."
-          }
-        ],
-        "tradeoff": "Stricter rules for effects and addresses in secret code, in return for a timing promise that holds through every optimizer pass on every target. The chip's half is confirmed where vendors allow it and reported where they do not."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0; BallotReview5 reviewed an earlier draft. No separate adversarial review ran on this repair."
-      },
-      "checkInstructions": "Run $JET_SCRATCH_ROOT/lanes/BallotFix/probes/t6c.sh probes/ct check, then run, with the t6c compiler (dev 76955986d0). Outputs are in probes/ct/out6 and match the seed's probes/ct/out. Intel's admission facts are from its Data Operand Independent Timing ISA Guidance, ID 768873. Run Tools/agent/ballots/Validate.jet on this payload. No option is built; the probes show only today's gaps.",
-      "surface": {
-        "gist": "Should the Secret tag forbid secret-dependent branches, indexes, divisions and stops, checked down to the final machine code?",
-        "lesson": "A timing leak needs only a branch, a memory lookup, a division or a stop that depends on a secret. A compiler can refuse those only if it follows secret values everywhere and checks the code it finally emits.",
-        "trio": {
-          "current": {
-            "note": "Today this compiles and leaks (c07).",
-            "code": "if expected[i] != got[i] -> return false"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "A library barrier, not a compiler check.",
-            "code": "let c: Choice = a.ct_eq(&b);"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Fixed-time Secret tag",
-            "gist": "Simple secret branches are rewritten; the rest are refused.",
-            "gains": [
-              "Natural code runs in fixed time.",
-              "Final instructions checked on every target."
-            ],
-            "losses": [
-              "Unconfirmed chips are reported, not proven."
-            ],
-            "proposed": {
-              "code": "if expected[i] != got[i] -> return false    // rewritten to masks"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Secret integer types",
-            "gist": "ct.U8 and ct.Bool refuse branches by type.",
-            "gains": [
-              "Safe by type."
-            ],
-            "losses": [
-              "A separate type family; no rewrite."
-            ],
-            "proposed": {
-              "code": "diff := ct.U8{0}\nct.reveal(diff == ct.U8{0})"
-            }
-          },
-          {
-            "key": "C",
-            "name": "#ConstantTime functions",
-            "gist": "Timing rules only where a function is marked.",
-            "gains": [
-              "Parsers stay as written."
-            ],
-            "losses": [
-              "Unmarked leaks compile."
-            ],
-            "proposed": {
-              "code": "#ConstantTime\ncheck: fn(expected: [#Secret U8], got: [U8]) -> Bool { … }"
-            }
-          },
-          {
-            "key": "D",
-            "name": "Test only",
-            "gist": "No rule; a machine-code test of listed Core functions.",
-            "gains": [
-              "No new rules."
-            ],
-            "losses": [
-              "User code unchecked.",
-              "Secret stops remain."
-            ],
-            "proposed": {
-              "code": "next_counter: fn(k: #Secret U8) -> #Secret U8 { k + U8{1} }"
-            }
-          },
-          {
-            "key": "E",
-            "name": "Refuse every secret branch",
-            "gist": "A without the rewrite.",
-            "gains": [
-              "Smaller trusted compiler."
-            ],
-            "losses": [
-              "Early exits rewritten by hand."
-            ],
-            "proposed": {
-              "code": "if expected[i] != got[i] -> return false    // E0737"
-            }
-          },
-          {
-            "key": "F",
-            "name": "Fail closed",
-            "gist": "A, refusing unconfirmed hosts and server Wasm.",
-            "gains": [
-              "No unconfirmed host runs."
-            ],
-            "losses": [
-              "AMD and newer Intel refused.",
-              "Needs an I9 exception."
-            ],
-            "proposed": {
-              "code": "jet build --target=wasm32-wasip2    // refused"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A reuses the Secret tag, rewrites simple secret branches, refuses the rest, checks the final instructions, and keeps every target.",
-          "gains": [
-            "Natural secret code is fixed-time.",
-            "Optimizers cannot undo it."
-          ],
-          "losses": [
-            {
-              "loss": "Unconfirmed chips cannot be proven.",
-              "mitigation": "Reported; the hardened profile refuses them."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "A separate timing-type family."
-            },
-            {
-              "key": "C",
-              "reason": "Safety is opt-in."
-            },
-            {
-              "key": "D",
-              "reason": "User code unchecked."
-            },
-            {
-              "key": "E",
-              "reason": "Hand-written masks for every early exit."
-            },
-            {
-              "key": "F",
-              "reason": "Refuses common hosts; needs an I9 exception."
-            }
-          ],
-          "tradeoff": "Stricter secret code, for a timing promise through every pass."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-10T03:47:58.143Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-10"
-    },
-    {
       "id": "D-SHARED-CYCLE2",
       "cardId": "c0r02x8n",
       "group": "memory",
@@ -207843,187 +206893,6 @@
           "result": "Growing enums grow without breaks, and nothing changes silently."
         }
       ]
-    },
-    {
-      "id": "D-INSPECT-TARGET1",
-      "cardId": "c0kbej10",
-      "group": "tooling",
-      "title": "Where a user reads the declared target machines and their dossiers: a new `jet inspect target [machine]` view, a section of `jet self doctor --target`, or no command at all",
-      "situation": "A target machine is a named kind of computer Jet can build for, like hosted (a normal Linux PC) or wasm.no-os (WebAssembly with no operating system). Each one has a dossier, a fact sheet that says what it gives a program: a heap, a clock, random numbers, a place to print, and the ways it runs. Today no command lists the machines or shows a sheet. The compiler refuses one kind of misuse: a web build that starts other programs or calls C is stopped at the call. Nothing tells a user that wasm.no-os has no clock. This vote decides where the list and the sheets are shown. We recommend a read-only view: `jet inspect target` lists the machines, and `jet inspect target <machine>` shows one sheet.",
-      "gist": "Where should a user list the target machines and read what one provides: a new `jet inspect target` view, the `jet self doctor --target` health check, or nowhere on the command line?",
-      "lesson": "Jet can build one program for different kinds of computers. Each kind has a fact sheet that says what the program can use there, such as a clock or random numbers. This vote picks the command that lists those computers and shows a sheet.",
-      "explainer": "Words used here. A target machine is a named build destination that Jet knows: hosted, wasm.browser, wasm.wasi, wasm.no-os and two boards. A capability is one thing the machine gives a program, written like Time.Wall (the wall clock) or Rand.Entropy (random numbers). A dossier is the full fact sheet for one machine.\n\nAn effect is a kind of outside action a function performs, like Exec (starting another program). An inspect view is a read-only `jet inspect <name>` command that shows compiler facts and changes nothing. `jet self doctor` is the health check that tests whether the toolchain works on this computer.",
-      "story": "Lena writes a sensor program for a WebAssembly chip with no operating system. First she wants the exact machine name, then whether that machine has a clock.\n\nUnder A she runs `jet inspect target`, sees wasm.no-os in the list, then runs `jet inspect target wasm.no-os` and reads `lacks: ... Time.Wall ...`. Under B she runs `jet self doctor --target wasm.no-os` and finds the same line after the toolchain checks; doctor has no list. Under C she has no command. The checker only stops web builds that start programs or call C, so nothing tells her the chip has no clock.",
-      "inWild": "# Rust: list the targets, then one target's facts.\nrustc --print target-list\nrustc --print cfg --target wasm32-unknown-unknown\nrustc -Z unstable-options --print target-spec-json --target wasm32-unknown-unknown\n# Zig: every target, and the host's facts, as JSON.\nzig targets\n# Go: every OS and architecture pair as JSON.\ngo tool dist list -json",
-      "detail": "What this ballot decides. Which user command, if any, lists the declared target machines and shows one machine's dossier, and in what shape.\n\nToday's facts. The compiler holds every declared machine in its machine table (Pipeline.jet JET_DRIVER_TARGET_MACHINE_NAMES and jet_driver_target_machine_by_name). Each machine carries an audit policy. The policy's dossier lens says whether its dossier may be shown (AuditPolicy.dossier_lens). Every part of the dossier already has a Jet JSON writer in Compiler/JetFoundation/Source/Target. No command lists the machines or prints a dossier.\n\nToday's commands. `jet self doctor --target <machine>` only checks that the name is a declared machine. It prints `[ok  ] <machine>: declared target machine (<triple>)` in its `cross` section (Doctor.jet jet_cli_doctor_check_cross_target). A wrong name gets E3302 with the list of names. No `jet targets` command exists. `jet inspect build` takes `--target` only as a build flag for its gates. The other inspect views (memory, choices) each came through a ballot.\n\nWhat the checker already says. E1123 (jet.TargetDeniedEffect) is the one target refusal that runs today (Sema TargetDenials.jet). It runs in the checker when the build selects the browser machine. A `build: fn` output with `os: web` selects it (Request.jet build_os, Pipeline.jet jet_driver_selected_target_machine).\n\nE1123 in detail. The checker walks every function the entry reaches.\n\nWhere it reports. It reports E1123 where Exec or FFI.C first enters the program's own code: a use in its body, or its call into Core. Only the browser machine denies effects (jet_target_machine_denied_effects is empty for every other machine). The cases pin it at `jet build` (cross/build_fn_checks_each_target_against_its_own_row) and in the checker's ui suite (target_denied_effect_e1123). `jet check --target web` does not select the browser machine yet (known failure #5201).\n\nWhat no command says. E3311 (Target `wasm.no-os` lacks the required `Time.Wall` capability) is written and unit-tested in JetFoundation (jet_target_machine_validate). No driver or checker path calls it. So no check names a missing clock, entropy source or allocator on a no-OS machine.\n\nWhat the card asks. #6663 c1 reads: a user-visible target dossier view exists (e.g. jet inspect target <name> --json) built from AuditPolicy.dossier_lens, with a case pinning its output.\n\nThe same dossier under every option. A machine whose audit policy drops the dossier lens shows no dossier. The JSON fields are name, triple, environment, provider_identity, linker, allocator, panic, memory and mmio_capability. Then come time_wall, time_monotonic, time_zone_data, time_sleep, entropy, scheduler, byte_sink and startup. Last come provider_facts, hardware, programmers, execution {aot, dev} and audit.\n\nOther tools. rustc lists names (`--print target-list`) and prints one target's facts (`--print cfg`, and `--print target-spec-json` on nightly). zig targets prints every target and the host's facts as one JSON document. go tool dist list -json lists every OS and architecture pair. Every one of them can list all targets. The first draft of A could not, so A now lists the machines when no name is given.\n\nThe docs rule. AGENTS.md forbids hand-kept catalogs and committed generated output in docs. Reference output is generated on demand. So the docs cannot carry a per-machine capability table; they can only point at a command that prints it.\n\nA ready build exists for A. It is the held submission G5DevX-dossier5, which replaces G5DevX-dossier4. It holds jet_target_machine_dossier_json and the inspect view with its list. It adds the help and completion rows, a case that pins the list and two dossiers, and a Jet test for the dossier lens.",
-      "options": [
-        {
-          "key": "A",
-          "name": "A new read-only view: jet inspect target [machine] [--json]",
-          "detail": "`jet inspect target` lists every declared machine, one line each, with its triple, its environment and where it runs. `jet inspect target <machine>` prints that machine's fact sheet: its triple, its environment, where it runs, and the capabilities it provides and lacks. `--json` prints the list or the whole dossier as one status line. It reads no project, so it works anywhere. A name that is not a declared machine is refused with E3302, which lists the declared machines.",
-          "technical": "Compiler/JetCli/Source/Cli/InspectTarget.jet (new). With no name, jet_cli_inspect_target_list walks JET_DRIVER_TARGET_MACHINE_NAMES in table order. `--json` prints one jet.status/v1 line, action inspect.target, whose targets array holds name, triple, environment and execution {aot, dev} per machine. With a name, the target field is jet_target_machine_dossier_json(machine).\n\nE3302 refuses an unknown name and a machine with no dossier lens. E2104 refuses `--live` and `--replay`. Inspect.jet adds `target` to JET_CLI_INSPECT_PLANES. CLICommands.jet adds the row `inspect target [MACHINE] [--json]`, so help, man and completions list it (19 goldens gain one entry). Docs/spec/reference/cli.md documents it. The case target_machines/inspect_target_shows_the_machine_dossier pins the list exactly.",
-          "code": "$ jet inspect target\ntarget machines\n  board.sensor_v1 (thumbv7em-none-eabihf, no-os): runs aot\n  board.virt_aarch64 (aarch64-unknown-none, no-os): runs aot\n  wasm.browser (wasm32-unknown-unknown, browser): runs aot, dev\n  wasm.wasi (wasm32-wasip2, wasi): runs aot, dev\n  wasm.no-os (wasm32-unknown-unknown, no-os): runs aot\n  hosted (x86_64-unknown-linux-gnu, hosted): runs aot, dev\nrun `jet inspect target <machine>` for one machine's dossier\n\n$ jet inspect target wasm.no-os\ntarget wasm.no-os\n  triple: wasm32-unknown-unknown\n  environment: no-os\n  provider identity: target-providers-v1:<hash of the toolchain version>\n  runs: aot\n  provides: Target.Memory, Target.Atomic64, Target.Panic, Target.Startup\n  lacks: Target.Allocator, Target.MMIO, Target.Hardware, Time.Wall, Time.Monotonic, Time.ZoneData, Time.Sleep, Rand.Entropy, Target.Scheduler, IO.Read, IO.Write, Panic.Report\n\n$ jet inspect target --json\n{\"schema\":\"jet.status/v1\",\"action\":\"inspect.target\",\"ok\":true,\"reports\":[],\"targets\":[{\"name\":\"board.sensor_v1\",\"triple\":\"thumbv7em-none-eabihf\",\"environment\":\"no-os\",\"execution\":{\"aot\":true,\"dev\":false}},...]}\n\n$ jet inspect target wasm.no-os --json\n{\"schema\":\"jet.status/v1\",\"action\":\"inspect.target\",\"ok\":true,\"reports\":[],\"target\":{\"name\":\"wasm.no-os\",\"triple\":\"wasm32-unknown-unknown\",\"environment\":\"no-os\",...}}"
-        },
-        {
-          "key": "B",
-          "name": "A section of the health check: jet self doctor --target <machine>",
-          "detail": "`jet self doctor --target <machine>` already checks that the name is a declared machine. Under B its `cross` section also prints the machine's runs, provides and lacks lines, and a new `--json` flag on doctor prints the dossier. No new command, and no list: a user learns the names from the E3302 refusal of a wrong name. The fact sheet comes after the toolchain checks, which doctor runs first (the artifact store, the caches, the C toolchain, the language server).",
-          "technical": "Doctor.jet jet_cli_doctor_check_cross_target returns the existing ok line plus note lines for runs, provides and lacks. A doctor `--json` flag prints a jet.status/v1 line, action self.doctor, with the checks and a target field holding jet_target_machine_dossier_json(machine). CLICommands.jet: `self doctor` usage gains `--json`. Update cli.md and the doctor help goldens. A failed toolchain check makes doctor exit 1 with L2101, even when the target section is fine.",
-          "code": "$ jet self doctor --target wasm.no-os\njet doctor\n...the toolchain checks...\n\ncross\n  [ok  ] wasm.no-os: declared target machine (wasm32-unknown-unknown)\n  [note] runs: aot\n  [note] provides: Target.Memory, Target.Atomic64, Target.Panic, Target.Startup\n  [note] lacks: Target.Allocator, Target.MMIO, Target.Hardware, Time.Wall, Time.Monotonic, Time.ZoneData, Time.Sleep, Rand.Entropy, Target.Scheduler, IO.Read, IO.Write, Panic.Report\n\neverything looks good."
-        },
-        {
-          "key": "C",
-          "name": "No command: the checker's refusals and a library read only",
-          "detail": "No user command lists the machines or shows a dossier. The compiler keeps jet_target_machine_dossier_json as a library function for Jet's own tools and tests. A user learns about a missing capability only when the checker refuses a use of it.\n\nToday that is E1123, for a web build that starts other programs or calls C. A missing clock, entropy source or allocator on a no-OS machine is refused by no check. The docs cannot carry a per-machine table, because AGENTS.md forbids hand-kept catalogs and committed generated output. They can only point at the machine table's source.",
-          "technical": "Keep jet_target_machine_dossier_json in Compiler/JetFoundation/Source/Target/TargetMachine.jet with its Jet test (TargetDossier.jet). Reword #6663 c1 to drop the user-visible view. To close the no-OS gap, C also needs the driver to call jet_target_machine_validate, so E3311 refuses a reached Time.Wall use on wasm.no-os. That is separate work, not built today.",
-          "code": "// a web build: `build: fn` declares an output with `os: web`\nuse process: core.process\n\nlister: fn() {\n    _: process.cmd([\"ls\"])\n}\n\nrun: fn() {\n    lister()\n}\n\n// $ jet build run.jet\n// Error [jet.TargetDeniedEffect]: `lister` uses `Exec`, which target `wasm32-unknown-unknown` denies\n//  Why: An artifact built for `wasm32-unknown-unknown` gets only the services that machine provides, and it lacks the one `Exec` needs\n//  Fix: Keep the `Exec` work out of the code this entry reaches, or build the entry for a target that provides `Exec`\n\n// the same program reading time.now() for wasm.no-os: no check names the missing clock"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Rust",
-          "note": "rustc lists every target name, prints one target's facts as key=value lines, and on nightly prints the full spec as JSON. A matches this split: a list, then one machine.",
-          "code": "rustc --print target-list\nrustc --print cfg --target wasm32-unknown-unknown\nrustc -Z unstable-options --print target-spec-json --target wasm32-unknown-unknown"
-        },
-        {
-          "lang": "Zig",
-          "note": "zig targets prints every target and the host's CPU and OS facts as one JSON document. A's list JSON carries each machine's identity and tiers; the full dossier comes per name.",
-          "code": "zig targets"
-        },
-        {
-          "lang": "Go",
-          "note": "go tool dist list -json lists every OS and architecture pair with its cgo support and first-class status. A's list JSON is the same shape: one object per machine.",
-          "code": "go tool dist list -json"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "The machine list and the dossier are read-only compiler facts, and inspect is the family of read-only compiler facts. A needs no project and runs no checks, so it answers at once. It gives what rustc, zig and go give: a list of every target, then one target's facts. Doctor answers a different question, whether this computer's toolchain works. C leaves most gaps unspoken, because the only target refusal today covers web builds that start programs or call C.",
-        "gains": [
-          "`jet inspect target` lists every machine, as rustc, zig and go list theirs.",
-          "One short command answers what a machine provides, before any code is written.",
-          "Read-only and project-free, like the other inspect views.",
-          "Text for people, and JSON for editors and agents, from one writer."
-        ],
-        "losses": [
-          {
-            "loss": "One more inspect view in help and completions.",
-            "mitigation": "It sits beside build and gates in `jet inspect`, the place users already look for compiler facts. It adds one help line, and it is not a new top-level command."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B puts a static fact sheet behind slow, environment-dependent health checks, and it has no list. A failed language server check turns a question about the chip into an L2101 report and exit 1."
-          },
-          {
-            "key": "C",
-            "reason": "C leaves a no-OS machine's missing clock, entropy source or allocator unsaid until a check is built for them. The docs cannot fill the gap, because a hand-kept table is forbidden."
-          }
-        ],
-        "tradeoff": "One help line, in exchange for an instant list of machines and an instant answer to what each provides."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Main. Main checked the claims against dev code: E1123 fires only for the browser machine, and E3311 has no caller, so no-OS gaps go unreported. Option C now states the catalog cost, and A lists machines like zig and go."
-      },
-      "checkInstructions": "Today's surfaces, on origin/dev c003cb289e. Doctor.jet jet_cli_doctor_check_cross_target prints only `declared target machine (<triple>)`. CLICommands.jet has no `targets` command and no `inspect target` action. Inspect.jet JET_CLI_INSPECT_PLANES has no `target`.\n\nThe checker today. Sema TargetDenials.jet emits E1123. jet_target_machine_denied_effects (TargetMachine.jet) denies Exec and FFI.C for the browser environment only. Pipeline.jet jet_driver_selected_target_machine picks the browser machine from build_os, which Request.jet sets from a `build: fn` output's `os`. The cases are tests/ui/target_denied_effect_e1123 and tests/cases/cross/build_fn_checks_each_target_against_its_own_row.\n\nWhat is unwired. E3311 is built by jet_target_machine_error_diagnostic; jet_target_machine_validate has no caller outside JetFoundation and its tests. tests/known-failing.tsv #5201 records that `jet check --target web` does not select the browser machine. AGENTS.md lines 56-57 forbid committed generated status and duplicate catalogs in docs.\n\nOption A's build is the submission $JET_SCRATCH_ROOT/lanes/Main/inbox/G5DevX-dossier5. It replaces G5DevX-dossier4 and sits on origin/dev c003cb289e. Its case tests/cases/target_machines/inspect_target_shows_the_machine_dossier.case pins the list text exactly, the list JSON in two parts, and the hosted and wasm.no-os dossiers. The case has not yet run on a built compiler.\n\nValidate this payload with Tools/agent/ballots/Validate.jet.",
-      "surface": {
-        "gist": "Where should users list target machines and read what one provides: a new inspect view, the doctor check, or nowhere?",
-        "lesson": "Jet can build for different kinds of computers. Each kind has a fact sheet: does it have a clock, a heap, random numbers? This vote picks the command that lists them and shows a sheet.",
-        "trio": {
-          "current": {
-            "note": "No command lists the machines or shows a sheet; doctor only says the name exists.",
-            "code": "$ jet self doctor --target wasm.no-os\n...\ncross\n  [ok  ] wasm.no-os: declared target machine (wasm32-unknown-unknown)"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "rustc lists every target, then prints one target's facts.",
-            "code": "rustc --print target-list\nrustc --print cfg --target wasm32-unknown-unknown"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "jet inspect target",
-            "gist": "A new read-only view lists the machines, or prints one sheet, in text or JSON.",
-            "gains": [
-              "Lists every machine, like rustc, zig and go.",
-              "Instant, needs no project."
-            ],
-            "losses": [
-              "One more help line."
-            ],
-            "proposed": {
-              "code": "$ jet inspect target\ntarget machines\n  wasm.no-os (wasm32-unknown-unknown, no-os): runs aot\n  ...\n$ jet inspect target wasm.no-os\ntarget wasm.no-os\n  runs: aot\n  lacks: ... Time.Wall ..."
-            }
-          },
-          {
-            "key": "B",
-            "name": "Doctor section",
-            "gist": "jet self doctor --target prints the sheet after its checks.",
-            "gains": [
-              "No new command."
-            ],
-            "losses": [
-              "Slow checks run first, and there is no list.",
-              "A broken tool hides the answer behind a warning."
-            ],
-            "proposed": {
-              "code": "$ jet self doctor --target wasm.no-os\n...\n  [note] lacks: ... Time.Wall ..."
-            }
-          },
-          {
-            "key": "C",
-            "name": "No command",
-            "gist": "Only the checker's refusals; the docs may not keep a table.",
-            "gains": [
-              "Nothing to add to the CLI."
-            ],
-            "losses": [
-              "Only web builds that start programs or call C are refused.",
-              "A missing clock on a chip goes unsaid."
-            ],
-            "proposed": {
-              "code": "$ jet build run.jet\nError [jet.TargetDeniedEffect]: `lister` uses `Exec`,\n  which target `wasm32-unknown-unknown` denies"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "The list and the sheets are read-only compiler facts, and inspect is where those live. Doctor checks this computer, not the target. C leaves most gaps unsaid.",
-          "gains": [
-            "A list of machines, then one sheet.",
-            "Text and JSON from one writer."
-          ],
-          "losses": [
-            {
-              "loss": "One more help line.",
-              "mitigation": "It lives inside `jet inspect`, not at the top level."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Slow checks stand in front of a static answer, and there is no list."
-            },
-            {
-              "key": "C",
-              "reason": "Only web builds are refused, and the docs may not keep a table."
-            }
-          ],
-          "tradeoff": "One help line, for an instant list and an instant answer."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-13T06:19:16.805Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-13"
     },
     {
       "id": "D-MMAP-STABLE1",
@@ -219913,6 +218782,55 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T07:25:58.476Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0lidgow",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T07:25:48.873Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0lidgow",
+      "note": "#4"
+    },
+    {
+      "at": "2026-11-17T07:25:46.373Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mq8xwu",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T06:58:39.181Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0prey1k",
+      "note": "#5 The Linux app window redraws when a live binding its current"
+    },
+    {
+      "at": "2026-11-17T06:34:39.156Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fymc7l",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-17T06:34:32.362Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0fymc7l",
+      "note": "#8: The UI folder was renamed to PackageMarkerOwnDiagnostic (dev 732af2563f) for the path-case guard; it passes under the new filter on the p249 batch compiler. (reopened); was: A package marker refuses code with its own declared diagnostic, and `jet explain package.Name` prints that diagnostic's what/why/fix text. Proof: `jet test Compiler --profile ui --filter package_marke"
+    },
+    {
+      "at": "2026-11-17T06:31:43.038Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gmf0y4",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-17T06:31:14.615Z",
       "by": "Main",
