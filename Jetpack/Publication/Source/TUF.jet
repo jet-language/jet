@@ -490,9 +490,7 @@ publication_tuf_log_contains_entry: fn(records: [PublicationLogRecord], expected
 publication_tuf_accept_checkpoint: fn(registry_name: String, repo: String, checkpoint: PublicationCheckpoint) -[FS, Env, Time]> IOError! {
     // Mandatory JP-PUB-REG-TRUST-CACHE path, never a repository-supplied pin.
     path: publication_registry_checkpoint_path(registry_name)
-    lock_path: path.copy()
-    // workaround #5940(h)
-    publication_tuf_with_checkpoint_lock(lock_path, fn() { publication_tuf_accept_checkpoint_locked(path, repo, checkpoint) })
+    publication_tuf_with_checkpoint_lock(path, fn() { publication_tuf_accept_checkpoint_locked(path, repo, checkpoint) })
 }
 
 publication_tuf_accept_checkpoint_locked: fn(path: String, repo: String, checkpoint: PublicationCheckpoint) -[FS, Env, Time]> IOError! {

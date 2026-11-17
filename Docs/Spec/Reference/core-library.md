@@ -6105,7 +6105,8 @@ runs the view acting for its account, and every answer to a request with a
 session, or to a signed-in screen, is `Cache-Control: private, no-store`. A
 view runs as server code, with the effects a server handler has: the
 network and reading files. So `app.bind`, which adds the screens, carries
-`FS.Read` as well as `Net`, as `serve` and `serve_once` do.
+`FS.Read` as well as `Net`, as `serve` and `serve_once` do. Each of them
+also carries `Env`, since it starts the push services the graph names.
 
 `app.url_of(state)` gives the address of the screen whose state is `state`'s
 type. Each path field's value is percent-encoded into its segment, and each
@@ -6124,6 +6125,19 @@ Push's `Topic` header and the notification's `tag`. So a retried run sends
 each push with the key it had before, whatever order its query gives the
 rows in, and the repeat replaces the earlier copy; two pushes of one run
 never share a key.
+A server's push services are named once in the graph, with the variables
+that hold their keys: `.push(apns: app.apns(key_env:, key_id_env:, team:,
+topic:), fcm: app.fcm(service_account_env:), web: app.web_push(key_env:,
+contact:))`, each argument optional. The server reads each variable once,
+as it starts (`bind`, `serve`, `serve_on` or the first `serve_once`), and
+keeps its value only as the service's key. A variable holds the file
+itself (the `.p8` key, the service account's JSON, the VAPID key's PEM) or
+its base64 on one line; the FCM project is the service account's
+`project_id`. A variable that is unset, empty or holds no key stops the
+start before it listens, naming the variable, the maker's argument and the
+`.push` call (E2416, exit 78), and so does a second `.push`, naming both
+calls. A device whose service the graph doesn't name is skipped and kept
+with its reason. APNs pushes go to its production service.
 `app.notify(title:, body:, open: state)`, written without `to:`, shows a
 notification on this device with no server. On Linux the desktop's
 notification service (org.freedesktop.Notifications on the session bus)

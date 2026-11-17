@@ -721,8 +721,10 @@ App: struct {
     // serves HTTPS and `deadline:` bounds each connection's reads and writes.
     // A failed bind is the caller's error to handle. It reads files because
     // it adds the rows of the app's endpoints, webhooks and mounts and of the
-    // app graph's screens, whose handlers may read files when they answer.
-    bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net, FS.Read]> HTTPServer HTTPError! {
+    // app graph's screens, whose handlers may read files when they answer,
+    // and the environment because it sets up the push services the graph
+    // names (`app_push_route`).
+    bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Env, Net, FS.Read]> HTTPServer HTTPError! {
         app_image_route(self)
         app_push_route(self)
         app_crawl_routes(self)
@@ -732,8 +734,9 @@ App: struct {
         http_server.server_bind(address, app_table(self), tls, deadline)
     }
 
-    // Answer the one connection `listener` accepts next.
-    serve_once: fn(self, listener: TCPListener) -[Net, FS.Read, Time]> HTTPError! {
+    // Answer the one connection `listener` accepts next. The first call
+    // sets up the push services the graph names, as `bind` does.
+    serve_once: fn(self, listener: TCPListener) -[Env, Net, FS.Read, Time]> HTTPError! {
         app_image_route(self)
         app_push_route(self)
         app_crawl_routes(self)
@@ -798,6 +801,7 @@ bind: fn<Settings: Decode>(address: String, *, prefix: String, build: fn(Setting
     settings: app_settings<Settings>(prefix)
     app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, app_build_failure("{err}"))
     app_image_route(app)
+    app_push_route(app)
     app_uploads_clean(app_service_routes(app))
     app_screen_routes(app)
     _: app_trace_start(app)
@@ -1185,15 +1189,20 @@ priv app_image_route: fn(app: App) Never! {
 // The address a device of the signed-in caller registers at for pushes.
 priv C_APP_PUSH_DEVICES: "/__jet/push/devices"
 
-// Registers POST `/__jet/push/devices` (app_push_register) unless the app
-// did this before.
-priv app_push_route: fn(app: App) Never! {
+// Registers POST `/__jet/push/devices` (app_push_register) and sets up the
+// push services the app graph's `.push` names (`push.start`), unless the
+// app did this before. Push services that can't start stop the program
+// before it listens (E2416, exit 78), naming the variable and the `.push`
+// call.
+priv app_push_route: fn(app: App) -[Env, Net]> Never! {
     table: app_table(app)
     loop route in http_server.mux_routes(table) {
         if route.method == "POST" && route.pattern == C_APP_PUSH_DEVICES {
             return
         }
     }
+    refused: calls.push.start()
+    if refused != "" -> core.rt.__coded_stop("E2416", refused)
     http_server.route_add(table, "POST", C_APP_PUSH_DEVICES, http_server.__handler(fn(request: HTTPRequest) { Ok(app_push_register(request)) }), "", #here)
 }
 
@@ -4478,9 +4487,6 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
 }
 
 #Test("a job's retried run repeats each push's key in any row order, and two sends never share a key") {
-    dir: core.files.temp_dir("jet-push-keys-") ?? panic("temp dir: {err}")
-    core.files.write("{dir.path}/apns.p8", push_wire.push_test_apns_key()) ?? panic("write: {err}")
-    core.files.write("{dir.path}/fcm.pem", push_wire.push_test_fcm_key()) ?? panic("write: {err}")
     apns_listener: core.net.tcp_listen("127.0.0.1:0") ?? panic("listen: {err}")
     apns_port: (core.net.listener_local_socket_addr(apns_listener) ?? panic("address: {err}")).port
     fcm_listener: core.net.tcp_listen("127.0.0.1:0") ?? panic("listen: {err}")
@@ -4488,9 +4494,9 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
     web_listener: core.net.tcp_listen("127.0.0.1:0") ?? panic("listen: {err}")
     web_port: (core.net.listener_local_socket_addr(web_listener) ?? panic("address: {err}")).port
     settings: push_wire.PushSettings{
-        apns: Val(push_wire.PushAPNs{origin: "http://127.0.0.1:{apns_port}", team_id: "TEAM123456", key_id: "KEY1234567", key_path: "{dir.path}/apns.p8", topic: "com.example.crew"}),
-        fcm: Val(push_wire.PushFCM{origin: "http://127.0.0.1:{fcm_port}", project: "crew-test", client_email: "push@crew-test.iam.gserviceaccount.com", token_uri: "http://127.0.0.1:{fcm_port}/token", key_path: "{dir.path}/fcm.pem"}),
-        web: Val(push_wire.PushWeb{contact: "mailto:push@example.com", key_path: "{dir.path}/apns.p8"}),
+        apns: Val(push_wire.PushAPNs{origin: "http://127.0.0.1:{apns_port}", team_id: "TEAM123456", key_id: "KEY1234567", key: push_wire.push_test_apns_key(), key_from: "the test key", topic: "com.example.crew"}),
+        fcm: Val(push_wire.PushFCM{origin: "http://127.0.0.1:{fcm_port}", project: "crew-test", client_email: "push@crew-test.iam.gserviceaccount.com", token_uri: "http://127.0.0.1:{fcm_port}/token", key: push_wire.push_test_fcm_key(), key_from: "the test key"}),
+        web: Val(push_wire.PushWeb{contact: "mailto:push@example.com", key: push_wire.push_test_apns_key(), key_from: "the test key"}),
     }
     calls.push.configure(settings) ?? panic("configure: {err}")
     rng := push_wire.push_test_rng()
@@ -4547,7 +4553,6 @@ priv app_webhook_test_status: fn(hook: AppWebhook, project: String, sent: String
     web_seen: web_server.join() ?? panic("the Web Push fake failed")
     assert_eq(web_seen.map(fn(seen) { app_push_test_between(seen, "topic: ", "\r\n") }), [String]{ann_7, ann_8, ann_8, ann_7})
     calls.push.configure(push_wire.PushSettings{apns: None, fcm: None, web: None}) ?? panic("unconfigure: {err}")
-    core.files.remove_all(dir.path).drop("the test's key files go")
 }
 
 // One run of a job whose delivery is `key`: a push of each task of `order`

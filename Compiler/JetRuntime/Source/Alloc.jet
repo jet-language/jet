@@ -16,6 +16,8 @@
 // (ALLOC_WINDOW).
 // The state page also reserves word 4080 for the execution-end flush lock
 // and word 4088 for ignored raw stdio outputs (the I64/Bool outputs alias).
+// Word 1024 stays zero: a thread without a TCB reads it as its stack limit
+// (StackSegment.jet STACK_TCB_LIMIT), so its stack never grows.
 // Each 64 KiB slab belongs to one arena and one power-of-two class
 // (32..4096). Slab layout: [next][prev][free][live][head-cell][arena][carve]
 // followed by padding to max(64, class-size), then the blocks. A block that
@@ -2772,7 +2774,9 @@ alloc_check_prefix: fn(align: I64) -> I64 Never! {
 
 // Store `count` return addresses of the calling chain at out, out+8, ...;
 // 0 past the chain's end. The walk stops at a null or misaligned link or one
-// that does not ascend within 16 MiB, so it never leaves the current stack.
+// that does not ascend within 16 MiB, and crosses a stack segment's bridge
+// frame (StackSegment.jet stack_frame_caller), so it never leaves the
+// thread's stacks.
 priv alloc_check_frames: fn(out: I64, count: I64) {
     frame := I64{0}
     #Unsafe("the checked-mode stub only copies rbp to rax and returns; a missing stub leaves no chain") {
@@ -2783,10 +2787,9 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
     loop index < count {
         address := I64{0}
         if (frame != I64{0} && frame & I64{7} == I64{0}) {
-            #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack: every followed link ascends by less than 16 MiB") {
+            #Unsafe("frame is an active caller's [saved rbp][return address] pair on this thread's stack: each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame") {
                 address = os_load_i64(wrapping(frame + I64{8}))
-                above: os_load_i64(frame)
-                frame = if (above > frame && wrapping(above - frame) < I64{16777216}) -> above else -> I64{0}
+                frame = stack_frame_caller(frame)
             }
         }
         #Unsafe("out lends count writable words: a checked block's chain words or a trap's scratch page") {
