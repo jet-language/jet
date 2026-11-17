@@ -226,18 +226,34 @@ command_model_shown_forms: fn() -> [String] Never! {
     problems
 }
 
+// The forms the not-built page `page` lists, each as its row spells it: a
+// line is `  jet <form>`, padded, then ` #<card>`; a shape row's form
+// follows `jet <command> `.
+command_model_not_built_forms: fn(page: String) -> [String] Never! {
+    forms := [String]{}
+    loop line in page.split("\n").to_list() {
+        parts: line.split(" #").to_list()
+        if parts.len() != 2 -> next
+        text: parts[0].trim()
+        if !text.starts_with("jet ") -> next
+        skip: if text.starts_with("jet <command> ") -> 14 else -> 4
+        forms.push(text.slice(skip..<text.len()))
+    }
+    forms
+}
+
 // n13: `jet help --all` lists every unported row and no ported one.
 command_model_not_built_page: fn() -> [String] Never! {
     problems := [String]{}
-    page: jet_cli_not_built_page()
+    listed: command_model_not_built_forms(jet_cli_not_built_page())
     loop row in JET_CLI_FORMS {
         if row.ported {
-            if page.contains(" {row.form} ") {
+            if listed.contains(row.form) {
                 problems.push("`jet help --all` lists ported `{row.form}` as not built")
             }
             next
         }
-        if !page.contains(row.form) {
+        if !listed.contains(row.form) {
             problems.push("`jet help --all` leaves out unported `{row.form}`")
         }
     }

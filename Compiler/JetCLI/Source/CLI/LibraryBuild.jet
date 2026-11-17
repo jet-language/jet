@@ -22,7 +22,7 @@ use {
         jet_driver_report_problems,
     ]
     jet_foundation.[BuildOptions, CompilerThreads, FnBody, build_options_value]
-    jet_ir.[IRLibraryExportRow, ir_x64_compile_module, ir_x64_library_object]
+    jet_ir.[IRLibraryExportRow, ir_c_export_result, ir_untag, ir_x64_compile_module, ir_x64_library_object]
 }
 
 // Build the Library of `file` (whose bytes are `source`) under `options`
@@ -138,9 +138,11 @@ jet_cli_library_name: fn(file: String, source: String) -[FS]> String Never! {
 }
 
 // The C prototype of each export row, by row: `int64_t call_host(int64_t
-// p0)`, read from the checked function the row names. An export whose
-// parameter or result has no C spelling (jet_cli_inline_c_type) is a row in
-// `problems`.
+// p0)`, read from the checked function the row names. The result is the
+// one the object publishes (ir_c_export_result: the success of the `T
+// Never!` carrier an infallible export is checked with), and a parameter's
+// type is read without its tags. An export whose parameter or result has no
+// C spelling (jet_cli_inline_c_type) is a row in `problems`.
 jet_cli_library_prototypes: fn(rows: [IRLibraryExportRow], functions: [FnBody], problems: &[String]) -> [String] Never! {
     prototypes := loop _ in rows -> ""
     loop function in functions {
@@ -155,18 +157,15 @@ jet_cli_library_prototypes: fn(rows: [IRLibraryExportRow], functions: [FnBody], 
 
 jet_cli_library_prototype: fn(symbol: String, function: FnBody, problems: &[String]) -> String Never! {
     result := "void"
-    if function.ret == .Val(ty) {
-        unit: if ty == .Tuple(fields) -> fields.len() == 0 else -> false
-        if !unit {
-            result = jet_cli_inline_c_type(ty) ?? {
-                problems.push("the export `{symbol}` returns a type a C header can't spell")
-                "void"
-            }
+    if ir_c_export_result(function) == .Val(ty) {
+        result = jet_cli_inline_c_type(ir_untag(ty)) ?? {
+            problems.push("the export `{symbol}` returns a type a C header can't spell")
+            "void"
         }
     }
     parameters := [String]{}
     loop (position, parameter) in function.params {
-        spelled: jet_cli_inline_c_type(parameter.ty) ?? {
+        spelled: jet_cli_inline_c_type(ir_untag(parameter.ty)) ?? {
             problems.push("parameter `{parameter.name}` of the export `{symbol}` has a type a C header can't spell")
             "void"
         }
