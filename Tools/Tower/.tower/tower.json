@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112001,
+    "rev": 112006,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65190,6 +65190,15 @@
           "verifiedBy": null,
           "evidence": "Landed in b92cae749b (p280). A writing function value now has its calls take turns under the invocation lock that D-FNVAL-WRITE1 keeps, and a detached task that takes one gets E0121 with a function-value fix. On the p280 batch compiler 412b58dbb6, the cases filter Concurrency/writing_function_values_take_turns_or_stay_with_their_task passes 1/1, and the ui filter ConcurrencyBoundaries/task_takes_a_writing_function_value_its_owner_calls_again passes 1/1.",
           "at": "2026-11-17T23:03:03.990Z"
+        },
+        {
+          "n": 6,
+          "text": "A failing lambda passed through an implicit-contract &&fn([Q]) parameter and called from a task runs, or stops with its error, on every tier; today it dies with SIGILL in fn_widen (found by DeclTypes building #6048 c2 step 1; worked around there by spelling Err!). Proof: a Concurrency case with that shape on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T23:46:36.120Z"
         }
       ],
       "refs": [],
@@ -65200,9 +65209,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-17T23:03:03.990Z",
+      "updated": "2026-11-17T23:46:36.120Z",
       "updatedBy": "Main",
-      "criteriaLastN": 5
+      "criteriaLastN": 6
     },
     {
       "id": "c0fvnyiq",
@@ -83855,11 +83864,11 @@
         {
           "n": 9,
           "text": "Device APIs reach the browser once the page runtime can wait on a promise: native.ask and native.open_settings through the Permissions API (moved from #6806 c2), native.take_photo and native.location through a capture input or getUserMedia and the Geolocation API (from #6803 c1), native.location_updates and the motion sensors as typed streams that stop with their scope and leave no listener (from #6803 c2), native.open_file and native.drop_files as PickedFile values backed by a browser File, with import_tasks importing the same CSV as on Linux (from #6802 c1), and folder access that survives a restart through a stored FileSystemDirectoryHandle that asks for permission again (from #6802 c3); the web E-APP-TARGET-FEATURE refusals are removed. Proof: the NativeApp cases ask_gives_a_typed_grant_on_every_target, camera_and_location_give_typed_values_after_a_grant, sensor_streams_stop_with_their_scope, picked_file_reads_the_same_bytes_on_linux_and_the_web and folder_access_survives_a_restart on the web.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T05:23:36.643Z"
+          "evidence": "Landed across 6a40f074f6, 3dad464773, 802105d3a4 and bd564de961 (p279-p282). On the p282 batch compiler bd564de961, each NativeApp proof case passes 1/1 with its web steps: ask_gives_a_typed_grant_on_every_target, camera_and_location_give_typed_values_after_a_grant, sensor_streams_stop_with_their_scope, picked_file_reads_the_same_bytes_on_linux_and_the_web and folder_access_survives_a_restart. The only web E-APP-TARGET-FEATURE refusals left are device notify (Web Push) and #App.Every background work, neither in this list.",
+          "at": "2026-11-17T23:46:30.630Z"
         },
         {
           "n": 10,
@@ -83880,7 +83889,7 @@
       "parentId": "c0vxf4u0",
       "needsAcceptance": false,
       "created": "2026-11-04T01:02:34.688Z",
-      "updated": "2026-11-17T23:03:06.780Z",
+      "updated": "2026-11-17T23:46:30.630Z",
       "updatedBy": "Main",
       "criteriaLastN": 10
     },
@@ -96031,7 +96040,7 @@
       "track": "epoch",
       "epoch": "e19",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -96040,6 +96049,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c1-c3 met on p281/p282 (802105d3a4, bd564de961)."
+        },
         {
           "at": "2026-11-17",
           "by": "Main",
@@ -96103,11 +96117,11 @@
         {
           "n": 3,
           "text": "ui.drop_zone<T> takes only a T. A file or text dropped on the drop zone in examples/drag.jet is refused. The same move is also reachable without dragging, by a single pointer or the keyboard (WCAG 2.2 SC 2.5.7). Proof: `jet test Compiler --profile cases --filter NativeApp/drop_zone_refuses_other_types_and_offers_a_move_without_dragging` on Linux and the web.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T21:54:01.724Z"
+          "evidence": "Landed in bd564de961 (p282). On the p282 batch compiler, `jet test Compiler --profile cases --filter NativeApp/drop_zone_refuses_other_types_and_offers_a_move_without_dragging` passes 1/1 on Linux and the web, and the switched ui snapshot app_device_bare_import_target passes 1/1.",
+          "at": "2026-11-17T23:46:32.295Z"
         }
       ],
       "refs": [],
@@ -96115,9 +96129,10 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:47.698Z",
-      "updated": "2026-11-17T23:24:01.228Z",
+      "updated": "2026-11-17T23:46:47.073Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-17T23:46:47.073Z"
     },
     {
       "id": "c02inyar",
@@ -96410,11 +96425,11 @@
         {
           "n": 3,
           "text": "On resume, live queries resubscribe and the offline queue sends with no app code, on Linux (resume after the machine sleeps) and the web. Proof: `jet test Compiler --profile cases --filter NativeApp/resume_resubscribes_and_drains_the_queue` on Linux and the web.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T21:54:50.686Z"
+          "evidence": "Landed in 169b2d64ab (p282). On the p282 batch compiler bd564de961, `jet test Compiler --profile cases --filter NativeApp/resume_resubscribes_and_drains_the_queue` passes 1/1 on Linux and in a page (remote_at goes through fetch).",
+          "at": "2026-11-17T23:46:33.979Z"
         },
         {
           "n": 4,
@@ -96449,7 +96464,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:53.581Z",
-      "updated": "2026-11-17T23:19:54.243Z",
+      "updated": "2026-11-17T23:46:33.979Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -214763,6 +214778,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T23:46:47.074Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0fqrrpk",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T23:46:36.120Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mhdm27",
+      "note": "#6 A failing lambda passed through an implicit-contract &&fn([Q"
+    },
+    {
+      "at": "2026-11-17T23:46:33.979Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c051j6ab",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T23:46:32.295Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fqrrpk",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T23:46:30.630Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0tjjr66",
+      "note": "#9"
+    },
     {
       "at": "2026-11-17T23:24:01.228Z",
       "by": "Main",
