@@ -1,0 +1,59 @@
+// A graph-query head a package declares with the same CheckedText shape as
+// Core's SQL: each hole stays a value (`Param`), `build` numbers it `$1`,
+// `$2`, … in the query text, and `check` rejects unbalanced brackets before
+// the program runs.
+
+#Error
+CypherError: struct {
+    reason: String,
+}
+
+Param: enum {
+    Number(Int),
+    Word(String),
+}
+
+Cypher: struct {
+    text: String,
+    params: [Param],
+
+    impl CheckedText {
+        Error: CypherError,
+        Hole: Param,
+
+        check: fn(text: String) -[]> CypherError! {
+            depth := 0
+            loop byte in text.bytes() {
+                if byte == (U8{40}) || byte == (U8{91}) -> depth += 1
+                if byte == (U8{41}) || byte == (U8{93}) {
+                    if depth == 0 {
+                        return Err(CypherError{reason: "a Cypher query closes a bracket it never opened"})
+                    }
+                    depth -= 1
+                }
+            }
+            if depth != 0 -> return Err(CypherError{reason: "a Cypher query leaves a bracket open"})
+            return Ok()
+        }
+
+        encode_hole: fn<T: Printable>(value: T) -[]> Param {
+            if T == {
+                Int -> Param.Number(value)
+                else -> Param.Word("{value}")
+            }
+        }
+
+        build: fn(parts: [String], holes: [Param]) -[]> Cypher {
+            text := parts[0].copy()
+            loop index in 0..<holes.len() -> text = "{text}${index + 1}{parts[index + 1]}"
+            Cypher{text: text, params: holes.copy()}
+        }
+    }
+}
+
+show: fn(param: Param) -> String {
+    if param == {
+        .Number(number) -> "number {number}"
+        .Word(word) -> "word \"{word}\""
+    }
+}
