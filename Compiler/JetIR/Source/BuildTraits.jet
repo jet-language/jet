@@ -4,7 +4,7 @@
 // unknown key stops at jet_rt_unreachable. A copy is one more owner of the
 // same box, and the last owner drops the payload and frees the box
 // (ir_trait_drop_body).
-use jet_foundation.[Span, SymbolID, BodyCallArg, BodyPatternBinding, FnBody, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, module_none, name_rows_set, name_rows_value, sha256_bytes, symbol_table, type_carrier_identity]
+use jet_foundation.[Span, SymbolID, BodyCallArg, BodyPatternBinding, BodyTree, FnBody, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, body_type, module_none, name_rows_set, name_rows_value, sha256_bytes, symbol_table, type_carrier_identity]
 
 // The payload key of concrete type `ty`: the key the program gave its
 // identity (IRProgram.trait_keys), or, for a type no implementation is
@@ -84,8 +84,10 @@ ir_trait_row: fn(m: IRModule, row: Int) -> Bool Never! { m.types[row].clone == i
 // owners of the trait's non-generic implementations, as ir_trait_methods
 // files them (a TraitMethod of the trait, or a Method its implementation
 // slot names the trait for), then the owners of its implementations that
-// declare no method (an empty trait's). A dynamic call selects among the
-// same owners.
+// declare no method (an empty trait's), then the generic instances the
+// program boxes as the trait's values (p.trait_boxed), which a generic
+// owner's implementation serves. A dynamic call selects among the same
+// owners.
 ir_trait_implementers: fn(p: IRProgram, bound: String) -> [Type] Never! {
     short: ir_short_name(bound)
     seen := [String:Bool]{}
@@ -111,6 +113,7 @@ ir_trait_implementers: fn(p: IRProgram, bound: String) -> [Type] Never! {
             .TopLevel -> {}
         }
         concrete: owner ?? next
+        if ir_owner_generic(p, concrete) -> next
         identity: ir_trait_identity(p, concrete)
         if seen.get(identity) != None -> next
         seen[identity] = true
@@ -123,7 +126,88 @@ ir_trait_implementers: fn(p: IRProgram, bound: String) -> [Type] Never! {
         seen[identity] = true
         owners.push(declared.owner.copy())
     }
+    instances: p.trait_boxed.get(short) ?? [Type]{}
+    loop instance in instances.move() {
+        identity: ir_trait_identity(p, instance)
+        if seen.get(identity) != None -> next
+        seen[identity] = true
+        owners.push(instance)
+    }
     owners
+}
+
+// IRProgram.trait_boxed of `p`'s functions: each generic instance a body
+// boxes as a value of one trait (a TraitBox, a list literal's trait
+// coercion, a call argument's), once per identity, by the trait's short
+// name. Sema checked that each one implements the trait. A generic body's
+// boxed types name its parameters, so only non-generic bodies are read.
+ir_trait_boxed: fn(p: IRProgram) -> [String:[Type]] Never! {
+    boxed := [String:[Type]]{}
+    seen := [String:Bool]{}
+    loop function in p.functions {
+        if function.generic_params.len() > 0 || ir_owner_binders(p, function).len() > 0 -> next
+        loop node in function.tree.nodes {
+            if node.kind == {
+                .TraitBox(value, target) -> {
+                    ir_trait_boxed_put(p, boxed, seen, body_type(function.tree, value), target)
+                }
+                .List(values, coercion) -> {
+                    if coercion == .Val(target) {
+                        loop value in values {
+                            ir_trait_boxed_put(p, boxed, seen, body_type(function.tree, value), target)
+                        }
+                    }
+                }
+                .Call(_, _, args) | .IndirectCall(_, _, args, _) | .MethodCall(_, _, _, args) | .StaticCall(_, _, _, _, args) | .AllocNew(_, args) -> {
+                    ir_trait_boxed_args(p, boxed, seen, function.tree, args)
+                }
+                .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) | .GlobalShared(_, _) | .DistinctCtor(_) | .DistinctConvert(_, _, _, _, _) | .UnitConvert(_, _, _, _, _, _, _, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .DecodeUnder(_, _) | .BuiltinMethod(_, _, _) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .Present(_) | .Absent | .Ok(_) | .Err(_) | .OrFallback(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .PatternMatches(_, _) | .OptionLift2(_, _, _) | .ClosureMethod(_, _, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .HandleMethod(_, _, _) | .CoreClosureCall(_) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) -> {}
+            }
+        }
+    }
+    boxed
+}
+
+// The call arguments of `args` boxed as trait values (box_as_trait), into
+// ir_trait_boxed's `boxed`.
+ir_trait_boxed_args: fn(p: IRProgram, boxed: &[String:[Type]], seen: &[String:Bool], tree: BodyTree, args: [BodyCallArg]) Never! {
+    loop arg in args {
+        if arg.box_as_trait == .Val(target) {
+            ir_trait_boxed_put(p, boxed, seen, body_type(tree, arg.value), target)
+        }
+    }
+}
+
+// `concrete` boxed as a value of `target`, into ir_trait_boxed's `boxed`
+// when it is a generic instance and `target` a single trait.
+ir_trait_boxed_put: fn(p: IRProgram, boxed: &[String:[Type]], seen: &[String:Bool], concrete: &&Type, target: Type) Never! {
+    if ir_type_args(concrete).len() == 0 {
+        return
+    }
+    bounds: if ir_untag(target) == .TraitObject(names) -> names else -> {
+        return
+    }
+    if bounds.len() != 1 {
+        return
+    }
+    short: ir_short_name(bounds[0])
+    key: "{short}|{ir_trait_identity(p, concrete)}"
+    if seen.get(key) != None {
+        return
+    }
+    seen[key] = true
+    if !boxed.has_key(short) -> boxed[short] = [Type]{}
+    boxed[short].push(concrete)
+}
+
+// Whether a value of trait `bound` may hold `concrete`
+// (ir_trait_implementers).
+ir_trait_holds: fn(p: IRProgram, bound: String, concrete: Type) -> Bool Never! {
+    identity: ir_trait_identity(p, concrete)
+    loop implementer in ir_trait_implementers(p, bound) {
+        if ir_trait_identity(p, implementer) == identity -> return true
+    }
+    false
 }
 
 // Whether `owner` spells a parameter of its generic type declaration
@@ -158,8 +242,7 @@ ir_trait_drop_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, at: 
 // payload key selects the concrete type, whose payload is dropped as any
 // holder's (ir_glue_drops: a handle payload is left to the move that reads
 // it out) and whose box (ir_trait_box_bytes) is freed. A key of no
-// implementer (a generic owner's, which no dynamic call selects either)
-// leaves the box as it is. Built once per row and never inlined.
+// implementer leaves the box as it is. Built once per row and never inlined.
 ir_trait_last_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int) -> Int Never! {
     helper_key: "#trait.last<{ir_row_key(m, row)}>"
     known: name_rows_value(m.function_rows, helper_key) ?? -1
@@ -203,8 +286,7 @@ ir_trait_box_bytes: fn(m: IRModule, payload_row: Int) -> Int Never! {
 // `slot`, a trait value, rendered into `builder` as the concrete value its
 // box holds: its payload key selects the implementer, whose payload at 8
 // renders as that type's own value does (ir_render_push), so a list of trait
-// values shows each value. A key of no implementer (a generic owner's, which
-// no dynamic call selects either) adds nothing.
+// values shows each value. A key of no implementer adds nothing.
 ir_render_trait: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, builder: Int, slot: Int, mode: IRRender, member: Bool, span: Span) Never! {
     owners := [Type]{}
     if ir_untag(m.types[b.f.slot_type[slot]].ty) == .TraitObject(bounds) {
@@ -409,6 +491,12 @@ ir_trait_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written:
     }
     concrete: ir_ty(p, b, value)
     if ir_untag(concrete) == .TraitObject(_) -> return ir_expr(m, p, b, value)
+    // A dynamic call selects among the generic instances non-generic bodies
+    // box (p.trait_boxed): one only an instance of a generic body boxes has
+    // no implementation a call could select.
+    if b.instance.names.len() > 0 && ir_type_args(concrete).len() > 0 && !ir_trait_holds(p, bounds[0], concrete) {
+        return ir_fail_slot(b, span, "{ir_type_name(concrete)} is boxed as a trait value only in a generic body, which no dynamic call selects among")
+    }
     row: ir_value_type(m, p, target) ?? return ir_type_fail(b, span, target)
     payload_row := -1
     if !ir_unit_type(concrete) {
@@ -439,11 +527,13 @@ ir_trait_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, value: Int, written:
 }
 
 // One implementation a dynamic call may select: its function key, concrete
-// receiver type and receiver convention.
+// receiver type, receiver convention and the owner arguments its instance
+// is built at (none for an implementation of the exact type).
 IRTraitTarget: struct {
     key: String,
     concrete: Type,
     access: String,
+    args: [Type],
 }
 
 // `receiver.method(args)` on a trait value: the payload key selects the
@@ -467,20 +557,45 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
     // Whether an implementation returns a view (`-> T from self`), whose
     // result the call marks lent.
     lent := false
-    candidates: p.trait_methods.get("{ir_short_name(ir_symbol_key(p, owner))}|{method.name}") ?? [Int]{}
+    short: ir_short_name(ir_symbol_key(p, owner))
+    candidates: p.trait_methods.get("{short}|{method.name}") ?? [Int]{}
+    // The implementations for exact types come first; a generic owner's
+    // (`impl Box.Shape`) then serves each instance of it the program boxes
+    // as the trait's values (p.trait_boxed) that no exact one claimed.
+    picks := [{row: Int, concrete: Type, args: [Type]}]{}
+    generic := [Int]{}
     loop index in candidates {
         if p.functions[index].generic_params.len() > 0 -> next
         if ir_function_row(p, p.functions[index].key) != (Val(index)) -> next
         implementer: ir_trait_implementer(p, index, owner) ?? next
+        if ir_owner_generic(p, implementer) {
+            generic.push(index)
+            next
+        }
+        picks.push({row: index, concrete: implementer, args: [Type]{}})
+    }
+    loop index in generic {
+        implementer: ir_trait_implementer(p, index, owner) ?? next
+        head: ir_trait_head_identity(p, implementer) ?? next
+        instances: p.trait_boxed.get(short) ?? [Type]{}
+        loop instance in instances.move() {
+            instance_head: ir_trait_head_identity(p, instance) ?? next
+            if instance_head != head -> next
+            instance_args: ir_owner_args(p, p.functions[index], instance) ?? next
+            picks.push({row: index, concrete: instance, args: instance_args})
+        }
+    }
+    loop pick in picks.move() {
         // One implementation per concrete type: its payload key selects it.
-        identity: ir_trait_identity(p, implementer)
+        identity: ir_trait_identity(p, pick.concrete)
         if seen.get(identity) != None -> next
         seen[identity] = true
         if targets.len() == 0 {
-            returned = ir_executable_return(p.functions[index]) ?? Type.Named{name: "Unit"}
+            declared: ir_executable_return(p.functions[pick.row]) ?? Type.Named{name: "Unit"}
+            returned = ir_callee_fact(p, b, pick.row, pick.args, declared, span)
         }
-        if p.functions[index].return_view_provenance != None -> lent = true
-        targets.push(IRTraitTarget{key: p.functions[index].key.copy(), concrete: implementer, access: ir_receiver_access(p.functions[index].kind)})
+        if p.functions[pick.row].return_view_provenance != None -> lent = true
+        targets.push(IRTraitTarget{key: p.functions[pick.row].key.copy(), concrete: pick.concrete, access: ir_receiver_access(p.functions[pick.row].kind), args: pick.args})
     }
     consumes := targets.len() > 0
     loop target in targets {
@@ -532,7 +647,7 @@ ir_trait_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, meth
                 self_slot = ir_copy_value(m, p, b, self_slot, span)
             }
         }
-        value: ir_call(m, p, b, target.key, [Type]{}, self_slot, [IRWriteBack]{}, args, span)
+        value: ir_call(m, p, b, target.key, target.args, self_slot, [IRWriteBack]{}, args, span)
         if ir_failed(b) -> return -1
         if result >= 0 && value >= 0 {
             // One implementation may return its plain success where another

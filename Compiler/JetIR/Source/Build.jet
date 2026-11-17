@@ -535,6 +535,11 @@ IRProgram: struct {
     // empty trait's): no function names their owner, so ir_trait_implementers
     // reads the owner here.
     empty_impls: [IREmptyImpl]{[IREmptyImpl]{}},
+    // The generic instances (`Box<Int>`) the bound functions box as values
+    // of each trait, by the trait's short name (ir_trait_boxed): an
+    // implementation for the generic owner (`impl Box.Shape`) serves each one
+    // a trait value may hold.
+    trait_boxed: [String:[Type]]{[String:[Type]]{}},
     // The checked source files' bytes and line starts by row, and each
     // path's row: a source location reads the file in place.
     source_bytes: [[U8]],
@@ -1006,6 +1011,7 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     p.functions = owned.move()
     p.rows = rows
     p.decode_helpers = ir_codec_decode_rows(p)
+    p.trait_boxed = ir_trait_boxed(p)
     ir_program_bind_decls(p, decls)
     p.render_impls = render_impls
     p.close_methods = close_methods
