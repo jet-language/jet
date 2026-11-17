@@ -1,0 +1,23 @@
+# A package declares a marker and the diagnostic it refuses code with. The
+# `routes` package's `#Served` rejects a relative route with its own
+# `BadPath`. In the depending `app`, `jet check` reports `routes.BadPath`
+# with its holes filled and points to `jet explain routes.BadPath`, and that
+# explain prints the package's what, why and fix literals.
+fixture: ExplainPackageDiagnostic.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet check app/main.jet
+exit: 1
+stderr: ~ "Error [routes.BadPath]: `about` serves `about`, not an absolute path" # the package's code and its what text, holes filled
+stderr: ~ "main.jet:5:1" # at the marker use
+stderr: ~ "Fix: Write `about`'s route with a leading `/`" # the package's fix text
+stderr: !~ "More:" # a package code has no Jet reference page
+stderr: ~ "run `jet explain routes.BadPath` to learn more" # the way to its explanation
+step: jet explain routes.BadPath app/main.jet
+exit: 0
+stdout: ~ "routes.BadPath" # explain names the package diagnostic
+stdout: ~ "`{self.name}` serves `{self.path}`, not an absolute path" # the what literal with its holes
+stdout: ~ "a route path starts at the site root" # the why literal
+stdout: ~ "write `{self.name}`'s route with a leading `/`" # the fix literal
+stdout: ~ "This explanation comes from the type's `Diagnostic` impl." # from the package source, not Jet's registry
