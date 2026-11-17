@@ -1,0 +1,88 @@
+// Crewboard in a Linux window: a task card and a note card a person drags
+// (`app.draggable`), and the Doing and Done columns, drop zones that take
+// a task (`app.drop_zone`). The board's panel shows the task's column:
+// blue for To Do, yellow for Doing, green for Done. The person drags the
+// card to Doing; drags the note to Done, which refuses it; drops text from
+// another program on Done, which refuses it too; then moves the card to
+// Done with the keyboard, and back to Doing from the menu a long press
+// opens. Then the window closes, which ends the app.
+use {
+    app
+    ui: core.ui
+    tasks: core.tasks
+    core.color.[Color]
+    core.ui.[UINode]
+}
+
+Task: struct {
+    id: Int,
+    title: String,
+}
+
+Note: struct {
+    text: String,
+}
+
+TASK: Task{id: 7, title: "Ship it"}
+
+#Error
+BoardError: enum {
+    Offline,
+}
+
+// The task's column: 0 for To Do, 1 for Doing, 2 for Done.
+Board: struct {
+    column: Int,
+}
+
+BOARD: Shared{Board{column: 0}}
+
+task_column: fn() -[DB.Read]> Int BoardError! {
+    held: BOARD.guard_read()
+    Ok(held.value.column)
+}
+
+// A task dropped on the column `column`: the board's task moves there.
+move_task: fn(task: Task, column: Int) app.Notice! {
+    if task.id != TASK.id {
+        return Err(app.Notice{text: "Couldn't move task {task.id}: the board has no such task"})
+    }
+    held := BOARD.guard_edit()
+    held.value.column = column
+    app.invalidate(task_column)
+    Ok()
+}
+
+BoardView: struct {}
+
+board: fn(_view: BoardView) -> UINode Never! {
+    column: if app.state(app.live(task_column)) == {
+        .Loaded(column) -> column
+        .Failed(_) | .Idle | .Loading -> 0
+    }
+    color: if column == 0 -> Color{r: 51, g: 102, b: 255, a: 255} else if column == 1 -> Color{r: 204, g: 153, b: 0, a: 255} else -> Color{r: 51, g: 153, b: 51, a: 255}
+    card: ui.node_color("", 200.0, 30.0, Color{r: 120, g: 120, b: 120, a: 255})
+    note: ui.node_color("", 200.0, 30.0, Color{r: 120, g: 60, b: 160, a: 255})
+    doing: ui.node_color("", 200.0, 30.0, Color{r: 250, g: 230, b: 160, a: 255})
+    done: ui.node_color("", 200.0, 30.0, Color{r: 180, g: 230, b: 180, a: 255})
+    ui.box(
+        [
+            ui.node_color("", 200.0, 30.0, color),
+            app.draggable<Task>(card, value: TASK, label: TASK.title),
+            app.draggable<Note>(note, value: Note{text: "Standup notes"}, label: "Standup notes"),
+            app.drop_zone<Task>(doing, label: "Doing", on_drop: fn(task: Task) app.Notice! { move_task(task, 1) }),
+            app.drop_zone<Task>(done, label: "Done", on_drop: fn(task: Task) app.Notice! { move_task(task, 2) }),
+        ],
+    )
+}
+
+run: fn() {
+    graph: app.new("Crewboard").screen("/", board).window(width: 200, height: 200)
+    if !graph.launch() {
+        return
+    }
+    // Closing the window ends the app; it waits up to a minute for that.
+    loop _ in 0..<6000 -> tasks.sleep(10)
+    loop notice in app.notices() -> print("notice: {notice.text}")
+    print("the window stayed open")
+}

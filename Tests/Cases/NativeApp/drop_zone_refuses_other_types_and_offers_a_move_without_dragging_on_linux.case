@@ -1,0 +1,30 @@
+# A drop zone takes only its own type, and every move works without a
+# drag: the board's task card and note card are dragged bodies
+# (`app.draggable`), and its Doing and Done columns take a task
+# (`app.drop_zone`). A fake compositor on $WAYLAND_DISPLAY drags the card
+# to Doing, which turns the board's panel; drags the note to Done, which
+# refuses it with a notice on the window's dark red bar; and drops text of
+# its own on Done, which refuses that too. Then it moves the card to Done
+# with the keyboard alone (Tab, Space, Right, Enter), and back to Doing
+# from the menu a long press on the card opens, with no drag. Then it
+# closes the window, which ends the app.
+fixture: DropZoneRefusesOtherTypesAndOffersAMoveWithoutDraggingOnLinux.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+mkdir: run
+spawn compositor: jet run compositor/fake_compositor.jet
+stdout: file compositor.stdout
+stderr: file compositor.stderr
+await: file compositor.ready timeout 120s every 10ms # the fake compositor listens
+step: jet run main.jet
+env: WAYLAND_DISPLAY={work}/wl.sock
+exit: 0
+stdout: empty
+wait: compositor timeout 60s
+exit: 0
+file: compositor.stdout = "board: 200x200, panel [51, 102, 255, 255], corner [255, 255, 255, 255]\ndragged the card to Doing\nafter the drag: panel [204, 153, 0, 255]\ndragged the note to Done\nrefused: panel [204, 153, 0, 255], corner [153, 27, 27, 255]\ndismissed the notice\ndropped text from another program on Done\nrefused: panel [204, 153, 0, 255], corner [153, 27, 27, 255]\ndismissed the notice\nmoved the card with Tab, Space, Right and Enter\nafter the keys: panel [51, 153, 51, 255], menu spot [120, 60, 160, 255]\nlong-pressed the card\nmenu: spot [245, 245, 245, 255]\nclicked Move Ship it to Doing\nafter the menu: panel [204, 153, 0, 255], menu spot [120, 60, 160, 255], corner [255, 255, 255, 255]\nclosed the window\n"

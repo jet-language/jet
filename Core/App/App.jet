@@ -4512,13 +4512,17 @@ priv app_context_menus_clear: fn() Never! {
     held.value.clear()
 }
 
-// The context menu whose id is `id`, opened at the pointer of `frame`,
-// moved left and up as far as it must be to fit in the window; None when
-// the shown tree has no such menu, or it has no items.
-priv app_context_open: fn(frame: ui.Frame, id: Int) -> AppOpenMenu? Never! {
+// The items of the context menu whose id is `id` in the shown tree; none
+// when it has no such menu.
+priv app_context_items: fn(id: Int) -> [MenuItem] Never! {
     held: APP_CONTEXT_MENUS.guard_read()
-    if id < 1 || id > held.value.len() -> return None
-    items: held.value[id - 1].items.copy()
+    if id < 1 || id > held.value.len() -> return [MenuItem]{}
+    held.value[id - 1].items.copy()
+}
+
+// A menu of `items`, opened at the pointer of `frame`, moved left and up
+// as far as it must be to fit in the window; None when it has no items.
+priv app_context_open: fn(frame: ui.Frame, items: [MenuItem]) -> AppOpenMenu? Never! {
     if items.len() == 0 -> return None
     widest := 0
     loop item in items {
@@ -4529,7 +4533,7 @@ priv app_context_open: fn(frame: ui.Frame, id: Int) -> AppOpenMenu? Never! {
     row: frame.__pixels(APP_MENU_ROW)
     x: app_menu_fit(frame.get_mouse_x(), width, frame.width)
     y: app_menu_fit(frame.get_mouse_y(), row * items.len(), frame.height)
-    Val(AppOpenMenu{x: x, y: y, width: width, row: row, items: items})
+    Val(AppOpenMenu{x: x, y: y, width: width, row: row, items: items.copy()})
 }
 
 // Where a span `size` long that starts at `at` starts so it ends in
@@ -4565,6 +4569,241 @@ priv app_context_draw: fn(frame: ui.Frame, menu: AppOpenMenu) Never! {
         enabled.push(item.enabled && item.kind != .Separator && item.kind != .Notice)
     }
     frame.__draw_menu(menu.x, menu.y, menu.width, menu.row, labels, enabled)
+}
+
+// `body` as one a person drags `value` with, named `label`: dropped on a
+// body that takes a `V` (`drop_zone`), `value` goes to that body's
+// `on_drop`; a drop zone that takes another type refuses it. The move
+// needs no drag, too. The keyboard reaches `body`: its first leaf that is
+// neither a button nor a text input joins the focus ring. Space picks it
+// up, the arrow keys step it through the drop zones by their labels,
+// Enter drops it on the one shown and Escape puts it back. A long press on
+// it (half a second, then letting go where it began) opens a menu of the
+// drop zones to move it to. On Linux the app's window (`App.window`)
+// carries the move; the other native targets keep a notice that says
+// their drag and drop is not built yet and give `body` back as it is. The
+// page runtime can't carry a drag yet, so a call in code whose target is
+// the web output is a compile error.
+draggable: fn<V: Encode>(body: UINode, value: V, label: String) -> UINode Never! {
+    #if #build.target.os == {
+        .Linux -> { return app_drag_source(body, value.encode(), Type{V}, label) }
+        .MacOS -> { return app_no_drag(body) }
+        .Windows -> { return app_no_drag(body) }
+        .Web -> { return app_no_drag(body) }
+        .Wasm -> { return app_no_drag(body) }
+        .Freestanding -> { return app_no_drag(body) }
+    }
+}
+
+// `body`, named `label`, taking the values of type `V` a person drops on
+// it (`draggable`), each to `on_drop`; a notice `on_drop` fails with
+// joins the app's notices, as a button's does, and the window shows it.
+// A value of another type, and a file or text another program drops on
+// it, is refused with a notice and goes nowhere. On Linux the app's
+// window (`App.window`) delivers the drops; the other native targets keep
+// a notice that says their drag and drop is not built yet and give `body`
+// back as it is. The page runtime can't carry a drag yet, so a call in
+// code whose target is the web output is a compile error.
+drop_zone: fn<V: Decode>(body: UINode, label: String, on_drop: &&fn(V) Notice!) -> UINode {
+    #if #build.target.os == {
+        .Linux -> {
+            return app_zone_target(body, label, Type{V}, app_zone_decoding<V>(on_drop.move()))
+        }
+        .MacOS -> { return app_no_drag(body) }
+        .Windows -> { return app_no_drag(body) }
+        .Web -> { return app_no_drag(body) }
+        .Wasm -> { return app_no_drag(body) }
+        .Freestanding -> { return app_no_drag(body) }
+    }
+}
+
+// The bodies a person drags (`draggable`) and the bodies that take what
+// they drop (`drop_zone`) in the tree the window shows, each one's id one
+// past its index (`app_window_tree` starts them over). `kind` is the
+// value's type (`Type{V}`); a drop zone takes only a value of its own.
+priv APP_DRAGS: Shared{[AppDrag]{}}
+
+priv AppDrag: struct {
+    label: String,
+    kind: Type,
+    value: Dyn,
+}
+
+priv APP_ZONES: Shared{[AppZone]{}}
+
+priv AppZone: struct {
+    label: String,
+    kind: Type,
+    run: Shared<AppZoneRun>,
+}
+
+priv AppZoneRun: struct {
+    run: fn(Dyn) Notice!,
+}
+
+// A press of the primary button on a body a person drags (`draggable`):
+// its id, where it began, in window pixels, and when (`rt.clock_mono_ns`).
+priv AppPress: struct {
+    drag: Int,
+    x: Int,
+    y: Int,
+    at: Int,
+}
+
+// A body the keyboard picked up (`draggable`) and the drop zone it shows
+// it would drop on, by their ids.
+priv AppPicked: struct {
+    drag: Int,
+    zone: Int,
+}
+
+// How long a press lasts to be a long press, and how far, in units, the
+// pointer moves from where it began to be a drag.
+priv APP_LONG_PRESS_NS: 500000000
+
+priv APP_DRAG_SLOP: 4
+
+// `on_drop` taking the encoded value it is given, decoded as a `V`.
+priv app_zone_decoding: fn<V: Decode>(on_drop: &&fn(V) Notice!) -> (fn(Dyn) Notice!) Never! {
+    run: on_drop.move()
+    fn(tree: Dyn) Notice! {
+        value: tree.decode<V>() ?? return Err(Notice{text: "Couldn't take what was dropped: {err}"})
+        run(value)
+    }
+}
+
+// `body` as one a person drags `value`, of the type `kind`, with.
+priv app_drag_source: fn(body: UINode, value: Dyn, kind: Type, label: String) -> UINode Never! {
+    held: APP_DRAGS.guard_edit()
+    held.value.push(AppDrag{label: label.copy(), kind: kind.copy(), value: value.copy()})
+    body.__dragging(held.value.len())
+}
+
+// `body` as one whose drops of a value of the type `kind` go to
+// `run`.
+priv app_zone_target: fn(body: UINode, label: String, kind: Type, run: &&fn(Dyn) Notice!) -> UINode Never! {
+    held: APP_ZONES.guard_edit()
+    held.value.push(AppZone{label: label.copy(), kind: kind.copy(), run: Shared{AppZoneRun{run: run.move()}}})
+    body.__taking_drops(held.value.len())
+}
+
+// Keeps the notice that this target carries no drags; gives `body`.
+priv app_no_drag: fn(body: UINode) -> UINode Never! {
+    __keep_notice(Notice{text: "Couldn't add drag and drop: this system's drag and drop is not built yet"})
+    body.copy()
+}
+
+// Starts the window's dragged bodies and drop zones over, for a tree
+// opened anew.
+priv app_drags_clear: fn() Never! {
+    drags: APP_DRAGS.guard_edit()
+    drags.value.clear()
+    zones: APP_ZONES.guard_edit()
+    zones.value.clear()
+}
+
+// The dragged body whose id is `id`, if the shown tree has it.
+priv app_drag: fn(id: Int) -> AppDrag? Never! {
+    held: APP_DRAGS.guard_read()
+    if id < 1 || id > held.value.len() -> return None
+    Val(held.value[id - 1].copy())
+}
+
+// The drop zone whose id is `id`, if the shown tree has it.
+priv app_zone: fn(id: Int) -> AppZone? Never! {
+    held: APP_ZONES.guard_read()
+    if id < 1 || id > held.value.len() -> return None
+    Val(held.value[id - 1].copy())
+}
+
+// How many drop zones the shown tree has.
+priv app_zones: fn() -> Int Never! {
+    held: APP_ZONES.guard_read()
+    held.value.len()
+}
+
+// Drops the value of the dragged body `drag` on the drop zone `zone`: its
+// `on_drop` takes it when it is of the zone's type, and its failure joins
+// the app's notices; a value of another type is refused with a notice.
+priv app_drag_drop: fn(drag: Int, zone: Int) Never! {
+    moved: app_drag(drag) ?? return
+    target: app_zone(zone) ?? return
+    if moved.kind != target.kind {
+        __keep_notice(Notice{text: "Couldn't move {moved.label} to {target.label}: it doesn't take that"})
+        return
+    }
+    held: target.run.guard_read()
+    app_zone_once(held.value.run, moved.value)
+}
+
+// Gives `value` to a drop zone's `on_drop`, as a button's handler runs;
+// the notice it fails with joins the app's notices.
+priv app_zone_once: fn(run: fn(Dyn) Notice!, value: Dyn) Never! {
+    if run(value) == .Err(notice) -> __keep_notice(notice)
+}
+
+// A drop from another program on the drop zone `zone` (0 for none): a
+// drop zone takes only what the app's own bodies carry, so it is refused
+// with a notice.
+priv app_zone_refuse: fn(zone: Int) Never! {
+    target: app_zone(zone) ?? return
+    __keep_notice(Notice{text: "Couldn't drop that on {target.label}: it takes only what you move there in this app"})
+}
+
+// The menu a long press on the dragged body `drag` opens: an item for
+// each drop zone, which moves it there.
+priv app_drag_items: fn(drag: Int) -> [MenuItem] Never! {
+    moved: app_drag(drag) ?? return [MenuItem]{}
+    items := [MenuItem]{}
+    loop index in 0..<app_zones() {
+        zone: index + 1
+        target: app_zone(zone) ?? next
+        if target.kind != moved.kind -> next
+        items.push(
+            item("Move {moved.label} to {target.label}", fn() Notice! {
+                app_drag_drop(drag, zone)
+                Ok()
+            }),
+        )
+    }
+    items
+}
+
+// Whether the pointer of `frame` is more than APP_DRAG_SLOP units from
+// where `press` began.
+priv app_press_moved: fn(frame: ui.Frame, press: AppPress) -> Bool Never! {
+    slop: frame.__pixels(APP_DRAG_SLOP)
+    dx: frame.get_mouse_x() - press.x
+    dy: frame.get_mouse_y() - press.y
+    dx > slop || -dx > slop || dy > slop || -dy > slop
+}
+
+// The keyboard's move of the picked-up body `picked` after `key`: the
+// arrow keys step it to the next or the previous drop zone, Enter drops
+// it on the one shown, and Escape puts it back; None once it is down.
+priv app_picked_key: fn(picked: AppPicked, key: Key) -> AppPicked? Never! {
+    count: app_zones()
+    if count == 0 -> return None
+    if key == {
+        .Right | .Down -> Val(AppPicked{drag: picked.drag, zone: picked.zone % count + 1})
+        .Left | .Up -> Val(AppPicked{drag: picked.drag, zone: (picked.zone + count - 2) % count + 1})
+        .Enter -> {
+            app_drag_drop(picked.drag, picked.zone)
+            None
+        }
+        .Escape -> None
+        .Char(_) | .Backspace | .Tab | .Delete | .Insert | .Home | .End | .PageUp | .PageDown | .Shift | .Control | .Alt | .Super | .CapsLock | .F(_) | .Ctrl(_) | .Unknown -> Val(picked.copy())
+    }
+}
+
+// Draws the picked-up body `picked` into `frame` (`Frame.__draw_picked`):
+// a frame around the drop zone it would drop on in `tree`, and a bar over
+// the top of the screen that says where it would go.
+priv app_picked_draw: fn(frame: ui.Frame, tree: UINode, picked: AppPicked) Never! {
+    moved: app_drag(picked.drag) ?? return
+    target: app_zone(picked.zone) ?? return
+    text: "Moving {moved.label} to {target.label}: Enter drops it, Escape puts it back"
+    frame.__draw_picked(tree.__zone_place(frame, picked.zone), text, frame.__pixels(APP_NOTICE_BAR))
 }
 
 // The height of the bar the window shows the app's newest notice in, at
@@ -5116,6 +5355,8 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
     shown := AppCurrent?{None}
     open := AppOpenMenu?{None}
     back := Notice?{None}
+    pressed := AppPress?{None}
+    picked := AppPicked?{None}
     loop frame in window.frames() {
         stale := !drawn
         loop event in frame.events() {
@@ -5123,9 +5364,9 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
             if event == .Focus(on) {
                 app_moment(if on -> AppMoment.Foreground else -> AppMoment.Background)
             }
-            if event == .Drop(x, y, items) -> app_window_drop(tree.__files_at(frame, x, y), items)
+            if event == .Drop(x, y, items) -> app_window_dropped(tree, frame, x, y, items)
             if event == .PointerDown(.Right) {
-                open = app_context_open(frame, tree.__menu_at(frame, frame.get_mouse_x(), frame.get_mouse_y()))
+                open = app_context_open(frame, app_context_items(tree.__menu_at(frame, frame.get_mouse_x(), frame.get_mouse_y())))
                 stale = true
                 next
             }
@@ -5151,6 +5392,10 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
                 next
             }
             if event == .PointerDown(.Left) && app_notice_dismissed(frame) {
+                stale = true
+                next
+            }
+            if app_window_drag(frame, tree, event, focused, pressed, picked, open) {
                 stale = true
                 next
             }
@@ -5182,6 +5427,8 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
             if now != shown {
                 focused = -1
                 open = None
+                pressed = None
+                picked = None
             }
             tree = app_window_tree(now)
             shown = now
@@ -5189,6 +5436,7 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
         }
         if !stale -> next
         tree.__draw(frame)
+        if picked == .Val(held) -> app_picked_draw(frame, tree, held)
         if open == .Val(menu) -> app_context_draw(frame, menu)
         app_notice_draw(frame)
         if back == .Val(notice) -> app_resumed_draw(frame, notice)
@@ -5196,6 +5444,68 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
     }
     if window.failure() == .Val(failure) -> app_window_lost("{failure}")
     process.exit(0)
+}
+
+// A drag's part of `event` in the window showing `tree`. A press of the
+// primary button on a dragged body (`draggable`) begins one (`pressed`);
+// letting go drops it on the drop zone under the pointer once it moved,
+// or, after a long press where it began, opens the menu of the drop zones
+// it can move to (`open`). Space picks up the focused dragged body
+// (`picked`), which then takes the keys (`app_picked_key`). Whether it
+// took the event, which changes what the window shows.
+priv app_window_drag: fn(frame: ui.Frame, tree: UINode, event: ui.UIEvent, focused: Int, pressed: &AppPress?, picked: &AppPicked?, open: &AppOpenMenu?) -[Time]> Bool Never! {
+    held: picked ?? AppPicked{drag: 0, zone: 0}
+    if held.drag != 0 {
+        if event == .KeyDown(key) {
+            picked = app_picked_key(held, key)
+            return true
+        }
+        return false
+    }
+    if event == {
+        .PointerDown(button) -> {
+            if button != .Left -> return false
+            x: frame.get_mouse_x()
+            y: frame.get_mouse_y()
+            drag: tree.__drag_at(frame, x, y)
+            pressed = if drag == 0 -> None else -> Val(AppPress{drag: drag, x: x, y: y, at: rt.clock_mono_ns()})
+            false
+        }
+        .PointerUp(button) -> {
+            if button != .Left -> return false
+            press: pressed ?? return false
+            pressed = None
+            if app_press_moved(frame, press) {
+                zone: tree.__zone_at(frame, frame.get_mouse_x(), frame.get_mouse_y())
+                if zone == 0 -> return false
+                app_drag_drop(press.drag, zone)
+                return true
+            }
+            if rt.clock_mono_ns() - press.at < APP_LONG_PRESS_NS -> return false
+            open = app_context_open(frame, app_drag_items(press.drag))
+            true
+        }
+        .KeyDown(key) -> {
+            if key != .Char(' ') -> return false
+            drag: tree.__focused_drag(focused)
+            if drag == 0 || app_zones() == 0 -> return false
+            picked = Val(AppPicked{drag: drag, zone: 1})
+            true
+        }
+        .KeyUp(_) | .Text(_) | .Compose(_) | .PointerMove(_, _) | .Scroll(_, _) | .Resize(_, _) | .Focus(_) | .Drop(_, _, _) | .Close -> false
+    }
+}
+
+// A drop from another program at (x, y), in pixels, on the window showing
+// `tree`: files on a body that takes them go to it (`app_window_drop`),
+// and a drop zone refuses it (`app_zone_refuse`).
+priv app_window_dropped: fn(tree: UINode, frame: ui.Frame, x: Int, y: Int, items: [UIDropItem]) -[FS.Read]> Never! {
+    files: tree.__files_at(frame, x, y)
+    if files != 0 {
+        app_window_drop(files, items)
+        return
+    }
+    app_zone_refuse(tree.__zone_at(frame, x, y))
 }
 
 // Runs the menu item `chosen` in the window: Cut, Copy and Paste on the
@@ -5345,6 +5655,7 @@ priv app_menu_bar_lost: fn(why: String) Never! {
 priv app_window_tree: fn(now: AppCurrent?) -[FS.Read, Net]> UINode Never! {
     app_drops_clear()
     app_context_menus_clear()
+    app_drags_clear()
     current: now ?? return ui.box([UINode]{})
     screen: app_screen(current.state) ?? return ui.box([UINode]{})
     me: tasks.current_task()
@@ -5625,6 +5936,44 @@ priv app_graph_shows: fn(ids: [Int]) -> Bool Never! {
     after: notices()
     assert_eq(after.len(), before + 1)
     assert_eq(after[after.len() - 1].text, "Couldn't refresh the board")
+}
+
+#Test("a drop zone takes only its own type and refuses another program's drop, and every move works without a drag") {
+    app_drags_clear()
+    _: draggable<Int>(ui.text("card"), value: 7, label: "Ship it")
+    _: draggable<String>(ui.text("note"), value: "Standup notes", label: "Standup notes")
+    _: drop_zone<Int>(ui.text("doing"), label: "Doing", on_drop: fn(task: Int) Notice! { Err(Notice{text: "Doing took {task}"}) })
+    _: drop_zone<String>(ui.text("notes"), label: "Notes", on_drop: fn(text: String) Notice! { Err(Notice{text: "Notes took {text}"}) })
+    app_drag_drop(1, 1)
+    shown := notices()
+    assert_eq(shown[shown.len() - 1].text, "Doing took 7")
+    app_drag_drop(2, 1)
+    shown = notices()
+    assert_eq(shown[shown.len() - 1].text, "Couldn't move Standup notes to Doing: it doesn't take that")
+    app_zone_refuse(2)
+    shown = notices()
+    assert_eq(shown[shown.len() - 1].text, "Couldn't drop that on Notes: it takes only what you move there in this app")
+    // A long press lists only the zones that take the value.
+    labels := [String]{}
+    loop entry in app_drag_items(1) -> labels.push(entry.label.copy())
+    assert_eq(labels.join("|"), "Move Ship it to Doing")
+    app_menu_choose(app_drag_items(2)[0])
+    shown = notices()
+    assert_eq(shown[shown.len() - 1].text, "Notes took Standup notes")
+    // The keyboard steps through every zone, wrapping, and Enter drops.
+    picked: AppPicked{drag: 1, zone: 1}
+    right: app_picked_key(picked, .Right) ?? AppPicked{drag: 0, zone: 0}
+    assert_eq(right.zone, 2)
+    wrapped: app_picked_key(right, .Down) ?? AppPicked{drag: 0, zone: 0}
+    assert_eq(wrapped.zone, 1)
+    left: app_picked_key(picked, .Left) ?? AppPicked{drag: 0, zone: 0}
+    assert_eq(left.zone, 2)
+    if app_picked_key(picked, .Escape) == .Val(_) -> assert(false)
+    if app_picked_key(picked, .Enter) == .Val(_) -> assert(false)
+    shown = notices()
+    assert_eq(shown[shown.len() - 1].text, "Doing took 7")
+    app_drags_clear()
+    assert_eq(app_zones(), 0)
 }
 
 #Test("a menu bar's menus hold their items with their keys, and a key equivalent names its keys") {

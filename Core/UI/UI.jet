@@ -156,6 +156,12 @@ UINode: struct {
     // The id the app keeps the node's context menu under (`__with_menu`);
     // 0 for none.
     priv menu: Int,
+    // The id the app keeps the value a person drags the node with under
+    // (`__dragging`); 0 for none.
+    priv drag: Int,
+    // The id the app keeps the handler of values dropped on the node under
+    // (`__taking_drops`); 0 for none.
+    priv zone: Int,
 
     // The tree as a server sends it (`html.node`), as a screen whose view
     // gives a tree shows it.
@@ -197,7 +203,7 @@ UINode: struct {
     // `frame`, in pixels, the tree laid out as `__draw` lays it out; 0 for
     // none.
     __files_at: fn(self, frame: Frame, x: Int, y: Int) -> Int Never! {
-        internal.held_at(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, Float{x} / frame.scale, Float{y} / frame.scale, false)
+        internal.held_at(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, Float{x} / frame.scale, Float{y} / frame.scale, UIHeld.Files)
     }
 
     // The tree as a body with a context menu, which the app keeps under
@@ -212,8 +218,56 @@ UINode: struct {
     // under the point (x, y) of a native window's `frame`, in pixels, as
     // `__files_at` finds a body that takes files; 0 for none.
     __menu_at: fn(self, frame: Frame, x: Int, y: Int) -> Int Never! {
-        internal.held_at(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, Float{x} / frame.scale, Float{y} / frame.scale, true)
+        internal.held_at(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, Float{x} / frame.scale, Float{y} / frame.scale, UIHeld.Menu)
     }
+
+    // The tree as a body a person drags the value the app keeps under
+    // `drag` with (`app.draggable`).
+    __dragging: fn(self, drag: Int) -> UINode Never! {
+        result := self.copy()
+        result.drag = drag
+        result
+    }
+
+    // The tree as a body that takes the values dropped on it, whose handler
+    // the app keeps under `zone` (`app.drop_zone`).
+    __taking_drops: fn(self, zone: Int) -> UINode Never! {
+        result := self.copy()
+        result.zone = zone
+        result
+    }
+
+    // The id of the innermost body a person drags (`__dragging`) under the
+    // point (x, y) of a native window's `frame`, in pixels, as `__files_at`
+    // finds a body that takes files; 0 for none.
+    __drag_at: fn(self, frame: Frame, x: Int, y: Int) -> Int Never! {
+        internal.held_at(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, Float{x} / frame.scale, Float{y} / frame.scale, UIHeld.Drag)
+    }
+
+    // The id of the innermost body that takes dropped values
+    // (`__taking_drops`) under the point (x, y) of a native window's
+    // `frame`, in pixels, as `__files_at` finds a body that takes files; 0
+    // for none.
+    __zone_at: fn(self, frame: Frame, x: Int, y: Int) -> Int Never! {
+        internal.held_at(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, Float{x} / frame.scale, Float{y} / frame.scale, UIHeld.Zone)
+    }
+
+    // Where the body that takes dropped values under `zone`
+    // (`__taking_drops`) is laid out in a native window's `frame`, in
+    // pixels, as `__draw` lays the tree out; None when the tree has none.
+    __zone_place: fn(self, frame: Frame, zone: Int) -> UIRect? Never! {
+        place: internal.zone_place(self, Rect{x: 0.0, y: 0.0, width: self.width, height: self.height}, zone) ?? return None
+        x: internal.pixel(place.x, frame.scale)
+        y: internal.pixel(place.y, frame.scale)
+        Val(UIRect{x: x, y: y, width: internal.pixel(place.width, frame.scale), height: internal.pixel(place.height, frame.scale)})
+    }
+
+    // The id of the body a person drags (`__dragging`) that holds node
+    // `focused` of the tree's focus ring (`__input`), when that node is
+    // neither a button nor a text input; 0 otherwise. A dragged body's
+    // first leaf that is neither joins the focus ring, so the keyboard
+    // reaches each one.
+    __focused_drag: fn(self, focused: Int) -> Int Never! { internal.focused_drag(self, focused) }
 
     // The text of the text input that is node `focused` of the tree's focus
     // ring (`__input`), None when that node is no text input.
@@ -274,6 +328,8 @@ box: fn(children: [UINode]) -> UINode Never! {
         drop: 0,
         files: 0,
         menu: 0,
+        drag: 0,
+        zone: 0,
     }
 }
 
@@ -443,11 +499,23 @@ UIBackendState: struct {
     priv renders: Int,
 }
 
-// A leaf of a tree and the frame a paint lays it out in
-// (`internal.placed_leaves`).
+// A leaf of a tree, the frame a paint lays it out in
+// (`internal.placed_leaves`), and the innermost dragged body that holds it
+// (`UINode.__dragging`), 0 for none.
 priv UIPlaced: struct {
     node: UINode,
     frame: Rect,
+    drag: Int,
+}
+
+// What `internal.held_at` looks for under a point: a body that takes
+// dropped files, one with a context menu, one a person drags, or one that
+// takes dropped values.
+priv UIHeld: enum {
+    Files,
+    Menu,
+    Drag,
+    Zone,
 }
 
 NullBackend: struct {
@@ -1510,7 +1578,26 @@ Frame: struct {
     __draw_notice: fn(self, text: String, bar: Int, top: Bool) Never! {
         y: if top || self.height <= bar -> 0 else -> self.height - bar
         high: if top && self.height > bar -> bar else -> self.height - y
-        self.draw_rectangle(0, y, self.width, high, Color{r: 153, g: 27, b: 27, a: 255})
+        self.__draw_bar(text, y, high, Color{r: 153, g: 27, b: 27, a: 255})
+    }
+
+    // Draws a dark blue frame 3 units thick around `place`, in pixels, and
+    // `text` over the top of the frame on a dark blue bar `bar` pixels
+    // high, in white: how a native window shows a value the keyboard picked
+    // up (`app.draggable`) and the drop zone it would drop on.
+    __draw_picked: fn(self, place: UIRect?, text: String, bar: Int) Never! {
+        blue: Color{r: 30, g: 64, b: 175, a: 255}
+        if place == .Val(at) {
+            thick: Float{self.__pixels(3)}
+            self.draw_rectangle_lines_ex(Rect{x: Float{at.x}, y: Float{at.y}, width: Float{at.width}, height: Float{at.height}}, thick, blue)
+        }
+        self.__draw_bar(text, 0, bar, blue)
+    }
+
+    // Draws `text` in white on a `fill` bar across the frame, `high`
+    // pixels high from row `y` (`__draw_notice`, `__draw_picked`).
+    __draw_bar: fn(self, text: String, y: Int, high: Int, fill: Color) Never! {
+        self.draw_rectangle(0, y, self.width, high, fill)
         size: self.__pixels(16)
         self.draw_text(text, self.__pixels(8), y + (high - size) /% 2, size, Color{r: 255, g: 255, b: 255, a: 255})
     }
@@ -1824,6 +1911,8 @@ priv internal: module {
             drop: 0,
             files: 0,
             menu: 0,
+            drag: 0,
+            zone: 0,
         }
     }
 
@@ -1892,20 +1981,27 @@ priv internal: module {
         }
     }
 
-    // The leaves of `node` in paint order, each with its frame: a box stacks
-    // its children down its frame, each its own height across the frame's
-    // width; every other node is a leaf painted into its frame. Every
-    // backend lays a tree out this way.
+    // The leaves of `node` in paint order, each with its frame and the
+    // innermost dragged body (`UINode.__dragging`) that holds it: a box
+    // stacks its children down its frame, each its own height across the
+    // frame's width; every other node is a leaf painted into its frame.
+    // Every backend lays a tree out this way.
     placed_leaves: fn(node: UINode, frame: Rect, leaves: &[UIPlaced]) Never! {
+        placed_under(node, frame, 0, leaves)
+    }
+
+    // `placed_leaves` within the dragged body `drag` (0 for none).
+    placed_under: fn(node: UINode, frame: Rect, drag: Int, leaves: &[UIPlaced]) Never! {
+        inner: if node.drag != 0 -> node.drag else -> drag
         if node.kind == .Box {
             at := frame.y
             loop child in node.children {
-                placed_leaves(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, leaves)
+                placed_under(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, inner, leaves)
                 at += child.height
             }
             return
         }
-        leaves.push(UIPlaced{node: node.copy(), frame: frame})
+        leaves.push(UIPlaced{node: node.copy(), frame: frame, drag: inner})
     }
 
     paint_leaf: fn(state: &UIBackendState, node: UINode, frame: Rect) Never! {
@@ -2028,12 +2124,18 @@ priv internal: module {
     }
 
     // The focus ring of a tree whose leaves are `leaves`, in paint order:
-    // the index of each button and text input.
+    // the index of each button and text input, and of the first leaf of
+    // each dragged body (`UINode.__dragging`) that is neither.
     focus_ring_of: fn(leaves: [UIPlaced]) -> [Int] Never! {
         ring := [Int]{}
+        reached := [Int]{}
         loop index in 0..<leaves.len() {
-            role: leaves[index].node.role
+            placed: leaves[index]
+            role: placed.node.role
             if role == Val(UIAriaRole.Button) || role == Val(UIAriaRole.TextInput) {
+                ring.push(index)
+            } else if placed.drag != 0 && !reached.contains(placed.drag) {
+                reached.push(placed.drag)
                 ring.push(index)
             }
         }
@@ -2049,6 +2151,18 @@ priv internal: module {
         node: leaves[ring[focused]].node
         if node.kind != .TextInput -> return None
         Val(node.label.copy())
+    }
+
+    // `UINode.__focused_drag`.
+    focused_drag: fn(tree: UINode, focused: Int) -> Int Never! {
+        leaves := [UIPlaced]{}
+        placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
+        ring: focus_ring_of(leaves)
+        if focused < 0 || focused >= ring.len() -> return 0
+        placed: leaves[ring[focused]]
+        role: placed.node.role
+        if role == Val(UIAriaRole.Button) || role == Val(UIAriaRole.TextInput) -> return 0
+        placed.drag
     }
 
     // `UINode.__set_focused_text`.
@@ -2074,23 +2188,42 @@ priv internal: module {
         None
     }
 
-    // `UINode.__files_at` and `UINode.__menu_at`, at (x, y) in units: the
-    // innermost node laid out over the point that takes dropped files, or
-    // with `menus` that has a context menu, gives its id, a box's children
-    // laid out as `placed_leaves` lays them out.
-    held_at: fn(node: UINode, frame: Rect, x: Float, y: Float, menus: Bool) -> Int Never! {
+    // `UINode.__files_at`, `__menu_at`, `__drag_at` and `__zone_at`, at
+    // (x, y) in units: the innermost node laid out over the point that
+    // holds what `held` names gives its id, a box's children laid out as
+    // `placed_leaves` lays them out.
+    held_at: fn(node: UINode, frame: Rect, x: Float, y: Float, held: UIHeld) -> Int Never! {
         if x < frame.x || x >= frame.x + frame.width || y < frame.y || y >= frame.y + frame.height {
             return 0
         }
         if node.kind == .Box {
             at := frame.y
             loop child in node.children {
-                inner: held_at(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, x, y, menus)
+                inner: held_at(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, x, y, held)
                 if inner != 0 -> return inner
                 at += child.height
             }
         }
-        if menus -> node.menu else -> node.files
+        if held == {
+            .Files -> node.files
+            .Menu -> node.menu
+            .Drag -> node.drag
+            .Zone -> node.zone
+        }
+    }
+
+    // `UINode.__zone_place`, in units: where the node that takes dropped
+    // values under `zone` is laid out, as `held_at` lays a tree out.
+    zone_place: fn(node: UINode, frame: Rect, zone: Int) -> Rect? Never! {
+        if node.zone == zone -> return Val(frame)
+        if node.kind != .Box -> return None
+        at := frame.y
+        loop child in node.children {
+            found: zone_place(child, Rect{x: frame.x, y: at, width: frame.width, height: child.height}, zone)
+            if found != None -> return found
+            at += child.height
+        }
+        None
     }
 
     // `node` with its leaf `target`, counted in paint order
@@ -2412,21 +2545,42 @@ priv html_name: fn(tree: UINode) -> String Never! {
     assert_eq(seen, [String]{"false -1 ab 2.0 6.0", "true 0 abd 3.0 6.0", "false 1 abd 3.0 6.0", "false 0 abd 3.0 6.0", "false 0 abd 3.0 6.0"})
 }
 
-#Test("a native window finds the innermost body that takes dropped files, or has a context menu, under a point") {
+#Test("a native window finds the innermost body that takes dropped files, has a context menu, is dragged or takes dropped values, under a point") {
     // A 10x4 panel over a body of its own, then a one-unit button.
     panel: node_color("", 10.0, 4.0, Color{r: 0, g: 0, b: 255, a: 255}).__taking_files(2)
     tree: box([panel, button("Go")]).__taking_files(1)
     whole: Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}
-    assert_eq(internal.held_at(tree, whole, 3.0, 2.0, false), 2)
-    assert_eq(internal.held_at(tree, whole, 3.0, 4.5, false), 1)
-    assert_eq(internal.held_at(tree, whole, 3.0, 5.0, false), 0)
-    assert_eq(internal.held_at(box([text("plain")]), whole, 1.0, 0.0, false), 0)
+    assert_eq(internal.held_at(tree, whole, 3.0, 2.0, .Files), 2)
+    assert_eq(internal.held_at(tree, whole, 3.0, 4.5, .Files), 1)
+    assert_eq(internal.held_at(tree, whole, 3.0, 5.0, .Files), 0)
+    assert_eq(internal.held_at(box([text("plain")]), whole, 1.0, 0.0, .Files), 0)
     // The panel's menu, inside a body that takes files: a point on the
     // panel finds the menu, and the button's point finds none.
     menus: box([panel.__with_menu(3), button("Go")]).__taking_files(1)
-    assert_eq(internal.held_at(menus, whole, 3.0, 2.0, true), 3)
-    assert_eq(internal.held_at(menus, whole, 3.0, 2.0, false), 2)
-    assert_eq(internal.held_at(menus, whole, 3.0, 4.5, true), 0)
+    assert_eq(internal.held_at(menus, whole, 3.0, 2.0, .Menu), 3)
+    assert_eq(internal.held_at(menus, whole, 3.0, 2.0, .Files), 2)
+    assert_eq(internal.held_at(menus, whole, 3.0, 4.5, .Menu), 0)
+    // A card dragged inside a column that takes drops: the card's point
+    // finds both, and the column's place is where its card is laid out.
+    card: box([text("Ship it"), button("Done")]).__dragging(4)
+    column: box([card, text("more")]).__taking_drops(5)
+    board: box([node_color("", 10.0, 2.0, Color{r: 0, g: 0, b: 0, a: 255}), column])
+    over: Rect{x: 0.0, y: 0.0, width: board.width, height: board.height}
+    assert_eq(internal.held_at(board, over, 1.0, 2.5, .Drag), 4)
+    assert_eq(internal.held_at(board, over, 1.0, 3.5, .Drag), 4)
+    assert_eq(internal.held_at(board, over, 1.0, 4.5, .Drag), 0)
+    assert_eq(internal.held_at(board, over, 1.0, 4.5, .Zone), 5)
+    assert_eq(internal.held_at(board, over, 1.0, 1.0, .Zone), 0)
+    place: internal.zone_place(board, over, 5) ?? Rect{x: -1.0, y: -1.0, width: 0.0, height: 0.0}
+    assert(place.x == 0.0 && place.y == 2.0 && place.width == board.width && place.height == 3.0)
+    if internal.zone_place(board, over, 6) == .Val(_) -> assert(false)
+    // The keyboard reaches the card through its first leaf that is not a
+    // button, then its button.
+    leaves := [UIPlaced]{}
+    internal.placed_leaves(board, over, leaves)
+    assert_eq(internal.focus_ring_of(leaves), [Int]{1, 2})
+    assert_eq(internal.focused_drag(board, 0), 4)
+    assert_eq(internal.focused_drag(board, 1), 0)
 }
 
 #Test("a native window's key matches a button's shortcut as a page's does") {
