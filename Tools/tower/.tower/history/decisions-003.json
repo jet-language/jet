@@ -33708,6 +33708,199 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-30",
       "retiredAt": "2026-11-17T07:54:14.915Z"
+    },
+    {
+      "id": "D-ROUTE-ONE1",
+      "cardId": "c0rtxw7u",
+      "group": "api",
+      "title": "Pages, marked methods and single routes share one table on `web.app()`",
+      "situation": "A Jet web program can add routes three ways. Pages go on the web app. Marked struct methods and single routes go on a router. Pages and router routes live in separate tables. A clash inside one table fails the check. A page and a router route at the same address pass with no error. The example app writes the same addresses twice. The vote decides whether pages and router routes share one table.",
+      "gist": "Should pages, marked methods and single routes share one route table on the web app?",
+      "lesson": "Yes: `web.app()` holds every route, so any clash fails the check and one listing shows all.",
+      "explainer": "",
+      "story": "Leo adds an `/orders/:id` API route beside an `/orders/:id` page. `jet check` names both lines, and he mounts the API under `/api`.",
+      "inWild": "Option            Tables   Cross-table clash   Like\nA one table       one      check error         Rails, Phoenix, Next.js\nB prefix mount    two      unchecked           Express sub-routers\nC check at serve  two      startup error       Go ServeMux",
+      "detail": "WHAT WE BUILD\n- `web.app()` owns the one route table; `server.mux()` removed. `app.get/post/mount` take the D-HTTP-ROUTE-EXPOSE1=A row rules. `app.mount(prefix, value)` takes a marked struct or a computed handler (web_app.jet:21, E2810 today).\n- E2804 for any two rows with one verb and address, naming both lines; E2807 merges into it. A route added while running is listed as computed with its call line and fails when added.\n\n- `jet explain --routes` lists every row (verb, address, page or handler, form, file:line). `jet explain --web-graph` is not ported today (Front.jet:1210).\n- Handler rows are server-only; only page rows join client navigation. Static files keep D-HTTP-STATIC-FILES1=A.\n- Battery example (run.jet): mount Orders once under /api; delete the duplicate `mux.get` lines (158-169); serve the page graph (lines 31-34, 134).\n\nFIXED UNDER EVERY OPTION\n- Path parameters are `:id` (D-DX-ROUTER1=A's Tower code writes `{id}`); the marker is `#server.Get` (D-ROUTE-FILES2 writes `#Server.Get`).\n- `#server.Get` is E0927 on r14 and base, even in Examples/features/net/http_routes.jet (probe r15; card #5548).\n\nEVIDENCE (r14 jet)\n- r13: `mux.get` beside `web.app().route` on one path passes check. r14: two identical `mux.get` give E2804.\n\nIDS\nUnder A amends D-HTTP-ROUTE-EXPOSE1=A (rows move from `server.mux()` to `web.app()`). Fixed: D-DX-ROUTER1=A, D-ROUTE-FILES2=A, D-WEBAUTHOR1=D (explicit and convention routes collide loudly). Hosts #6055 (L-17).",
+      "options": [
+        {
+          "key": "A",
+          "name": "One table on the app",
+          "detail": "The router builder folds into `web.app()`. Every route form adds rows to one table. Gains: Any two routes at one address fail the check. One command lists every route. One builder instead of two. Losses: Every router caller moves to the app.",
+          "technical": "`server.mux()` is removed. `mux.get`, `mux.post` and `mux.mount` become `app.get`, `app.post` and `app.mount` with the same rules. `app.mount(prefix, value)` adds rows under a prefix from a marked struct or a handler. Two rows with one verb and address are E2804 naming both lines; E2807 merges into it. `jet explain --routes` lists verb, address, kind and file:line for every row.",
+          "code": "// A: one table on the app\nweb.app()\n    .get(\"/health\", health)\n    .mount(\"/api\", Orders{db: open_db()})\n    .routes(from: \"Routes\")   // Routes/orders/[ID].jet\n// two rows, one verb and address: E2804 names both"
+        },
+        {
+          "key": "B",
+          "name": "Two tables, joined by a prefix",
+          "detail": "The app forwards everything under a prefix to a router, which keeps its own table. Gains: Router code stays as it is. Losses: Clashes across tables still pass. Two listings and two builders.",
+          "technical": "`app.mount(prefix, mux)` strips the prefix and forwards requests to the router. Clashes are checked inside each table.",
+          "code": "// B: two tables, joined by a prefix\nmux := server.mux()\n&mux.mount(Orders{db: open_db()})\nweb.app().routes(from: \"Routes\").mount(\"/api\", mux)\n// clashes are checked inside each table only"
+        },
+        {
+          "key": "C",
+          "name": "Two builders, one clash check",
+          "detail": "Keep both builders. Serving them together checks clashes across both at startup. Gains: Clashes across tables are caught. Losses: Caught at startup, not at check. Two builders and two listings stay.",
+          "technical": "The app and the router keep separate builders. Serving them together merges the tables and fails on a clash.",
+          "code": "// C: two builders, one clash check at startup\nmux := server.mux()\n&mux.get(\"/orders/:id\", order_api)\nweb.app().route(\"/orders/:id\", order_page).serve(mux)\n// E2804 at startup names both lines"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rails",
+          "note": "One routes file holds pages and APIs; `rails routes` lists all. Source: https://guides.rubyonrails.org/routing.html",
+          "code": "# Rails: config/routes.rb\nresources :orders\nnamespace :api do\n  resources :orders\nend"
+        },
+        {
+          "lang": "Phoenix",
+          "note": "One router holds browser and API scopes; `mix phx.routes` lists all. Source: https://hexdocs.pm/phoenix/routing.html",
+          "code": "# Elixir, Phoenix\nscope \"/\", ShopWeb do\n  get \"/orders/:id\", OrderController, :show\nend\nscope \"/api\", ShopWeb.API do\n  get \"/orders/:id\", OrderController, :show\nend"
+        },
+        {
+          "lang": "Next.js",
+          "note": "Pages and route handlers share one file tree; one path cannot hold both. Source: https://nextjs.org/docs/app/building-your-application/routing/route-handlers",
+          "code": "// Next.js\n// app/orders/[id]/page.tsx    -> page\n// app/api/orders/[id]/route.ts -> handler\n// page.tsx and route.ts in one folder: build error"
+        },
+        {
+          "lang": "Express",
+          "note": "Sub-routers mount under a prefix, each with its own table. Source: https://expressjs.com/en/guide/routing.html",
+          "code": "// Express\nconst api = express.Router();\napi.get(\"/orders/:id\", show);\napp.use(\"/api\", api);"
+        },
+        {
+          "lang": "Go",
+          "note": "ServeMux panics when two patterns conflict at registration. Source: https://pkg.go.dev/net/http#ServeMux",
+          "code": "// Go\nmux.HandleFunc(\"GET /orders/{id}\", show)\nmux.HandleFunc(\"GET /orders/{id}\", again)   // panic"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Marked methods and single routes already share one table. Adding pages finishes the job: one builder, one table, every clash caught at check.",
+        "gains": [
+          "Every clash fails at check, naming both lines.",
+          "One command lists every route.",
+          "Removes a second builder."
+        ],
+        "losses": [
+          {
+            "loss": "Every router caller moves to the app.",
+            "mitigation": "The row rules are unchanged; only `mux.` becomes `app.`."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Clashes between tables still pass silently."
+          },
+          {
+            "key": "C",
+            "reason": "Clashes surface only at startup, and two builders remain."
+          }
+        ],
+        "tradeoff": "One rename for router users, for one table that catches every clash."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReview. I attacked whether one table forces a big migration, whether Go's startup check is good enough, and each peer row. The peers hold, Next.js does reject a page and handler in one folder, and A wins because every clash fails at check."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should pages, marked methods and single routes share one route table on the web app?",
+        "lesson": "Yes: `web.app()` holds every route, so any clash fails the check and one listing shows all.",
+        "trio": {
+          "current": {
+            "note": "Today: a page and a router route can claim one address unchecked.",
+            "code": "// Today: two tables, no clash check between them\nmux.get(\"/orders/:id\", order_api)\n_app :: web.app().route(\"/orders/:id\", order_page)  // ok\nmux.get(\"/orders/:id\", order_again)\n// E2804: Two routes both match GET /orders/:id (one router)"
+          },
+          "wild": {
+            "lang": "Rails",
+            "note": "Pages and API routes share one table, listed by one command.",
+            "code": "# Rails\n$ bin/rails routes\norder  GET  /orders/:id(.:format)      orders#show\napi_order GET /api/orders/:id(.:format) api/orders#show"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One table on the app",
+            "gist": "The router builder folds into `web.app()`. Every route form adds rows to one table.",
+            "gains": [
+              "Any two routes at one address fail the check.",
+              "One command lists every route.",
+              "One builder instead of two."
+            ],
+            "losses": [
+              "Every router caller moves to the app."
+            ],
+            "proposed": {
+              "code": "// A: one table on the app\nweb.app()\n    .get(\"/health\", health)\n    .mount(\"/api\", Orders{db: open_db()})\n    .routes(from: \"Routes\")   // Routes/orders/[ID].jet\n// two rows, one verb and address: E2804 names both"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Two tables, joined by a prefix",
+            "gist": "The app forwards everything under a prefix to a router, which keeps its own table.",
+            "gains": [
+              "Router code stays as it is."
+            ],
+            "losses": [
+              "Clashes across tables still pass.",
+              "Two listings and two builders."
+            ],
+            "proposed": {
+              "code": "// B: two tables, joined by a prefix\nmux := server.mux()\n&mux.mount(Orders{db: open_db()})\nweb.app().routes(from: \"Routes\").mount(\"/api\", mux)\n// clashes are checked inside each table only"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Two builders, one clash check",
+            "gist": "Keep both builders. Serving them together checks clashes across both at startup.",
+            "gains": [
+              "Clashes across tables are caught."
+            ],
+            "losses": [
+              "Caught at startup, not at check.",
+              "Two builders and two listings stay."
+            ],
+            "proposed": {
+              "code": "// C: two builders, one clash check at startup\nmux := server.mux()\n&mux.get(\"/orders/:id\", order_api)\nweb.app().route(\"/orders/:id\", order_page).serve(mux)\n// E2804 at startup names both lines"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Marked methods and single routes already share one table. Adding pages finishes the job: one builder, one table, every clash caught at check.",
+          "gains": [
+            "Every clash fails at check, naming both lines.",
+            "One command lists every route.",
+            "Removes a second builder."
+          ],
+          "losses": [
+            {
+              "loss": "Every router caller moves to the app.",
+              "mitigation": "The row rules are unchanged; only `mux.` becomes `app.`."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Clashes between tables still pass silently."
+            },
+            {
+              "key": "C",
+              "reason": "Clashes surface only at startup, and two builders remain."
+            }
+          ],
+          "tradeoff": "One rename for router users, for one table that catches every clash."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-29T01:56:05.983Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-29",
+      "retiredAt": "2026-11-17T08:17:44.162Z"
     }
   ]
 }
