@@ -685,10 +685,12 @@ symbol_key_rows_intern: fn(rows: &SymbolKeyRows, key: String) -> Int Never! {
     row
 }
 
-// The core builtin owner types (`Task`, `Receiver`, `Sender`): declared by
-// no module, like the owned traits. A subset view of the built-in type
-// catalog (JET_TYPE_NAMES), which SYMBOL_BUILTIN_TYPES_CHECKED holds it to.
-SYMBOL_BUILTIN_TYPES: [String]{"Task", "Receiver", "Sender"}
+// The core builtin types no module declares, like the owned traits: the task
+// and channel handles (`Task`, `Receiver`, `Sender`) and the Event family's
+// handles. A bare spelling of one is that type, whatever loaded module
+// declares a type of its name. A subset view of the built-in type catalog
+// (JET_TYPE_NAMES), which SYMBOL_BUILTIN_TYPES_CHECKED holds it to.
+SYMBOL_BUILTIN_TYPES: [String]{"Task", "Receiver", "Sender", "Event", "Hook", "DecisionHook", "AsyncEvent", "DispatchReport", "EventScope", "Subscription", "EventTrace"}
 
 SYMBOL_BUILTIN_TYPES_CHECKED: #run symbol_builtin_types_checked(SYMBOL_BUILTIN_TYPES, JET_TYPE_NAMES)
 
