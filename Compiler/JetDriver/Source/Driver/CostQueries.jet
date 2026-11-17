@@ -396,7 +396,7 @@ jet_driver_cost_assign_fact: fn(tree: BodyTree, place: BodyPlace, op: TBinaryOp?
     target := TIntegerBounds?{None}
     if place == .Expr(expression) {
         if body_node(tree, expression).kind == .Index(_, _, kind, _, _, _) {
-            if kind == TIndexKind.Map {
+            if kind == TIndexKind.Map || kind == TIndexKind.MapOr {
                 return Val(TCostFact{kind: TCostKind.CollectionCopyOnWrite, state: TCostState.SemanticRemainder})
             }
         }

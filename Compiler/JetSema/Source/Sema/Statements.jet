@@ -85,6 +85,7 @@ use jet_foundation.[
     ast_visit_expr,
     ast_empty_lambda_meta,
     diagnostic_registry_row,
+    expr_is_map_slot_or,
     expr_node_id,
     expr_source_span,
     expr_source_start,
@@ -4086,7 +4087,7 @@ sema_stmt_binds_map_slot: fn(statement: TStmt) -> Bool Never! {
     if statement == .Let(_, _, init, _, _, _) {
         if init.kind == .Borrow(place, access) {
             if access == AccessConvention.Write && place.kind == .Index(_, _, kind, _, _, _) {
-                return kind == .Map
+                return kind == .Map || kind == .MapOr
             }
         }
     }
@@ -8401,10 +8402,13 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
         return sema_stmt_check_shared_place_assignment(place.handle, place.target, op, op_span, expr, place.span, place.name, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     if target == {
-        .Index(_, _, span, _) -> {
-            if op != None {
+        .Index(_, slot, span, _) -> {
+            // `map[key, or: start] op= value` names a slot that exists, so only
+            // an index without a starting value is refused.
+            started: if slot == .Call(call, _) -> expr_is_map_slot_or(call) else -> false
+            if op != None && !started {
                 operator: op
-                diagnostics.push(sema_error("E0164", span, "compound assignment can't target an indexed slot.", "a compound update reads an indexed slot before it writes; that read can panic when a map key is missing.", "write a total update, such as `map[key] = (map.get(key) ?? 0) {sema_expr_binary_name(operator)} 1`"))
+                diagnostics.push(sema_error("E0164", span, "compound assignment can't target an indexed slot.", "a compound update reads an indexed slot before it writes; that read can panic when a map key is missing.", "give the slot a starting value, such as `map[key, or: 0] {sema_expr_binary_name(operator)}= 1`"))
                 return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment exit 1")
             }
         }

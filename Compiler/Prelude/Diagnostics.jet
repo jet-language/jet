@@ -3095,7 +3095,7 @@ CompoundAssignToIndex: struct {
         safety_reason: "A missing key would stop with a defined panic, not a fault, and Jet asks for an explicit read and write.",
         meaning: "Compound assignment can't target an indexed slot",
         detail: true,
-        fix_next: "Use a supported integer update, such as `map[key] = (map.get(key) ?? 0) + 1`.",
+        fix_next: "Give the map slot a starting value, such as `map[key, or: 0] += 1`.",
 
         what: fn(self) -> String { "Compound assignment can't target an indexed slot." }
 
@@ -3104,7 +3104,7 @@ CompoundAssignToIndex: struct {
         }
 
         fix: fn(self) -> String {
-            "Write a total update, such as `map[key] = (map.get(key) ?? 0) {self.op} 1`"
+            "Give the slot a starting value, such as `map[key, or: 0] {self.op}= 1`"
         }
     }
 }

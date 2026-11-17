@@ -822,6 +822,20 @@ beside a loop is E0445: build the two apart and join them, as in
 `[0].concat(loop x in xs -> x)`. The other collection types build from the
 loop's list through their constructors, such as `Tally.from(loop …)`.
 
+A map index with a starting value, `m[k, or: start]`, is a writable slot that
+looks `k` up once, on every tier from the same lowering. As a value it reads
+the stored value, or `start` when `k` is missing, and adds no entry, so it
+reads an immutable map too. As a place it first adds `start` under a missing
+`k`, then updates the stored value. The counter idiom is
+`counts[w, or: 0] += 1`, and `&groups[w, or: [String]{}].push(w)` groups
+values under their key. `slot: &m[k, or: start]` binds the entry the same way.
+`start` has the map's value type and runs only when `k` is missing, at most
+once per slot use. A plain `m[k, or: start] = v` sets `k` as `m[k] = v` does,
+and `start` does not run. A starting value on anything but a map is E0505, and
+a compound assignment on a plain map index, `m[k] += 1`, stays E0164, whose
+fix is this slot. It is the one upsert spelling; Map has no other method that
+inserts a default.
+
 The naming law in [`stdlib-api-laws.md`](../stdlib-api-laws.md) owns verb
 choices; this table records the shipped surface without adding aliases:
 
@@ -1092,7 +1106,6 @@ runs each of these cases.
 | `[K:V]` | `add(key, value)` | exclusive, in place | Mutate | None | current |
 | `[K:V]` | `try_insert(key, value)` | exclusive, in place | TryMutate | Ok(None) | current |
 | `[K:V]` | `add_new(key, value)` | exclusive, in place | Mutate | true | current |
-| `[K:V]` | `setdefault(key, value)` | exclusive, in place | Mutate | the default | current |
 | `[K:V]` | `remove(key)` | exclusive, in place | Mutate | None | current |
 | `[K:V]` | `pop(key)` | exclusive, in place | Mutate | None | current |
 | `[K:V]` | `get(key)` | borrows | Lookup | None | current |

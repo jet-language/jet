@@ -33,6 +33,7 @@ use {
         access_sigil,
         dimension_display_name,
         expr_source_start,
+        expr_is_map_slot_or,
         expr_span,
         foundation_byte_text,
         measure_expression,
@@ -1556,7 +1557,14 @@ jfmt_fmt_expr: fn(f: &JetFmt, expr: Expr, prec: Int) {
         .Ident(name, _, _) -> {
             jfmt_write(f, if pipe_value_is_name(name) || f.pipe_names.contains(name) -> "<>" else -> name)
         }
-        .Call(call, _) -> { jfmt_fmt_call(f, call) }
+        .Call(call, _) -> {
+            // The index of `m[key, or: start]` (expr_map_slot_or).
+            if expr_is_map_slot_or(call) {
+                jfmt_fmt_expr(f, call.args[0].expr, JFMT_PREC_OR_FALLBACK)
+                jfmt_write(f, ", or: ")
+                jfmt_fmt_expr(f, call.args[1].expr, JFMT_PREC_OR_FALLBACK)
+            } else { jfmt_fmt_call(f, call) }
+        }
         .Unary(op, inner, _, _) -> {
             // Wrap only when the surrounding slot binds tighter.
             if prec > JFMT_PREC_UNARY -> jfmt_write(f, "(")

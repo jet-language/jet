@@ -43,6 +43,7 @@ use {
         diagnostic_from_registry,
         diagnostic_with_edit,
         diagnostic_with_edit_grade,
+        expr_map_slot_or,
         expr_span,
         fact_read_kind,
         marker_registered,
@@ -2079,6 +2080,20 @@ parser_parse_postfix: fn(state: &JetParserState, initial: &&ParsedExpr, depth: I
                 next
             }
             index: parser_parse_expression(state, 1, depth + 1)
+            // `m[key, or: start]`: the map slot that starts at `start` when the
+            // key is missing, kept as an internal call of the key and the start.
+            if parser_current_kind(state) == TOKEN_COMMA && parser_kind_at(state, 1) == TOKEN_IDENT && parser_kind_at(state, 2) == TOKEN_COLON && parser_value(state, parser_lookahead(state, 1)) == "or" {
+                parser_bump(state)
+                label: parser_bump(state)
+                parser_bump(state)
+                start: parser_parse_expression(state, 1, depth + 1)
+                slot_close: parser_expect(state, TOKEN_RBRACKET, "`]` after the starting value")
+                slot_span: parser_cover(open.span, slot_close.span)
+                slot_whole: parser_cover(expression.span, slot_close.span)
+                slot: expr_map_slot_or(index.expr, start.expr, label.span, parser_node_id(state))
+                expression = ParsedExpr{expr: Expr.Index{base: expression.expr.move(), index: slot, span: slot_span, kind: IndexKind.Unknown, id: parser_node_id(state)}, span: slot_whole}
+                next
+            }
             close: parser_expect(state, TOKEN_RBRACKET, "`]` after the index")
             span := parser_cover(expression.span, close.span)
             // An index or slice is spanned at its brackets, as in the

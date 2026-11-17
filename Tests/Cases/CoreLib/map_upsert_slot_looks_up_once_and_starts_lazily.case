@@ -1,0 +1,23 @@
+# `m[k, or: start]` is a writable map slot. `counts[w, or: 0] += 1` counts
+# words and `&groups[n, or: fresh(n)].push(w)` groups them, each with one
+# lookup; `fresh` runs once per missing key, never for a present one. A
+# string slot appends to its start. A present key's compound assignment and
+# a plain set never run the start. As a value the slot reads the stored
+# value or the start and adds no entry, on an immutable map too. The same
+# lines on O0, O1 and O2.
+fixture: Fixtures/MapUpsertSlotLooksUpOnceAndStartsLazily
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run -O0 main.jet
+exit: 0
+stdout: = map_upsert_slot_looks_up_once_and_starts_lazily.out
+stderr: empty
+step: jet run -O1 main.jet
+exit: 0
+stdout: = map_upsert_slot_looks_up_once_and_starts_lazily.out
+stderr: empty
+step: jet run -O2 main.jet
+exit: 0
+stdout: = map_upsert_slot_looks_up_once_and_starts_lazily.out
+stderr: empty

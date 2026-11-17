@@ -1,0 +1,33 @@
+// The map slot `m[k, or: start]`: one lookup, and `start` runs only for a
+// missing key.
+fresh: fn(size: Int) -> [String] {
+    print("fresh group {size}")
+    [String]{}
+}
+
+noisy: fn() -> Int {
+    print("noisy start ran")
+    0
+}
+
+run: fn() {
+    counts := [String:Int]{}
+    groups := [Int:[String]]{}
+    loop w in "a bb a ccc bb a".split(" ") {
+        counts[w, or: 0] += 1
+        &groups[w.len(), or: fresh(w.len())].push(w)
+    }
+    print("a {counts["a"]} bb {counts["bb"]} ccc {counts["ccc"]} entries {counts.len()}")
+    print("1: {groups[1].join(",")} 2: {groups[2].join(",")} 3: {groups[3].join(",")}")
+    tags := [String:String]{}
+    tags["x", or: "<"] += "x"
+    tags["x", or: "<"] += "y"
+    print("tags {tags["x"]}")
+    // A present key never runs its start; a plain set never does either.
+    counts["a", or: noisy()] += 10
+    counts["d", or: noisy()] = 9
+    print("a {counts["a"]} d {counts["d"]}")
+    // As a value the slot adds no entry, so an immutable map reads it too.
+    frozen: [String:Int]{"k": 1}
+    print("read {frozen["k", or: 5]} {frozen["z", or: 5]} entries {frozen.len()}")
+}
