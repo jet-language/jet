@@ -157,7 +157,7 @@ test('every registered verb answers --json with one JSON document, or one error 
       cpSync(base.root, root, { recursive: true });
       const args = ARGS({ root, ids: base.ids })[path];
       const argv = [...EVAL, '--data', join(root, '.tower'), ...path.split(' '), ...args, '--json', ...(flags.includes('by') ? ['--by', 'tester'] : [])];
-      const child = run(process.execPath, argv, { encoding: 'utf8', env: ENV, cwd: root, timeout: 60_000 });
+      const child = run(process.execPath, argv, { encoding: 'utf8', env: ENV, cwd: root, timeout: 60_000, maxBuffer: 256 * 1024 * 1024 });
       child.child.stdin.end();
       const result = await child.then(r => ({ ...r, code: 0 }), e => ({ stdout: e.stdout, stderr: e.stderr, code: e.code }));
       results.push({ path, ...result });
@@ -173,7 +173,8 @@ test('every registered verb answers --json with one JSON document, or one error 
       assert.equal(typeof code, 'number', `${path}: exits with a status, not a signal`);
       assert.match(doc?.error?.code ?? '', /^E_[A-Z_]+$/, `${path}: error.code — got ${stdout.slice(0, 200)}`);
       assert.ok(typeof doc.error.message === 'string' && doc.error.message.length, `${path}: error.message`);
-      // gauntlet standings loads Tools/Gauntlet, which a Tower-only checkout lacks.
+      // gauntlet standings loads Tools/Gauntlet/Entries, which a Tower-only checkout lacks;
+      // in the Jet checkout its answer is the whole planned grid, so the buffer is large.
       if (path !== 'gauntlet standings') assert.notEqual(doc.error.code, 'E_INTERNAL', `${path}: refused, not crashed — ${doc.error.message}`);
     }
   }
