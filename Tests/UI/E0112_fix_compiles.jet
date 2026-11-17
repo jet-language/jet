@@ -1,0 +1,12 @@
+// E0112's Fix for a program's own type with no Debug form offers the `Debug`
+// implementation and never `{job}`, which has no `Display` either; the
+// `.fixed.jet` companion implements `Debug` as offered, and it checks clean
+// and runs.
+Job: struct {
+    step: fn(Int) -> Int,
+}
+
+run: fn() {
+    job: Job{step: fn(n: Int) -> Int { n + 1 }}
+    print("debug {job:Debug}")
+}

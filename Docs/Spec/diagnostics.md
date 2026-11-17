@@ -257,9 +257,7 @@ remains explicit.
 
 E3301 covers the modules no machine without an OS can serve (`core.files`,
 the network and HTTP modules, `core.tasks`, `core.process`, `core.log`,
-`core.watcher`, `core.crypto.vault`) and `#Live`, in every body checked for
-the machine: Core's and a package's as well as the program's, with no
-exemption by name. A Core operation a machine's
+`core.watcher`, `core.crypto.vault`) and `#Live`. A Core operation a machine's
 declared services can back, such as `core.time`'s clocks or `core.term`'s
 reads and writes, is checked against the selected machine instead: each
 service the operation needs that the machine's profile lacks is E3311 at the

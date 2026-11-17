@@ -1643,12 +1643,18 @@ sema_expression_interpolation_display: fn(value: TExpr, environment: SemaScopeEn
     }
     // sema_type_show quotes a nominal name itself; the impl head is bare code.
     // The Fix offers only spellings that compile for this value: an `impl`
-    // where the orphan rule (E0902) admits one, and `:Debug` where the value
-    // has a Debug form (else that hole is E0112).
+    // where the orphan rule (E0902) admits one, nested in the type's body
+    // when this module declares it as a struct or enum (impl placement,
+    // L0535), and `:Debug` where the value has a Debug form (else that hole
+    // is E0112).
     written: sema_expression_interpolation_text(value.span, environment, program)
     fixes := [String]{}
     if sema_expression_impl_allowed(ty, environment, program, scopes) {
-        fixes.push("add `impl {type_name(ty)}.Display {{ display: fn(self) -> String {{ … }} }}`")
+        if sema_expression_impl_in_body(ty, environment, program) {
+            fixes.push("add `impl Display {{ display: fn(self) -> String {{ … }} }}` to the body of `{type_name(ty)}`")
+        } else {
+            fixes.push("add `impl {type_name(ty)}.Display {{ display: fn(self) -> String {{ … }} }}`")
+        }
     }
     if sema_call_debug_traceable(ty, environment, program) {
         fixes.push("use `{{{written}:Debug}}` for debug output")
@@ -1665,6 +1671,17 @@ sema_expression_impl_allowed: fn(ty: Type, environment: SemaScopeEnvironment, pr
     name: sema_type_graph_base_name(ty) ?? return false
     owner: sema_expression_type_symbol(scopes, environment, program, name) ?? return false
     !sema_module_is_core_source(sema_scope_module_text(environment, program, owner.module_identity))
+}
+
+// Whether `ty` is a struct or enum the environment's own module declares,
+// whose body then holds its impls (L0535).
+sema_expression_impl_in_body: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    graph: program.registration_graph ?? return false
+    caller: sema_scope_caller_index(environment, graph) ?? return false
+    row: sema_type_resolve_nominal_row_at(graph, ty, caller) ?? return false
+    if row.module_index != caller -> return false
+    kind: graph.modules[row.module_index].nominals[row.row].kind
+    kind == .Struct || kind == .Enum
 }
 
 // The source text of the interpolated expression at `span`, or `value` when

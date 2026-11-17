@@ -12,6 +12,7 @@ use {
         authority_package_effect,
         authority_parse_right,
         BUILTIN_METHOD_ROWS,
+        BUILTIN_STATIC_ROWS,
         CORE_BUILTINS_MODULE,
         CORE_CALLS,
         CORE_MODULE_EXPORTS,
@@ -4092,11 +4093,14 @@ JetDriverCoreIdentifierDemand: struct {
     // core.encoding too. A `FieldError` value or type alone is
     // compiler-owned and loads nothing.
     codec_decode: Bool{false},
-    // A `.send(…)` receiver call: `Sender.send` fails with core.prelude's
-    // `SendError<T>`, a type the source need not spell, so core.prelude
-    // loads. Syntactic, as for `.abs`: Sema alone decides whether the
-    // receiver is a Sender.
-    channel_send: Bool{false},
+    // A call whose failure is a core.prelude error the source need not
+    // spell (`send`, then JET_DRIVER_PRELUDE_FAILURE_METHODS and
+    // JET_DRIVER_PRELUDE_FAILURE_STATICS), so core.prelude loads:
+    // `Sender.send` fails with `SendError<T>`, and `Int.parse`,
+    // `Float.parse`, `Int.from_radix`, `String.to_int` and `String.to_float`
+    // with `ParseError`. Syntactic, as for `.abs`: Sema alone decides
+    // whether the receiver is a Sender or a number's text.
+    prelude_failure: Bool{false},
     // Rust sema checks a qualified `core.<module>.<member>` call through a root
     // `use core: core` alias by its fixed typed row and lowers it to the
     // member's Core ABI host function (hmac_sha256). Natively that member's
@@ -4110,6 +4114,40 @@ JetDriverCoreIdentifierDemand: struct {
     // `__input_csv` (core_input_method_modules), so the encoding module the
     // method names loads when it is one.
     input_methods: [String]{[String]{}},
+}
+
+// The builtin methods and statics whose failure is a core.prelude error
+// (JetDriverCoreIdentifierDemand.prelude_failure), by their
+// BUILTIN_METHOD_ROWS and BUILTIN_STATIC_ROWS indexes: each row whose failure
+// type is a bare core.prelude spelling, as `parse`, `from_radix`, `to_int`
+// and `to_float` fail with `ParseError`. `send`, which fails with
+// `SendError<T>`, is no builtin row, so the demand names it beside them.
+JET_DRIVER_PRELUDE_FAILURE_METHODS: #run jet_driver_prelude_failure_methods()
+
+JET_DRIVER_PRELUDE_FAILURE_STATICS: #run jet_driver_prelude_failure_statics()
+
+jet_driver_prelude_failure_methods: fn() -> [Int] Never! {
+    rows := [Int]{}
+    loop (at, row) in BUILTIN_METHOD_ROWS {
+        if row.result == .Result(_, .Named(err)) && jet_driver_prelude_failure_type(err) {
+            rows.push(at)
+        }
+    }
+    rows
+}
+
+jet_driver_prelude_failure_statics: fn() -> [Int] Never! {
+    rows := [Int]{}
+    loop (at, row) in BUILTIN_STATIC_ROWS {
+        if row.return_type == .Result(_, .Named(err)) && jet_driver_prelude_failure_type(err) {
+            rows.push(at)
+        }
+    }
+    rows
+}
+
+jet_driver_prelude_failure_type: fn(name: String) -> Bool Never! {
+    (core_bare_source_module(name) ?? "") == "core.prelude"
 }
 
 // `lines` (newlines) and `tokens` are the unit's parse work, which a traced
@@ -4212,7 +4250,9 @@ JetDriverCoreDemandNames: struct {
     migration_name: Int,
     field_error_name: Int,
     input_name: Int,
-    send_name: Int,
+    // The ids of `send` and each JET_DRIVER_PRELUDE_FAILURE_METHODS and
+    // JET_DRIVER_PRELUDE_FAILURE_STATICS name.
+    prelude_failure_names: [Int],
     field_error_under_name: Int,
     bare: [Int],
     bare_alias: [[Int]],
@@ -4280,7 +4320,14 @@ jet_driver_core_demand_names: fn(tables: TokenTables) -> JetDriverCoreDemandName
     loop field in SEMA_CONTEXT_CORE_FIELDS {
         context_fields.push(jet_driver_core_demand_name(tables, field))
     }
-    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), matrix_name: jet_driver_core_demand_name(tables, "Matrix"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), send_name: jet_driver_core_demand_name(tables, "send"), bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads, context_name: jet_driver_core_demand_name(tables, "context"), context_marker_name: jet_driver_core_demand_name(tables, "Context"), context_fields: context_fields}
+    prelude_failure_names := [Int]{jet_driver_core_demand_name(tables, "send")}
+    loop at in JET_DRIVER_PRELUDE_FAILURE_METHODS {
+        prelude_failure_names.push(jet_driver_core_demand_name(tables, BUILTIN_METHOD_ROWS[at].name))
+    }
+    loop at in JET_DRIVER_PRELUDE_FAILURE_STATICS {
+        prelude_failure_names.push(jet_driver_core_demand_name(tables, BUILTIN_STATIC_ROWS[at].method))
+    }
+    JetDriverCoreDemandNames{task_name: jet_driver_core_demand_name(tables, "task"), timeout_name: jet_driver_core_demand_name(tables, "timeout"), or_err_name: jet_driver_core_demand_name(tables, "or_err"), abs_name: jet_driver_core_demand_name(tables, "abs"), pow_name: jet_driver_core_demand_name(tables, "pow"), regex_name: jet_driver_core_demand_name(tables, "Regex"), matrix_name: jet_driver_core_demand_name(tables, "Matrix"), source_method_names: source_method_names, source_method_modules: source_method_modules, test_suite_name: jet_driver_core_demand_name(tables, "suite"), expect_name: jet_driver_core_demand_name(tables, "expect"), event_time_name: jet_driver_core_demand_name(tables, "with_event_time"), unit_family_name: jet_driver_core_demand_name(tables, "UnitFamily"), decode_name: jet_driver_core_demand_name(tables, "decode"), migration_name: jet_driver_core_demand_name(tables, "migration"), field_error_name: jet_driver_core_demand_name(tables, "FieldError"), field_error_under_name: jet_driver_core_demand_name(tables, "under"), input_name: jet_driver_core_demand_name(tables, "input"), prelude_failure_names: prelude_failure_names, bare: bare, bare_alias: bare_alias, bare_rows: bare_rows, core_segments: core_segments, typed_heads: typed_heads, context_name: jet_driver_core_demand_name(tables, "context"), context_marker_name: jet_driver_core_demand_name(tables, "Context"), context_fields: context_fields}
 }
 
 // The words besides its name that demand a bare Core type's module: `url`
@@ -4424,8 +4471,8 @@ jet_driver_collect_core_identifier_demand_ids: fn(tokens: [Token], tables: Token
             if name == names.event_time_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN {
                 demand.stream_event_time = true
             }
-            if name == names.send_name && index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN {
-                demand.channel_send = true
+            if index > from && tokens[index - 1].kind == TOKEN_DOT && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN && names.prelude_failure_names.contains(name) {
+                demand.prelude_failure = true
             }
             if name == names.timeout_name && index > from + 1 && tokens[index - 1].kind == TOKEN_DOT && tokens[index - 2].kind == TOKEN_IDENT && name_index(tokens[index - 2].decoded) == names.task_name && index + 1 < to && tokens[index + 1].kind == TOKEN_LPAREN && !demand.source_modules.contains("core.time") {
                 demand.source_modules.push("core.time")
@@ -4555,7 +4602,7 @@ jet_driver_collect_core_identifier_demand_threads: fn(input: &&Lexed, runs: [Int
         if output.test_suite -> demand.test_suite = true
         if output.stream_event_time -> demand.stream_event_time = true
         if output.codec_decode -> demand.codec_decode = true
-        if output.channel_send -> demand.channel_send = true
+        if output.prelude_failure -> demand.prelude_failure = true
         if output.unit_family -> demand.unit_family = true
         loop receiver in output.conversion_receivers {
             if !demand.conversion_receivers.contains(receiver) {
@@ -6351,11 +6398,12 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
                 }
             }
         }
-        // `tx.send(v)` fails with core.prelude's `SendError<T>`, laid out
-        // from its declaration, even when the caller names neither.
-        if demand.channel_send && !defers {
-            send_error_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.prelude", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
-            if send_error_index == .Val(index) {
+        // `tx.send(v)` fails with core.prelude's `SendError<T>`, and
+        // `Int.parse(text)` with its `ParseError`, each laid out from its
+        // declaration, even when the caller names neither.
+        if demand.prelude_failure && !defers {
+            prelude_failure_index: jet_driver_core_unit(source_units, queued, pending, generated_records, request.core_sources, "core.prelude", importer_core, entry_module, entry_index ?? 0, Span{start: 0, end: 0}, diagnostics)
+            if prelude_failure_index == .Val(index) {
                 if !queued[index] {
                     queued[index] = true
                     pending.push(index)

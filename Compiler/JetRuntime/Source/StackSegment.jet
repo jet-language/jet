@@ -63,6 +63,14 @@ STACK_SEGMENT_FIRST: I64{1048576}
 
 STACK_SEGMENT_MOST: I64{268435456}
 
+// A segment of at least this many bytes takes huge pages (MADV_HUGEPAGE).
+// Only a recursion already megabytes deep maps one, and it then faults in
+// 2 MiB at a time instead of 4 KiB, 512 times fewer faults, so a recursion
+// that runs to the budget reaches its overflow report quickly. A thread's
+// own stack and the first segments keep 4 KiB pages (Thread.jet
+// thread_stack_map), so a shallow stack costs no 2 MiB page.
+STACK_SEGMENT_HUGE: I64{4194304}
+
 // The least total stack budget: 1 GiB.
 STACK_BUDGET_LEAST: I64{1073741824}
 
@@ -199,6 +207,11 @@ stack_segment_take: fn(tcb: I64, need: I64) -> I64 {
     }
     if (mapping < I64{0}) { return I64{0} }
     total: wrapping(bytes + THREAD_GUARD_BYTES)
+    if (bytes >= STACK_SEGMENT_HUGE) {
+        #Unsafe("the fresh segment is this thread's own mapping and madvise only changes its page size; a refused advice keeps 4 KiB pages") {
+            _ := os_syscall_i64(I64{28}, mapping, total, I64{14}, I64{0}, I64{0}, I64{0})
+        }
+    }
     sync_store(wrapping(tcb + STACK_TCB_ROOM), wrapping(sync_load(wrapping(tcb + STACK_TCB_ROOM)) - total))
     record: wrapping(wrapping(mapping + total) - STACK_SEGMENT_RECORD)
     sync_store(wrapping(record + I64{16}), mapping)

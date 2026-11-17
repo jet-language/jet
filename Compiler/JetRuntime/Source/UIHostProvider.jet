@@ -1,9 +1,9 @@
 // The UI host provider seam (core.ui.host): primitives only. Core owns every
-// rule, queue, registry and UIHostError; a provider answers six questions:
+// rule, queue, registry and UIHostError; a provider answers seven questions:
 // is a capability present, the clipboard's text (get and set), the next raw
 // event of a queue, a dialog's request and result, whether it claimed a key
-// for the shortcut queue, and whether it handed a file's bytes to the person
-// to save (app.save_file).
+// for the shortcut queue, whether it handed a file's bytes to the person
+// to save (app.save_file), and a device request of the app's (app.ask).
 //
 // The leaves below are C functions. This native runtime defines them headless:
 // no capability is present and every service declines. A web build's host
@@ -11,9 +11,12 @@
 // call and forwards each to the page's browser provider; the optimizer never
 // inlines one (JetIR IR.jet IR_HOST_PROVIDER).
 //
-// A text answer is two calls: the leaf stages the text and returns its UTF-8
+// A text or byte answer is two calls: the leaf stages it and returns its
 // byte length (negative for none), then `jet_ui_provider_take` copies the
-// staged bytes into a buffer of that length and clears the stage.
+// staged bytes into a buffer of that length and clears the stage. A leaf
+// whose provider answers later returns -2 instead: `jet_ui_provider_settle`
+// waits for that answer and stages it, where the program's entry can wait
+// (Sync.jet jet_rt_host_can_wait); elsewhere there is none.
 
 // The headless provider: 0 is absent, -1 declines, and nothing is staged.
 #Export(c) jet_ui_provider_capability: fn(capability: I64) -> I64 { I64{0} }
@@ -30,6 +33,14 @@
 
 #Export(c) jet_ui_provider_key_claim: fn(bytes: I64, length: I64) -> I64 { I64{-1} }
 
+// The request record of kind `kind`, as its pointer and length: 0 asks for
+// the permission it names (app.ask), 1 for where the device is
+// (app.location), 2 for a photo (app.take_photo), and 3 for a part of a file
+// the provider holds for the app (PickedFile), whose bytes are the answer.
+#Export(c) jet_ui_provider_device: fn(kind: I64, bytes: I64, length: I64) -> I64 { I64{-1} }
+
+#Export(c) jet_ui_provider_settle: fn() -> I64 { I64{-1} }
+
 // The file's name, media type and bytes, each as its pointer and length.
 #Export(c) jet_ui_provider_save_file: fn(name: I64, name_length: I64, media: I64, media_length: I64, bytes: I64, length: I64) -> I64 {
     I64{-1}
@@ -37,9 +48,10 @@
 
 #Export(c) jet_ui_provider_take: fn(buffer: I64) {}
 
-// The staged text of `length` bytes as an owned string, into `some`; 0 when
-// the leaf staged none.
-ui_host_take_into: fn(length: I64, some: I64) -> I64 {
+// The staged text of the leaf's answer as an owned string, into `some`; 0
+// when the leaf staged none.
+ui_host_take_into: fn(answer: I64, some: I64) -> I64 {
+    length: ui_host_answer_length(answer)
     if (length < I64{0}) { return I64{0} }
     buffer: jet_rt_alloc(if (length == I64{0}) -> I64{1} else -> length, I64{1})
     jet_ui_provider_take(buffer)
@@ -48,6 +60,29 @@ ui_host_take_into: fn(length: I64, some: I64) -> I64 {
     if (jet_rt_session_propagate() != I64{0}) { return I64{0} }
     trap_store(some, text)
     I64{1}
+}
+
+// The staged bytes of the leaf's answer as a fresh [U8] in
+// data_out/length_out, presence 1; 0 when the leaf staged none.
+ui_host_take_bytes: fn(answer: I64, data_out: I64, length_out: I64) -> I64 {
+    rt_text_store(data_out, I64{0})
+    rt_text_store(length_out, I64{0})
+    length: ui_host_answer_length(answer)
+    if (length < I64{0}) { return I64{0} }
+    buffer: jet_rt_alloc(if (length == I64{0}) -> I64{1} else -> length, I64{1})
+    jet_ui_provider_take(buffer)
+    rt_text_store(length_out, packed_bytes_out(buffer, length, data_out))
+    jet_rt_free(buffer, if (length == I64{0}) -> I64{1} else -> length, I64{1})
+    I64{1}
+}
+
+// The length of the leaf's staged answer, negative for none. A provider
+// that answers later (-2) has its answer staged once it came: the entry
+// waits for it where it can, and has none where it can't.
+ui_host_answer_length: fn(answer: I64) -> I64 {
+    if (answer != I64{-2}) { return answer }
+    if (jet_rt_host_can_wait() == I64{0}) { return I64{-1} }
+    jet_ui_provider_settle()
 }
 
 // Core routes (core.ui.host.__*): the leaves' answers as Jet values.
@@ -81,4 +116,12 @@ ui_host_take_into: fn(length: I64, some: I64) -> I64 {
 
 #Export(c) jet_ui_host_dialog_result: fn(token: I64, some: I64) -> I64 {
     ui_host_take_into(jet_ui_provider_dialog_result(jet_int_owned_to_i64(token)), some)
+}
+
+#Export(c) jet_ui_host_device: fn(kind: I64, request: I64, some: I64) -> I64 {
+    ui_host_take_into(jet_ui_provider_device(jet_int_owned_to_i64(kind), rt_text_data(request), rt_text_len(request)), some)
+}
+
+#Export(c) jet_ui_host_device_bytes: fn(kind: I64, request: I64, data_out: I64, length_out: I64) -> I64 {
+    ui_host_take_bytes(jet_ui_provider_device(jet_int_owned_to_i64(kind), rt_text_data(request), rt_text_len(request)), data_out, length_out)
 }

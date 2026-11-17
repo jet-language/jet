@@ -213,13 +213,139 @@ function providerRecord(fields) {
 // browser is not seen. A saved file is a download of its bytes under its
 // name, which the browser keeps in its downloads folder or where the person
 // says when it asks. File dialogs and font shaping are absent: a file input
-// answers later than the synchronous seam and gives no filesystem path.
+// answers later than the synchronous seam and gives no filesystem path. A
+// device request is answered the browser's way (deviceRequest).
 const UI_QUEUE = 256;
+
+// How long a location request waits for the person: then it is refused, as
+// on Linux.
+const ASK_WAIT_MS = 300000;
+
+// app.ask's permission `name` (`camera`, `location`, `notifications`) asked
+// of the browser: a promise of `granted`, `denied` or `restricted`. The
+// Permissions API answers first; a permission the browser would still ask
+// for is asked by using the device once (the camera's stream, stopped at
+// once; one position; the notification request). A browser without the
+// device's API, or with no camera to give, is `restricted`. A person who
+// dismisses the request is `denied`, as on Linux.
+async function askPermission(name) {
+  const browser = globalThis.navigator;
+  const query = { camera: "camera", location: "geolocation", notifications: "notifications" }[name];
+  if (query === undefined) return null;
+  try {
+    const state = (await browser?.permissions?.query({ name: query }))?.state;
+    if (state === "granted" || state === "denied") return state;
+  } catch {}
+  if (name === "camera") {
+    if (!browser?.mediaDevices?.getUserMedia) return "restricted";
+    try {
+      const stream = await browser.mediaDevices.getUserMedia({ video: true });
+      for (const track of stream.getTracks()) track.stop();
+      return "granted";
+    } catch (error) {
+      return cameraRefusal(error);
+    }
+  }
+  if (name === "location") return (await findPlace())[0];
+  const notices = globalThis.Notification;
+  if (!notices?.requestPermission) return "restricted";
+  return (await notices.requestPermission()) === "granted" ? "granted" : "denied";
+}
+
+// The grant a refused camera request gives: the person's or the page's
+// refusal is `denied`; no camera, or one another program holds, `restricted`.
+function cameraRefusal(error) {
+  return error?.name === "NotAllowedError" || error?.name === "SecurityError" ? "denied" : "restricted";
+}
+
+// Where the device is, through the Geolocation API: a promise of the grant
+// and, once allowed, the latitude, longitude and accuracy in meters. A
+// position error other than a refusal comes after the person allowed it, so
+// it is `granted` with no place; a request left unanswered for five minutes
+// is `denied`.
+function findPlace() {
+  const geolocation = globalThis.navigator?.geolocation;
+  if (!geolocation?.getCurrentPosition) return Promise.resolve(["restricted"]);
+  return new Promise((resolve) => {
+    const unanswered = setTimeout(() => resolve(["denied"]), ASK_WAIT_MS);
+    unanswered.unref?.();
+    const said = (fields) => {
+      clearTimeout(unanswered);
+      resolve(fields);
+    };
+    geolocation.getCurrentPosition(
+      ({ coords }) => said(["granted", String(coords.latitude), String(coords.longitude), String(coords.accuracy ?? 0)]),
+      (error) => said([error?.code === 1 ? "denied" : "granted"]),
+    );
+  });
+}
+
+// A photo from the camera: a promise of the grant and, once one was taken,
+// the photo as a JPEG Blob. ImageCapture takes it where the browser has it;
+// elsewhere a frame of the camera's video is drawn and encoded. The camera's
+// stream stops once the photo is taken.
+async function takePhoto(doc) {
+  const media = globalThis.navigator?.mediaDevices;
+  if (!media?.getUserMedia) return { grant: "restricted", photo: null };
+  let stream;
+  try {
+    stream = await media.getUserMedia({ video: true });
+  } catch (error) {
+    return { grant: cameraRefusal(error), photo: null };
+  }
+  try {
+    const track = (stream.getVideoTracks?.() ?? stream.getTracks())[0];
+    if (globalThis.ImageCapture) return { grant: "granted", photo: await new globalThis.ImageCapture(track).takePhoto() };
+    if (!doc?.createElement) return { grant: "granted", photo: null };
+    const video = doc.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.srcObject = stream;
+    await video.play();
+    const canvas = doc.createElement("canvas");
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
+    return { grant: "granted", photo: await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg")) };
+  } catch {
+    return { grant: "granted", photo: null };
+  } finally {
+    for (const track of stream.getTracks()) track.stop();
+  }
+}
+
+// The provider's answer to the app's device request `request` of kind
+// `kind` (UIHostProvider.jet jet_ui_provider_device): 0 app.ask's grant, 1
+// the location's record, 2 the photo's record (its grant and, when taken,
+// the number the provider keeps it under and its size), 3 the bytes of the
+// kept file `<number> <offset> <limit>` names. Each answer is a promise.
+function deviceRequest(doc, kept, kind, request) {
+  if (kind === 0) return askPermission(request);
+  if (kind === 1) return findPlace().then(providerRecord);
+  if (kind === 2) {
+    return takePhoto(doc).then(({ grant, photo }) =>
+      providerRecord(photo?.size > 0 ? [grant, String(kept.push(photo) - 1), String(photo.size)] : [grant]),
+    );
+  }
+  if (kind === 3) {
+    const [number, offset, limit] = request.split(" ").map(Number);
+    const file = kept[number];
+    if (file === undefined) return null;
+    return file
+      .slice(offset, offset + limit)
+      .arrayBuffer()
+      .then((bytes) => new Uint8Array(bytes));
+  }
+  return null;
+}
 
 function defaultUiProvider(doc) {
   const queues = [[], [], []];
   const claims = new Set();
   let clipboard = null;
+  // The files the app was given (a photo), by number; each lives as long as
+  // the page.
+  const kept = [];
   const enqueue = (queue, fields) => {
     const records = queues[queue];
     if (records.length < UI_QUEUE) records.push(providerRecord(fields));
@@ -280,6 +406,7 @@ function defaultUiProvider(doc) {
     eventPop: (queue) => queues[queue]?.shift() ?? null,
     dialogRequest: () => -1,
     dialogResult: () => null,
+    device: (kind, request) => deviceRequest(doc, kept, kind, request),
     keyClaim: (claim) => {
       claims.add(claim);
       return true;
@@ -1087,11 +1214,19 @@ class Host {
     const host = this;
     // The UI provider seam's leaves forward to the page's browser provider,
     // globalThis.jetUiProvider, and only marshal: Core owns every rule and
-    // error. A text answer is staged here until jet_ui_provider_take copies it.
+    // error. A text or byte answer (a Uint8Array) is staged here until
+    // jet_ui_provider_take copies it. An answer the provider gives later, a
+    // promise, waits in `pending` for jet_ui_provider_settle; a refused
+    // promise is no answer.
     const provider = () => globalThis.jetUiProvider;
     let staged = null;
-    const stage = (text) => {
-      staged = text == null ? null : encoder.encode(text);
+    let pending = null;
+    const stage = (answer) => {
+      if (typeof answer?.then === "function") {
+        pending = Promise.resolve(answer).catch(() => null);
+        return -2n;
+      }
+      staged = answer == null ? null : answer instanceof Uint8Array ? answer : encoder.encode(answer);
       return staged === null ? -1n : BigInt(staged.length);
     };
     const textAt = (bytes, length) => decoder.decode(host.u8().slice(Number(bytes), Number(bytes) + Number(length)));
@@ -1102,6 +1237,7 @@ class Host {
       jet_ui_provider_event_pop: (queue) => stage(provider()?.eventPop(Number(queue))),
       jet_ui_provider_dialog_request: (kind, bytes, length) => BigInt(provider()?.dialogRequest(Number(kind), textAt(bytes, length)) ?? -1),
       jet_ui_provider_dialog_result: (token) => stage(provider()?.dialogResult(Number(token))),
+      jet_ui_provider_device: (kind, bytes, length) => stage(provider()?.device?.(Number(kind), textAt(bytes, length))),
       jet_ui_provider_key_claim: (bytes, length) => (provider()?.keyClaim(textAt(bytes, length)) ? 0n : -1n),
       jet_ui_provider_save_file: (name, nameLength, media, mediaLength, bytes, length) =>
         (provider()?.saveFile?.(textAt(name, nameLength), textAt(media, mediaLength), host.u8().slice(Number(bytes), Number(bytes) + Number(length))) ? 0n : -1n),
@@ -1109,6 +1245,20 @@ class Host {
         if (staged !== null) host.u8().set(staged, Number(buffer));
         staged = null;
       },
+      // The provider's later answer, staged once it came; the entry stays
+      // suspended meanwhile, as in wait.
+      jet_ui_provider_settle: JSPI
+        ? new WebAssembly.Suspending(async () => {
+            const answer = pending;
+            pending = null;
+            host.waiting = true;
+            try {
+              return stage(await answer);
+            } finally {
+              host.waiting = false;
+            }
+          })
+        : () => -1n,
       // The calling chain (trace): up to `capacity` bytes of its lines at
       // `buffer`, and their full length.
       jet_rt_host_frames: (buffer, capacity) => {

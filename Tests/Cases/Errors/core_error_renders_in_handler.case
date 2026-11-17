@@ -1,0 +1,17 @@
+# Inside a `??` handler Int.parse's ParseError renders like any declared
+# error: `{err}` shows its message through its Display, `{err:Debug}` its
+# one field, and `err.message` reads the runtime's reason text, on every tier.
+fixture: CoreErrorRendersInHandler.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "display: cannot parse `seven` as an integer\ndebug: ParseError { message: \"cannot parse `seven` as an integer\" }\nmessage: cannot parse `seven` as an integer\nradix: invalid base-2 integer `zz`\n0 -1\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "display: cannot parse `seven` as an integer\ndebug: ParseError { message: \"cannot parse `seven` as an integer\" }\nmessage: cannot parse `seven` as an integer\nradix: invalid base-2 integer `zz`\n0 -1\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "display: cannot parse `seven` as an integer\ndebug: ParseError { message: \"cannot parse `seven` as an integer\" }\nmessage: cannot parse `seven` as an integer\nradix: invalid base-2 integer `zz`\n0 -1\n"

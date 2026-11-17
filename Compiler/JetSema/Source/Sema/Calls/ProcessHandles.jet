@@ -430,8 +430,25 @@ sema_process_spec_method: fn(receiver: Expr, receiver_value: TExpr, method: Stri
         value := sema_tree_node(result, TExprKind.Call{callee: callee, type_args: [Type]{}, args: [TCallArg]{sema_value_method_source_arg(receiver_value)}}, span)
         return SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
     }
-    effect_name: if method == "run" || method == "run_checked" || method == "spawn" -> "Exec" else -> ""
-    sema_process_finish(receiver_value, THandleOp.ProcessSpecMethod{method: method, args_len: args.len()}, values, result, effect_name, "ProcessSpec.{method}", span, expected, environment, program, scopes, context, diagnostics)
+    // Every other builder is the host leaf `jet_builtins.process_spec_<method>`
+    // (`terminal(policy)` is `process_spec_terminal_with_policy`): its Core
+    // call facts name the effects and its row names the runtime export every
+    // tier runs.
+    rejected: SemaMethodSpecialCheck{handled: true, value: None}
+    leaf: if method == "terminal" && args.len() == 1 -> "terminal_with_policy" else -> method
+    record: core_call(CORE_BUILTINS_MODULE, "process_spec_{leaf}") ?? panic("ProcessSpec.{method} has no jet_builtins.process_spec_{leaf} host leaf")
+    fallibility: sema_expression_failure_carrier(result)
+    if !sema_call_core_record_effects_as(record, "ProcessSpec.{method}", span, [Type]{}, result, fallibility, [FunctionDefaultRef]{}, scopes, context, environment, program, diagnostics) {
+        return rejected
+    }
+    call_args := [TExpr]{receiver_value}
+    widen := [Bool]{false}
+    loop argument in values {
+        call_args.push(argument)
+        widen.push(false)
+    }
+    value: sema_call_core_tree(record, call_args, span, [Type]{}, widen, result, fallibility, None, environment, program, diagnostics) ?? return rejected
+    SemaMethodSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, diagnostics)}
 }
 
 sema_process_spec_keep_open: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], result: Type, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {

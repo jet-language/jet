@@ -1,0 +1,15 @@
+// E0915's Fix for a program's own type that has a Debug form offers the
+// `impl` the program may write and `:Debug`; the `.fixed.jet` companion takes
+// both spellings as offered, and it checks clean and runs.
+Job: struct {
+    step: fn(Int) -> Int,
+
+    impl Debug {
+        debug: fn(self) -> String { "Job(step 1 -> {self.step(1)})" }
+    }
+}
+
+run: fn() {
+    job: Job{step: fn(n: Int) -> Int { n + 1 }}
+    print("job {job}")
+}

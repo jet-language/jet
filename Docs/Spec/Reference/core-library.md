@@ -7152,7 +7152,10 @@ including for empty text. This is a separate operation from the module function
 
 `Int.parse(text)`, `Int.from_radix(text, base)`, and `Float.parse(text)` return
 `ParseError!` and should be handled with `?` or `??`; `Int.from_radix` also
-reports a base outside `2..=36` as a parse error. `Cursor.over(text)` is the consuming scanner for
+reports a base outside `2..=36` as a parse error. `ParseError` is a prelude
+struct with one field, `message: String`, the reason (``cannot parse `x` as
+an integer``): a program may name it (`fn(err: ParseError)`), and `{err}`
+shows the message, `{err:Debug}` the field. `Cursor.over(text)` is the consuming scanner for
 structured text: `skip_ws`, `take_pattern`, and `take_until` advance the cursor
 and return an ordinary error value on a miss. The scanner example is
 [`Examples/Text/TextCursor.jet`](../../../Examples/Text/TextCursor.jet).

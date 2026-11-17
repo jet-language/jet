@@ -1,0 +1,18 @@
+# Int.parse's failure type, ParseError, is declared in Core, so a program can
+# name it: a `??` handler passes the failure of Int.parse, Float.parse and
+# String.to_int to functions whose parameter, return and list element types
+# spell `ParseError`, on every tier.
+fixture: ParseErrorNamedInHandler.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step check: jet check main.jet
+exit: 0
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "rejected: cannot parse `x` as an integer\nrejected: cannot parse `1.5.2` as a float\n0 -1 1 true\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "rejected: cannot parse `x` as an integer\nrejected: cannot parse `1.5.2` as a float\n0 -1 1 true\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "rejected: cannot parse `x` as an integer\nrejected: cannot parse `1.5.2` as a float\n0 -1 1 true\n"
