@@ -1,0 +1,26 @@
+# Type arms over a trait value: `.Square(q)` tests the type
+# the trait value holds and binds that value in place; the arm names a type
+# as type position names it, and the table has an `else`. arms.jet: declared
+# types and a builtin implementer (`impl Int.Shape`), an arm with no binding,
+# a statement table and a value table. qualified.jet: another module's type
+# through its module (`.geo.Point(p)`) beside this module's own `Point`.
+# generic.jet: an arm that spells a generic's arguments (`.Box<Int>(b)`)
+# checks.
+fixture: TraitValueTypeArms.fixture
+step arms: jet run arms.jet
+exit: 0
+stdout: = "square 3\na rect\nlabel hello\nshape 12\nint 7\n4\n0\n"
+step arms_o0: jet run -O0 arms.jet
+exit: 0
+stdout: == arms
+step arms_o2: jet run -O2 arms.jet
+exit: 0
+stdout: == arms
+step qualified: jet run qualified.jet
+exit: 0
+stdout: = "geo point 7\nother line\n1\n"
+step qualified_o2: jet run -O2 qualified.jet
+exit: 0
+stdout: == qualified
+step generic: jet check generic.jet
+exit: 0

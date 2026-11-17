@@ -4,7 +4,7 @@
 // unknown key stops at jet_rt_unreachable. A copy is one more owner of the
 // same box, and the last owner drops the payload and frees the box
 // (ir_trait_drop_body).
-use jet_foundation.[Span, SymbolID, BodyCallArg, FnBody, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, module_none, name_rows_set, name_rows_value, sha256_bytes, symbol_table, type_carrier_identity]
+use jet_foundation.[Span, SymbolID, BodyCallArg, BodyPatternBinding, FnBody, NodeKind, TAssociatedTypeValue, TComptimeField, TComptimeValue, TConstantDef, TImplDef, TMethodRef, TTraitConstantValue, TTryConvert, TTypeDef, Type, module_none, name_rows_set, name_rows_value, sha256_bytes, symbol_table, type_carrier_identity]
 
 // The payload key of concrete type `ty`: the key the program gave its
 // identity (IRProgram.trait_keys), or, for a type no implementation is
@@ -582,6 +582,53 @@ ir_trait_unreachable: fn(m: &IRModule, b: &IRBuilder) Never! {
     message: ir_static_text(m, b, "unknown native trait method key")
     _: ir_runtime(m, b, "jet_rt_unreachable", message, -1)
     ir_emit(b.f, IROp.Unreachable, -1, -1, -1, -1, b.line)
+}
+
+// A type arm over the trait value at `subject` (sema_pattern_trait_arm):
+// `identity` names the arm's type as its payload key hashes it, and the arm
+// holds when the box holds that type's key. The type is the implementer of
+// the trait with that identity, so a builtin implementer (`Int`) matches by
+// its carrier identity. A name binds the payload at 8 in place, a read of
+// the box the trait value keeps; a nested pattern tests it there.
+ir_trait_arm_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, identity: String, bindings: [BodyPatternBinding], span: Span) -> Int Never! {
+    written: Type.Named{name: identity}
+    wanted: ir_trait_identity(p, written)
+    held := Type?{None}
+    if ir_untag(m.types[b.f.slot_type[subject]].ty) == .TraitObject(bounds) {
+        if bounds.len() == 1 {
+            loop implementer in ir_trait_implementers(p, bounds[0]) {
+                if ir_trait_identity(p, implementer) == wanted || type_carrier_identity(ir_untag(implementer)) == identity {
+                    held = Val(implementer)
+                }
+            }
+        }
+    }
+    key: ir_load_word(m, b, subject, 0)
+    expected: ir_word_const(m, b, if held == .Val(concrete) -> ir_trait_key(p, concrete) else -> ir_trait_key(p, written))
+    result: ir_bool_op(m, b, IROp.Eq, key, expected)
+    if bindings.len() > 1 {
+        return ir_fail_slot(b, span, "trait arm {identity} with more than one binding")
+    }
+    if bindings.len() == 0 || bindings[0] == .Wildcard -> return result
+    concrete: held ?? return ir_fail_slot(b, span, "trait arm {identity} binds a type no implementation of the trait holds")
+    if ir_unit_type(concrete) -> return result
+    payload_row: ir_value_type(m, p, concrete) ?? return ir_type_fail(b, span, concrete)
+    if bindings[0] == .Bind(name, _) {
+        if name != "_" {
+            slot: ir_new_slot(b, payload_row, IRSlotKind.Local, ir_intern_name(m, name))
+            b.pending.push(IRPending{name: name, slot: slot, subject: subject, offset: 8})
+        }
+        return result
+    }
+    before: ir_own_states(b, b.bindings.len())
+    ir_open_if(b.f, result, b.line)
+    payload: ir_load_at(m, b, subject, 8, payload_row)
+    ir_close_note(m, p, b, payload, subject, IRPartStep{selector: -1, offset: 8})
+    test: ir_binding_test(m, p, b, payload, bindings[0], span)
+    if ir_failed(b) -> return -1
+    ir_emit(b.f, IROp.Copy, result, test, -1, -1, b.line)
+    ir_end_tested(m, b, before)
+    result
 }
 
 #Test("two types whose first payload keys collide each get a key of their own, whatever order they are declared in") {

@@ -1,0 +1,31 @@
+// E0307: a `Shape` value may hold any type that implements `Shape`, so a
+// table of type arms over one needs `else`, even when every type that
+// implements `Shape` today has an arm.
+Shape: trait {
+    area: fn(self) -> Int,
+}
+
+Square: struct {
+    side: Int,
+
+    impl Shape {
+        area: fn(self) -> Int { self.side * self.side }
+    }
+}
+
+Rect: struct {
+    w: Int,
+
+    impl Shape {
+        area: fn(self) -> Int { self.w }
+    }
+}
+
+describe: fn(s: Shape) {
+    if s == {
+        .Square(q) -> { print("square {q.side}") }
+        .Rect(r) -> print("rect {r.w}")
+    }
+}
+
+run: fn() { describe(Square{side: 2}) }

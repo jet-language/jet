@@ -5260,6 +5260,9 @@ ir_pattern_test: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, sha
         .Variant(variant, bindings, leading_dot, variant_span) -> {
             subject_type: b.f.slot_type[subject]
             subject_args: ir_row_args(m, subject_type)
+            if ir_untag(m.types[subject_type].ty) == .TraitObject(_) {
+                return ir_trait_arm_test(m, p, b, subject, variant, bindings, span)
+            }
             row: ir_enum_def(m, p, subject_type) ?? return ir_fail_slot(b, span, "variant pattern on a non-enum subject")
             leaves: ir_group_leaves(p, row, variant)
             if leaves.len() > 0 {

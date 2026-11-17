@@ -1,0 +1,22 @@
+// An arm over a trait value spells a generic type's arguments as type
+// position does: `.Box<Int>(b)` binds `b` as a `Box<Int>`.
+Shape: trait {
+    area: fn(self) -> Int,
+}
+
+Box: struct<T> {
+    value: T,
+
+    impl Shape {
+        area: fn(self) -> Int { 1 }
+    }
+}
+
+size: fn(s: Shape) -> Int {
+    if s == {
+        .Box<Int>(b) -> b.value + 1
+        else -> s.area()
+    }
+}
+
+run: fn() { print(size(Box<Int>{value: 3})) }

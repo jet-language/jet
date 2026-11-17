@@ -1,0 +1,68 @@
+// Type arms over a trait value: an arm names a type that implements the
+// trait (a builtin one too) and binds the value the trait value holds, in
+// place; an arm may name the type without binding it; `else` takes every
+// other type.
+Shape: trait {
+    area: fn(self) -> Int,
+}
+
+Square: struct {
+    side: Int,
+
+    impl Shape {
+        area: fn(self) -> Int { self.side * self.side }
+    }
+}
+
+Rect: struct {
+    w: Int,
+    h: Int,
+
+    impl Shape {
+        area: fn(self) -> Int { self.w * self.h }
+    }
+}
+
+Label: struct {
+    text: String,
+
+    impl Shape {
+        area: fn(self) -> Int { self.text.len() }
+    }
+}
+
+Circle: struct {
+    r: Int,
+
+    impl Shape {
+        area: fn(self) -> Int { 3 * self.r * self.r }
+    }
+}
+
+impl Int.Shape {
+    area: fn(self) -> Int { self }
+}
+
+describe: fn(s: Shape) {
+    if s == {
+        .Square(q) -> { print("square {q.side}") }
+        .Label(l) -> { print("label {l.text}") }
+        .Rect -> { print("a rect") }
+        .Int(n) -> print("int {n}")
+        else -> print("shape {s.area()}")
+    }
+}
+
+side: fn(s: Shape) -> Int {
+    if s == {
+        .Square(q) -> q.side
+        else -> 0
+    }
+}
+
+run: fn() {
+    shapes: [Shape]{Square{side: 3}, Rect{w: 2, h: 5}, Label{text: "hello"}, Circle{r: 2}, 7}
+    loop s in shapes -> describe(s)
+    print(side(Square{side: 4}))
+    print(side(Circle{r: 1}))
+}
