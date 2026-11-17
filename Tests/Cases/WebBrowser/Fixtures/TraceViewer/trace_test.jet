@@ -1,0 +1,29 @@
+// One browser case whose first attempt fails and whose retry passes. Each
+// attempt opens the page, which logs to the console and fetches `/data`, and
+// waits for what it fetched. The first attempt then leaves a marker in the
+// project folder, named after the report, and waits for an element the page
+// never shows.
+use {
+    browser: core.browser
+    files: core.files
+}
+
+#Test("a retried browser test records its trace") {
+    config: browser.config() ?? panic("browser-tests.conf: {err}")
+    server: browser.server_start(config) ?? panic("the app is not serving {config.server_url()}: {err}")
+    url: server.url()
+    marker: "{files.basename(config.report_path())}.attempted"
+    report := browser.report_new(config)
+    notes: browser.run_case(config, "notes", fn(page: BrowserPage) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserError! {
+        page.goto(url)
+        page.get_by_text("milk").wait(browser.timeout(10000))
+        if !files.exists(marker) {
+            files.write(marker, "1") ?? return Err(BrowserError{kind: "transport"})
+            page.get_by_css("#later").wait(browser.timeout(300))
+        }
+    })
+    report = browser.report_add_case(report, notes)
+    server.stop()
+    browser.write_report(report, config.report_path()) ?? panic("the report: {err}")
+    assert_eq(report.failures(), [String]{})
+}

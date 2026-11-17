@@ -1,0 +1,68 @@
+# A browser test whose first attempt fails and whose retry passes records the
+# retry (trace on retry is on by default). The json report keeps the retry's
+# bounded trace, as hashed facts only, and its commands as a timeline. It also
+# keeps the page's console and network events and the DOM and a screenshot of
+# the page, as hash and size, all at the test's source position. The failed
+# first attempt records nothing. The run writes report.html beside the
+# report, so the trace opens in the local viewer. Page payloads stay out: no
+# file holds the DOM or the screenshot. A second run with
+# JET_TEST_TRACE_PAYLOADS=1 writes both under the artifact folder and
+# attaches them.
+env: NO_COLOR=1
+copy: {root}/Tests/Cases/WebBrowser/Fixtures/TraceViewer {work}/trace
+when probe chromium --version
+when probe chromedriver --version
+spawn app: jet run {work}/trace/run.jet
+env: JET_APP_PORT={free-port:app}
+stdout: null
+poll ready: jet run {root}/Tests/Cases/WebBrowser/Fixtures/http-ready.jet 127.0.0.1:{free-port:app} / - write until stdout: ^= "HTTP/1.1 200" timeout 60s every 50ms # the app serves its root page
+step: jetpack browser lock chromium --binary {tool:chromium} --driver {tool:chromedriver}
+cwd: {work}/trace
+env: JET_PROJECT_ROOT={work}/trace
+exit: 0
+step: jet test
+cwd: {work}/trace
+env: JET_PROJECT_ROOT={work}/trace
+env: JET_TEST_WEB_SERVER_URL=http://127.0.0.1:{free-port:app}/
+exit: 0
+stdout+stderr: ~ "a retried browser test records its trace: pass" # the retry passes the test
+file: trace/.jet/browser-tests/report.json ~ "\"attempt\": 0,\n          \"passed\": false" # the first attempt failed
+file: trace/.jet/browser-tests/report.json ~ "\"actions\": [],\n          \"snapshots\": [],\n          \"events\": [],\n          \"artifacts\": [],\n          \"trace\": [],\n          \"error\": \"browser operation timed out\"" # and recorded nothing
+file: trace/.jet/browser-tests/report.json ~ "\"attempt\": 1,\n          \"passed\": true" # the retry passed
+file: trace/.jet/browser-tests/report.json ~ "\"trace\": [\n            \"connect\",\n            \"send:1:" # the retry's bounded trace, as hashed facts
+file: trace/.jet/browser-tests/report.json ~ "\"kind\": \"browsingContext.navigate\",\n              \"fact\": \"ok\"" # its timeline names each command and how it ended
+file: trace/.jet/browser-tests/report.json ~ "\"kind\": \"browsingContext.locateNodes\",\n              \"fact\": \"ok\"" # the wait that found the fetched text
+file: trace/.jet/browser-tests/report.json ~ "\"source\": {\n            \"path\": \"trace_test.jet\",\n            \"line\": 17,\n            \"column\": 20" # the test's source position
+file: trace/.jet/browser-tests/report.json ~ "\"kind\": \"dom\",\n              \"hash\": \"" # a DOM snapshot of the page
+file: trace/.jet/browser-tests/report.json ~ "\"kind\": \"screenshot\",\n              \"hash\": \"" # and a screenshot
+file: trace/.jet/browser-tests/report.json ~ "\"path\": \"\",\n              \"source\"" # kept as hash and size, with no payload file
+file: trace/.jet/browser-tests/report.json ~ "\"kind\": \"console\"" # the page's console entry
+file: trace/.jet/browser-tests/report.json ~ "\"kind\": \"network\",\n              \"requestIdHash\": \"" # its network requests, ids as hashes
+file: trace/.jet/browser-tests/report.json ~ "\"requestMethod\": \"GET\",\n              \"urlHash\": \"" # with method and URL hash
+file: trace/.jet/browser-tests/report.json ~ "\"statusCode\": 200" # and response status
+file: trace/.jet/browser-tests/report.json ~ "\"artifacts\": [],\n          \"trace\": [\n            \"connect\"" # the retry attaches no payload
+file: trace/.jet/browser-tests/report.json !~ "notes-chromium" # no payload file is named
+file: trace/.jet/browser-tests/artifacts absent
+file: trace/.jet/browser-tests/report.html ~ "<!doctype html>" # the local viewer beside the report
+file: trace/.jet/browser-tests/report.html ~ "\"kind\": \"browsingContext.navigate\"" # holds the recorded trace
+step: jet test
+cwd: {work}/trace
+env: JET_PROJECT_ROOT={work}/trace
+env: JET_TEST_WEB_SERVER_URL=http://127.0.0.1:{free-port:app}/
+env: JET_TEST_REPORT={work}/trace/payloads.json
+env: JET_TEST_TRACE_PAYLOADS=1
+exit: 0
+stdout+stderr: ~ "a retried browser test records its trace: pass" # the second run retries the same way
+file: trace/payloads.json ~ "\"kind\": \"dom\"" # the DOM snapshot
+file: trace/payloads.json ~ "artifacts/notes-chromium-1.html\",\n              \"source\"" # now names its payload file
+file: trace/payloads.json ~ "artifacts/notes-chromium-1.png\",\n              \"source\"" # and the screenshot's
+file: trace/payloads.json ~ "\"name\": \"dom\",\n              \"path\": \"" # the retry attaches the DOM
+file: trace/payloads.json ~ "\"mime\": \"image/png\"" # and the screenshot
+file: trace/.jet/browser-tests/artifacts/notes-chromium-1.html ~ "<p id=\"out\">milk</p>" # the DOM as the retry left it
+file: trace/.jet/browser-tests/artifacts/notes-chromium-1.png exists
+file: trace/.jet/browser-tests/artifacts/notes-chromium-0.html absent
+signal app: KILL
+wait: app
+exit: any # the server is killed
+end when
+end when

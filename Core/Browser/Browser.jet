@@ -811,6 +811,7 @@ BrowserTestConfig: struct {
     watch: Bool
     trace_on_retry: Bool
     trace_all: Bool
+    trace_payloads: Bool
     server_url: String
     server_command: [String]
     server_reuse: Bool
@@ -1575,9 +1576,12 @@ browser_id: fn(value: Dyn) -> Int? Never! {
 // FNV-1a 64 of the UTF-8 bytes as 16 lowercase hex digits: the hash every
 // event and trace fact carries. Public, so a caller compares a fact against
 // text it already holds without the text ever being kept.
-fact_hash: fn(value: String) -> String Never! {
+fact_hash: fn(value: String) -> String Never! { bytes_fact_hash(value.bytes()) }
+
+// fact_hash over raw bytes, for a page payload such as a screenshot.
+priv bytes_fact_hash: fn(value: [U8]) -> String Never! {
     hash := U64{14695981039346656037}
-    loop byte in value.bytes() -> hash = wrapping((hash ~ U64{byte}) * U64{1099511628211})
+    loop byte in value -> hash = wrapping((hash ~ U64{byte}) * U64{1099511628211})
     digits: "0123456789abcdef".bytes()
     out := [U8]{}
     loop index in 0..<16 {
@@ -1974,43 +1978,114 @@ run_case: fn(config: BrowserTestConfig, test: String, body: fn(BrowserPage) -[En
     source: BrowserTestSource{path: at.file.copy(), line: source_position(at.line), column: source_position(at.column)}
     loop engine in config.engines {
         loop attempt in 0..<config.retries + 1 {
-            started: time.instant()
-            error: run_attempt(config, test, engine, attempt, source, body)
-            case.attempts.push(
-                BrowserTestAttempt{
-                    test: test.copy(),
-                    engine: engine.copy(),
-                    attempt: attempt,
-                    passed: error == "",
-                    expected_failure: false,
-                    duration_ms: started.elapsed_millis(),
-                    source: source.copy(),
-                    actions: [BrowserTestAction]{},
-                    snapshots: [BrowserTestSnapshot]{},
-                    events: [BrowserTestEventFact]{},
-                    artifacts: [BrowserTestArtifact]{},
-                    trace: [String]{},
-                    error: error,
-                },
-            )
-            if error == "" -> break
+            tried: run_attempt(config, test, engine, attempt, source, body)
+            passed: tried.passed
+            case.attempts.push(tried)
+            if passed -> break
         }
     }
     case
 }
 
-// One attempt: "" when `body` passed on a fresh page, else what failed.
-priv run_attempt: fn(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source: BrowserTestSource, body: fn(BrowserPage) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserError!) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> String Never! {
-    fixture: begin_named(config, test, engine, attempt, source.path, source.line, source.column) ?? return "{err}"
-    failure: if body(fixture.__page) == {
+// One attempt on a fresh page: whether `body` passed, what failed, and, when
+// the attempt records, what it recorded.
+priv run_attempt: fn(config: BrowserTestConfig, test: String, engine: String, attempt: Int, source: BrowserTestSource, body: fn(BrowserPage) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserError!) -[Env, Exec, FS, IO, Net, Time, Time.Wait]> BrowserTestAttempt Never! {
+    started: time.instant()
+    out := BrowserTestAttempt{test: test.copy(), engine: engine.copy(), attempt: attempt, passed: false, expected_failure: false, duration_ms: 0, source: source.copy(), actions: [BrowserTestAction]{}, snapshots: [BrowserTestSnapshot]{}, events: [BrowserTestEventFact]{}, artifacts: [BrowserTestArtifact]{}, trace: [String]{}, error: ""}
+    fixture: begin_named(config, test, engine, attempt, source.path, source.line, source.column) ?? {
+        out.error = "{err}"
+        out.duration_ms = started.elapsed_millis()
+        return out
+    }
+    out.error = if body(fixture.__page) == {
         .Ok(_) -> ""
         .Err(err) -> "{err}"
     }
+    out.passed = out.error == ""
+    out.duration_ms = started.elapsed_millis()
+    if attempt_records(config, attempt) -> record_attempt(config, fixture, out)
     // The attempt's outcome is the one reported; closing is best effort.
     fixture.__page.close() ?? ()
     fixture.__context.close() ?? ()
     fixture.__browser.close() ?? ()
-    failure
+    out
+}
+
+// A retry records by default (`trace_on_retry`); under `trace_all` and in UI
+// mode every attempt records.
+priv attempt_records: fn(config: BrowserTestConfig, attempt: Int) -> Bool Never! {
+    config.ui || config.trace_all || (config.trace_on_retry && attempt > 0)
+}
+
+// What a recording attempt keeps, read after `body` and before the page
+// closes: its bounded trace (hashed facts only), the commands it sent as its
+// timeline, the console and network events queued for it, and the DOM and a
+// screenshot of the page as its last action left it. The DOM text and the
+// screenshot bytes are page payloads: a snapshot keeps only their hash and
+// size, unless UI mode or `trace_payloads` asks for them; then each is
+// written under the artifact folder and attached.
+priv record_attempt: fn(config: BrowserTestConfig, fixture: BrowserTestFixture, out: &BrowserTestAttempt) -[FS, Net, Time]> Never! {
+    out.trace = fixture.__browser.trace().entries
+    out.actions = trace_actions(out.trace)
+    loop {
+        event: browser_pop_event(fixture.__browser) ?? break
+        out.events.push(event_fact(event))
+    }
+    payloads: config.ui || config.trace_payloads
+    stem: files.join(config.artifact_dir, "{source_name(out.test)}-{out.engine}-{out.attempt}")
+    if fixture.__page.dom() == .Ok(dom) {
+        record_snapshot(out, "dom", dom.bytes(), if payloads -> "{stem}.html" else -> "", "text/html")
+    }
+    if fixture.__page.screenshot() == .Ok(png) {
+        record_snapshot(out, "screenshot", png, if payloads -> "{stem}.png" else -> "", "image/png")
+    }
+}
+
+// The timeline: each command the trace holds, in order, named by its
+// protocol method and marked by how it ended: "ok", "error", or "sent" when
+// no reply came. A method outside the bidi-2024.11 table keeps its hash.
+priv trace_actions: fn(trace: [String]) -> [BrowserTestAction] Never! {
+    actions := [BrowserTestAction]{}
+    loop entry in trace {
+        parts: parse.split(entry, ":")
+        if parts.len() != 3 || parts[0] != "send" -> next
+        sequence: parse.parse_int(parts[1]) ?? next
+        fact := "sent"
+        loop reply in trace {
+            if reply == "recv:{parts[1]}:{parts[2]}" -> fact = "ok" else if reply == "error:{parts[1]}:{parts[2]}" {
+                fact = "error"
+            }
+        }
+        actions.push(BrowserTestAction{sequence: sequence, kind: method_named(parts[2]), fact: fact})
+    }
+    actions
+}
+
+priv method_named: fn(hash: String) -> String Never! {
+    loop method in C_BIDI_2024_11 {
+        if fact_hash(method) == hash -> return method
+    }
+    hash.copy()
+}
+
+// A queued event as the report keeps it: "console" or "network" and the
+// request facts, with the request id and URL as hashes and no message text.
+priv event_fact: fn(event: BrowserEvent) -> BrowserTestEventFact Never! {
+    console: event.method == "log.entryAdded" || event.method == "browsingContext.consoleMessage"
+    kind: if console -> "console" else if event.method.starts_with("network.") -> "network" else -> event.method
+    request: if event.request_id == "" -> "" else -> fact_hash(event.request_id)
+    BrowserTestEventFact{kind: kind, request_id_hash: request, request_method: event.request_method, url_hash: event.url_hash, status_code: event.status_code, is_blocked: event.is_blocked}
+}
+
+// One snapshot of `bytes`. With a `path`, the bytes are written there and
+// attached; a payload that can't be written leaves the snapshot's path "".
+priv record_snapshot: fn(out: &BrowserTestAttempt, kind: String, bytes: [U8], path: String, mime: String) -[FS]> Never! {
+    hash: bytes_fact_hash(bytes)
+    kept: if path != "" && write_report_bytes(path, bytes) == .Ok(_) -> path else -> ""
+    if kept != "" {
+        out.artifacts.push(BrowserTestArtifact{name: kind, path: kept, mime: mime, bytes: bytes.len(), hash: hash, source: out.source.copy()})
+    }
+    out.snapshots.push(BrowserTestSnapshot{kind: kind, hash: hash, bytes: bytes.len(), path: kept, source: out.source.copy()})
 }
 
 fixture_source: fn(name: String, body: String) -> String BrowserError! {
@@ -2218,26 +2293,40 @@ report_html: fn(report: BrowserTestReport) -> String Never! {
 
 write_report: fn(report: BrowserTestReport, path: String) -[FS]> BrowserError! {
     // The configured format is written first; the HTML viewer companion
-    // follows for `ui` runs and HTML reports.
+    // follows for `ui` runs, HTML reports and runs that recorded a trace.
     rendered: if report.reporter == {
         "json" -> report_json(report)
         "html" -> report_html(report)
         else -> report_text(report)
     }
     write_report_text(path, rendered)
-    if report.ui || report.reporter == "html" {
+    if report.ui || report.reporter == "html" || report_traced(report) {
         write_report_text(files.with_suffix(path, ".html"), report_html(report))
     }
     Ok()
 }
 
+priv report_traced: fn(report: BrowserTestReport) -> Bool Never! {
+    loop case in report.cases {
+        loop attempt in case.attempts {
+            if attempt.trace.len() > 0 -> return true
+        }
+    }
+    false
+}
+
 write_report_text: fn(path: String, rendered: String) -[FS]> BrowserError! {
-    if rendered.bytes().len() > C_MAX_REPORT_BYTES -> return Err(BrowserError{kind: "protocol"})
+    write_report_bytes(path, rendered.bytes())
+}
+
+// Writes a report file or an attempt's payload, creating its folder.
+priv write_report_bytes: fn(path: String, bytes: [U8]) -[FS]> BrowserError! {
+    if bytes.len() > C_MAX_REPORT_BYTES -> return Err(BrowserError{kind: "protocol"})
     parent: files.dirname(path)
     if parent.len() > 0 {
         files.create_dir_all(parent) ?? return Err(BrowserError{kind: "transport"})
     }
-    files.write(path, rendered) ?? return Err(BrowserError{kind: "transport"})
+    files.write_bytes(path, bytes) ?? return Err(BrowserError{kind: "transport"})
     Ok()
 }
 
@@ -2486,6 +2575,19 @@ C_REPORT_HTML_TAIL: "</script><script>\nconst data=JSON.parse(document.getElemen
     assert(html.ends_with("</script></body></html>"))
 }
 
+#Test("a recorded trace names each command and how it ended") {
+    navigate: fact_hash("browsingContext.navigate")
+    call: fact_hash("script.callFunction")
+    trace: [String]{"connect", "send:1:{navigate}", "event:{fact_hash("network.beforeRequestSent")}", "recv:1:{navigate}", "send:2:{call}", "error:2:{call}", "send:3:{fact_hash("input.performActions")}", "send:4:0123456789abcdef"}
+    actions: trace_actions(trace)
+    assert_eq(actions.len(), 4)
+    assert_eq("{actions[0].sequence} {actions[0].kind} {actions[0].fact}", "1 browsingContext.navigate ok")
+    assert_eq("{actions[1].sequence} {actions[1].kind} {actions[1].fact}", "2 script.callFunction error")
+    assert_eq("{actions[2].sequence} {actions[2].kind} {actions[2].fact}", "3 input.performActions sent")
+    assert_eq(actions[3].kind, "0123456789abcdef")
+    assert_eq(bytes_fact_hash("ab".bytes()), fact_hash("ab"))
+}
+
 #Test("a cross-browser case passes only when each engine's last attempt passed") {
     source: BrowserTestSource{path: "home_test.jet", line: 7, column: 5}
     tried: fn(engine: String, attempt: Int, error: String) -> BrowserTestAttempt {
@@ -2677,6 +2779,7 @@ config_from_snapshot: fn(root: String, env: [{name: [U8], value: [U8]}]) -[FS]> 
             watch: env_bool(env, "JET_TEST_WATCH", false),
             trace_on_retry: env_bool(env, "JET_TEST_TRACE_ON_RETRY", true),
             trace_all: env_bool(env, "JET_TEST_TRACE", false),
+            trace_payloads: env_bool(env, "JET_TEST_TRACE_PAYLOADS", false),
             server_url: server_url,
             server_command: split_command(command),
             server_cwd: cwd,

@@ -1,0 +1,63 @@
+# UI mode (JET_TEST_BROWSER_UI=1) records every attempt and writes
+# report.html beside the json report. A test run with watch on opens in the
+# viewer, which a locked chromium drives. It shows the test tree with the
+# run's summary and a filter. The selected test shows each attempt: its
+# error, its timeline of commands, the DOM and screenshot snapshots, its
+# source position, the console entry the page logged, the network requests it
+# made, and the snapshot files attached. While it watches, the viewer reloads
+# itself to show the latest run. A filter that matches nothing empties the
+# tree.
+env: NO_COLOR=1
+copy: {root}/Tests/Cases/WebBrowser/Fixtures/TraceViewer {work}/ui
+when probe chromium --version
+when probe chromedriver --version
+spawn app: jet run {work}/ui/run.jet
+env: JET_APP_PORT={free-port:app}
+stdout: null
+poll ready: jet run {root}/Tests/Cases/WebBrowser/Fixtures/http-ready.jet 127.0.0.1:{free-port:app} / - write until stdout: ^= "HTTP/1.1 200" timeout 60s every 50ms # the app serves its root page
+step: jetpack browser lock chromium --binary {tool:chromium} --driver {tool:chromedriver}
+cwd: {work}/ui
+env: JET_PROJECT_ROOT={work}/ui
+exit: 0
+step: jet test
+cwd: {work}/ui
+env: JET_PROJECT_ROOT={work}/ui
+env: JET_TEST_WEB_SERVER_URL=http://127.0.0.1:{free-port:app}/
+env: JET_TEST_BROWSER_UI=1
+env: JET_TEST_WATCH=1
+exit: 0
+stdout+stderr: ~ "a retried browser test records its trace: pass" # the test passes on its retry
+file: ui/.jet/browser-tests/report.json ~ "\"ui\": true,\n  \"watch\": true" # the run is in UI mode and watching
+file: ui/.jet/browser-tests/report.html ~ "\"watch\": true" # the viewer holds the watch flag
+file: ui/.jet/browser-tests/report.html ~ "if(data.watch)setInterval(()=>location.reload(),1000)" # and reloads while it watches
+file: ui/.jet/browser-tests/artifacts/notes-chromium-0.html ~ "<h1 id=\"title\">Notes</h1>" # UI mode writes the failed attempt's DOM
+file: ui/.jet/browser-tests/artifacts/notes-chromium-0.png exists
+file: ui/.jet/browser-tests/artifacts/notes-chromium-1.html ~ "<p id=\"out\">milk</p>" # and the retry's
+file: ui/.jet/browser-tests/artifacts/notes-chromium-1.png exists
+step: jet run view.jet
+cwd: {work}/ui
+env: JET_PROJECT_ROOT={work}/ui
+exit: 0
+stdout: ~ "1 passed, 0 failed, 0 skipped · exit 0" # the run's summary
+stdout: ~ "Filter" # the filter
+stdout: ~ "Test tree\nPASS notes" # the test tree
+stdout: ~ "FAIL · chromium · attempt 0" # each attempt of the selected test
+stdout: ~ "Error: browser operation timed out" # the failed attempt's error
+stdout: ~ "Timeline\n1 browser.createUserContext ok" # its timeline of commands
+stdout: ~ "browsingContext.navigate ok" # the page it opened
+stdout: ~ "DOM snapshots" # the snapshots
+stdout: ~ "artifacts/notes-chromium-0.html" # the DOM snapshot's file
+stdout: ~ "Source\n\ntrace_test.jet:17:20" # the test's source position
+stdout: ~ "Logs / console\n\nconsole ·" # the console entry the page logged
+stdout: ~ "Network\n\nGET · " # the requests the page made
+stdout: ~ " · 200 · blocked=false" # with their status
+stdout: ~ "Attachments\n\ndom · " # the attached DOM
+stdout: ~ "image/png" # and screenshot
+stdout: ~ "PASS · chromium · attempt 1" # the retry that passed
+stdout: ~ "== watch: the viewer reloaded" # watch updates reload the viewer
+stdout: ~ "== filtered: the tree is empty" # the filter narrows the tree
+signal app: KILL
+wait: app
+exit: any # the server is killed
+end when
+end when

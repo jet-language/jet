@@ -1,0 +1,12 @@
+// The app the browser tests open: its page logs to the console and fetches
+// `/data`, then shows what it fetched. JET_APP_PORT overrides the port.
+use web: core.web
+
+home: fn() -> WebPage {
+    script: "console.log(\"notes ready\"); fetch(\"/data\").then(r => r.text()).then(t => {{ document.getElementById(\"out\").textContent = t.includes(\"milk\") ? \"milk\" : \"none\"; }});"
+    web.page("Notes", "<main><h1 id=\"title\">Notes</h1><p id=\"out\"></p></main><script>{script}</script>")
+}
+
+data: fn() -> WebPage { web.page("Data", "<p>milk</p>") }
+
+run: fn() { web.app().route("/", home).route("/data", data).serve(4173) }
