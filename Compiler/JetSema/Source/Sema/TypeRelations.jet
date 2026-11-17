@@ -1838,14 +1838,13 @@ sema_type_graph_bare_rename: fn(graph: SemaRegistrationGraph, declared: String, 
 // module is loaded, and no other owner; a parameterless Core alias outside the
 // bare-owner and root-type sets is skipped; an alias that re-exports a
 // namespaced type of the same leaf names that type's owner. Core source never
-// imports user code, so a Core caller sees only Core owners: a user's
-// `Task: struct` must not capture the bare `Task` that Core source spells.
-// A built-in event handle (`Event`, `Subscription`, …; sema_event_handle_name)
-// has no declaring module, so a loaded same-named type (a user module's
-// `Event`, `core.compiler::Event`) never owns its bare spelling here: only a
-// caller that declares or imports that name means its own type.
+// imports user code, so a Core caller sees only Core owners. A builtin type
+// no module declares (SYMBOL_BUILTIN_TYPES: `Task`, `Event`, …) has no owner
+// here, so a loaded same-named type (a user module's `Task`,
+// `core.compiler::Event`) never captures its bare spelling: only a caller
+// that declares or imports that name means its own type.
 sema_type_graph_unique_type_owner: fn(graph: SemaRegistrationGraph, caller_index: Int, name: String) -> SemaRegistrationResolvedSymbol? {
-    if sema_event_handle_name(name) -> return None
+    if symbol_builtin(SymbolKind.Type, name) != None -> return None
     rows: sema_registration_nominal_rows_named(graph, name)
     if rows.len() == 0 -> return None
     if boundary_head_owner_module(name) != None {
@@ -1960,8 +1959,8 @@ sema_type_graph_base_name: fn(ty: Type) -> String? {
     }
 }
 
-// Whether the checked type `ty` is the builtin handle type `name`: one of
-// `Task`, `Receiver` and `Sender` (symbol_builtin), which no module declares.
+// Whether the checked type `ty` is the builtin type `name`, one of
+// SYMBOL_BUILTIN_TYPES (symbol_builtin), which no module declares.
 // The spelling is its owner: sema spells every resolved source nominal
 // `module::Leaf` (sema_registration_nominal_spelling), so a program's own
 // `Task` or `Task<T>`, local, aliased or imported, is never spelled bare, and
@@ -2003,9 +2002,9 @@ sema_type_lookup_nominal_row: fn(graph: SemaRegistrationGraph, resolved: SemaReg
 // jet_parser never imports). With no binding of the name in the caller's scope, the type
 // is the one source nominal of that name in the graph, or, when several share it, the
 // one in a module the caller's package reaches; otherwise it is unknown. A bare
-// built-in event handle name is that handle (sema_type_graph_unique_type_owner).
+// builtin type name is that builtin (sema_type_graph_unique_type_owner).
 sema_type_unscoped_nominal_row: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> SemaRegistrationRowRef? {
-    if sema_event_handle_name(name) -> return None
+    if symbol_builtin(SymbolKind.Type, name) != None -> return None
     scan := sema_type_scan_unscoped_rows(graph, name, caller, SemaOwnerCount.Every)
     if scan.ambiguous {
         scan = sema_type_scan_unscoped_rows(graph, name, caller, SemaOwnerCount.Reached)

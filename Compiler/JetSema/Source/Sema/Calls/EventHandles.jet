@@ -14,12 +14,6 @@ use jet_foundation.[
 
 sema_event_unit: fn() -> Type Never! { Type.Named{name: "Unit"} }
 
-// The built-in handle types of the Event family: compiler-known, with no
-// source declaration (the lowering's `lower_event_repr` guard).
-sema_event_handle_name: fn(name: String) -> Bool Never! {
-    name == "Event" || name == "Hook" || name == "DecisionHook" || name == "AsyncEvent" || name == "DispatchReport" || name == "EventScope" || name == "Subscription" || name == "EventTrace"
-}
-
 // The handle family a receiver type is named for: `Event<T>`, `Hook<T, R>`,
 // `DecisionHook<T, E>`, `AsyncEvent<T, E>`, `DispatchReport<E>`,
 // `EventScope`, `Subscription`, `EventTrace`; None for any other type (a
@@ -41,8 +35,9 @@ sema_event_handle_family: fn(ty: Type) -> String? {
 // `Sender`/`Receiver` shadows the channel endpoints (StreamHandles.jet
 // `sema_stream_handle_is_canonical`). A same-named nominal of another module
 // (a user module's or `core.compiler::Event`) is another type, keyed by its
-// owner path: a bare handle name never resolves to it only because its
-// module is loaded (TypeRelations.jet `sema_type_graph_unique_type_owner`).
+// owner path: a bare handle name, one of SYMBOL_BUILTIN_TYPES, never resolves
+// to it only because its module is loaded (TypeRelations.jet
+// `sema_type_graph_unique_type_owner`).
 sema_event_handle_owner: fn(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     owner: sema_event_handle_family(ty) ?? return None
     if program.registration_graph == .Val(graph) {
