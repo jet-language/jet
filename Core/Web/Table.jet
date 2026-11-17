@@ -304,10 +304,10 @@ replace_row: fn<T>(table: &WebTable<T>, key: String, row: T) WebTableError! {
     return Err(WebTableError.NotFound)
 }
 
-update_row: fn<T>(table: &WebTable<T>, key: String, transform: fn(T) -> T) WebTableError! {
+update_row: fn<T, E>(table: &WebTable<T>, key: String, transform: fn(T) -> T E!) (WebTableError | E)! {
     loop i in 0..<table.rows.len() {
         if table.rows[i].key == key {
-            updated: transform(table.rows[i].value.copy()) ?? table.rows[i].value.copy()
+            updated: transform(table.rows[i].value.copy())
             table.rows[i] = WebTableRow<T>{key: table.rows[i].key.copy(), value: updated}
             return Ok()
         }

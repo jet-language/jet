@@ -37,7 +37,7 @@ build_session_add_run: fn(state: &BuildSessionState, args: [BuildSessionValue], 
     }
     id: state.actions.len()
     state.actions.push(action)
-    BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildAction", session: state.id, id: id}}
+    BuildSessionReply.Value{value: BuildSessionValue.Handle{type_name: "BuildStepHandle", session: state.id, id: id}}
 }
 
 // `b.found(probe)`: the program a find_program probe finds, which a step runs
@@ -198,7 +198,7 @@ build_session_file_path: fn(state: &BuildSessionState, args: [BuildSessionValue]
 // under `.jet/`, which is never committed.
 build_session_step_call: fn(state: &BuildSessionState, method: String, args: [BuildSessionValue]) -> BuildSessionReply {
     if args.len() == 0 -> return build_session_fail(state, "step call lost its step")
-    id: build_session_handle(state, args[0], "BuildAction") ?? return build_session_fail(state, "the step does not belong to this build")
+    id: build_session_handle(state, args[0], "BuildStepHandle") ?? return build_session_fail(state, "the step does not belong to this build")
     step := state.actions[id]
     flag: build_session_text(args, 2) ?? ""
     unit: BuildSessionReply.Value{value: BuildSessionValue.Unit}
@@ -345,7 +345,7 @@ build_session_add_target: fn(state: &BuildSessionState, method: String, args: [B
     }
     name: build_session_text(args, 0) ?? return build_session_fail(state, "target name must be a string")
     sources: build_session_strings(args, 1) ?? return build_session_fail(state, "target sources must be strings")
-    actions: build_session_handles(state, args, 2, "BuildAction") ?? return build_session_fail(state, "target actions do not belong to this build")
+    actions: build_session_handles(state, args, 2, "BuildStepHandle") ?? return build_session_fail(state, "target actions do not belong to this build")
     deps := [Int]{}
     probes := [Int]{}
     toolchain := 0

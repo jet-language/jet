@@ -13,9 +13,9 @@ core_web_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCa
     core.browser.storage kind_local|kind_session - String
     core.web openapi HTTPRouter Result<String,OpenAPIError>
     core.web form WebFormInput,String WebFormTyped
-    core.web.router route WebRouter,String,[WebRouterField],[WebRouterField],fn(WebNavigation;String) Result<WebRouter,WebRouterError>
-    core.web.router route_with_search_codec WebRouter,String,[WebRouterField],[WebRouterField],WebRouterSearchCodec,fn(WebNavigation;String) Result<WebRouter,WebRouterError>
-    core.web.router not_found WebRouter,fn(String;String) Result<WebRouter,WebRouterError>
+    core.web.router route WebRouter,String,[WebRouterField],[WebRouterField],fn(WebNavigation;Result<String,E>) Result<WebRouter,Union<WebRouterError,E>> E
+    core.web.router route_with_search_codec WebRouter,String,[WebRouterField],[WebRouterField],WebRouterSearchCodec,fn(WebNavigation;Result<String,E>) Result<WebRouter,Union<WebRouterError,E>> E
+    core.web.router not_found WebRouter,fn(String;Result<String,E>) Result<WebRouter,Union<WebRouterError,E>> E
     core.web.router navigate|preload WebRouter,String Result<WebNavigation,WebRouterError>
     core.web.router abort WebRouter Bool
     core.web.router stale|expire|collect WebRouter,String Int
@@ -30,7 +30,7 @@ core_web_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCa
     core.web.query load String,String,String,fn(;String) WebQuery
     core.web.query mutate WebQuery,String,String?,fn(String;String) WebMutationState
     core.web.query mutate_with_invalidations WebQuery,String,String?,[String],fn(String;String) WebMutationState
-    core.web.query retry WebQuery,fn(String;Unit) Result<Int,WebQueryError>
+    core.web.query retry WebQuery,fn(String;Result<Unit,E>) Result<Int,Union<WebQueryError,E>> E
     core.web.query watch String WebQuery
     core.web.query get WebQuery String
     core.web.query state WebQuery WebQueryState
@@ -59,7 +59,7 @@ core_web_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCa
     core.web.forms input_replace WebFormInput,String,WebFormFieldSpec Result<WebFormInput,WebFormError>
     core.web.forms typed WebFormInput,String Result<WebFormTyped,WebFormError>
     core.web.forms typed_set WebFormTyped,String,String Result<Unit,WebFormError>
-    core.web.forms typed_set_async_validator WebFormTyped,String,WebFormValidationTiming,Int,fn(String;Unit) Result<Unit,WebFormError>
+    core.web.forms typed_set_async_validator WebFormTyped,String,WebFormValidationTiming,Int,fn(String;Result<Unit,E>) Result<Unit,Union<WebFormError,E>> E
     core.web.forms typed_set_action WebFormTyped,fn(WebFormDecodedInput;String) Unit
     core.web.forms action_error - WebFormActionError
     core.web.forms action_field_error WebFormActionError,String,String WebFormActionError
@@ -67,7 +67,7 @@ core_web_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCa
     core.web.forms typed_blur WebFormTyped,String Result<Unit,WebFormError>
     core.web.forms typed_validate WebFormTyped Result<Unit,WebFormError>
     core.web.forms typed_validate_async WebFormTyped WebFormValidation
-    core.web.forms typed_validate_field WebFormTyped,String,WebFormValidationTiming,fn(String;Unit) WebFormValidationChain
+    core.web.forms typed_validate_field WebFormTyped,String,WebFormValidationTiming,fn(String;Result<Unit,E>) Result<WebFormValidationChain,E> E
     core.web.forms typed_validation_render WebFormValidationChain String
     core.web.forms typed_submit|typed_no_script WebFormTyped Result<String,WebFormError>
     core.web.forms typed_submit_async WebFormTyped WebFormTypedSubmission
@@ -108,7 +108,7 @@ core_web_fixed_signature: fn(module_name: String, member: String) -> CoreTypedCa
     core.web.table selected_rows WebTable<T> Result<[WebTableRow<T>],WebTableError> T
     core.web.table insert_row WebTable<T>,T Result<String,WebTableError> T
     core.web.table replace_row WebTable<T>,String,T Result<Unit,WebTableError> T
-    core.web.table update_row WebTable<T>,String,fn(T;T) Result<Unit,WebTableError> T
+    core.web.table update_row WebTable<T>,String,fn(T;Result<T,E>) Result<Unit,Union<WebTableError,E>> T|E
     core.web.table remove_row WebTable<T>,String Result<T,WebTableError> T
     core.web.table first_page|next_page WebTable<T> - T
     core.web.table last_page WebTable<T> Result<Unit,WebTableError> T

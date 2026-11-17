@@ -1,6 +1,6 @@
 // Private compiler service linkage, not a second public Build API. The trusted
 // build/comptime wrapper binds these symbols after ordinary checking. Handles
-// remain the compiler's Build/BuildPlan/BuildAction/... nominal values.
+// remain the compiler's Build/BuildPlan/BuildStepHandle/... nominal values.
 // Source owns session mutation, validation and projection on every tier.
 use {
     build_crypto: core.crypto
@@ -409,7 +409,7 @@ build_session_handle: fn(state: BuildSessionState, value: BuildSessionValue, kin
         if kind == "BuildPlan" && id >= -1 && id < state.targets.len() -> return Val(id)
         if id < 0 -> return None
         count: if kind == {
-            "BuildAction" -> state.actions.len()
+            "BuildStepHandle" -> state.actions.len()
             "BuildTarget" -> state.targets.len()
             "BuildToolchain" -> state.toolchains.len()
             "BuildProbe" -> state.probes.len()

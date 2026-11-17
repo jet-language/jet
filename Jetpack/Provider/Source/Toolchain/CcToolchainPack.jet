@@ -655,18 +655,12 @@ provider_cc_realize_pack: fn(verification: &StoreVerification, spec: RefSpec, ct
     provider_cc_ensure_real_directory(ctx.store_dir) ?? return Err(ProviderError.BadOutput(err.message()))
     stem: "{CC_TOOLCHAIN_PACKAGE}-{covered.triple}-{provider_cc_pack_short(tools.digest)}-{process.current_pid()}"
     staging: files.join(ctx.store_dir, ".{stem}.partial")
-    scratch: files.join(ctx.store_dir, ".{stem}.build")
     output: files.join(ctx.store_dir, stem)
     provider_cc_remove_tree(staging)
-    provider_cc_remove_tree(scratch)
     provider_cc_remove_tree(output)
-    if provider_cc_pack_publish_target(spec, ctx, tools, covered, staging, scratch, output) == {
-        .Ok(realized) -> {
-            provider_cc_remove_tree(scratch)
-            Ok(realized)
-        }
+    if provider_cc_pack_publish_target(spec, ctx, tools, covered, staging, output) == {
+        .Ok(realized) -> Ok(realized)
         .Err(error) -> {
-            provider_cc_remove_tree(scratch)
             provider_cc_remove_tree(staging)
             provider_cc_remove_tree(output)
             Err(ProviderError.BadOutput(error.message()))
@@ -674,13 +668,13 @@ provider_cc_realize_pack: fn(verification: &StoreVerification, spec: RefSpec, ct
     }
 }
 
-provider_cc_pack_publish_target: fn(spec: RefSpec, ctx: ProviderCtx, tools: CcPackTools, target: CcPackTarget, staging: String, scratch: String, output: String) -[IO, FS, Env, Exec, Time.Wait]> Realized CcToolchainError! {
+provider_cc_pack_publish_target: fn(spec: RefSpec, ctx: ProviderCtx, tools: CcPackTools, target: CcPackTarget, staging: String, output: String) -[IO, FS, Env, Exec, Time.Wait]> Realized CcToolchainError! {
     usr: files.join(staging, "sysroot/usr")
     if target.libc == "glibc" {
         provider_cc_pack_copy_tree(files.join(tools.root, "glibc/{target.triple}/usr"), usr)
     } else {
         provider_cc_pack_copy_tree(files.join(tools.root, "musl/{target.arch}/include"), files.join(usr, "include"))
-        provider_cc_pack_build_musl(tools, target, usr, scratch)
+        provider_cc_pack_copy_tree(provider_cc_pack_musl_libraries(tools, target, ctx.store_dir), files.join(usr, "lib"))
     }
     store_seal_local_output(staging) ?? return Err(CcToolchainError.Invalid("seal C toolchain target `{target.triple}`: {err.message()}"))
     files.rename(staging, output) ?? return Err(CcToolchainError.Invalid("publish C toolchain target `{target.triple}`: {err}"))
@@ -803,14 +797,52 @@ provider_cc_pack_copy_tree: fn(source: String, destination: String) -[FS]> CcToo
     files.set_mode(destination, ((metadata.mode) | 0o200) & 0o755) ?? return Err(CcToolchainError.Invalid("set the mode of `{destination}`: {err}"))
 }
 
-// Build musl's libc.a and crt objects for `target` into `usr/lib` with the
+// The directory holding musl's libraries for `target`, built from the pack
+// once per pack digest and target and shared: by every realization in
+// `hangar`, and by every Hangar of a run when `JET_CC_PACK_ROOT` names this
+// same pack unpacked in a Hangar the run shares (a test run does). Concurrent
+// realizations take turns under a file lock; the first builds in private
+// staging and publishes by rename, the rest copy what it published.
+provider_cc_pack_musl_libraries: fn(tools: CcPackTools, target: CcPackTarget, hangar: String) -[IO, FS, Env, Exec, Time.Wait]> String CcToolchainError! {
+    home := hangar
+    if sys.get(ENV_JET_CC_PACK_ROOT) == .Val(shared) && shared != "" && files.basename(shared) == tools.digest {
+        home = files.dirname(files.dirname(shared))
+    }
+    area: files.join(home, "{STORE_BUILD_SCRATCH_DIR}/cc-musl")
+    name: "{provider_cc_pack_short(tools.digest)}-{target.triple}"
+    built: files.join(area, name)
+    lib: files.join(built, "lib")
+    if provider_cc_node_exists(lib) -> return Ok(lib)
+    files.create_dir_all(area) ?? return Err(CcToolchainError.Invalid("create the shared musl build directory: {err}"))
+    _held: files.lock(files.join(area, "{name}.lock")) ?? return Err(CcToolchainError.Invalid("lock the shared musl build: {err}"))
+    if provider_cc_node_exists(lib) -> return Ok(lib)
+    staging: files.join(area, ".{name}-{process.current_pid()}.partial")
+    scratch: files.join(area, ".{name}-{process.current_pid()}.build")
+    provider_cc_remove_tree(staging)
+    provider_cc_remove_tree(scratch)
+    if provider_cc_pack_build_musl(tools, target, files.join(staging, "lib"), scratch) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            provider_cc_remove_tree(scratch)
+            provider_cc_remove_tree(staging)
+            return Err(error)
+        }
+    }
+    provider_cc_remove_tree(scratch)
+    files.rename(staging, built) ?? {
+        provider_cc_remove_tree(staging)
+        return Err(CcToolchainError.Invalid("publish the shared musl build for {target.triple}: {err}"))
+    }
+    Ok(lib)
+}
+
+// Build musl's libc.a and crt objects for `target` into `lib` with the
 // pack's own clang and llvm-ar; the other libc archives are empty, as in a
 // musl install. Objects are compiled in `scratch`.
-provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: String, scratch: String) -[IO, FS, Env, Exec, Time.Wait]> CcToolchainError! {
+provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, lib: String, scratch: String) -[IO, FS, Env, Exec, Time.Wait]> CcToolchainError! {
     term.eprint("building musl for {target.short} (first time only)")
     source_root: files.join(tools.root, "musl/src")
     internal: files.join(scratch, "internal")
-    lib: files.join(usr, "lib")
     files.create_dir_all(internal) ?? return Err(CcToolchainError.Invalid("create musl build directory: {err}"))
     files.create_dir_all(lib) ?? return Err(CcToolchainError.Invalid("create musl library directory: {err}"))
     files.write(files.join(internal, "version.h"), "#define VERSION \"{tools.manifest.musl}\"\n") ?? return Err(CcToolchainError.Invalid("write musl version header: {err}"))
@@ -827,7 +859,7 @@ provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: S
         "-I{internal}",
         "-I{files.join(source_root, "src/include")}",
         "-I{files.join(source_root, "src/internal")}",
-        "-I{files.join(usr, "include")}",
+        "-I{files.join(tools.root, "musl/{target.arch}/include")}",
         "-Os",
         "-pipe",
         "-fomit-frame-pointer",
@@ -863,14 +895,14 @@ provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, usr: S
     loop result in receipts {
         receipt: result ?? return Err(CcToolchainError.Invalid("run the pack compiler: {err}"))
         if !receipt.success {
-            return Err(CcToolchainError.Invalid("building musl for {target.triple} failed: {provider_cc_pack_clip(receipt.errors)}"))
+            return Err(CcToolchainError.Invalid("building musl for {target.triple} failed ({provider_cc_pack_ended(receipt)}): {provider_cc_pack_clip(receipt.errors)}"))
         }
     }
     archive := [String]{files.join(tools.root, CC_PACK_AR), "rcs", files.join(lib, "libc.a")}
     archive.extend(objects)
     linked: process.cmd(archive).cwd(scratch).env_clear().stdout(.Capture).stderr(.Capture).run() ?? return Err(CcToolchainError.Invalid("run the pack archiver: {err}"))
     if !linked.success {
-        return Err(CcToolchainError.Invalid("archiving musl for {target.triple} failed: {provider_cc_pack_clip(linked.errors)}"))
+        return Err(CcToolchainError.Invalid("archiving musl for {target.triple} failed ({provider_cc_pack_ended(linked)}): {provider_cc_pack_clip(linked.errors)}"))
     }
     loop name in CC_PACK_MUSL_EMPTY_LIBS {
         files.write(files.join(lib, "lib{name}.a"), CC_PACK_EMPTY_ARCHIVE) ?? return Err(CcToolchainError.Invalid("write empty musl archive `lib{name}.a`: {err}"))
@@ -890,4 +922,12 @@ provider_cc_pack_clip: fn(text: String) -> String Never! {
     raw: text.trim().bytes()
     if raw.len() <= CC_PACK_MAX_REPORTED_BYTES -> return text.trim()
     "{pkg_bytes_text(raw, 0, CC_PACK_MAX_REPORTED_BYTES)}…"
+}
+
+// How a pack tool ended: the signal that killed it, its timeout, or its exit
+// code. A tool killed by a signal writes no error text of its own.
+provider_cc_pack_ended: fn(receipt: ProcessReceipt) -> String Never! {
+    if receipt.signal == .Val(number) -> return "killed by signal {number}"
+    if receipt.timed_out -> return "timed out"
+    "exit code {receipt.code}"
 }

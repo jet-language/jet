@@ -5355,8 +5355,9 @@ The lifecycle states are `Pending`, `Fresh`, `Stale`, `Fetching`, `Error`, and
 `show`, `state`, `state_signal`, `mutation_state`, `mutation_signal`, and
 `facts` read values and bounded lifecycle facts. `mark_stale(q)` marks a
 query stale and advances its generation. `refresh(q)`, `queue(q, data)`, and
-`retry(q, replay)` are fallible operations; `cancel(q)` returns whether an
-in-flight operation was canceled. `mutate` checks the key and optional
+`retry(q, replay)` are fallible operations, and a failure of `replay` is
+`retry`'s, unchanged; `cancel(q)` returns whether an in-flight operation was
+canceled. `mutate` checks the key and optional
 expected value, applies the mutation, and returns a `WebMutationState`;
 `mutate_with_invalidations` additionally validates target keys.
 
@@ -7024,7 +7025,7 @@ dependency's function is rewritten only after the root writes
 fails the build (E3514). The consent names the dependency the build loads at
 its locked version, and the rewrite changes only this build's copy of it.
 
-`b.run(name, tool, caps)` declares one step and returns its `BuildAction`.
+`b.run(name, tool, caps)` declares one step and returns its `BuildStepHandle`.
 The tool is a `BuildFile`. `b.found(probe)` is the program a `find_program`
 probe finds, and a step's `.output(path)` is a file that step makes, so one
 step can build the tool the next one runs. `b.host(target)` is the executable

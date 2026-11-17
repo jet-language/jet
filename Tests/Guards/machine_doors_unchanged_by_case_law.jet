@@ -10,7 +10,9 @@
 // Only values that change from run to run or machine to machine are masked,
 // the same way before and after: every run of 16 or more hex digits (digests,
 // build and run identities) reads `<hash>`, and the values of the keys in
-// MD_VOLATILE_KEYS read `<volatile>`.
+// MD_VOLATILE_KEYS read `<volatile>`. A derivation's premises are sorted by
+// value, so a digest among them sorts by the digits it hides; they are
+// recorded sorted again after masking, in an order no digest moves.
 use {
     md_process: core.process
     md_sys: core.sys
@@ -104,7 +106,23 @@ md_mask_key: fn(text: String, key: String) -> String {
 md_mask: fn(text: String) -> String {
     masked := md_mask_digests(text)
     loop key in MD_VOLATILE_KEYS -> masked = md_mask_key(masked, key)
-    masked
+    md_sort_premises(masked)
+}
+
+// Every `"premises":[...]` list with its masked values sorted.
+md_sort_premises: fn(text: String) -> String {
+    parts: text.split("\"premises\":[").to_list()
+    out := [String]{parts[0]}
+    loop part in parts.slice(1, parts.len()) {
+        if part.split_once("]") == .Val(list) {
+            values := if list.before == "" -> [String]{} else -> list.before.split(",").to_list()
+            values.sort()
+            out.push("\"premises\":[{values.join(",")}]{list.after}")
+        } else {
+            out.push("\"premises\":[{part}")
+        }
+    }
+    out.join("")
 }
 
 // A door's recording: its exit code, its stdout, and its stderr JSON lines.
@@ -129,6 +147,11 @@ md_record: fn(jet: String, door: MachineDoor) -[Env, Exec, Time.Wait]> String {
 #Test("masking hides digests and volatile values and keeps the rest") {
     text: `{"elapsed_ms":25,"report":"test:f726f69157eddc8b:2654214:1794911227967456533","build":{"target":"x86_64-unknown-linux-gnu"},"id":"f65c3e3fe3eb78838a69885607fa7186","span":{"start":78}}`
     assert_eq(md_mask(text), `{"elapsed_ms":"<volatile>","report":"<volatile>","build":{"target":"<volatile>"},"id":"<hash>","span":{"start":78}}`)
+}
+
+#Test("masking sorts a derivation's premises after their digests are masked") {
+    text: `{"premises":["double doubles","f65c3e3fe3eb78838a69885607fa7186"],"rule":"x","premises":[]}`
+    assert_eq(md_mask(text), `{"premises":["<hash>","double doubles"],"rule":"x","premises":[]}`)
 }
 
 #Test("every machine door prints the bytes it printed before the case rules") {

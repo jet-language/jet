@@ -75,7 +75,7 @@ WebQuery: struct {
 
     queue: fn(&self, data: String) -> Int WebQueryError! { queue(self, data) }
 
-    retry: fn(&self, replay: fn(String)) -> Int WebQueryError! { retry(self, replay) }
+    retry: fn<E>(&self, replay: fn(String) E!) -> Int (WebQueryError | E)! { retry(self, replay) }
 
     set_online: fn(&self, online: Bool) Never! { set_online(self, online) }
 
@@ -211,7 +211,7 @@ queue: fn(q: &WebQuery, data: String) -> Int WebQueryError! {
     q.generation
 }
 
-retry: fn(q: &WebQuery, replay: fn(String)) -> Int WebQueryError! {
+retry: fn<E>(q: &WebQuery, replay: fn(String) E!) -> Int (WebQueryError | E)! {
     if q.status == WebQueryStatus.Fetching || q.status == WebQueryStatus.Pending {
         return Err(WebQueryError.Invalid)
     }

@@ -55,10 +55,10 @@ ExpiringSecret: struct<T> {
 
     expires_at_ms: fn(self) -> Int Never! { self.deadline_ms }
 
-    with: fn<R>(self, callback: fn(T) -> R Never!) -> R Expired! {
+    with: fn<R, E>(self, callback: fn(T) -> R E!) -> R (Expired | E)! {
         if self.observer.now() > self.deadline_ms -> take_expired<T>(self.value)
         guard: self.value.guard_read()
-        loan_secret<T, R>(guard.value, callback)
+        loan_secret<T, R, E>(guard.value, callback)
     }
 
     impl Close {
@@ -84,7 +84,7 @@ priv take_expired: fn<T>(storage: Shared<T?>) Never! {
 
 // A read parameter's pattern payload is an existing non-owning read window.
 // Keep the guard held in `with` until the source callback has returned.
-priv loan_secret: fn<T, R>(value: T?, callback: fn(T) -> R Never!) -> R Expired! {
+priv loan_secret: fn<T, R, E>(value: T?, callback: fn(T) -> R E!) -> R (Expired | E)! {
     if value == {
         .Val(secret) -> Ok(callback(secret))
         None -> Err(Expired{})

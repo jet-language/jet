@@ -167,13 +167,13 @@ jet_cli_native_c_tools: fn() -[FS, Env, Exec, Time.Wait]> JetCLINativeCTools Jet
 }
 
 // The same choice for a Jet program's C closure. The pack route takes the
-// engine's pack and the musl sysroot the engine builds once per Hangar (no
-// variable names a sysroot, so `JET_CC_PACK_ROOT` does not serve here): it
-// compiles for musl and links musl's `libc.a` and the pack's compiler-rt
-// builtins; the pack ships no unwinder, so a Rust helper takes the host C
-// compiler's `libgcc_eh.a`. The host route links the musl `libc.a` a
-// find_folder search chooses on LIBRARY_PATH and the host compiler's
-// `libgcc_eh.a` and `libgcc.a`.
+// engine's pack and the musl sysroot the engine builds once per pack and
+// target (no variable names a sysroot, so `JET_CC_PACK_ROOT` does not serve
+// here): it compiles for musl and links musl's `libc.a` and the pack's
+// compiler-rt builtins; the pack ships no unwinder, so a Rust helper takes
+// the host C compiler's `libgcc_eh.a`. The host route links the musl
+// `libc.a` a find_folder search chooses on LIBRARY_PATH and the host
+// compiler's `libgcc_eh.a` and `libgcc.a`.
 jet_cli_closure_c_tools: fn(rust_helper: String?) -[FS, Env, Exec, Time.Wait]> JetCLIClosureCTools JetCLIForeignLinkError! {
     named: cli_sys.get("CC") != None || cli_sys.get("AR") != None
     if !named {

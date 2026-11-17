@@ -26,8 +26,6 @@ CC_KEPT_BY_APP: "kept: the app runs it later and shows its Notice"
 
 CC_RUN_BY_RUNTIME: "kept: the runtime calls it later, outside any caller"
 
-CC_TYPED_BY_COMPILER: "typed by the compiler's own signature of the call, which gains the callback's failure with the Core one"
-
 CORE_CALLBACKS_REVIEWED: [CoreCallbackReviewed]{
     {name: "app.App.background", why: CC_KEPT_BY_APP},
     {name: "app.App.tray", why: CC_KEPT_BY_APP},
@@ -50,17 +48,8 @@ CORE_CALLBACKS_REVIEWED: [CoreCallbackReviewed]{
     {name: "core.browser.run_case", why: "a failure of the body is the attempt's outcome, recorded and retried, not the call's"},
     {name: "core.web.serve", why: "a failure of `build` stops the program before any socket binds"},
     {name: "core.web.bind", why: "a failure of `build` stops the program before any socket binds"},
-    {name: "core.crypto.vault.ExpiringSecret.with", why: CC_TYPED_BY_COMPILER},
     {name: "core.data.track", why: "never called: the key only names the tracked rows' key type"},
-    {name: "core.testing.histories", why: CC_TYPED_BY_COMPILER},
-    {name: "core.web.router.route", why: CC_TYPED_BY_COMPILER},
-    {name: "core.web.router.route_with_search_codec", why: CC_TYPED_BY_COMPILER},
-    {name: "core.web.router.not_found", why: CC_TYPED_BY_COMPILER},
-    {name: "core.web.forms.typed_set_async_validator", why: CC_TYPED_BY_COMPILER},
-    {name: "core.web.forms.typed_validate_field", why: CC_TYPED_BY_COMPILER},
-    {name: "core.web.query.WebQuery.retry", why: CC_TYPED_BY_COMPILER},
-    {name: "core.web.query.retry", why: CC_TYPED_BY_COMPILER},
-    {name: "core.web.table.update_row", why: CC_TYPED_BY_COMPILER},
+    {name: "core.testing.histories", why: "a failure of a callback is the comparison's `unavailable` outcome, not the call's"},
 }
 
 // What the guard read: each problem, and the name of every function it
