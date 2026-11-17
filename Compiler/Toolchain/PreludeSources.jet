@@ -62,7 +62,9 @@ TextFile: struct {
 
 // One copy's block: its comment, its path constant and its raw string.
 render_copy: fn(row: PreludeCopy, source: String) -> String PreludeSourcesError! {
-    if source.contains(FENCE) -> return Err(sources_fail("{row.source} holds ``` and cannot be a raw string"))
+    if source.contains(FENCE) {
+        return Err(sources_fail("{row.source} holds ``` and cannot be a raw string"))
+    }
     lines := [String]{}
     loop line in row.comment.split("\n") -> lines.push("// {line}")
     if row.path != "" -> lines.push("{row.constant}_PATH: \"{row.path}\"")
@@ -97,23 +99,33 @@ render_targets: fn(copies: [PreludeCopy], read: [TextFile]) -> [TextFile] Prelud
 
 generated_files: fn() -[FS]> [TextFile] PreludeSourcesError! {
     read := [TextFile]{}
-    loop row in COPIES -> read.push(TextFile{path: row.source.copy(), text: read_text(row.source) ?? return Err(err)})
+    loop row in COPIES {
+        read.push(TextFile{path: row.source.copy(), text: read_text(row.source) ?? return Err(err)})
+    }
     render_targets(COPIES, read)
 }
 
 prelude_sources_main: fn(args: [String]) -[FS]> String PreludeSourcesError! {
     mode: if args.len() == 0 -> "--check" else -> args[0]
-    if args.len() > 1 || (mode != "--check" && mode != "--write") -> return Err(sources_fail("usage: jet Toolchain/PreludeSources.jet [--check|--write]"))
+    if args.len() > 1 || (mode != "--check" && mode != "--write") {
+        return Err(sources_fail("usage: jet Toolchain/PreludeSources.jet [--check|--write]"))
+    }
     generated: generated_files() ?? return Err(err)
     differing := [String]{}
     loop file in generated {
         current: if files.exists(file.path) -> read_text(file.path) ?? return Err(err) else -> ""
         if current == file.text -> next
         differing.push(file.path.copy())
-        if mode == "--write" -> files.write(file.path, file.text) ?? return Err(sources_fail("cannot write {file.path}: {err}"))
+        if mode == "--write" {
+            files.write(file.path, file.text) ?? return Err(sources_fail("cannot write {file.path}: {err}"))
+        }
     }
-    if mode == "--write" -> return Ok("prelude source copies written: {differing.len()} rewritten of {generated.len()}")
-    if differing.len() == 0 -> return Ok("prelude sources check passed: {COPIES.len()} copies in {generated.len()} wholly generated files match")
+    if mode == "--write" {
+        return Ok("prelude source copies written: {differing.len()} rewritten of {generated.len()}")
+    }
+    if differing.len() == 0 {
+        return Ok("prelude sources check passed: {COPIES.len()} copies in {generated.len()} wholly generated files match")
+    }
     Err(sources_fail("{differing.join(", ")} differ from what Compiler/Prelude generates (a generated file takes no hand edit, inside its raw strings or outside them); run jet build Compiler"))
 }
 
@@ -131,6 +143,10 @@ run: fn() { print(prelude_sources_main(process.args()) ?? process.fail(1, err.me
     assert_eq(out[0].path, "t.jet")
     assert_eq(out[0].text, "// First.\n// Second.\nA: #run {{ ```a: 1\n``` }}\n\n// Bee.\nB_PATH: \"jet:b.jet\"\nB: #run {{ ```b: 2\n``` }}\n")
     assert_eq(out[1].text, "// Sea.\nC: #run {{ ```a: 1\n``` }}\n")
-    if render_targets(copies, [TextFile]{TextFile{path: "a.jet", text: "has ``` inside"}, TextFile{path: "b.jet", text: ""}}) == .Ok(_) -> panic("a fence in the source must fail")
-    if render_targets(copies, [TextFile]{TextFile{path: "a.jet", text: ""}}) == .Ok(_) -> panic("a source with no text must fail")
+    if render_targets(copies, [TextFile]{TextFile{path: "a.jet", text: "has ``` inside"}, TextFile{path: "b.jet", text: ""}}) == .Ok(_) {
+        panic("a fence in the source must fail")
+    }
+    if render_targets(copies, [TextFile]{TextFile{path: "a.jet", text: ""}}) == .Ok(_) {
+        panic("a source with no text must fail")
+    }
 }

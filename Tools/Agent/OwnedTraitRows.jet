@@ -523,18 +523,35 @@ render_row: fn(source: TraitSource, traits: [TraitSource], checked_text_declared
             lines := [String]{}
             loop method in source.methods {
                 rendered: render_method(method, flag(source, "any_receiver"), "trait {source.name}") ?? return Err(err)
-                lines.push("        {rendered},\n")
+                lines.push("                {rendered},\n")
             }
             shares: optional_text(source, "shares")
-            contract = "OwnedContract.Methods{{methods: [OwnedMethod]{{\n{lines.join("")}    }}, associated: {quoted(source.associated)}, shares: {shares}}}"
+            contract = "OwnedContract.Methods{{\n            methods: [OwnedMethod]{{\n{lines.join("")}            }},\n            associated: {quoted(source.associated)},\n            shares: {shares},\n        }}"
         }
     }
-    laws := ""
+    fields := [String]{
+        "name: \"{source.name}\"",
+        "local: {flag(source, "local")}",
+        "bare_bound: {flag(source, "bare_bound")}",
+        "raw_return: {flag(source, "raw_return")}",
+        "contract: {contract}",
+        "operators: {quoted(words(source, "operators"))}",
+        "commutative: {flag(source, "commutative")}",
+        "requires: {quoted(words(source, "requires"))}",
+        "auto_derive: {flag(source, "auto_derive")}",
+        "auto_derive_family: {optional_text(source, "auto_derive_family")}",
+        "bundle: {flag(source, "bundle")}",
+        "through_elements: {flag(source, "through_elements")}",
+    }
     if source.laws.len() > 0 {
         rendered: loop law in source.laws -> "OwnedLaw{{name: \"{law.name}\", source: \"{jet_text(law.source)}\"}}"
-        laws = ", laws: [OwnedLaw]{{{rendered.join(", ")}}}"
+        fields.push("laws: [OwnedLaw]{{{rendered.join(", ")}}}")
     }
-    Ok("    OwnedTrait{{name: \"{source.name}\", local: {flag(source, "local")}, bare_bound: {flag(source, "bare_bound")}, raw_return: {flag(source, "raw_return")}, contract: {contract}, operators: {quoted(words(source, "operators"))}, commutative: {flag(source, "commutative")}, requires: {quoted(words(source, "requires"))}, auto_derive: {flag(source, "auto_derive")}, auto_derive_family: {optional_text(source, "auto_derive_family")}, bundle: {flag(source, "bundle")}, through_elements: {flag(source, "through_elements")}{laws}}},")
+    // A row stays on one line unless its contract spans lines; then, as
+    // `jet fmt` writes it, each field has a line of its own.
+    if !contract.contains("\n") -> return Ok("    OwnedTrait{{{fields.join(", ")}}},")
+    expanded: loop field in fields -> "        {field},\n"
+    Ok("    OwnedTrait{{\n{expanded.join("")}    }},")
 }
 
 declared: fn(traits: [TraitSource], name: String) -> Bool Never! {
@@ -695,7 +712,7 @@ MINIMAL_TRAITS: "// Two traits.\nAdd: trait {{\n    local: Bool{{true}},\n    op
     assert(rendered.contains("OwnedMethod{{name: \"query\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"sql\", access: AccessConvention.Read, ty: Type.Named{{name: \"SQL\"}}}}}}, returns: Val(Type.Result{{ok: Type.List{{element: Type.Map{{key: Type.String, key_span: None, value: Type.Named{{name: \"DBValue\"}}}}}}, err: Type.Named{{name: \"DBError\"}}}})}}"))
     assert(rendered.contains("OwnedMethod{{name: \"fill\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Write}}, params: [OwnedParam]{{OwnedParam{{name: \"buffer\", access: AccessConvention.Write, ty: Type.List{{element: Type.IntN{{signed: false, bits: 8}}}}}}, OwnedParam{{name: \"limit\", access: AccessConvention.Read, ty: Type.Int}}}}, returns: Val(Type.Result{{ok: Type.Int, err: Type.Named{{name: \"IOError\"}}}})}}"))
     assert(rendered.contains("OwnedMethod{{name: \"close\", receiver: OwnedReceiver.Fixed{{access: AccessConvention.Move}}, params: [OwnedParam]{{}}, returns: Val(Type.Result{{ok: Type.Named{{name: \"Unit\"}}, err: Type.Named{{name: \"IOError\"}}}})}}"))
-    assert(rendered.contains("auto_derive: true, auto_derive_family: Val(\"Bundle\"),"))
+    assert(rendered.contains("        auto_derive: true,\n        auto_derive_family: Val(\"Bundle\"),\n"))
     assert(rendered.contains("OwnedTrait{{name: \"Literal.Int\", local: false, bare_bound: false, raw_return: false, contract: OwnedContract.Literal{{source: Type.Int}},"))
     block: render_dictionary_rows(MINIMAL_TRAITS) ?? panic(err.message)
     assert(block.contains("{{token: \"Bundle\", query: \"bundle\", registry_name: \"OWNED_TRAITS\","))
