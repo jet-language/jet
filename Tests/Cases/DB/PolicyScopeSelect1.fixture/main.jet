@@ -1,0 +1,24 @@
+// A row policy narrows the rows of its one table and nothing else: a scope
+// over `notes` runs `SELECT 1` and reads another table unchanged, narrows
+// its own table's rows to its user, and refuses SQL that would read its
+// table's rows past the policy through a join.
+use db: core.db
+
+run: fn() {
+    c := db.open_memory()
+    _: db.migrate(c.all_rows(), "notes-v1", [SQL{"CREATE TABLE notes (owner TEXT, title TEXT)"}, SQL{"CREATE TABLE tags (tag TEXT)"}]) ?? panic("migrate: {err}")
+    _: c.execute(SQL{"INSERT INTO notes (owner, title) VALUES ('ann', 'plan'), ('ben', 'diary')"}) ?? panic("notes: {err}")
+    _: c.execute(SQL{"INSERT INTO tags (tag) VALUES ('work')"}) ?? panic("tags: {err}")
+    owned: db.policy("notes", "owner == user") ?? panic("policy: {err}")
+    ann: c.with_policy(owned, "ann")
+    one: ann.query(SQL{"SELECT 1 AS one"}) ?? panic("select 1: {err}")
+    print("select 1: {one.len()} row, one = {db.row_int(one[0], "one") ?? -1}")
+    tags: ann.query(SQL{"SELECT tag FROM tags"}) ?? panic("tags: {err}")
+    print("another table: {tags.len()} row")
+    mine: ann.query(SQL{"SELECT title FROM notes"}) ?? panic("notes: {err}")
+    print("ann's notes: {mine.len()}")
+    if ann.query(SQL{"SELECT tag FROM tags JOIN notes"}) == {
+        .Ok(_) -> { print("a join through notes: ran") }
+        .Err(_) -> { print("a join through notes: refused") }
+    }
+}

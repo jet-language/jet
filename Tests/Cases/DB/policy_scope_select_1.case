@@ -1,0 +1,9 @@
+# A row policy narrows its one table and nothing else: a scope over `notes`
+# runs `SELECT 1` and reads another table unchanged, narrows `notes` to its
+# user, and refuses a join that would read `notes` past the policy.
+fixture: PolicyScopeSelect1.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = policy_scope_select_1.stdout.expected

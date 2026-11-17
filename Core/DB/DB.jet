@@ -727,8 +727,10 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
         return Err(db_error("policy-scoped SQL must be one statement without control characters"))
     }
     if sql_has_comment(raw) -> return Err(db_error("policy-scoped SQL cannot contain comments"))
+    // An all-rows scope (`Store.all_rows`, a policy with no table) acts for
+    // no user.
     user_raw: user.bytes()
-    if sql_blank(user_raw, 0, user_raw.len()) || user_raw.len() > 1048576 || sql_has_control(user_raw, false) {
+    if policy.table != "" && (sql_blank(user_raw, 0, user_raw.len()) || user_raw.len() > 1048576 || sql_has_control(user_raw, false)) {
         return Err(db_error("policy user identity is empty, too long, or contains control characters"))
     }
     tokens: sql_tokens(raw)
@@ -745,6 +747,7 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
         }
         return Err(db_error("row policy supports SELECT, INSERT, UPDATE, and DELETE only"))
     }
+    if policy.table == "" -> return Ok(sql.copy())
     target: sql_target_index(tokens, kind)
     table: sql_lower_text(policy.table)
     // A row policy constrains the rows of its own table (#6070). SQL that
@@ -907,9 +910,12 @@ Store: struct {
         DBScope{state: self.state.copy(), policy: RowPolicy{table: policy.table.copy(), owner: policy.owner}, user: user.copy()}
     }
 
-    // Opens a transaction; the `DBTransaction` it returns has to be committed
-    // or rolled back.
-    begin: fn(self) -[DB]> DBTransaction DBError! { db_begin(self.state, false) }
+    // The scope over every row: no row policy narrows what it reads or
+    // writes, so a helper written for a `DBScope` serves a script's
+    // connection as well as a server's policy scope.
+    all_rows: fn(self) -> DBScope Never! {
+        DBScope{state: self.state.copy(), policy: RowPolicy{table: "", owner: false}, user: ""}
+    }
 
     close: fn(self) -[DB]> Bool Never! { db_shutdown(self.state) }
 
@@ -918,6 +924,26 @@ Store: struct {
     // `guard` gives it one.
     table: fn<K: [Encode, Decode, Comparable], T: [Encode, Decode]>(self, name: String, key: &&fn(T) -[]> K) -> Table<K, T> Never! {
         Table<K, T>{state: self.state.copy(), name: name.copy(), key_of: key.move(), policy: None}
+    }
+
+    // An opened connection queries directly, meaning every row: `query`
+    // needs DB.Read and `execute` DB.Write, as on its `all_rows()` scope.
+    // `begin` opens a transaction; the `DBTransaction` it returns has to be
+    // committed or rolled back.
+    impl Driver {
+        query: fn(self, sql: SQL) -[DB.Read]> [[String:DBValue]] DBError! {
+            scope_query(self.all_rows(), sql, false)
+        }
+
+        query_one: fn(self, sql: SQL) -[DB.Read]> [String:DBValue]? DBError! {
+            scope_query_one(self.all_rows(), sql)
+        }
+
+        execute: fn(self, sql: SQL) -[DB.Write]> Int DBError! {
+            scope_execute(self.all_rows(), sql, false)
+        }
+
+        begin: fn(self) -[DB]> DBTransaction DBError! { db_begin(self.state, false) }
     }
 
     // One line: where the database lives and whether it is still open.
@@ -961,10 +987,7 @@ DBScope: struct {
         }
 
         query_one: fn(self, sql: SQL) -[DB.Read]> [String:DBValue]? DBError! {
-            rows := scope_query(self, sql, false) ?? return Err(err)
-            if rows.len() == 0 -> return Ok(None)
-            first: rows.remove(0, .Slot) ?? panic("database first row disappeared")
-            Ok(Val(first))
+            scope_query_one(self, sql)
         }
 
         execute: fn(self, sql: SQL) -[DB.Write]> Int DBError! { scope_execute(self, sql, false) }
@@ -2338,6 +2361,14 @@ priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String:D
     db_join(guard.value, scope.state, call) ?? return Err(err)
     if read == .Val(table) -> db_live_watch(guard.value, scope.state, table)
     __driver_query(guard.value.driver, scoped.text, scoped.values)
+}
+
+// The first row `sql` reads through `scope`, or None when it reads none.
+priv scope_query_one: fn(scope: DBScope, sql: SQL) -> [String:DBValue]? DBError! {
+    rows := scope_query(scope, sql, false) ?? return Err(err)
+    if rows.len() == 0 -> return Ok(None)
+    first: rows.remove(0, .Slot) ?? panic("database first row disappeared")
+    Ok(Val(first))
 }
 
 // ---- live queries (#1158) ----------------------------------
@@ -3900,6 +3931,25 @@ priv driver_cache_parity_probe: fn() Never! {
     assert(policy_allows(owned, user: "alice", owner: "alice"))
     assert(!policy_allows(owned, user: "alice", owner: "bob"))
     assert(policy_allows(open, user: "alice", owner: "bob"))
+}
+
+#Test("an opened connection queries every row with no row policy, and schema changes stay in db.migrate") {
+    store: open_memory()
+    _: migrate(store.all_rows(), "notes-v1", [SQL]{sql_raw("CREATE TABLE notes (id INTEGER, owner TEXT)"), sql_raw("CREATE TABLE tags (note INTEGER, tag TEXT)")}) ?? panic("migrate: {err}")
+    assert_eq(store.execute(sql_raw("INSERT INTO notes (id, owner) VALUES (1, 'ann'), (2, 'ben')")) ?? panic("notes: {err}"), 2)
+    _: store.execute(sql_raw("INSERT INTO tags (note, tag) VALUES (2, 'home')")) ?? panic("tags: {err}")
+    assert_eq((store.query(sql_raw("SELECT id FROM notes")) ?? panic("every note: {err}")).len(), 2)
+    joined: store.query(sql_raw("SELECT notes.owner, tags.tag FROM notes JOIN tags ON tags.note = notes.id")) ?? panic("join: {err}")
+    assert_eq(joined.len(), 1)
+    assert_eq(row_text(joined[0], "owner") ?? panic("owner"), "ben")
+    one: store.query_one(sql_raw("SELECT 1 AS one")) ?? panic("select 1 reads one row")
+    assert_eq(row_int(one, "one") ?? panic("one"), 1)
+    if store.execute(sql_raw("DROP TABLE tags")) == .Ok(_) {
+        panic("a connection dropped a table outside db.migrate")
+    }
+    owned: RowPolicy{table: "notes", owner: true}
+    assert_eq((store.with_policy(owned, "ann").query(sql_raw("SELECT id FROM notes")) ?? panic("ann: {err}")).len(), 1)
+    assert(store.close())
 }
 
 #Test("migration identities hash every field with its length") {

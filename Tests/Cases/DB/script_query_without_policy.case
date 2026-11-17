@@ -1,0 +1,11 @@
+# A script queries an opened database with no row policy: `c.query` and
+# `c.query_one` read every row, joining two tables or touching none, and
+# need only DB.Read; `c.execute` writes and needs DB.Write. Schema changes
+# still go through db.migrate, which takes the connection's all-rows scope,
+# and a row policy still narrows the scope `with_policy` takes from it.
+fixture: ScriptQueryWithoutPolicy.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 0
+stdout: = script_query_without_policy.stdout.expected
