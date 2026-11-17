@@ -98,8 +98,11 @@ board (and the live SSE UI) is how the owner finds out — there is no
 side channel.
 
 Post Now-page context with
-`tower briefing post --file report.md --title "…" --by me` and
-`tower status post --file snapshot.json --by me`. Status snapshots
+`tower publish --title "…" --file report.md --by me` and
+`tower status post --file snapshot.json --by me`. `publish` posts the
+briefing, commits the board, pushes the board branch and exits non-zero
+(`E_PUBLISH`) unless `origin` then holds that very commit;
+`tower briefing post` posts without publishing. Status snapshots
 contain milestone progress and workstreams, not an owner task queue.
 The removed `ownerActions` field is rejected with `E_INVALID`; omit it.
 Use ballots, owner verification, messages, and card closures for owner work.
@@ -150,6 +153,7 @@ tower decision post D-ID --by me             # a reviewed ballot enters the owne
 tower ballots                                # every ballot by stage, with the work waiting on it
 tower decision list --open --drafts          # agent review: include drafts, hidden from owner views
 tower card update '#12' --phase done --log "criteria met" --by orchestrator
+tower apply --file plan.json --by me         # many edits as one all-or-nothing write; --dry-run first
 tower card release '#12' --by me              # if you stop without finishing
 tower card release '#12' --by me --handoff "parser done, sema left, watch X"  # required if the card is `building`
 ```
@@ -517,7 +521,33 @@ tower board commit --by <agent>   # end of your card-operation batch: commit now
 tower board check                 # exit 1 (E_BOARD_STALE) when the committed
                                   # board trails the working copy by more than
                                   # one batch
+tower publish --title "…" --file report.md --by <agent>
+                                  # post a briefing, commit, push the board
+                                  # branch and prove origin holds the commit
 ```
+
+## Plans: many edits in one write
+
+`tower apply --file plan.json --by me` (or `--file -` / `--stdin`) runs a plan
+as one write: one revision and one backup, so one `tower undo` reverts the
+whole plan, and one `board.apply` event summarizes it beside each op's own
+event. Every op's shape is checked first and all problems are listed at once;
+then the ops run in order, and the first refused op (`op N (…): reason`)
+leaves the board untouched. `--dry-run` runs the plan on a copy and writes
+nothing. A plan is `{ "ops": [ … ] }`; each op runs the same checks as its
+CLI verb:
+
+| `op` | Needs | May carry |
+|---|---|---|
+| `meet` | `card`, `n`, `evidence` | `kind` |
+| `edit` | `card`, `n`, and one of `text`, `proof`, `blockedBy` | `reason` (needed with `text`) |
+| `add` | `card`, `text` | `proof`, `blockedBy` |
+| `remove` | `card`, `n`, `reason` | — |
+| `move` | `card`, `n`, `to` | `reason` |
+| `card.update` | `card` and a field | stored card fields (`phase`, `epoch`, `milestoneId`, `tags`, `blockedBy`, …), `addTags`, `removeTags`, `logEntry` |
+| `epoch.update` | `id` and a field | `name`, `goal`, `status`, `order`, `exitCriteria` |
+| `milestone.add` | `epochId`, `title` | `id`, `goal`, `criteria` |
+| `milestone.update` | `id` and a field | `title`, `goal`, `criteria`, `archived` |
 
 ## Gauntlet standings (#6834)
 

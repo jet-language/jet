@@ -132,12 +132,18 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
 - **Questions** — owner ⇄ agent threads on a card.
 - **Ideas** — capture bay; promote to a card when real.
 - **Events** — append-only audit trail of every mutation, with `--by` attribution.
-- **Now reports** — `tower status post --file snapshot.json --by me` posts the
+- **Now reports** — `tower publish --title "…" --file report.md --by me` posts
+  a briefing, commits the board, pushes the board branch and exits non-zero
+  unless `origin` then holds that commit. `tower status post --file
+  snapshot.json --by me` posts the
   latest status snapshot with milestone progress, workstreams, workers,
   blockers, and optional card/decision links. Briefings and the status board
   provide context; ballots, owner verification, messages, and card closures
   remain their own authoritative surfaces. Snapshots containing the removed
   `ownerActions` field are rejected with `E_INVALID`; omit that field.
+- **Plans** — `tower apply --file plan.json --by me` runs many card, criterion,
+  epoch and milestone edits as one all-or-nothing write (one revision, one
+  undo); `--dry-run` checks the plan and writes nothing.
 - **History** — a done card, or a ratified decision, sits live for
   `config.retireAfterDays` (default 3) before it retires into
   `Tools/tower/.tower/history.json` — the walk-back buffer. A card's own decisions and
@@ -153,16 +159,17 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
 ## CLI
 
 ```
-tower status | state | next | events
+tower status | state | next | events | ballots
 tower brief [ref] [--agent me] [--json] [--no-claim]
 tower card      list|show|add|update|claim|release|delete
-tower decision  list|show|add|update|ratify|reopen|delete
+tower decision  list|show|add|update|review|post|ratify|reopen|delete
 tower question  list|ask|answer|delete
 tower message   list|add|done
 tower idea      list|add|promote|delete
 tower epoch     list|add|update|remove|current
 tower milestone list|add|update|criteria|closeout|verify|delete
 tower archive   status | show <id> | restore <id>
+tower apply --file plan.json [--dry-run] | publish --title "…" --file report.md
 tower init | serve | import
 ```
 

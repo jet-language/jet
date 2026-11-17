@@ -24,6 +24,7 @@ import { machinePersonalInfo } from './personal-info.mjs';
 import { readGauntletStandings } from './gauntlet-standings.mjs';
 import { gauntletStandingsText, projectGauntletStandings } from './ui/gauntlet.js';
 import { closestCards, epochChain, epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
+import { applyPlan } from './apply.mjs';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
 
@@ -171,6 +172,8 @@ const COMMAND_FLAGS = {
   undo: { flags: ['expectRev'] },
   githook: { verbs: { install: [], 'post-commit': [] } },
   board: { verbs: { commit: by(), check: [] } },
+  apply: { flags: payload('dryRun', 'expectRev') },
+  publish: { flags: by('title', 'file') },
   gauntlet: { verbs: { standings: ['table'] } },
 };
 
@@ -1518,6 +1521,34 @@ function cmdBoard(store, { pos, flags }) {
   }
 }
 
+// `tower apply --file plan.json`: a plan of board edits as one all-or-nothing
+// write (apply.mjs). --dry-run runs it on a copy and writes nothing.
+function cmdApply(store, { flags }) {
+  const plan = readPayload(flags);
+  if (!plan) throw new TowerError('E_USAGE', 'apply needs --file plan.json (or --file - / --stdin)');
+  if (flags.dryRun) {
+    const pair = store.loadPair();
+    const result = applyPlan(structuredClone(pair.state), plan, flags.by, store.config, structuredClone(pair.history));
+    return out(flags, `dry run: ${result.applied} op${result.applied === 1 ? '' : 's'} would apply (${result.summary}); nothing written`, { ...result, dryRun: true });
+  }
+  const { result, state } = store.mutate((s, cfg, history) => applyPlan(s, plan, flags.by, cfg, history), { expectRev: flags.expectRev });
+  return out(flags, `applied ${result.applied} op${result.applied === 1 ? '' : 's'} in one write at rev ${state.meta.rev} (${result.summary})`, { ...result, rev: state.meta.rev });
+}
+
+// `tower publish`: post the briefing, commit the board, push the board branch
+// and confirm origin holds that very commit; anything less exits non-zero.
+function cmdPublish(store, { flags }) {
+  if (typeof flags.title !== 'string' || !flags.title.trim()) throw new TowerError('E_USAGE', 'publish needs --title "…"');
+  if (typeof flags.file !== 'string') throw new TowerError('E_USAGE', 'publish needs --file FILE (markdown)');
+  if (typeof flags.by !== 'string' || !flags.by) throw new TowerError('E_USAGE', 'publish needs --by <agent>');
+  const body = readFileSync(flags.file === '-' ? 0 : flags.file, 'utf8');
+  const { result: briefing } = store.mutate(s => db.postBriefing(s, { title: flags.title, body, sections: [], by: flags.by }));
+  const pushed = store.publishBoard(flags.by);
+  if (!pushed.ok) throw new TowerError('E_PUBLISH', `posted briefing ${briefing.id}, but the board is not published: ${pushed.reason}`);
+  return out(flags, `published briefing ${briefing.id} — ${briefing.title}; origin/${pushed.branch} = ${pushed.head.slice(0, 10)}`,
+    { briefing: briefing.id, branch: pushed.branch, commit: pushed.head, remote: pushed.remote });
+}
+
 // #6834: the gauntlet table the Gauntlet page shows, as text: every entry's
 // grid from the entries' manifests with the table's measured rows. --table
 // names another table file than the machine's
@@ -1701,6 +1732,8 @@ export async function run(argv) {
       case 'events':    return cmdEvents(store, sub);
       case 'undo':      return cmdUndo(store, sub);
       case 'board':     return cmdBoard(store, sub);
+      case 'apply':     return cmdApply(store, sub);
+      case 'publish':   return cmdPublish(store, sub);
       case 'gauntlet':  return await cmdGauntlet(store, sub);
       case 'githook':
         if (sub.pos[0] === 'post-commit') return await githookPostCommit(store);

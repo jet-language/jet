@@ -27,7 +27,7 @@ import {
 import { withLock, withLockAsync } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
 import { CLOSURE_KINDS, SCRATCH_PATH_RE, createCommitResolver } from './durable.mjs';
-import { checkBoard, commitBoard } from './board-git.mjs';
+import { checkBoard, commitBoard, pushBoardVerified } from './board-git.mjs';
 import { migrateRecommendationLosses, migrateRetiredPlanning, migrateReviewPasses } from './migrate.mjs';
 import { checkProof, migrateCriterionProof, proofInput } from './proof.mjs';
 import { chainRank, criteriaCounts, epochChain, epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
@@ -410,6 +410,10 @@ export function openStore(dataDir) {
   const mutateAsync = (fn, options) => withLockAsync(file, () => afterWrite(mutateLocked(fn, options)));
   const commitBoardNow = (by) => withLock(file, () => commitBoardLocked(by));
   const checkBoardNow = () => checkBoard(dataDir, boardFiles(), config, readConsistentLive().meta.rev);
+  // `tower publish`: commit under the lock, then push and read origin back
+  // outside it, so writers never wait on the network.
+  const publishBoardNow = (by) => pushBoardVerified(dataDir, boardFiles(), config,
+    withLock(file, () => commitBoard(dataDir, boardFiles(), config, { rev: readConsistentLive().meta.rev, by, push: false })));
 
   // Replace the whole state (undo). Guarded by expectRev so an interleaved
   // write from another agent can never be silently reverted. Undo touches
@@ -454,7 +458,7 @@ export function openStore(dataDir) {
 
   return {
     file, dataDir, config, load, loadLive, loadPair, mutate, mutateAsync, restore, restoreArchived, loadHistory,
-    commitBoard: commitBoardNow, checkBoard: checkBoardNow,
+    commitBoard: commitBoardNow, checkBoard: checkBoardNow, publishBoard: publishBoardNow,
     project: () => { const pair = loadPair(); return project(pair.state, config, pair.history); },
   };
 }
@@ -1820,7 +1824,7 @@ export function updateHardeningCard(s, ref, p, config, history = emptyHistory())
   return addOrUpdateHardeningCard(s, { ...p, ref }, config, history);
 }
 
-const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'probe', 'visualMedia', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId', 'hardeningFixture', 'hardeningState'];
+export const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'probe', 'visualMedia', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId', 'hardeningFixture', 'hardeningState'];
 
 // D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Agent closure needs a
 // nonempty checklist with every row met or verified on durable evidence. A
