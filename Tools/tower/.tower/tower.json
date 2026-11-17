@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111075,
+    "rev": 111100,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -53557,8 +53557,8 @@
       "title": "One build plan produces several configurations of the same program",
       "body": "## Outcome\n\n`fn build` can register one program in several configurations in a single plan: debug, release, web, or a cross target. Each configuration has its own profile and target, and all are built by one `jet build` with separate outputs.\n\n## Evidence\n\n- In Jai, every `compiler_create_workspace` call carries its own `Build_Options` (The Way to Jai @19cb4b7 `examples/30/30.1_workspaces.jai`, `30.13_dynamic_libraries.jai`).\n- Blow's \"build all\" builds a debug workspace and a release workspace in parallel (`OHZwYYW9koI` 00:03:01, 2015-10-15). Tsoding's game build produces release, debug and WebAssembly outputs on every build (`kjF_YuLsPqo` 00:05:13, 2022).\n- In Jet, `BuildTarget` has a toolchain handle but no profile (`crates/jet-comptime/src/Comptime/Build/targets.rs:129-143`). The profile is chosen once per invocation (`--profile`/`--release`, D-BUILD-DEFAULT1). Two configurations of one program need two invocations.\n\n## Ballot\n\nThe public `BuildContext` API shape, on Main's ballot list (2026-11-15): a profile and target argument on each registered target, or a named configuration set applied to a target. Builds on #4913's one option table and D-BUILDCTX-FLAGS1 defaults.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e4",
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -53637,7 +53637,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:26.421Z",
-      "updated": "2026-11-16T12:56:30.242Z",
+      "updated": "2026-11-17T01:40:52.404Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -53810,8 +53810,8 @@
       "title": "Compiler event parity: import, program-wide generation, placeholders, link and artifact stages, per-invocation hooks",
       "body": "## Outcome\n\nA package can replace the link step of one executable target with a declared, cached build action. That action receives the compiler's object files and libraries and produces the artifact. A package can also run checked steps on the written artifact, such as signing or embedding an icon or manifest, with failures reported as Jet diagnostics.\n\n## Evidence\n\n- Jai: setting `use_custom_link_command` makes the compiler stop at the `READY_FOR_CUSTOM_LINK_COMMAND` phase. `Message_Phase.compiler_generated_object_files` lists the objects, and the metaprogram links them itself, then calls `compiler_custom_link_command_is_complete(w)` (focus-editor `first.jai` @c6b3ead lines 75, 153-155, 357-391).\n- `PRE_WRITE_EXECUTABLE` lets a metaprogram replace the executable (Blow `AdoShhhnsQA` 00:03:53, 2018). `POST_WRITE_EXECUTABLE` reports the linker exit code (The Way to Jai @19cb4b7 `examples/30/30.5_compiler_intercept.jai:46-53`). Focus sets the icon and manifest after a successful link.\n- Jet links internally (`Compiler/JetBackend/Source/Image/ELF.jet:30`) or through rustc. D-HOOK-STAGES1 makes `compiler.emitted(Artifact)` read-only, with findings only. `b.action` (D-BUILDACTION1) can add steps over declared outputs, but it cannot take over an executable target's link.\n\n## Ballot\n\nAmending D-HOOK-STAGES1 or D-BUILDACTION1 to allow a typed link step (c1, c2) is public API; it is on Main's ballot list (2026-11-15). Linker-argument options belong to #5005.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e4",
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -53924,7 +53924,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:38.986Z",
-      "updated": "2026-11-16T12:56:31.165Z",
+      "updated": "2026-11-17T01:40:53.947Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -53938,7 +53938,7 @@
       "body": "Owner order. mem-safety release plan (97f139e75..e3da4d72e, in r26): 35/36 programs at the ~94 KB start-up floor, 0 untracked frees, lircheck 0 DOUBLE/0 UAF over 91 LIRs. Open: probe mixed 1.89 MB (loop working copy over a temporary collection; overwrite in a loop blocked by back-edge move), 89 static LEAK reports (exact-Int results), full 129-program corpus sweep, vc-base regression in small batches. Workers LeakGaps + CorrectAudit. Tools: $JET_SCRATCH_ROOT/discovery/memverify/{loop.sh,lircheck.mjs,memwait.sh}.",
       "kind": "bug",
       "track": "epoch",
-      "epoch": "e3",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -54242,7 +54242,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-16T07:36:29.780Z",
-      "updated": "2026-11-16T12:56:35.924Z",
+      "updated": "2026-11-17T01:40:55.456Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -54368,8 +54368,8 @@
       "title": "Expert opt-out model: how experts turn off Jet's guardrails to reach Jai-level power",
       "body": "## Outcome\n\nDecision D-JAI-EXPERT1 picks the one opt-out mechanism every Jai-parity power uses. Jai has no guardrails; Jet keeps them as defaults. Today each power has its own switch (`metaprogramming: unrestricted`, `#Impure` plus `--gate impure=allow`, `#StepLimit`), and some powers have none (full host access while compiling, build-wide check relaxation, string code, duck-typed generics). Audit rows: A05-A07, A20, E12-E17, B03, B06, B16.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e4",
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -54454,7 +54454,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:40.464Z",
-      "updated": "2026-11-17T01:28:48.235Z",
+      "updated": "2026-11-17T01:40:57.028Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -54559,8 +54559,8 @@
       "title": "Context parity with Jai: readable context, typed keys, scratch storage, assertion handler",
       "body": "## Outcome\n\nDecision D-JAI-CONTEXT1. Jai passes an implicit context (allocator, logger, temporary storage, assertion handler, stack trace, print style, thread index; #add_context, push_context). Jet has the D-CTX1 `#Context(...) { }` block for allocator, logger and deadline. The earlier context-extension card #3502 is frozen by the owner pending what context adds; the owner's 2026-10-16 direction (every Jai feature) supersedes that freeze for this decision. Audit rows: F01-F13, E24, E34.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e4",
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -54845,7 +54845,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T10:54:43.172Z",
-      "updated": "2026-11-16T12:56:44.386Z",
+      "updated": "2026-11-17T01:40:58.537Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -55011,8 +55011,8 @@
       "title": "C source import: translate C into editable safe Jet, keep the rest behind the checked binder (c2v lesson)",
       "body": "Source: mine-for-jet V report (Docs/research, 2026-10-16). V's c2v translates whole C and C++ projects to V through Clang's JSON AST (vlang/c2v README:1-86; DOOM and Doom 3 demos) and is V's main on-ramp for C codebases. Jet has no C source importer: Docs/spec/reference/migration-tier-map.md:28 keeps C binder-only by D-ADOPT-TIER1=A. The owner wants C compatibility as an on-ramp for new users (2026-10-16). V's model has two defects Jet must not copy: translated files relax the language rules (@[translated]: globals, pointer writes without unsafe, C scalar conversions; doc/docs.md:10990-11014), and vlang/doom still links the C platform layer and has broken sound (doom README:5-9). Jet already ratified one Clang declaration extractor for C and C++ (D-CBIND-UPSTREAM1=A, D-CIMPORT1=A, #4174), so a body importer can extend the same extraction instead of adding a parser. D-CSRC-IMPORT1=A (ratified) settles whether Jet translates C source into editable Jet, and so the C row of the tier map.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e6",
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -55072,7 +55072,7 @@
       "parentId": "c0969ekj",
       "needsAcceptance": false,
       "created": "2026-10-16T13:34:44.515Z",
-      "updated": "2026-11-16T12:56:46.296Z",
+      "updated": "2026-11-17T01:41:00.037Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -55365,8 +55365,8 @@
       "title": "Jet Doom: a separate GPL-2.0 project, written in Jet, proved by demo sync and benchmarked against C, V, Go, C#, Rust and Zig ports",
       "body": "Owner direction 2026-10-16 (chat, mine-for-jet V session): 'the jet doom port would go in a separate project so that the license doesnt conflict. jet stays MIT but jet doom would be whatever license is needed. i also want as much as possible to be jet not leaning on c ffi/interop for most of it.' Doom's source is GPL-2.0 (id Software release; Chocolate Doom, doomgeneric, gore are GPL-2.0), so the port lives in its own repository under GPL-2.0; nothing GPL enters the Jet repository. Evidence: vlang/doom is a c2v translation of Chocolate Doom's src/doom only, linked against Chocolate Doom's C platform objects and SDL; its README lists inlined #define constants and broken sound effects; last push 2024-07 (vlang/doom build_whole_project.sh:10-36, README.md:1-9). Peers with source (gh metadata 2026-10-16): Chocolate Doom (C, reference accuracy), doomgeneric (C, portable), AndreRenaud/gore (Go), sinshu/managed-doom (C#), Henrique194/iron-doom (Rust), lumi2021/zigDOOM (Zig), vlang/doom (V). Feasibility: game logic (~45k C lines in Chocolate Doom src/doom plus the shared engine files) is fixed-point integer code, tables and a software renderer, all expressible in safe Jet with fixed-width wrapping arithmetic and fixed lists; the only OS edge is the Core platform layer (#5035). The C source importer (#5034, ballot D-CSRC-IMPORT1) can seed the port but is not required. Assets: Freedoom IWADs (BSD-3) can be shipped with tests; shareware doom1.wad only as an unmodified download.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e15",
+      "track": "epoch",
+      "epoch": "e25",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -55451,7 +55451,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-16T13:37:15.355Z",
-      "updated": "2026-11-16T12:56:47.258Z",
+      "updated": "2026-11-17T01:41:01.568Z",
       "updatedBy": "Main",
       "goals": [
         "G13"
@@ -55465,7 +55465,7 @@
       "body": "## Outcome\nOne session protocol for every external client, per the ballots ratified 2026-10-17. D-SESSION-WIRE1=A: newline-delimited JSON `jet.session.v1`, UTF-8, one message per line. Reports are the D-REPORT-MACHINE1 object unchanged, build events come from the `compiler.Event` registry (D-COMPILER-EVENT1=A), the first line is `hello` with the toolchain identity, a mismatch refuses the attach (the CLI runs fresh and explains under --verbose; Jetpack reports E1227), lines are capped at 1 MiB, and artifacts never cross the wire. D-SESSION-ENTRY1=C: `--listen=-` on `jet check|build|test|run|dev` serves the protocol on stdio, with no hidden verb. D-SESSION-OWNER1=A: `jet dev --serve` and `jet self lsp --serve` may own the workspace endpoint. The first owner holds the lock in `.jet/session` and the other attaches as a client. This amends D-BUILD-SESSION1 (`dev --serve` only), and D-JPK-NODAEMON1 holds because both are foreground processes.\n\nThis card also carries the real work of #2529 (D-BUILD-SESSION1). That card is `done` without code: there is no `--serve`, `--session`, socket or tests/cli_dev_session.rs at 161cf85cc (finding F1).\n\n## Plan\n1. T2 codec: CompilerService.jet's tagged-value/CtValue codecs become the session JSON codec; `foundation_parse_protocol_json` stays the reader; the narrow diagnostic codec is deleted and the D-REPORT-MACHINE1 writer used.\n2. `--listen=-` flag row in CLICommands.jet next to --threads/--trace; Front.jet parsing for the five verbs; session loop over the S1 session; per-verb `update` per the ratified D-SESSION-UPDATE1 table.\n3. `--serve` on `jet dev` and `jet self lsp`: endpoint security as ratified (0700 per-user dir, symlinks rejected, peer credentials, nonce from .jet/session, one owner per workspace by lock); `--session=auto|off|required` attach on build/run/test; `invoke` envelope; Ctrl-C cancels the client's request.\n4. Docs/spec/reference/cli.md section for --listen and --serve; help snapshots regenerated in the same commit.\n\nIdentity set: Compiler/ only, so this lands after a0_004.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -55565,7 +55565,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-17T23:30:06.429Z",
-      "updated": "2026-11-16T12:56:53.526Z",
+      "updated": "2026-11-17T01:41:03.127Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -55578,8 +55578,8 @@
       "title": "jet build Compiler/ --trace just works: native multi-package builds, build-entry resolution, self-contained install",
       "body": "## Owner intent (2026-10-18 14:20)\nFrom the repo root, `jet build Compiler/` (optionally with `--trace`) builds the compiler using the `jet` on PATH. It needs no .mjs assembler, no --runtime-dir, no env vars and no prlimit. The NixOS `jet` points at the latest approved or released compiler.\n\n## Owner rulings (this session; recorded as ratified)\n- **`--trace`** prints the live phase trace to stdout/stderr. Each phase prints as it ends (wall, CPU s, cores busy, memory), with a summary at the end.\n- **`--trace=<file>`** writes the trace to `<file>` as Chrome trace events, readable in Perfetto.\n- **`Compiler/` becomes a package root.** Add `Compiler/package.jet` as a workspace whose members are the compiler packages.\n- **`jet build <dir>` runs the package's BUILD entry,** `fn build(...) -> ... { ... }` (the build script), not `run.jet`, which is the executable entry point.\n  - The Compiler workspace's build entry builds the `jet` CLI executable from Compiler/JetCli.\n  - Research the existing build-entry convention first and follow it: Project.jet already recognizes `@build.jet`, and `build.jet` is a project marker in ReceiptIdentity.jet.\n  - Anything not yet ratified goes on a ballot.\n\n## Gaps measured 2026-10-18 with the round-D compiler (dev bc5e44948)\n1. **Multi-package builds with path deps.** `jet build Compiler/JetCli/run.jet` reads every dependency package (after 4 stray hard links were broken), then fails module resolution:\n   - E0610 \"No module named `jet_sema`/`jet_driver`/`jet_foundation` in scope\";\n   - E0603 \"the imported dependency module is not present in its authorized package root\";\n   - 3,474 stderr lines in total.\n\n   Port package-graph module resolution (transitive path deps) to the Jet driver. Then retire the Tools/agent/native-compiler.mjs assembly for the self-build (greenfield cutover: one mechanism).\n2. **`jet build <directory>`.** The Jet CLI refuses it (\"not part of the Jet-hosted CLI yet\", Front.jet:583 jet_cli_not_ported). Port the resolution from directory to package.jet or workspace to build entry.\n3. **Stack.** The compiler needs a 1 GiB stack (prlimit or ulimit). Run the compiler's main on a large stack inside the runtime or CLI.\n4. **Toolchain root and identity** come from env vars (JET_TOOLCHAIN_ROOT, JET_COMPILER_IDENTITY). Default both from the install layout (the binary's directory); inside a Jet checkout, use that checkout. The interim launcher does this today.\n5. **C toolchain** for the native link and foreign C. Today it comes from Tools/agent/jet-env (nix develop; ~3-4 s per command). The NixOS package should provide cc/ld directly.\n6. **`--trace` and `--trace=<file>`** as above. Today only the JET_TRACE_FILE env var exists.\n7. **The `jet` on PATH was the Rust implementation.** ~/nixos/modules/apps/dev/jetlang.nix execs the newest cargo target, and the cargo targets were removed in the 2026-10-18 cleanup.\n\n## Interim (in place 2026-10-18 14:15)\n- `~/.local/share/jet-seeds/current` points to `round-d/`, which holds `jet`, `jet-runtime/`, `toolchain/` (an export of bc5e44948), `IDENTITY` and `SOURCE`.\n- The launcher `~/.local/share/jet-seeds/bin/jet` supplies the stack, the toolchain and identity defaults, and jet-env.\n- It is linked as `$JET_STATE_ROOT/targets/approved/release/jet`, which the existing NixOS wrapper scans, so `jet` on PATH runs the approved compiler without a rebuild.\n- Approving a new compiler means repointing `current`.\n- Follow-up: change jetlang.nix to exec the launcher directly (one nixos-rebuild) and drop the cargo scan.\n\n## Acceptance\n- In a clean checkout, `jet build Compiler/` builds a jet CLI identical to chain s2 for the same SHA.\n- `jet build Compiler/ --trace` shows the live phases.\n- It works with only the approved `jet` on PATH.\n- Collect-all diagnostics.\n- Examples and UI snapshots cover the new CLI behaviour (I4/I5).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e14",
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -55742,7 +55742,7 @@
       "parentId": "c0fqk5ka",
       "needsAcceptance": false,
       "created": "2026-10-18T18:18:42.399Z",
-      "updated": "2026-11-16T12:56:55.436Z",
+      "updated": "2026-11-17T01:41:04.613Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -56327,8 +56327,8 @@
       "title": "Scripting ergonomics ballots B1-B10 (list +, slot +=, char-index find, write, top-level statements, fail, Match.named, is_executable, Path.script_dir, Regex lint)",
       "body": "# Script ergonomics ballots (final; for Main to file on Tower)\n\nOne entry per proposed new API or syntax. Each names the exact spelling, the semantics, a\nbefore/after taken from the four idiomatic tool rewrites\n(`$JET_STATE_ROOT/scratch/ScriptErgonomics/idiomatic/{TestShards,WebBundleCheck,LexerKeywordRows,Lifecycle}.jet`),\nand the saving counted with `count.sh` (program lines / whitespace tokens: no blanks, comments,\n`#Test` blocks or `package {}`). A saving marked [INFERENCE] is read off the before/after text,\nnot measured on a rewritten file.\nNot ballots (bug fixes, no new surface). Landed: `pad_start`/`pad_end` link, `remove_prefix`/`remove_suffix`\nmethods (efbc29643), web baseline (17537755c). Patch ready, not landed (see lane report): the prelude\nrows below and the collecting-loop propagation fix.\n- readable prelude names `eprint`, `read_file`, `write_file`, `file_exists`, `keep`, `Clock`,\n  `Instant`, `Date`, `Duration` resolve without `use` (Spec.md:305-317, D-CORE-PRELUDE1/2);\n  `Date.today()` reaches `LocalDate` statics; `files.read`/`read_file` take `String | Path`\n  like `write`; `.or_err(...)`/`keep(...)` no longer ICE (core.prelude loads);\n- integer selectors of every width (`{i64:Hex(8)}`) and `Pad`/`PadLeft` of any displayable value\n  (`{n:PadLeft(2, \"0\")}`), as codegen already lowered them;\n- `\"x\".pad_start(n, f)` / `pad_end` link (they share the `rjust`/`ljust` runtime routes);\n- `s.remove_prefix(p)` / `s.remove_suffix(p)` are methods (String.jet already had the bodies);\n- `Int.parse` (any fallible call) inside a collecting loop propagates like the statement form\n  (former draft B9).\n\n---\n\n## B1 — List concatenation with `+`\n- Spelling: `a + b` where `a: [T]`, `b: [T]` → new `[T]`; operands unchanged (read, not moved).\n- Semantics: eager copy of `a` then `b`. `View<T>` operands are E0108 (write `.copy()`); maps and\n  sets keep their own operators (none). No new token: `+` widens its operand set, which is\n  language surface, so it needs ratification.\n- Beginner path: `all: header + rows`. Expert path: `xs.extend(ys)` (in place, no copy).\n- Alternatives: (a) `xs.concat(ys)` method only; (b) status quo\n  `out := xs.copy(); loop y in ys -> out.push(y)`.\n- Before (Lifecycle.jet:62): `text: \"{HEADER.join(\"\\n\")}\\n{(loop row in rows -> \"{row}\\n\").join(\"\")}\"`\n  After: `text: \"{(HEADER + rows).join(\"\\n\")}\\n\"`.\n- Before (LexerKeywordRows, 2 sites): `values := m.get(k) ?? [String]{}` / `values.push(v)` /\n  `m[k] = values` — After: `m[k] = (m.get(k) ?? [String]{}) + [v]`.\n- Saving: −4 lines in LexerKeywordRows, −0 lines/−9 tokens in Lifecycle [INFERENCE].\n- Trade-off: `+` hides an O(n) copy; the L0501 copy-in-loop lint covers the hot case.\n\n## B2 — Compound update of a list slot (`xs[i] += n`)\n- Spelling: `xs[i] op= v` for `xs: [T]` (mutable binding), `i: Int`, every compound operator that\n  exists for `T`.\n- Semantics: one bounds check, then read-modify-write of the slot; an out-of-range index stops\n  before any write, so no partial update exists. Maps keep E0164 (a missing key has no value\n  to update); maps get no sugar in this ballot.\n- Today: E0164 \"Compound assignment can't target an indexed slot\".\n- Before (TestShards.jet:44): `loads[lightest] = loads[lightest] + row.weight`\n  After: `loads[lightest] += row.weight`.\n- Saving: 0 lines, −2 tokens per site.\n- Alternative: keep E0164 (explicit total update).\n\n## B3 — `String.find` / `rfind` return a character index as `Int?`\n- Spelling (changed signature, same names): `s.find(needle) -> Int?`, `s.rfind(needle) -> Int?`.\n- Semantics: the character (Unicode scalar) index of the first/last match, `None` when absent, so\n  it composes with `slice`, `len` and `regex.Match.start/end`, which already count characters.\n  Byte search stays available as `s.bytes().index_of_seq(n.bytes())`.\n- Today: `find` returns a UTF-8 byte offset (Core/Text/String.jet:83) and `-1` when absent;\n  `\"héllo // c\".slice(0, \"héllo // c\".find(\"//\"))` prints `héllo /` (probe r1.jet).\n- Before (LexerKeywordRows literal port): `at: line.find(\"//\")` +\n  `code: if at < 0 -> line else -> byte_slice(line, 0, at)` plus a `byte_slice` helper.\n  After: `code: line.slice(0, line.find(\"//\") ?? line.len())`.\n- Saving: the byte-helper family in every text port (PortReview counted 103 lines across ports;\n  −1 line per site [INFERENCE]).\n- Changes a ratified API: one cutover migrating every caller.\n- Alternatives: (a) keep bytes, add `slice_bytes(a, b)`; (b) only document `split_once`.\n\n## B4 — Ambient `write(text)` (stdout without a newline)\n- Spelling: `write(text: String)` in the readable prelude, beside `print`/`eprint`.\n- Semantics: writes `text` to stdout unchanged (no newline), same `IO` effect and flush rules\n  as `print`; `#NoPrelude` hides it like `print`.\n- Today: `print` always appends `\\n`; raw text needs `out := term.stdout()` +\n  `out.write(text).drop(\"...\")`; `term.stdout().write(t)` is E0111 (a plain call cannot change a temporary).\n- Before (Lifecycle.jet:64-66): `else if args[0] == \"--print\" {` / `out := term.stdout()` /\n  `out.write(text).drop(\"lifecycle text\")` / `}` — After: `else if args[0] == \"--print\" -> write(text)`.\n- Saving: −3 lines in Lifecycle, and its `use core.term` line once B4 lands (−1).\n- Alternatives: `print(text, end: \"\")` (labelled argument on an existing builtin); allow `&` on a\n  temporary handle for one call.\n\n## B5 — Script entry without `fn run()` (top-level statements)\n- Spelling: a loose file (or `#!` script) with no `fn run` may contain statements at top level.\n- Semantics: those statements, in order, are the body of an implicit fallible `fn run()`;\n  `fn`, `struct`, constants and `use` stay items; a file that has `fn run` and top-level\n  statements is an error. Authority and package rules are unchanged.\n- Today: \"Ordinary files execute only their explicit `fn run` body\" (Examples/features/script_mode).\n- Before: `fn run() {` … `}` (2 lines + one indent level). After: the body alone.\n- Saving: −2 lines per script (TestShards, WebBundleCheck, Lifecycle, LexerKeywordRows: −8).\n- Trade-off: two entry shapes (I8), mitigated because the implicit form desugars to exactly\n  `fn run()`. Coordinate with lane ScriptMode (`#!`, `-A`).\n\n## B6 — `fail(message, code)` for expected failures\n- Spelling: `fail(message: String, code: Int{1}) -> Never` in the readable prelude.\n- Semantics: writes `message` and a newline to stderr, runs scope guards, exits with `code`.\n  Unlike `panic` (program bugs, E3001 frame) it prints no frame.\n- Before (all four rewrites): `fn fail(message: String) -> Never {` / `term.eprint(message)` /\n  `process.exit(1)` / `}` (TestShards names it `usage` with code 64).\n- After: `fail(\"...\")` / `fail(\"...\", 64)` at the call sites; no helper.\n- Saving: −4 lines per script (−16 over the four), and `use core.process` where only `exit`\n  used it.\n- Alternative: `#Error struct` + `return Err(...)` from `run()` (exists; prints a framed report).\n\n## B7 — Named regex groups on `Match`\n- Spelling: `m.named(name: String) -> String?` on `core.regex.Match`.\n- Semantics: the text of the named group `(?<name>…)` in this match; `None` when the group did\n  not participate or the name is not in the pattern (the pattern is known: a `Regex{…}` literal\n  makes an unknown name a compile error).\n- Today: groups are positional (`m.groups[2]`); named groups parse but have no accessor on the\n  source engine path.\n- Before (Lifecycle.jet:45-49): `kind: m.groups[0]`, `name: m.groups[2]`,\n  `m.groups[3].trim()`. After: `m.named(\"kind\") ?? \"\"`, `m.named(\"name\") ?? \"\"`, …\n- Saving: 0 lines; removes index bookkeeping (readability only).\n\n## B8 — `files.is_executable(path)`\n- Spelling: `files.is_executable(path: String | Path) -[FS]> Bool` in `core.files`.\n- Semantics: true when `path` names a regular file the current process may execute; `false` for\n  a failed probe, like `is_file`.\n- Before (WebBundleCheck.jet:39): `if (process.cmd([\"test\", \"-x\", \"{root}/{JET_ENV}\"]).run() ?? fail(...)).code != 0 -> fail(...)`\n  After: `if !files.is_executable(\"{root}/{JET_ENV}\") -> fail(...)`.\n- Saving: 0 lines, −8 tokens, and no `Exec` authority for the probe.\n\n## B9 — `Path.script_dir()`\n- Spelling: `Path.script_dir() -> Path` (static on the prelude `Path`).\n- Semantics: the directory of the entry source file of the running program (the file `jet run`\n  was given), canonicalized; for a built binary, the directory recorded at build time.\n- Today every ported tool assumes cwd = repository root; the originals computed it from\n  `import.meta.url` / `BASH_SOURCE`.\n- Before: `root: files.cwd()` (wrong when run from elsewhere).\n  After: `root: Path.script_dir().join(\"../..\")`.\n- Saving: 0 lines; fixes a behavior difference from the originals.\n- Trade-off: one more ambient read of the entry path; must be defined for `jet build` output.\n\n## B10 — Lint: constant `re.compile(\"…\")` should be a `Regex{…}` literal\n- Spelling: new lint code (next free L-code) \"this pattern is a constant; write `Regex{…}`\",\n  with an auto-fix that rewrites the call and un-escapes backslashes.\n- Semantics: fires on `re.compile(<string literal>)` / `compile_with(<literal>, flags)` with no\n  interpolation; the literal is compile-checked and needs no `?? panic`.\n- Evidence: the four ports re-implemented 873 lines of scanners (PortReview) and no port used a\n  `Regex{}` literal; rewrites with literals were 0.7–1.1× the originals.\n- Saving: per site, −1 `?? panic(...)` and doubled backslashes.\n\n\nEvidence: idiomatic rewrites and measurements in $JET_STATE_ROOT/scratch/ScriptErgonomics/ (count.sh, idiomatic/, gaps.md). Additional items from the port review, on Main's ballot list (2026-11-15): merging a child process stderr into stdout or redirecting it to a file (ProcessSpec), and process.exit requiring the Exec effect.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e17",
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -56420,7 +56420,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-21T11:49:42.286Z",
-      "updated": "2026-11-16T12:56:56.400Z",
+      "updated": "2026-11-17T01:41:06.168Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -56511,8 +56511,8 @@
       "title": "Build D-LINK-MODEL1=A: each linked part has its own linkage, shown by jet inspect",
       "body": "## Situation\nJet native programs are fully static Linux executables today: the runtime pack carries a private musl libc (used only for pthread, getaddrinfo DNS, and libm math) and no dynamic loader. The code already marks musl as interim (Compiler/JetRuntime/imports.list:10 \"musl until glibc dynamic linking\"; Thread.jet: \"interim pthread imports die when musl leaves the pack\"; raw clone/futex already written). D-JPK-VARIANT1=D ratified `runtime/libc` and `linkage` as native variant axes with context-derived defaults, but no decision says which default applies when.\n\nThe owner wants Jet-native raylib (#5086) that works out of the box. The GPU is only reachable through the vendor driver the user's OS ships (Linux: libGL/libEGL/libvulkan + libX11/libwayland-client, built against glibc; macOS: Metal/libSystem; Windows: d3d/opengl32/kernel32). Those must be loaded from the user's system at run time by the platform's own loader. A static musl process cannot load a glibc-built driver (the driver expects glibc's loader, TLS and allocator).\n\nOther languages: C, C++, Rust, Jai link the platform libc dynamically by default (Jai: `#system_library \"d3d11\"`, OS loader, no custom loader). Go and Zig build fully static binaries with no libc for pure programs and switch to dynamic platform-libc linking when a program needs system libraries (cgo / linkSystemLibrary). macOS and Windows effectively require dynamic system libraries for every program.\n\n## Same program under each option\n```jet\n// tool.jet (CLI)        // game.jet\nfn run() {               fn run() {\n    print(\"hi\")              window := game.open(800, 600, \"demo\")\n}                            ...\n                         }\n```\n\n### A. Static by default, dynamic when the program needs OS libraries (recommended)\n- tool.jet -> one static file, no libc (musl removed: Jet's own threads/DNS/math), runs on any Linux of the same architecture.\n- game.jet -> dynamically linked against the platform libc (glibc on Linux), GPU/window drivers loaded by the OS loader. The compiler decides from what the program reaches (graphics/windowing Core APIs, `#Import(c)` of a system library); no annotation needed.\n- Expert path: `jet build --linkage=static|dynamic` (the D-JPK-VARIANT1 axis) to force either; forcing static on a program that needs drivers is a diagnostic.\n- macOS/Windows: always dynamic against system libraries (the platforms require it); static only on Linux.\n- Trade-offs: two link modes to maintain and test (I9 parity runs both). Dynamic Linux builds inherit glibc version skew: build against an old-enough glibc baseline (as Go/Rust release builds do) so binaries run on older distros.\n- Edge cases: a static program that later adds graphics silently becomes dynamic (shown in `jet build` output and `jet inspect`); plugin hosts (#5087) stay static (the WASM interpreter needs no OS library).\n\n### B. Always dynamic (C/Rust/Jai model)\n- Both programs link the platform libc dynamically. One mode, simplest mental model, drivers always reachable.\n- Trade-offs: no \"copy one file to any Linux box\" for CLI tools and servers (glibc skew; containers need a libc); slightly slower start; musl still leaves.\n\n### C. Always static, with a Jet-written loader for driver libraries\n- Listed for completeness, not recommended: vendor GPU drivers (Mesa, NVIDIA) are glibc-built and depend on glibc loader internals and TLS; a custom loader in a non-glibc process would have to reimplement glibc's ABI. Impractical and fragile.\n\n### D. Keep today's model (static musl, no graphics without dlopen)\n- Raylib stays headless-only natively; contradicts the owner direction in #5086.\n\n## Related owner directions (2026-10-21)\n- HarfBuzz is removed: core.font shapes with Jet's own shaper only (correct for Latin/Cyrillic/Greek; complex scripts wrong until a Jet-native OpenType GSUB/GPOS shaper exists - Rust's rustybuzz and Go's go-text are pure-language precedents).\n- musl leaves the runtime in every option (Jet-owned threads, DNS resolver, math).\n",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e11",
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -56572,7 +56572,7 @@
       "parentId": "c0rc2iou",
       "needsAcceptance": false,
       "created": "2026-10-21T14:37:08.760Z",
-      "updated": "2026-11-16T12:56:58.430Z",
+      "updated": "2026-11-17T01:41:07.714Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -56833,8 +56833,8 @@
       "title": "Web target on JetIR: a new IR to JS/Wasm backend (A4)",
       "body": "The Jet compiler has no live web path: no Jet CLI route constructs JetDriverCompileTarget.Web; web builds today run only through the Rust driver (crates/jet-driver MIRWeb emitter) and Bootstrap/Host/Native.rs, emitting MIR to JS (JetCodegen Emit/Web, 167 functions over 7 files) and MIR to Rust source to rustc for the Wasm bucket. JetIR/JetBackend have no JS or Wasm emitter. A6 S4b deletes Emit/Web with the MIR pipeline, and R7a deletes the Rust driver, so the 113 --target web cases stop running until this lands. Scope: an IR to JS backend (or IR to Wasm replacing rustc), move the JS/Wasm partition facts (web_marker/bucket, on MIR functions today) to checked facts or IR, keep the JS preludes (DOM, game, harfbuzz, timezone). I9: web must carry the same meaning as native. Acceptance: the --target web examples and UI cases pass on the Jet CLI.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e11",
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -57027,7 +57027,7 @@
       "parentId": "c022g7qw",
       "needsAcceptance": false,
       "created": "2026-10-23T04:11:56.439Z",
-      "updated": "2026-11-16T12:57:04.407Z",
+      "updated": "2026-11-17T01:41:09.243Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -58217,8 +58217,8 @@
       "title": "Secure, current and reproducible systems in the AI-attack era (JetOS and Jetpack)",
       "body": "Owner discussion 2026-10-23: Jet aims to replace Nix. Nix buys reproducibility by pinning, while current security advice (AI shortens patch-to-exploit from weeks to hours) is \"update everything fast\". These goals conflict less than they seem: a declarative system can make updates atomic, reversible and verifiable, so it should be the easiest system to keep current. This umbrella collects the directions to discuss and plan later; nothing here is scheduled now.\n\nDirections (child cards):\n1. Need fewer updates: memory safety (I1) removes the largest CVE class; per-program authority limits blast radius.\n2. Make updating cheap and safe: a security lane separate from feature pins, atomic generations, health checks, automatic rollback, exact advisory matching, optional targeted patching (grafts).\n3. Make updates trustworthy: capability diffs on update, independent-builder reproducibility checks, signed trust root and transparency log (#2199), hermetic builds with no install scripts (#4760), bootstrappability from a small seed (#4154).\n4. Declarative plus imperative: imperative changes write back to the declaration, giving an audit trail, drift detection and attested generations.\n5. AI agents as users: capability-limited agent sessions by default.\n\nChoices for ballots (Q1 and Q3 are on Main's ballot list (2026-11-15); Q2 is settled by D-AUTH-DEFAULT1=A, #5459):\nQ1. Should JetOS apply security fixes automatically by default, or only when the declaration opts in?\nQ2. Should a dependency update that widens authority (new network, file write, #Unsafe) be blocked until approved, or only flagged?\nQ3. Is temporarily breaking bit-reproducibility for patch speed (grafts) acceptable if recorded and reconciled, or should reproducibility be absolute with a faster build farm instead?\n\nRelated existing cards: #2199 trust root, #3033 release updates without breaking the app, #3418 inferred effects and policy, #4154 bootstrap resilience, #4195 portable sandboxed app format, #4268 authority and sandbox boundaries, #4760 build hooks in the sandbox, #5070 package effects block.",
       "kind": "idea",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -58279,7 +58279,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:29.670Z",
-      "updated": "2026-11-16T12:57:07.314Z",
+      "updated": "2026-11-17T01:41:10.741Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -58332,8 +58332,8 @@
       "title": "Supply-chain security: exact advisory matching, targeted grafts, capability diff on update, verified reproducibility and a declarative audit trail",
       "body": "Jetpack and JetOS know every input a system is built from (lock and closure). Match security advisories against that exact graph, down to the version and build options, so \"am I affected?\" is an exact query instead of a guess, and the security lane knows exactly what to update. Covers both packages and whole JetOS generations.",
       "kind": "idea",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -58429,7 +58429,7 @@
       "parentId": "c00tizy7",
       "needsAcceptance": false,
       "created": "2026-10-23T08:10:33.234Z",
-      "updated": "2026-11-16T12:57:15.984Z",
+      "updated": "2026-11-17T01:41:12.288Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -58693,8 +58693,8 @@
       "title": "Compile speed: 30M lines per second, with per-phase lines/s budgets",
       "body": "Owner asked 2026-10-23 for the theoretical maximum compiler speed. Self-compile input: Compiler+Core non-test = 1,263 files, 576k lines, 38.9 MB; output ~55-63 MB. Today about 30 s wall / ~120-150 CPU-s (about 90,000 cycles per token). Reference per-core targets (Carbon toolchain goals): lex+parse 10M lines/s, semantic analysis 1M lines/s; direct x64 emission (no LLVM) can plausibly match about 1M lines/s at O0. Applied: about 1.2 s single-core, about 80-100 ms on 16 cores with near-linear sema/codegen scaling, plus output write/fault cost. Physical floor (memory bandwidth plus a few hundred cycles per token end to end) is tens of ms on 16 cores. Levers: data-oriented compiler data (index-based SoA IR, arenas, no per-node RC or atomics), interned symbols (no string_compare), hashed maps, parallel sema/codegen per function, SIMD lexing, direct emission without a link step, huge pages for output. Work: add per-phase lines/s to the trace report; set phase budgets; card each gap.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e11",
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -59434,7 +59434,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-23T14:31:32.550Z",
-      "updated": "2026-11-16T12:57:23.567Z",
+      "updated": "2026-11-17T01:41:13.843Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -59857,8 +59857,8 @@
       "title": "JetDevserver: finish the port, so jet dev serves the app preview, canvas, devtools and web hot swap from the self-hosted toolchain",
       "body": "Destination: Compiler/JetDevserver checks clean, is built into `jet`, and serves:\n- `jet dev`'s app preview on a stable port;\n- `jet dev --canvas`, `jet run --app` and `jet run --share`;\n- the browser host's workbench and in-app devtools;\n- web hot swap for `jet dev --target=web`.\n\nPlain `jet dev` (watch plus rerun) lives in JetCli and works without it.\n\nOperative ruling: finish the port. The owner ruled on 2026-11-09 to keep JetDevserver and finish it. Under the AGENTS.md authority order, an explicit owner instruction (rank 1) outranks a ratified decision (rank 2), and the newer ruling wins, so it governs over D-DEVSERVER1=A (delete and rebuild lean, ratified 2026-10-24). Amending the D-DEVSERVER1 record to match the 2026-11-09 ruling is on Main's ballot list (2026-11-15); the port proceeds under the ruling.\n\nState 2026-11-13: G5DevX-2 owns the port in hour-sized steps, and the registration errors are cleared (34e02ff42f). The hot-swap paths refuse with not-available until #6625 lands. The 67 undeclared imports take path (b) (Main's log 2026-11-13).\n\nSource: O0Image-3's census 2026-10-24 and CFreeLead3's census 2026-11-09.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e14",
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -60073,7 +60073,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-24T19:25:14.992Z",
-      "updated": "2026-11-16T12:57:36.591Z",
+      "updated": "2026-11-17T01:41:15.421Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -60086,8 +60086,8 @@
       "title": "Scripting measured against every peer: the ScriptBench gate, the run phases and the peer audit",
       "body": "Owner ruling, 2026-10-28. This replaces the old rule where a `#!` first line silently granted every permission.\n\nIn plain words: a Jet script gets no extra powers just by having a `#!` line. The first time it needs one (reading files, the network, and so on), Jet asks you in the terminal, once. Your answer is remembered for that exact script. If you already wrote `-A` (allow all), Jet does not ask. Printing, arguments, stdin, time, randomness and exit are always free.\n\nBehavior:\n1. A `#!` launch line no longer grants anything implicitly (today `jet_cli_source_invocation` in Compiler/JetCli/Source/Cli/Authority.jet sets `all = true` for any `#!/` file).\n2. `-A` (or `--allow=...`) written on the launch line, e.g. `#!/usr/bin/env -S jet -A`, applies as if typed. `./script` and `jet run script.jet` behave the same. `-A` on the command line works as today.\n3. Ask once: when the run needs a permission it was not given and stdin/stderr are a terminal, Jet asks before the program starts. Sema already knows the required effects, so one prompt lists every missing permission and its resource, for example \"read files under ./data\" or \"connect to the network\". It offers allow once, always allow this script, and no. \"Always\" is remembered against the script's content hash in the project's single top-level `.jet/` (or the user cache for loose scripts). If the content changes, Jet asks again.\n4. With -A present, Jet never asks. Outside a terminal (CI, pipes), Jet never asks either: it fails with the exact-grant error (5).\n5. Exact-grant errors name the smallest grant (e.g. `--allow=FS.Read:./data`) and also say that `-A` grants every effect. `jet fix` writes the chosen grant onto the launch line (scripts) or into package.jet (packages).\n6. Free basics: stdout/stderr printing, args, stdin, env-free time reads, randomness and exit never need a grant.\n7. `--verbose` under -A prints one line listing the effects the run actually used, so users learn what to narrow.\n\nOne meaning on every tier (I9): the prompt and grants live in the shared CLI authority path, not per backend.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e17",
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -60380,7 +60380,7 @@
       "parentId": "c0svnelx",
       "needsAcceptance": false,
       "created": "2026-10-28T10:49:58.414Z",
-      "updated": "2026-11-17T01:38:10.762Z",
+      "updated": "2026-11-17T01:41:16.950Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -60836,7 +60836,7 @@
       "body": "A workspace is one folder holding several packages. Today `jet check`, `jet test`, `jet build` and `jet doc` at the workspace root refuse with \"ambiguous\" and exit 2, `jet status` shows a phantom `target run.jet`, and a failing dependency hides its own errors. This card makes the root useful. What root commands act on is ballot D-WORKSPACE-CMD1, hosted here.\n\nEvidence (audit 2026-10-28, LAY-04, mono_probe.sh / notes/mono_probe.log).",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -60908,7 +60908,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:13.858Z",
-      "updated": "2026-11-16T12:57:39.638Z",
+      "updated": "2026-11-17T01:41:18.456Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -60922,7 +60922,7 @@
       "body": "A lock file pins the exact dependency versions so every machine builds the same thing. Today the lock lives in `.jet/lock`, which `jet new` tells git to ignore, and it stores a build timestamp, so it would churn on every commit. This card makes the lock reproducible and places it where ballot D-LOCKFILE1 (hosted here) decides.\n\nEvidence (audit 2026-10-28, LAY-02, LAY-06): generated .gitignore = `.jet/build/ .jet/lock .jet/cache/` (Host.jet:1478); `[build.stamp]` in the lock. Related: D-LOCK1 (spec), D-GENERATED-STORAGE2=B, #3421.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -61008,7 +61008,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:14.997Z",
-      "updated": "2026-11-16T12:57:43.329Z",
+      "updated": "2026-11-17T01:41:19.984Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -61022,7 +61022,7 @@
       "body": "Destination: Core ships a lazy table type over the shared Arrow column batches (D-DATA-FRAME1=A, ratified 2026-10-28: dataframe in Core): read a CSV into a frame, filter, group, join, sort and select by column name with compile-time column and unit checks, through the shared compute operations, and show and plot frames in `jet notebook` with no package install.\n\nWhy it matters: data analysts expect a dataframe; Jet has none.\n\nDecisions: D-DATA-FRAME1=A, D-COMPUTE1=D (frames integrate through the compute operation family), D-COLUMNAR-BOUNDARY1, D-DATA-READER1 (scan into column batches).\n\nEvidence: audit 2026-10-28, DOMAIN gaps.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e15",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -61172,7 +61172,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:17.509Z",
-      "updated": "2026-11-16T12:57:48.929Z",
+      "updated": "2026-11-17T01:41:21.552Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -61186,7 +61186,7 @@
       "body": "A manifest is the file that describes a project. Jet projects can carry package.jet, env.jet and workspace.jet, and a user must learn which setting goes where. Removing the legacy pkg.jet is already decided (D-JPK-LEGACY1=A, #5075). Whether the remaining files become sections of package.jet is ballot D-MANIFEST-ONE1, hosted here.\n\nEvidence (audit 2026-10-28, LAY-05). Related: D-CONF-NAME1 (members live in package.jet).",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -61291,7 +61291,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-10-28T11:04:18.786Z",
-      "updated": "2026-11-16T12:57:53.573Z",
+      "updated": "2026-11-17T01:41:23.129Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -64975,8 +64975,8 @@
       "title": "Scripts may read the file you name on the command line, and use a private temp folder, without a prompt",
       "body": "When you type `./wc.jet notes.txt`, you have already said which file the script may read. This card lets that act count as the permission: a `#CLI` field of type `Path` grants reading exactly the path you passed, and a private per-run temp folder (`files.temp_dir`) needs no prompt. Everything else still asks once, as owner ruling #5949 says. Ballot D-SCRIPT-DESIGNATE1, hosted here, decides; this card builds the winner.\n\nSource: FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T11 items 2 and 3 (the powerbox model: a file picker grants the file the user picked). Writes are not designated; they keep the #5949 prompt.\n\nRelated: #5949, D-SCRIPT-CONFIRM1=A (#3705), spec.md \"Command registry and typed inputs\" (`Path` is a supported #CLI scalar), core-library.md `temp_dir`.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -65063,7 +65063,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:09.798Z",
-      "updated": "2026-11-16T12:57:58.389Z",
+      "updated": "2026-11-17T01:41:24.671Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -65077,7 +65077,7 @@
       "body": "Rust has Miri: a slow interpreter that catches memory mistakes the type checker missed, such as reading past a buffer inside unsafe code. Jet should have the same safety net. This card adds an opt-in checking run at O0 that tracks extra state for every value and stops with a named error on any aliasing, bounds, release, race or uninitialised-read mistake, including inside `#Unsafe` blocks and at foreign edges.\n\nSource: FutureAudit 2026-10-28, $JET_SCRATCH_ROOT/lanes/Audit/FUTURE.md T06 (\"new card for the O0 checking mode if #4726 does not cover it\"; #4726 lists results, not a checker).\n\nRelated: #4309 (static IR ownership verifier, a compile-time check; this is its run-time partner), #4620 (memory model), #4726 (defined-behavior ledger), D-MEM-HARDEN1=A (shipping run-time checks for unsafe islands and foreign edges).",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e3",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -65161,7 +65161,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T11:57:15.083Z",
-      "updated": "2026-11-16T12:58:01.288Z",
+      "updated": "2026-11-17T01:41:26.168Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -85057,6 +85057,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T13:01:37.302Z"
+        },
+        {
+          "n": 9,
+          "text": "Device APIs reach the browser once the page runtime can wait on a promise: native.ask and native.open_settings through the Permissions API (moved from #6806 c2), native.take_photo and native.location through a capture input or getUserMedia and the Geolocation API (from #6803 c1), and native.location_updates and the motion sensors as typed streams that stop with their scope and leave no listener (from #6803 c2); the web E-APP-TARGET-FEATURE refusals are removed. Proof: the NativeApp cases ask_gives_a_typed_grant_on_every_target, camera_and_location_give_typed_values_after_a_grant and sensor_streams_stop_with_their_scope on the web.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T01:40:51.628Z"
         }
       ],
       "refs": [],
@@ -85069,9 +85078,9 @@
       "parentId": "c0vxf4u0",
       "needsAcceptance": false,
       "created": "2026-11-04T01:02:34.688Z",
-      "updated": "2026-11-16T13:01:37.302Z",
+      "updated": "2026-11-17T01:40:51.628Z",
       "updatedBy": "Main",
-      "criteriaLastN": 8
+      "criteriaLastN": 9
     },
     {
       "id": "c017cddb",
@@ -98188,12 +98197,12 @@
         },
         {
           "n": 2,
-          "text": "native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered, on Linux and the web. Proof: `jet test Compiler --profile cases --filter NativeApp/sensor_streams_stop_with_their_scope`.",
+          "text": "native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered, on Linux; on a web build they are an E-APP-TARGET-FEATURE compile error until #6556. Proof: `jet test Compiler --profile cases --filter NativeApp/sensor_streams_stop_with_their_scope`.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T21:53:20.463Z"
+          "at": "2026-11-17T01:40:50.677Z"
         }
       ],
       "refs": [],
@@ -98204,7 +98213,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:45.126Z",
-      "updated": "2026-11-17T01:40:48.614Z",
+      "updated": "2026-11-17T01:40:50.677Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -217864,6 +217873,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:41:26.168Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bmxzrb",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:24.671Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w8kkg9",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:23.129Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05i2uiq",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:21.552Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0kdgbf8",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:19.984Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0etvk8s",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:18.457Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0vzmbkk",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:16.950Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0wi8ere",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:15.421Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0c209zc",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:13.843Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c031o59x",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:12.288Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nr5mre",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:10.742Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00tizy7",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:09.243Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m58g8t",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:07.714Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ba141x",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:06.168Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00ys8fj",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:04.614Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0hnphts",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:03.127Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c07bi8ml",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:01.568Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0grmd0j",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:41:00.037Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c064zxf4",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:58.537Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dhc7rh",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:57.028Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c04pd50v",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:55.456Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mj3ijb",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:53.947Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gmf0y4",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:52.405Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0otj2s1",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:51.628Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0tjjr66",
+      "note": "#9 Device APIs reach the browser once the page runtime can wait"
+    },
+    {
+      "at": "2026-11-17T01:40:50.677Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c097myt8",
+      "note": "#2: The web half needs a page runtime that can wait on a browser promise (the resumed-handler runtime of D-RESUME1); a Jet call in the page runs synchronously today, so it moves to #6556.; was: native.location_updates and the motion sensors are typed streams that stop when their scope ends, with no listener left registered, on Linux and the web. Proof: `jet test Compiler --profile cases --fi"
+    },
     {
       "at": "2026-11-17T01:40:49.403Z",
       "by": "Main",
