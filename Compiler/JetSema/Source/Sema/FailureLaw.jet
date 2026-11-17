@@ -1346,6 +1346,20 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
         }
         .Result(ok, error) -> {
             sema_check_failure_contract_type(ok, span, in_return, generic_names, environment, program, diagnostics)
+            // A failure union may name the function's type parameters beside
+            // its errors (`(ShopError | E)!`): a call binds each to its
+            // callback's failure and reads the union again
+            // (sema_inference_failure_union). Every other member is an error.
+            if error == .Union(members) && sema_failure_union_names_generic(members, generic_names) {
+                loop member in members {
+                    if member == .Named(name) && generic_names.contains(name) -> next
+                    sema_check_failure_contract_type(member, span, true, generic_names, environment, program, diagnostics)
+                    if !sema_failure_domain_is_error(member, [String]{}, environment, program) {
+                        diagnostics.push(sema_error("E2417", span, "Explicit failure domain {sema_type_show_quoted(error)} is not an Error type", "A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.", "use a Core error, add `#Error` to a local error type, or remove the explicit error contract."))
+                    }
+                }
+                return
+            }
             sema_check_failure_contract_type(error, span, true, generic_names, environment, program, diagnostics)
             generic := false
             if error == .Named(name) {
@@ -1395,6 +1409,14 @@ sema_check_failure_contract_type: fn(ty: Type, span: Span, in_return: Bool, gene
         }
         .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
     }
+}
+
+// Whether a failure union names one of the function's type parameters.
+sema_failure_union_names_generic: fn(members: [Type], generic_names: [String]) -[]> Bool {
+    loop member in members {
+        if member == .Named(name) && generic_names.contains(name) -> return true
+    }
+    false
 }
 
 // E0605 for a written type `alias.child.Name` that reaches into a `priv

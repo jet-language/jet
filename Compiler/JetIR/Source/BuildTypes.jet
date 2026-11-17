@@ -3644,15 +3644,9 @@ ir_try_reraise: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conv
             if ir_failed(b) -> return -1
             b.fresh[converted] = true
         }
-        .WidenUnion(_, _) -> {
-            converted = ir_union_box(m, p, b, payload, source, error, span)
+        .WidenUnion(_, _) | .RewidenUnion(_) -> {
+            converted = ir_try_widened(m, p, b, payload, source, error, span)
             if ir_failed(b) -> return -1
-            b.fresh[converted] = true
-        }
-        .RewidenUnion(_) -> {
-            converted = ir_union_rewiden(m, p, b, payload, source, error, span)
-            if ir_failed(b) -> return -1
-            b.fresh[converted] = true
         }
         .Never -> return ir_fail_slot(b, span, "`?` with error conversion {ir_conversion_name(conversion)}")
     }
@@ -3662,6 +3656,23 @@ ir_try_reraise: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, conv
     }
     ir_release(m, b, subject)
     ir_result_box(m, p, b, Type.Result{ok: success, err: error}, false, converted)
+}
+
+// The failure `payload` (of type `source`) a union conversion of `?` hands
+// into the function's failure `error`, read at the instance being built. A
+// failure union naming a type parameter (`(ShopError | E)!`) is read again at
+// each instance (sema_inference_failure_union): at `E = Never` the failure is
+// `ShopError` alone and passes unchanged, at `E = KeyError` it is boxed as
+// that member, and a union `E` is re-tagged member by member.
+ir_try_widened: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, source: Type, error: Type, span: Span) -[]> Int {
+    if !(ir_untag(error) == .Union(_)) -> return payload
+    if ir_untag(source) == .Union(_) {
+        return ir_union_rewiden_fresh(m, p, b, payload, source, error, span)
+    }
+    boxed: ir_union_box(m, p, b, payload, source, error, span)
+    if ir_failed(b) -> return -1
+    b.fresh[boxed] = true
+    boxed
 }
 
 // The failure `payload` (of type `source`, laid out as `source_row`) converted

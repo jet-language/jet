@@ -1,0 +1,81 @@
+// A failure union may name a type parameter beside an error the function
+// owns: `total` fails with its own `ShopError` or with whatever `weigh` fails
+// with. Each call reads the union at its binding: a callback that can't fail
+// leaves `ShopError` alone, one that fails with `ShopError` adds nothing,
+// `KeyError` joins it, and `ShopError | KeyError` adds no second `ShopError`.
+#Error
+ShopError: enum {
+    Empty,
+}
+
+#Error
+KeyError: enum {
+    Blank,
+}
+
+total: fn<T, E>(rows: [T], weigh: fn(T) -> Int E!) -> Int (ShopError | E)! {
+    if rows.len() == 0 -> return Err(ShopError.Empty)
+    sum := 0
+    loop row in rows -> sum += weigh(row)
+    sum
+}
+
+shop_weigh: fn(name: String) -> Int ShopError! {
+    if name == "" -> return Err(ShopError.Empty)
+    Ok(name.len())
+}
+
+strict: fn(name: String) -> Int KeyError! {
+    if name == "" -> return Err(KeyError.Blank)
+    Ok(name.len())
+}
+
+either: fn(name: String) -> Int (ShopError | KeyError)! {
+    if name == "x" -> return Err(ShopError.Empty)
+    if name == "" -> return Err(KeyError.Blank)
+    Ok(name.len())
+}
+
+plain: fn(names: [String]) -> Int ShopError! { total(names, fn(n) { n.len() }) }
+
+same: fn(names: [String]) -> Int ShopError! { total(names, shop_weigh) }
+
+keyed: fn(names: [String]) -> Int (ShopError | KeyError)! { total(names, strict) }
+
+mixed: fn(names: [String]) -> Int (ShopError | KeyError)! { total(names, either) }
+
+failure_name: fn(error: ShopError | KeyError) -> String {
+    if error == {
+        .ShopError -> "shop"
+        .KeyError -> "key"
+    }
+}
+
+report_keyed: fn(names: [String]) {
+    line: if keyed(names) == {
+        .Ok(n) -> "total {n}"
+        .Err(e) -> failure_name(e)
+    }
+    print(line)
+}
+
+report_mixed: fn(names: [String]) {
+    line: if mixed(names) == {
+        .Ok(n) -> "total {n}"
+        .Err(e) -> failure_name(e)
+    }
+    print(line)
+}
+
+run: fn() {
+    print(plain([String]{"ab", "c"}) ?? -1)
+    print(plain([String]{}) ?? -1)
+    print(same([String]{"ab"}) ?? -2)
+    print(same([String]{"", "a"}) ?? -2)
+    report_keyed([String]{"ab", "cde"})
+    report_keyed([String]{"ab", ""})
+    report_keyed([String]{})
+    report_mixed([String]{"x"})
+    report_mixed([String]{"", "a"})
+    report_mixed([String]{"abc"})
+}

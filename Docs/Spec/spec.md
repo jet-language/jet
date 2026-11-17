@@ -1736,6 +1736,15 @@ named error domain. The supported forms are:
 - `T (E1 | E2)!` — an explicit error union; mark the success type optional for
   `T? (E1 | E2)!`. (D-UNIONTYPE1=A)
 
+A failure union may name one of the function's own type parameters beside the
+errors the function owns: `total: fn<T, E>(rows: [T], weigh: fn(T) -> Int E!)
+-> Int (ShopError | E)!` fails with its own `ShopError` or with whatever
+`weigh` fails with. Each call reads the union at its binding of `E`: a
+callback that can't fail binds `Never`, which leaves `ShopError!`; a member
+named twice is one, and a bound union's members join it, so
+`E = ShopError | KeyError` gives `(ShopError | KeyError)!`. Every other member
+must still be an error domain (E2417). (D-CALLBACK-ERR1=A)
+
 The explicit `!` must name an error domain; ordinary failure leaves the error
 contract implicit. The entry function `run: fn()` has the default fallible
 `Result<(), Err>` carrier, so it may propagate a standard-library failure
