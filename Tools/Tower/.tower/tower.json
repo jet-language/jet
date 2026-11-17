@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 111994,
+    "rev": 112000,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -57039,1180 +57039,6 @@
       "criteriaLastN": 31
     },
     {
-      "id": "c0h18kyi",
-      "num": 5454,
-      "title": "Ported Rust test cases that fail on Jet (known-failing ledger)",
-      "body": "Every case in Tools/testkit/known-failing.tsv: literal ports of tests/*.rs whose Jet output differs from the Rust expectation (comptime/AOT parity, arena and effect diagnostic code lists, Dyn and task APIs, and others). Each ledger row names the case and its failure. For each row: fix Jet, or where Jet changed on purpose, confirm the intent and rewrite the case to the new behavior; then delete the row. Done when the ledger is empty.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": "e11",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "Closed on owner order 2026-11-14: its three open criteria moved to #6843 c1-c3, and the 163 known-failing.tsv rows that named #5454 now name #6843."
-        },
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "Flake evidence 2026-11-12 03:0x (Lander5, seed-b11 jet@a0.0.45#3667b9a1, b11 tree 19333b2bb3, jet test Compiler --profile cases --filter browser_bidi/, 3 runs): PASS 18 and FAIL 0 in each run. hostile_matrix was KNOWN-FAILING 3 of 3. command_deadline was UNEXPECTED-PASS 1 of 3 and KNOWN-FAILING 2 of 3. privacy_receipt_hostile_and_closed_paths and rejects_hostile_frames_profiles_and_timeouts_without_leaks were UNEXPECTED-PASS in some runs only. The last-owner-drop rows pass or fail by timing, so the result is nondeterministic and a determinism defect beside the leak. The KF rows stay until a fix makes all of them pass deterministically in 3 of 3 runs. Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/bidi2-b11/{1,2}.out and the b11 deferred row 76."
-        },
-        {
-          "at": "2026-11-07",
-          "by": "Main",
-          "text": "784485df5d (CoreCliLead-2): the inferred-carrier form is done. tests/ui/cffi_e3203_export_inferred_failure is red on the old s1 (it reported Int Never! and Never! as non-C types and said nothing about twice) and green on the new one (one E3203 NonCAbiType at 6:12, 'twice can fail: its body infers the carrier Int Err!'). The 33 cffi_ ui neighbours pass. RuntimeLibraryFeed.jet passes 100/100 with JET set, including 'an exported run: fn builds as a library export'. Interop/FFI goldens: 15 PASS, 3 KF (#6418). Still open: a carrier declared on a library component signature still reaches BuildLibrary's message. 2fcbdfed8c removed the bogus entry_key ICE in the library feed."
-        },
-        {
-          "at": "2026-11-07",
-          "by": "Main",
-          "text": "Triage at 8583f858a0 (PortsLead-2): c1, c14, c35-37, c65, c92, c93, c95 and c96 met; c11 obsolete. Open gaps:\n- c2: the sema gate admits any fn named build (compiler_api/an_unselected_runtime_named_build_cannot_use_the_compiler_api).\n- c3: jet profile is not a command (store_generations_empty, store_record_generation; #5694 root).\n- c5: there is no runtime route jet_rt_handle_field_jet_file_reader_path for FileReader.path (2 rows), plus 1 row under #6462. The metadata predicates are fixed in 8583f858a0.\n- c6: package.jet unknown fields are not reported by jet check (E1215), plus the c2 row, #6386 and #4260. Inline package E1215 and semindex are fixed in 8583f858a0.\n- c9: no Jet linker override (RUSTC_LINKER, L2101), build replay prints no 'up to date:', host cc (#6662), parallel_check (#4310).\n- c13: core.process run/workspace (#6419, 11 rows), comptime Authority value, E0712 narrowing outside held rights (now a runtime panic), erased devtools E1414, script confirm prompt (E1803).\n- c56: taskgroup_cannot_escape_in_a_closure lacks FailureDomainMismatch.\nMoved from G1 to G3. This card is the ledger of ported cases that fail on Jet; each remaining row is a product or language gap. They stay tracked (KF lines name this card), which is all #6096 c65 needs from it."
-        },
-        {
-          "at": "2026-11-07",
-          "by": "Main",
-          "text": "Batch proof on the a0_030 candidate kit (35e0cfaf0d, chain s2 eeeba2c67584e1ba): 85f5e3b075 (arena view escape is the binding's only fault) PASS cases arena/region_confines_view_escape, arena/view_stored_in_binding_is_e0631, core_runtime_units/grouped_format_is_source_owned_without_a_dispatcher_row; 84782cf44d (L0530 safe edit) PASS redundant_final_return/final_return_fix_removes_keyword. Its fallout on 3 ownership copy-edit snapshots is fixed by f018d09d21."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Owner 2026-11-06: c10 and c11 close as obsolete when #6035 c3 lands (testkit and Node harnesses deleted). Main closes them then."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 73 criteria from archived #294, #690, #698, #1025, #1038, #1050, #1051, #1147, #1370, #1383, #1411, #1556, #1574, #1575, #1726, #1748, #1775, #1854, #1865, #1883, #2239, #2293, #2313, #2406, #2426, #2489, #2504, #2516, #2639, #2758, #2770, #2774, #2882, #3048, #3059, #3424, #4661: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "PROGRESS ONLY, not met: udp loopback, reexport_module_call and unqualified_file_module_call pass (owner answer q0z3918p 2026-11-01 parts A and D); 4 known-failing rows removed, 5 reasons rewritten to their remaining cause (IrTypes-46) Landed in wave 28 as dev bb770de593 (IrTypes-46)."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "PROGRESS ONLY, not met: core_files_depth_example_runs passes (Files take String or Path, owner answer q0z3918p 2026-11-01 part A); its known-failing row is removed (IrTypes-46) Landed in wave 28 as dev bb770de593 (IrTypes-46)."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "PROGRESS ONLY, not met: a refused `jet run` names full paths with the \"N problems found\" footer (owner answer q07mphiy 2026-11-01), Host.jet jet_cli_full_path_origins; the golden runner compares those paths relative to the example's directory and the list_position case expects `{work}/folded.jet` (IrTypes-45) Landed in wave 28 as dev bb770de593 (IrTypes-45)."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "PROGRESS ONLY, not met: 14 root-error-only ui snapshots (owner answer q0rhnu0g 2026-11-01), 6 compiler-drift ui rows and the q07mphiy help/bind/failed-here snapshots pass; 29 known-failing rows removed (IrTypes-45) Landed in wave 28 as dev bb770de593 (IrTypes-45)."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "AsmPar-24 (wave 24, landed as dev a34ef0affd; ui/cases rows from $JET_SCRATCH_ROOT/lanes/Main/q/sg/{ui,cases}-w24-wave.txt) removes the stale known-failing row real_core_provider_registers_canonical_object_and_action_relation: it passed 3 of 3 on the w22 s2 (AsmPar/selfab/up3.tsv) and passes in the wave-24 cases run. The stale reason was the double close of a Close value copied from a match payload, fixed under #6429."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "Landed on dev at undefined in AsmPar-24 (patch row: criterion/count 24): removes stale KF row real_core_provider_registers_canonical_object_and_action_relation: 3/3 PASS on the w22 s2 (AsmPar/selfab/up3.tsv), PASS with the patched ledger (selfab/kf24.tsv)"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at undefined in CardClose-19: CardClose-19.patch; CardClose-19.msg"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at undefined in CardClose-16: CardClose-16.patch; CardClose-16.msg"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at undefined in CardClose-19: CardClose-19.patch; CardClose-19.msg"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at undefined in CardClose-16: CardClose-16.patch; CardClose-16.msg"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at undefined in GoldC-44 (patch row: criterion/count 1): ledger: output_callable/renamed_entry_is_not_recovered_from_a_stale_lock verify-intent: its package fixture's `use \"helper\"` is the active E0623"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at 94dacfc354 in TestGreen3-2: TestGreen3-2: compiler. (1) package-budget leaf → E0750 (syntax-decisions.md:3246-3252); (2) authority.providers accepted (syntax-decisions.md:6012-6016, E1221 registry row); (3) `entry: file.callable` resolved by member-file stem (spec.md:2144-2146). Base→patched over package_outputs+project_check+pkg (tg3cb→tg3cp): PASS 16→23, 7 FAIL→PASS, no PASS lost. lane-check CHECK OK, s1 rc=0. The six grants E1221 rows need the dependency-budget producer or a ruling."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at 94dacfc354 in TestGreen3-1: TestGreen3-1: testkit runner fix. Absent fixture → ERROR verdict instead of a task panic; capture-own assertions resolve after the capture; free-port tokens in write/send templates are reserved. 6 phantom fixture: lines removed. 9 targeted rows ERROR→verdict: 3 PASS (serde parity, typo engine verb, real engine pair in tg3rp), the rest honest product FAIL/ERROR. Regression tg3rb→tg3rp over 151 cases: no PASS lost. lane-check Tools/testkit CHECK OK."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at 94dacfc354 in GoldC-42 (patch row: criterion/count 2): compiled_imported_typed_fallible_entry re-reasoned unbuilt (jet run never resolves Outputs with the Run intent); public_build_product root named (fn build in run.jet never found, Entry.jet:825-866, Front.jet:1042-1045)"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at 94dacfc354 in GoldC-41 (patch row: criterion/count 1): project parts takes the two-segment `use project._name` (Unqualified import) as explicit (Project.jet; spec.md:2332-2337); project_parts_lists_skipped_explicit_and_conflicting_modules row removed"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at 94dacfc354 in GoldC-40 (patch row: criterion/count 2): inspect provenance reads the entry manifest's authority.trust.require (InspectProvenance.jet jet_cli_provenance_requirement); both inspect_provenance_human_and_json_agree rows removed"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at 94dacfc354 in GoldC-37 (patch row: criterion/count 1): web_app_dev row: no producer of the `jet-dev-server-functions` dev script exists (port gap), re-reasoned unbuilt"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at 94dacfc354 in GoldC-34 (patch row: criterion/count 2): expand templates lens reads unexpanded items (Cli/Expand.jet:225-233); typed_fact golden reads the fixture's package identity (spec.md:4872-4874), effects count and print order remain"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at 94dacfc354 in GoldC-32 (patch row: criterion/count 3): check_json_golden moved to jet.status/v1 (syntax-decisions.md:10019-10021) and passes; jetdoc fixture/package goldens differ beyond the envelope; nested_reflection: stream fixed (main.Point, syntax-decisions.md:3474-3478), web step hits the testkit .jet/build/main gap"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Landed on dev at 94dacfc354 in GoldC-31 (patch row: criterion/count 5): find signature shape, JSON bind number kinds, doc Markdown examples: 5 ledger rows removed, suite UNEXPECTED-PASS on p3 s1 (tmp/tro/w9-res.json)"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "TestGreen-17 landed on dev df84747616: TestGreen-17: 11 stale ported cases FAIL→PASS (result shape, ??-on-Int, built-in Queue, access marks, split_once, literal braces, bare-script fn run, --allow). Plus 21 ledger rows: 6 ICE ir.build unlowered and 15 owner ruling q0z3918p. Evidence: TestGreen-17-rows.tsv, 0 rows lost"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "TestGreen-16 landed on dev df84747616: Log only: TestGreen-16 (Tools/testkit Steps.jet and Tests/StepsParsing.jet, on wave/7/tree after CoverPort-17). `jet build --help`/`-h` no longer demands a CLI build artifact. lane-check of tmp/kw7/Tools/testkit: CHECK OK. `jet test Tools/testkit`: 176 passed / 31 failed, against 175 / 31 untouched; the same 31 names fail, and the one gain is the new \"a build help request expects no artifact\" test. The 3 per_command_help/help_command cases need the pool testkit rebuilt before they can show it."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "TestGreen-15r landed on dev df84747616: Log only: TestGreen-15 (218 files, all under tests/cases, on 53004eaa66; git apply --check -p1 OK on 53004 and on wave/7/tree). Cases suite (q/sg/cases-tg2a.txt) vs cases-w7-base: 141 rows gained, 64 of them in touched cases (61 FAIL->PASS, 2 ERROR->PASS, 1 KNOWN-FAILING->UNEXPECTED-PASS). 5 rows lost, all in untouched cases: 4 pass when rerun alone, and cc_cli/c_drivers_are_registered fails alone on pristine 53004 too. 6 touched rows now reach backend ICEs (ir.build unlowered), flagged for the COMPILER lane. Per-row list: TestGreen-15-rows.tsv."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "GoldC-28 landed on dev df84747616: expand, jetdoc, semindex and output_callable cases read the suffix-form contract; suite PASS list in GoldC-28.msg"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "GoldC-27 landed on dev df84747616: `jet inspect bind` default output is .jet/bindings/<sanitized input stem>.jet (spec.md:3417-3418): Bindings.jet uses binding_files.stem, which drops any extension; bind rows that read the default output pass (suite list in GoldC-27.msg)"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "GoldC-26 landed on dev df84747616: ported cases follow the decided surface, each edit citing its doc line: bare `jet` palette (syntax-decisions.md:7148-7150), jet.status/v1 --json (syntax-decisions.md:10014), `names.copy()` (syntax-decisions.md:23), fn arrows (syntax-decisions.md:292-300), applied rules (syntax-decisions.md:151), sentence-case What lines (syntax-decisions.md:161-162), binder-only Ada/Pascal (migration-tier-map.md:25-26, :45), `b.default` (spec.md:4738), testkit `chmod:`; suite PASS list in GoldC-26.msg"
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Owner ruling 2026-10-31 (verbatim): \"And actually close fucking cards properly not just consolidating them to cheat on card count, the work needs to actually be done to close them properly\". Effect: no more merges for count. A card closes only when its work is done and every criterion is met with evidence. Tonight merge plans 4-6 (46 cards) are listed in $JET_SCRATCH_ROOT/lanes/Main/q/board/merge-plan{4,5,6}.json for owner review; every open criterion was carried to its survivor."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Owner ruling 2026-10-30 ~21:30 (verbatim choice): \"Yes, KNOWN-FAILING with a card link\". Rows that need a feature not yet built (web target, jet review, jet budget, jet prove and similar) are marked KNOWN-FAILING with a link to the card that builds the feature. They flip to required passes when the feature lands (UNEXPECTED-PASS catches them). Same session, owner: \"Yes, merge and close\" duplicate and superseded cards into one survivor (criteria carried over, log names the survivor), and \"Yes, use all 10\" agent slots. Open ballots: \"if they are not answered do whatever work you can without them and proceed.\""
-        },
-        {
-          "at": "2026-10-30",
-          "by": "Main",
-          "text": "MemDesign-2 2026-10-30 on 4e514f96e1: tensor operations still stop with ICE 101 on o0, o1 and o2 (runtime route jet_compute_*): $JET_SCRATCH_ROOT/lanes/MemDesign-2/probes/g/g3_builtin_add.jet, g/g4_devices.jet and tm4k/run.jet."
-        },
-        {
-          "at": "2026-10-30",
-          "by": "Main",
-          "text": "Criteria removed as moot: the owner ordered email support dropped from Jet (2026-10-30), and it was removed in dev 6b5645b88c (#6279). C7/C8 (core.email cases) removed."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5924 \"memory_semantics testkit: 4 FAIL, 1 ICE and 3 REFUSED cases on dev\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Census on 803195f620 and 7574d49abe (identical rows on both, 2026-10-24, Main): FAIL exercised_memory_ledger_reports_empty_gc_sentry_and_combined_runs (snapshot mismatch); FAIL memo_computed_and_view_copy_examples_agree_across_execution_tiers (exit 1); FAIL memory_denial_matches_the_dev_interpreter_path (exit 2); FAIL missing_memory_ledger_is_stable_e2112 (snapshot mismatch); ERROR memory_fix_applies_one_exact_repair_and_names_ambiguous_options (internal compiler error, exit 101, an I2 violation); REFUSED gc_promotions_append_to_the_configured_cross_run_memory_ledger, memory_denial_matches_repl, parameterized_memory_rights_are_denials_not_positive_effects (case file format: invalid exit or m"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5923 \"Authority testkit: 24 cases still fail after #5070's follow-ups (grants/providers, E0119, non-hosted verbs, core.process.run, fixtures, jet query, fix status on stderr)\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: After O0Load-3's #5070 follow-up patch, testkit cases --filter authority gives PASS 11 / FAIL 24 / REFUSED 3 / ERROR 2 (KNOWN-FAILING 19, UNEXPECTED-PASS 1). None were caused by #5070. Causes, from $JET_SCRATCH_ROOT/lanes/O0Load/out/5070-followups.msg: (1) grants:/providers: manifests refused; (2) the Ability E0119 check was never ported; (3) E2104 verbs (--target web, some jet inspect forms) are not Jet-hosted; (4) core.process.run is missing; (5) fixture errors E0002/E0209/E0003; (6) jet query moved under jet inspect, so the cases need migrating; (7) jet fix prints its status on stderr where the cases expect stdout, fix_safety_tiers too; (8) effects/authority_denied: a package deny is now a "
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5896 \"test-native-output-diagnostic: the generated snapshot.jet doesn't compile (Nothing named foundation_utf8_lead_width)\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Found by script-port-11 (2026-10-23): at dev b49bc8e78f, both the old test-native-output-diagnostic.mjs and its Jet port (Compiler/JetBackend/Tests/TestNativeOutputDiagnostic.jet) emit a snapshot.jet that fails to compile: 'Nothing named foundation_utf8_lead_width' at snapshot.jet:349, and also foundation_utf8_width and foundation_utf8_codepoint. The snapshot's source list is missing the file that now defines them. Acceptance: the tool's run exits 0 and its snapshot compiles."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5846 \"testkit: shell steps fail with 'spawn: I/O error during resolve' (bash, sh, /bin/sh)\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Seen by RustTestsD 2026-10-23 on dev with base/latest: any case step that runs bash, sh or /bin/sh fails with 'spawn: I/O error during resolve', and the existing compiled_workloads case crashes with 'fixture not found'. That blocks every ported Rust test that uses a shell step (#4717). Check how the kit resolves commands (PATH inside the kit sandbox on NixOS, where /bin/sh is the only fixed path)."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5844 \"Repo fixture harnesses (run-*-fixtures.mjs --lower) fail on dev HEAD: jet check ICE 'runtime front end returned no checked inputs'; jet_int_pow fixtures stale\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Found by O0Speed 2026-10-23 on pristine dev HEAD: the Compiler/*/Tests/run-*-fixtures.mjs --lower harnesses fail because jet check reports the internal error 'runtime front end returned no checked inputs', and the jet_int_pow fixtures are stale. An ICE from jet check on valid input breaks I2/I3, and the harnesses gate nothing until fixed. Acceptance: each run-*-fixtures.mjs --lower harness passes on dev, or is ported or retired under #5072 with its checks carried elsewhere."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5842 \"cli_compiler_speed ported cases: 8 known-failing (cc not on PATH, MathBuiltin E2104, jet dev --watch, verbose cache lines, named job, RUSTC_LINKER)\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: From the #4717 port of tests/cli_compiler_speed.rs (RustTestsD, J1b, 2026-10-23). Each case copies the .rs assertion; on dev base/latest: 1. explicit_project_link_build_is_reproducible_and_content_sensitive: exit 127, cc not on PATH. The kit has no C compiler (toolchain question: the kit should provide one, or the case should use the Jet toolchain's linker). 2. production_build_reuses_and_repairs_stdlib_objects: E2104 'expression MathBuiltin' at main.jet:68..71 (backend gap). 3. compiler_speed_default_profile_routing_is_removal_sensitive_and_production_backed: jet dev --watch=off exits 2, E2104 'jet run --watch is not part of the Jet-hosted CLI yet'. 4. cache_cli_status_prune_limit_and_docto"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5816 \"core.email: no Jet test covers the SMTP reply parser, STARTTLS transaction or require_all\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Rust-test port SA6 retires three tests in tests/corelib_parts/email.rs (reply_parser, starttls transaction, require_all) that exercised the Rust runtime prelude's SMTP code; Tools/testkit/retired-with-rust.tsv:62-64 records them, and tests.tsv:5557-5559 notes there is no Jet SMTP parser or transaction test. Write Jet tests for Core's SMTP reply parsing, the STARTTLS transaction state machine and require_all, so the coverage the Rust tests gave comes back."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5815 \"core.email cases fail on HEAD: envelope pattern, header arithmetic, .Password inference, MIME HTML argument, limits position\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Rust-test port SA6 (tests/corelib_parts/email.rs; kit SA6J on dev HEAD). First errors: core_email_envelope_reports_and_errors_follow_smtp_law E0305 (pattern Ok doesn't match Envelope); core_email_headers_and_wire_bounds_are_prospective E0109 (arithmetic needs matching number types); core_email_mailer_surface_constructs_with_real_secret E0330 (can't infer enum type for .Password); core_email_mime_bytes_use_crlf_and_keep_bcc_envelope_only E2105 (argument type HTML, fixture.jet:1425); core_email_smtp_config_limits_and_trust_follow_ratified_law E1004 (core.email exposes limits but not in this position). Decide per case whether the ported case or Core's email surface is wrong, then fix."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5700 \"compiler API: inline package parse errors are not reported as expected\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Rust-test port SA3: compiler_api inline_package_parse_errors fails. Parse errors in an inline package do not match the expected diagnostics (collect-all; compare #5571)."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5698 \"core files: golden store primitives and metadata predicates snapshot differ\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Rust-test port SA3: core_files_foundations golden_store_primitives and metadata_predicates_snapshot fail against their ported expectations."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5696 \"services runtime: migrations, workflow wait/sleep, authority, state store, worker slots and rollout generations fail (11 cases)\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Rust-test port SA3: services_runtime x11 fail: migration, workflow wait and sleep, service authority, state store x2, source worker slot, unknown migration policy, durable lifecycle audit, forged rollout generation. Per-case detail in kit-SA3.json. Group the cases by root before fixing; split this card if the roots differ."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5694 \"pure: store record generations and nested pretty rendering of compile-time values differ\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Rust-test port SA3 (kit-SA3, $JET_RUN_ROOT/RustTestsA/SA3/kf.tsv): pure store_record_generation, store_generations_empty and ctvalue_render_pretty_nested fail. Store generation numbering and the pretty rendering of nested compile-time values diverge from the ported expectations."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5629 \"run-tier diagnostics differ: E0956 stream, pattern-hole stream, programmable build check accepted\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Rust-test port SA2: run_tier_diagnostics x3: the e0956 stderr stream differs, the pattern_hole stream differs, and programmable_build_check exits 0 where 1 is expected (the build-time check doesn't fail the run)."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5623 \"diagnostic_snapshots: two cases' diagnostic streams differ from the ported expectations\" (CardTrim 2026-10-28: golden/test-gap step of map #5454). Body: Rust-test port SA2: tests/cases diagnostic_snapshots x2 fail their stderr stream predicate. Decide per case whether the snapshot or the compiler is wrong (I4), then fix it."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "Main",
-          "text": "Destination: Every known-failing ported case passes or its row is removed with a reason; the ledger is empty.\nNotes: Batch G16 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && TESTKIT_ARGS=\"--cases $JET_SCRATCH_ROOT/lanes/Audit/consol/cases/G16.golden.txt --tier o0,o1\" JET=$JET Tools/agent/jet-env jet test Tools/testkit \"suite golden\". Order: #5846 #5923 #5924 #5623 #5629 #5694 #5696 #5698 #5700 #5815 #5816 #5842 #5844 #5896.\nDecisions so far: none linked to member cards.\nFog: no criteria yet on #5454 #5623 #5629 #5694 #5696 #5698 #5700 #5842 #5815 #5816 #5923 #5924 #5846 #5844 #5896 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan."
-        },
-        {
-          "at": "2026-10-27",
-          "by": "agent",
-          "text": "2026-10-27 Main: full known-failing rerun with the dev 3aa6fe388c base jet: 43 UNEXPECTED-PASS rows (39 #5454-only, 1 #5619, 2 #5625, 1 #5696) are removed in burn-down batch bd1; 737 rows still fail as recorded."
-        },
-        {
-          "at": "2026-10-23",
-          "by": "agent",
-          "text": "dev dfc4e930b2: --interpret retired from tests/cases (483 files; 529 steps dropped onto native twins, 100 rewritten, E2102 pin kept). Testkit per case: 87 newly pass, 28 KF rows removed, no PASS lost; 12 FAIL->ERROR + 1 FAIL->CRASH are native crashes previously masked by E2102 (still failing). Table: $JET_SCRATCH_ROOT/lanes/Goldens/interp/flips.tsv. Rows still blaming --interpret need rewording."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "(was #5623) diagnostic_snapshots: two cases' diagnostic streams differ from the ported expectations",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "PortsLead-2 triage at dev 8583f858a0 (lane s1 of dev HEAD, private state; logs $JET_SCRATCH_ROOT/lanes/PortsLead/p5454/): 284 rows, 250 PASS, 1 FAIL, 32 KF. c1 rows: 3/3 PASS.",
-          "at": "2026-11-07T08:38:20.704Z"
-        },
-        {
-          "n": 2,
-          "text": "(was #5629) run-tier diagnostics differ: E0956 stream, pattern-hole stream, programmable build check accepted",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G12Docs-5 closer sweep, dev e764ade14b, seed-b14: jet test Compiler --profile cases --filter run_tier_diagnostics/ gives PASS 6, FAIL 0, KNOWN-FAILING 0 (e0956_row_text, pattern_hole_reuse and programmable_build_check among them), and no known-failing row remains in that directory.",
-          "at": "2026-11-13T10:21:10.522Z"
-        },
-        {
-          "n": 3,
-          "text": "(was #5694) pure: store record generations and nested pretty rendering of compile-time values differ",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved unchanged to #6843 c1 (dev d6ae72dc93 repoints the known-failing rows); it stays open there. Owner order 2026-11-14.",
-          "at": "2026-11-14T23:12:02.010Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 4,
-          "text": "(was #5696) services runtime: migrations, workflow wait/sleep, authority, state store, worker slots and rollout generations fail (11 cases)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "services runtime: all 53 tests/cases/services_runtime cases pass on t25 (wave/7/tree + LiveUI-7). Workflow sleep now records its cancel through the jet_services_workflow_sleep_wait leaf. workflow_wait_methods_publish_typed_effects is migrated to D-SERVICE-EFFECTS1=A. 20 durable cases grant the FS.Read/FS.Write their authority and state logs perform, and the emptied real_aot_paths case is restored. No services_runtime known-failing rows remain. Proof: `Tools/testkit run cases --filter services_runtime --jobs 2` (32 PASS; the 20 FS.Write failures were fixed and rerun with `--cases` for 20/20 PASS; the restored case was run with `--filter real_aot_paths` and PASSed). (LiveUI-7, landed on dev df84747616; wave 8 composed suites)",
-          "at": "2026-10-31T11:49:53.117Z"
-        },
-        {
-          "n": 5,
-          "text": "(was #5698) core files: golden store primitives and metadata predicates snapshot differ",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G12Docs-5 closer sweep, dev e764ade14b, seed-b14: jet test Compiler --profile cases --filter core_files_foundations/core_files_golden_store_primitives and --filter core_files_foundations/core_files_metadata_predicates_follow_links_and_keep_errors_false each give PASS 1, FAIL 0. Fixed by 8583f858a0.",
-          "at": "2026-11-13T10:10:45.410Z"
-        },
-        {
-          "n": 6,
-          "text": "(was #5700) compiler API: inline package parse errors are not reported as expected",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G12Docs-5 closer sweep, dev e764ade14b, seed-b14: jet test Compiler --profile cases --filter compiler_api/inline_package_parse_errors_preserve_registered_diagnostic gives PASS 1, FAIL 0. Fixed by 8583f858a0.",
-          "at": "2026-11-13T10:10:46.427Z"
-        },
-        {
-          "n": 9,
-          "text": "(was #5842) cli_compiler_speed ported cases: 8 known-failing (cc not on PATH, MathBuiltin E2104, jet dev --watch, verbose cache lines, named job, RUSTC_LINKER)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 9c23afb11d (G3Core-5454-c9, landed by Lander5): the RUSTC_LINKER case is deleted under greenfield, since Jet links itself and has no L2101 path. jet test Compiler --profile cases --filter cli_compiler_speed/ gives PASS 12, FAIL 0, KNOWN-FAILING 1. The one KF row is parallel_check_matches_serial_check, owned by #4310. tests/cases and tests/known-failing.tsv have no RUSTC_LINKER hits. DiagnosticRows --check rc 0.",
-          "at": "2026-11-13T10:45:20.924Z"
-        },
-        {
-          "n": 11,
-          "text": "(was #5846) testkit: shell steps fail with 'spawn: I/O error during resolve' (bash, sh, /bin/sh)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "fab74a230c / c515c4ea10: the testkit shell-step runner and the node suite scripts it ran through are ported to Tools/agent Land.jet and Suite.jet (#6035 c3); the 'spawn: I/O error during resolve' path no longer exists.",
-          "at": "2026-11-07T08:38:31.785Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 13,
-          "text": "(was #5923) Authority testkit: 24 cases still fail after #5070's follow-ups (grants/providers, E0119, non-hosted verbs, core.process.run, fixtures, jet query, fix status on stderr): each failing case fixed or re-pointed at",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved unchanged to #6843 c2 (dev d6ae72dc93 repoints the known-failing rows); it stays open there. Owner order 2026-11-14.",
-          "at": "2026-11-14T23:12:03.846Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 14,
-          "text": "(was #5924) memory_semantics testkit: 4 FAIL, 1 ICE and 3 REFUSED cases on dev: the ICE root-caused and fixed first; each FAIL fixed or migrated to current canonical behavior; each",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "PortsLead-2 triage at dev 8583f858a0 (lane s1 of dev HEAD, private state; logs $JET_SCRATCH_ROOT/lanes/PortsLead/p5454/): 284 rows, 250 PASS, 1 FAIL, 32 KF. memory_semantics rows: 30 PASS; 1 KF owned by #6295.",
-          "at": "2026-11-07T08:38:21.738Z"
-        },
-        {
-          "n": 15,
-          "text": "(was #294) corelib audit: core.random — distributions, bytes, sampling [precut audit: failing on 9c7ddf1359: C:corelib_parts_encoding_surface/random_distribution_surface_is_deterministic KNOWN-FAILING #5454 Jet rejects the original source: E0112 `weighted_pick` wants [Float], the weights literal is [Decimal]: exit 1; expected 0 (known-failing #5454: Jet rejects the original…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/corelib_parts_encoding_surface/random_distribution_surface_is_deterministic.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:26:54.049Z"
-        },
-        {
-          "n": 16,
-          "text": "(was #690 c1) Every behavior named by “fn build scope: unit-local entry selection and dependency order”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: failing on 9c7ddf1359: C:build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain KNOWN-FAILING #5454 `jet build workspace.jet` reports E2105 (no `fn run` to build) instead of running the workspace and member `fn build` entries (#5496): exit (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6621 (\"`fn build` per-package permissions\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:24:53.196Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 17,
-          "text": "(was #690 c2, #1038 c2) Each build unit receives only its declared Tier-1 inputs and explicitly named Tier-2 grants; dependency order, computed package facts, plan, execution, lock, and explain output agree [precut audit: failing on 9c7ddf1359: C:build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain KNOWN-FAILING #5454 `jet build workspace.jet` reports E2105 (no `fn run` to build) instead of running the workspace and member `fn build` entries (#5496): exit (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6621 (\"`fn build` per-package permissions\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:24:54.277Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 18,
-          "text": "(was #690 c3, #1038 c3) Unlisted dependency authority, grant escalation, cycles, outside-root paths, read/write failure, and stale computed facts reject before effects with the correct registered diagnostic and exact UI snapshot [precut audit: failing on 9c7ddf1359: C:build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain KNOWN-FAILING #5454 `jet build workspace.jet` reports E2105 (no `fn run` to build) instead of running the workspace and member `fn build` entries (#5496): exit (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6621 (\"`fn build` per-package permissions\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:24:55.308Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 19,
-          "text": "(was #690 c4, #1038 c4) Focused multi-member workspace tests prove grant non-inheritance, explicit dependency grants, order, root-layer boundaries, diagnostic snapshots, and rollback of failed builds [precut audit: failing on 9c7ddf1359: C:build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain KNOWN-FAILING #5454 `jet build workspace.jet` reports E2105 (no `fn run` to build) instead of running the workspace and member `fn build` entries (#5496): exit (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6621 (\"`fn build` per-package permissions\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:24:56.330Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 20,
-          "text": "(was #698 c1) Every behavior named by “Stdlib DSL blocks: fixed-whitelist parser, sema, and formatter path”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: failing on 9c7ddf1359: C:dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw KNOWN-FAILING #5454 assert not satisfied: original expect not satisfied: exit 1; expected 0 (known-failing #5454: assert not satisfied: original expect not satisfied)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6622 (\"Typed SQL and HTML text blocks\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:05.218Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 21,
-          "text": "(was #698 c2, #1050 c2, #1051 c2) DSL owner/type resolution, segments, typed holes, source spans, formatting, generated typed value, effects, and runtime behavior preserve the ratified SQL/HTML meaning [precut audit: failing on 9c7ddf1359: C:dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw KNOWN-FAILING #5454 assert not satisfied: original expect not satisfied: exit 1; expected 0 (known-failing #5454: assert not satisfied: original expect not satisfied)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6622 (\"Typed SQL and HTML text blocks\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:06.351Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 22,
-          "text": "(was #698 c3, #1050 c3, #1051 c3) Unknown owners or types, unsupported holes, malformed DSL text, unsafe raw content, type mismatch, formatter round-trip, and runtime errors fail at the precise source span with an exact UI snapshot [precut audit: failing on 9c7ddf1359: C:dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw KNOWN-FAILING #5454 assert not satisfied: original expect not satisfied: exit 1; expected 0 (known-failing #5454: assert not satisfied: original expect not satisfied)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6622 (\"Typed SQL and HTML text blocks\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:07.454Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 23,
-          "text": "(was #698 c4, #1050 c4, #1051 c4) Focused parser/sema/formatter/UI and executable-example tests cover declared and undeclared owners, typed holes, raw escape, round-trip, and O0, O1 and O2 parity on the real DSL path [precut audit: failing on 9c7ddf1359: C:dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw KNOWN-FAILING #5454 assert not satisfied: original expect not satisfied: exit 1; expected 0 (known-failing #5454: assert not satisfied: original expect not satisfied)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6622 (\"Typed SQL and HTML text blocks\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:08.526Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 24,
-          "text": "(was #1025 c6) Slice-specific: the behavior this card alone owns — “Compiler speed: reusable stdlib objects and relevant-digest cache” — is exercised by a targeted check that fails when docs/plans/compiler-speed.md is bypassed, with no sibling slice supplying the evidence [precut audit: failing on 9c7ddf1359: C:cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects KNOWN-FAILING #5454 exit 1: Error [E2104]: The Jet backend can't build `main.jet` yet: run [function:main.run]: expression MathBuiltin at main.jet:68..71: strea (known-failing #5454: exit 1: Error [E2104]:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6623 (\"Compiler speed: reusable stdlib objects\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:14.033Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 25,
-          "text": "(was #1038 c1) Every behavior named by “fn build authority: package, workspace, and dependency grant chain”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: failing on 9c7ddf1359: C:build_entry_epoch4/workspace_build_observes_dependency_order_and_execution_chain KNOWN-FAILING #5454 `jet build workspace.jet` reports E2105 (no `fn run` to build) instead of running the workspace and member `fn build` entries (#5496): exit (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6621 (\"`fn build` per-package permissions\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:24:57.354Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 26,
-          "text": "(was #1050 c1) Every behavior named by “Stdlib DSL blocks: typed SQL vertical”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: failing on 9c7ddf1359: C:dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw KNOWN-FAILING #5454 assert not satisfied: original expect not satisfied: exit 1; expected 0 (known-failing #5454: assert not satisfied: original expect not satisfied)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6622 (\"Typed SQL and HTML text blocks\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:09.692Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 27,
-          "text": "(was #1051 c1) Every behavior named by “Stdlib DSL blocks: typed HTML vertical”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: failing on 9c7ddf1359: C:dsl_blocks/typed_text_forms_cover_sql_html_sh_and_audited_raw KNOWN-FAILING #5454 assert not satisfied: original expect not satisfied: exit 1; expected 0 (known-failing #5454: assert not satisfied: original expect not satisfied)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6622 (\"Typed SQL and HTML text blocks\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:10.813Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 28,
-          "text": "(was #1147 c1) Every behavior named by “core.compute: data integration, differential parity, and closeout”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: failing on 9c7ddf1359: C:compute_cuda/cuda_f32_backend_runs_or_fails_closed_across_all_tiers KNOWN-FAILING #5454 E0112: the checker types `compute.matrix(..)` as `Matrix<1, 1>`, and `matmul_f32_tile` then rejects it as not a `Tensor` (#5494): exit 1; ex (known-failing #5454: E0112:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6624 (\"core.compute tensors and GPU backends\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:19.731Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 29,
-          "text": "(was #1147 c2) Storage, views, operations, precision, placement, streams, kernels, derivatives, serialization, and backend receipts preserve the declared tensor meaning and CPU-oracle result for the named slice [precut audit: failing on 9c7ddf1359: C:compute_cuda/cuda_f32_backend_runs_or_fails_closed_across_all_tiers KNOWN-FAILING #5454 E0112: the checker types `compute.matrix(..)` as `Matrix<1, 1>`, and `matmul_f32_tile` then rejects it as not a `Tensor` (#5494): exit 1; ex (known-failing #5454: E0112:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6624 (\"core.compute tensors and GPU backends\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:20.811Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 30,
-          "text": "(was #1147 c3) Shape, alias, bounds, race, barrier, precision, device loss, transfer, gradient, corrupt-model, and unsupported-operation failures are checked at the owning layer and cannot silently fabricate fallback success [precut audit: failing on 9c7ddf1359: C:compute_cuda/cuda_f32_backend_runs_or_fails_closed_across_all_tiers KNOWN-FAILING #5454 E0112: the checker types `compute.matrix(..)` as `Matrix<1, 1>`, and `matmul_f32_tile` then rejects it as not a `Tensor` (#5494): exit 1; ex (known-failing #5454: E0112:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6624 (\"core.compute tensors and GPU backends\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:21.907Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 31,
-          "text": "(was #1147 c4) Focused algebraic, edge, hostile, and CPU-differential checks exercise the real implementation, include negative proof for safety claims, and prove default `jet run` plus AOT parity [precut audit: failing on 9c7ddf1359: C:compute_cuda/cuda_f32_backend_runs_or_fails_closed_across_all_tiers KNOWN-FAILING #5454 E0112: the checker types `compute.matrix(..)` as `Matrix<1, 1>`, and `matmul_f32_tile` then rejects it as not a `Tensor` (#5494): exit 1; ex (known-failing #5454: E0112:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6624 (\"core.compute tensors and GPU backends\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:22.991Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 32,
-          "text": "(was #1370 c1) BuildContext methods specified for declaring default jet CLI/effect/build knobs from fn build [precut audit: failing on 9c7ddf1359: C:feature_acceptance/public_build_product ERROR CLI build artifact missing: programmable_build (known-failing #5454: bug: `fn build(b: Build)` in run.jet is never found: jet_cli_command_override (Cli/Entry.jet:825-866) skips the other role files, and an…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/feature_acceptance/public_build_product.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:26:55.122Z"
-        },
-        {
-          "n": 33,
-          "text": "(was #1370 c3) Example + golden under programmable_build; docs linked to D-BUILDENTRY1 family [precut audit: failing on 9c7ddf1359: C:feature_acceptance/public_build_product ERROR CLI build artifact missing: programmable_build (known-failing #5454: bug: `fn build(b: Build)` in run.jet is never found: jet_cli_command_override (Cli/Entry.jet:825-866) skips the other role files, and an…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/feature_acceptance/public_build_product.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:26:56.199Z"
-        },
-        {
-          "n": 35,
-          "text": "(was #1411 c2) The `D-NEVER1` outcome controls non-returning behavior, and no unratified `Never` type reaches source or docs [precut audit: failing on 9c7ddf1359: C:run_entry/retired_void_type_reports_the_migration_diagnostic KNOWN-FAILING #5454 assert not satisfied: original assert! not satisfied: [false]: stream predicate ~ failed (known-failing #5454: assert not satisfied: original assert! not satisfied: [false])]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "PortsLead-2 triage at dev 8583f858a0 (lane s1 of dev HEAD, private state; logs $JET_SCRATCH_ROOT/lanes/PortsLead/p5454/): 284 rows, 250 PASS, 1 FAIL, 32 KF. c35-c37 rows: 16 PASS. The run_entry/retired_void_type_reports_the_migration_diagnostic row the criterion cited is no longer in the corpus.",
-          "at": "2026-11-07T08:38:28.436Z"
-        },
-        {
-          "n": 36,
-          "text": "(was #1411 c3) O0, O1, O2 and web where applicable use the same `()` and non-returning semantics where applicable [precut audit: failing on 9c7ddf1359: C:run_entry/retired_void_type_reports_the_migration_diagnostic KNOWN-FAILING #5454 assert not satisfied: original assert! not satisfied: [false]: stream predicate ~ failed (known-failing #5454: assert not satisfied: original assert! not satisfied: [false])]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "PortsLead-2 triage at dev 8583f858a0 (lane s1 of dev HEAD, private state; logs $JET_SCRATCH_ROOT/lanes/PortsLead/p5454/): 284 rows, 250 PASS, 1 FAIL, 32 KF. c35-c37 rows: 16 PASS on o0/o1/o2.",
-          "at": "2026-11-07T08:38:29.488Z"
-        },
-        {
-          "n": 37,
-          "text": "(was #1411 c4) Examples, diagnostics, snapshots, and docs teach `()` without changing tuple syntax [precut audit: failing on 9c7ddf1359: C:run_entry/retired_void_type_reports_the_migration_diagnostic KNOWN-FAILING #5454 assert not satisfied: original assert! not satisfied: [false]: stream predicate ~ failed (known-failing #5454: assert not satisfied: original assert! not satisfied: [false])]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "PortsLead-2 triage at dev 8583f858a0 (lane s1 of dev HEAD, private state; logs $JET_SCRATCH_ROOT/lanes/PortsLead/p5454/): 284 rows, 250 PASS, 1 FAIL, 32 KF. c35-c37 rows: 16 PASS.",
-          "at": "2026-11-07T08:38:30.618Z"
-        },
-        {
-          "n": 38,
-          "text": "(was #1556 c4) The bare identifier i is still an ordinary variable name and a test proves it [precut audit: failing on 9c7ddf1359: C:unit_family/imaginary_arithmetic_abs_and_display_keep_all_hosted_tiers_equal KNOWN-FAILING #5454 verify-intent: ref build failed: E0360 No `*` operator is defined for `Complex`: exit 1; expected 0 (known-failing #5454: verify-intent: ref build failed: E0360 No…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/unit_family/imaginary_arithmetic_abs_and_display_keep_all_hosted_tiers_equal.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:08:20.579Z"
-        },
-        {
-          "n": 39,
-          "text": "(was #1556 c7, #1566 c6) Tier parity (I9) is proved inside this card: parser, sema, TIR, O0, O1, O2, compile-time evaluation, REPL and web all show the same behavior, with one test per tier [precut audit: failing on 9c7ddf1359: C:unit_family/imaginary_arithmetic_abs_and_display_keep_all_hosted_tiers_equal KNOWN-FAILING #5454 verify-intent: ref build failed: E0360 No `*` operator is defined for `Complex`: exit 1; expected 0 (known-failing #5454: verify-intent: ref build failed: E0360 No…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:02:48.255Z"
-        },
-        {
-          "n": 41,
-          "text": "(was #1574 c4) http.get and http.post are re-exported on the http parent [precut audit: failing on 9c7ddf1359: C:modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers KNOWN-FAILING #5454 jet build crashes: internal compiler error \"semantic declaration checking did not return a complete resolved package graph\" (#5507): interna (known-failing #5454: jet build crashes:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:02:50.099Z"
-        },
-        {
-          "n": 42,
-          "text": "(was #1574 c5) core.json is not added [precut audit: failing on 9c7ddf1359: C:modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers KNOWN-FAILING #5454 jet build crashes: internal compiler error \"semantic declaration checking did not return a complete resolved package graph\" (#5507): interna (known-failing #5454: jet build crashes:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:02:50.980Z"
-        },
-        {
-          "n": 43,
-          "text": "(was #1574 c6) Every in-repo import, example, test, doc and snapshot moves in the same change and the old paths are a resolution error naming the new home [precut audit: failing on 9c7ddf1359: C:modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers KNOWN-FAILING #5454 jet build crashes: internal compiler error \"semantic declaration checking did not return a complete resolved package graph\" (#5507): interna (known-failing #5454: jet build crashes:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:08:21.529Z"
-        },
-        {
-          "n": 44,
-          "text": "(was #1574 c7) Open cards targeting the moved namespaces, including #288, #1479, #1480 and #1493, are re-homed in the same change [precut audit: failing on 9c7ddf1359: C:modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers KNOWN-FAILING #5454 jet build crashes: internal compiler error \"semantic declaration checking did not return a complete resolved package graph\" (#5507): interna (known-failing #5454: jet build crashes:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:02:51.930Z"
-        },
-        {
-          "n": 45,
-          "text": "(was #1575 c1) use path.[a as x, b] binds modules or items from that path [precut audit: failing on 9c7ddf1359: C:modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers KNOWN-FAILING #5454 jet build crashes: internal compiler error \"semantic declaration checking did not return a complete resolved package graph\" (#5507): interna (known-failing #5454: jet build crashes:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, second cut questions): contradicted the ratified use-list rule; reworded to D-CORE-USELIST1=A in the criterion added beside it.",
-          "at": "2026-11-07T01:03:53.833Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 46,
-          "text": "(was #1575 c2) The default local name is the last path segment [precut audit: failing on 9c7ddf1359: C:modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers KNOWN-FAILING #5454 jet build crashes: internal compiler error \"semantic declaration checking did not return a complete resolved package graph\" (#5507): interna (known-failing #5454: jet build crashes:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:02:53.076Z"
-        },
-        {
-          "n": 47,
-          "text": "(was #1575 c4) Every in-repo use line is migrated in the same change [precut audit: failing on 9c7ddf1359: C:modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers KNOWN-FAILING #5454 jet build crashes: internal compiler error \"semantic declaration checking did not return a complete resolved package graph\" (#5507): interna (known-failing #5454: jet build crashes:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "eb94f67b7a release candidate kit (chain s2 c8b9033ed8dd9a88): tests/cases/modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:10:47.395Z"
-        },
-        {
-          "n": 48,
-          "text": "(was #1575 c5) No wildcard import form exists [precut audit: failing on 9c7ddf1359: C:modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers KNOWN-FAILING #5454 jet build crashes: internal compiler error \"semantic declaration checking did not return a complete resolved package graph\" (#5507): interna (known-failing #5454: jet build crashes:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/modules_and_enums/inline_module_core_use_list_and_pub_reexport_match_all_tiers.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:08:22.560Z"
-        },
-        {
-          "n": 49,
-          "text": "(was #1726 c2) docs/spec states the one project-wide refusal shape once [precut audit: failing on 9c7ddf1359: C:auto_derive_policy/generic_deny_list_refuses_auto_derive KNOWN-FAILING #5454 E0112: a manual `impl Manual.Debug` under policy deny auto_derive is not accepted for :Debug interpolation: exit 1; expected 0 (known-failing #5454: E0112: a manual…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/auto_derive_policy/generic_deny_list_refuses_auto_derive.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:08:23.850Z"
-        },
-        {
-          "n": 50,
-          "text": "(was #1748 c1) Every registered lint carries a stable snake_case name; a coverage test fails a lint registered without one [precut audit: failing on 9c7ddf1359: C:diagnostics_coverage/registered_config_and_cli_snapshots_keep_row_identity KNOWN-FAILING #5454 jet install: `jet install` is not in the Jet-hosted CLI (E2104) (exit 2, expected 1; stderr lacks \"Error [E0043]\"): exit 2; expected 1 (known-failing…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "eb94f67b7a release candidate kit (chain s2 c8b9033ed8dd9a88): tests/cases/diagnostics_coverage/registered_config_and_cli_snapshots_keep_row_identity.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:10:48.262Z"
-        },
-        {
-          "n": 51,
-          "text": "(was #1748 c2) policy.lints.deny and every other lint-selecting config surface (including the D-REPORT-SEV1 severity control) parse names; a bare L-code in config is refused with a registered diagnostic whose fix-it states the name [precut audit: failing on 9c7ddf1359: C:diagnostics_coverage/registered_config_and_cli_snapshots_keep_row_identity KNOWN-FAILING #5454 jet install: `jet install` is not in the Jet-hosted CLI (E2104) (exit 2, expected 1; stderr lacks \"Error [E0043]\"): exit 2; expected 1 (known-failing…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main vb7 suite run on s1 built from dev 6c15482301: cases rows diagnostics_coverage/registered_config_and_cli_snapshots_keep_row_identity PASS (o0/o1/o2 where the row is tiered). Report: $JET_SCRATCH_ROOT/lanes/Main/vb7/kit/candidate-cases-0.json",
-          "at": "2026-11-06T21:13:07.810Z"
-        },
-        {
-          "n": 52,
-          "text": "(was #1748 c3) Code-keyed spellings migrate via the #1718 retirement table with an adoption ratchet; in-repo configs, docs, and examples carry names only [precut audit: failing on 9c7ddf1359: C:diagnostics_coverage/registered_config_and_cli_snapshots_keep_row_identity KNOWN-FAILING #5454 jet install: `jet install` is not in the Jet-hosted CLI (E2104) (exit 2, expected 1; stderr lacks \"Error [E0043]\"): exit 2; expected 1 (known-failing…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/diagnostics_coverage/registered_config_and_cli_snapshots_keep_row_identity.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:08:24.941Z"
-        },
-        {
-          "n": 53,
-          "text": "(was #1748 c4) Rendered diagnostics still show the code beside the name; nothing user-typed requires a code anywhere [precut audit: failing on 9c7ddf1359: C:diagnostics_coverage/registered_config_and_cli_snapshots_keep_row_identity KNOWN-FAILING #5454 jet install: `jet install` is not in the Jet-hosted CLI (E2104) (exit 2, expected 1; stderr lacks \"Error [E0043]\"): exit 2; expected 1 (known-failing…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Duplicate of #6096 c52 (met: rendered_lint_keeps_code_beside_name ported); owner approved closing it 2026-11-06.",
-          "at": "2026-11-06T18:45:57.668Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 54,
-          "text": "(was #1775 c3) `jet test Compiler --profile cases secrets_expiry/expiring_secret_system_observation_is_not_pure` passes [precut audit: failing on 9c7ddf1359: C:secrets_expiry/expiring_secret_lends_then_zeroizes_on_expiry KNOWN-FAILING #5454 verify-intent: ref build failed: E1803 Application authority is undecided for `Rand`: exit 1; expected 0 (known-failing #5454: verify-intent: ref build failed: E1803 Application authority…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/secrets_expiry/expiring_secret_lends_then_zeroizes_on_expiry.case, tests/cases/secrets_expiry/expiring_secret_system_observation_is_not_pure.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:26:57.236Z"
-        },
-        {
-          "n": 55,
-          "text": "(was #1775 c4) no other assertion in either test is weakened [precut audit: failing on 9c7ddf1359: C:secrets_expiry/expiring_secret_lends_then_zeroizes_on_expiry KNOWN-FAILING #5454 verify-intent: ref build failed: E1803 Application authority is undecided for `Rand`: exit 1; expected 0 (known-failing #5454: verify-intent: ref build failed: E1803 Application authority…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/secrets_expiry/expiring_secret_lends_then_zeroizes_on_expiry.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:26:58.482Z"
-        },
-        {
-          "n": 56,
-          "text": "(was #1854 c2) the tests/cases/taskgroup_params/ rows and Examples/features/concurrency/*.jet pass on O0, O1 and O2 (I9) [precut audit: failing on 9c7ddf1359: C:taskgroup_params/taskgroup_type_is_second_class KNOWN-FAILING #5454 only the struct-field position reports E1110; return types report only E0113, and list/tuple/Val/closure-parameter captures of a Group compi (known-failing #5454: only the struct-field position…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Moved unchanged to #6843 c3 (dev d6ae72dc93 repoints the known-failing rows); it stays open there. Owner order 2026-11-14.",
-          "at": "2026-11-14T23:12:05.679Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 57,
-          "text": "(was #1865 c1) task.race / task.any tie-break is deterministic and specified for near-simultaneous branches (absorbed from 1860) [precut audit: failing on 9c7ddf1359: C:taskgroup_params/early_return_closes_group_before_caller_continues KNOWN-FAILING #5454 L1101 `_bad` still owes `join`: exit 1; expected 0 (known-failing #5454: L1101 `_bad` still owes `join`)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/taskgroup_params/early_return_closes_group_before_caller_continues.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:26:59.811Z"
-        },
-        {
-          "n": 58,
-          "text": "(was #1865 c2) the task keyword no longer collides with pre-existing locals named task; diagnostic or scoping rule is specified (absorbed from 1861) [precut audit: failing on 9c7ddf1359: C:taskgroup_params/early_return_closes_group_before_caller_continues KNOWN-FAILING #5454 L1101 `_bad` still owes `join`: exit 1; expected 0 (known-failing #5454: L1101 `_bad` still owes `join`)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/taskgroup_params/early_return_closes_group_before_caller_continues.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:27:00.731Z"
-        },
-        {
-          "n": 59,
-          "text": "(was #1865 c3) a task panic propagates reliably through group auto-join and Drop-based close, on every tier (I9) [precut audit: failing on 9c7ddf1359: C:taskgroup_params/early_return_closes_group_before_caller_continues KNOWN-FAILING #5454 L1101 `_bad` still owes `join`: exit 1; expected 0 (known-failing #5454: L1101 `_bad` still owes `join`)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/taskgroup_params/early_return_closes_group_before_caller_continues.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:27:01.652Z"
-        },
-        {
-          "n": 60,
-          "text": "(was #1883 c3) m.add on an existing key returns the previous value and on a missing key returns None, byte-identical across O0, O1 and O2 (probe program from the card body becomes a test) [precut audit: failing on 9c7ddf1359: C:collections_and_methods/map_builtin_methods KNOWN-FAILING #5454 verify-intent: ref build failed: E0224 This call writes `probe`, but it has no `&` mark: exit 1; expected 0 (known-failing #5454: verify-intent: ref build…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main vb7 suite run on s1 built from dev 6c15482301: cases rows collections_and_methods/map_builtin_methods PASS (o0/o1/o2 where the row is tiered). Report: $JET_SCRATCH_ROOT/lanes/Main/vb7/kit/candidate-cases-0.json",
-          "at": "2026-11-06T21:13:09.225Z"
-        },
-        {
-          "n": 61,
-          "text": "(was #1883 c4) The vacant/occupied map cases also run on O0; Examples/features/collections/map_surface.jet covers both cases with golden output (`jet test Compiler --profile golden collections/map_surface`) [precut audit: failing on 9c7ddf1359: C:collections_and_methods/map_builtin_methods KNOWN-FAILING #5454 verify-intent: ref build failed: E0224 This call writes `probe`, but it has no `&` mark: exit 1; expected 0 (known-failing #5454: verify-intent: ref build…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "eb94f67b7a release candidate kit (chain s2 c8b9033ed8dd9a88): tests/cases/collections_and_methods/map_builtin_methods.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:10:49.100Z"
-        },
-        {
-          "n": 62,
-          "text": "(was #2239 c1) One scaffold command produces a web project jet dev serves immediately: Target(Web) source, reactive example, working default shell, authority block included [precut audit: failing on 9c7ddf1359: C:web_scaffold/jet_new_web_scaffold_runs_from_new_to_browser KNOWN-FAILING #5454 expects `web_app/.jet/build/index.html`, which the wasm build does not write (#5201): wrong file kind: web_app/.jet/build/index.html (known-failing #5454: expects `web_app/.jet/build/index.html`, which the wasm build does not…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "2ec700da30 release candidate kit (chain s2 a0_032): tests/cases/web_scaffold/jet_new_web_scaffold_runs_from_new_to_browser.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T07:07:24.907Z"
-        },
-        {
-          "n": 63,
-          "text": "(was #2293 c1) JSON integer + non-finite fidelity: i64 extremes round-trip, big ints never clamp/float/stringify, trailing comma and non-finite rejected; witness green byte-identical both tiers vs golden [precut audit: failing on 9c7ddf1359: C:encoding_corpus/exact_typed_json_numbers KNOWN-FAILING #5454 E2402 This implicit fallible call can't convert `[FieldError]` into `Err` — no declared conversion exists: exit 1; expected 0 (known-failing #5454: E2402 This implicit…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/encoding_corpus/exact_typed_json_numbers.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:08:25.861Z"
-        },
-        {
-          "n": 64,
-          "text": "(was #2313 c1) Typed Codable integer fidelity: decoded i64 extremes re-encode exactly on both tiers; non-finite floats never emit invalid JSON [precut audit: failing on 9c7ddf1359: C:encoding_corpus/exact_typed_json_numbers KNOWN-FAILING #5454 E2402 This implicit fallible call can't convert `[FieldError]` into `Err` — no declared conversion exists: exit 1; expected 0 (known-failing #5454: E2402 This implicit…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/encoding_corpus/exact_typed_json_numbers.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:08:26.767Z"
-        },
-        {
-          "n": 65,
-          "text": "(was #2406 c2) A String-backed View<str> return emits a valid Ok/carrier body, and the ownership suite passes without a rustc leak [precut audit: failing on 9c7ddf1359: C:ownership/edit_disjoint_callback_views_reject_every_retaining_boundary KNOWN-FAILING #5454 assert not satisfied: original assert! not satisfied: [false]: stream predicate ~ failed (known-failing #5454: assert not satisfied: original assert! not satisfied: [false]); C:ownership/enum_pattern_payload_keeps_its_original_owner_live KNOWN-FAILING…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "PortsLead-2 triage at dev 8583f858a0 (lane s1 of dev HEAD, private state; logs $JET_SCRATCH_ROOT/lanes/PortsLead/p5454/): 284 rows, 250 PASS, 1 FAIL, 32 KF. c65 rows: 89/89 PASS.",
-          "at": "2026-11-07T08:38:22.805Z"
-        },
-        {
-          "n": 66,
-          "text": "(was #2426 c1) Implementation-only closure: every live edit computes per-key canonical #Persist retention from checked type identity, validates payload shape through one Foundation migration boundary, preserves only unchanged typed values, and records explicit Fresh/Reset reasons for changed or unavailable keys across tiers [precut audit: failing on 9c7ddf1359: C:dev_parts_routine/persist_example_survives_hot_reload KNOWN-FAILING #5454 REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output: stdout ended before r (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6625 (\"Live hot-reload that keeps state (#Persist)\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:30.988Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 67,
-          "text": "(was #2489 c1) Game hot swap is source-complete through production WatchSession facts, one shared Foundation swap kernel, typed asset/script/world decisions, resident CmdDevTools application, and canonical event publication; runtime proof is deferred to #2919 [precut audit: failing on 9c7ddf1359: C:dev_parts_routine/persist_example_survives_hot_reload KNOWN-FAILING #5454 REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output: stdout ended before r (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6625 (\"Live hot-reload that keeps state (#Persist)\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:32.055Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 68,
-          "text": "(was #2504 c1) Execution selection, composed O0/O2 source paths, content-digest watching and resident live execution with Persist semantics are integrated; long-lived tier proof remains #2919 [precut audit: failing on 9c7ddf1359: C:dev_parts_routine/persist_example_survives_hot_reload KNOWN-FAILING #5454 REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output: stdout ended before r (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6625 (\"Live hot-reload that keeps state (#Persist)\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:33.095Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 69,
-          "text": "(was #2504 c2) Published Persist migrations use one shared canonical Shape migration plan; restart and renamed-binding reset policies are implemented [precut audit: failing on 9c7ddf1359: C:dev_parts_routine/persist_example_survives_hot_reload KNOWN-FAILING #5454 REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output: stdout ended before r (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6625 (\"Live hot-reload that keeps state (#Persist)\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:34.140Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 70,
-          "text": "(was #2504 c3) Default swap, explicit session/project restart opt-outs and retained existing field values are implemented with typed save outcomes [precut audit: failing on 9c7ddf1359: C:dev_parts_routine/persist_example_survives_hot_reload KNOWN-FAILING #5454 REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output: stdout ended before r (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6625 (\"Live hot-reload that keeps state (#Persist)\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:35.252Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 71,
-          "text": "(was #2504 c4) Live inspection exposes typed pinned values and their shapes at the ratified inspect build live route, with source fixtures [precut audit: failing on 9c7ddf1359: C:dev_parts_routine/persist_example_survives_hot_reload KNOWN-FAILING #5454 REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output: stdout ended before r (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6625 (\"Live hot-reload that keeps state (#Persist)\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:36.311Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 72,
-          "text": "(was #2504 c5) All named live/dev/parity/inspection/diagnostic proof and O0/O2 smoke remain mandatory in #2919; source implementation is complete [precut audit: failing on 9c7ddf1359: C:dev_parts_routine/persist_example_survives_hot_reload KNOWN-FAILING #5454 REFUSED read_bytes: the testkit session `recv` is not implemented yet, and the original reads the live session output: stdout ended before r (known-failing #5454:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Owner ruling 2026-11-06 (chat, cut questions): moved to #6625 (\"Live hot-reload that keeps state (#Persist)\"), outside the G1/G2 deadline.",
-          "at": "2026-11-06T23:25:37.436Z",
-          "closure": "duplicate"
-        },
-        {
-          "n": 73,
-          "text": "(was #2516 c2) `jet test Compiler --profile cases cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects` passes against the store: an unchanged build restores the binary and the runtime objects from $HOME/.cache/jet/store, and a corrupted blob is removed, reported with one note line, and rebuilt [precut audit: failing on 9c7ddf1359: C:cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects KNOWN-FAILING #5454 exit 1: Error [E2104]: The Jet backend can't build `main.jet` yet: run [function:main.run]: expression MathBuiltin at main.jet:68..71: strea (known-failing #5454: exit 1: Error [E2104]:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:27:02.566Z"
-        },
-        {
-          "n": 74,
-          "text": "(was #2516 c3) No JET_CACHE_DIR or JET_RUNTIME_CACHE_DIR remains under Compiler/, Core/, Jetpack/ or Tools/ [precut audit: failing on 9c7ddf1359: C:cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects KNOWN-FAILING #5454 exit 1: Error [E2104]: The Jet backend can't build `main.jet` yet: run [function:main.run]: expression MathBuiltin at main.jet:68..71: strea (known-failing #5454: exit 1: Error [E2104]:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/cli_compiler_speed/production_build_reuses_and_repairs_stdlib_objects.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:27:03.521Z"
-        },
-        {
-          "n": 75,
-          "text": "(was #2639 c1) The higher-order autodiff fixture defines and calls curvature without E0112 or E0102, and its second derivative has the expected value. Proof: the exact fixture receipt shows a successful result and no diagnostics [precut audit: failing on 9c7ddf1359: C:compute_parity/named_gradient_composes_into_second_derivative KNOWN-FAILING #5454 verify-intent: ICE ir.build unlowered generic Core call core.compute.gradient (autodiff runtime tape waits on ballot): exit 1; expected 0 (known-failing #5454: verify-intent: ICE ir.build unlowered…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "6c31e4f192 release candidate kit (chain s2 jet fa08aca4357522f7, a0_033): tests/cases/compute_parity/named_gradient_composes_into_second_derivative.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T11:07:21.505Z"
-        },
-        {
-          "n": 76,
-          "text": "(was #2639 c3) The ml-training observing row is re-probed with a positive second-derivative parity receipt. Proof: the updated compute_autodiff receipt records matching outputs [precut audit: failing on 9c7ddf1359: C:compute_parity/named_gradient_composes_into_second_derivative KNOWN-FAILING #5454 verify-intent: ICE ir.build unlowered generic Core call core.compute.gradient (autodiff runtime tape waits on ballot): exit 1; expected 0 (known-failing #5454: verify-intent: ICE ir.build unlowered…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "6c31e4f192 release candidate kit (chain s2 jet fa08aca4357522f7, a0_033): tests/cases/compute_parity/named_gradient_composes_into_second_derivative.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T11:07:22.373Z"
-        },
-        {
-          "n": 77,
-          "text": "(was #2758 c1) `jet test Compiler --profile cases core_and_closures/try_sort_by_is_atomic_and_tier_stable` passes on O0, O1 and O2 with output 31 and no E0121 [precut audit: failing on 9c7ddf1359: C:core_and_closures/try_sort_by_is_atomic_and_tier_stable KNOWN-FAILING #5454 verify-intent: ref build failed: E0224 This call writes `ascending`, but it has no `&` mark: exit 1; expected 0 (known-failing #5454: verify-intent: ref build…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "eb94f67b7a release candidate kit (chain s2 c8b9033ed8dd9a88): tests/cases/core_and_closures/try_sort_by_is_atomic_and_tier_stable.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:10:49.999Z"
-        },
-        {
-          "n": 78,
-          "text": "(was #2770 c1) The immutable fixture is rejected in sema with registered E0111 on check/run/release/build paths and never reaches generated Rust or a rustc ICE; the corrected `:`→`:=` companion exits 0 and prints exactly `[0.0, 3.0, 0.0, 0.0]` on O0, O1 and O2 [precut audit: failing on 9c7ddf1359: U:compute_set_immutable FAIL snapshot mismatch: tests/ui/compute_set_immutable.stderr; C:compute_parity/compute_set_requires_mutable_binding_before_codegen KNOWN-FAILING #5454 stream predicate ~ failed; first diagnostic: E0205 Cannot edit through `tensor` — it has read access only: stream predicate…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/compute_parity/compute_set_requires_mutable_binding_before_codegen.case, tests/ui/compute_set_immutable.jet PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:08:27.752Z"
-        },
-        {
-          "n": 79,
-          "text": "(was #2770 c3) The prim-arrays-G2 probe and compute.set parity coverage pass on the affected O0, O1 and O2 tiers: immutable input yields E0111, while the mutable companion preserves the exact observer values [precut audit: failing on 9c7ddf1359: U:compute_set_immutable FAIL snapshot mismatch: tests/ui/compute_set_immutable.stderr; C:compute_parity/compute_set_requires_mutable_binding_before_codegen KNOWN-FAILING #5454 stream predicate ~ failed; first diagnostic: E0205 Cannot edit through `tensor` — it has read access only: stream predicate…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/compute_parity/compute_set_requires_mutable_binding_before_codegen.case, tests/ui/compute_set_immutable.jet PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:08:28.673Z"
-        },
-        {
-          "n": 80,
-          "text": "(was #2774 c2, #2772 c2, #2777 c2) A regression test or golden guards the construct, and any changed diagnostic has a registered code with a UI snapshot (I4). Proof: the named test and snapshot [precut audit: failing on 9c7ddf1359: C:exact_division/comptime_division_keeps_the_same_exact_value_as_runtime KNOWN-FAILING #5454 verify-intent: ref build failed: E0956 evaluation does not implement `ambient route is unavailable to the canonical host adapter`: exit 1; e (known-failing #5454: verify-intent:…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/exact_division/comptime_division_keeps_the_same_exact_value_as_runtime.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:27:04.437Z"
-        },
-        {
-          "n": 81,
-          "text": "(was #2882 c1) For the exact `jet new demo` scaffold, either the checked web adapter emits a browser page that prints `hello, world`, or validation stops before code generation with registered E-WEB-TIR-UNSUPPORTED naming the unsupported ability; neither path may report an internal ability-facts drift [precut audit: failing on 9c7ddf1359: C:web_scaffold/jet_new_native_scaffold_builds_for_explicit_web_target KNOWN-FAILING #5454 expects `demo/.jet/build/index.html`, which the wasm build does not write (#5201): wrong file kind: demo/.jet/build/index.html (known-failing #5454: expects `demo/.jet/build/index.html`, which the wasm build does not…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "2ec700da30 release candidate kit (chain s2 a0_032): tests/cases/web_scaffold/jet_new_native_scaffold_builds_for_explicit_web_target.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T07:07:25.715Z"
-        },
-        {
-          "n": 82,
-          "text": "(was #2882 c2) No path reports `ability facts drifted after validation` [precut audit: failing on 9c7ddf1359: C:web_scaffold/jet_new_native_scaffold_builds_for_explicit_web_target KNOWN-FAILING #5454 expects `demo/.jet/build/index.html`, which the wasm build does not write (#5201): wrong file kind: demo/.jet/build/index.html (known-failing #5454: expects `demo/.jet/build/index.html`, which the wasm build does not…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "2ec700da30 release candidate kit (chain s2 a0_032): tests/cases/web_scaffold/jet_new_native_scaffold_builds_for_explicit_web_target.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T07:07:26.525Z"
-        },
-        {
-          "n": 83,
-          "text": "(was #3048 c1) The existing generic_method_calls_keep_owner_and_method_arguments_separate regression passes and prints ok, again, static, inferred through O0 (`jet run`) [precut audit: failing on 9c7ddf1359: C:generics/generic_method_calls_keep_owner_and_method_arguments_separate KNOWN-FAILING #5454 E0904 cannot infer the owner type arguments for `Box.make` (the static method never names the owner's `T`): exit 1; expected 0 (known-failing #5454: E0904…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/generics/generic_method_calls_keep_owner_and_method_arguments_separate.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:27:05.396Z"
-        },
-        {
-          "n": 84,
-          "text": "(was #3048 c2) Equivalent owner/method-generic calls preserve explicit/inferred/static/named/default argument meaning on O0, O1 and O2 [precut audit: failing on 9c7ddf1359: C:generics/generic_method_calls_keep_owner_and_method_arguments_separate KNOWN-FAILING #5454 E0904 cannot infer the owner type arguments for `Box.make` (the static method never names the owner's `T`): exit 1; expected 0 (known-failing #5454: E0904…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "34290833a9 release candidate kit (chain s2 613ff4f17287d935): tests/cases/generics/generic_method_calls_keep_owner_and_method_arguments_separate.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T06:27:06.362Z"
-        },
-        {
-          "n": 85,
-          "text": "(was #3059 c1) Arena construction, allocation and close execute with expected values on O0, O1 and O2; an erased move preserves the owner, while the active use-after-close witness is rejected by sema. Constructor typing comes from checked semantic metadata [precut audit: failing on 9c7ddf1359: C:arena/alloc_and_use_compiles_and_runs KNOWN-FAILING #5454 E0111: the original writes through the arena view with `x = 43` after `x: arena.alloc(42)`; Jet treats `x` as an immutable binding: exit…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/arena/alloc_and_use_compiles_and_runs.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:08:29.584Z"
-        },
-        {
-          "n": 86,
-          "text": "(was #3424 c1) The active arena view escape is rejected by sema with canonical E0631 and no unrelated cascade; each retained diagnostic is independently actionable [precut audit: failing on 9c7ddf1359: C:arena/view_escape_is_e0631 KNOWN-FAILING #5454 jet check accepts it; Rust reported E0631: exit 0; expected 1 (known-failing #5454: jet check accepts it; Rust reported E0631)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "eb94f67b7a release candidate kit (chain s2 c8b9033ed8dd9a88): tests/cases/arena/view_escape_is_e0631.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:10:50.896Z"
-        },
-        {
-          "n": 87,
-          "text": "(was #4661 c1) The work has landed on dev with evidence in the closing log entry [precut audit: failing on 9c7ddf1359: C:collections_and_methods/collection_pop_table KNOWN-FAILING #5454 verify-intent: ref build failed: E0224 This call writes `xs`, but it has no `&` mark: exit 1; expected 0 (known-failing #5454: verify-intent: ref build…]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main vb7 suite run on s1 built from dev 6c15482301: cases rows collections_and_methods/collection_pop_table PASS (o0/o1/o2 where the row is tiered). Report: $JET_SCRATCH_ROOT/lanes/Main/vb7/kit/candidate-cases-0.json",
-          "at": "2026-11-06T21:13:14.310Z"
-        },
-        {
-          "n": 88,
-          "text": "tests/cases/cffi/cffi_string_returns_are_borrowed_non_null_utf8_and_copied.case passes: a null or non-UTF-8 C String return stops with the asserted words (returned a null pointer / not valid UTF-8), and its known-failing row is removed",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "35e0cfaf0d release candidate kit (chain s2 eeeba2c67584e1ba): tests/cases/cffi/cffi_string_returns_are_borrowed_non_null_utf8_and_copied.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T02:08:30.501Z"
-        },
-        {
-          "n": 89,
-          "text": "Compiler/JetFoundation/Tests/Outcome/ErrorReport.jet 'error report protocol canonical equality and duplicate refusal' passes without expected_fail: JetErrorReport.from_json reads the jet.err/v1 wire with the strict reader's rules (depth 64, its refusal messages, 1.0 not canonical)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "e898561daa (MechC): JetErrorReport.from_json now reads through Core's json.parse_with_limits, with the strict reader's 64-container depth and no byte ceiling, and maps a missing value or a too-deep container to the strict reader's wording. It re-encodes a fraction or exponent lexeme as its Float, so a non-canonical 1.0 is refused. There is still one JSON parser, Core's. Main ran a0_031 jet test Compiler/JetFoundation/Tests/Outcome/ErrorReport.jet on dev: 212 passed, 0 failed. 'canonical equality and duplicate refusal', 'nested equality empty option and raw detail rejection' and 'depth64 strict syntax and no protocol byte ceiling' all pass, and the file has no expected_fail.",
-          "at": "2026-11-07T04:10:04.709Z"
-        },
-        {
-          "n": 90,
-          "text": "Compiler/JetFoundation/Tests/Outcome/ErrorReport.jet 'error report protocol nested equality empty option and raw detail rejection' passes without expected_fail",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "e898561daa (MechC): JetErrorReport.from_json now reads through Core's json.parse_with_limits, with the strict reader's 64-container depth and no byte ceiling, and maps a missing value or a too-deep container to the strict reader's wording. It re-encodes a fraction or exponent lexeme as its Float, so a non-canonical 1.0 is refused. There is still one JSON parser, Core's. Main ran a0_031 jet test Compiler/JetFoundation/Tests/Outcome/ErrorReport.jet on dev: 212 passed, 0 failed. 'canonical equality and duplicate refusal', 'nested equality empty option and raw detail rejection' and 'depth64 strict syntax and no protocol byte ceiling' all pass, and the file has no expected_fail.",
-          "at": "2026-11-07T04:10:05.593Z"
-        },
-        {
-          "n": 91,
-          "text": "Compiler/JetFoundation/Tests/Outcome/ErrorReport.jet 'error report protocol depth64 strict syntax and no protocol byte ceiling' passes without expected_fail",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "e898561daa (MechC): JetErrorReport.from_json now reads through Core's json.parse_with_limits, with the strict reader's 64-container depth and no byte ceiling, and maps a missing value or a too-deep container to the strict reader's wording. It re-encodes a fraction or exponent lexeme as its Float, so a non-canonical 1.0 is refused. There is still one JSON parser, Core's. Main ran a0_031 jet test Compiler/JetFoundation/Tests/Outcome/ErrorReport.jet on dev: 212 passed, 0 failed. 'canonical equality and duplicate refusal', 'nested equality empty option and raw detail rejection' and 'depth64 strict syntax and no protocol byte ceiling' all pass, and the file has no expected_fail.",
-          "at": "2026-11-07T04:10:06.577Z"
-        },
-        {
-          "n": 92,
-          "text": "Compiler/JetCli/Tests/ComparisonHistory.jet comparison_history passes without expected_fail: the comparison record identity is re-derived and pinned from a checked-in oracle (today 704 bytes, id 580b78f7…, vs the pinned 683-byte Rust capture 2c21b6b1…)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "PortsLead-2 triage at dev 8583f858a0 (lane s1 of dev HEAD, private state; logs $JET_SCRATCH_ROOT/lanes/PortsLead/p5454/): 284 rows, 250 PASS, 1 FAIL, 32 KF. Compiler/JetCli/Tests comparison_history 1/0 with no expected_fail.",
-          "at": "2026-11-07T08:38:23.814Z"
-        },
-        {
-          "n": 93,
-          "text": "Compiler/JetCli/Tests/Try.jet try passes without expected_fail: with use tools: core.devtools the retained checked projection keeps its loaded-module ownership bijection (JetDriver Pipeline.jet jet_driver_doc_modules)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "PortsLead-2 triage at dev 8583f858a0 (lane s1 of dev HEAD, private state; logs $JET_SCRATCH_ROOT/lanes/PortsLead/p5454/): 284 rows, 250 PASS, 1 FAIL, 32 KF. Compiler/JetCli/Tests try 5/0 with no expected_fail.",
-          "at": "2026-11-07T08:38:24.835Z"
-        },
-        {
-          "n": 94,
-          "text": "Compiler/JetCli/Tests/InspectBuild.jet 'inspect_build planned fn build' passes without expected_fail: a planned fn build query completes in a unit test (today E0956: no runtime image, jet_runtime.image)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "0053b316f6 (MechC): the InspectBuild 'planned fn build' test opens a native session over the runtime pack beside $JET, through the new internal jet_cli_native_session_at(runtime_dir) in Request.jet, which jet_cli_native_session also calls. expected_fail is removed. Main ran JET=a0_031 jet test Compiler/JetCli/Tests/InspectBuild.jet on dev: 96 passed, 0 failed, 2 expected-fail (other tests), and 'inspect_build planned fn build' passes. Without JET, the test falls back to jet on PATH, which must be the admitted compiler (AGENTS.md: JET names it for every tool and gate).",
-          "at": "2026-11-07T04:20:45.480Z"
-        },
-        {
-          "n": 95,
-          "text": "The Core tree matches D-CORE-TREE1=A (proved by the retired-namespaces case and the core_unknown_module ui row). (reworded from c40)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "PortsLead-2 triage at dev 8583f858a0 (lane s1 of dev HEAD, private state; logs $JET_SCRATCH_ROOT/lanes/PortsLead/p5454/): 284 rows, 250 PASS, 1 FAIL, 32 KF. Retired-namespaces case and ui core_unknown_module PASS.",
-          "at": "2026-11-07T08:38:26.330Z"
-        },
-        {
-          "n": 96,
-          "text": "`use path.[a, b]` binds each member by its last segment, and a renamed member is its own `x: path.a` row (D-CORE-USELIST1=A, amended by #6542). (reworded from c45)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "PortsLead-2 triage at dev 8583f858a0 (lane s1 of dev HEAD, private state; logs $JET_SCRATCH_ROOT/lanes/PortsLead/p5454/): 284 rows, 250 PASS, 1 FAIL, 32 KF. use-list rows 4/4 PASS.",
-          "at": "2026-11-07T08:38:27.395Z"
-        },
-        {
-          "n": 97,
-          "text": "Interpolating a struct value whose fields include Set<String> or Set<Int> lowers and prints on every tier. Today sema accepts it and IR lowering stops with an ICE (exit 101) at 'display of Set<..>' (MechD-3, 11-07). tests/cases/backend_ice/backend_gap_is_ice_101_with_a_row_per_function.case uses this gap as its trigger, because sema now refuses the old compute.vjp/jvp trigger with E2104. When the gap is closed, the case moves to the JET_ICE_SELF_TEST hook (tests/cases/ice_report_single_home/panic_hook_prints_the_branded_report_and_exits_101.case) so the ICE-report claim never depends on a product defect.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile cases --filter core_set_foundations/a_set_displays_as_its_keys_on_every_tier: 1 PASS on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev bda8175585",
-          "at": "2026-11-14T23:04:15.546Z"
-        },
-        {
-          "n": 98,
-          "text": "Sema refuses every #Export(c) or library export that can fail (an inferred failure carrier, or a carrier written on the export or on a library component signature) with E3203 at the export's name, and Never! is the infallible spelling. Codegen's check in Compiler/JetIR/Source/BuildLibrary.jet (ir_infallible, 'a native C export is infallible') becomes an internal assertion that checked code never reaches, so no input gets a user error from codegen or an exit 101 there. ui snapshots cover each form.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "vb17 batch kit of dev 964e737fcc (s1 from a0_033; golden 4324 PASS, ui 2312 PASS, cases 3637 PASS, 0 FAIL/ERROR/TIMEOUT): all 6 ui/cffi_e3203_* snapshots PASS (component_declared_failure, enum_rejected, export_declared_failure, export_inferred_failure, non_cabi, struct_needs_layout_c). Compiler/JetIR/Source/BuildLibrary.jet:558 is now an internal assertion (panic 'checked C export has a failure carrier; sema refuses it with E3203').",
-          "at": "2026-11-07T16:59:31.019Z"
-        },
-        {
-          "n": 99,
-          "text": "tests/cases/browser_bidi/native_bidi_command_deadline_does_not_reset_on_continuous_events.case passes on every hosted tier with no known-failing row: a BiDi command deadline is not reset by a continuous event stream. Fixed by G3Core-1b (#Deadline marker), row dropped by G3Core-1b-kf.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main goal sweep 2026-11-13 on the batch-15 jet (gate-p20, dev 734568e5cd): jet test Compiler --profile cases --filter browser_bidi/native_bidi_command_deadline_does_not_reset_on_continuous_events gives PASS with 0 FAIL, 0 KNOWN-FAILING and 0 ERROR (Lander5 sweep, results row in $JET_SCRATCH_ROOT/lanes/Main/sweep/results.tsv).",
-          "at": "2026-11-14T00:45:12.975Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "wayfinder:map"
-      ],
-      "parentId": "c0rqi33c",
-      "needsAcceptance": false,
-      "created": "2026-10-23T06:35:31.835Z",
-      "updated": "2026-11-14T23:12:09.059Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 99,
-      "completedAt": "2026-11-14T23:12:09.058Z"
-    },
-    {
       "id": "c00tizy7",
       "num": 5455,
       "title": "Secure, current and reproducible systems in the AI-attack era (JetOS and Jetpack)",
@@ -97259,11 +96085,11 @@
         {
           "n": 1,
           "text": "native.share uses the Web Share API in a browser that has it. On Linux and in other browsers it copies the link and says so. Proof: `jet test Compiler --profile cases --filter NativeApp/share_uses_the_web_share_api_or_copies` on Linux and the web.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T21:53:56.522Z"
+          "evidence": "Landed in c7edef5faa (p279), fixed by 802105d3a4 (p281). On the p281 batch compiler 443a0e13e5, `jet test Compiler --profile cases --filter NativeApp/share_uses_the_web_share_api_or_copies` passes 1/1, with Linux steps and web page steps (Web Share API, and the copy fallback).",
+          "at": "2026-11-17T23:23:58.702Z"
         },
         {
           "n": 2,
@@ -97289,7 +96115,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:47.698Z",
-      "updated": "2026-11-17T14:09:38.222Z",
+      "updated": "2026-11-17T23:23:58.702Z",
       "updatedBy": "Main",
       "criteriaLastN": 3
     },
@@ -97598,6 +96424,24 @@
           "verifiedBy": null,
           "evidence": "Landed in 7ae60a532b (p280). On the p280 batch compiler 412b58dbb6, the cases NativeApp/the_phase_follows (1/1) and WebBuild/the_phase_follows_hide_show_and_suspend_in_a_page (1/1) print the phase sequence across hide, show and suspend.",
           "at": "2026-11-17T23:03:12.062Z"
+        },
+        {
+          "n": 5,
+          "text": "A core.ui text input reports what is typed: a change handler on text_input, carried as a compiler-registered slot role like TextInputDrop (sema CoreRoles/UIHandles, the JetRuntime UIBackends slot table, the native __input path and the web host reading the input's value). It is the step c2 needs below ui.saved, and its name follows the existing core.ui handler naming. Proof: a NativeApp case where typing into a text input runs the handler with the typed text, on Linux and in a page.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T23:19:52.396Z"
+        },
+        {
+          "n": 6,
+          "text": "An App screen renders in a page: launch on the web draws the app's screens through the client render, where today it draws nothing. c2's web half needs it. Proof: a WebBuild case whose page shows an App screen's text after launch.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T23:19:54.243Z"
         }
       ],
       "refs": [],
@@ -97605,9 +96449,9 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:53.581Z",
-      "updated": "2026-11-17T23:03:12.062Z",
+      "updated": "2026-11-17T23:19:54.243Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 6
     },
     {
       "id": "c0s5hn28",
@@ -117926,7 +116770,7 @@
       "track": "epoch",
       "epoch": "e24",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -117938,6 +116782,11 @@
         {
           "at": "2026-11-17",
           "by": "Main",
+          "text": "c1-c3 met on p281 (443a0e13e5)."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
           "text": "c2 decision (Main): Compiler/JetTestKit/Source/EnvironmentNames.jet is generated by Tools/Agent/EnvironmentRows.jet as a full copy of the environment registry. JET_SCHEDULER_THREADS stays a real user setting, so its row stays. The workaround that c2 removes is Kit.jet's default-pool setting. c2's proof excludes the generated copy: git grep -n JET_SCHEDULER_THREADS -- Compiler/JetTestKit Tools/testkit ':!Compiler/JetTestKit/Source/EnvironmentNames.jet' prints nothing."
         }
       ],
@@ -117945,11 +116794,11 @@
         {
           "n": 1,
           "text": "A cases fixture nests joins inside a task group whose limit is at least the core count and finishes on O0, O1 and O2, with a join on a not-yet-started child running that child on the joining thread.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:18:43.391Z",
+          "evidence": "Landed in 321f8ee4a2 (p279) and 443a0e13e5 (p281 fallout). On the p281 batch compiler 443a0e13e5, `jet test Compiler --profile cases --filter Runtime/nested_join_more_tasks_than_workers` passes 1/1: a built program with one carrier and a 4 GiB cap nests joins in a group whose limit is at least the core count, finishes on O0, O1 and O2, and a join runs a child no carrier can start on the joining thread.",
+          "at": "2026-11-17T23:23:43.898Z",
           "proof": {
             "profile": "cases",
             "filter": "Runtime/nested_join_more_tasks_than_workers"
@@ -117967,11 +116816,11 @@
         {
           "n": 3,
           "text": "The inline join keeps each task's observable identity. A child that a join runs on the joining thread still reports its own task thread/context, its CPU time is charged to the child and not the joiner, and carrier kind facts are unchanged. Proof (p279 regressions): Examples/Concurrency/TaskCPUClock golden on o0/o1/o2, the cases Context/local_values_reaching_a_context_read_stay_run_time_code, Context/compile_time_code_reads_the_build_root_context, TaskControlTiers/carriers_come_from_the_runtime_or_from_the_c_closures_libc and FFICallbacksTasks/programs_without_c_start_raw_clones_and_programs_with_c_start_musl_threads all pass, and Runtime/nested_join_more_tasks_than_workers runs (not REFUSED).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T22:33:17.795Z"
+          "evidence": "Landed in 443a0e13e5 (p281). A join runs a child inline only when no carrier is left, so children keep their own thread, CPU clock and carrier kind. On the p281 batch compiler: golden Concurrency/TaskCPUClock 3/3 (o0, o1, o2), cases Context/ 14/14, TaskControlTiers/carriers_come_from_the_runtime_or_from_the_c_closures_libc 1/1, FFICallbacksTasks/programs_without_c_start_raw_clones_and_programs_with_c_start_musl_threads 1/1, Runtime/nested_join_more_tasks_than_workers 1/1 (runs, not REFUSED).",
+          "at": "2026-11-17T23:23:45.471Z"
         }
       ],
       "refs": [],
@@ -117983,9 +116832,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:29:07.249Z",
-      "updated": "2026-11-17T22:33:17.795Z",
+      "updated": "2026-11-17T23:23:48.005Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-17T23:23:48.005Z"
     },
     {
       "id": "c0oymlrt",
@@ -213900,19 +212750,6 @@
       "answeredBy": "Main"
     },
     {
-      "id": "q0z3918p",
-      "cardId": "c0h18kyi",
-      "decisionId": null,
-      "by": "Main",
-      "kind": "question",
-      "text": "Test cases the compiler now rejects, where no spec line says whether the case or the compiler is wrong (13 cases; details with expected vs actual: $JET_SCRATCH_ROOT/lanes/TestGreen/out/ruling-triage.md). A) Core takes plain values where cases pass typed ones: files.read_at(path: String) given a Path, udp send_to given a SocketAddr, http .timeout(ms: Int) given `2s`. Should Core take Path / SocketAddr / Duration (Core changes, Main recommends yes) or stay primitive (cases change)? B) An `if` or result handler used as a statement, with one arm giving Int and one Unit: today E0108/E0124 because the arms must agree. Allow it when the value is discarded (Main recommends yes; it matches how a discarded call result works) or keep requiring agreement? C) Lenient JSON/YAML decode: should map values be a dynamic value you match with .Int(n)/.Array(xs) (Main recommends yes) or typed Strings? D) `pub use wrap.wrap` in file wrap.jet, and `use mathlib.clamp` beside a clamp file module: legal (Main recommends yes; the import names the same thing) or E0105? E) sync.policy_new used to take an owner expression; it now takes none. Drop that law (Main recommends) or restore the expression form? F) A list literal [1.5, 2.5] passed to a lambda annotated Float: should the annotation make the literal Float (Main recommends yes) instead of Decimal? G) The spelling for building a pointer inside #Unsafe: `*Int{*arena.alloc(7)}` is rejected; what is the canonical spelling? Main decides the rest itself: wrong E0105 where spec.md:2131/2136 gives E0624 is a compiler fix; the bare-script case is rewritten to `fn run`; the out-of-project jet test cases are pointed at the package; the lexer case fixture gets escaped braces.",
-      "status": "answered",
-      "answer": "Owner (chat 2026-11-01 ~07:50 EST): accept all of Main's recommendations: A Core takes Path/SocketAddr/Duration; B a discarded if/handler may mix Int and Unit arms; C lenient decode map values are a dynamic value; D both imports are legal; E drop the policy_new owner-expression law; F a Float annotation makes the literal Float; G the spec's existing pointer spelling, case corrected.",
-      "created": "2026-10-31T08:40:34.344Z",
-      "answeredAt": "2026-11-01",
-      "answeredBy": "Main"
-    },
-    {
       "id": "qiew1w79",
       "cardId": "c0eymgfx",
       "decisionId": "D-SERDE-ABSENT-OPTIONAL1",
@@ -215926,6 +214763,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T23:23:58.702Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fqrrpk",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T23:23:48.006Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ywczn1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T23:23:45.471Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ywczn1",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T23:23:43.898Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0ywczn1",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T23:19:54.243Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c051j6ab",
+      "note": "#6 An App screen renders in a page: launch on the web draws the"
+    },
+    {
+      "at": "2026-11-17T23:19:52.396Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c051j6ab",
+      "note": "#5 A core.ui text input reports what is typed: a change handler"
+    },
     {
       "at": "2026-11-17T23:03:12.062Z",
       "by": "Main",
