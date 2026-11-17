@@ -77,7 +77,6 @@ use jet_foundation.[
     name_rows_set,
     ModuleID,
     module_find,
-    module_is_core,
     module_text,
 ]
 
@@ -705,18 +704,21 @@ SemaScopeEnvironment: struct {
     module_scope: SemaScopeTable?{None},
 }
 
-// Core's own generic bodies, and the canonical prelude's, are checked
-// independently of a consumer's target: E3301 and `#Live` refuse what the
-// program itself names, not every Core body the program never reaches. User
-// bodies consume the selected machine fact, never a host OS guess. A
-// function body is checked with the graph in the program tables; the scope
-// environment holds it only between passes.
+// E3301 and `#Live` refuse what the program's own code (its package's
+// modules) names on a machine with no OS. A body outside it, in Core or a
+// package alike, is judged by what the program reaches from its entries
+// (sema_target_no_os_reach_check): a reached OS module is E3301 at the
+// program's call that leads to it, and a body the program never reaches is
+// never refused. User bodies consume the selected machine fact, never a host
+// OS guess. A function body is checked with the graph in the program tables;
+// the scope environment holds it only between passes.
 sema_scope_environment_no_os: fn(environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
-    if module_is_core(environment.module_identity) || environment.package_identity == JET_CANONICAL_EFFECT_PACKAGE_IDENTITY {
-        return false
+    if program.registration_graph == .Val(graph) {
+        return graph.target_machine.no_os && environment.package_identity == graph.package_identity
     }
-    if program.registration_graph == .Val(graph) -> return graph.target_machine.no_os
-    if environment.registration_graph == .Val(graph) -> return graph.target_machine.no_os
+    if environment.registration_graph == .Val(graph) {
+        return graph.target_machine.no_os && environment.package_identity == graph.package_identity
+    }
     false
 }
 

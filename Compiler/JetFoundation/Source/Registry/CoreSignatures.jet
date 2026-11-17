@@ -10,6 +10,8 @@ CoreCallDefault: enum {
     Absent,
     StaticCall(type_name: String, method: String),
     StaticEnum(type_name: String, variant: String),
+    // The parameter's struct type built from its declared field defaults.
+    FieldDefaults,
 }
 
 CoreCallTypeConstraint: enum {
@@ -766,6 +768,24 @@ core_sig_vault: fn(module_name: String, member: String) -> CoreTypedCallSignatur
     Val(core_sig_generic(module_name, member, parameters, Val(core_sig_result(ok, err)), core_sig_type_parameter("T", CoreCallTypeConstraint.VaultKey)))
 }
 
+// `core.plugin.load(path, authority, limits:)`. The limits name Core's
+// plugin `Limits` by its canonical identity, so a program's own `Limits` or
+// `core.image`'s never stands in, and an absent label builds it from its
+// declared field defaults.
+core_sig_plugin_load: fn(module_name: String, member: String) -> CoreTypedCallSignature? {
+    if module_name != "core.plugin" || member != "load" -> return None
+    read: AccessConvention.Read
+    limits: Type.Named{name: "<corelib>/core.plugin::Limits"}
+    parameters := [CoreCallTypedParameter]{
+        core_sig_positional(Type.String, read),
+        core_sig_positional(core_sig_named("Authority"), read),
+        core_sig_parameter("limits", "limits", ParamZone.LabelOnly, read, limits, Val(CoreCallDefault.FieldDefaults)),
+    }
+    signature := core_sig(module_name, member, parameters, Val(core_sig_named("Plugin")))
+    signature.min_arity = 2
+    Val(signature)
+}
+
 core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature? {
     if core_sig_vault(request.module_name, request.member) == Val(vault) -> return Val(vault)
     if core_web_fixed_signature(request.module_name, request.member) == Val(web) -> return Val(web)
@@ -783,6 +803,9 @@ core_sig_fixed: fn(request: CoreCallSignatureRequest) -> CoreTypedCallSignature?
     }
     if core_value_fixed_signature(request.module_name, request.member) == Val(value) {
         return Val(value)
+    }
+    if core_sig_plugin_load(request.module_name, request.member) == Val(plugin) {
+        return Val(plugin)
     }
     core_platform_fixed_signature(request.module_name, request.member)
 }

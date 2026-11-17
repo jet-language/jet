@@ -1,6 +1,8 @@
 # A web program's wait suspends it on a promise instead of blocking the page:
 # a `time.sleep` from a JS-bucket function and from a Wasm-bucket one each
-# lets the page's own timer run before the program's next line.
+# lets the page's own work run before the program's next line. The page
+# queues its work as a microtask, which runs as soon as the program returns
+# to the event loop, so the order holds however loaded the machine is.
 requires: tool:node
 fixture: WebPageRunsWhileTheProgramWaitsOnJSAndWasm.fixture
 env: NO_COLOR=1

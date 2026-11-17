@@ -19,6 +19,19 @@ package: {
 // compiler-owned `PluginFault { export, message, frames }` whose frames are
 // `PluginFrame { function, component, offset }`.
 
+// The budgets one loaded component runs under, `load`'s `limits:` label; a
+// load without it takes these defaults. Fuel and the timeout refill before
+// each export call; memory and table elements cap the component for its
+// whole life. A field of zero or less, or memory above the 4 GiB a 32-bit
+// memory addresses, fails the load as `Guest` before the artifact is read.
+// Running past a limit stops the call with `Budget` naming it.
+Limits: struct {
+    fuel: Int{10_000_000},
+    memory_bytes: Int{16_777_216},
+    table_elements: Int{10_000},
+    timeout: Duration{1s},
+}
+
 // The budget a plugin call ran out of, the `limit` of `PluginError.Budget`.
 // The runtime builds it by its position (jet.runtime.plugin).
 PluginLimit: enum {

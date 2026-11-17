@@ -1,0 +1,70 @@
+use plugin: core.plugin
+
+// How an export call failed: a budget names whether it is the limit the
+// load capped, the other kinds their export and message.
+explain: fn(error: plugin.PluginError, expected: plugin.PluginLimit) -> String {
+    if error == {
+        .Budget(limit, fault) -> {
+            which: if limit == expected -> "the expected limit" else -> "another limit"
+            "Budget, {which}, in {fault.export}: {fault.message}"
+        }
+        .Guest(fault) -> "Guest in {fault.export}: {fault.message}"
+        .Denied(fault) -> "Denied in {fault.export}: {fault.message}"
+        .Defect(fault) -> "Defect in {fault.export}: {fault.message}"
+    }
+}
+
+// Each `plugin.Limits` field caps its own budget, fuel and time per call and
+// memory and tables for the component's life; a load without `limits:` takes
+// the declared defaults, and limits out of range refuse the load.
+run: fn() {
+    policy: Authority.from_rights(["FS.Read(\".\")"])
+
+    open: plugin.load("budget.wat", policy)
+    print("defaults: grow {open.grow() ?? -1}, extend {open.extend() ?? -1}, burn {open.burn(100_000) ?? -1}")
+
+    fueled: plugin.load("budget.wat", policy, limits: plugin.Limits{fuel: 4_000})
+    first: fueled.burn(3_000) ?? -1
+    second: fueled.burn(3_000) ?? -1
+    print("fuel refills per call: {first + second}")
+    if fueled.burn(10_000) == {
+        .Ok(value) -> { print("fuel: returned {value}") }
+        .Err(error) -> print("fuel: {explain(error, .Fuel)}")
+    }
+
+    roomy: plugin.load("budget.wat", policy, limits: plugin.Limits{memory_bytes: 196_608})
+    print("memory grows once: {roomy.grow() ?? -1}")
+    if roomy.grow() == {
+        .Ok(value) -> { print("memory: returned {value}") }
+        .Err(error) -> print("memory: {explain(error, .Memory)}")
+    }
+
+    narrow: plugin.load("budget.wat", policy, limits: plugin.Limits{table_elements: 4})
+    if narrow.extend() == {
+        .Ok(value) -> { print("table: returned {value}") }
+        .Err(error) -> print("table: {explain(error, .Table)}")
+    }
+
+    hasty: plugin.load("budget.wat", policy, limits: plugin.Limits{timeout: Duration{50ms}})
+    if hasty.crawl() == {
+        .Ok(value) -> { print("time: returned {value}") }
+        .Err(error) -> print("time: {explain(error, .Time)}")
+    }
+    print("ping after the deadline: {hasty.ping() ?? -1}")
+
+    empty: plugin.load("budget.wat", policy, limits: plugin.Limits{fuel: 0})
+    if empty.ping() == {
+        .Ok(value) -> { print("zero fuel: returned {value}") }
+        .Err(error) -> print("zero fuel: {explain(error, .Fuel)}")
+    }
+    huge: plugin.load("budget.wat", policy, limits: plugin.Limits{memory_bytes: 8_589_934_592})
+    if huge.ping() == {
+        .Ok(value) -> { print("huge memory: returned {value}") }
+        .Err(error) -> print("huge memory: {explain(error, .Memory)}")
+    }
+    instant: plugin.load("budget.wat", policy, limits: plugin.Limits{timeout: Duration{0ms}})
+    if instant.ping() == {
+        .Ok(value) -> { print("zero timeout: returned {value}") }
+        .Err(error) -> print("zero timeout: {explain(error, .Time)}")
+    }
+}

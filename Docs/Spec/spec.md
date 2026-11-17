@@ -6990,23 +6990,31 @@ host call line through the ordinary failure journey. Loading a
 malformed Component does not stop the host: its first call reports `Guest` with
 export `load` and no frames.
 
-Every call runs under fixed budgets, and running past one fails as
-`Budget(limit, fault)`:
+Every call runs under budgets, and running past one fails as
+`Budget(limit, fault)`. The optional `limits:` label of `plugin.load` sets
+four of them for the component it loads, as in
+`plugin.load("mathkit.wasm", policy, limits: plugin.Limits{fuel: 100_000})`;
+a load without `limits:`, or a field it leaves out, takes the default
+`plugin.Limits` declares (D-CORE-PLUGINLIMITS1=A):
 
-- `.Fuel`: 10,000,000 units per call, spent at each function entry and loop
-  iteration.
-- `.Time`: 1 second of wall-clock time per call, measured from the call's
-  start. The deadline is checked each time the call has spent another 4,096
-  units of fuel, and a call found past it stops there with its guest frames;
-  the host keeps running and the plugin keeps serving calls.
-- `.Memory`: 256 pages of 64 KiB for each linear memory.
-- `.Table`: 10,000 elements for each table.
+- `.Fuel`: `fuel` units per call (default 10,000,000), spent at each function
+  entry and loop iteration, and refilled before each call.
+- `.Time`: `timeout` of wall-clock time per call (default 1 second), measured
+  from the call's start. The deadline is checked each time the call has spent
+  another 4,096 units of fuel, and a call found past it stops there with its
+  guest frames; the host keeps running and the plugin keeps serving calls.
+- `.Memory`: `memory_bytes` for each linear memory over the component's life
+  (default 16,777,216, 256 pages of 64 KiB), in whole pages.
+- `.Table`: `table_elements` for each table over the component's life
+  (default 10,000).
 - `.Wire`: 1,048,576 bytes for each string argument or result crossing the
   boundary. An argument over it fails before the guest's `realloc` is asked
   for room, and a result over it fails before the host copies it out. Neither
   failure has guest frames.
 
-A fault keeps at most 32 guest frames.
+A field of zero or less, or `memory_bytes` above 4 GiB (4,294,967,296), fails
+the load as `Guest` with export `load` before the component is read. A fault
+keeps at most 32 guest frames.
 
 The manifest `export:` target names the interface and defaults to the package
 name. The frozen public interface is keyed as `plugin__<export>` in
