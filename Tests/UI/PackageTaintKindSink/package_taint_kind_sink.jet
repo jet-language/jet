@@ -1,0 +1,13 @@
+// The `phi` package declares the `PHI` taint kind and its sinks; this
+// package has no word of it. A record may be printed, but no process
+// command may take it.
+use {
+    phi
+    process: core.process
+}
+
+run: fn() {
+    record: phi.read_record(7)
+    print(record)
+    _: process.cmd(["echo", record])
+}

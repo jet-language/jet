@@ -1115,6 +1115,15 @@ struct is E0732, and using a tag where dispatch or method attachment is
 expected is E0731. Tag names are PascalCase. Prelude declares `Input`, `PII`,
 `Secret`, and `Credential` as tag structs (D-QUAL2, D-TAG-MARKER1, D-CASING1).
 
+A package adds a taint kind the same way, with no compiler edit: its tag
+struct's `#FX(!…)` row names the kind's sinks and its `from` row the kind's
+sources, a function path written as the package's own module names it. A
+value a dependent gets from such a source carries the tag, and a sink the
+row denies refuses it in the dependent too (E0721), though the dependent never
+names the tag. A health-data package's `#FX(!Net, !Exec) PHI` with
+`from: [read_record]` makes `phi.read_record(7)` in an importing package a
+`PHI` value that `process.cmd` refuses.
+
 A `Credential` value passed to a call is E0722 when the callee's declaration
 says the call writes it out: its effect row names `Log` or `IO`, or it is a
 `to_string`/`to_bytes` form over an `Encode`-bounded or `Dyn` value. Core

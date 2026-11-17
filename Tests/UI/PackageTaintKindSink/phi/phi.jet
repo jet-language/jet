@@ -1,0 +1,12 @@
+// @fixture_module
+// A health-data package's taint kind, written as rows: a `PHI` value comes
+// from `read_record`, and its sinks are the network and process commands.
+#FX(!Net, !Exec)
+PHI: struct {
+    impl Marker {
+        sites: [.TypeUse],
+        from: [read_record]
+    }
+}
+
+read_record: fn(id: Int) -> String { "patient {id}" }
