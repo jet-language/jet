@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 110650,
+    "rev": 110675,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -26339,272 +26339,6 @@
       "criteriaLastN": 29
     },
     {
-      "id": "c0uasubv",
-      "num": 3078,
-      "title": "Reuse lifecycle operations while preserving readiness and drain",
-      "body": "Connect existing resource lifecycle to application readiness and drain.\n\nA pool can track draining while an HTTP server still admits requests; no application lifecycle receipt proves agreement.\n\nUse one App-owned lifecycle: validate/start resources, publish readiness, stop admission, drain/cancel bounded work, close resources and report failures.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-nestjs-app-readiness-drain. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": "e3-m25-http-service-runtime",
-      "phase": "done",
-      "priority": "P2",
-      "plan": "## Goal\nImplement ratified D-ONE-LIFECYCLE1=A (shared operations with explicit policies). Readiness, stop-admission, finite drain and resource close compose in one App-owned order, using the existing HTTP server and DB pool owners. No universal Service, Resource or Async type is added. Separately, factor the repeated interpreter ambient registration without changing per-mode reset or retention.\n\n## Current state\n- The HTTP server already has bounded shutdown: `crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2062` `jet_http_server_shutdown(server, grace)`, proven by `tests/http_server_lifecycle.rs:3666,3719,3855,3904`. Jet surface: `Examples/features/net/http_server_lifecycle.jet:1-17`.\n- The DB pool has its own lifecycle in `crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs`: `ready` (`:476`), `drain(deadline_ms)` (`:500`) and `mark_drained` (`:158`). Jet entry is `Core/db/db.jet:28` `pool(url, max)`.\n- Nothing composes the two. `Examples/features/net/backend_battery/run.jet:95,145-147` prints the pool report and calls `bound.shutdown(100ms)` independently, and it has no golden.\n- `Source/JitBackend.rs:61-67`, `:91-97` and `:133-139` repeat the same seven `register_*_interpreter_ambient` calls plus hardware registration in run, hot_swap and restart.\n\n## Changes\n1. Host (`Source/JitBackend.rs`, retained JIT host): extract one `install_interpreter_ambient(ambient, program)` used by all three modes. The existing per-mode reset and retention stay at the call sites. Ambient registration must be idempotent, so a repeated install leaves no stale rows.\n2. New `Examples/features/net/app_lifecycle.jet`. It opens a DB pool and checks `ready()` before `bind`, serves, then shuts down in order:\n   - `server.shutdown(grace)` stops admission;\n   - a blocked handler gets a finite outcome (cancelled count reported);\n   - `pool.drain(deadline)` runs and the pool closes.\n   It prints each transition. A required resource that is not ready must refuse to bind and must never print a ready line.\n3. Where the ordering needs an owner hook (for example, drain waits for leased connections held by in-flight handlers), fix it in the owning HTTPServer.rs or DbPool.rs leaf, not in a new lifecycle type.\n4. Update backend_battery to use the same order.\n\n## Proof\n- `jet test Compiler --profile golden net/app_lifecycle`: ready, serving, admission-stopped, drain-outcome and closed print in that order on O0, O1 and O2.\n- `jet test Compiler --profile cases http_server_lifecycle/` passes.\n- New `Tools/agent/jet-env cargo test --test output_callable -- interpreter_backend_run_hot_swap_restart_keep_persist_retention` passes. It drives InterpreterBackend through run, then hot_swap, then restart; `#Persist` counter prints 1, 2, 1, and no duplicate registrations occur.\n\n## Batch\nbatch-core-net: HTTP and DB lifecycle composition. The JitBackend refactor is a small host change riding the same build.\n\n## Dependencies\nNone.",
-      "checkSteps": "1. Not ready before required resources are usable.\n2. Shutdown stops new admission before resource close.\n3. A blocked request/worker has a finite drain outcome and observable failure.\n4. No clean-exit claim hides unfinished tasks or leaked resource ownership.",
-      "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-nestjs-app-readiness-drain. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "Main decision 2026-11-13 on c4: D-EXIT-TASKS1=A (spec.md, ratified) says tasks left at exit are cancelled after a 1 s grace and abandoned without an error, and it outranks the wording of c4. c4 is therefore read as: no clean-exit claim hides unfinished work, shown by the domain reports. Proof: golden Network/AppLifecycle prints admission accepted 1, completed 0, cancelled 1; pool drain refused: 1 lease still out; and db.pool leased=0 with acquires=2 and releases=2. The shutdown_grace straggler case stays KNOWN-FAILING under #6419 and is not part of this proof."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c16 waits on D-HTTP-READINESS1 (posted; it recommends A: HTTPServer.readiness() plus a built-in /__jet/ready route built on it). Adversarial review by G6Meta-4: holds."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "D-APP-READY1 draft dropped: the adversarial review (Docs/audits/2026-11-13-d-app-ready1-review.md, G6Meta-4) fails it, because D-VERDICT-3086-1=A already rules that serve decodes a typed settings record before it binds. The review gaps are filed as new criteria. Main chose S1 (generic serve and bind with build:), with env.decode<T> resolved at generic instantiation."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c5 split (Main decision): part a, where fresh run and each jet dev restart share host registration, is SUB G12Docs-3078c5a. The hot-swap leg depends on in-process hot swap, which #6625 (Live hot-reload that keeps state, c2 and c13) owns. It is written and proved there once #6625 lands, not built under #3078."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
-        },
-        {
-          "at": "2026-10-23",
-          "by": "agent",
-          "text": "Board burndown 2026-10-22: Implementation homes named in this card (Rust crates and host files, TIR/MIR/LIR, the JIT, generated Rust) are retired. The work lands in Compiler/ and Core/ on the JetIR path (#5073) with Rust removed (#4717); the rest of the card stands."
-        },
-        {
-          "at": "2026-10-04",
-          "by": "Pip",
-          "text": "Burn-down consolidation 2026-10-04: absorbed #3076, #3086, #3090, #3229; their criteria are carried here as [#n] rows."
-        },
-        {
-          "at": "2026-10-04",
-          "by": "Pip",
-          "text": "Burn-down consolidation 2026-10-04: absorbed #3076, #3086, #3090, #3229; their criteria are carried here as [#n] rows."
-        },
-        {
-          "at": "2026-10-04",
-          "by": "Pip",
-          "text": "Burn-down consolidation 2026-10-04: absorbed ; their criteria are carried here verbatim as [#n] rows."
-        },
-        {
-          "at": "2026-09-29",
-          "by": "Pip",
-          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-core-net."
-        },
-        {
-          "at": "2026-09-29",
-          "by": "Pip",
-          "text": "Phase 0 triage 2026-09-28 (misc1b, Opus 5.5): E_BUILD. D-ONE-LIFECYCLE1=A ratified; 2026-09-22 audit: HTTP and DB shutdown pieces exist separately but no App-owned lifecycle composes readiness, stop-admission, finite drain and resource close; InterpreterBackend registration reuse unproven. Evidence: Card log 2026-09-22: HTTPServer.rs:2062-2333, DbPool.rs:500-573, tests/http_server_lifecycle.rs; Source/JitBackend.rs:23-79 InterpreterBackend run/hot_swap (host execution adapter)"
-        },
-        {
-          "at": "2026-09-22",
-          "by": "Main",
-          "text": "Read-only lifecycle audit on 2026-09-22 found no current-tree receipt and no source edit justified. Independent HTTP and DB shutdown pieces exist (`HTTPServer.rs:2062-2333`, `DbPool.rs:500-573`) with focused test definitions in `tests/http_server_lifecycle.rs:1227-1266,3718-3773,3854-3901`, but no App-owned composition proves readiness/admission/resource-close order, finite drain outcome, leak-free clean exit, or fresh/hot-swap/restart parity. Criteria remain open."
-        },
-        {
-          "at": "2026-09-13",
-          "text": "All decisions ratified; advanced out of deciding."
-        },
-        {
-          "at": "2026-09-13",
-          "by": "Main",
-          "text": "Owner-requested simplification preparation. Expanded the existing coherent mechanism home, preserving every original criterion/status/evidence. Captured the named tactical duplication and consumer boundaries; no implementation or new public contract is claimed before the attached ballot is ratified."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Not ready before required resources are usable.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev b6ffbca47d (G12Docs-3078c8, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/AppLifecycle` PASS 3/3 (O0, O1, O2). Golden lines: store missing, pool ready: false; then 1. pool ready before bind, both printed before app.bind.",
-          "at": "2026-11-13T21:52:58.075Z"
-        },
-        {
-          "n": 2,
-          "text": "Shutdown stops new admission before resource close.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev b6ffbca47d (G12Docs-3078c8, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/AppLifecycle` PASS 3/3 (O0, O1, O2). Golden line 3: admission stopped before the pool drains and closes.",
-          "at": "2026-11-13T21:52:59.198Z"
-        },
-        {
-          "n": 3,
-          "text": "A blocked request/worker has a finite drain outcome and observable failure.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev b6ffbca47d (G12Docs-3078c8, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/AppLifecycle` PASS 3/3 (O0, O1, O2). The blocked handler gets a finite drain outcome, reported as cancelled 1, and the observable failure: response was sent: false.",
-          "at": "2026-11-13T21:53:00.232Z"
-        },
-        {
-          "n": 4,
-          "text": "No clean-exit claim hides unfinished tasks or leaked resource ownership.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Batch 15 landed on dev 734568e5cd; proved on its batch jet (gate-p20) by Lander5 b15proofs: golden Network/AppLifecycle PASS 3/3 prints admission accepted 1, completed 0, cancelled 1; pool drain refused: 1 lease still out; and db.pool leased=0 with acquires=2 and releases=2. Read under ratified D-EXIT-TASKS1=A (see the card log of 2026-11-13): no unfinished task or leased resource is hidden by a clean exit.",
-          "at": "2026-11-14T00:53:26.769Z"
-        },
-        {
-          "n": 5,
-          "text": "The O0 host's ambient registration is shared by fresh run, hot swap and restart, preserves exact retention and reset, and repeated initialization leaves no stale registrations.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): jet test Compiler --profile cases --filter dev_parts_routine/fresh_run_and_each_dev_restart_get_the_same_host_registration PASS 1/1.",
-          "at": "2026-11-13T23:54:30.693Z"
-        },
-        {
-          "n": 6,
-          "text": "Shared task/deadline/channel/failure/marshalling operations do not erase domain admission, close, cancellation, durability, retry or authority.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Batch 15 landed on dev 734568e5cd (G3Core2-3078c6: a cancelled task in an open DBTransaction now rolls back on Close). On the batch-15 jet (gate-p20, Lander5 b15proofs) these PASS: http_server_lifecycle/a_handler_task_failure_is_its_answer_and_admission_goes_on (3.out), db_policy/task_deadline_and_cancel_keep_pool_admission_and_transaction_outcome (5.out), services_runtime/task_deadline_and_cancel_keep_job_lease_and_retry, and golden CoreIO/DB 12/0. Task deadline, cancel and failure keep each domain`s admission, transaction outcome, lease and retry.",
-          "at": "2026-11-14T01:01:16.946Z"
-        },
-        {
-          "n": 8,
-          "text": "`jet test Compiler --profile golden net/app_lifecycle` shows pool ready before bind, admission stopped before pool drain, a finite drain outcome for a blocked handler, and close last, on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev b6ffbca47d (G12Docs-3078c8, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/AppLifecycle` PASS 3/3 (O0, O1, O2). The golden prints pool ready before bind, admission stopped before pool drain, the blocked handler's finite drain outcome (cancelled 1, response was sent: false), and close last.",
-          "at": "2026-11-13T21:52:56.978Z"
-        },
-        {
-          "n": 9,
-          "text": "[#3076]  • Interleaved requests keep separate principals and transaction outcomes. • Rollback writes nothing. A lost reply after commit reports committed. A deadline before dispatch prevents mutation. Pool and app lifetimes stay distinct. • Golden `net/request_continuity`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev 82bd267151 (G12Docs-3078c9, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/RequestContinuity` PASS 3/3 (O0, O1, O2).",
-          "at": "2026-11-13T21:53:01.460Z"
-        },
-        {
-          "n": 10,
-          "text": "[#3086]  • Ballot a readiness hook versus explicit pre-serve composition. • Then a missing or invalid required value fails before admission with a redacted field path (E2416) and no bind (golden `web/app_config_readiness`).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "D-HTTP-READINESS1 is ratified A (owner, 2026-11-13). On the batch-9 jet built from dev 69c877459d (Lander5 b9rest): jet test Compiler --profile golden --filter Apps/Web/AppConfigReadiness PASS (missing or invalid required value fails before admission with redacted field path E2416 and no bind).",
-          "at": "2026-11-13T23:58:58.496Z"
-        },
-        {
-          "n": 11,
-          "text": "[#3090]  • Isolated and loopback-HTTP paths give identical denial/success verdicts. A denied or malformed request never invokes the service. • DB substitution works without bypassing policy. Cleanup leaves no listener or registration. • Golden `net/service_http_seam`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main goal sweep 2026-11-13 on the batch-15 jet (gate-p20, dev 734568e5cd): jet test Compiler --profile golden --filter Network/ServiceHTTPSeam gives PASS with 0 FAIL, 0 KNOWN-FAILING and 0 ERROR (Lander5 sweep, results row in $JET_SCRATCH_ROOT/lanes/Main/sweep/results.tsv).",
-          "at": "2026-11-14T00:45:19.276Z"
-        },
-        {
-          "n": 12,
-          "text": "[#3229]  • One app-scoped resource is shared without per-request construction. • A missing dependency fails source-located, before serving. A substituted fake changes behaviour with no global mutation. No DI container. • Golden `net/app_composition`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev fe3f340786 (G12Docs-3078c12, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/AppComposition` PASS 3/3 (O0, O1, O2).",
-          "at": "2026-11-13T21:53:02.850Z"
-        },
-        {
-          "n": 13,
-          "text": "env.decode hides the value of any field whose environment name has a segment containing secret, password, token or key (APP_DB_PASSWORD and APP_API_KEY print redacted), and a missing variable names the variable (APP_DB_URL), not only the field path. Proof: a case under tests/cases that decodes such a record with bad and missing values.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed as dev 9ca1ccdb82 (G12Docs-3078c13, batch 1). Proof on seed-b16 at dev 37176be497: `jet test Compiler --profile=cases --filter=env_overlay/decode_hides_secret_named_values_and_names_the_missing_variable` PASS 1/1; `jet test Core/Sys/Sys.jet` 40 passed, 0 failed.",
-          "at": "2026-11-13T21:34:53.062Z"
-        },
-        {
-          "n": 14,
-          "text": "web.serve<Settings>(prefix:, build:) and web.bind<Settings>(address, prefix:, build:) decode the typed settings record before binding (D-VERDICT-3086-1=A); a failure is a coded E2416 stop with exit 78 listing every redacted field path and never binds; env.decode<T> resolves inside any generic function. Proof: a web case for serve and bind, and a non-web generic case.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): jet test Compiler --profile cases --filter web_app/typed_settings_decode_before_serve_and_bind PASS 1/1 (serve and bind decode before binding) and --filter env_overlay/decode_in_a_generic_function_reads_the_instance_renames PASS 1/1 (non-web generic case).",
-          "at": "2026-11-13T23:54:28.714Z"
-        },
-        {
-          "n": 15,
-          "text": "An explicit serve(settings.port) and JET_APP_PORT follow one documented precedence rule, and the server reports which source chose the port. Proof: a case that sets both.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): jet test Compiler --profile cases --filter web_app/port_precedence_names_the_source_that_chose_it PASS 1/1.",
-          "at": "2026-11-13T23:54:29.692Z"
-        },
-        {
-          "n": 16,
-          "text": "Readiness (not ready, ready, draining, closed) is a state that a probe can read through drain. Proof: the Examples/Network/AppLifecycle golden prints each state as a probe sees it.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Batch 15 landed on dev 734568e5cd; proved on its batch jet (gate-p20) by Lander5 b15proofs: jet test Compiler --profile golden --filter Network/AppLifecycle gives PASS 3/3 (o0, o1, o2), printing readiness not ready, ready, draining and closed as a probe sees them through drain (G3Core2-3078c16: Core/Http/Server.jet HTTPReadiness, GET /__jet/ready, 503 while draining). Golden Network/ServiceHTTPSeam 3/3, http_server_lifecycle/ and process_signal_drain/ also pass. The closed_lists guard flags HTTPReadiness as a hand-written list; that fix is forward work with G3Core-2.",
-          "at": "2026-11-14T00:53:25.593Z"
-        }
-      ],
-      "refs": [
-        "docs/research/mine-for-jet-2026-09-12.md#finding-nestjs-app-readiness-drain",
-        "crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs:36-46,536-680",
-        "https://docs.nestjs.com/fundamentals/lifecycle-events",
-        "https://docs.nestjs.com/recipes/terminus",
-        "D-APP-UNIFY1",
-        "D-SERVICE-UPGRADE1",
-        "D-NETTASK1",
-        "#1447",
-        "#444",
-        "#2851",
-        "#2799",
-        "#2919",
-        "#3080",
-        "#3239",
-        "#3240",
-        "Source/JitBackend.rs",
-        "examples/features/devloop/persist.jet",
-        "D-ONE-LIFECYCLE1",
-        "#3398"
-      ],
-      "tags": [
-        "mining-20260912",
-        "nestjs",
-        "mine-playlist-20260911",
-        "cluster-app-lifecycle",
-        "batch-core-net",
-        "wayfinder:task"
-      ],
-      "parentId": "c0u5tm84",
-      "needsAcceptance": false,
-      "created": "2026-09-12T12:53:32.615Z",
-      "updated": "2026-11-14T01:32:49.967Z",
-      "updatedBy": "Main",
-      "workOrder": 87,
-      "goals": [
-        "G9"
-      ],
-      "criteriaLastN": 16,
-      "completedAt": "2026-11-14T01:32:49.967Z"
-    },
-    {
       "id": "c0c4k3fw",
       "num": 3102,
       "title": "Sandboxed plugins: denied imports, limits, failures and release are proven at the Component boundary, and native libraries stay explicitly trusted",
@@ -30910,7 +30644,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6882 c17, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:49:51.449Z",
+          "at": "2026-11-17T01:31:53.020Z",
           "closure": "duplicate"
         },
         {
@@ -30920,7 +30654,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6882 c18, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:49:52.969Z",
+          "at": "2026-11-17T01:31:55.705Z",
           "closure": "duplicate"
         },
         {
@@ -30930,7 +30664,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6882 c19, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:49:54.759Z",
+          "at": "2026-11-17T01:31:58.644Z",
           "closure": "duplicate"
         },
         {
@@ -30940,7 +30674,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6871 c12, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:49:56.222Z",
+          "at": "2026-11-17T01:32:01.188Z",
           "closure": "duplicate"
         },
         {
@@ -30950,7 +30684,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6882 c20, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:49:57.943Z",
+          "at": "2026-11-17T01:32:04.017Z",
           "closure": "duplicate"
         },
         {
@@ -30960,7 +30694,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6871 c13, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:49:59.362Z",
+          "at": "2026-11-17T01:32:06.616Z",
           "closure": "duplicate"
         },
         {
@@ -30970,18 +30704,18 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6871 c14, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:50:00.575Z",
+          "at": "2026-11-17T01:32:09.436Z",
           "closure": "duplicate"
         },
         {
           "n": 18,
           "text": "[#3350]  • Fast/slow branch traces measure retained items and cleanup. • A finite capacity backpressures or fails explicitly. • Cloned replayable sources are compared with buffered one-shot sources. • Any caching API goes to a separate owner ballot. • Golden `collections/fork_replay`.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6882 c8: fork and replay buffering is lazy-demand work",
-          "at": "2026-11-15T03:17:26.653Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:12.029Z",
+          "closure": "duplicate"
         },
         {
           "n": 19,
@@ -30990,7 +30724,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6882 c21, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:50:01.781Z",
+          "at": "2026-11-17T01:32:14.607Z",
           "closure": "duplicate"
         },
         {
@@ -31033,161 +30767,161 @@
           "n": 25,
           "text": "(was #3318) Owned, shared-borrowed, and exclusive-borrowed forms have distinct observable ownership contracts. (was #4284 c42)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6871 c3: borrowed iteration belongs on the views card",
-          "at": "2026-11-15T03:17:27.680Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:17.426Z",
+          "closure": "duplicate"
         },
         {
           "n": 26,
           "text": "(was #3318) Mutating a yielded element updates the intended original collection; illegal overlap is rejected before execution. (was #4284 c43)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6871 c3: mutation through a yielded view is part of V3",
-          "at": "2026-11-15T03:17:28.772Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:20.296Z",
+          "closure": "duplicate"
         },
         {
           "n": 27,
           "text": "(was #3318) Non-overlapping mutable chunks are supported safely; overlapping mutable windows are not fabricated from ordinary references. (was #4284 c44)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6871 c4: chunks and windows belong on the views card",
-          "at": "2026-11-15T03:17:29.900Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:22.976Z",
+          "closure": "duplicate"
         },
         {
           "n": 28,
           "text": "(was #3318) Borrowed windows/chunks and text slices avoid per-output allocation where the source storage permits a view. (was #4284 c45)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6871 c5: per-output allocation of views belongs on the views card",
-          "at": "2026-11-15T03:17:31.022Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:25.451Z",
+          "closure": "duplicate"
         },
         {
           "n": 29,
           "text": "(was #3318) An explicit loan cannot escape its owner. Default read-view stores preserve D-MEM-COPYSEM1 semantic-copy behavior; mutable-view escapes remain rejected. Explicit borrowed aggregates are F083. (was #4284 c46)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6871 c6: loan escape belongs on the views card",
-          "at": "2026-11-15T03:17:32.069Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:28.095Z",
+          "closure": "duplicate"
         },
         {
           "n": 30,
           "text": "(was #3318) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): Golden Examples/features/collections/borrowed_iteration.jet: ViewMut over a List mutates the original, disjoint mutable chunks update the source, text split/lines views print their text rather than handles, and replaced slots drop exactly once, all on O0, O1 and O2. Proof: `jet test Compiler --profile golden collections/borrowed_iteration`. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. (was #4284 c47)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6871 c3: the borrowed_iteration golden is V3's and V5's proof",
-          "at": "2026-11-15T03:17:33.464Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:30.770Z",
+          "closure": "duplicate"
         },
         {
           "n": 31,
           "text": "(was #3318) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): UI fixtures for an escaping loan, overlapping mutable windows, and a resize during iteration are rejected before execution. Proof: `jet test Compiler --profile ui view_loan_`. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. (was #4284 c48)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6871 c6: the view_loan_ UI fixtures are V6's proof",
-          "at": "2026-11-15T03:17:34.790Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:33.486Z",
+          "closure": "duplicate"
         },
         {
           "n": 32,
           "text": "(was #3318) [#3340]  • Exact width-zero, remainder, direction, overlap and mutability semantics. • Borrowed windows do not copy. Mutable forms are disjoint only. • JP: `collections/slice_producers`. (was #4284 c50)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6871 c4: slice producer semantics are V4",
-          "at": "2026-11-15T03:17:36.064Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:36.207Z",
+          "closure": "duplicate"
         },
         {
           "n": 33,
           "text": "(was #3318) [#3359]  • Move-only items transfer exactly once. • Shared views cannot move. Exclusive-view mutation reaches the original storage. • Escaping callbacks respect their loans. • JP: `collections/map_owned_items`; `map_move_from_shared_view`. (was #4284 c51)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6871 c7: mapping owned items through views belongs on the views card",
-          "at": "2026-11-15T03:17:37.149Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:38.729Z",
+          "closure": "duplicate"
         },
         {
           "n": 34,
           "text": "(was #3318) [#3391]  • Remove the parser special case at Compiler/JetParser/Source/Parser/Expressions.jet:1521-1533. • `values[range]`, `&values[range]` and `~values[range]` keep their contracts. No new `.view()`. • JP: UI `view_method_retired_e0214`. (was #4284 c53)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6871 c8: view syntax belongs on the views card",
-          "at": "2026-11-15T03:17:38.263Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:41.230Z",
+          "closure": "duplicate"
         },
         {
           "n": 35,
           "text": "(was #3318) [#3393]  • An explicit `[View<T>]` materializer rooted in live storage, with no payload copies. • Temporaries cannot escape; invalidating mutation is rejected. Default `to_list` keeps D-MEM-COPYSEM1. • Golden `collections/borrowed_collect`; UI `view_collect_*`. (was #4284 c54)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6871 c9: [View<T>] collect belongs on the views card",
-          "at": "2026-11-15T03:17:39.266Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:43.805Z",
+          "closure": "duplicate"
         },
         {
           "n": 36,
           "text": "(was #3320) Callback traces and a tail-failure source establish that early-exit consumers do not read beyond their semantic stop. (was #4284 c55)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6882 c1: early stop is ITERDEM c1",
-          "at": "2026-11-15T03:17:40.247Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:46.322Z",
+          "closure": "duplicate"
         },
         {
           "n": 37,
           "text": "(was #3320) Each adapter documents its minimum necessary state and peak live memory; no avoidable whole-source list remains on the lazy path. (was #4284 c56)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6882 c2: adapter state is lazy-demand work",
-          "at": "2026-11-15T03:17:41.153Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:48.923Z",
+          "closure": "duplicate"
         },
         {
           "n": 38,
           "text": "(was #3320) Sortedness and lexicographic comparison can stop at the first decisive item. (was #4284 c57)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6882 c3: early stop is lazy-demand work",
-          "at": "2026-11-15T03:17:42.056Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:51.596Z",
+          "closure": "duplicate"
         },
         {
           "n": 39,
           "text": "(was #3320) Adjacent groups and dedup preserve item order and do not merge nonadjacent equal keys. (was #4284 c58)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6882 c4: adjacent groups are lazy-demand work",
-          "at": "2026-11-15T03:17:42.968Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:54.984Z",
+          "closure": "duplicate"
         },
         {
           "n": 41,
           "text": "(was #3320) `jet test Compiler --profile golden collections/iter_demand` passes on O0, O1 and O2: pull traces stop at each adapter's semantic stop, and the tail-panicking source is never read past it. (was #4284 c60)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6882 c1: the iter_demand golden is lazy-demand work",
-          "at": "2026-11-15T03:17:43.870Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:32:58.407Z",
+          "closure": "duplicate"
         },
         {
           "n": 42,
@@ -31277,7 +31011,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:12.936Z",
-      "updated": "2026-11-17T01:31:49.077Z",
+      "updated": "2026-11-17T01:32:58.407Z",
       "updatedBy": "Main",
       "workOrder": 37,
       "goals": [
@@ -50154,175 +49888,6 @@
       ],
       "criteriaLastN": 6,
       "completedAt": "2026-11-14T05:05:16.920Z"
-    },
-    {
-      "id": "c04es5yq",
-      "num": 4635,
-      "title": "The web server must route through the Jet-owned server runtime",
-      "body": "http.serve must not bypass the Jet server runtime: requests go through the Core/http Jet port (#3665) for routing and response handling. The Rust-side routes and server paths named in the old body are removed with Rust removal #4717. Criteria: serve() uses the same route table on every tier; a golden request covers routing and a bad-request path.\n\nEarlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired):\n\nSource reading on dev 3f64b4fb6 (v3 H2-http-b re-mine of FknTw9bJsXM 181:29-192:02; not executed). Jet has two server runtimes. The mux path bounds admission, wraps handlers and middleware in catch_unwind, keeps connections alive and drains on shutdown with an atomic flag. But http.serve(addr, lambda) and router serve lower to jet_http_serve (routes.rs:8046 to HTTPServer.rs:6898-6941), which spawns one OS thread per connection without bound, has no panic isolation, always sends Connection: close, has no shutdown path and calls process::exit(1) on a bind failure. Accept errors are mishandled on both paths: the mux loop stops serving and force-cancels every active stream on any non-WouldBlock accept error such as EMFILE (HTTPServer.rs:2280-2288), while the lambda loop prints E2801 and retries in a tight loop (6914-6919). The serializer has four divergent reason-phrase tables and falls back to \"OK\", so a 503, 429 or 422 goes out as \"503 OK\" (HTTPServer.rs:5761-5783, 1504-1524, 5025; http.jet:312-381). #3666 (server framing) is done on the board but this policy is still present, and the earlier mining claim that Jet bounds admission holds only for the mux path. Unverified: the default jet run tier's route to jet_http_serve was not traced (the JIT host path is being retired); the AOT route was.\n\nFresh review 2026-10-05: protocol parsing and framing criteria for the same course stay on #3665 (attached there); graceful drain must reuse the App lifecycle of #3078 rather than a second shutdown path.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": "1. Reproduce per tier: a lambda-served program under a connection flood (thread count), a panicking handler, SIGTERM during a slow request, a port already in use, and fd exhaustion. 2. Route every serve spelling (lambda, router, mux) through one server runtime with bounded admission, panic page, keep-alive, graceful drain and a typed bind error returned to the caller. 3. One accept policy: classify transient errors (EMFILE, ENFILE, ECONNABORTED), back off with a cap and keep serving; fatal listener errors end the server with a report. 4. One reason table in Core: an unknown code gets an empty reason (valid per RFC 9112 s4), never another code's text. 5. Under the Rust freeze, land the policy in the Core/http Jet port (#3665) with Rust keeping only provider leaves, and delete the duplicate runtime in the same cutover.",
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c3 fatal-accept half (Main, 2026-11-13): no case can reach it yet. The runtime fault schedule (jet_fault_should_fail) is armed only by a test and selects only FS.Read, FS.Write, IO.Write, IO.Flush and allocation; it has no Net.Accept selector. Next item: add a Net.Accept selector to that internal fault schedule (test-armed only, not public API), then a case showing that a fatal accept stops serve with its typed error on O0/O1/O2. G9Web-4635-concurrent-serve covers c1, c5, c6, c8, c11 and the non-fatal half of c3."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "Defect found by the D-WS-ROUTE1 review (probe w04, a0.0.43): the http serve loop is serial, against D-HTTP-SERVER2=A. Report: Docs/audits/2026-11-10-ws-route-review.md."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-ROUTE-ONE1=A (2026-10-29): web.app() holds the one route table and server.mux() is removed. c1 and c5 now name http.serve and web.app().serve(). c6 names its proof case. c9 merged into c8 (D-G9-3); the Tower DataTree resident proof in c8 was the Node Tower and is dropped. c10's proof case (http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient) is known-failing under #4260 (G5: how a printed HTTP error reads), so c10 closes after #4260."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-EXEC2=A (native code generator only; Cranelift and MIREval are retired)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 4 criteria from archived #3493, #3494, #3496, #3512: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        },
-        {
-          "at": "2026-10-23",
-          "by": "agent",
-          "text": "Rewritten for the Jet architecture (self-hosted compiler, AST + fact tables, JetIR slot IR, no Rust) in the 2026-10-22 board burndown: http.serve bypasses the server and cites Rust routes.rs and HTTPServer.rs. Re-target to the Jet-owned Core/http runtime. The earlier text is kept at the end of the body."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "web.app().serve() and web.app().bind(addr) run through one Jet-owned server runtime: a flood test shows bounded concurrent connections, a panicking handler returns a 500 page while other requests keep being served, and SIGTERM drains in-flight requests, identical on every execution level.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): http_server_lifecycle/per_peer_connection_limit_answers_503 PASS (bounded connections), panicking_handler_answers_500_and_serving_goes_on PASS, and process_signal_drain/sigterm_drains_a_serving_artifact_within_a_second plus sigterm_answers_the_request_in_flight PASS; each case runs every execution level.",
-          "at": "2026-11-13T23:54:36.138Z"
-        },
-        {
-          "n": 2,
-          "text": "A bind failure returns a typed error to the caller; no process exit call remains in the server path.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): --profile cases --filter http_server_lifecycle/ gives serve_entry_bind_failure_is_a_typed_error PASS (11 PASS, 0 FAIL, 6 KNOWN-FAILING tracked on #4635/#6419).",
-          "at": "2026-11-13T23:54:31.702Z"
-        },
-        {
-          "n": 3,
-          "text": "Transient accept errors (fd-exhaustion test) back off and recover without cancelling active streams; a fatal listener error ends serve with a reported error; no tight retry loop.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 1b8ac82041 (G3Core2-http-4635): jet test Compiler --profile cases --filter http_server_lifecycle/ gives 17/0 plus 2 KNOWN-FAILING, with accept_backs_off (fd exhaustion backs off and recovers, no tight loop) PASS.",
-          "at": "2026-11-14T01:17:31.001Z"
-        },
-        {
-          "n": 4,
-          "text": "A handler returning 503, 429 or 422 sends the registered reason text and an unknown code sends an empty reason; one reason table lives in Core and the server, error page and read-error writer use it.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 1b8ac82041 (G3Core2-http-4635): golden Network/HTTP/HTTPServerReasons 3/0 (o0, o1, o2; registered reason text for 503, 429 and 422, empty reason for an unknown code, from one Core table) and http_server_lifecycle/ 17/0.",
-          "at": "2026-11-14T01:17:33.375Z"
-        },
-        {
-          "n": 5,
-          "text": "Keep-alive behavior is one runtime meaning for web.app().serve() and web.app().bind(addr); a golden for each is updated.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs/5.out): jet test Compiler --profile cases --filter http_server_lifecycle/ gives keep_alive_means_the_same_for_serve_and_bind PASS, one golden case driving web.app().serve() and web.app().bind(addr) with the same keep-alive output.",
-          "at": "2026-11-14T00:08:09.277Z"
-        },
-        {
-          "n": 6,
-          "text": "(was #3493 c1) O0 (`jet run`) preserves both HTTPResponse.header mutations and matches exact O1 and O2 output in the focused HTTP response fixture Proof: a new tests/cases/http_server_lifecycle case that sets two HTTPResponse.header values and prints the response, with identical stdout on O0, O1 and O2 (precut audit 2026-11: unproven at 9c7ddf1359).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): --profile cases --filter http_server_lifecycle/ gives response_keeps_both_header_mutations_on_every_tier PASS (O0, O1, O2 identical stdout).",
-          "at": "2026-11-13T23:54:32.772Z"
-        },
-        {
-          "n": 7,
-          "text": "(was #3494 c1) O0 (`jet run`) resolves core.http.server.json through jet_http_srv_json and the focused Tower DataTree fixture executes with expected output [precut audit: failing on 9c7ddf1359: C:http_i9/http_route_handlers_preserve_arity_context_and_errors_on_both_dev_tiers FAIL exit 1; expected 0]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/cases/http_i9/http_route_handlers_preserve_arity_context_and_errors_on_both_dev_tiers.case PASS. This row is the proof the precut audit named for this criterion.",
-          "at": "2026-11-07T03:47:31.113Z"
-        },
-        {
-          "n": 8,
-          "text": "(was #3496 c1, #3512 c1) core.http.server.static_file returns one Result<HTTPResponse, HTTPError> carrier on O0, O1 and O2: jet run resolves it through the existing adapter with no ICE, and a focused resident static-file case passes on all three.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): --profile cases --filter http_server_lifecycle/ gives static_file_result_on_every_tier PASS on O0, O1 and O2.",
-          "at": "2026-11-13T23:54:33.890Z"
-        },
-        {
-          "n": 10,
-          "text": "(was #1312 c1) resp/req/body.json, server.json, static_files, cors, and cors_policy lower on O0, O1 and O2 with the same semantics [precut audit: failing on 9c7ddf1359: C:http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient KNOWN-FAILING #4260 no doc decides how a printed HTTP error reads: Jet prints its message (`invalid HTTP framing`), the Rust-era golden its variant (`InvalidFra (known-failing #4260:…] (was #4260 c19)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev d9f6a4b839 (G9Web-4635c9): tests/cases/http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient exercises resp/req/body .json, server.json, static_files, cors and cors_policy, and its one .stdout.expected (from a real run) matches jet run, --optimize=basic, --optimize=full and the built binary. A printed HTTPError reads as its HTTPErrors.jet message per D-DISPLAYDBG1=A. The web target refuses the build with E3304 (no server sockets). The #4260 KF row is removed. Lander ran it on seed-b14: PASS 1, FAIL 0, KNOWN-FAILING 0.",
-          "at": "2026-11-13T06:39:50.518Z"
-        },
-        {
-          "n": 11,
-          "text": "The serve loop is concurrent, as ratified D-HTTP-SERVER2=A requires: handler concurrency is bounded by the task scheduler, with its 10k total and 256-per-IP limits answered by 503. Today Core/Http/Server.jet:262-289 and :295 serve one request at a time: D-WS-ROUTE1 probe w04 holds one WebSocket open for 400 ms, and a GET sent at 50 ms is answered at 400 ms. A two-client case proves that the second request is answered while the first is held, on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): --profile cases --filter http_server_lifecycle/ gives second_client_answered_while_first_is_held PASS and per_peer_connection_limit_answers_503 PASS.",
-          "at": "2026-11-13T23:54:34.988Z"
-        }
-      ],
-      "refs": [
-        "#3665",
-        "#3666",
-        "#2873",
-        "D-FOUND-LIFECYCLE1",
-        "D-HTTP-ROUTE-EXPOSE1",
-        "D-EXEC1",
-        "#3078"
-      ],
-      "tags": [
-        "http",
-        "runtime",
-        "server",
-        "defect",
-        "mine-2026-10-05",
-        "wayfinder:task"
-      ],
-      "parentId": "c086hhzb",
-      "needsAcceptance": false,
-      "created": "2026-10-05T21:07:55.999Z",
-      "updated": "2026-11-14T01:32:52.809Z",
-      "updatedBy": "Main",
-      "goals": [
-        "G9"
-      ],
-      "criteriaLastN": 11,
-      "completedAt": "2026-11-14T01:32:52.809Z"
     },
     {
       "id": "c0w1f3xa",
@@ -126465,130 +126030,6 @@
       "ratifiedAt": "2026-09-13"
     },
     {
-      "id": "D-ONE-LIFECYCLE1",
-      "cardId": "c0uasubv",
-      "group": "runtime",
-      "title": "Shared lifecycle operations without a universal runtime",
-      "gist": "Should lifecycle integrations reuse existing operations instead of defining another general runtime?",
-      "lesson": "A lifecycle says how work starts, survives an update, and stops. The captured interpreter backend repeats registration work in run, hot_swap and restart. Sharing that setup does not make a task durable or a job merely local. The example shows the distinction between preserving compatible live state and starting a new process; both options must retain it.",
-      "explainer": "",
-      "story": "Kai adds a long-running integration. Cancellation, waiting, failure reporting, and identity should reuse existing machinery rather than introduce another scheduler or supervisor.",
-      "inWild": "import asyncio\nasync def work():\n    return 42\nasync def main():\n    async with asyncio.TaskGroup() as group:\n        task = group.create_task(work())\n    print(task.result())\nasyncio.run(main())\nSource-composed TaskGroup example. Python documents waiting for child tasks at context exit. This does not prove persistent jobs or Jet runtime parity. https://docs.python.org/3/library/asyncio-task.html#task-groups",
-      "detail": "No new type, public method, executor, resource category or I9 exception is authorized. Domain-specific event loops and foreign runtime adapters may remain necessary; reuse means common semantic operations, not pretending all hosts have the same execution model. Durability, cancellation, retry, acknowledgment and capability authority must remain observable. No exactly-once external side-effect guarantee is implied.\n\nSource evidence:\n\nSource/JitBackend.rs:54-69,81-96,120-135\n\ncrates/jet-codegen/src/Prelude/CoreLib/Top/Services.rs:6-12,139-165\n\ncrates/jet-codegen/src/Prelude/TaskGroup.rs:470-660\n\ncrates/jet-codegen/src/Prelude/Deadline.rs:1\n\ncrates/jet-codegen/src/Prelude/Service.rs:10-45,84-118\n\nCaptured work:\nPrior finding 8 and tactical ambient-registration consolidation.\nShared planned lifecycle, service, UI, job and foreign-runtime operations; retain domain acceptance criteria.\n\nRequired evidence before implementation closure:\nRun/hot-swap/restart retention and reset transitions.\nCancellation, child failure, teardown and repeated initialization without stale registrations.\nService authority, durable acknowledgment/retry and deadline behavior remain unchanged.\n\nExample status: current snippets are explicitly source-composed or captured source/test expectations. This preparation ran no Jet compiler, provider or UI scenario. Proposed alternatives are design contracts, not implemented behavior. No peer example proves Jet semantics.\n\nCurrent source boundary: the three repeated paths are methods of InterpreterBackend implementing the JitBackend interface. Compiled-JIT migration, live-value retention and repeated-registration behavior are not proved by that source observation. Any wider reuse must be justified by matching operations, not common names.\n\nContribution or failure trial (proposed acceptance, not an observed run):\n\nA: Contributor trial: add one required interpreter host binding. Shared setup installs it for run, hot-swap and restart. The existing per-mode reset/retention rules remain separate.\n\nB: Same trial: update three interpreter setup paths. Omitting hot-swap setup must fail the transition check when that binding is needed. This option adds no new runtime.\n\nThe concrete consolidation is interpreter registration only. Cranelift run uses reset_one_shot_core_state and try_resident; hot-swap and restart use distinct resident paths. Do not make those paths call interpreter setup.\n\nCompiled hot-swap clears network handles and interrupts while retaining runtime state; fresh run and invocation have other heap/module reset rules. Preserve each transition at its existing owner. No migration success is claimed here.\n\nFor other domains, reuse only an already-matching operation such as the existing deadline or task-group primitive. This is not permission to merge Task, durable Job, Stream, service, GUI or foreign event loops.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Shared operations with explicit policies",
-          "detail": "Factor repeated ambient registration while preserving each mode’s exact state clearing and retention. New services, streams, UI integrations and durable work must use the existing scheduler, task-group, failure, deadline, channel and marshalling owners wherever they perform the same operation. Policy functions remain explicit. Do not automatically create a universal Service, Resource or Async object. A later type-family ballot can unify public artifacts if it preserves their actual guarantees.",
-          "code": "#Persist counter := 0\nfn run() {\n    counter += 1\n    print(\"{counter}\")\n}\n// Fresh process: 1. Compatible dev reload: 2.\n// Fresh restart: 1. These are source expectations.\n// Trial: add one required interpreter host binding.\n// One shared installer covers run/hot-swap/restart.\n// Per-mode reset and retention remain distinct."
-        },
-        {
-          "key": "B",
-          "name": "Separate interpreter setup paths",
-          "detail": "Keep the existing InterpreterBackend mode-specific registration/setup paths. Each remains responsible for its own reset, retention and teardown ordering and must prove the transition matrix. This option does not authorize a new executor, scheduler, public resource type or weakened lifecycle contract.",
-          "code": "#Persist counter := 0\nfn run() {\n    counter += 1\n    print(\"{counter}\")\n}\n// Fresh process: 1. Compatible dev reload: 2.\n// Fresh restart: 1. These are source expectations.\n// Same trial: update three interpreter setup paths.\n// Miss hot-swap: its binding-availability check fails."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Python",
-          "note": "Source-composed TaskGroup example. Python documents waiting for child tasks at context exit. This does not prove persistent jobs or Jet runtime parity. https://docs.python.org/3/library/asyncio-task.html#task-groups",
-          "code": "import asyncio\nasync def work():\n    return 42\nasync def main():\n    async with asyncio.TaskGroup() as group:\n        task = group.create_task(work())\n    print(task.result())\nasyncio.run(main())"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Shared operations remove duplicated machinery while leaving different completion and authority promises checkable.",
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Keeping three copies makes a shared binding change a multi-site edit. Mode-specific reset and retention can remain explicit without duplicating installation."
-          }
-        ],
-        "tradeoff": "Domain policies remain explicit where their observable promises differ."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": "After owner selection, prove every exact boundary and source/golden/UI/provider criterion in this ballot and its card. This preparation supplies source facts and proposed behavior only; no runtime or performance success is claimed.",
-      "surface": {
-        "gist": "Should lifecycle integrations reuse existing operations instead of defining another general runtime?",
-        "lesson": "A lifecycle says how work starts, survives an update, and stops. The captured interpreter backend repeats registration work in run, hot_swap and restart. Sharing that setup does not make a task durable or a job merely local. The example shows the distinction between preserving compatible live state and starting a new process; both options must retain it.",
-        "trio": {
-          "current": {
-            "note": "Existing #Persist example, shortened; comments are recorded source expectations, not a new runtime observation. The repeated implementation is InterpreterBackend behind the JitBackend trait, not proof about three compiled-JIT implementations.",
-            "code": "#Persist counter := 0\nfn run() {\n    counter += 1\n    print(\"{counter}\")\n}\n// Fresh process: 1. Compatible dev reload: 2.\n// Fresh restart: 1. These are source expectations."
-          },
-          "wild": {
-            "lang": "Python",
-            "note": "Source-composed TaskGroup example. Python documents waiting for child tasks at context exit. This does not prove persistent jobs or Jet runtime parity. https://docs.python.org/3/library/asyncio-task.html#task-groups",
-            "code": "import asyncio\nasync def work():\n    return 42\nasync def main():\n    async with asyncio.TaskGroup() as group:\n        task = group.create_task(work())\n    print(task.result())\nasyncio.run(main())"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Shared operations with explicit policies",
-            "gist": "Reuse scheduler, failure, waiting, and marshalling operations.",
-            "gains": [
-              "Integrations do not add another general scheduler.",
-              "Run, hot-swap, and restart share ambient setup.",
-              "Durability and authority remain visible contracts."
-            ],
-            "losses": [
-              "Integrations still specify their cancellation and completion rules."
-            ],
-            "proposed": {
-              "code": "#Persist counter := 0\nfn run() {\n    counter += 1\n    print(\"{counter}\")\n}\n// Fresh process: 1. Compatible dev reload: 2.\n// Fresh restart: 1. These are source expectations.\n// Trial: add one required interpreter host binding.\n// One shared installer covers run/hot-swap/restart.\n// Per-mode reset and retention remain distinct."
-            }
-          },
-          {
-            "key": "B",
-            "name": "Separate interpreter setup paths",
-            "gist": "Keep per-mode setup without adding another runtime.",
-            "gains": [
-              "Each mode can change its setup locally."
-            ],
-            "losses": [
-              "A shared binding change must be applied to each setup path."
-            ],
-            "proposed": {
-              "code": "#Persist counter := 0\nfn run() {\n    counter += 1\n    print(\"{counter}\")\n}\n// Fresh process: 1. Compatible dev reload: 2.\n// Fresh restart: 1. These are source expectations.\n// Same trial: update three interpreter setup paths.\n// Miss hot-swap: its binding-availability check fails."
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Shared operations remove duplicated machinery while leaving different completion and authority promises checkable.",
-          "gains": [
-            "Integrations do not add another general scheduler.",
-            "Run, hot-swap, and restart share ambient setup.",
-            "Durability and authority remain visible contracts."
-          ],
-          "losses": [
-            {
-              "loss": "Integrations still specify their cancellation and completion rules.",
-              "mitigation": "Acknowledging durable work is not the same action as completing an in-memory task."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Keeping three copies makes a shared binding change a multi-site edit. Mode-specific reset and retention can remain explicit without duplicating installation."
-            }
-          ],
-          "tradeoff": "Domain policies remain explicit where their observable promises differ."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-09-13T12:43:54.998Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-09-13"
-    },
-    {
       "id": "D-TRUST-LAUNCH1",
       "cardId": "c05efrmn",
       "group": "syntax",
@@ -148583,375 +148024,6 @@
       "created": "2026-10-06T00:57:52.795Z",
       "outcome": "A",
       "ratifiedAt": "2026-10-07"
-    },
-    {
-      "id": "D-HTTP-DATE1",
-      "cardId": "c04es5yq",
-      "group": "core",
-      "title": "Whether Jet's web server sends the Date header",
-      "situation": "Every web response can carry a Date line saying when the server answered. The web standard requires it from any server with a clock, and caches and clients use it. Jet's server never sends it today, although Jet already formats that exact date style for other headers. You decide whether responses carry Date by default; we recommend yes, read from the program's clock so tests with a fake clock stay exact.",
-      "gist": "Should Jet's web server add a Date header to every response by default?",
-      "lesson": "A response header is a named line sent before the page. Date says when the response was made. The web standard says a server with a clock must send it. A adds Date to every response from the program's clock, so a test clock gives a fixed value. B keeps today's rule: handlers add it by hand. C adds it only outside tests.",
-      "explainer": "A web response starts with header lines, such as Content-Type, then the body. Date is one header. It records when the server produced the response, in one fixed format called IMF-fixdate.\n\nThe standard that defines HTTP says an origin server with a reasonably accurate clock must send Date on its normal responses. Caches use it to compute how old a stored response is. Clients use it to notice clock skew.\n\nJet's server writes every other framing header itself, but never Date. Jet already formats IMF dates for Last-Modified on static files, so nothing new is needed to produce it.\n\nOption A adds Date to every response the server writes. The time comes from the program's clock, which tests already replace with a fake clock. So a test sees one fixed, predictable Date, while a real server sends the real time. A handler that sets Date itself keeps its own value.\n\nOption B keeps today's behavior and documents that handlers add Date by hand. Option C adds Date only when the server runs outside tests.",
-      "story": "Lena puts a small Jet API behind a shared cache. Responses arrive with no Date, so the cache cannot work out their age and stores them by its own guess. Her Go service on the same cache never had this problem, because Go's server adds Date itself.",
-      "inWild": "// Go net/http adds Date unless the handler sets it to nil\n// https://pkg.go.dev/net/http#ResponseWriter\nw.Write(body)   // response carries: Date: Mon, 05 Oct 2026 18:00:00 GMT\n\n// Node: response.sendDate defaults to true\n// https://nodejs.org/api/http.html#responsesenddate",
-      "detail": "Current state: the server serializer never writes Date. An IMF-fixdate formatter exists and is used only for Last-Modified (claim v3-H2:FknTw9bJsXM-B33). The serializer already owns Content-Length, Transfer-Encoding, Trailer and Connection (v3-H2:FknTw9bJsXM-B29). Card #4635 owns the server serve paths.\n\nRFC 9110 section 6.6.1 says an origin server with a clock must generate Date for 2xx, 3xx and 4xx responses, and may for 1xx and 5xx. A recipient cache with no Date must add one on receipt.\n\nSource: ThePrimeagen's From TCP to HTTP course (FknTw9bJsXM), which lists Date among the common response headers used for caching (claims v3-H2:FknTw9bJsXM-B33; web-data-net:C76).\n\nProven approaches. Go's net/http adds Date unless the handler sets the header to nil. Node's http sets response.sendDate true by default. Rust's hyper adds Date by default and caches the formatted string, refreshing it once a second, so the header costs almost nothing per response. nginx always sends Date.\n\nThe known trap is test output that changes every second. Jet removes it the same way it handles all time: the header reads the program's clock service. Test fakes and D-EFFECT-HANDLE1 scoped replacement already control that clock.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Always send Date from the program's clock",
-          "detail": "The server adds Date to every response it writes, unless the handler already set one. The value comes from the program's clock, so a test with a fake clock sees a fixed date. A real server sends the real time.",
-          "technical": "The serializer reads the clock service once per second at most and reuses the formatted IMF-fixdate text, as hyper does. A handler-set Date passes through. The rule covers the supervised server, the lambda serve path and serve_once, so tests see the same header shape as production.",
-          "code": "http.serve(\":8080\", app) ?? return\n// HTTP/1.1 200 OK\n// Date: Mon, 05 Oct 2026 18:00:00 GMT\n\n// in a test with a fake clock: the same date on every run"
-        },
-        {
-          "key": "B",
-          "name": "Handlers add Date by hand",
-          "detail": "Today's rule stays. The server never adds Date. A handler that needs it formats the time and sets the header itself, and the documentation says so.",
-          "technical": "No serializer change. A public IMF-fixdate helper is documented for handlers.",
-          "code": "response :: http.response(200, body)\n    |> http.with_header(\"Date\", time.now().imf())\n// every handler repeats this line"
-        },
-        {
-          "key": "C",
-          "name": "Send Date outside tests only",
-          "detail": "The server adds Date when it runs for real and leaves it out under jet test, so test output never contains a time.",
-          "technical": "The serializer checks whether the process runs under the test harness. Production and test responses differ in shape.",
-          "code": "// jet run: Date present\n// jet test: no Date line\n// a test cannot check that Date is sent"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Go",
-          "note": "net/http adds Date automatically; a handler can suppress it explicitly.",
-          "code": "// https://pkg.go.dev/net/http#ResponseWriter\nw.Header()[\"Date\"] = nil   // suppress\nw.Write(body)               // otherwise Date is added"
-        },
-        {
-          "lang": "Node.js",
-          "note": "response.sendDate defaults to true.",
-          "code": "// https://nodejs.org/api/http.html#responsesenddate\nres.sendDate = false   // opt out\nres.end(body)"
-        },
-        {
-          "lang": "Rust (hyper)",
-          "note": "Date is added by default and cached once per second.",
-          "code": "// hyper/src/common/date.rs: cached HTTP date, updated each second\nResponse::new(body)   // Date added by the server"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A makes Jet's server follow the standard every major server already follows, at almost no cost per response. Reading the program's clock keeps tests exact, which removes the one reason servers ever leave Date out.",
-        "tradeoff": "Raw response bytes in tests now include a Date line set by the test clock.",
-        "gains": [
-          "Caches and clients get the header the standard requires.",
-          "Handlers never repeat a date line.",
-          "Tests see the same header shape as production."
-        ],
-        "losses": [
-          {
-            "loss": "Existing tests that compare raw response bytes gain one Date line.",
-            "mitigation": "Under a fake clock the line is fixed, so each expected output is updated once and stays stable; a one-time fixture update covers the corpus."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B breaks the standard by default and makes every handler repeat the same line."
-          },
-          {
-            "key": "C",
-            "reason": "C makes test responses differ from real ones, so no test can catch a missing Date."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": "Check that every 2xx, 3xx and 4xx response from the supervised server, the lambda serve path and serve_once carries one Date line in IMF-fixdate form. Check that a handler-set Date passes through unchanged.\n\nCheck that a fake test clock produces a fixed Date, and that the formatted value is reused within one second. Update raw-response fixtures in the corpus once.",
-      "surface": {
-        "gist": "Should Jet's web server add a Date header to every response by default?",
-        "lesson": "Date is a response header saying when the server answered; the web standard requires it from a server with a clock. A adds it from the program's clock, so test clocks keep it fixed. B leaves it to handlers. C sends it only outside tests.",
-        "trio": {
-          "current": {
-            "note": "No response ever carries Date.",
-            "code": "http.serve(\":8080\", app) ?? return\n// HTTP/1.1 200 OK\n// Content-Length: 5\n// (no Date line)"
-          },
-          "wild": {
-            "lang": "Go",
-            "note": "net/http adds Date by itself.",
-            "code": "w.Write(body)\n// Date: Mon, 05 Oct 2026 18:00:00 GMT"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Always, from the program's clock",
-            "gist": "Every response gets Date; test clocks make it fixed.",
-            "gains": [
-              "Follows the standard.",
-              "Tests match production."
-            ],
-            "losses": [
-              "Raw-response test fixtures gain one line."
-            ],
-            "proposed": {
-              "code": "http.serve(\":8080\", app) ?? return\n// Date: Mon, 05 Oct 2026 18:00:00 GMT\n// fake test clock: same date every run"
-            }
-          },
-          {
-            "key": "B",
-            "name": "By hand in handlers",
-            "gist": "Nothing changes; handlers add Date themselves.",
-            "gains": [
-              "No output changes."
-            ],
-            "losses": [
-              "Breaks the standard by default.",
-              "Every handler repeats a line."
-            ],
-            "proposed": {
-              "code": "http.response(200, body)\n    |> http.with_header(\"Date\", time.now().imf())"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Outside tests only",
-            "gist": "Real runs send Date; tests never see it.",
-            "gains": [
-              "Test output has no time in it."
-            ],
-            "losses": [
-              "No test can check Date is sent."
-            ],
-            "proposed": {
-              "code": "// jet run: Date present\n// jet test: Date absent"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A follows the standard like Go, Node, hyper and nginx do, and the program's clock keeps tests exact.",
-          "gains": [
-            "Standard responses with no handler code.",
-            "Predictable tests."
-          ],
-          "losses": [
-            {
-              "loss": "Raw-response test fixtures gain one line.",
-              "mitigation": "The fake clock makes it fixed; update fixtures once."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B breaks the standard and repeats code."
-            },
-            {
-              "key": "C",
-              "reason": "C makes tests differ from production."
-            }
-          ],
-          "tradeoff": "One-time fixture update."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "Existing tests that compare raw response bytes gain one Date line.",
-          "attempts": [
-            "Leave Date out under tests. Rejected as option C: tests would stop matching production.",
-            "Read the clock service the tests already control. Kept: the line becomes fixed and predictable in every test."
-          ]
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-06T00:57:57.253Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-06"
-    },
-    {
-      "id": "D-HTTP-REQMEM1",
-      "cardId": "c04es5yq",
-      "group": "core",
-      "title": "A memory limit for each web request",
-      "situation": "A web server handles many requests at once. If one request builds a huge list, today it can use all the machine's memory and take every other request down with it. Jet already gives each request a time limit, but not a memory limit. You decide whether each request gets its own memory budget; we recommend a generous default per request, adjustable per route, that ends only the request that goes over.",
-      "gist": "Should each web request get its own memory budget, so one runaway request fails alone instead of taking down the server?",
-      "lesson": "A budget is a limit on how much memory one request may use. A gives every request a generous default budget, adjustable per route. A request that goes over ends with a server error, and the others keep running. B adds the same budget but leaves it off unless a server sets it. C adds no per-request limit and relies on whole-process limits.",
-      "explainer": "A Jet web server runs each request as its own task. Jet already bounds request time: a deadline cancels a slow request. Memory has no such bound while the program runs. One request that builds a huge value can grow until the operating system kills the whole process, ending every request in flight.\n\nJet does have a static memory rule, which lets a function promise it allocates at most a fixed number of bytes. That is checked at build time and cannot know how big a user's request will be.\n\nOption A gives every request a running memory budget. Memory the request's task allocates counts against it, and memory it frees counts back. Going over ends that request with a 500 server error and a log record naming the line that crossed the limit. Other requests keep running.\n\nThe default is generous, 128 MiB per request, which only runaway requests reach. A route that really needs more, such as an export, sets its own budget. Option B adds the same budget but leaves it off by default. Option C adds nothing and relies on limits for the whole process.",
-      "story": "Jun's report endpoint builds the whole year's data in memory when a user picks a wide date range. One such request grows until the operating system kills the server, and 200 other users lose their pages mid-request.",
-      "inWild": "// Cloudflare Workers: each isolate has a fixed memory limit; going over\n// ends that worker, not the platform (developers.cloudflare.com/workers/platform/limits)\n\n% Erlang: a per-process heap limit kills only that process\nspawn_opt(fun handle/0, [{max_heap_size, #{size => 10000000, kill => true}}])",
-      "detail": "Current state: bind and serve take (addr, mux, tls, deadline) and no memory budget (core-library.md:997-998). Request bodies have a shared size limit (core-library.md:984-986; D-CORE-HTTPBODYLIMIT1). D-FOUND-LIFECYCLE1 makes request deadlines a cancellation. D-AUTHORITY-MEM2=A gives a static Mem.Alloc(above: N) denial checked at build time, and D-STACKBOUND1 reports worst-case stack and heap per entry point. Card #4635 owns the serve paths. The v3 A2-langs re-read confirmed the gap (note 2).\n\nSource: Richard Feldman on Roc's NIA platform (DzhIprQan68 17:13-18:33). It gives each request a bounded bump arena, frees everything after the response, and answers 500 when a request exceeds its cap (claims languages-a:R12, R13).\n\nThe 2026-10-05 synthesis held this as an evidence gap pending research on response-body escape, streaming and cancellation. This ballot answers those points in the technical text of option A.\n\nProven approaches. Erlang's max_heap_size kills only the offending process, the model for failing one request alone. Cloudflare Workers and AWS Lambda give each worker or invocation a fixed memory limit. Go and Node have no per-request limit, so one request can exhaust the process.\n\nThe known risks are false failures for legitimately large requests and memory that escapes the request. A handles the first with per-route budgets and the second by counting only the request task's live allocations.",
-      "options": [
-        {
-          "key": "A",
-          "name": "A generous default budget per request, set per route",
-          "detail": "Every request runs with a memory budget, 128 MiB by default. Live memory the request's task allocates counts against it. Going over ends that request with a 500 and a log record naming the allocation site. A route sets its own budget, or .Unbounded. Response bodies being streamed and data handed to shared state stop counting once ownership leaves the request.",
-          "technical": "The request task carries an allocation account in the program allocator (D-ALLOC-PROGRAM1); child tasks inherit it. Crossing the budget raises the existing cancellation on that task, like a deadline, so cleanup runs. The serializer then writes 500 if no response has started, or closes the connection if one has. bind and serve gain limits: .{ request_memory: Bytes }, and mux routes accept memory:.",
-          "code": "http.serve(\":8080\", app) ?? return\n// each request: up to 128 MiB, then 500 for that request only\n\napp.route(\"/export\", export, memory: 1.GiB)"
-        },
-        {
-          "key": "B",
-          "name": "The same budget, off unless set",
-          "detail": "The per-request budget exists, but servers have no limit until they set request_memory. Existing servers behave as today.",
-          "technical": "As A, with the default .Unbounded.",
-          "code": "http.serve(\":8080\", app, limits: .{ request_memory: 128.MiB }) ?? return"
-        },
-        {
-          "key": "C",
-          "name": "No per-request limit",
-          "detail": "Servers rely on whole-process limits from the operating system or container. One runaway request can still end every request.",
-          "technical": "No change.",
-          "code": "http.serve(\":8080\", app) ?? return\n// out of memory: the process is killed"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Erlang",
-          "note": "max_heap_size kills only the process that exceeds it.",
-          "code": "process_flag(max_heap_size, #{size => 10000000, kill => true})"
-        },
-        {
-          "lang": "Go",
-          "note": "No per-request memory limit; MaxBytesReader caps only the body.",
-          "code": "r.Body = http.MaxBytesReader(w, r.Body, 1<<20)"
-        },
-        {
-          "lang": "Cloudflare Workers",
-          "note": "Each worker isolate has a fixed memory limit.",
-          "code": "// exceeding the limit ends that worker invocation"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A gives memory the same protection Jet already gives time: one bad request fails alone. A generous default protects every server from day one, and per-route budgets keep large exports working.",
-        "tradeoff": "A rare request that legitimately needs more than the default fails until its route sets a larger budget.",
-        "gains": [
-          "One runaway request no longer kills the server.",
-          "The failure names the line that crossed the limit.",
-          "Large routes opt into larger budgets explicitly."
-        ],
-        "losses": [
-          {
-            "loss": "A legitimate request above 128 MiB fails with 500 until its route is given a larger budget.",
-            "mitigation": "The log record names the route and the bytes needed, and jet dev reports the peak per route, so the budget is set once before deploy."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B protects only servers whose authors already know to ask for it."
-          },
-          {
-            "key": "C",
-            "reason": "C lets one request end every request in flight."
-          }
-        ]
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": "Check that a request allocating past its budget ends with 500 and a log record naming the allocation site, while concurrent requests finish normally. Check that a route budget and .Unbounded override the default, and that streamed response bytes and values moved into shared state stop counting.\n\nCheck that crossing the budget after the response started closes the connection cleanly. Measure allocator overhead under the strict performance gate.",
-      "surface": {
-        "gist": "Should each web request get its own memory budget, so one runaway request fails alone instead of taking down the server?",
-        "lesson": "Requests have time limits but no memory limits. A gives each request a generous default budget, adjustable per route. B adds the budget but leaves it off. C adds nothing.",
-        "trio": {
-          "current": {
-            "note": "One request can exhaust memory for everyone.",
-            "code": "http.serve(\":8080\", app) ?? return\n// one huge request: whole server killed"
-          },
-          "wild": {
-            "lang": "Erlang",
-            "note": "A heap limit ends only the offending process.",
-            "code": "process_flag(max_heap_size, #{size => 10000000, kill => true})"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Default budget per request",
-            "gist": "128 MiB per request; routes can raise it.",
-            "gains": [
-              "One bad request fails alone.",
-              "Protection from day one."
-            ],
-            "losses": [
-              "Large routes must raise their budget."
-            ],
-            "proposed": {
-              "code": "http.serve(\":8080\", app) ?? return\napp.route(\"/export\", export, memory: 1.GiB)"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Budget off by default",
-            "gist": "Servers opt in.",
-            "gains": [
-              "No behavior change."
-            ],
-            "losses": [
-              "Unprotected unless set."
-            ],
-            "proposed": {
-              "code": "http.serve(\":8080\", app, limits: .{ request_memory: 128.MiB })"
-            }
-          },
-          {
-            "key": "C",
-            "name": "No per-request limit",
-            "gist": "Process limits only.",
-            "gains": [
-              "No new API."
-            ],
-            "losses": [
-              "One request can end all."
-            ],
-            "proposed": {
-              "code": "http.serve(\":8080\", app) ?? return"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A gives memory the protection time already has. A generous default protects every server, and routes can raise it.",
-          "gains": [
-            "Failures stay inside one request.",
-            "The log names the line."
-          ],
-          "losses": [
-            {
-              "loss": "Large routes must raise their budget.",
-              "mitigation": "jet dev reports peak memory per route."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B protects only those who ask."
-            },
-            {
-              "key": "C",
-              "reason": "C lets one request end all."
-            }
-          ],
-          "tradeoff": "Rare big requests need a route budget."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "A legitimate request above 128 MiB fails with 500 until its route is given a larger budget.",
-          "attempts": [
-            "Derive each route's budget from the build's worst-case heap report. Kept where D-STACKBOUND1 can bound the route; the default applies otherwise.",
-            "Turn the limit off by default. Rejected as option B."
-          ]
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-06T00:58:01.785Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-06"
     },
     {
       "id": "D-LOG-SPAN-SCOPE1",
@@ -211270,232 +210342,6 @@
       "ratifiedAt": "2026-11-13"
     },
     {
-      "id": "D-HTTP-READINESS1",
-      "cardId": "c0uasubv",
-      "group": "library",
-      "title": "How a probe reads whether a Jet HTTP server is ready: both a method and a built-in route, a method only, or a route only",
-      "situation": "Card #3078 c16 asks for readiness to be a state a probe can read through drain: not ready, ready, draining and closed. Today the server tracks its phases privately. Its only public signal is the stdout ready line. Nothing tells a draining server from a ready one, and a supervisor or load balancer can't ask. This vote picks the public shape. A gives a method on HTTPServer and a built-in probe route built on it. B gives the method only. C gives the route only. We recommend A.",
-      "gist": "Should a server's readiness be read by a method and a built-in probe route, by the method only, or by the route only?",
-      "lesson": "A readiness probe asks a running server whether to send it traffic. The answer changes while the program runs. It is no before the server serves and yes while it serves. It turns no again as soon as shutdown starts, while admitted requests still finish.",
-      "explainer": "Words used here. A probe is a check that a supervisor runs again and again against a program. Kubernetes, load balancers and systemd all run them. A readiness probe decides whether traffic is sent. A liveness probe decides whether the program is restarted.\n\nDraining is the time after shutdown starts. No new work is admitted, and requests in flight get up to a grace period to finish. Binding opens the port; serving starts taking connections from it. Between the two, the kernel queues connections but nobody answers them.",
-      "story": "Ana deploys app.serve() behind a load balancer that checks a path every 5 seconds. Under B she has no server value to ask, because serve never returns. She moves to bind, runs serve in a task, and writes a second admin server whose route calls server.readiness().\n\nUnder A and C she points the load balancer at /__jet/ready and writes nothing. On SIGTERM the route answers 503 draining until the requests in flight end. The balancer stops sending traffic before the port closes.\n\nHer colleague Raj also needs the database pool in the answer. Under A he serves a /ready route on a private admin listener. It combines server.readiness() with pool.ready(). The public balancer keeps using /__jet/ready.",
-      "inWild": "// Spring Boot: readiness is a published state that flips on shutdown,\n// and Actuator serves it as a probe route.\n// https://docs.spring.io/spring-boot/reference/features/spring-application.html#features.spring-application.application-availability\nAvailabilityChangeEvent.publish(ctx, ReadinessState.REFUSING_TRAFFIC);\n// GET /actuator/health/readiness -> {\"status\":\"OUT_OF_SERVICE\"} (503)\n\n// ASP.NET Core: health checks tagged \"ready\" back a mapped probe route.\n// https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/health-checks\napp.MapHealthChecks(\"/healthz/ready\", new() { Predicate = c => c.Tags.Contains(\"ready\") });",
-      "detail": "What this ballot decides: the public shape of #3078 c16. It builds on c1, not ready before resources are usable, and c2, shutdown stops admission before resources close. It adds no new error code.\n\nCurrent code, on the #3078 c9 stack, is in Core/Http/Server.jet. __HTTPServerState (:264-273) holds a phase and a stopping flag. Phase 0 is bound, 1 is serving and 2 is finished. serve (:297-359) moves phase 0 to 1 and accepts until stopping is set or its accept is cancelled. It then waits up to the drain budget for live connections (:348-353). Last it sets phase 2 with its report.\n\nshutdown(grace) (:367-375) sets stopping. bind (:554-577) opens the listener with the state at phase 0. None of this is public. A signal-cancelled accept drains without setting stopping (:329-330). So the private state can't yet tell draining from serving there. Every option fixes that by setting stopping when the accept loop ends.\n\nThe states, the same for every option:\n- NotReady: bound, not yet serving. The kernel queues connections, so a plain TCP probe reads ready too early.\n- Ready: serving and accepting.\n- Draining: shutdown called, or accept cancelled by a signal, with admitted requests still finishing.\n- Closed: serve has reported. Also the state when shutdown runs before serve ever starts.\n\nBind failure: bind returns Err and no HTTPServer exists. There is no state to read under any option. A probe gets connection refused, which every prober reads as not ready. A settings failure (#3078 c14) exits 78 before bind, with the same result.\n\nOut of scope: resource health after start, such as a pool going bad. c1 is met by building resources before bind (D-VERDICT-3086-1=A). A live resource check is the expert path under A and B.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Both: HTTPServer.readiness() -> HTTPReadiness, and a built-in GET /__jet/ready route that answers from it",
-          "gist": "No code for the common probe; the state is readable when a program needs more.",
-          "detail": "The method of B, plus the route of C, which answers from readiness(). It follows C's drain rule. A handler has no accessor for its own server, and A adds none. So a composed probe lives on a private admin listener, or reads a cell the program fills with the server after bind.\n\nBeginner path: as C, nothing to write. Expert path: read the state and combine it with pool.ready(). Serve that on a private admin listener, or through a cell filled after bind.\n\nGain: both paths, and the route and the method can't disagree because one reads the other. Loss: the surfaces of B and C together.",
-          "technical": "Proposed, not implemented. The work of B, then the work of C with the route handler calling readiness(). Proof: the AppLifecycle golden prints each state as the method reports it. Beside it, it prints what the route answers, through the drain.",
-          "code": "web.app().get(\"/order\", place_order).serve()   // probes use /__jet/ready\n\n// Expert: a probe that also checks the pool, on a private admin listener.\nlistening: app.bind(\"0.0.0.0:8080\") ?? return Err(err)\nadmin: web.app().get(\"/ready\", fn() {\n    ok: listening.readiness() == .Ready && (pool.ready() ?? false)\n    Ok(http_server.response(if ok -> 200 else -> 503, \"\"))\n}).bind(\"127.0.0.1:9090\") ?? return Err(err)"
-        },
-        {
-          "key": "B",
-          "name": "A method only: HTTPServer.readiness() -> HTTPReadiness { NotReady, Ready, Draining, Closed }",
-          "gist": "The program reads the state; any probe route is user code.",
-          "detail": "One public enum and one public method on HTTPServer. The method reads the private state under its lock, with no I/O. The four cases are as listed in the ballot detail.\n\nBeginner path: app.serve() never returns a server, so a beginner gets nothing here. They must switch to bind, run serve in a task, and write a probe route. A route on the same app can't see its own server, since no handler accessor exists. So the usual answer is a second admin listener, or a cell filled after bind.\n\nExpert path: full control. Combine the state with pool.ready() and serve it on a private admin port that the public balancer never sees.\n\nGain: the smallest surface, with no reserved path and no change to drain. Loss: probes need user code in every service, the Go pattern. The beginner path is the expert path.",
-          "technical": "Proposed, not implemented. Add HTTPReadiness: enum { NotReady, Ready, Draining, Closed } to core.http.server, exported in Prelude/Core.rows. Add a readiness(self) -> HTTPReadiness Never! method on HTTPServer. When serve's accept loop ends, it sets stopping before it drains, so a signal stop reads Draining.\n\nProof: the Examples/Network/AppLifecycle golden prints each state from a probe task. It reads NotReady after bind, Ready after serve starts and Draining during shutdown while a handler holds its lease. It reads Closed after the report. A case covers shutdown before serve, which reads Closed and was never Ready.",
-          "code": "listening: app.bind(\"0.0.0.0:{settings.port}\") ?? return Err(err)\nprint(listening.readiness())   // NotReady: bound, not serving\nserving: task { listening.serve() ?? panic(\"serve\") }\n// ... Ready while serving\nreport: listening.shutdown(5s) // Draining until in-flight requests end\nprint(listening.readiness())   // Closed"
-        },
-        {
-          "key": "C",
-          "name": "A route only: every served app answers GET /__jet/ready with 200 ready, or 503 draining",
-          "gist": "Probes work with no user code; the state itself stays private.",
-          "detail": "Every app served with app.serve() or app.bind() answers GET /__jet/ready. The /__jet/ prefix already holds jet dev's /__jet/reload. The answer is 200 with the body ready, or 503 with draining. The route can't show NotReady, because nothing accepts before serve starts. NotReady is visible only through a method (A, B).\n\nDuring drain, the server keeps accepting connections for the grace period. It stays within the admission limits it already enforces. A connection over those limits is refused as today. It answers /__jet/ready with 503 draining, and any other request with 503 and Connection: close.\n\nToday the listener stops accepting at once and probes get connection refused. A load balancer can't tell that from a crash. Every user path also answers 503 during drain, so a liveness probe must not use a user path. A TCP liveness check keeps passing until Closed.\n\nA user route on /__jet/ready takes the place of the built-in one, but under C it has no state to read. Beginner path: nothing to write; point the probe at /__jet/ready. Expert path: no way to read the state from code, so a custom route that adds the pool can't report draining.\n\nGain: the probe a deployment needs, with no code, from app.serve() too. Loss: one reserved path, the drain change, a wider overloaded count, and no read from code.",
-          "technical": "Proposed, not implemented. __app_table adds the route the same way the dev reload route is added (Core/Web/Web.jet:547). The serve accept loop goes on accepting during the drain budget, through the same __admit limits. It answers 503 and closes.\n\nThe ShutdownReport counts these as overloaded, not as accepted work. That widens overloaded from over the connection limits to also refused while draining. The spec text for the report changes with it. HTTPServer users who build their own HTTPMux get no route; only web.app does.\n\nProof: the AppLifecycle golden runs a probe client against /__jet/ready. It prints 200 ready, then 503 draining during the grace period, then connection refused after Closed.",
-          "code": "web.app().get(\"/order\", place_order).serve()\n// probe: GET /__jet/ready -> 200 ready\n// SIGTERM: GET /__jet/ready -> 503 draining (in-flight requests finishing)\n// after the report: connection refused"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Kubernetes",
-          "note": "Readiness is a state that starts false, turns true, and turns false again on shutdown. A failing readiness probe removes the pod from its Service's endpoints. Source: https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/",
-          "code": "readinessProbe:\n  httpGet: { path: /__jet/ready, port: 8080 }"
-        },
-        {
-          "lang": "Spring Boot",
-          "note": "ApplicationAvailability publishes ReadinessState, the shape of B. Actuator serves it as /actuator/health/readiness, the shape of C. Together they are A. Source: https://docs.spring.io/spring-boot/reference/features/spring-application.html#features.spring-application.application-availability",
-          "code": "availability.getReadinessState() // ACCEPTING_TRAFFIC | REFUSING_TRAFFIC"
-        },
-        {
-          "lang": "Go net/http",
-          "note": "No readiness state. Each service writes its own handler and flips a flag before Server.Shutdown: B's expert path as the only path. Source: https://pkg.go.dev/net/http#Server.Shutdown",
-          "code": "var ready atomic.Bool\nhttp.HandleFunc(\"/ready\", func(w http.ResponseWriter, r *http.Request) { if !ready.Load() { w.WriteHeader(503) } })"
-        },
-        {
-          "lang": "systemd",
-          "note": "Type=notify: the service sends READY=1 when it can serve and STOPPING=1 when it drains. The state is pushed, not polled. Source: https://www.freedesktop.org/software/systemd/man/latest/sd_notify.html",
-          "code": "sd_notify(0, \"STOPPING=1\");"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "The owner's settings ruling (D-VERDICT-3086-1=A) rejected a design in which every author must remember a step. B repeats that for probes and leaves app.serve(), the beginner path, with no probe. C gives experts no way to add the pool to the answer. A gives both from one state, so they can't disagree.",
-        "gains": [
-          "A deployed app gets a correct readiness probe, including 503 during drain, with no code.",
-          "Code can read the same state to compose its own probe.",
-          "A draining server answers 503 instead of refusing connections, so a load balancer can tell it from a crashed one."
-        ],
-        "losses": [
-          {
-            "loss": "New public names: the HTTPReadiness enum, its four cases, readiness() and the reserved /__jet/ready path.",
-            "mitigation": "The path sits under /__jet/, which jet dev already uses, and a user route replaces it."
-          },
-          {
-            "loss": "During the grace period the drain answers new connections 503 with Connection: close instead of refusing them. The report's overloaded count widens to include them.",
-            "mitigation": "Admission of work still stops at once (c2). The existing admission limits cap these connections. Only the refusal becomes a readable answer, which load balancers need."
-          },
-          {
-            "loss": "During drain every user path answers 503, so an HTTP liveness probe on a user path would restart a draining pod.",
-            "mitigation": "Point liveness at a TCP check, which passes until Closed; the guide says so."
-          },
-          {
-            "loss": "A handler can't read its own server's state.",
-            "mitigation": "A composed probe lives on an admin listener or reads a cell filled after bind. A handler accessor would be a separate ballot."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Every service writes its own probe, and app.serve() users get none without moving to bind. That is the remember-a-step shape D-VERDICT-3086-1 rejected."
-          },
-          {
-            "key": "C",
-            "reason": "The state stays private, so an expert probe that adds the pool can't report draining, and NotReady is never visible."
-          }
-        ],
-        "tradeoff": "The no-code probe costs a reserved path and a drain that answers 503 instead of refusing."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: G6Meta-4. The recommended option holds after five fixes: an admin-listener expert path, a TCP liveness rule, capped drain answers, a method-only NotReady and a full name count."
-      },
-      "checkInstructions": "Code reads only. No probe was run, because checks were on hold for the sweep2 A/B. Use the #3078 c9 stack tree.\n\nRead Core/Http/Server.jet. :264-273 holds __HTTPServerState, with phase and stopping. :297-359 is serve: the cancelled accept at :329-330 doesn't set stopping, the drain is at :348-353, then it finishes. :367-375 is shutdown, :396-401 is __server_request_stop and :554-577 is bind at phase 0.\n\nRead Core/Web/Web.jet:547 for the /__jet/reload route that the probe route would sit beside. Read Examples/Network/AppLifecycle.jet, from the #3078 c8 SUB. It already shuts down while a handler holds a lease, which is where c16's golden prints the states.",
-      "surface": {
-        "gist": "Should a server's readiness be read by a method and a built-in route, by the method only, or by the route only?",
-        "lesson": "A readiness probe asks whether to send traffic. The answer is no before serving, yes while serving, and no again from the start of shutdown.",
-        "trio": {
-          "current": {
-            "note": "Today the only signal is the stdout ready line; a draining server looks the same as a ready one.",
-            "code": "web.app().get(\"/order\", place_order).serve()\n// stdout: serving http://127.0.0.1:8080\n// SIGTERM: new connections are refused at once"
-          },
-          "wild": {
-            "lang": "Spring Boot",
-            "note": "A readiness state code can read, served as a probe route that turns 503 on shutdown.",
-            "code": "availability.getReadinessState() // ACCEPTING_TRAFFIC\n// GET /actuator/health/readiness -> 503 while shutting down"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Both",
-            "gist": "The route is built on the method; beginners write nothing, and experts read the state.",
-            "gains": [
-              "A probe with no code, from app.serve() too",
-              "The state is readable to compose a custom probe"
-            ],
-            "losses": [
-              "A reserved path and a drain that answers 503"
-            ],
-            "proposed": {
-              "code": "web.app().get(\"/order\", place_order).serve()\n// GET /__jet/ready -> 200 ready, 503 draining\n// code: listening.readiness() == .Ready"
-            }
-          },
-          {
-            "key": "B",
-            "name": "server.readiness()",
-            "gist": "A method returns NotReady, Ready, Draining or Closed; probe routes are user code.",
-            "gains": [
-              "The smallest surface",
-              "No change to drain"
-            ],
-            "losses": [
-              "app.serve() users get no probe without moving to bind"
-            ],
-            "proposed": {
-              "code": "listening: app.bind(\"0.0.0.0:8080\") ?? return Err(err)\nserving: task { listening.serve() ?? panic(\"serve\") }\nprint(listening.readiness()) // Ready"
-            }
-          },
-          {
-            "key": "C",
-            "name": "GET /__jet/ready",
-            "gist": "Every served app answers 200 or 503, including during drain, with no user code.",
-            "gains": [
-              "A probe with no code"
-            ],
-            "losses": [
-              "No read from code, so custom probes can't report draining"
-            ],
-            "proposed": {
-              "code": "web.app().get(\"/order\", place_order).serve()\n// GET /__jet/ready -> 200 ready, 503 draining"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "B leaves app.serve() with no probe, and C hides the state from code. A gives both from one state.",
-          "gains": [
-            "A no-code probe",
-            "A readable state"
-          ],
-          "losses": [
-            {
-              "loss": "A reserved path and a drain that answers 503.",
-              "mitigation": "Admission of work still stops at once, within the existing limits."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Every service writes its own probe, the step D-VERDICT-3086-1 rejected for settings."
-            },
-            {
-              "key": "C",
-              "reason": "A custom probe can't report draining."
-            }
-          ],
-          "tradeoff": "The no-code probe costs a reserved path and a drain that answers 503."
-        }
-      },
-      "reports": [
-        {
-          "title": "Kubernetes: liveness, readiness and startup probes",
-          "url": "https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/",
-          "note": "Readiness is a changing state; a TCP probe treats an open port as ready."
-        },
-        {
-          "title": "Spring Boot: application availability",
-          "url": "https://docs.spring.io/spring-boot/reference/features/spring-application.html#features.spring-application.application-availability",
-          "note": "ReadinessState flips to REFUSING_TRAFFIC on graceful shutdown; Actuator exposes it as a probe group."
-        },
-        {
-          "title": "ASP.NET Core health checks",
-          "url": "https://learn.microsoft.com/en-us/aspnet/core/host-and-deploy/health-checks",
-          "note": "Checks tagged ready back a mapped readiness route."
-        },
-        {
-          "title": "Go net/http Server.Shutdown",
-          "url": "https://pkg.go.dev/net/http#Server.Shutdown",
-          "note": "Closes listeners first, then waits for idle connections; readiness is user code."
-        },
-        {
-          "title": "sd_notify",
-          "url": "https://www.freedesktop.org/software/systemd/man/latest/sd_notify.html",
-          "note": "READY=1 and STOPPING=1 push the state to the supervisor."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-13T20:50:21.601Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-13"
-    },
-    {
       "id": "D-CORE-TARGET1",
       "cardId": "c0q31aks",
       "group": "language",
@@ -219167,6 +218013,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:32:58.408Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#41"
+    },
+    {
+      "at": "2026-11-17T01:32:54.984Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#39"
+    },
+    {
+      "at": "2026-11-17T01:32:51.596Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#38"
+    },
+    {
+      "at": "2026-11-17T01:32:48.923Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#37"
+    },
+    {
+      "at": "2026-11-17T01:32:46.322Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#36"
+    },
+    {
+      "at": "2026-11-17T01:32:43.805Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-17T01:32:41.230Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#34"
+    },
+    {
+      "at": "2026-11-17T01:32:38.729Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#33"
+    },
+    {
+      "at": "2026-11-17T01:32:36.207Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#32"
+    },
+    {
+      "at": "2026-11-17T01:32:33.486Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#31"
+    },
+    {
+      "at": "2026-11-17T01:32:30.771Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-17T01:32:28.096Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-17T01:32:25.451Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#28"
+    },
+    {
+      "at": "2026-11-17T01:32:22.977Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#27"
+    },
+    {
+      "at": "2026-11-17T01:32:20.297Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#26"
+    },
+    {
+      "at": "2026-11-17T01:32:17.427Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-17T01:32:14.608Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-17T01:32:12.030Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-17T01:32:09.436Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#17"
+    },
+    {
+      "at": "2026-11-17T01:32:06.616Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-17T01:32:04.018Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-17T01:32:01.188Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-17T01:31:58.646Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-17T01:31:55.705Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-17T01:31:53.020Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m83e3n",
+      "note": "#11"
+    },
     {
       "at": "2026-11-17T01:31:49.077Z",
       "by": "Main",

@@ -104269,6 +104269,445 @@
       "completedAt": "2026-11-13T23:00:40.126Z",
       "questions": [],
       "retiredAt": "2026-11-16T23:03:10.748Z"
+    },
+    {
+      "id": "c0uasubv",
+      "num": 3078,
+      "title": "Reuse lifecycle operations while preserving readiness and drain",
+      "body": "Connect existing resource lifecycle to application readiness and drain.\n\nA pool can track draining while an HTTP server still admits requests; no application lifecycle receipt proves agreement.\n\nUse one App-owned lifecycle: validate/start resources, publish readiness, stop admission, drain/cancel bounded work, close resources and report failures.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-nestjs-app-readiness-drain. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m25-http-service-runtime",
+      "phase": "done",
+      "priority": "P2",
+      "plan": "## Goal\nImplement ratified D-ONE-LIFECYCLE1=A (shared operations with explicit policies). Readiness, stop-admission, finite drain and resource close compose in one App-owned order, using the existing HTTP server and DB pool owners. No universal Service, Resource or Async type is added. Separately, factor the repeated interpreter ambient registration without changing per-mode reset or retention.\n\n## Current state\n- The HTTP server already has bounded shutdown: `crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs:2062` `jet_http_server_shutdown(server, grace)`, proven by `tests/http_server_lifecycle.rs:3666,3719,3855,3904`. Jet surface: `Examples/features/net/http_server_lifecycle.jet:1-17`.\n- The DB pool has its own lifecycle in `crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs`: `ready` (`:476`), `drain(deadline_ms)` (`:500`) and `mark_drained` (`:158`). Jet entry is `Core/db/db.jet:28` `pool(url, max)`.\n- Nothing composes the two. `Examples/features/net/backend_battery/run.jet:95,145-147` prints the pool report and calls `bound.shutdown(100ms)` independently, and it has no golden.\n- `Source/JitBackend.rs:61-67`, `:91-97` and `:133-139` repeat the same seven `register_*_interpreter_ambient` calls plus hardware registration in run, hot_swap and restart.\n\n## Changes\n1. Host (`Source/JitBackend.rs`, retained JIT host): extract one `install_interpreter_ambient(ambient, program)` used by all three modes. The existing per-mode reset and retention stay at the call sites. Ambient registration must be idempotent, so a repeated install leaves no stale rows.\n2. New `Examples/features/net/app_lifecycle.jet`. It opens a DB pool and checks `ready()` before `bind`, serves, then shuts down in order:\n   - `server.shutdown(grace)` stops admission;\n   - a blocked handler gets a finite outcome (cancelled count reported);\n   - `pool.drain(deadline)` runs and the pool closes.\n   It prints each transition. A required resource that is not ready must refuse to bind and must never print a ready line.\n3. Where the ordering needs an owner hook (for example, drain waits for leased connections held by in-flight handlers), fix it in the owning HTTPServer.rs or DbPool.rs leaf, not in a new lifecycle type.\n4. Update backend_battery to use the same order.\n\n## Proof\n- `jet test Compiler --profile golden net/app_lifecycle`: ready, serving, admission-stopped, drain-outcome and closed print in that order on O0, O1 and O2.\n- `jet test Compiler --profile cases http_server_lifecycle/` passes.\n- New `Tools/agent/jet-env cargo test --test output_callable -- interpreter_backend_run_hot_swap_restart_keep_persist_retention` passes. It drives InterpreterBackend through run, then hot_swap, then restart; `#Persist` counter prints 1, 2, 1, and no duplicate registrations occur.\n\n## Batch\nbatch-core-net: HTTP and DB lifecycle composition. The JitBackend refactor is a small host change riding the same build.\n\n## Dependencies\nNone.",
+      "checkSteps": "1. Not ready before required resources are usable.\n2. Shutdown stops new admission before resource close.\n3. A blocked request/worker has a finite drain outcome and observable failure.\n4. No clean-exit claim hides unfinished tasks or leaked resource ownership.",
+      "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-nestjs-app-readiness-drain. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Main decision 2026-11-13 on c4: D-EXIT-TASKS1=A (spec.md, ratified) says tasks left at exit are cancelled after a 1 s grace and abandoned without an error, and it outranks the wording of c4. c4 is therefore read as: no clean-exit claim hides unfinished work, shown by the domain reports. Proof: golden Network/AppLifecycle prints admission accepted 1, completed 0, cancelled 1; pool drain refused: 1 lease still out; and db.pool leased=0 with acquires=2 and releases=2. The shutdown_grace straggler case stays KNOWN-FAILING under #6419 and is not part of this proof."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c16 waits on D-HTTP-READINESS1 (posted; it recommends A: HTTPServer.readiness() plus a built-in /__jet/ready route built on it). Adversarial review by G6Meta-4: holds."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "D-APP-READY1 draft dropped: the adversarial review (Docs/audits/2026-11-13-d-app-ready1-review.md, G6Meta-4) fails it, because D-VERDICT-3086-1=A already rules that serve decodes a typed settings record before it binds. The review gaps are filed as new criteria. Main chose S1 (generic serve and bind with build:), with env.decode<T> resolved at generic instantiation."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c5 split (Main decision): part a, where fresh run and each jet dev restart share host registration, is SUB G12Docs-3078c5a. The hot-swap leg depends on in-process hot swap, which #6625 (Live hot-reload that keeps state, c2 and c13) owns. It is written and proved there once #6625 lands, not built under #3078."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: Implementation homes named in this card (Rust crates and host files, TIR/MIR/LIR, the JIT, generated Rust) are retired. The work lands in Compiler/ and Core/ on the JetIR path (#5073) with Rust removed (#4717); the rest of the card stands."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3076, #3086, #3090, #3229; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3076, #3086, #3090, #3229; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed ; their criteria are carried here verbatim as [#n] rows."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-core-net."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (misc1b, Opus 5.5): E_BUILD. D-ONE-LIFECYCLE1=A ratified; 2026-09-22 audit: HTTP and DB shutdown pieces exist separately but no App-owned lifecycle composes readiness, stop-admission, finite drain and resource close; InterpreterBackend registration reuse unproven. Evidence: Card log 2026-09-22: HTTPServer.rs:2062-2333, DbPool.rs:500-573, tests/http_server_lifecycle.rs; Source/JitBackend.rs:23-79 InterpreterBackend run/hot_swap (host execution adapter)"
+        },
+        {
+          "at": "2026-09-22",
+          "by": "Main",
+          "text": "Read-only lifecycle audit on 2026-09-22 found no current-tree receipt and no source edit justified. Independent HTTP and DB shutdown pieces exist (`HTTPServer.rs:2062-2333`, `DbPool.rs:500-573`) with focused test definitions in `tests/http_server_lifecycle.rs:1227-1266,3718-3773,3854-3901`, but no App-owned composition proves readiness/admission/resource-close order, finite drain outcome, leak-free clean exit, or fresh/hot-swap/restart parity. Criteria remain open."
+        },
+        {
+          "at": "2026-09-13",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-09-13",
+          "by": "Main",
+          "text": "Owner-requested simplification preparation. Expanded the existing coherent mechanism home, preserving every original criterion/status/evidence. Captured the named tactical duplication and consumer boundaries; no implementation or new public contract is claimed before the attached ballot is ratified."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Not ready before required resources are usable.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed as dev b6ffbca47d (G12Docs-3078c8, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/AppLifecycle` PASS 3/3 (O0, O1, O2). Golden lines: store missing, pool ready: false; then 1. pool ready before bind, both printed before app.bind.",
+          "at": "2026-11-13T21:52:58.075Z"
+        },
+        {
+          "n": 2,
+          "text": "Shutdown stops new admission before resource close.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed as dev b6ffbca47d (G12Docs-3078c8, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/AppLifecycle` PASS 3/3 (O0, O1, O2). Golden line 3: admission stopped before the pool drains and closes.",
+          "at": "2026-11-13T21:52:59.198Z"
+        },
+        {
+          "n": 3,
+          "text": "A blocked request/worker has a finite drain outcome and observable failure.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed as dev b6ffbca47d (G12Docs-3078c8, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/AppLifecycle` PASS 3/3 (O0, O1, O2). The blocked handler gets a finite drain outcome, reported as cancelled 1, and the observable failure: response was sent: false.",
+          "at": "2026-11-13T21:53:00.232Z"
+        },
+        {
+          "n": 4,
+          "text": "No clean-exit claim hides unfinished tasks or leaked resource ownership.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Batch 15 landed on dev 734568e5cd; proved on its batch jet (gate-p20) by Lander5 b15proofs: golden Network/AppLifecycle PASS 3/3 prints admission accepted 1, completed 0, cancelled 1; pool drain refused: 1 lease still out; and db.pool leased=0 with acquires=2 and releases=2. Read under ratified D-EXIT-TASKS1=A (see the card log of 2026-11-13): no unfinished task or leased resource is hidden by a clean exit.",
+          "at": "2026-11-14T00:53:26.769Z"
+        },
+        {
+          "n": 5,
+          "text": "The O0 host's ambient registration is shared by fresh run, hot swap and restart, preserves exact retention and reset, and repeated initialization leaves no stale registrations.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): jet test Compiler --profile cases --filter dev_parts_routine/fresh_run_and_each_dev_restart_get_the_same_host_registration PASS 1/1.",
+          "at": "2026-11-13T23:54:30.693Z"
+        },
+        {
+          "n": 6,
+          "text": "Shared task/deadline/channel/failure/marshalling operations do not erase domain admission, close, cancellation, durability, retry or authority.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Batch 15 landed on dev 734568e5cd (G3Core2-3078c6: a cancelled task in an open DBTransaction now rolls back on Close). On the batch-15 jet (gate-p20, Lander5 b15proofs) these PASS: http_server_lifecycle/a_handler_task_failure_is_its_answer_and_admission_goes_on (3.out), db_policy/task_deadline_and_cancel_keep_pool_admission_and_transaction_outcome (5.out), services_runtime/task_deadline_and_cancel_keep_job_lease_and_retry, and golden CoreIO/DB 12/0. Task deadline, cancel and failure keep each domain`s admission, transaction outcome, lease and retry.",
+          "at": "2026-11-14T01:01:16.946Z"
+        },
+        {
+          "n": 8,
+          "text": "`jet test Compiler --profile golden net/app_lifecycle` shows pool ready before bind, admission stopped before pool drain, a finite drain outcome for a blocked handler, and close last, on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed as dev b6ffbca47d (G12Docs-3078c8, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/AppLifecycle` PASS 3/3 (O0, O1, O2). The golden prints pool ready before bind, admission stopped before pool drain, the blocked handler's finite drain outcome (cancelled 1, response was sent: false), and close last.",
+          "at": "2026-11-13T21:52:56.978Z"
+        },
+        {
+          "n": 9,
+          "text": "[#3076]  • Interleaved requests keep separate principals and transaction outcomes. • Rollback writes nothing. A lost reply after commit reports committed. A deadline before dispatch prevents mutation. Pool and app lifetimes stay distinct. • Golden `net/request_continuity`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed as dev 82bd267151 (G12Docs-3078c9, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/RequestContinuity` PASS 3/3 (O0, O1, O2).",
+          "at": "2026-11-13T21:53:01.460Z"
+        },
+        {
+          "n": 10,
+          "text": "[#3086]  • Ballot a readiness hook versus explicit pre-serve composition. • Then a missing or invalid required value fails before admission with a redacted field path (E2416) and no bind (golden `web/app_config_readiness`).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-HTTP-READINESS1 is ratified A (owner, 2026-11-13). On the batch-9 jet built from dev 69c877459d (Lander5 b9rest): jet test Compiler --profile golden --filter Apps/Web/AppConfigReadiness PASS (missing or invalid required value fails before admission with redacted field path E2416 and no bind).",
+          "at": "2026-11-13T23:58:58.496Z"
+        },
+        {
+          "n": 11,
+          "text": "[#3090]  • Isolated and loopback-HTTP paths give identical denial/success verdicts. A denied or malformed request never invokes the service. • DB substitution works without bypassing policy. Cleanup leaves no listener or registration. • Golden `net/service_http_seam`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main goal sweep 2026-11-13 on the batch-15 jet (gate-p20, dev 734568e5cd): jet test Compiler --profile golden --filter Network/ServiceHTTPSeam gives PASS with 0 FAIL, 0 KNOWN-FAILING and 0 ERROR (Lander5 sweep, results row in $JET_SCRATCH_ROOT/lanes/Main/sweep/results.tsv).",
+          "at": "2026-11-14T00:45:19.276Z"
+        },
+        {
+          "n": 12,
+          "text": "[#3229]  • One app-scoped resource is shared without per-request construction. • A missing dependency fails source-located, before serving. A substituted fake changes behaviour with no global mutation. No DI container. • Golden `net/app_composition`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed as dev fe3f340786 (G12Docs-3078c12, batch 2). Proof on seed-b17 at dev f4230964eb: `jet test Compiler --profile=golden --filter=Network/AppComposition` PASS 3/3 (O0, O1, O2).",
+          "at": "2026-11-13T21:53:02.850Z"
+        },
+        {
+          "n": 13,
+          "text": "env.decode hides the value of any field whose environment name has a segment containing secret, password, token or key (APP_DB_PASSWORD and APP_API_KEY print redacted), and a missing variable names the variable (APP_DB_URL), not only the field path. Proof: a case under tests/cases that decodes such a record with bad and missing values.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed as dev 9ca1ccdb82 (G12Docs-3078c13, batch 1). Proof on seed-b16 at dev 37176be497: `jet test Compiler --profile=cases --filter=env_overlay/decode_hides_secret_named_values_and_names_the_missing_variable` PASS 1/1; `jet test Core/Sys/Sys.jet` 40 passed, 0 failed.",
+          "at": "2026-11-13T21:34:53.062Z"
+        },
+        {
+          "n": 14,
+          "text": "web.serve<Settings>(prefix:, build:) and web.bind<Settings>(address, prefix:, build:) decode the typed settings record before binding (D-VERDICT-3086-1=A); a failure is a coded E2416 stop with exit 78 listing every redacted field path and never binds; env.decode<T> resolves inside any generic function. Proof: a web case for serve and bind, and a non-web generic case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): jet test Compiler --profile cases --filter web_app/typed_settings_decode_before_serve_and_bind PASS 1/1 (serve and bind decode before binding) and --filter env_overlay/decode_in_a_generic_function_reads_the_instance_renames PASS 1/1 (non-web generic case).",
+          "at": "2026-11-13T23:54:28.714Z"
+        },
+        {
+          "n": 15,
+          "text": "An explicit serve(settings.port) and JET_APP_PORT follow one documented precedence rule, and the server reports which source chose the port. Proof: a case that sets both.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): jet test Compiler --profile cases --filter web_app/port_precedence_names_the_source_that_chose_it PASS 1/1.",
+          "at": "2026-11-13T23:54:29.692Z"
+        },
+        {
+          "n": 16,
+          "text": "Readiness (not ready, ready, draining, closed) is a state that a probe can read through drain. Proof: the Examples/Network/AppLifecycle golden prints each state as a probe sees it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Batch 15 landed on dev 734568e5cd; proved on its batch jet (gate-p20) by Lander5 b15proofs: jet test Compiler --profile golden --filter Network/AppLifecycle gives PASS 3/3 (o0, o1, o2), printing readiness not ready, ready, draining and closed as a probe sees them through drain (G3Core2-3078c16: Core/Http/Server.jet HTTPReadiness, GET /__jet/ready, 503 while draining). Golden Network/ServiceHTTPSeam 3/3, http_server_lifecycle/ and process_signal_drain/ also pass. The closed_lists guard flags HTTPReadiness as a hand-written list; that fix is forward work with G3Core-2.",
+          "at": "2026-11-14T00:53:25.593Z"
+        }
+      ],
+      "refs": [
+        "docs/research/mine-for-jet-2026-09-12.md#finding-nestjs-app-readiness-drain",
+        "crates/jet-codegen/src/Prelude/CoreLib/Top/DbPool.rs:36-46,536-680",
+        "https://docs.nestjs.com/fundamentals/lifecycle-events",
+        "https://docs.nestjs.com/recipes/terminus",
+        "D-APP-UNIFY1",
+        "D-SERVICE-UPGRADE1",
+        "D-NETTASK1",
+        "#1447",
+        "#444",
+        "#2851",
+        "#2799",
+        "#2919",
+        "#3080",
+        "#3239",
+        "#3240",
+        "Source/JitBackend.rs",
+        "examples/features/devloop/persist.jet",
+        "D-ONE-LIFECYCLE1",
+        "#3398"
+      ],
+      "tags": [
+        "mining-20260912",
+        "nestjs",
+        "mine-playlist-20260911",
+        "cluster-app-lifecycle",
+        "batch-core-net",
+        "wayfinder:task"
+      ],
+      "parentId": "c0u5tm84",
+      "needsAcceptance": false,
+      "created": "2026-09-12T12:53:32.615Z",
+      "updated": "2026-11-14T01:32:49.967Z",
+      "updatedBy": "Main",
+      "workOrder": 87,
+      "goals": [
+        "G9"
+      ],
+      "criteriaLastN": 16,
+      "completedAt": "2026-11-14T01:32:49.967Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T01:32:52.166Z"
+    },
+    {
+      "id": "c04es5yq",
+      "num": 4635,
+      "title": "The web server must route through the Jet-owned server runtime",
+      "body": "http.serve must not bypass the Jet server runtime: requests go through the Core/http Jet port (#3665) for routing and response handling. The Rust-side routes and server paths named in the old body are removed with Rust removal #4717. Criteria: serve() uses the same route table on every tier; a golden request covers routing and a bad-request path.\n\nEarlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired):\n\nSource reading on dev 3f64b4fb6 (v3 H2-http-b re-mine of FknTw9bJsXM 181:29-192:02; not executed). Jet has two server runtimes. The mux path bounds admission, wraps handlers and middleware in catch_unwind, keeps connections alive and drains on shutdown with an atomic flag. But http.serve(addr, lambda) and router serve lower to jet_http_serve (routes.rs:8046 to HTTPServer.rs:6898-6941), which spawns one OS thread per connection without bound, has no panic isolation, always sends Connection: close, has no shutdown path and calls process::exit(1) on a bind failure. Accept errors are mishandled on both paths: the mux loop stops serving and force-cancels every active stream on any non-WouldBlock accept error such as EMFILE (HTTPServer.rs:2280-2288), while the lambda loop prints E2801 and retries in a tight loop (6914-6919). The serializer has four divergent reason-phrase tables and falls back to \"OK\", so a 503, 429 or 422 goes out as \"503 OK\" (HTTPServer.rs:5761-5783, 1504-1524, 5025; http.jet:312-381). #3666 (server framing) is done on the board but this policy is still present, and the earlier mining claim that Jet bounds admission holds only for the mux path. Unverified: the default jet run tier's route to jet_http_serve was not traced (the JIT host path is being retired); the AOT route was.\n\nFresh review 2026-10-05: protocol parsing and framing criteria for the same course stay on #3665 (attached there); graceful drain must reuse the App lifecycle of #3078 rather than a second shutdown path.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "1. Reproduce per tier: a lambda-served program under a connection flood (thread count), a panicking handler, SIGTERM during a slow request, a port already in use, and fd exhaustion. 2. Route every serve spelling (lambda, router, mux) through one server runtime with bounded admission, panic page, keep-alive, graceful drain and a typed bind error returned to the caller. 3. One accept policy: classify transient errors (EMFILE, ENFILE, ECONNABORTED), back off with a cap and keep serving; fatal listener errors end the server with a report. 4. One reason table in Core: an unknown code gets an empty reason (valid per RFC 9112 s4), never another code's text. 5. Under the Rust freeze, land the policy in the Core/http Jet port (#3665) with Rust keeping only provider leaves, and delete the duplicate runtime in the same cutover.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c3 fatal-accept half (Main, 2026-11-13): no case can reach it yet. The runtime fault schedule (jet_fault_should_fail) is armed only by a test and selects only FS.Read, FS.Write, IO.Write, IO.Flush and allocation; it has no Net.Accept selector. Next item: add a Net.Accept selector to that internal fault schedule (test-armed only, not public API), then a case showing that a fatal accept stops serve with its typed error on O0/O1/O2. G9Web-4635-concurrent-serve covers c1, c5, c6, c8, c11 and the non-fatal half of c3."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Defect found by the D-WS-ROUTE1 review (probe w04, a0.0.43): the http serve loop is serial, against D-HTTP-SERVER2=A. Report: Docs/audits/2026-11-10-ws-route-review.md."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-ROUTE-ONE1=A (2026-10-29): web.app() holds the one route table and server.mux() is removed. c1 and c5 now name http.serve and web.app().serve(). c6 names its proof case. c9 merged into c8 (D-G9-3); the Tower DataTree resident proof in c8 was the Node Tower and is dropped. c10's proof case (http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient) is known-failing under #4260 (G5: how a printed HTTP error reads), so c10 closes after #4260."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-EXEC2=A (native code generator only; Cranelift and MIREval are retired)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 4 criteria from archived #3493, #3494, #3496, #3512: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Rewritten for the Jet architecture (self-hosted compiler, AST + fact tables, JetIR slot IR, no Rust) in the 2026-10-22 board burndown: http.serve bypasses the server and cites Rust routes.rs and HTTPServer.rs. Re-target to the Jet-owned Core/http runtime. The earlier text is kept at the end of the body."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "web.app().serve() and web.app().bind(addr) run through one Jet-owned server runtime: a flood test shows bounded concurrent connections, a panicking handler returns a 500 page while other requests keep being served, and SIGTERM drains in-flight requests, identical on every execution level.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): http_server_lifecycle/per_peer_connection_limit_answers_503 PASS (bounded connections), panicking_handler_answers_500_and_serving_goes_on PASS, and process_signal_drain/sigterm_drains_a_serving_artifact_within_a_second plus sigterm_answers_the_request_in_flight PASS; each case runs every execution level.",
+          "at": "2026-11-13T23:54:36.138Z"
+        },
+        {
+          "n": 2,
+          "text": "A bind failure returns a typed error to the caller; no process exit call remains in the server path.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): --profile cases --filter http_server_lifecycle/ gives serve_entry_bind_failure_is_a_typed_error PASS (11 PASS, 0 FAIL, 6 KNOWN-FAILING tracked on #4635/#6419).",
+          "at": "2026-11-13T23:54:31.702Z"
+        },
+        {
+          "n": 3,
+          "text": "Transient accept errors (fd-exhaustion test) back off and recover without cancelling active streams; a fatal listener error ends serve with a reported error; no tight retry loop.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 1b8ac82041 (G3Core2-http-4635): jet test Compiler --profile cases --filter http_server_lifecycle/ gives 17/0 plus 2 KNOWN-FAILING, with accept_backs_off (fd exhaustion backs off and recovers, no tight loop) PASS.",
+          "at": "2026-11-14T01:17:31.001Z"
+        },
+        {
+          "n": 4,
+          "text": "A handler returning 503, 429 or 422 sends the registered reason text and an unknown code sends an empty reason; one reason table lives in Core and the server, error page and read-error writer use it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 1b8ac82041 (G3Core2-http-4635): golden Network/HTTP/HTTPServerReasons 3/0 (o0, o1, o2; registered reason text for 503, 429 and 422, empty reason for an unknown code, from one Core table) and http_server_lifecycle/ 17/0.",
+          "at": "2026-11-14T01:17:33.375Z"
+        },
+        {
+          "n": 5,
+          "text": "Keep-alive behavior is one runtime meaning for web.app().serve() and web.app().bind(addr); a golden for each is updated.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs/5.out): jet test Compiler --profile cases --filter http_server_lifecycle/ gives keep_alive_means_the_same_for_serve_and_bind PASS, one golden case driving web.app().serve() and web.app().bind(addr) with the same keep-alive output.",
+          "at": "2026-11-14T00:08:09.277Z"
+        },
+        {
+          "n": 6,
+          "text": "(was #3493 c1) O0 (`jet run`) preserves both HTTPResponse.header mutations and matches exact O1 and O2 output in the focused HTTP response fixture Proof: a new tests/cases/http_server_lifecycle case that sets two HTTPResponse.header values and prints the response, with identical stdout on O0, O1 and O2 (precut audit 2026-11: unproven at 9c7ddf1359).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): --profile cases --filter http_server_lifecycle/ gives response_keeps_both_header_mutations_on_every_tier PASS (O0, O1, O2 identical stdout).",
+          "at": "2026-11-13T23:54:32.772Z"
+        },
+        {
+          "n": 7,
+          "text": "(was #3494 c1) O0 (`jet run`) resolves core.http.server.json through jet_http_srv_json and the focused Tower DataTree fixture executes with expected output [precut audit: failing on 9c7ddf1359: C:http_i9/http_route_handlers_preserve_arity_context_and_errors_on_both_dev_tiers FAIL exit 1; expected 0]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/cases/http_i9/http_route_handlers_preserve_arity_context_and_errors_on_both_dev_tiers.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:47:31.113Z"
+        },
+        {
+          "n": 8,
+          "text": "(was #3496 c1, #3512 c1) core.http.server.static_file returns one Result<HTTPResponse, HTTPError> carrier on O0, O1 and O2: jet run resolves it through the existing adapter with no ICE, and a focused resident static-file case passes on all three.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): --profile cases --filter http_server_lifecycle/ gives static_file_result_on_every_tier PASS on O0, O1 and O2.",
+          "at": "2026-11-13T23:54:33.890Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #1312 c1) resp/req/body.json, server.json, static_files, cors, and cors_policy lower on O0, O1 and O2 with the same semantics [precut audit: failing on 9c7ddf1359: C:http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient KNOWN-FAILING #4260 no doc decides how a printed HTTP error reads: Jet prints its message (`invalid HTTP framing`), the Rust-era golden its variant (`InvalidFra (known-failing #4260:…] (was #4260 c19)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev d9f6a4b839 (G9Web-4635c9): tests/cases/http_i9/http_web_defaults_forced_deopt_uses_prelude_ambient exercises resp/req/body .json, server.json, static_files, cors and cors_policy, and its one .stdout.expected (from a real run) matches jet run, --optimize=basic, --optimize=full and the built binary. A printed HTTPError reads as its HTTPErrors.jet message per D-DISPLAYDBG1=A. The web target refuses the build with E3304 (no server sockets). The #4260 KF row is removed. Lander ran it on seed-b14: PASS 1, FAIL 0, KNOWN-FAILING 0.",
+          "at": "2026-11-13T06:39:50.518Z"
+        },
+        {
+          "n": 11,
+          "text": "The serve loop is concurrent, as ratified D-HTTP-SERVER2=A requires: handler concurrency is bounded by the task scheduler, with its 10k total and 256-per-IP limits answered by 503. Today Core/Http/Server.jet:262-289 and :295 serve one request at a time: D-WS-ROUTE1 probe w04 holds one WebSocket open for 400 ms, and a GET sent at 50 ms is answered at 400 ms. A two-client case proves that the second request is answered while the first is held, on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the batch-9 jet built from dev 69c877459d (Lander5 b9proofs, $JET_STATE_ROOT/lander3-tmp/b9proofs): --profile cases --filter http_server_lifecycle/ gives second_client_answered_while_first_is_held PASS and per_peer_connection_limit_answers_503 PASS.",
+          "at": "2026-11-13T23:54:34.988Z"
+        }
+      ],
+      "refs": [
+        "#3665",
+        "#3666",
+        "#2873",
+        "D-FOUND-LIFECYCLE1",
+        "D-HTTP-ROUTE-EXPOSE1",
+        "D-EXEC1",
+        "#3078"
+      ],
+      "tags": [
+        "http",
+        "runtime",
+        "server",
+        "defect",
+        "mine-2026-10-05",
+        "wayfinder:task"
+      ],
+      "parentId": "c086hhzb",
+      "needsAcceptance": false,
+      "created": "2026-10-05T21:07:55.999Z",
+      "updated": "2026-11-14T01:32:52.809Z",
+      "updatedBy": "Main",
+      "goals": [
+        "G9"
+      ],
+      "criteriaLastN": 11,
+      "completedAt": "2026-11-14T01:32:52.809Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T01:32:55.554Z"
     }
   ]
 }
