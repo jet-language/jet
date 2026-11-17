@@ -99,3 +99,8 @@ Run a lesson from the repository root, for example `jet run Examples/Data/<Lesso
 - [JSONStringify](JSON/JSONStringify.jet) — json.stringify: the text JavaScript's JSON.stringify(value, null, indent) writes.
 - [JSONTyped](JSON/JSONTyped.jet) — Typed JSON keeps Decimal and Int number tokens exact.
 - [JSONTypedFile](JSON/JSONTypedFile.jet)
+
+## Serde
+
+- [CodecFieldErrors](Serde/CodecFieldErrors.jet) — A typed decode returns every failing field in one `[FieldError]` list, each at the path of the wire key that failed.
+- [CodecOverridePrecedence](Serde/CodecOverridePrecedence.jet) — Which codec decides a value's wire form, from strongest to weakest: a hand-written codec, then a field's own marker, then the type's marker, then the derived default.

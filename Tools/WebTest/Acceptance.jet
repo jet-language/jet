@@ -187,12 +187,12 @@ wait_for: fn(d: Driver, expression: String, label: String) Failure! {
 // Run a page action once; a thrown page error fails the matrix.
 perform: fn(d: Driver, expression: String) Failure! {
     if evaluate(d, expression) == {
-        .Val(_) -> { Ok() }
-        None -> {
+        .Err(error) -> { Err(error) }
+        .Ok(value) -> {
+            if value != None -> return Ok()
             page: evaluate(d, "document.body.innerHTML.slice(0, 600)") ?? "unreadable"
             Err(Failure{message: "page action threw: {expression}; the page is {page}"})
         }
-        .Err(error) -> Err(error)
     }
 }
 

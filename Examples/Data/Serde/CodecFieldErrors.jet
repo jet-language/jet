@@ -1,0 +1,99 @@
+// A typed decode returns every failing field in one `[FieldError]` list,
+// each at the path of the wire key that failed. The path counts field keys
+// after renames, `[index]` for list items, and the variant key and payload
+// field inside an enum. A hand-written codec's error lands at the field that
+// holds it. Aliases, constraints, time values and generic targets report the
+// same way. A `validate` block checks only a value whose fields all decoded.
+// Decoding JSON text in place and decoding a parsed tree give the same list.
+use core.encoding.json
+
+// A constrained number: an out-of-range value is a field error.
+Percent: distinct Int(0..100)
+
+// A type alias decodes as the type it names.
+Batch<T>: [T]
+
+// A hand-written codec: its own error has the empty path, and the decode
+// that holds it adds the field's path.
+Email: struct {
+    address: String
+
+    impl Encode {
+        encode: fn(self) -> Dyn { Dyn.Text(self.address.copy()) }
+    }
+
+    impl Decode {
+        decode: fn(tree: Dyn) -> Email [FieldError]! {
+            address: tree.decode<String>() ?? return Err(err)
+            if !address.contains("@") {
+                return Err([FieldError{path: "", reason: "not an email: {address}"}])
+            }
+            Ok(Email{address: address})
+        }
+    }
+}
+
+Level: enum {
+    Low
+    High
+}
+
+Shape: enum {
+    Dot
+    Circle(radius: Int)
+    Square(Int)
+}
+
+Page: struct<T> {
+    items: [T]
+    total: Int
+}
+
+#Rename(.Camel)
+Account: struct {
+    user_name: String
+    #Rename("mail") email: Email
+    score: Percent
+    level: Level
+    shapes: [Shape]
+    tags: Batch<String>
+    born: LocalDate
+    // Skipped: never read from the wire, so it takes its default.
+    #Codable(.Skip) visits: Int
+    // Read-only: computed from the stored fields, never decoded.
+    label: String -> "{user_name} <{email.address}>"
+    note: String?
+
+    validate { check(user_name.len() > 2, at: user_name, "is too short") }
+}
+
+show: fn(label: String, errors: [FieldError]) {
+    print("{label}: {errors.len()} errors")
+    loop error in errors -> print("  {error.path}: {error.reason}")
+}
+
+// Every way a field can fail, decoded from the text and from the tree.
+BAD: "{{\"userName\":7,\"mail\":\"nobody\",\"score\":140,\"level\":\"Mid\",\"shapes\":[\"Dot\",{{\"Circle\":{{\"radius\":\"x\"}}}},{{\"Square\":true}},{{\"Circle\":{{}}}},\"Hex\"],\"tags\":[\"a\",2],\"born\":\"2024-13-40\"}}"
+
+// Every field decodes, so the validate block runs and rejects the name.
+SHORT_NAME: "{{\"userName\":\"Al\",\"mail\":\"a@b\",\"score\":5,\"level\":\"Low\",\"shapes\":[],\"tags\":[],\"born\":\"2024-01-02\"}}"
+
+// A generic target reports its element's variant error under the list index.
+BAD_PAGE: "{{\"items\":[\"Dot\",{{\"Square\":\"4\"}}],\"total\":\"two\"}}"
+
+// A skipped key on the wire is ignored, and the encode leaves it and the
+// computed field out.
+GOOD: "{{\"userName\":\"Ada\",\"mail\":\"ada@example.com\",\"score\":5,\"level\":\"Low\",\"shapes\":[\"Dot\",{{\"Circle\":{{\"radius\":2}}}},{{\"Square\":3}}],\"tags\":[\"x\"],\"born\":\"2024-01-02\",\"visits\":9}}"
+
+run: fn() {
+    if json.decode<Account>(BAD) == .Err(errors) -> show("from text", errors)
+    tree: json.parse(BAD) ?? panic("parse")
+    if tree.decode<Account>() == .Err(errors) -> show("from the tree", errors)
+    if json.decode<Account>("{{}}") == .Err(errors) -> show("empty object", errors)
+    if json.decode<Account>(SHORT_NAME) == .Err(errors) -> show("validate", errors)
+    if json.decode<Page<Shape>>(BAD_PAGE) == .Err(errors) -> show("generic page", errors)
+    good: json.decode<Account>(GOOD) ?? panic("decode")
+    print("visits: {good.visits}")
+    print("label: {good.label}")
+    print(json.to_string(good) ?? panic("encode"))
+}

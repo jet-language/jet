@@ -1,0 +1,114 @@
+// Which codec decides a value's wire form, from strongest to weakest: a
+// hand-written codec, then a field's own marker, then the type's marker,
+// then the derived default. `Money` writes its own codec, so it wins even
+// over its `#Codable` marker, and every type that holds a `Money` uses it:
+// a field, a generic `Pair<Money>`, and a hand-written container. A field's
+// `#Rename` wins over the type's `#Rename(.Kebab)`, the kebab case wins over
+// the field names a derived codec would write, a nested `Tip` keeps its own
+// derived names, and a field the wire leaves out takes its declared default.
+// Errors from every layer land in one list, each at its wire path.
+use core.encoding.json
+
+// The marker asks for a derived codec, but the hand-written one wins: the
+// wire form is "$D.CC" text, never `{"cents": N}`.
+#Codable
+Money: struct {
+    cents: Int
+
+    impl Encode {
+        encode: fn(self) -> Dyn {
+            cents: "{self.cents % 100}".rjust(2, "0")
+            Dyn.Text("${self.cents /% 100}.{cents}")
+        }
+    }
+
+    impl Decode {
+        decode: fn(tree: Dyn) -> Money [FieldError]! {
+            text: tree.decode<String>() ?? return Err(err)
+            parts: text.removeprefix("$").split(".").to_list()
+            if !text.starts_with("$") || parts.len() != 2 {
+                return Err([FieldError{path: "", reason: "expected $D.CC, found {text}"}])
+            }
+            dollars: Int.parse(parts[0]) ?? return Err([FieldError{path: "", reason: "bad dollars in {text}"}])
+            cents: Int.parse(parts[1]) ?? return Err([FieldError{path: "", reason: "bad cents in {text}"}])
+            Ok(Money{cents: dollars * 100 + cents})
+        }
+    }
+}
+
+// A generic target: each `T` decodes through `T`'s own codec.
+Pair: struct<T> {
+    left: T
+    right: T
+}
+
+// A hand-written container codec supplies its own context: each line is
+// an Object member named for it, and `FieldError.under` puts a line's
+// errors under that name.
+Ledger: struct {
+    lines: [{name: String, amount: Money}]
+
+    impl Encode {
+        encode: fn(self) -> Dyn {
+            members := [String:Dyn]{}
+            loop line in self.lines -> members[line.name.copy()] = line.amount.encode()
+            Dyn.Object(members)
+        }
+    }
+
+    impl Decode {
+        decode: fn(tree: Dyn) -> Ledger [FieldError]! {
+            if tree == .Object(entries) {
+                lines := [{name: String, amount: Money}]{}
+                errors := [FieldError]{}
+                loop entry in entries {
+                    if FieldError.under(entry.key, entry.value.decode<Money>()) == {
+                        .Ok(amount) -> { lines.push({name: entry.key.copy(), amount: amount}) }
+                        .Err(found) -> {
+                            loop error in found -> errors.push(error)
+                        }
+                    }
+                }
+                if errors.len() > 0 -> return Err(errors)
+                return Ok(Ledger{lines: lines})
+            }
+            Err([FieldError{path: "", reason: "expected an object of lines"}])
+        }
+    }
+}
+
+// No marker and no codec: the derived default writes the field names.
+Tip: struct {
+    tip_cents: Int
+}
+
+#Rename(.Kebab)
+Invoice: struct {
+    // The field's marker wins over the type's kebab case.
+    #Rename("amount_due") total_due: Money
+    line_count: Int{1}
+    split: Pair<Money>
+    tip_jar: Tip
+    ledger: Ledger
+}
+
+show: fn(label: String, errors: [FieldError]) {
+    print("{label}: {errors.len()} errors")
+    loop error in errors -> print("  {error.path}: {error.reason}")
+}
+
+GOOD: "{{\"amount_due\":\"$3.50\",\"split\":{{\"left\":\"$1.00\",\"right\":\"$2.50\"}},\"tip-jar\":{{\"tip_cents\":40}},\"ledger\":{{\"rent\":\"$1.10\"}}}}"
+
+BAD: "{{\"amount_due\":350,\"line-count\":\"x\",\"split\":{{\"left\":\"1.00\",\"right\":\"$2.50\"}},\"tip-jar\":{{\"tip-cents\":40}},\"ledger\":{{\"rent\":\"$x.10\",\"food\":\"$1.00\"}}}}"
+
+run: fn() {
+    ledger: Ledger{lines: [{name: "rent", amount: Money{cents: 1000}}, {name: "food", amount: Money{cents: 250}}]}
+    invoice: Invoice{total_due: Money{cents: 1250}, line_count: 2, split: Pair<Money>{left: Money{cents: 625}, right: Money{cents: 625}}, tip_jar: Tip{tip_cents: 75}, ledger: ledger}
+    print(json.to_string(invoice) ?? panic("encode"))
+    back: json.decode<Invoice>(GOOD) ?? panic("decode")
+    print("due {back.total_due.cents}, lines {back.line_count}, split {back.split.left.cents}+{back.split.right.cents}, tip {back.tip_jar.tip_cents}")
+    loop line in back.ledger.lines -> print("ledger {line.name}: {line.amount.cents}")
+    if json.decode<Invoice>(BAD) == .Err(errors) -> show("from text", errors)
+    tree: json.parse(BAD) ?? panic("parse")
+    if tree.decode<Invoice>() == .Err(errors) -> show("from the tree", errors)
+}
