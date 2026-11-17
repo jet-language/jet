@@ -5456,7 +5456,11 @@ UIShortcut, existing_action: String)`, and `QueueFull(service: String)`.
 Every `core.ui.host` service answer is Core's: the host is a provider of
 primitives (capability flags, clipboard text, queued raw events, dialog
 tokens and results), and multi-field provider text is a record of
-length-prefixed fields (`<decimal UTF-8 byte length>:<bytes>`). A native
+length-prefixed fields (`<decimal UTF-8 byte length>:<bytes>`).
+`capabilities()` answers Core's six `UICapability` facts (provider codes 0 to
+5); `provider_capability(code: Int) -> Bool` answers any provider code, so a
+package whose service rides the same provider asks for the code it owns (the
+font battery's `shaping_available` asks for 6). A native
 build's provider is headless and reports every capability absent, so each
 service fails with `CapabilityUnavailable` after Core validates the request.
 On the web, a page that installs no `globalThis.jetUiProvider` gets the

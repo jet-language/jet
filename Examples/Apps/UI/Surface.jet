@@ -137,6 +137,8 @@ run: fn() {
     grant_result: host.fs_grant(".", read_write_rights)
     facts: host.capabilities()
     loop fact in facts.facts -> print("capability {fact.capability}: {fact.available}")
+    // Glyph shaping is the font battery's provider capability, not Core's.
+    print("capability FontShaping: {font.shaping_available()}")
     metadata: host.accessibility("Surface", "Portable UI surface")
     if clipboard.read_text() == {
         .Ok(read) -> { print("clipboard read: {read.text}") }

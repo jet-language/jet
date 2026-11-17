@@ -16,9 +16,12 @@ use {
 // `defaultUiProvider`, unless the page installs its own).
 //
 // Provider capability codes: FileDialog 0, Clipboard 1, IME 2, DragDrop 3,
-// Shortcuts 4, Accessibility 5, FontShaping 6. A multi-field provider text is
-// a record of length-prefixed fields (`<decimal UTF-8 byte length>:<bytes>`),
-// so any text, separators included, round-trips.
+// Shortcuts 4, Accessibility 5: Core's own, each a UICapability. A package
+// whose service rides the same provider asks for its own code with
+// `provider_capability` (the font battery's glyph shaping is 6). A
+// multi-field provider text is a record of length-prefixed fields
+// (`<decimal UTF-8 byte length>:<bytes>`), so any text, separators
+// included, round-trips.
 
 UICapability: enum {
     FileDialog,
@@ -27,7 +30,6 @@ UICapability: enum {
     DragDrop,
     Shortcuts,
     Accessibility,
-    FontShaping,
 }
 
 UICancellation: enum {
@@ -171,13 +173,17 @@ UIShortcutDispatch: enum {
 }
 
 capabilities: fn() -> UICapabilityFacts Never! {
-    all: [UICapability]{.FileDialog, .Clipboard, .IME, .DragDrop, .Shortcuts, .Accessibility, .FontShaping}
+    all: [UICapability]{.FileDialog, .Clipboard, .IME, .DragDrop, .Shortcuts, .Accessibility}
     facts := [UICapabilityFact]{}
     loop (code, capability) in all {
-        facts.push(UICapabilityFact{capability: capability, available: core.ui.host.__capability(code)})
+        facts.push(UICapabilityFact{capability: capability, available: provider_capability(code)})
     }
     UICapabilityFacts{facts: facts}
 }
+
+// Whether the UI provider has the capability with provider code `code`:
+// Core's own in UICapability order, a package's by the code it owns.
+provider_capability: fn(code: Int) -> Bool Never! { core.ui.host.__capability(code) }
 
 open_file: fn(request: UIFileDialogRequest) -[FS]> UIFileDialogSelection UIHostError! {
     file_dialog(request, .Open)

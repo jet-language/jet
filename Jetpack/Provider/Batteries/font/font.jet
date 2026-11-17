@@ -4,7 +4,19 @@
 // `shape` validates the face and returns the canonical run every tier
 // produces today: approximate, deterministic advances from the face size.
 // `shape_with` is the same portable run without the validation, for callers
-// that build faces they already trust.
+// that build faces they already trust. `shaping_available` asks the UI
+// provider whether it shapes glyphs itself.
+use host: core.ui.host
+
+// The UI provider's capability code for glyph shaping: this battery's own,
+// past Core's six (core.ui.host `provider_capability`).
+FONT_SHAPING_CODE: 6
+
+// Whether the UI provider shapes glyphs itself. No provider does yet (a
+// native build's is headless and the browser's answers no), so every tier
+// shapes with the portable fallback.
+shaping_available: fn() -> Bool Never! { host.provider_capability(FONT_SHAPING_CODE) }
+
 FontStyle: enum {
     Body,
     Title,
@@ -165,4 +177,8 @@ decode_cp: fn(raw: [U8], i: Int) -> DecodePair {
     assert_eq(run.glyphs[1].advance_x, 14.0)
     assert_eq(run.glyphs[2].advance_x, 0.0)
     assert(run.shaper == GlyphShaper.HeadlessFallback && run.deterministic && run.approximate)
+}
+
+#Test("glyph shaping is absent without a provider that shapes") {
+    assert(!shaping_available())
 }
