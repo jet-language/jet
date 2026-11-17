@@ -5637,9 +5637,11 @@ tasks never read or change the process registry. The module source is
 | `graph.app_links(domain: String) -> App` | graph | Make the web links of `domain` the app's own: `https://{domain}/tasks/7` opens what `/tasks/7` opens; give back the graph. See below. |
 | `graph.open_link(link: String) -[Net, FS.Read]> Bool` | opened | Open the screen state `link` addresses through the graph's route set, or the not-found state; true when a screen opened. See below. |
 | `graph.lost_link() -> String?` | link | The link the not-found state shows; `None` while a screen is open. |
-| `graph.launch() -[Env, Exec.Args, FS.Read, FS.Write, Net, Time.Wait]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. See below. |
+| `graph.launch() -[Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. See below. |
 | `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
+| `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
+| `item(label: String, run: fn() Notice!) -> MenuItem` / `separator() -> MenuItem` / `quit_item() -> MenuItem` | item | A menu item that runs `run` when chosen, a separator line, and the item that quits the app. |
 | `graph.desktop_entry(exec: String) -> String` | text | The app's Linux desktop entry, running `exec` with the link it opens. |
 | `ask(permission: Permission) -[Env, Net, Time]> Grant` | grant | Ask the person for the device permission `permission` and give their answer, once per process. The package's `purposes:` says why the app wants it. See below. |
 | `open_settings() -[Env, Exec]> Bool` | opened | Open the system's settings page for the app, where the person changes the permissions `ask` got; true when one opened. See below. |
@@ -6172,8 +6174,8 @@ scheme. In `{config}/mimeapps.list` (`$XDG_CONFIG_HOME` or `~/.config`) the
 `[Default Applications]` group names the entry for each
 `x-scheme-handler/{scheme}`, as `xdg-mime default` does, and every other
 line stays. A file that can't be written leaves the links unregistered and
-the app runs. Then the graph's background work starts, and the launch's
-link opens (`graph.open_link`), and `launch` is true.
+the app runs. Then the graph's background work starts, its tray shows, and
+the launch's link opens (`graph.open_link`), and `launch` is true.
 
 `graph.background(every:, run:, at_login:)` gives the graph background
 work, and a Linux desktop runs it on a timer. Once `graph.launch()` makes
@@ -6192,6 +6194,22 @@ other value panics. A browser runs nothing for a page that is closed, so
 On the web, the work is a server job: a service method marked
 `#App.Every(cron: …)` runs on its schedule, and an `#App.Job` method is
 work a call queues.
+
+`graph.tray(icon:, menu:)` gives the app an icon in the Linux desktop's
+tray from `graph.launch()` on. The icon stays while the process runs,
+whatever windows close. `icon` names it in the desktop's icon theme. The
+tray is a StatusNotifierItem on the session bus, and its menu is a
+dbusmenu (`com.canonical.dbusmenu`). The menu's items are what `menu`
+makes: `app.item(label, run)`, `app.separator()` and `app.quit_item()`.
+The tray asks `menu` again every quarter second and after each call the
+desktop makes, so a menu made from a live binding (`app.state`) follows
+it. When the items change, the desktop hears `LayoutUpdated` and reads
+the menu again. When `menu` fails, the tray keeps its last items under a
+first item with the notice's text, which can't be chosen. Choosing an
+item runs its `run`, and a run that fails adds its `Notice` to
+`app.notices()`. Choosing Quit ends the process with status 0. A desktop
+with no tray host (no `org.kde.StatusNotifierWatcher`), or a session bus
+that goes away, adds a notice, and the app runs on without a tray.
 
 `app.ask(permission)` asks the person for a device permission and gives
 their answer. `Permission` is `.Camera`, `.Location` or `.Notifications`;

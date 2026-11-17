@@ -2324,10 +2324,11 @@ App: struct {
     // `{config}/mimeapps.list`, as `xdg-mime default` does. `{data}` is
     // `$XDG_DATA_HOME`, else `~/.local/share`; `{config}` is
     // `$XDG_CONFIG_HOME`, else `~/.config`. It starts the graph's background
-    // work (`background`). Then it opens the link the launch was given
-    // (`open_link`) and is true. That link is the first argument that is
-    // one, as the desktop passes the link the entry's `%u` names.
-    launch: fn(self) -[Env, Exec.Args, FS.Read, FS.Write, Net, Time.Wait]> Bool Never! {
+    // work (`background`) and puts its tray in the desktop's (`tray`). Then
+    // it opens the link the launch was given (`open_link`) and is true. That
+    // link is the first argument that is one, as the desktop passes the link
+    // the entry's `%u` names.
+    launch: fn(self) -[Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool Never! {
         link := ""
         loop given in process.args() {
             if app_link_address(given) == None -> next
@@ -2340,6 +2341,7 @@ App: struct {
         if app_graph_schemes().len() > 0 -> app_link_register(self.title)
         app_launch_listen(App{title: self.title.copy()}, socket)
         app_background_start(self.title)
+        app_tray_start(self.title)
         if link != "" -> _: self.open_link(link)
         true
     }
@@ -2368,6 +2370,22 @@ App: struct {
         }
         held := APP_GRAPH.guard_edit()
         held.value.backgrounds.push(AppBackground{every_ns: every.ns, at_login: at_login, run: Shared{AppBackgroundRun{run: run.move()}}})
+        self.copy()
+    }
+
+    // Puts the app's icon in the Linux desktop's tray from `launch` on,
+    // where it stays while the app runs, whatever windows close. `icon`
+    // names it in the desktop's icon theme. Its menu is the items `menu`
+    // makes: the tray asks again every quarter second and after each call
+    // the desktop makes, so a menu made from a live binding (`state`)
+    // follows it, and the desktop hears when the items change. When `menu`
+    // fails, the tray keeps its last items under a first item, which can't
+    // be chosen, with the notice's text. Choosing an item runs it (`item`,
+    // `quit_item`). A desktop with no tray leaves a notice in the app's
+    // notice list (`notices`). Gives back the graph.
+    tray: fn(self, icon: String, menu: &&fn() -> [MenuItem] Notice!) -> App Never! {
+        held := APP_GRAPH.guard_edit()
+        held.value.tray = Val(AppTray{icon: icon, menu: Shared{AppTrayMenu{menu: menu.move()}}})
         self.copy()
     }
 
@@ -2690,7 +2708,7 @@ Query: struct {
 // heads, queue or links yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
-    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}}
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None}
     heads := APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
     App{title: title}
@@ -3183,8 +3201,8 @@ AppInstall: struct {
 // installs it, the screen open now and that screen's route data: the ids of
 // the live bindings its view read, the link schemes and web domains whose
 // links open its screens (`.url_scheme`, `.app_links`), the activation
-// tokens of the later launches that handed it their links (`.launch`) and
-// its background work (`.background`).
+// tokens of the later launches that handed it their links (`.launch`), its
+// background work (`.background`) and its tray (`.tray`).
 priv AppGraph: struct {
     title: String,
     apis: [String:AppAPI],
@@ -3198,9 +3216,10 @@ priv AppGraph: struct {
     link_domains: [String],
     activations: [String],
     backgrounds: [AppBackground],
+    tray: AppTray?,
 }
 
-priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}}}
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None}}
 
 // One piece of a graph's background work (`App.background`): it runs every
 // `every_ns` nanoseconds while the app runs, and at login when `at_login`.
@@ -3212,6 +3231,54 @@ priv AppBackground: struct {
 
 priv AppBackgroundRun: struct {
     run: fn() Notice!,
+}
+
+// A graph's tray (`App.tray`): its icon's name in the desktop's icon theme
+// and what makes its menu.
+priv AppTray: struct {
+    icon: String,
+    menu: Shared<AppTrayMenu>,
+}
+
+priv AppTrayMenu: struct {
+    menu: fn() -> [MenuItem] Notice!,
+}
+
+// One entry of a menu the app shows, its tray's (`App.tray`): an item the
+// person chooses to run it, a separator line, the item that quits the
+// app, or a notice that shows but can't be chosen. `item`, `separator` and
+// `quit_item` make them.
+MenuItem: struct {
+    label: String,
+    kind: MenuItemKind,
+    priv run: Shared<AppMenuRun>,
+}
+
+MenuItemKind: enum {
+    Item,
+    Separator,
+    Quit,
+    Notice,
+}
+
+priv AppMenuRun: struct {
+    run: fn() Notice!,
+}
+
+// An item labelled `label` that runs `run` when the person chooses it. A
+// run that fails puts its notice in the app's notice list (`notices`).
+item: fn(label: String, run: &&fn() Notice!) -> MenuItem Never! {
+    MenuItem{label: label, kind: .Item, run: Shared{AppMenuRun{run: run.move()}}}
+}
+
+// A separator line between items.
+separator: fn() -> MenuItem Never! {
+    MenuItem{label: "", kind: .Separator, run: Shared{AppMenuRun{run: app_menu_nothing}}}
+}
+
+// The item that quits the app.
+quit_item: fn() -> MenuItem Never! {
+    MenuItem{label: "Quit", kind: .Quit, run: Shared{AppMenuRun{run: app_menu_nothing}}}
 }
 
 // The most bytes one call's body to the service `service` (its key) may
@@ -4089,6 +4156,109 @@ priv app_notify_show: fn(title: String, body: String, open_route: String) -[Env,
 // Keeps a notice that the notification `title` couldn't be shown, and why.
 priv app_notify_unshown: fn(title: String, why: String) Never! {
     __keep_notice(Notice{text: "Couldn't show the notification \"{title}\": {why}"})
+}
+
+// How long the tray waits for the session bus and its tray host, and how
+// often it asks its menu again between the desktop's calls.
+priv TRAY_WAIT_NS: 5000000000
+
+priv TRAY_TICK_NS: 250000000
+
+// Starts the graph's tray (`App.tray`), when it has one, in a task that
+// keeps the session bus connection while the app runs.
+priv app_tray_start: fn(title: String) -[Env, Exec.Exit, Net, Time]> Never! {
+    tray: app_graph_tray() ?? return
+    showing: task { app_tray_run(title, tray.icon, tray.menu) }
+    showing.detach()
+}
+
+priv app_graph_tray: fn() -> AppTray? Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.tray.copy()
+}
+
+// Puts the icon in the desktop's tray (a StatusNotifierItem) and keeps its
+// menu current: it asks `menu` again every TRAY_TICK_NS and after each
+// call the desktop makes, and the desktop hears when the items change.
+// Choosing an item runs it (`app_menu_choose`). A desktop with no tray, or
+// a bus that goes away, leaves a notice.
+priv app_tray_run: fn(title: String, icon: String, menu: Shared<AppTrayMenu>) -[Env, Exec.Exit, Net, Time]> Never! {
+    bus := dbus.session(TRAY_WAIT_NS) ?? return app_tray_lost("{err}")
+    tray := dbus.tray_start(bus, title, icon, sys.getpid(), TRAY_WAIT_NS) ?? return app_tray_lost("{err}")
+    shown := [MenuItem]{}
+    loaded := [MenuItem]{}
+    loop {
+        held: menu.guard_read()
+        failed: if app_tray_menu_make(held.value.menu) == {
+            .Ok(items) -> {
+                loaded = items.copy()
+                String?{None}
+            }
+            .Err(notice) -> notice.text.copy()
+        }
+        shown = loaded.copy()
+        if failed == .Val(text) {
+            shown.insert(0, MenuItem{label: text.copy(), kind: .Notice, run: Shared{AppMenuRun{run: app_menu_nothing}}})
+        }
+        dbus.tray_show(bus, tray, app_tray_entries(shown)) ?? return app_tray_lost("{err}")
+        asked: if dbus.next_call(bus, TRAY_TICK_NS) == {
+            .Err(err) -> {
+                return app_tray_lost("{err}")
+            }
+            .Ok(got) -> got
+        }
+        call: asked ?? next
+        chosen: if dbus.tray_answer(bus, tray, call) == {
+            .Err(err) -> {
+                return app_tray_lost("{err}")
+            }
+            .Ok(got) -> got
+        }
+        index: chosen ?? next
+        app_menu_choose(shown[index])
+    }
+}
+
+// The tray's entries for `items`: a notice shows but can't be chosen.
+priv app_tray_entries: fn(items: [MenuItem]) -> [dbus.TrayEntry] Never! {
+    entries := [dbus.TrayEntry]{}
+    loop item in items {
+        entries.push(dbus.TrayEntry{label: item.label.copy(), enabled: item.kind != .Notice, separator: item.kind == .Separator})
+    }
+    entries
+}
+
+// Runs the item the person chose: Quit ends the app, and an item's failed
+// run puts its notice in the app's notice list.
+priv app_menu_choose: fn(item: MenuItem) -[Exec.Exit]> Never! {
+    if item.kind == .Quit -> process.exit(0)
+    held: item.run.guard_read()
+    app_background_once(held.value.run)
+}
+
+priv app_tray_menu_make: fn(menu: fn() -> [MenuItem] Notice!) -> [MenuItem] Notice! { menu() }
+
+priv app_menu_nothing: fn() Notice! { Ok() }
+
+// Keeps a notice that the tray couldn't be shown or kept, and why.
+priv app_tray_lost: fn(why: String) Never! {
+    __keep_notice(Notice{text: "Couldn't show the app in the tray: {why}"})
+}
+
+#Test("a tray shows its items, a notice can't be chosen, and an item's failed run joins the notices") {
+    items: [MenuItem]{item("Gate repair", fn() Notice! { Err(Notice{text: "The board is offline"}) }), separator(), MenuItem{label: "Can't load", kind: .Notice, run: Shared{AppMenuRun{run: app_menu_nothing}}}, quit_item()}
+    entries: app_tray_entries(items)
+    assert_eq(entries.len(), 4)
+    assert_eq(entries[0].label, "Gate repair")
+    assert(entries[0].enabled && !entries[0].separator)
+    assert(entries[1].separator)
+    assert(!entries[2].enabled)
+    assert_eq(entries[3].label, "Quit")
+    before: notices().len()
+    app_menu_choose(items[0])
+    after: notices()
+    assert_eq(after.len(), before + 1)
+    assert_eq(after[after.len() - 1].text, "The board is offline")
 }
 
 // A photo from the camera through PipeWire, kept in a directory of this
