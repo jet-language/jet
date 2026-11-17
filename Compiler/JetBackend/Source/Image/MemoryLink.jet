@@ -27,7 +27,10 @@
 // libgcc's `__register_frame_info` when the image links that unwinder, and
 // tail-calls `main` with its arguments.
 // A program this cannot bind gets errors, and the caller links it in full:
-// thread-local data, init/fini arrays, or an import the image does not define.
+// thread-local data, init/fini arrays, an import the image does not define,
+// or a definition of a runtime provider hook, whose calls the image already
+// binds to its own.
+use jet_foundation.[RUNTIME_PROVIDER_HOOKS]
 
 // What binding reads from a runtime image.
 LinkImageView: struct {
@@ -759,6 +762,15 @@ link_bind_image: fn(name: String, program: &&[U8], image: &&[U8], gap_at: Int, g
     if main_g < 0 || c.g_kind[link_final(c, main_g)] != LINK_G_FILE || c.g_section[link_final(c, main_g)] < 0 {
         link_error(c, "{name}: the program does not define `main`")
         return link_bind_failure(c)
+    }
+    // The image's calls to a provider hook reach its own definition; only a
+    // full link binds them to the program's.
+    loop hook in RUNTIME_PROVIDER_HOOKS {
+        hook_g: link_global_named(c, hook)
+        if hook_g >= 0 && c.g_kind[link_final(c, hook_g)] == LINK_G_FILE {
+            link_error(c, "{name}: the program defines the runtime hook `{hook}`, which the runtime image binds to its own; link it in full")
+            return link_bind_failure(c)
+        }
     }
     // The program's imports, and the binding startup's
     // `__register_frame_info` when the image links libgcc's unwinder,

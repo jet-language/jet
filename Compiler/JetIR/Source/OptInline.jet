@@ -177,8 +177,9 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
 
 // The cost (ir_opt_inline_cost) of the callee of the Call at `at` when it
 // may be inlined there, else -1. An asm leaf's code is its template, never
-// IR to inline; a host provider leaf (IR.jet IR_HOST_PROVIDER) stays a call
-// its host can replace. A marked callee also takes a body that writes a
+// IR to inline; a host provider leaf (IR.jet IR_HOST_PROVIDER) or a runtime
+// provider hook (IRFunction.host_symbol) stays a call its host or program
+// can replace. A marked callee also takes a body that writes a
 // parameter (ir_opt_splice gives it a slot of its own), an argument or
 // result of another type row of the same layout, and a stop in another
 // file (the stop reports at the call's line).

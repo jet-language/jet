@@ -1143,7 +1143,8 @@ jet_cli_native_executable: fn(result: JetDriverCompileResult, inputs: &&JetDrive
     if realized.bound {
         // A program with no C closure binds to the prelinked runtime image
         // (Image/MemoryLink.jet); one it can't bind (thread-local data,
-        // init/fini arrays, an import the image lacks) links the pack in full.
+        // init/fini arrays, an import the image lacks, a definition of a
+        // runtime provider hook) links the pack in full.
         if trace_sink == .Val(sink) -> sink.begin("native.link", "", -1, -1)
         // copy: the full link needs the object again when the bind refuses it.
         bound := x64_bind_runtime_image(executable_path, object.copy(), runtime, runtime_path, realized.runtime_stamp, realized.runtime_at, realized.runtime_gap_at, realized.runtime_gap, debug_info)

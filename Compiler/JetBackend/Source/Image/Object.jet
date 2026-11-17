@@ -35,8 +35,11 @@
 // are global symbols of their data objects. A library with more sections
 // than ELF's 16-bit indices reach (the Core library's) uses extended
 // section numbering: the header's count and each symbol's section index at
-// SHN_LORESERVE or above move to section 0 and `.symtab_shndx`.
-use jet_foundation.[CompilerThreads, NameTable, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
+// SHN_LORESERVE or above move to section 0 and `.symtab_shndx`. Its provider
+// hooks (RUNTIME_PROVIDER_HOOKS) are weak globals, and its calls to them are
+// relocations against those globals, so a program that defines one replaces
+// it at link time and the library's calls reach the program's definition.
+use jet_foundation.[CompilerThreads, NameTable, RUNTIME_PROVIDER_HOOKS, compiler_take_rows, compiler_threads_admit, compiler_threads_failure_text, compiler_threads_partition, compiler_threads_single, name_find, name_index, name_intern, name_table_sized]
 
 ELF64_SECTION_HEADER_SIZE: 64
 
@@ -309,8 +312,9 @@ x64_object_text_weight: fn(function: X64CompiledFunction) -> Int Never! {
 // the entry stub `main` is id -1) and whether that id is exported, whether
 // the object numbers its sections through `.symtab_shndx`, and per data
 // object its place in its section and that section's symbol. With own
-// sections, per function the symbol of its section (empty otherwise), and
-// every place is 0.
+// sections, per function the symbol of its section (empty otherwise), per
+// function id + 1 the row in RUNTIME_PROVIDER_HOOKS of the hook it exports
+// (-1: none), and every place is 0.
 X64ObjectTextShared: struct {
     functions: [X64CompiledFunction],
     offsets: [Int],
@@ -320,6 +324,7 @@ X64ObjectTextShared: struct {
     data_offsets: [Int],
     function_symbols: [Int],
     data_symbols: [Int],
+    provider_hooks: [Int],
 }
 
 // One thread's consecutive function range, the range's code (each
@@ -402,6 +407,7 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
     data_offsets: reads.value.data_offsets
     function_symbols: reads.value.function_symbols
     data_symbols: reads.value.data_symbols
+    provider_hooks: reads.value.provider_hooks
     own: function_symbols.len() > 0
     loop index in start..<end {
         function: reads.value.functions[index]
@@ -415,6 +421,9 @@ x64_object_text_part: fn(inputs: Shared<X64ObjectTextShared>, part: Shared<X64Ob
                     if {
                         row < 0 -> {
                             errors.push("{function.name}: call to function {id.value}, which is not in the object")
+                        }
+                        own && provider_hooks[id.value + 1] >= 0 -> {
+                            x64_object_import(imports, import_names, import_of, runtime_at, runtime_local, relas, at, RUNTIME_PROVIDER_HOOKS[provider_hooks[id.value + 1]], ELF64_R_X86_64_PLT32)
                         }
                         own -> {
                             x64_object_rela_put(relas, at, function_symbols[row], ELF64_R_X86_64_PC32, -4)
@@ -708,9 +717,11 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
     }
     function_rows := [Int]{}
     exported := [Bool]{}
+    provider_hooks := [Int]{}
     loop _ in 0..<(max_id + 2) {
         function_rows.push(-1)
         exported.push(false)
+        provider_hooks.push(-1)
     }
     loop (index, function) in functions {
         if function_rows[function.id.value + 1] < 0 -> function_rows[function.id.value + 1] = index
@@ -726,6 +737,9 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
         }
         _ := name_intern(export_names, entry_row.symbol)
         exported[id + 1] = true
+        if own_sections {
+            provider_hooks[id + 1] = RUNTIME_PROVIDER_HOOKS.index_of(entry_row.symbol) ?? -1
+        }
     }
     // Per export, the header indices of its hook's guard data sections
     // (none: an unconditional hook).
@@ -820,12 +834,12 @@ x64_object_functions_threads: fn(program: &&X64ObjectModule, compiled: &&[X64Com
     if {
         compiler_threads_admit(threads, functions.len(), weight, X64_OBJECT_MIN_WEIGHT_PER_THREAD, 0, 0) <= 1 -> {
             dwarf_rows.push(x64_dwarf_sections(program, functions, debug, offsets, sizes, text_size, dwarf_symbols, threads, debug_info))
-            laid_rows.push(x64_object_lay(program, functions, codes, exports, data_exports, threads, own_sections, guard_sections, offsets, sizes, weights, function_rows, exported, data_rows, function_symbols))
+            laid_rows.push(x64_object_lay(program, functions, codes, exports, data_exports, threads, own_sections, guard_sections, offsets, sizes, weights, function_rows, exported, provider_hooks, data_rows, function_symbols))
         }
         else -> {
             task.group x64_object_dwarf_thread {
                 dwarfing: task x64_dwarf_sections(program, functions, debug, offsets, sizes, text_size, dwarf_symbols, threads, debug_info)
-                laid_rows.push(x64_object_lay(program, functions, codes, exports, data_exports, threads, own_sections, guard_sections, offsets, sizes, weights, function_rows, exported, data_rows, function_symbols))
+                laid_rows.push(x64_object_lay(program, functions, codes, exports, data_exports, threads, own_sections, guard_sections, offsets, sizes, weights, function_rows, exported, provider_hooks, data_rows, function_symbols))
                 dwarf_rows.push(dwarfing.join() ?? panic(compiler_threads_failure_text(err)))
             }
         }
@@ -876,10 +890,11 @@ X64ObjectLaid: struct {
 
 // The data, symbol and `.text` layout of x64_object_functions_threads,
 // which checked the exports, placed the functions (`offsets`, and with own
-// sections `function_symbols`), kept their `sizes` and `.text` `weights`
-// and took their `codes` out of them; `.text` on the threads `threads`
-// admits.
-x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], codes: &[[U8]], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, own_sections: Bool, guard_sections: [[Int]], offsets: [Int], sizes: [Int], weights: [Int], function_rows: [Int], exported: [Bool], data_rows: [Int], function_symbols: [Int]) -> X64ObjectLaid Never! {
+// sections `function_symbols`, and per function id + 1 the row in
+// RUNTIME_PROVIDER_HOOKS of the hook it exports, -1 for none, in
+// `provider_hooks`), kept their `sizes` and `.text` `weights` and took their
+// `codes` out of them; `.text` on the threads `threads` admits.
+x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], codes: &[[U8]], exports: [X64RuntimeExport], data_exports: [X64DataExport], threads: CompilerThreads, own_sections: Bool, guard_sections: [[Int]], offsets: [Int], sizes: [Int], weights: [Int], function_rows: [Int], exported: [Bool], provider_hooks: [Int], data_rows: [Int], function_symbols: [Int]) -> X64ObjectLaid Never! {
     // Whether a section index reaches SHN_LORESERVE (extended numbering).
     extended := false
     if own_sections {
@@ -985,7 +1000,9 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
     tail := [X64ObjectSymbol]{}
     loop entry_row in exports {
         index: function_rows[entry_row.function.value + 1]
-        tail.push(X64ObjectSymbol{name: entry_row.symbol, info: 0x12, section: x64_object_function_section(own_sections, index), value: offsets[index], size: sizes[index]})
+        // A provider hook is weak: a program's definition replaces it.
+        info: if provider_hooks[entry_row.function.value + 1] >= 0 -> 0x22 else -> 0x12
+        tail.push(X64ObjectSymbol{name: entry_row.symbol, info: info, section: x64_object_function_section(own_sections, index), value: offsets[index], size: sizes[index]})
     }
     loop (index, entry_row) in data_exports {
         row: data_rows[index]
@@ -1021,7 +1038,7 @@ x64_object_lay: fn(program: X64ObjectModule, functions: [X64CompiledFunction], c
     loop weight in weights -> total += weight
     workers: compiler_threads_admit(threads, functions.len(), total, X64_OBJECT_MIN_WEIGHT_PER_THREAD, 0, 0)
     bounds: if workers <= 1 -> [Int]{0, functions.len()} else -> compiler_threads_partition(weights, workers)
-    inputs: Shared{X64ObjectTextShared{functions: functions, offsets: offsets, function_rows: function_rows, exported: exported, extended: extended, data_offsets: data_offsets, function_symbols: function_symbols, data_symbols: data_symbols}}
+    inputs: Shared{X64ObjectTextShared{functions: functions, offsets: offsets, function_rows: function_rows, exported: exported, extended: extended, data_offsets: data_offsets, function_symbols: function_symbols, data_symbols: data_symbols, provider_hooks: provider_hooks}}
     // Built last part first, each taking its code off the end of `codes`.
     parts := [Shared<X64ObjectTextPart>]{}
     loop back in 0..<(bounds.len() - 1) {

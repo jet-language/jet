@@ -1121,17 +1121,21 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     jet_scheduler_native_propagate()
 }
 
-// Scheduler256: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
+// Scheduler264: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
 // fibers56 pooled64 pool72 completionLo80/Hi88 nextTask96 timerRoot104
 // poolSize112 idle120 carriers128 fiberTimers136 stop144 started152
 // woken160 readyHead168 readyTail176 stackBytes184 gsMode192 fiberSpace200
 // blocked208 monitorArmed216 monitor224 sizedPools232 liveLock240
-// liveTasks248.
+// liveTasks248 queued256.
 // liveTasks heads the list of every task state not yet freed, under its own
 // mutex liveLock (Task.jet task_live_link), not the thread lock.
 // lock is a thread lock (Sync.jet sync_thread_lock): a fiber's wake takes it.
-// The FIFO holds submitted task states (linked through their reserved word
-// @88); ready holds fibers to resume (Fiber.jet). live counts tasks taken and
+// The run queue holds submitted task states; queued counts them. It is the
+// two hooks jet_rt_scheduler_queue_push and jet_rt_scheduler_queue_pop, whose
+// definitions here are the FIFO (linked through the tasks' reserved word
+// @88). A program a target profile gives a scheduler provider defines both,
+// and its link binds the runtime's calls to them (scheduler_queue_push).
+// ready holds fibers to resume (Fiber.jet). live counts tasks taken and
 // not finished, parked their parked fibers, fibers the fiber stacks mapped,
 // pooled (pool, linked through Fiber next@48, and the sizedPools lists of
 // larger stacks, Fiber.jet fiber_sized_pool) the idle ones and fiberSpace
@@ -1169,7 +1173,7 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // starting, -2: its start was refused, and the pool goes on without it).
 scheduler_root := I64{0}
 
-SCHEDULER_ROOT_BYTES: I64{256}
+SCHEDULER_ROOT_BYTES: I64{264}
 
 SCHEDULER_CARRIER_BYTES: I64{72}
 
@@ -1190,7 +1194,7 @@ SCHEDULER_STAT_BYTES: I64{512}
 // The initialized root without starting the pool. Only scheduler_submit (via
 // scheduler_get) starts workers, so a program that never submits a job (hello,
 // a plain sleep) never creates a pool thread; draining, timers and statistics
-// observe the same FIFO, live count and counters either way.
+// observe the same run queue, live count and counters either way.
 scheduler_root_required: fn() -> I64 {
     root: scheduler_root
     if (root == I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
@@ -1344,11 +1348,8 @@ scheduler_submit: fn(task: I64) {
     root: scheduler_get()
     sync_store(wrapping(task + I64{88}), I64{0})
     sync_thread_lock(root)
-    tail: sync_load(wrapping(root + I64{16}))
-    if (tail == I64{0}) { sync_store(wrapping(root + I64{8}), task) } else {
-        sync_store(wrapping(tail + I64{88}), task)
-    }
-    sync_store(wrapping(root + I64{16}), task)
+    jet_rt_scheduler_queue_push(task)
+    sync_store(wrapping(root + I64{256}), wrapping(sync_load(wrapping(root + I64{256})) + I64{1}))
     jet_rt_observe_pool(I64{-1}, I64{1})
     start := false
     monitor := I64{0}
@@ -1430,7 +1431,7 @@ scheduler_monitor_needed: fn(root: I64) -> Bool {
 // Whether a queued job or a ready fiber waits with no idle carrier
 // unclaimed to take it. The root lock is held.
 scheduler_work_waits: fn(root: I64) -> Bool {
-    queued: sync_load(wrapping(root + I64{8})) != I64{0} || sync_load(wrapping(root + I64{168})) != I64{0}
+    queued: sync_load(wrapping(root + I64{256})) != I64{0} || sync_load(wrapping(root + I64{168})) != I64{0}
     queued && sync_load(wrapping(root + I64{120})) <= sync_load(wrapping(root + I64{160}))
 }
 
@@ -1575,12 +1576,8 @@ scheduler_monitor_starts: fn(root: I64) -> I64 {
     if (pool <= I64{0} || room <= I64{0}) { return I64{0} }
     spare: sync_load(wrapping(root + I64{120})) - sync_load(wrapping(root + I64{160}))
     limit: room + (if (spare > I64{0}) -> spare else -> I64{0})
-    queued := I64{0}
-    task := sync_load(wrapping(root + I64{8}))
-    loop task != (I64{0}) && queued < limit {
-        queued += I64{1}
-        task = sync_load(wrapping(task + I64{88}))
-    }
+    tasks: sync_load(wrapping(root + I64{256}))
+    queued := if (tasks < limit) -> tasks else -> limit
     fiber := sync_load(wrapping(root + I64{168}))
     loop fiber != (I64{0}) && queued < limit {
         queued += I64{1}
@@ -1668,14 +1665,40 @@ scheduler_watch_kick: fn(root: I64, deadline_ns: I64) {
     if woke -> scheduler_kick_idle(root)
 }
 
-// The FIFO's first task; the root lock is held.
+// The run queue's next task, 0 when it holds none; the root lock is held.
 scheduler_pop: fn(root: I64) -> I64 {
+    queued: sync_load(wrapping(root + I64{256}))
+    if (queued == I64{0}) { return I64{0} }
+    task: jet_rt_scheduler_queue_pop()
+    if (task == I64{0}) { return I64{0} }
+    sync_store(wrapping(root + I64{256}), wrapping(queued - I64{1}))
+    sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) + I64{1})
+    task
+}
+
+// The run queue's hooks, which hold the submitted task states the root's
+// queued word counts; the root lock is held for each call. These are the
+// runtime's FIFO (FIFOhead8/tail16, linked through each task's word @88).
+// They are weak definitions that the runtime's own calls reach through their
+// symbols (JetFoundation RUNTIME_PROVIDER_HOOKS), so a program that defines
+// them, as one whose target profile names a scheduler provider does, replaces
+// both at link time, and every call goes straight to its definitions.
+#Export(c) jet_rt_scheduler_queue_push: fn(task: I64) {
+    root: scheduler_root_required()
+    tail: sync_load(wrapping(root + I64{16}))
+    if (tail == I64{0}) { sync_store(wrapping(root + I64{8}), task) } else {
+        sync_store(wrapping(tail + I64{88}), task)
+    }
+    sync_store(wrapping(root + I64{16}), task)
+}
+
+#Export(c) jet_rt_scheduler_queue_pop: fn() -> I64 {
+    root: scheduler_root_required()
     task: sync_load(wrapping(root + I64{8}))
     if (task == I64{0}) { return I64{0} }
     next_task: sync_load(wrapping(task + I64{88}))
     sync_store(wrapping(root + I64{8}), next_task)
     if (next_task == I64{0}) { sync_store(wrapping(root + I64{16}), I64{0}) }
-    sync_store(wrapping(root + I64{40}), sync_load(wrapping(root + I64{40})) + I64{1})
     task
 }
 
@@ -1842,7 +1865,7 @@ scheduler_completion_order: fn(out: I64) {
     loop at < (I64{5000}) {
         if jet_rt_observe_has_parked_tasks() -> break
         sync_thread_lock(root)
-        idle: sync_load(wrapping(root + I64{8})) == I64{0} && sync_load(wrapping(root + I64{40})) == I64{0}
+        idle: sync_load(wrapping(root + I64{256})) == I64{0} && sync_load(wrapping(root + I64{40})) == I64{0}
         sync_thread_unlock(root)
         if idle && jet_rt_observe_io_quiescent() -> break
         sync_park(slot, I64{1000000})
@@ -1851,11 +1874,11 @@ scheduler_completion_order: fn(out: I64) {
     sync_park_drop(slot)
 }
 
-// Whether no task is queued or running (the root's counts at 8 and 40).
+// Whether no task is queued or running (the root's counts at 256 and 40).
 scheduler_idle: fn() -> Bool {
     root: scheduler_root_required()
     sync_thread_lock(root)
-    idle: sync_load(wrapping(root + I64{8})) == I64{0} && sync_load(wrapping(root + I64{40})) == I64{0}
+    idle: sync_load(wrapping(root + I64{256})) == I64{0} && sync_load(wrapping(root + I64{40})) == I64{0}
     sync_thread_unlock(root)
     idle
 }
@@ -1997,7 +2020,7 @@ scheduler_timer_shutdown: fn(root: I64) -> I64 {
         _ := sync_wait(root + I64{112}, I64{-1}, I64{-1})
     }
     sync_thread_lock(root)
-    if (sync_load(wrapping(root + I64{8})) != I64{0} || sync_load(wrapping(root + I64{40})) != I64{0}) {
+    if (sync_load(wrapping(root + I64{256})) != I64{0} || sync_load(wrapping(root + I64{40})) != I64{0}) {
         sync_thread_unlock(root)
         return I64{-1}
     }

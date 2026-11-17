@@ -807,7 +807,7 @@ TASK_EXIT_DRAIN_NS: I64{1000000000}
     loop {
         task_live_cancel(root)
         sync_thread_lock(root)
-        settled: sync_load(wrapping(root + I64{8})) == I64{0} && sync_load(wrapping(root + I64{168})) == I64{0} && sync_load(wrapping(root + I64{40})) == sync_load(wrapping(root + I64{48}))
+        settled: sync_load(wrapping(root + I64{256})) == I64{0} && sync_load(wrapping(root + I64{168})) == I64{0} && sync_load(wrapping(root + I64{40})) == sync_load(wrapping(root + I64{48}))
         sync_thread_unlock(root)
         if (settled && jet_rt_observe_io_quiescent()) || time_host_monotonic_i64() >= deadline {
             break
