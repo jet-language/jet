@@ -3,8 +3,10 @@
 // puts `text` before character `at`, `remove(from, to)` drops characters
 // `from` up to, not including, `to`, and `truncate(n)` keeps the first `n`
 // (all of them when there are fewer). `String.with_capacity(n)` and
-// `reserve(n)` set bytes aside up front, and `capacity()` counts them. A
-// copy taken before an edit keeps its own text.
+// `reserve(n)` set bytes aside up front, and `capacity()` counts them.
+// `try_push(text)` appends and reports a refused allocation as an
+// `AllocError` value. A copy taken before an edit keeps its own text, and a
+// `:` String rejects every edit.
 Row: struct {
     label: String,
 }
@@ -44,5 +46,6 @@ run: fn() {
     buffer += "abc"
     buffer.reserve(200)
     print(buffer.capacity() >= 203)
-    print(buffer)
+    buffer.try_push("dé") ?? panic("no memory")
+    print("{buffer} {buffer.len()}")
 }
