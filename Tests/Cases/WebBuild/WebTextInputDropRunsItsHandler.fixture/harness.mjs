@@ -25,11 +25,12 @@ class Element {
     if (!this.listeners.has(name)) this.listeners.set(name, []);
     this.listeners.get(name).push(handler);
   }
-  // Runs the `type` listeners on one event; whether one prevented its default.
-  dispatch(type, fields) {
+  // Runs the `type` listeners on one event; settles once each handler's run
+  // has ended, with whether one prevented its default.
+  async dispatch(type, fields) {
     let prevented = false;
     const event = { type, target: this, preventDefault: () => { prevented = true; }, ...fields };
-    for (const handler of this.listeners.get(type) ?? []) handler(event);
+    await Promise.all((this.listeners.get(type) ?? []).map((handler) => handler(event)));
     return prevented;
   }
 }
@@ -52,8 +53,8 @@ const show = (when) => {
 const input = () => root.children.find((child) => child.tagName === "INPUT");
 const transfer = (plain, uris) => ({ getData: (format) => (format === "text/plain" ? plain : format === "text/uri-list" ? uris : "") });
 show("mounted");
-console.log(`dragover accepted: ${input().dispatch("dragover", {})}`);
-input().dispatch("drop", { dataTransfer: transfer("hello", "") });
+console.log(`dragover accepted: ${await input().dispatch("dragover", {})}`);
+await input().dispatch("drop", { dataTransfer: transfer("hello", "") });
 show("after a text drop");
-input().dispatch("drop", { dataTransfer: transfer("note", "# picked\nhttps://example.test/a\n\nhttps://example.test/b\n") });
+await input().dispatch("drop", { dataTransfer: transfer("note", "# picked\nhttps://example.test/a\n\nhttps://example.test/b\n") });
 show("after a text and two links");

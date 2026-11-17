@@ -23,8 +23,9 @@ class Element {
   addEventListener(name, handler) {
     if (name === "click") this.clicks.push(handler);
   }
+  // Runs the click listeners; settles once each handler's run has ended.
   click() {
-    for (const handler of this.clicks) handler({ type: "click", target: this });
+    return Promise.all(this.clicks.map((handler) => handler({ type: "click", target: this })));
   }
 }
 const body = new Element("body");
@@ -45,7 +46,7 @@ const show = (when) => {
 };
 const button = (label) => root.children.find((child) => child.tagName === "BUTTON" && child.textContent === label);
 show("mounted");
-for (let i = 0; i < 3; i += 1) button("increment").click();
+for (let i = 0; i < 3; i += 1) await button("increment").click();
 show("after 3 increments");
-button("reset").click();
+await button("reset").click();
 show("after reset");

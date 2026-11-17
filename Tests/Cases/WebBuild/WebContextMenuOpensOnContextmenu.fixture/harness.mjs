@@ -37,9 +37,9 @@ class Element {
     this.listeners.set(name, [...(this.listeners.get(name) ?? []), handler]);
   }
   // Dispatches `name` as a browser does: the document's capturing listeners
-  // first, then the element's own unless one stopped it. True when no
-  // listener prevented the default.
-  dispatch(name, fields = {}) {
+  // first, then the element's own unless one stopped it. Settles once each
+  // handler's run has ended, true when no listener prevented the default.
+  async dispatch(name, fields = {}) {
     let stopped = false;
     let prevented = false;
     const event = {
@@ -53,8 +53,10 @@ class Element {
         stopped = true;
       },
     };
-    for (const handler of [...(capturing.get(name) ?? [])]) handler(event);
-    if (!stopped) for (const handler of this.listeners.get(name) ?? []) handler(event);
+    const runs = [];
+    for (const handler of [...(capturing.get(name) ?? [])]) runs.push(handler(event));
+    if (!stopped) for (const handler of this.listeners.get(name) ?? []) runs.push(handler(event));
+    await Promise.all(runs);
     return !prevented;
   }
 }
@@ -93,28 +95,28 @@ const shown = () => {
   return `at ${open.style.left},${open.style.top}: ${entries.join(" | ")}`;
 };
 const panel = () => container.children.find((child) => child.listeners.has("contextmenu"));
-const rightClick = () => {
-  const kept = panel().dispatch("contextmenu", { clientX: 40, clientY: 30 });
+const rightClick = async () => {
+  const kept = await panel().dispatch("contextmenu", { clientX: 40, clientY: 30 });
   console.log(`right-click: browser menu ${kept ? "shown" : "suppressed"}; menu ${shown()}`);
 };
-const choose = (label) => {
-  menu().children.find((entry) => entry.textContent === label).dispatch("click");
+const choose = async (label) => {
+  await menu().children.find((entry) => entry.textContent === label).dispatch("click");
   console.log(`chose ${label}: menu ${shown()}; scene ${scene()}`);
 };
 
 console.log(`initial: ${scene()}`);
 console.log(`the button has no menu: ${!container.children.find((child) => child.tagName === "button").listeners.has("contextmenu")}`);
-rightClick();
-choose("Add Task");
-rightClick();
+await rightClick();
+await choose("Add Task");
+await rightClick();
 const outside = container.children.find((child) => child.tagName === "button");
-outside.dispatch("click");
+await outside.dispatch("click");
 console.log(`click outside: menu ${shown()}; scene ${scene()}`);
-rightClick();
-const kept = body.dispatch("keydown", { key: "Escape" });
+await rightClick();
+const kept = await body.dispatch("keydown", { key: "Escape" });
 console.log(`escape: ${kept ? "passed on" : "taken"}; menu ${shown()}`);
-rightClick();
-choose("Quit");
-choose("Share");
+await rightClick();
+await choose("Quit");
+await choose("Share");
 console.log("notices:");
-container.children.find((child) => child.tagName === "button").dispatch("click");
+await container.children.find((child) => child.tagName === "button").dispatch("click");

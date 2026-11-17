@@ -1,0 +1,20 @@
+# A web program's wait suspends it on a promise instead of blocking the page:
+# a `time.sleep` from a JS-bucket function and from a Wasm-bucket one each
+# lets the page's own timer run before the program's next line.
+requires: tool:node
+fixture: WebPageRunsWhileTheProgramWaitsOnJSAndWasm.fixture
+env: NO_COLOR=1
+step: jet build --target web js/main.jet
+exit: 0
+copy: harness.mjs js/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: js/.jet/build
+exit: 0
+stdout: = web_page_runs_while_the_program_waits_on_js_and_wasm.stdout.expected
+step: jet build --target web wasm/main.jet
+exit: 0
+copy: harness.mjs wasm/.jet/build/harness.mjs
+step: node harness.mjs
+cwd: wasm/.jet/build
+exit: 0
+stdout: = web_page_runs_while_the_program_waits_on_js_and_wasm.stdout.expected
