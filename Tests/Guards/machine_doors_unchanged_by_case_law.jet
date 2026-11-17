@@ -1,0 +1,140 @@
+// Machine doors unchanged by case law: the rules that set the case of what a
+// person reads (labels, headings, messages, help) never reach what a machine
+// reads. Each door in MD_DOORS runs the compiler under test (JET, else `jet`
+// on PATH) under `--json` in the corpus folder Tests/Fixtures/MachineDoors,
+// and its recording must equal `<name>.out` there byte for byte: the exit
+// code, everything the door wrote to stdout, and each JSON line it wrote to
+// stderr (a failed `run` reports there). The rest of stderr is for people and
+// is not recorded. `jet test -u` records the doors again.
+//
+// Only values that change from run to run or machine to machine are masked,
+// the same way before and after: every run of 16 or more hex digits (digests,
+// build and run identities) reads `<hash>`, and the values of the keys in
+// MD_VOLATILE_KEYS read `<volatile>`.
+use {
+    md_process: core.process
+    md_sys: core.sys
+    md_testing: core.testing
+}
+
+MD_CORPUS: "Tests/Fixtures/MachineDoors"
+
+MD_HEX_DIGITS: "0123456789abcdef"
+
+// Wall time, the process and clock in a report identity, the toolchain
+// release and the host target.
+MD_VOLATILE_KEYS: [String]{"elapsed_ms", "report", "toolchain", "target"}
+
+// One machine door: its recording's name and the arguments after `jet`.
+MachineDoor: struct {
+    name: String,
+    args: [String],
+}
+
+MD_DOORS: [MachineDoor]{
+    MachineDoor{name: "check_error", args: [String]{"check", "--json", "broken.jet"}},
+    MachineDoor{name: "check_clean", args: [String]{"check", "--json", "clean.jet"}},
+    MachineDoor{name: "build_error", args: [String]{"build", "--json", "broken.jet"}},
+    MachineDoor{name: "run_error", args: [String]{"run", "--json", "broken.jet"}},
+    MachineDoor{name: "test", args: [String]{"test", "--json", "clean.jet"}},
+    MachineDoor{name: "fmt_dirty", args: [String]{"fmt", "--check", "--json", "unformatted.jet"}},
+    MachineDoor{name: "fmt_clean", args: [String]{"fmt", "--check", "--json", "clean.jet"}},
+    MachineDoor{name: "fix_dry_run", args: [String]{"fix", "--dry-run", "--json", "broken.jet"}},
+    MachineDoor{name: "eval", args: [String]{"eval", "--json", "1 + 2"}},
+    MachineDoor{name: "audit_copies", args: [String]{"audit", "copies", "--json", "clean.jet"}},
+    MachineDoor{name: "audit_writes", args: [String]{"audit", "writes", "--json", "clean.jet"}},
+    MachineDoor{name: "audit_foreign", args: [String]{"audit", "foreign", "--json", "clean.jet"}},
+    MachineDoor{name: "explain_effects", args: [String]{"explain", "effects", "--json", "clean.jet"}},
+    MachineDoor{name: "explain_code", args: [String]{"explain", "E0102", "--json"}},
+    MachineDoor{name: "emit_ast", args: [String]{"emit", "--ast", "--json", "clean.jet"}},
+    MachineDoor{name: "doc", args: [String]{"doc", "--json", "clean.jet"}},
+    MachineDoor{name: "unknown_command", args: [String]{"frobnicate", "--json"}},
+}
+
+// The compiler under test, never this test binary.
+md_jet: fn() -[Env, FS]> String {
+    md_sys.get("JET") ?? (md_process.which("jet") ?? panic("set JET to the compiler under test"))
+}
+
+// A run of hex digits, masked when it is long enough to be a digest.
+md_hex_run: fn(run: [String]) -> String { if run.len() >= 16 -> "<hash>" else -> run.join("") }
+
+md_mask_digests: fn(text: String) -> String {
+    out := [String]{}
+    run := [String]{}
+    loop scalar in text.chars() {
+        ch: "{scalar}"
+        if MD_HEX_DIGITS.contains(ch) -> run.push(ch) else {
+            out.push(md_hex_run(run))
+            run = [String]{}
+            out.push(ch)
+        }
+    }
+    out.push(md_hex_run(run))
+    out.join("")
+}
+
+// What follows a key's scalar value: a string's text after its closing
+// quote, or a number's text from the `,`, `}`, `]` or line end that ends it.
+md_after_scalar: fn(rest: String) -> String {
+    if rest.starts_with("\"") {
+        if rest.slice(1, rest.len()).split_once("\"") == .Val(parts) -> return parts.after
+        return ""
+    }
+    width := 0
+    loop scalar in rest.chars() {
+        ch: "{scalar}"
+        if ch == "," || ch == "}}" || ch == "]" || ch == "\n" -> break
+        width += ch.len()
+    }
+    rest.slice(width, rest.len())
+}
+
+md_mask_key: fn(text: String, key: String) -> String {
+    parts: text.split("\"{key}\":").to_list()
+    out := [String]{parts[0]}
+    loop part in parts.slice(1, parts.len()) {
+        if part.starts_with("{{") || part.starts_with("[") -> out.push("\"{key}\":{part}") else {
+            out.push("\"{key}\":\"<volatile>\"{md_after_scalar(part)}")
+        }
+    }
+    out.join("")
+}
+
+md_mask: fn(text: String) -> String {
+    masked := md_mask_digests(text)
+    loop key in MD_VOLATILE_KEYS -> masked = md_mask_key(masked, key)
+    masked
+}
+
+// A door's recording: its exit code, its stdout, and its stderr JSON lines.
+md_record: fn(jet: String, door: MachineDoor) -[Env, Exec, Time.Wait]> String {
+    argv := [String]{jet}
+    loop arg in door.args -> argv.push(arg.copy())
+    spec := md_process.cmd(argv).cwd(MD_CORPUS).env("NO_COLOR", "1")
+    // The outer test run's switches (its filter, its update mode) are not the door's.
+    loop name in (md_process.env_keys() ?? panic("read the environment: {err}")) {
+        if name.starts_with("JET_TEST") || name == "JET_UPDATE_SNAPSHOTS" {
+            spec = spec.env_remove(name)
+        }
+    }
+    ran: spec.stdout(.Capture).stderr(.Capture).run() ?? panic("run `jet {door.args.join(" ")}`: {err}")
+    json := [String]{}
+    loop line in md_process.stderr_lines(ran) {
+        if line.starts_with("{{") -> json.push(line)
+    }
+    md_mask("exit {ran.code}\n--- stdout\n{ran.output}--- stderr JSON\n{json.join("\n")}\n")
+}
+
+#Test("masking hides digests and volatile values and keeps the rest") {
+    text: `{"elapsed_ms":25,"report":"test:f726f69157eddc8b:2654214:1794911227967456533","build":{"target":"x86_64-unknown-linux-gnu"},"id":"f65c3e3fe3eb78838a69885607fa7186","span":{"start":78}}`
+    assert_eq(md_mask(text), `{"elapsed_ms":"<volatile>","report":"<volatile>","build":{"target":"<volatile>"},"id":"<hash>","span":{"start":78}}`)
+}
+
+#Test("every machine door prints the bytes it printed before the case rules") {
+    guards_enter_root()
+    jet: md_jet()
+    loop door in MD_DOORS {
+        assert(md_testing.golden("{MD_CORPUS}/{door.name}.out", md_record(jet, door)))
+    }
+}
