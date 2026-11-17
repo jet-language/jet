@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111875,
+    "rev": 111884,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -43,7 +43,7 @@
         "radar:e19"
       ]
     },
-    "completionCursor": "2026-11-17T13:09:03.227Z",
+    "completionCursor": "2026-11-17T15:31:44.613Z",
     "dayStart": {
       "date": "2026-11-17",
       "openCards": 359,
@@ -53963,11 +53963,11 @@
         {
           "n": 2,
           "text": "A post-link step (signing, or embedding an icon or manifest) runs on the written artifact through the same typed action mechanism, with an executable example.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:45:55.371Z",
+          "evidence": "dev a438ca5a1a (p266, post_link stage over the written artifact through the typed BuildAction mechanism) and eba6f39612 (p270, example Examples/Tooling/Build/PostLinkManifest: a post_link step that embeds a manifest via objcopy). On batch compiler p270: golden PostLinkManifest PASS and case post_link_step_signs_artifact PASS (p268).",
+          "at": "2026-11-17T16:05:36.630Z",
           "proof": {
             "profile": "cases",
             "filter": "post_link_step_signs_artifact"
@@ -54059,7 +54059,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:49:38.986Z",
-      "updated": "2026-11-17T15:05:45.855Z",
+      "updated": "2026-11-17T16:05:36.630Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -90640,6 +90640,16 @@
         {
           "at": "2026-11-17",
           "by": "Main",
+          "text": "c2 ruling (Main): the L2510 cost lints are opt-in, run only by jet lint --cost and jet explain --cost like the other optional jet lint checks. Plain jet check adds no cost warnings; it carries only the projection's completeness refusal (E2104), so existing snapshots don't churn. The hot-loop case's jet check step is dropped."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c2 ruling (Main): no valid source reaches an incomplete reachable projection (a bodyless fn is E0081, foreign is exempt, every checked callee has a FnBody row). The producer still reports E2104 for a reachable non-foreign callee with no body row; a JetDriver unit test that drops a body row proves it, and the existing E2104 UI snapshots cover the rendering. That meets c2's 'UI snapshot' part. No UI fixture is contorted to force it."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
           "text": "c2 ruling (Main, within scope): cost_incomplete_generic.jet is byte-identical to the fixture cost_cli_projects_generic_specializations needs to pass, so both cases can't pass. Valid generic and foreign programs project completely. E2104 stays for a genuinely incomplete reachable projection (a reachable checked callable with no body row), forced by a dedicated fixture with its UI snapshot, and the rejects case is rewritten to use that fixture. Owner: Speed."
         },
         {
@@ -90678,7 +90688,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T06:50:52.522Z",
-      "updated": "2026-11-17T14:49:06.561Z",
+      "updated": "2026-11-17T15:30:05.338Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -90785,11 +90795,11 @@
         {
           "n": 6,
           "text": "The last two Jetpack workarounds for port-found defects go: Jetpack/Store/Source/Nar/NarCodec.jet:45 (`workaround #5940(d,e)`: the NarByteInput enum instead of an escaping lambda owning the reader) and Jetpack/Publication/Source/TUF.jet:392 (`workaround #5940(h)`: a `path.copy()` local before a lambda capture) use the fixed forms, as 62e933686a did for the other sites. Proof: `git grep -n 'workaround #5940' -- Jetpack` prints nothing, and `jet test Jetpack/Store` and `jet test Jetpack/Publication` pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:03:02.305Z"
+          "evidence": "dev 0b8f8c0562 (p268, NarCodec uses the escaping-lambda form) and d29d7cff88 (p269, TUF captures path directly). git grep -n 'workaround #5940' origin/dev -- Jetpack prints nothing. 'jet test Jetpack/Publication' passes on batch compiler p269 (rc 0).",
+          "at": "2026-11-17T15:58:30.276Z"
         }
       ],
       "refs": [],
@@ -90797,7 +90807,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-07T08:09:39.678Z",
-      "updated": "2026-11-17T15:06:00.452Z",
+      "updated": "2026-11-17T15:58:30.276Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -96082,11 +96092,20 @@
         {
           "n": 3,
           "text": "A stored closure (in a struct field or a list) that writes a captured `:=` local, by `k += 1` or a `&self` method call, either writes the original or is refused with a registered error; it never silently loses the write (gate-p64 prints 10; CardCloser-3 found the field and list forms on gate-p131). Proof: `jet test Compiler --profile ui --filter stored_closure_capture_write` and `jet test Compiler --profile cases --filter Closures/stored_closure_capture_write_` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 23be2f30cb (p268) and 2d5ee4ccc1 (p270). A stored closure that writes a captured := local makes every later whole or field read of that local the registered E0204 jet.UseWhileWriteActive, so the write is never silently lost. On batch compiler p270: cases Closures/stored_closure_capture_write_ 2/2 PASS (both forms run on O0, O1 and O2); ui stored_closure_capture_write PASS on p268, and the new field-read snapshot stored_closure_capture_write_field_read landed in 2d5ee4ccc1. Card2845StoredMutatingClosureTierParity and ReactiveCodegenClonesTheWholeRootBeforeRunning goldens pass on all tiers.",
+          "at": "2026-11-17T16:05:34.995Z"
+        },
+        {
+          "n": 4,
+          "text": "A lambda bound to a local reads the captured local's current value, or the program is refused. Today 'v := [1]; f := fn() { v.len() }; v.push(2); f()' prints the stale count (accepted on p267 and p268): the outer write is invisible to the lambda's copy, the converse of c3. Proof: a case in Tests/Cases/Closures where each tier prints the current value or the UI snapshot shows the registered refusal.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:04:36.887Z"
+          "at": "2026-11-17T15:27:55.185Z"
         }
       ],
       "refs": [],
@@ -96094,9 +96113,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T09:48:08.492Z",
-      "updated": "2026-11-17T01:45:25.352Z",
+      "updated": "2026-11-17T16:05:34.995Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3
+      "criteriaLastN": 4
     },
     {
       "id": "c0g4h3r9",
@@ -96772,7 +96791,7 @@
       "track": "epoch",
       "epoch": "e19",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -96781,6 +96800,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "Closed: all 4 criteria met (c3 on p270, 8b3c9ea3ae)."
+        },
         {
           "at": "2026-11-16",
           "by": "Main",
@@ -96833,11 +96857,11 @@
         {
           "n": 3,
           "text": "Crewboard's \"assigned to you\" push is sent only after update_task's transaction commits, and a rolled-back write sends nothing. This uses the after-commit outbox (#6825 c1).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:04:52.909Z",
+          "evidence": "dev ff7f01417a and badb784097 (p269 and p270, App.push(...) push settings, with .push reading its key variables itself through -[Env]>) and 8b3c9ea3ae (p270, the proof case). On batch compiler p270, case WebApp/assignee_push_is_sent_after_commit_only PASS: the assignee push goes out through the after-commit outbox only after update_task commits, and a rolled-back write sends nothing. Every HTTP example passes on all tiers again (golden 0 FAIL).",
+          "at": "2026-11-17T16:05:38.269Z",
           "proof": {
             "profile": "cases",
             "filter": "WebApp/assignee_push_is_sent_after_commit_only"
@@ -96858,9 +96882,10 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:41.131Z",
-      "updated": "2026-11-17T05:18:28.734Z",
+      "updated": "2026-11-17T16:05:46.463Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-17T16:05:46.463Z"
     },
     {
       "id": "c01pk3vf",
@@ -215617,6 +215642,69 @@
   ],
   "events": [
     {
+      "at": "2026-11-17T16:05:46.463Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0f4o904",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-17T16:05:38.269Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0f4o904",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T16:05:36.630Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gmf0y4",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T16:05:34.995Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08zzpo5",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T15:58:30.276Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0m4deiq",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-17T15:31:44.613Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-17T15:31:44.613Z"
+    },
+    {
+      "at": "2026-11-17T15:30:05.338Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zlsxzv",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T15:27:55.185Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c08zzpo5",
+      "note": "#4 A lambda bound to a local reads the captured local's current"
+    },
+    {
+      "at": "2026-11-17T15:25:12.370Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0zlsxzv",
+      "note": "logEntry"
+    },
+    {
       "at": "2026-11-17T15:06:01.415Z",
       "by": "Main",
       "action": "card.update",
@@ -219080,713 +219168,6 @@
       "action": "card.update",
       "ref": "c0l0ygs4",
       "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:10.664Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00fktgk",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:08.776Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0m83e3n",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:07.835Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lidgow",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:06.289Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0t54oz7",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:04.982Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06r6neu",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:02.974Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uyfbge",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:48:02.129Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:48:00.549Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06l1r0z",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:47:59.635Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0e6znz4",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:58.034Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nctuf1",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:47:56.969Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gokkbf",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:55.709Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0i891tv",
-      "note": "#36"
-    },
-    {
-      "at": "2026-11-17T01:47:54.710Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c08r6ogl",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T01:47:53.811Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0n7zpy3",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:53.018Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vqsfl8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T01:47:52.009Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0vqsfl8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T01:47:50.979Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0x9nq8j",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T01:47:50.031Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0r6d7ja",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:49.191Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wi8ere",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-17T01:47:48.132Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0wi8ere",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T01:47:47.034Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jd9jl3",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-17T01:47:46.013Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ct5o6i",
-      "note": "track,epoch,goals"
-    },
-    {
-      "at": "2026-11-17T01:47:45.058Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0jd9jl3",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T01:47:43.986Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#30"
-    },
-    {
-      "at": "2026-11-17T01:47:42.775Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0o8f1p4",
-      "note": "#24"
-    },
-    {
-      "at": "2026-11-17T01:47:41.726Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0in2dft",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:40.483Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T01:47:39.267Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c077ihdp",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T01:47:38.075Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0nwrfck",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:37.107Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fi6uj5",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T01:47:35.792Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c03ai7mm",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T01:47:34.594Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0oe96sn",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:33.592Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l0ygs4",
-      "note": "#19"
-    },
-    {
-      "at": "2026-11-17T01:47:32.337Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0l0ygs4",
-      "note": "#17"
-    },
-    {
-      "at": "2026-11-17T01:47:31.060Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0m83e3n",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-17T01:47:29.975Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w0b4wd",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:28.973Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0t54oz7",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T01:47:27.657Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uyfbge",
-      "note": "#11"
-    },
-    {
-      "at": "2026-11-17T01:47:26.374Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0uyfbge",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T01:47:25.300Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0reo0hk",
-      "note": "track,epoch,goals"
-    },
-    {
-      "at": "2026-11-17T01:47:24.361Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06l1r0z",
-      "note": "#14"
-    },
-    {
-      "at": "2026-11-17T01:47:22.858Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06l1r0z",
-      "note": "#9"
-    },
-    {
-      "at": "2026-11-17T01:47:21.589Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pv78gy",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:20.363Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nctuf1",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-17T01:47:18.949Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nctuf1",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T01:47:17.377Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0nctuf1",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T01:47:15.921Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0exjsbx",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:13.016Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0e5gz4o",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:10.043Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0w7y8wz",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:07.436Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0b5xq4b",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:47:03.941Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0429qak",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:46:58.180Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00xuadc",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:46:52.947Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0akrada",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:46:47.351Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ha077m",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:46:41.840Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02vkuef",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:46:37.401Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0s5hn28",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:46:33.513Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c051j6ab",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:46:28.628Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fpntwa",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:46:25.207Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gelll3",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:46:22.075Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0rom5jy",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:46:17.672Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02inyar",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:46:08.990Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fqrrpk",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:46:03.073Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0unyp7q",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:59.266Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c097myt8",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:57.647Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0mq8xwu",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:54.655Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01pk3vf",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:51.225Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0f4o904",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:49.623Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0prey1k",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:46.862Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0zupuj4",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:42.741Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0b3gyq2",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:41.106Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0okfgjw",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:38.229Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c00g7rk8",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:37.048Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0uwol3w",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:45:33.472Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0hkdzht",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:31.854Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0x3j5om",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:28.819Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0g4h3r9",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:25.352Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c08zzpo5",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:23.596Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gy2j07",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:20.347Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0xphd0i",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:16.847Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0on083p",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:14.883Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ssy5wy",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:11.469Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ef6eb1",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:08.471Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0pmy5fy",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:06.663Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j93bm1",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:45:03.126Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0miof6j",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:59.788Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qnrbr0",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:57.624Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c03obxd3",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:55.352Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0cnf5w8",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:53.243Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07k91t6",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:51.672Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0exjsbx",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:44:49.985Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0j3st66",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:47.401Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0leoyxb",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:46.144Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0unyp7q",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T01:44:43.926Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qoe1b9",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:41.287Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0f9brds",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:38.863Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0qyk2os",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:36.335Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01xp5ri",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:32.975Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0vwlomv",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:31.419Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0ky4017",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:29.095Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0wz8yaf",
-      "note": "track,epoch"
-    },
-    {
-      "at": "2026-11-17T01:44:27.053Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c01pk3vf",
-      "note": "#1"
     }
   ],
   "nextNum": 368,
