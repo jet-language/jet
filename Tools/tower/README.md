@@ -86,7 +86,11 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   taste or a real environment eyes-only check. That mints an accept/bounce
   ballot once the checklist is clean. Bare `verify` is legacy agent state and
   does not appear in the owner's Now queue. Integration and no-known-blocker
-  are orchestration evidence, not mandatory rows on every card.
+  are orchestration evidence, not mandatory rows on every card. A row meets
+  only on durable evidence: a commit on `dev` or `master`, or a declared
+  `--kind decision|duplicate|obsolete` with its evidence. A refused close lists
+  every failing row with its reason. `card criteria --move n --to '#M'` moves
+  an open row to another card and links both rows (`movedTo`/`movedFrom`).
   Acceptance is owner-UI-only: generic ratify, batch clearance, CLI
   `--by owner`, and agent quotes cannot resolve `D-ACCEPT-*`; rejected
   attempts remain in the audit log.

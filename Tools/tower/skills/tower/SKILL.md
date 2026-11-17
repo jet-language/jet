@@ -67,9 +67,10 @@ approved contract is not a ballot.
   evidence and no contradictory blocker remains. Do not add a per-card review,
   duplicate proof, broad suite, or technical `verify` step.
 - Criterion evidence names the landed commit on `dev` or `master`; scratch
-  output alone is refused (`E_EVIDENCE`). A row with no code to land declares
-  `--kind decision|duplicate|obsolete` and names the ratified decision, the
-  surviving card, or the reason.
+  output alone is refused (`E_EVIDENCE`), at `--meet` as at close. A row with
+  no code to land declares `--kind decision|duplicate|obsolete` and names the
+  ratified decision, the surviving card, or the reason. A row that belongs on
+  another card moves with `--move n --to '#M'`, which keeps both rows linked.
 - Board text never names this machine's home, user, host, email or mounts
   (#6564 c5). Write `~`, `$JET_SCRATCH_ROOT`, `user` or `devhost` instead; a
   write that adds one is refused (`E_PERSONAL_INFO`) with the text to use.

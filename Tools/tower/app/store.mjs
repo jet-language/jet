@@ -542,6 +542,12 @@ function validateStoredCriterion(item, index, source) {
     validateStoredString(item[key], `${label}.${key}`);
   if (item.closure !== undefined && !CLOSURE_KINDS.includes(item.closure))
     fail('E_INVALID', `${label}.closure must be one of ${CLOSURE_KINDS.join(', ')}`);
+  for (const key of ['movedTo', 'movedFrom']) {
+    if (item[key] === undefined) continue;
+    if (!plainObject(item[key])) fail('E_INVALID', `${label}.${key} must be an object`);
+    validateStoredNumber(item[key].card, `${label}.${key}.card`, { integer: true, min: 1 });
+    validateStoredNumber(item[key].n, `${label}.${key}.n`, { integer: true, min: 1 });
+  }
 }
 
 function validateStoredCriteria(criteria, source) {
@@ -1789,8 +1795,10 @@ export function updateHardeningCard(s, ref, p, config, history = emptyHistory())
 const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'probe', 'visualMedia', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId', 'hardeningFixture', 'hardeningState'];
 
 // D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Agent closure needs a
-// nonempty checklist with every row met or verified. Owner writes keep the
-// legacy bypass and audit event. needsAcceptance remains transport-hard.
+// nonempty checklist with every row met or verified on durable evidence. A
+// refusal lists every failing criterion with its reason, so one read shows all
+// that is left. Owner writes keep the legacy bypass and audit event.
+// needsAcceptance remains transport-hard.
 function applyDoneGate(s, c, targetPhase, by, criteria = c.criteria, needsAcceptance = c.needsAcceptance, config = {}) {
   if (targetPhase !== 'done') return null;
   if (needsAcceptance && by === 'owner')
@@ -1801,11 +1809,15 @@ function applyDoneGate(s, c, targetPhase, by, criteria = c.criteria, needsAccept
   const unsettled = items.filter(i => !['met', 'verified'].includes(i.status));
   if (by !== 'owner' && !items.length)
     fail('E_CRITERIA', `card #${c.num} needs at least one exit criterion before an agent can close it`);
-  if (by !== 'owner' && unsettled.length)
-    fail('E_CRITERIA', `${unsettled.length} of ${items.length} criteria not met or verified (${unsettled.map(i => i.n).join(',')})`);
   if (by !== 'owner') {
-    const issues = items.map(i => criterionDurabilityIssue(s, c, i.n, i.closure || 'code', i.evidence, config, null)).filter(Boolean);
-    if (issues.length) fail('E_EVIDENCE', `card #${c.num} cannot close: ${issues.join('; ')}`);
+    const failing = items.map(i => {
+      if (unsettled.includes(i)) return `c${i.n}: not met — ${shorten(i.text, 120)}`;
+      const issue = criterionDurabilityIssue(s, c, i.closure || 'code', i.evidence, config, null);
+      return issue && `c${i.n}: ${issue}`;
+    }).filter(Boolean);
+    if (failing.length)
+      fail(unsettled.length ? 'E_CRITERIA' : 'E_EVIDENCE',
+        `card #${c.num} cannot close: ${failing.length} of ${items.length} criteria fail\n  ${failing.join('\n  ')}`);
   }
   // A closed card leaves the board view, which strands any ballot still open on
   // it: the owner can no longer ask about it from the ballot deck. The card's own
@@ -2048,6 +2060,7 @@ function rewordCriterion(item, text) {
     item.verifiedBy = null;
     item.evidence = '';
     delete item.closure;
+    delete item.movedTo;
   }
   item.at = now();
   return { before, reopened };
@@ -2078,6 +2091,48 @@ export function removeCriterion(s, ref, n, { reason, by } = {}) {
   return { ...item, removed: true, cardId: c.id, cardNum: c.num };
 }
 
+// Moving a criterion re-homes its work: the text becomes a new open criterion
+// on the target card, and the source row closes as a duplicate that points at
+// it. Both rows carry the link (movedTo / movedFrom), so either side leads to
+// the other.
+export function moveCriterion(s, ref, n, { to, reason, by } = {}) {
+  const c = mustCard(s, ref);
+  const item = mustCriterion(c, n);
+  if (!by) fail('E_INVALID', 'move needs --by <agent>');
+  if (to == null || to === '' || to === true) fail('E_INVALID', 'move needs --to <card>');
+  const target = mustCard(s, to);
+  if (target === c) fail('E_INVALID', `criterion #${item.n} is already on card #${c.num}`);
+  if (item.status !== 'open')
+    fail('E_INVALID', `criterion #${item.n} on card #${c.num} is ${item.status}; only an open criterion moves`);
+  if (target.phase === 'done') fail('E_INVALID', `card #${target.num} is done; reopen it before moving work onto it`);
+  const why = reason == null ? '' : String(reason).trim();
+  target.criteria ||= [];
+  const k = nextCriterionNumber(target);
+  const moved = {
+    n: k, text: item.text, status: 'open', metBy: null, verifiedBy: null, evidence: '', at: now(),
+    movedFrom: { card: c.num, n: item.n },
+  };
+  target.criteria.push(moved);
+  item.status = 'met';
+  item.metBy = by;
+  item.verifiedBy = null;
+  item.evidence = `Moved to #${target.num} c${k}`;
+  item.closure = 'duplicate';
+  item.movedTo = { card: target.num, n: k };
+  item.at = now();
+  for (const card of [c, target]) {
+    invalidateCardMilestone(s, card);
+    touchCard(card, by);
+  }
+  maybeMintAcceptance(s, c);
+  logEvent(s, { by, action: 'card.criteria-move', ref: c.id, note: `#${item.n} → #${target.num} c${k}${why ? `: ${why}` : ''}` });
+  logEvent(s, { by, action: 'card.criteria-add', ref: target.id, note: `#${k} moved from #${c.num} c${item.n}` });
+  return {
+    from: { ...item, cardId: c.id, cardNum: c.num },
+    to: { ...moved, cardId: target.id, cardNum: target.num },
+  };
+}
+
 function mustCriterion(c, n) {
   const item = (c.criteria || []).find(i => i.n === Number(n));
   if (!item) fail('E_NOT_FOUND', `no criterion #${n} on card #${c.num}`);
@@ -2091,10 +2146,9 @@ function mustCriterion(c, n) {
 // `obsolete` gives the reason. No kind may rest on scratch output alone. With
 // history null (the done gate) the decision and card lookups are skipped: they
 // ran when the row was met, and the target may since have retired.
-function criterionDurabilityIssue(s, c, n, kind, evidence, config, history) {
-  const where = `criterion #${n}`;
+function criterionDurabilityIssue(s, c, kind, evidence, config, history) {
   if (!CLOSURE_KINDS.includes(kind))
-    return `${where}: unknown closure kind "${kind}" (use ${CLOSURE_KINDS.join(', ')})`;
+    return `unknown closure kind "${kind}" (use ${CLOSURE_KINDS.join(', ')})`;
   const text = String(evidence || '').trim();
   const resolver = config?.durability;
   const active = !!resolver?.active();
@@ -2104,34 +2158,34 @@ function criterionDurabilityIssue(s, c, n, kind, evidence, config, history) {
   if (kind === 'code') {
     if (!active || durable) return null;
     if (commits.length)
-      return `${where}: commit ${commits.map(found => found.token).join(', ')} is not on ${branches}; land it, then cite the landed commit`;
+      return `commit ${commits.map(found => found.token).join(', ')} is not on ${branches}; land it, then cite the landed commit`;
     if (SCRATCH_PATH_RE.test(text))
-      return `${where}: evidence cites only scratch output, which is throwaway; land the work and cite its commit on ${branches}`;
-    return `${where}: evidence names no commit on ${branches}; cite the landed commit, or declare --kind decision, duplicate or obsolete`;
+      return `evidence cites only scratch output, which is throwaway; land the work and cite its commit on ${branches}`;
+    return `evidence names no commit on ${branches}; cite the landed commit, or declare --kind decision, duplicate or obsolete`;
   }
-  if (!text) return `${where}: --kind ${kind} needs --evidence`;
+  if (!text) return `--kind ${kind} needs --evidence`;
   if (SCRATCH_PATH_RE.test(text) && !durable)
-    return `${where}: evidence cites scratch output, which is throwaway; land the work and cite its commit${branches ? ` on ${branches}` : ''}`;
+    return `evidence cites scratch output, which is throwaway; land the work and cite its commit${branches ? ` on ${branches}` : ''}`;
   if (history === null) return null;
   if (kind === 'decision') {
     const decisions = [...(s.decisions || []), ...(history?.decisions || [])];
     const ids = text.match(/\bD-[A-Za-z0-9][A-Za-z0-9-]*/g) || [];
     if (!ids.some(id => decisions.some(d => d.id === id && d.status === 'ratified')))
-      return `${where}: --kind decision evidence must name the ratified decision (D-...) that settles it`;
+      return '--kind decision evidence must name the ratified decision (D-...) that settles it';
   }
   if (kind === 'duplicate') {
     const cards = [...(s.cards || []), ...(history?.cards || [])];
     const nums = [...text.matchAll(/#(\d+)\b/g)].map(m => Number(m[1])).filter(num => num !== c.num);
     if (!nums.some(num => cards.some(card => card.num === num)))
-      return `${where}: --kind duplicate evidence must name the card (#N) this one duplicates or merged into`;
+      return '--kind duplicate evidence must name the card (#N) this one duplicates or merged into';
   }
   return null;
 }
 
 function assertCriterionDurable(s, c, n, kind, evidence, by, config, history) {
   if (by === 'owner') return;
-  const issue = criterionDurabilityIssue(s, c, n, kind, evidence, config, history ?? {});
-  if (issue) fail('E_EVIDENCE', `card #${c.num} ${issue}`);
+  const issue = criterionDurabilityIssue(s, c, kind, evidence, config, history ?? {});
+  if (issue) fail('E_EVIDENCE', `card #${c.num} criterion #${n}: ${issue}`);
 }
 
 // A recorded non-code closure kind; `code` is the default and is not stored.
@@ -2188,6 +2242,7 @@ export function reopenCriterion(s, ref, n, { reason, by } = {}) {
   item.verifiedBy = null;
   item.evidence = '';
   delete item.closure;
+  delete item.movedTo;
   item.at = now();
   invalidateCardMilestone(s, c);
   touchCard(c, by);

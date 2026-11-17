@@ -90,7 +90,7 @@ const COMMAND_FLAGS = {
     claim: by(),
     release: by('handoff'),
     delete: by(),
-    criteria: by('add', 'edit', 'text', 'remove', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
+    criteria: by('add', 'edit', 'text', 'remove', 'move', 'to', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
     log: by('text'),
   }},
   decision: { verbs: {
@@ -191,7 +191,7 @@ function checkFlags(cmd, verb, flags) {
 }
 
 const FLAG_VALUE = {
-  add: '"text"', edit: 'n', remove: 'n', meet: 'n', verify: 'n', reopen: 'n', reason: '"…"', evidence: '"…"',
+  add: '"text"', edit: 'n', remove: 'n', move: 'n', to: 'REF', meet: 'n', verify: 'n', reopen: 'n', reason: '"…"', evidence: '"…"',
   by: 'X', file: 'FILE', stdin: null, color: '=auto|always|never',
   sections: 'FILE',
   title: '"…"', body: '"…"', text: '"…"', path: 'PATH', section: 'SECTION',
@@ -276,6 +276,12 @@ const cardLine = (c, { epoch } = {}) =>
   `#${String(c.num).padEnd(4)}${epoch ? ` ${epoch.padEnd(4)} ` : ' '}${(c.priority || '').padEnd(3)} ${displayLane(c.lane.lane).padEnd(9)} ${c.title.slice(0, epoch ? 52 : 60)}`;
 // The short `E18` tag for an epoch id on this board; `—` when there is none.
 const epochTag = (s, id) => id ? epochLabel(s.epochs.find(e => e.id === id) || { id }, { name: false }) : '—';
+// One criterion row of `card criteria --list`, with its move links.
+const criterionLine = (it) => `#${it.n} [${it.status}] ${it.text}`
+  + (it.movedFrom ? `  ← from #${it.movedFrom.card} c${it.movedFrom.n}` : '')
+  + (it.movedTo ? `  → moved to #${it.movedTo.card} c${it.movedTo.n}` : '')
+  + (it.metBy ? `  met:${it.metBy}` : '') + (it.verifiedBy ? `  verified:${it.verifiedBy}` : '')
+  + (it.evidence && !it.movedTo ? `  — ${it.evidence}` : '');
 const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
 const zeroWidth = /[\p{Mark}\p{Default_Ignorable_Code_Point}\p{Control}]/u;
 const glyphWidth = (glyph) => {
@@ -566,6 +572,12 @@ function cmdCard(store, { pos, flags }) {
         return out(flags, `criterion #${result.n} removed from card #${result.cardNum}`, result);
       }
       if (flags.text !== undefined) throw new TowerError('E_USAGE', 'card criteria --text goes with --edit n');
+      if (flags.to !== undefined && flags.move === undefined) throw new TowerError('E_USAGE', 'card criteria --to goes with --move n');
+      if (flags.move !== undefined) {
+        if (flags.to === undefined) throw new TowerError('E_USAGE', 'card criteria --move n needs --to <card>');
+        const { result } = store.mutate((s) => db.moveCriterion(s, ref, flags.move, { to: flags.to, reason: flags.reason, by }));
+        return out(flags, `criterion #${result.from.n} moved from card #${result.from.cardNum} to card #${result.to.cardNum} as c${result.to.n}`, result);
+      }
       if (flags.add !== undefined) {
         const { result } = store.mutate((s) => db.addCriterion(s, ref, flags.add, by));
         return out(flags, `added criterion #${result.n} to card #${result.cardNum}`, result);
@@ -583,7 +595,7 @@ function cmdCard(store, { pos, flags }) {
       const s = store.load();
       const found = db.findCard(s, ref) || (() => { throw new TowerError('E_NOT_FOUND', `no card ${ref}`); })();
       if (flags.json) return out(flags, null, found.criteria || []);
-      for (const it of found.criteria || []) console.log(`#${it.n} [${it.status}] ${it.text}${it.metBy ? `  met:${it.metBy}` : ''}${it.verifiedBy ? `  verified:${it.verifiedBy}` : ''}${it.evidence ? `  — ${it.evidence}` : ''}`);
+      for (const it of found.criteria || []) console.log(criterionLine(it));
       if (!(found.criteria || []).length) console.log('(no criteria — an agent cannot close this card)');
       return;
     }
@@ -1123,7 +1135,8 @@ function renderBrief(p, t) {
     L.push(`  ${t.dim('Workers return a receipt. After integrated proof, the orchestrator marks rows met and closes the card.')}`);
     for (const it of items) {
       const state = (it.status === 'verified' ? t.success : it.status === 'met' ? t.warn : t.dim)(`[${it.status}]`);
-      L.push(`  ${t.border(`#${it.n}`)} ${state} ${it.text}${it.metBy ? `  ${t.dim(`met:${it.metBy}`)}` : ''}${it.verifiedBy ? `  ${t.dim(`verified:${it.verifiedBy}`)}` : ''}${it.evidence ? `  ${t.border('—')} ${it.evidence}` : ''}`);
+      const moved = `${it.movedFrom ? `  ${t.dim(`← from #${it.movedFrom.card} c${it.movedFrom.n}`)}` : ''}${it.movedTo ? `  ${t.dim(`→ moved to #${it.movedTo.card} c${it.movedTo.n}`)}` : ''}`;
+      L.push(`  ${t.border(`#${it.n}`)} ${state} ${it.text}${moved}${it.metBy ? `  ${t.dim(`met:${it.metBy}`)}` : ''}${it.verifiedBy ? `  ${t.dim(`verified:${it.verifiedBy}`)}` : ''}${it.evidence ? `  ${t.border('—')} ${it.evidence}` : ''}`);
     }
   } else {
     L.push('', heading(`CRITERIA  (none — an agent cannot close this card${p.criteria.needsAcceptance ? '; owner visual review still applies' : ''})`));

@@ -1384,6 +1384,8 @@ async function showDetail(ref) {
   else showDetailMessage(summary ? `Loading #${summary.num} ${summary.title}…` : 'Loading card…');
   await loadDetail(id);
 }
+// A card named by its number, as move links and text references cite it.
+const showCardNum = (num) => showDetail(allCards().find(c => c.num === num)?.id || `#${num}`);
 
 function showDetailMessage(text, retry = null) {
   detailShown = null;
@@ -1508,9 +1510,12 @@ function renderDetail(c) {
           <span style="margin-left:auto"><button class="btn btn--ghost btn--sm" data-crit-edit>Edit</button>
           <button class="btn btn--ghost btn--sm" data-crit-remove>Remove</button></span></div>
         <div class="critrow__text">${esc(it.text)}</div>
-        ${it.evidence ? `<div class="critrow__ev">${esc(it.evidence)}</div>` : ''}
+        ${it.movedFrom ? `<div class="critrow__moved">← moved from <button class="linkbtn" data-card-num="${esc(it.movedFrom.card)}">#${esc(it.movedFrom.card)} c${esc(it.movedFrom.n)}</button></div>` : ''}
+        ${it.movedTo ? `<div class="critrow__moved">→ moved to <button class="linkbtn" data-card-num="${esc(it.movedTo.card)}">#${esc(it.movedTo.card)} c${esc(it.movedTo.n)}</button></div>` : ''}
+        ${it.evidence && !it.movedTo ? `<div class="critrow__ev">${esc(it.evidence)}</div>` : ''}
         ${it.metBy || it.verifiedBy ? `<div class="critrow__by">${it.metBy ? `met: ${esc(it.metBy)}` : ''}${it.verifiedBy ? `  verified: ${esc(it.verifiedBy)}` : ''}</div>` : ''}
       </div>`);
+    row.querySelectorAll('[data-card-num]').forEach(b => b.addEventListener('click', () => showCardNum(Number(b.dataset.cardNum))));
     // Editing a met row reopens it on the server: its evidence proved the old wording.
     const text = $('.critrow__text', row);
     const editBtn = $('[data-crit-edit]', row);

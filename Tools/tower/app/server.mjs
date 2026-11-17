@@ -135,6 +135,7 @@ const routes = {
   'card/criteria-reopen': (s, p) => db.reopenCriterion(s, p.id, p.n, { reason: p.reason, by: p.by }),
   'card/criteria-edit':   (s, p) => db.editCriterion(s, p.id, p.n, { text: p.text, reason: p.reason, by: p.by }),
   'card/criteria-remove': (s, p) => db.removeCriterion(s, p.id, p.n, { reason: p.reason, by: p.by }),
+  'card/criteria-move':   (s, p) => db.moveCriterion(s, p.id, p.n, { to: p.to, reason: p.reason, by: p.by }),
   'decision/add':    (s, p) => db.addDecision(s, p),
   'decision/update': (s, p) => db.updateDecision(s, p.id, p, p.by),
   'decision/delete': (s, p) => db.deleteDecision(s, p.id, p.by),

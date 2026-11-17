@@ -84,6 +84,13 @@ takes the same flags). Rewording a met or verified row reopens it, because its
 evidence proved the old wording. Removed numbers are never reused, and the event
 log keeps the old text and the reason.
 
+`--move n --to '#M' [--reason "…"]` moves an open row to card #M: the text
+becomes a new open row there, and the old row is met as kind `duplicate` with
+evidence `Moved to #M cK`. Both rows keep the link, shown by `--list`. A row
+meets only on durable evidence (a commit on `dev` or `master`, or a `--kind`
+with its evidence); a refused meet changes nothing. A refused close lists every
+failing row with its reason, one per line.
+
 Only the owner starts `tower serve`. Agents use the non-serve CLI. Use HTTP
 only when the owner has already started the server and the task explicitly
 requires it; never start a server or open a browser for the owner.

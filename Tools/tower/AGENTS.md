@@ -161,11 +161,14 @@ tower card criteria '#12' --add "matrix vs full spec, per feature" --by planner
 tower card criteria '#12' --meet 1 --evidence "landed 3f2a9c1e: matrix 9/9" --by orchestrator
 tower card criteria '#12' --verify 1 --evidence "milestone review of 3f2a9c1e confirmed it" --by reviewer
 tower card criteria '#12' --meet 2 --kind decision --evidence "D-CACHE1 ratified A: no code change" --by orchestrator
+tower card criteria '#12' --move 3 --to '#40' --reason "belongs with the parser work" --by planner
 tower card criteria '#12' --list
 ```
 
-`--phase done` by a non-owner is refused (`E_CRITERIA`) when the card has no
-criteria or any row is not `met` or `verified`. The orchestrator marks rows
+`--phase done` by a non-owner is refused when the card has no criteria, when
+any row is not `met` or `verified` (`E_CRITERIA`), or when a settled row's
+evidence no longer passes the rule below (`E_EVIDENCE`). One refusal lists
+every failing row, one per line, as `cN: reason`. The orchestrator marks rows
 `met` only from integrated focused proof. When the last row settles on an
 actively claimed card, `E_CLOSE_READY` blocks every further claim and brief
 until that card closes, reopens, or gains a real gate. A milestone reviewer may
@@ -180,9 +183,16 @@ the row declares a non-code closure with `--kind`: `decision` (names the
 ratified `D-…` that settles it), `duplicate` (names the `#N` it duplicates or
 merged into) or `obsolete` (the evidence is the reason). Evidence that cites
 only scratch output (`$JET_SCRATCH_ROOT`, `$JET_STATE_ROOT`, `$JET_RUN_ROOT`,
-`~/.cache`, `/tmp`) is refused, and `--phase done` re-checks every row
-(`E_EVIDENCE`). The guard applies when the project root is a git work tree
-holding one of those branches.
+`~/.cache`, `/tmp`) is refused. `--meet` and `--verify` apply this rule when the
+row settles, so a refused meet changes nothing, and `--phase done` re-checks
+every row (`E_EVIDENCE`). The guard applies when the project root is a git work
+tree holding one of those branches.
+
+A row that belongs on another card moves with `--move n --to '#M'`. Its text
+becomes a new open row on #M, and the old row is met as kind `duplicate` with
+evidence `Moved to #M cK`. Both rows keep the link (`movedTo` on the old row,
+`movedFrom` on the new one), shown by `--list`, the briefing and the card view.
+Only an open row moves, and never onto a done card.
 
 No board text names this machine's home, user, host, email, mounts or dev tool
 roots (#6564 c5). Every write is checked against the rule table in
@@ -488,7 +498,7 @@ GET  /api/gauntlet/standings        the one run shown: newest full or merged
                                      results file, else the planned grid
 GET  /api/messages?card=&open=0|1   durable card messages; open=1 filters
 POST /api/card/add|update|claim|release|delete   (release: {handoff})
-POST /api/card/criteria-add|criteria-edit|criteria-remove|criteria-meet|criteria-verify|criteria-reopen
+POST /api/card/criteria-add|criteria-edit|criteria-remove|criteria-move|criteria-meet|criteria-verify|criteria-reopen   (move: {n, to, reason})
 POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
 POST /api/clearance {decisionId,outcome,comment,quote}  (generic ballots only; quote = on-behalf-of)
 POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, same-origin session-bound, short TTL)
