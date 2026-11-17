@@ -475,12 +475,12 @@ jet_cli_remote_run_consent: fn(origin: JetCLIRemoteRunOrigin, file: String, sour
         return Val(JetDriverVerbOutput{stdout: "", stderr: jet_cli_run_problems(file, source, [Diagnostic]{diagnostic}, color, json), exit_code: JET_DRIVER_EXIT_USER_ERROR})
     }
     console := remote_run_term.stderr()
-    console.write("{origin.name} from {origin.from} ({jet_cli_remote_run_short_hash(origin.pin.content_hash)}), {jet_cli_remote_run_status(origin)}\nit {jet_cli_effect_words(rights)}\nRun it? [y/N] ").drop("remote run question")
+    console.write("{origin.name} from {origin.from} ({jet_cli_remote_run_short_hash(origin.pin.content_hash)}), {jet_cli_remote_run_status(origin)}\nIt {jet_cli_effect_words(rights)}\nRun it? [y/N] ").drop("remote run question")
     input := remote_run_term.stdin()
     answer: input.read_line() ?? ""
     word: answer.trim().to_lower()
     if word != "y" && word != "yes" {
-        return Val(JetDriverVerbOutput{stdout: "", stderr: "not run\n", exit_code: JET_DRIVER_EXIT_USER_ERROR})
+        return Val(JetDriverVerbOutput{stdout: "", stderr: "Not run\n", exit_code: JET_DRIVER_EXIT_USER_ERROR})
     }
     accepted := [String]{}
     if !origin.changed {

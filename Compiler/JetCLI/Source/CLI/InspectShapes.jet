@@ -453,16 +453,16 @@ jet_cli_shape_fact_value: fn(fact: JetCLIShapeFact) -> JetCLIStatusValue Never! 
 jet_cli_shape_name_text: fn(value: String?) -> String Never! { value ?? "ignored" }
 
 jet_cli_shape_fact_text: fn(fact: JetCLIShapeFact) -> String Never! {
-    out := "shape {fact.source}.{fact.type_name} (encoding=Object, layout={fact.layout})\n  dimensions: Known {{ rank: 1, width: {fact.fields.len()} }}\n"
+    out := "Shape {fact.source}.{fact.type_name} (encoding=Object, layout={fact.layout})\n  Dimensions: Known {{ rank: 1, width: {fact.fields.len()} }}\n"
     projected := 0
     loop field in fact.fields {
         if !field.skip -> projected += 1
-        out = "{out}  field {field.name}: {jet_cli_shape_type_label(field.ty)} (order={field.order}, encoding={field.encoding}, skipped={field.skip})\n"
+        out = "{out}  Field {field.name}: {jet_cli_shape_type_label(field.ty)} (order={field.order}, encoding={field.encoding}, skipped={field.skip})\n"
         names: field.names
-        out = "{out}    names: text={names.text} json={jet_cli_shape_name_text(names.json)} cbor={jet_cli_shape_name_text(names.cbor)} csv={jet_cli_shape_name_text(names.csv)} toml={jet_cli_shape_name_text(names.toml)} yaml={jet_cli_shape_name_text(names.yaml)} xml={jet_cli_shape_name_text(names.xml)} args={names.args} env={names.env} db={jet_cli_shape_name_text(names.db)} layout={jet_cli_shape_name_text(names.layout)}\n"
+        out = "{out}    Names: text={names.text} json={jet_cli_shape_name_text(names.json)} cbor={jet_cli_shape_name_text(names.cbor)} csv={jet_cli_shape_name_text(names.csv)} toml={jet_cli_shape_name_text(names.toml)} yaml={jet_cli_shape_name_text(names.yaml)} xml={jet_cli_shape_name_text(names.xml)} args={names.args} env={names.env} db={jet_cli_shape_name_text(names.db)} layout={jet_cli_shape_name_text(names.layout)}\n"
     }
     loop projection in JET_CLI_SHAPE_PROJECTIONS {
-        out = "{out}  projection {projection}: supported ({projected} fields)\n"
+        out = "{out}  Projection {projection}: supported ({projected} fields)\n"
     }
     out
 }

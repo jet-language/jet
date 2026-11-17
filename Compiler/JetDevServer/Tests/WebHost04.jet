@@ -46,7 +46,9 @@ use jetpack_foundation.[terminal_esc]
 #Test("frame_lines_keeps_diagnostic_words_verbatim") {
     diagnostic: "Error [jet.UnknownFunction]: nothing named `nonexistent_function_xyz` exists here\n  8 | nonexistent_function_xyz()\n    | ^^^^^^^^^^^^^^^^^^^^^^^^\nWhy: only defined names can be called\nFix: define it first"
     framed: frame_lines("E0102", diagnostic)
-    loop line in diagnostic.split("\n") -> assert(framed.contains("│ {line}"), "missing verbatim line {line}")
+    loop line in diagnostic.split("\n") {
+        assert(framed.contains("│ {line}"), "missing verbatim line {line}")
+    }
     assert(framed[0].starts_with("┌ E0102 "), framed[0])
     assert(framed[framed.len() - 1].starts_with("└"), framed[framed.len() - 1])
 }

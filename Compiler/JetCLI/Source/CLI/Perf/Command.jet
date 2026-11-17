@@ -50,7 +50,7 @@ jet_cli_perf: fn(argv: [String], color: Bool) -[FS, Env, Exec, Time]> JetDriverV
     }
     if help && jet_cli_nested_command("perf", action) == .Val(found) {
         spec: JET_CLI_COMMANDS[found.group].actions[found.action]
-        return JetDriverVerbOutput{stdout: "jet perf {spec.name} — {spec.summary}\nusage: {spec.usage}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        return JetDriverVerbOutput{stdout: "jet perf {spec.name} — {spec.summary}\nUsage: {spec.usage}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     if action == {
         "run" | "test" -> jet_cli_perf_session(action, rest, quiet, color)
@@ -173,7 +173,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     out = "{out}{diagnostic_theme_paint(color, "1", "command")} {jet_cli_perf_content_text(trace, "command") ?? "unknown"}\n"
     out = "{out}{diagnostic_theme_paint(color, "1", "frames")} {frames}\n"
     if jet_cli_perf_first_sample(trace) == .Val(sample) {
-        out = "{out}sample {sample.domain} {sample.ns}ns · {sample.symbol}\n"
+        out = "{out}Sample {sample.domain} {sample.ns}ns · {sample.symbol}\n"
     }
     summaries: [String?]{
         jet_cli_perf_profile_summary(trace),
@@ -315,9 +315,9 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
     }
     override_note: if mismatch && override_identity -> " · identity override" else -> ""
     baseline_note: if baseline == .Val(name) -> " · baseline {name}" else -> ""
-    out := "compare ok · schema {TRACE_SCHEMA} v{TRACE_VERSION} · base {trace_id(base) ?? "unknown"} · head {trace_id(head) ?? "unknown"}{override_note}{baseline_note}\n"
-    if deltas.len() > 0 -> out = "{out}deltas: {deltas.join(" · ")}\n"
-    if receipt_deltas.len() > 0 -> out = "{out}receipt deltas: {receipt_deltas.join(" · ")}\n"
+    out := "Compare OK · schema {TRACE_SCHEMA} v{TRACE_VERSION} · base {trace_id(base) ?? "unknown"} · head {trace_id(head) ?? "unknown"}{override_note}{baseline_note}\n"
+    if deltas.len() > 0 -> out = "{out}Deltas: {deltas.join(" · ")}\n"
+    if receipt_deltas.len() > 0 -> out = "{out}Receipt deltas: {receipt_deltas.join(" · ")}\n"
     JetDriverVerbOutput{stdout: "{out}{budget}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 

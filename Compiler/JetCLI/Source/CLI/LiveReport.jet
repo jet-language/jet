@@ -7,22 +7,22 @@ jet_cli_live_text: fn(snapshot: JetLiveSnapshot) -> String Never! {
     if event_lines == None {
         event_lines = Val(jet_cli_live_event_render(snapshot.event_records) ?? return "jet inspect live · invalid snapshot: {err.message}\n")
     }
-    out := "jet inspect live · pid {snapshot.pid}\nprotocol={snapshot.protocol} session={snapshot.session_id} source={snapshot.source_id} build={snapshot.build_id} revision={snapshot.revision} world={snapshot.world_id}\n\ntask tree\n"
+    out := "jet inspect live · pid {snapshot.pid}\nprotocol={snapshot.protocol} session={snapshot.session_id} source={snapshot.source_id} build={snapshot.build_id} revision={snapshot.revision} world={snapshot.world_id}\n\nTask Tree\n"
     if snapshot.tasks.len() == 0 -> out = "{out}  (no live tasks)\n"
     loop live_task in snapshot.tasks {
         deadline: if live_task.deadline_ms == .Val(value) -> "{value}" else -> "-"
         wait: if live_task.wait == "" -> "-" else -> live_task.wait
-        out = "{out}  task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} cancelled={live_task.cancelled}\n"
+        out = "{out}  Task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} cancelled={live_task.cancelled}\n"
     }
-    out = "{out}\nchannels\n"
+    out = "{out}\nChannels\n"
     if snapshot.channels.len() == 0 -> out = "{out}  (no live channels)\n"
     loop channel in snapshot.channels {
         capacity: if channel.capacity == .Val(value) -> "{value}" else -> "∞"
-        out = "{out}  channel {jet_cli_inspect_pad("{channel.id}", 5)} depth {channel.depth}/{capacity} blocked send={channel.send_waiters} recv={channel.recv_waiters} closed={channel.closed}\n"
+        out = "{out}  Channel {jet_cli_inspect_pad("{channel.id}", 5)} depth {channel.depth}/{capacity} blocked send={channel.send_waiters} recv={channel.recv_waiters} closed={channel.closed}\n"
     }
     effects: snapshot.effects
     resources: snapshot.resources
-    out = "{out}\neffects: compute={effects.get("compute") ?? 0} waiting={effects.get("waiting") ?? 0} channel={effects.get("channel") ?? 0} time={effects.get("time") ?? 0} io={effects.get("io") ?? 0}\nresources: workers={resources.get("workers") ?? 0} running={resources.get("running") ?? 0} queued={resources.get("queued") ?? 0} cancelled={resources.get("cancelled") ?? 0} arenas={resources.get("arenas") ?? 0} arena_allocations={resources.get("arena_allocations") ?? 0} arena_bytes={resources.get("arena_bytes") ?? 0}\n\nvalues\n"
+    out = "{out}\nEffects: compute={effects.get("compute") ?? 0} waiting={effects.get("waiting") ?? 0} channel={effects.get("channel") ?? 0} time={effects.get("time") ?? 0} io={effects.get("io") ?? 0}\nResources: workers={resources.get("workers") ?? 0} running={resources.get("running") ?? 0} queued={resources.get("queued") ?? 0} cancelled={resources.get("cancelled") ?? 0} arenas={resources.get("arenas") ?? 0} arena_allocations={resources.get("arena_allocations") ?? 0} arena_bytes={resources.get("arena_bytes") ?? 0}\n\nValues\n"
     if snapshot.values.len() == 0 -> out = "{out}  (no live value decisions)\n"
     loop value in snapshot.values {
         reason: if value.reason == "" -> "" else -> " reason={value.reason}"
@@ -30,7 +30,7 @@ jet_cli_live_text: fn(snapshot: JetLiveSnapshot) -> String Never! {
         out = "{out}  {value.value_id} type={value.type_identity} {value.disposition}{reason}{rendered}\n"
     }
     if event_lines == .Val(events) {
-        out = "{out}\nevents\n"
+        out = "{out}\nEvents\n"
         if events == "" -> out = "{out}  (no runtime event observations)\n" else {
             loop line in events.split("\n") -> out = "{out}  {line}\n"
         }

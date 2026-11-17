@@ -64,7 +64,7 @@ inspect_build_request: fn() -> JetDriverCompileRequest {
 
 #Test("inspect_build") {
     empty: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: true, internal_problem: None}
-    inspect_build_require(jet_cli_build_report(empty, None, false) == "default pipeline: no root fn build\n", "default pipeline human")
+    inspect_build_require(jet_cli_build_report(empty, None, false) == "Default pipeline: no root fn build\n", "default pipeline human")
     inspect_build_require(jet_cli_build_report(empty, None, true) == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.build\",\"ok\":true,\"reports\":[],\"build\":null}}\n", "default pipeline JSON")
     policy: BuildSessionPolicy{plugins_denied: None, plugin_grants: [String:[String]]{}}
     session := build_session_new(101, "fixture", "compiler", policy)
@@ -207,7 +207,7 @@ inspect_build_request: fn() -> JetDriverCompileRequest {
     other_query := other_response.query.move()
     inspect_build_require(other_query.complete && other_query.nodes[0].key != made_query.nodes[0].key, "another consent is another identity")
     planned_text: jet_cli_build_nodes_host(inspect_build_request(), scope, "main.jet", "main", None, false, false, false)
-    inspect_build_require(planned_text.exit_code == JET_DRIVER_EXIT_OK && planned_text.stdout == "no build recorded for main yet; planned steps:\ncheck\t0984cbcd63f1947088648f5c4d7e9b27b7d0f39b025f227e250ca7d2ce4e7b9f\tmain.jet\tmain.jet\ncompile\tfc25e6bcf7a37b9e22a1574a12a4554ce92960ca4f4558aa23c1c1ebea5b0629\tmain\tcheck:main.jet\nlink\tfa8fa4225fe9ff3c2e3d1c7c9047bfa17552676e618f5c4d91df4f325a86bc9e\tmain\tcompile:main\n", "no record lists the planned steps with no time or reason")
+    inspect_build_require(planned_text.exit_code == JET_DRIVER_EXIT_OK && planned_text.stdout == "No build recorded for main yet; planned steps:\ncheck\t0984cbcd63f1947088648f5c4d7e9b27b7d0f39b025f227e250ca7d2ce4e7b9f\tmain.jet\tmain.jet\ncompile\tfc25e6bcf7a37b9e22a1574a12a4554ce92960ca4f4558aa23c1c1ebea5b0629\tmain\tcheck:main.jet\nlink\tfa8fa4225fe9ff3c2e3d1c7c9047bfa17552676e618f5c4d91df4f325a86bc9e\tmain\tcompile:main\n", "no record lists the planned steps with no time or reason")
     planned_json: jet_cli_build_nodes_host(inspect_build_request(), scope, "main.jet", "main", None, true, false, false)
     inspect_build_require(planned_json.exit_code == JET_DRIVER_EXIT_OK && planned_json.stdout == "{{\"schema\":\"jet.explain-build/v1\",\"program\":\"main\",\"nodes\":[],\"planned\":[{{\"kind\":\"check\",\"key\":\"0984cbcd63f1947088648f5c4d7e9b27b7d0f39b025f227e250ca7d2ce4e7b9f\",\"subject\":\"main.jet\",\"inputs\":[\"main.jet\"]}},{{\"kind\":\"compile\",\"key\":\"fc25e6bcf7a37b9e22a1574a12a4554ce92960ca4f4558aa23c1c1ebea5b0629\",\"subject\":\"main\",\"inputs\":[\"check:main.jet\"]}},{{\"kind\":\"link\",\"key\":\"fa8fa4225fe9ff3c2e3d1c7c9047bfa17552676e618f5c4d91df4f325a86bc9e\",\"subject\":\"main\",\"inputs\":[\"compile:main\"]}}]}}\n", "no record has empty nodes and planned entries without duration_ms or why_ran")
     foreign: jet_cli_build_nodes_host(inspect_build_request(), scope, "main.jet", "main", Val(BuildRecord.new("other", [BuildNodeRecord]{})), true, false, false)
@@ -232,7 +232,7 @@ inspect_build_request: fn() -> JetDriverCompileRequest {
     inspect_build_require(!quiet_failure.stdout.contains("L0507") && verbose_failure.stdout.contains("L0507"), "build failure advisories require verbose presentation")
     internal_query: JetDriverBuildQueryResult{plan: None, graph: None, generated: [], diagnostics: [], complete: false, internal_problem: Val("build query lost its plan")}
     internal_failure: jet_cli_build_query_failure(inspect_build_request(), internal_query, "main.jet", true, false, false)
-    inspect_build_require(internal_failure.exit_code == JET_CLI_EXIT_ICE && internal_failure.stdout == "" && internal_failure.stderr.contains("internal compiler error: build query lost its plan"), "internal query failures retain ICE exit and stream")
+    inspect_build_require(internal_failure.exit_code == JET_CLI_EXIT_ICE && internal_failure.stdout == "" && internal_failure.stderr.contains("Internal compiler error: build query lost its plan"), "internal query failures retain ICE exit and stream")
 }
 
 // A build query whose staging check failed, stopped before its plan with the
@@ -250,7 +250,7 @@ inspect_build_stopped_is_internal: fn(ran: [Diagnostic], refused: Bool, problem:
     query := response.query.move()
     inspect_build_require(!query.complete && (query.internal_problem ?? "") == problem, "a staged build query keeps its internal problem: {problem}")
     failure: jet_cli_build_query_failure(response.request.move(), query, "main.jet", false, false, false)
-    inspect_build_require(failure.exit_code == JET_CLI_EXIT_ICE && failure.stdout == "" && failure.stderr.contains("internal compiler error: {problem}") && !failure.stderr.contains("Shape"), "a staged build that failed internally is an internal compiler error: {problem}")
+    inspect_build_require(failure.exit_code == JET_CLI_EXIT_ICE && failure.stdout == "" && failure.stderr.contains("Internal compiler error: {problem}") && !failure.stderr.contains("Shape"), "a staged build that failed internally is an internal compiler error: {problem}")
 }
 
 #Test("inspect_build staged internal problem") {

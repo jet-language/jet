@@ -161,7 +161,7 @@ cli_nix_index_generate: fn(args: [String], write_signature_request: Bool) -[FS, 
         }
         .None -> {}
     }
-    print("generated channel={channel} revision={requested_revision} system={system} compressed_bytes={generated.compressed.len()} decoded_bytes={generated.decoded.len()} target_sha256={digest}")
+    print("Generated channel={channel} revision={requested_revision} system={system} compressed_bytes={generated.compressed.len()} decoded_bytes={generated.decoded.len()} target_sha256={digest}")
 }
 
 // `--released-unix`, else the release metadata's `released_unix`,
@@ -256,7 +256,7 @@ cli_nix_index_verify_differential: fn(args: [String]) -[FS, IO]> CLIToolError! {
     if mismatches.len() > 0 {
         return Err(CLIToolError.new("differential verification failed: {mismatches.len()} mismatches; see {report_path}"))
     }
-    print("differential verification passed: all records compared, zero mismatches")
+    print("Differential verification passed: all records compared, zero mismatches")
 }
 
 // ── manifest ──
@@ -316,7 +316,7 @@ cli_nix_index_manifest: fn(args: [String]) -[IO, FS, Env]> CLIToolError! {
     bytes: nix_index_producer_manifest_bytes(channel, generation, issued_unix, expires_unix, targets) ?? return Err(CLIToolError.new(err.message()))
     cli_nix_index_write_immutable(output, bytes)
     cli_nix_index_write_immutable("{output}.sig.request", nix_index_manifest_signature_request(bytes))
-    print("generated channel manifest generation={generation} targets={target_count} bytes={bytes.len()}")
+    print("Generated channel manifest generation={generation} targets={target_count} bytes={bytes.len()}")
 }
 
 // One staged `.json.zst` target, checked against its file-name digest, its

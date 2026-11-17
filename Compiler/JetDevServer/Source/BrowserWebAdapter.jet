@@ -5,6 +5,7 @@
 use jet_foundation.[foundation_json_integer, foundation_json_parse, foundation_json_quote]
 
 BROWSER_PAGE_SCHEMA: "jet.devtools.browser.v1"
+
 // Facts render in three intent groups: build and source, data and requests,
 // then runtime and interface (browser_web_intent_group).
 BROWSER_WEB_INTENT_GROUPS: Int{3}
@@ -15,6 +16,7 @@ BrowserTools: struct {
     rebuild: Bool,
     rebuild_reason: String?,
 }
+
 BrowserDevtoolsFrame: struct {
     placement: BrowserPlacement,
     route: String,
@@ -34,6 +36,7 @@ BrowserDevtoolsFrame: struct {
     panels: [BrowserPanelView],
     elements: [BrowserHTMLElement],
 }
+
 // One ancestor step from a panel to its selected node.
 BrowserWebCrumb: struct { id: String, label: String }
 
@@ -49,23 +52,48 @@ BrowserWebState: struct {
 
     new: fn(session_id: String) -> BrowserWebState {
         BrowserWebState{
-            host: BrowserHost.new(session_id), source_id: None, build_id: None, revision: "", world_id: None, status: browser_web_starting_status(),
-            tools: BrowserTools{source: false, source_reason: None, rebuild: false, rebuild_reason: None}, receipts: [JetDevtoolsCommandReceipt]{},
+            host: BrowserHost.new(session_id),
+            source_id: None,
+            build_id: None,
+            revision: "",
+            world_id: None,
+            status: browser_web_starting_status(),
+            tools: BrowserTools{source: false, source_reason: None, rebuild: false, rebuild_reason: None},
+            receipts: [JetDevtoolsCommandReceipt]{},
         }
     }
+
     frame: fn(self, placement: BrowserPlacement) -> BrowserDevtoolsFrame {
         model: self.host.view_model(placement)
         BrowserDevtoolsFrame{
-            placement: model.placement, route: model.route, protocol: model.protocol, session_id: model.session_id,
-            source_id: self.source_id, build_id: self.build_id, revision: self.revision, world_id: self.world_id,
-            sequence: model.sequence, cursor: model.cursor, state: browser_web_session_state(self.status.state), status: self.status,
-            tools: self.tools, receipts: self.receipts, selection: model.selection, panels: model.panels, elements: model.elements,
+            placement: model.placement,
+            route: model.route,
+            protocol: model.protocol,
+            session_id: model.session_id,
+            source_id: self.source_id,
+            build_id: self.build_id,
+            revision: self.revision,
+            world_id: self.world_id,
+            sequence: model.sequence,
+            cursor: model.cursor,
+            state: browser_web_session_state(self.status.state),
+            status: self.status,
+            tools: self.tools,
+            receipts: self.receipts,
+            selection: model.selection,
+            panels: model.panels,
+            elements: model.elements,
         }
     }
+
     // A projection from another session, or one that resets, starts a new host.
     sync: fn(&self, projection: DevtoolsProjection, canonical_panels: [JetDevtoolsPanelProjection]) Err! {
-        if projection.protocol != JET_DEVTOOLS_PROTOCOL -> return Err("devtools projection protocol does not match jet.devtools.v1")
-        if projection.session_id != self.host.session_id || projection.reset -> self.host = BrowserHost.new(projection.session_id)
+        if projection.protocol != JET_DEVTOOLS_PROTOCOL {
+            return Err("devtools projection protocol does not match jet.devtools.v1")
+        }
+        if projection.session_id != self.host.session_id || projection.reset {
+            self.host = BrowserHost.new(projection.session_id)
+        }
         self.source_id = browser_web_bounded_optional(projection.source_id, MAX_BROWSER_TEXT)
         self.build_id = browser_web_bounded_optional(projection.build_id, MAX_BROWSER_TEXT)
         self.revision = browser_web_bounded_text(projection.revision, "", MAX_BROWSER_TEXT)
@@ -88,7 +116,9 @@ BrowserWebState: struct {
         if projection.selection == .Val(selection) {
             if self.host.panel(selection.panel_id) != None {
                 node_id := String?{None}
-                if selection.item_key != "" && self.host.node_exists(selection.panel_id, Val(selection.item_key)) -> node_id = Val(selection.item_key)
+                if selection.item_key != "" && self.host.node_exists(selection.panel_id, Val(selection.item_key)) {
+                    node_id = Val(selection.item_key)
+                }
                 self.host.select(selection.panel_id, node_id) ?? return Err("{err}")
                 return Ok()
             }
@@ -97,6 +127,7 @@ BrowserWebState: struct {
         Ok()
     }
 }
+
 // The session's current projection under every browser grant; Canvas alone
 // provides the source tools.
 browser_web_sync_session: fn(state: &BrowserWebState, session: ResidentDevSession) Err! {
@@ -106,9 +137,11 @@ browser_web_sync_session: fn(state: &BrowserWebState, session: ResidentDevSessio
     state.tools.source_reason = if state.tools.source -> None else -> Val(SOURCE_TOOLS_OFF_REASON)
     state.sync(projection, panels)
 }
+
 browser_web_starting_status: fn() -> DevtoolsStatusFact {
     DevtoolsStatusFact{state: .Starting, diagnostic_code: None, diagnostic: None, accepted_revision: None, last_good_revision: None, run_target: None, run_output: None, test_state: None}
 }
+
 browser_web_normalize_status: fn(status: DevtoolsStatusFact) -> DevtoolsStatusFact {
     DevtoolsStatusFact{
         state: status.state,
@@ -121,6 +154,7 @@ browser_web_normalize_status: fn(status: DevtoolsStatusFact) -> DevtoolsStatusFa
         test_state: browser_web_bounded_optional(status.test_state, MAX_BROWSER_TEXT),
     }
 }
+
 browser_web_session_state: fn(state: JetDevtoolsLifecycleState) -> BrowserSessionState {
     if state == {
         .Starting | .Ready -> BrowserSessionState.Idle
@@ -129,6 +163,7 @@ browser_web_session_state: fn(state: JetDevtoolsLifecycleState) -> BrowserSessio
         .Unavailable | .Stopped -> BrowserSessionState.RuntimeFailure
     }
 }
+
 // One panel row per catalog projection: each retained event becomes a tree
 // node with its source, kind, entity, fields and payload.
 browser_web_panel_fact: fn(panel: JetDevtoolsPanelProjection) -> BrowserPanelFact {
@@ -154,15 +189,19 @@ browser_web_panel_fact: fn(panel: JetDevtoolsPanelProjection) -> BrowserPanelFac
         label: browser_web_bounded_text(event.entity(), event.kind(), MAX_BROWSER_TEXT)
         nodes.push(BrowserNode.new(prefix, .Tree, label).with_status(browser_web_bounded_text(event.kind(), "event", MAX_BROWSER_TEXT)).with_children(children))
     }
-    if nodes.len() == 0 -> nodes.push(BrowserNode.new("availability", .Status, "availability").with_status(shown))
+    if nodes.len() == 0 {
+        nodes.push(BrowserNode.new("availability", .Status, "availability").with_status(shown))
+    }
     BrowserPanelFact.new(descriptor.id.as_str(), descriptor.title, 0, shown, nodes).with_cursor(panel.cursor)
 }
+
 browser_web_bounded_optional: fn(value: String?, limit: Int) -> String? {
     text: value ?? return None
     bounded: browser_web_bounded_text(text, "", limit)
     if bounded == "" -> return None
     Val(bounded)
 }
+
 // Control characters become spaces; the text stops at a character boundary
 // within `limit` bytes. Empty text shows `fallback`.
 browser_web_bounded_text: fn(value: String, fallback: String, limit: Int) -> String {
@@ -179,7 +218,11 @@ browser_web_bounded_text: fn(value: String, fallback: String, limit: Int) -> Str
     if used == 0 -> return "{fallback}"
     pieces.join("")
 }
-browser_web_bounded_value: fn(value: String) -> String { browser_web_bounded_text(value, "(none)", MAX_BROWSER_VALUE) }
+
+browser_web_bounded_value: fn(value: String) -> String {
+    browser_web_bounded_text(value, "(none)", MAX_BROWSER_VALUE)
+}
+
 // One character's UTF-8 text is a C0 or C1 control.
 browser_web_is_control: fn(text: String) -> Bool {
     bytes: text.bytes()
@@ -187,39 +230,50 @@ browser_web_is_control: fn(text: String) -> Bool {
     bytes.len() == 2 && bytes[0] == 194 && bytes[1] < 160
 }
 
-browser_web_view_json: fn(state: BrowserWebState, placement: BrowserPlacement) -> String { browser_web_frame_json(state.frame(placement)) }
+browser_web_view_json: fn(state: BrowserWebState, placement: BrowserPlacement) -> String {
+    browser_web_frame_json(state.frame(placement))
+}
+
 browser_web_release_json: fn(projection: DevtoolsProjection, panels: [JetDevtoolsPanelProjection]) -> String {
     rows: loop panel in panels -> browser_web_release_panel_json(panel)
     "{{\"protocol\":{foundation_json_quote(projection.protocol)},\"kind\":\"devtools.release\",\"session_id\":{foundation_json_quote(projection.session_id)},\"source_id\":{browser_web_maybe(projection.source_id)},\"build_id\":{browser_web_maybe(projection.build_id)},\"revision\":{foundation_json_quote(projection.revision)},\"lifecycle\":{foundation_json_quote(projection.status.state.as_str())},\"read_only\":true,\"payloads_redacted\":true,\"panels\":[{rows.join(",")}]}}"
 }
+
 browser_web_release_panel_json: fn(panel: JetDevtoolsPanelProjection) -> String {
     descriptor: panel.availability.descriptor
     capabilities: loop capability in descriptor.required_capabilities -> foundation_json_quote(capability.as_str())
     "{{\"id\":{foundation_json_quote(descriptor.id.as_str())},\"title\":{foundation_json_quote(descriptor.title)},\"available\":{browser_web_flag(panel.availability.is_available())},\"capabilities\":[{capabilities.join(",")}]}}"
 }
+
 browser_web_frame_json: fn(frame: BrowserDevtoolsFrame) -> String {
     cursor := Int?{None}
     if frame.cursor == .Val(at) -> cursor = Val(at.sequence)
     tools: "{{\"source\":{{\"available\":{browser_web_flag(frame.tools.source)},\"reason\":{browser_web_maybe(frame.tools.source_reason)}}},\"rebuild\":{{\"available\":{browser_web_flag(frame.tools.rebuild)},\"reason\":{browser_web_maybe(frame.tools.rebuild_reason)}}}}}"
     receipts: loop receipt in frame.receipts -> "{{\"sequence\":{receipt.sequence},\"request_id\":{foundation_json_quote(receipt.request_id)},\"kind\":{foundation_json_quote(receipt.kind)},\"status\":{foundation_json_quote(receipt.status)},\"error\":{browser_web_maybe(receipt.error)}}}"
     selection := "null"
-    if frame.selection == .Val(selected) -> selection = "{{\"panel_id\":{foundation_json_quote(selected.panel_id)},\"node_id\":{browser_web_maybe(selected.node_id)}}}"
+    if frame.selection == .Val(selected) {
+        selection = "{{\"panel_id\":{foundation_json_quote(selected.panel_id)},\"node_id\":{browser_web_maybe(selected.node_id)}}}"
+    }
     panels: loop panel in frame.panels -> "{{\"panel_id\":{foundation_json_quote(panel.panel_id)},\"title\":{foundation_json_quote(panel.title)},\"freshness_ms\":{panel.freshness_ms},\"status\":{foundation_json_quote(panel.status)},\"cursor\":{browser_web_maybe_int(panel.cursor)},\"open\":{browser_web_flag(panel.open)},\"dock\":{foundation_json_quote(panel.dock.as_str())},\"nodes\":[{browser_web_nodes_json(panel.nodes)}]}}"
     elements: loop element in frame.elements -> "{{\"id\":{foundation_json_quote(element.id)},\"kind\":{foundation_json_quote(element.kind)},\"panel_id\":{browser_web_maybe(element.panel_id)},\"node_id\":{browser_web_maybe(element.node_id)},\"label\":{foundation_json_quote(element.label)},\"value\":{browser_web_maybe(element.value)},\"status\":{browser_web_maybe(element.status)}}}"
     identity: "\"session_id\":{foundation_json_quote(frame.session_id)},\"source_id\":{browser_web_maybe(frame.source_id)},\"build_id\":{browser_web_maybe(frame.build_id)},\"revision\":{foundation_json_quote(frame.revision)},\"world_id\":{browser_web_maybe(frame.world_id)}"
     "{{\"schema\":{foundation_json_quote(BROWSER_PAGE_SCHEMA)},\"protocol\":{foundation_json_quote(frame.protocol)},\"placement\":{foundation_json_quote(frame.placement.as_str())},\"route\":{foundation_json_quote(frame.route)},{identity},\"sequence\":{browser_web_maybe_int(frame.sequence)},\"cursor\":{browser_web_maybe_int(cursor)},\"state\":{foundation_json_quote(frame.state.as_str())},\"status\":{browser_web_status_json(frame.status)},\"tools\":{tools},\"receipts\":[{receipts.join(",")}],\"selection\":{selection},\"panels\":[{panels.join(",")}],\"elements\":[{elements.join(",")}]}}"
 }
+
 browser_web_status_json: fn(status: DevtoolsStatusFact) -> String {
     "{{\"state\":{foundation_json_quote(status.state.as_str())},\"diagnostic_code\":{browser_web_maybe(status.diagnostic_code)},\"diagnostic\":{browser_web_maybe(status.diagnostic)},\"accepted_revision\":{browser_web_maybe(status.accepted_revision)},\"last_good_revision\":{browser_web_maybe(status.last_good_revision)},\"run_target\":{browser_web_maybe(status.run_target)},\"run_output\":{browser_web_maybe(status.run_output)},\"test_state\":{browser_web_maybe(status.test_state)}}}"
 }
+
 browser_web_nodes_json: fn(nodes: [BrowserNode]) -> String {
     rows: loop node in nodes -> "{{\"id\":{foundation_json_quote(node.id)},\"kind\":{foundation_json_quote(node.kind.as_str())},\"label\":{foundation_json_quote(node.label)},\"value\":{browser_web_maybe(node.value)},\"status\":{browser_web_maybe(node.status)},\"children\":[{browser_web_nodes_json(node.children)}]}}"
     rows.join(",")
 }
+
 browser_web_event_json: fn(event: BrowserHostEvent) -> String {
     panels: loop panel in event.panels -> "{{\"panel_id\":{foundation_json_quote(panel.panel_id)},\"title\":{foundation_json_quote(panel.title)},\"freshness_ms\":{panel.freshness_ms},\"status\":{foundation_json_quote(panel.status)},\"cursor\":{browser_web_maybe_int(panel.cursor)},\"nodes\":[{browser_web_nodes_json(panel.nodes)}]}}"
     "{{\"protocol\":{foundation_json_quote(event.protocol)},\"session_id\":{foundation_json_quote(event.session_id)},\"revision\":{event.revision},\"sequence\":{event.sequence},\"observed_at_ms\":{event.observed_at_ms},\"panels\":[{panels.join(",")}]}}"
 }
+
 // The retained host events after the `after` sequence, with the workbench
 // view. A truncated replay sends no events and is not complete.
 browser_web_reconnect_json: fn(state: BrowserWebState, after: Int?, reset: Bool, truncation: Bool) -> String Err! {
@@ -233,17 +287,20 @@ browser_web_reconnect_json: fn(state: BrowserWebState, after: Int?, reset: Bool,
     view: browser_web_view_json(state, BrowserPlacement.Workbench)
     Ok("{{\"schema\":{foundation_json_quote(BROWSER_PAGE_SCHEMA)},\"protocol\":{foundation_json_quote(JET_DEVTOOLS_PROTOCOL)},\"session_id\":{foundation_json_quote(state.host.session_id)},\"from\":{browser_web_maybe_int(after)},\"cursor\":{browser_web_maybe_int(state.host.sequence)},\"reset\":{browser_web_flag(reset)},\"truncation\":{browser_web_flag(truncation)},\"complete\":{browser_web_flag(!truncation)},\"events\":[{events.join(",")}],\"view\":{view}}}")
 }
+
 browser_web_maybe: fn(value: String?) -> String {
     text: value ?? return "null"
     foundation_json_quote(text)
 }
+
 browser_web_maybe_int: fn(value: Int?) -> String {
     number: value ?? return "null"
     "{number}"
 }
+
 browser_web_flag: fn(value: Bool) -> String { if value -> "true" else -> "false" }
 
-PAGE_CSS: ```
+PAGE_CSS: `
 :root{color-scheme:dark;--bg:#0F1013;--raised:#17191D;--raised-2:#1D2026;--well:#0A0B0D;--line:#30343C;--ink:#F6F5F2;--dim:#9B9EA8;--red:#E8232A;--ok:#56C271;--amber:#E3A43B;--sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 *{box-sizing:border-box}html,body{height:100%}
 body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 var(--sans);-webkit-font-smoothing:antialiased}
@@ -329,8 +386,9 @@ li[data-selected=true]>.node{background:var(--raised);box-shadow:inset 2px 0 0 v
 @media(max-width:900px){[data-placement=workbench] .body{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto}.inspector{border-left:0;border-top:1px solid var(--line);max-height:40vh}}
 @media(max-width:560px){.bar,.attention,.source header,.source footer{padding-left:14px;padding-right:14px}.selected,.group,.fold{margin-left:14px;margin-right:14px}.group>summary{padding-left:11px;padding-right:11px}.group-meta{font-size:10px}}
 @media(prefers-reduced-motion:no-preference){.chev,.group>summary::before{transition:transform .12s}.selected,.source{animation:in .18s ease}@keyframes in{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}}
-```
-PAGE_JS: ```
+`
+
+PAGE_JS: `
 const session=new URL(location.href).searchParams.get('session')||'';const params=new URL(location.href).searchParams;const q=(p)=>p+'?session='+encodeURIComponent(session);const key='jet-devtools:'+S.placement;const DRAFT='jet-devtools:draft';const OPEN='jet-devtools:source';const $=(s)=>document.querySelector(s);const note=$('.note');const embedded=window.parent!==window;$('main').classList.toggle('embedded',embedded);document.querySelectorAll('a[data-route]').forEach((a)=>{a.href=q(a.dataset.route);a.hidden=embedded});
 const store={get(k){try{return JSON.parse(sessionStorage.getItem(k)||'null')}catch(_){return null}},set(k,v){try{if(v==null)sessionStorage.removeItem(k);else sessionStorage.setItem(k,JSON.stringify(v))}catch(_){}}};
 const intentKey='jet-devtools:intents:'+S.placement;const restoreIntentGroups=()=>{const saved=store.get(intentKey)||{};document.querySelectorAll('details[data-intent]').forEach((group)=>{if(group.dataset.active!=='true'&&Object.prototype.hasOwnProperty.call(saved,group.dataset.intent))group.open=!!saved[group.dataset.intent];group.addEventListener('toggle',()=>{const next=store.get(intentKey)||{};next[group.dataset.intent]=group.open;store.set(intentKey,next)})})};restoreIntentGroups();
@@ -374,7 +432,7 @@ function live(once){return fetch(q('/__jet_devtools/state'),{cache:'no-store'}).
 setTimeout(live,1000);
 const sel=S.selection&&S.panels.find((p)=>p.panel_id===S.selection.panel_id);if(sel&&!sel.open){const once='jet-devtools:reveal:'+S.placement+':'+sel.panel_id;let done=false;try{done=sessionStorage.getItem(once)===String(S.sequence);sessionStorage.setItem(once,String(S.sequence))}catch(_){}if(!done)send('/__jet_devtools/action',{action:'open_panel',placement:S.placement,panel_id:sel.panel_id},focusKey())}
 addEventListener('keydown',(ev)=>{if(ev.key==='Escape'&&document.activeElement===src.text){src.text.blur();ev.preventDefault();return}if(!embedded)return;const alt=ev.altKey&&!ev.ctrlKey&&!ev.metaKey&&ev.key.toLowerCase()==='j';if(ev.key==='Escape'||alt){ev.preventDefault();parent.postMessage({jet:'devtools',key:ev.key,altKey:ev.altKey},location.origin)}});
-```
+`
 
 // The intent group of a panel; panels outside the first two groups join the last.
 browser_web_intent_group: fn(panel_id: String) -> Int {
@@ -384,6 +442,7 @@ browser_web_intent_group: fn(panel_id: String) -> Int {
         else -> 2
     }
 }
+
 browser_web_intent_label: fn(index: Int) -> String {
     if index == {
         0 -> "Build & source"
@@ -391,13 +450,18 @@ browser_web_intent_label: fn(index: Int) -> String {
         else -> "Runtime & interface"
     }
 }
-browser_web_panel_available: fn(panel: BrowserPanelView) -> Bool { !panel.status.starts_with("unavailable") }
+
+browser_web_panel_available: fn(panel: BrowserPanelView) -> Bool {
+    !panel.status.starts_with("unavailable")
+}
+
 browser_web_unavailable_reason_text: fn(status: String) -> String {
     rest := status
     if rest.starts_with("unavailable:") -> rest = status.slice(12, status.len())
     reasons: loop reason in rest.split(",").to_list() -> browser_web_reason_text(reason)
     reasons.join(", ")
 }
+
 browser_web_reason_text: fn(reason: String) -> String {
     if reason == {
         "unsupported-host" | "host-kind" -> "not offered by this host"
@@ -405,6 +469,7 @@ browser_web_reason_text: fn(reason: String) -> String {
         else -> reason
     }
 }
+
 // The `.jet` file a diagnostic's first `-->` location names.
 browser_web_diagnostic_file: fn(diagnostic: String) -> String? {
     parts: diagnostic.split_once("-->") ?? return None
@@ -418,6 +483,7 @@ browser_web_diagnostic_file: fn(diagnostic: String) -> String? {
     if file.ends_with(".jet") -> return Val(file)
     None
 }
+
 browser_web_render_page: fn(state: BrowserWebState, placement: BrowserPlacement) -> String {
     frame: state.frame(placement)
     state_json: browser_web_frame_json(frame)
@@ -435,13 +501,17 @@ browser_web_render_page: fn(state: BrowserWebState, placement: BrowserPlacement)
     html.push("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; connect-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'\"><title>Jet devtools{title_suffix}</title><style>")
     html.push(PAGE_CSS)
     html.push("</style></head><body><main data-schema=\"{BROWSER_PAGE_SCHEMA}\" data-placement=\"{placement.as_str()}\" data-session-id=\"{browser_web_html_escape(frame.session_id)}\" data-state=\"{state_word}\"><header class=\"bar\"><span class=\"mark\"></span><strong>Jet devtools</strong><span class=\"state\"><i class=\"status-mark\" aria-hidden=\"true\"></i>{state_word}</span><span class=\"grow\"></span><span class=\"note\" role=\"status\"></span>")
-    if !workbench -> html.push("<a class=\"link\" data-route=\"/__jet_devtools/workbench\">Workbench</a>")
+    if !workbench {
+        html.push("<a class=\"link\" data-route=\"/__jet_devtools/workbench\">Workbench</a>")
+    }
     html.push("</header>")
     browser_web_render_attention(html, frame)
     browser_web_render_source_tool(html, frame)
     html.push("<div class=\"body\"><section class=\"facts\" data-scroll aria-label=\"Facts\">")
     if !workbench -> browser_web_render_selected(html, frame)
-    loop index in 0..<BROWSER_WEB_INTENT_GROUPS -> browser_web_render_group(html, frame, index, workbench, any_open)
+    loop index in 0..<BROWSER_WEB_INTENT_GROUPS {
+        browser_web_render_group(html, frame, index, workbench, any_open)
+    }
     if frame.panels.len() == 0 {
         html.push("<p class=\"empty\">Waiting for the first devtools fact.</p>")
     } else if !any_available {
@@ -454,6 +524,7 @@ browser_web_render_page: fn(state: BrowserWebState, placement: BrowserPlacement)
     html.push("</script></main></body></html>")
     html.join("")
 }
+
 browser_web_render_group: fn(html: &[String], frame: BrowserDevtoolsFrame, index: Int, workbench: Bool, any_open: Bool) {
     member_count := 0
     available_count := 0
@@ -466,39 +537,48 @@ browser_web_render_group: fn(html: &[String], frame: BrowserDevtoolsFrame, index
         available_count += 1
         if panel.open -> open_count += 1
     }
-    if member_count == 0 -> return
-    if frame.selection == .Val(selected) -> selected_here = browser_web_intent_group(selected.panel_id) == index && browser_web_find_panel(frame.panels, selected.panel_id) != None
+    if member_count == 0 {
+        return
+    }
+    if frame.selection == .Val(selected) {
+        selected_here = browser_web_intent_group(selected.panel_id) == index && browser_web_find_panel(frame.panels, selected.panel_id) != None
+    }
     failing: frame.status.state == .Building || frame.status.state == .Error
     forced: selected_here || open_count > 0 || (!workbench && index == 0 && failing)
     initially_open: forced || (workbench && index == 0 && !any_open && frame.selection == None)
     active: if forced -> " data-active=\"true\"" else -> ""
     open_attribute: if initially_open -> " open" else -> ""
     meta := "{available_count} available"
-    if selected_here {
-        meta = "Selected"
-    } else if open_count > 0 {
+    if selected_here -> meta = "Selected" else if open_count > 0 {
         suffix: if available_count == 1 -> "" else -> "s"
         meta = "{open_count} open · {available_count} panel{suffix}"
     }
     html.push("<details class=\"group\" data-intent=\"{index}\"{active}{open_attribute}><summary data-focus=\"intent:{index}\"><span class=\"group-label\">{browser_web_html_escape(browser_web_intent_label(index))}</span><span class=\"group-meta\">{meta}</span></summary><div class=\"group-body\">")
     loop panel in frame.panels {
-        if browser_web_intent_group(panel.panel_id) == index && browser_web_panel_available(panel) -> browser_web_render_panel(html, panel, frame.selection)
+        if browser_web_intent_group(panel.panel_id) == index && browser_web_panel_available(panel) {
+            browser_web_render_panel(html, panel, frame.selection)
+        }
     }
     unavailable_count: member_count - available_count
     if unavailable_count > 0 {
         html.push("<details class=\"fold\"><summary>{unavailable_count} not available here</summary>")
         loop panel in frame.panels {
-            if browser_web_intent_group(panel.panel_id) != index || browser_web_panel_available(panel) -> next
+            if browser_web_intent_group(panel.panel_id) != index || browser_web_panel_available(panel) {
+                next
+            }
             html.push("<div class=\"u\"><span>{browser_web_html_escape(panel.title)}</span><small>{browser_web_html_escape(browser_web_unavailable_reason_text(panel.status))}</small></div>")
         }
         html.push("</details>")
     }
     html.push("</div></details>")
 }
+
 browser_web_render_attention: fn(html: &[String], frame: BrowserDevtoolsFrame) {
     status: frame.status
     failing_file := String?{None}
-    if status.diagnostic == .Val(diagnostic) -> failing_file = browser_web_diagnostic_file(diagnostic)
+    if status.diagnostic == .Val(diagnostic) {
+        failing_file = browser_web_diagnostic_file(diagnostic)
+    }
     heading: if status.state == {
         .Starting -> "Starting"
         .Building -> "Building"
@@ -508,23 +588,35 @@ browser_web_render_attention: fn(html: &[String], frame: BrowserDevtoolsFrame) {
         .Stopped -> "Stopped"
     }
     html.push("<section class=\"attention\" aria-label=\"Attention\"><h2><i class=\"status-mark\" aria-hidden=\"true\"></i>{heading}")
-    if status.diagnostic_code == .Val(code) -> html.push("<small class=\"mono\">{browser_web_html_escape(code)}</small>")
-    if failing_file == .Val(file) -> html.push("<small class=\"mono\">{browser_web_html_escape(file)}</small>")
-    if status.test_state == .Val(tests) -> html.push("<small>tests {browser_web_html_escape(tests)}</small>")
+    if status.diagnostic_code == .Val(code) {
+        html.push("<small class=\"mono\">{browser_web_html_escape(code)}</small>")
+    }
+    if failing_file == .Val(file) {
+        html.push("<small class=\"mono\">{browser_web_html_escape(file)}</small>")
+    }
+    if status.test_state == .Val(tests) {
+        html.push("<small>tests {browser_web_html_escape(tests)}</small>")
+    }
     html.push("</h2>")
     // Verbatim diagnostic (I4), escaped for HTML.
-    if status.diagnostic == .Val(diagnostic) -> html.push("<pre class=\"diag\">{browser_web_html_escape(diagnostic)}</pre>")
+    if status.diagnostic == .Val(diagnostic) {
+        html.push("<pre class=\"diag\">{browser_web_html_escape(diagnostic)}</pre>")
+    }
     html.push("<div class=\"acts\">")
     if frame.tools.source {
         if status.state == .Error {
             file_attribute := ""
-            if failing_file == .Val(file) -> file_attribute = " data-file=\"{browser_web_html_escape(file)}\""
+            if failing_file == .Val(file) {
+                file_attribute = " data-file=\"{browser_web_html_escape(file)}\""
+            }
             html.push("<button class=\"btn primary\" type=\"button\" data-tool=\"source\" data-focus=\"tool:source\"{file_attribute}>Fix in source</button>")
         } else {
             html.push("<button class=\"btn\" type=\"button\" data-tool=\"source\" data-focus=\"tool:source\">Source</button>")
         }
     }
-    if frame.tools.rebuild -> html.push("<button class=\"btn\" type=\"button\" data-tool=\"rebuild\" data-focus=\"tool:rebuild\">Rebuild</button>")
+    if frame.tools.rebuild {
+        html.push("<button class=\"btn\" type=\"button\" data-tool=\"rebuild\" data-focus=\"tool:rebuild\">Rebuild</button>")
+    }
     html.push("<span class=\"receipt\" role=\"status\"></span><span class=\"result\" role=\"status\"></span>")
     reasons := [String]{}
     if frame.tools.source_reason == .Val(reason) -> reasons.push("{reason}")
@@ -537,10 +629,14 @@ browser_web_render_attention: fn(html: &[String], frame: BrowserDevtoolsFrame) {
     }
     html.push("</div></section>")
 }
+
 browser_web_render_source_tool: fn(html: &[String], frame: BrowserDevtoolsFrame) {
-    if !frame.tools.source -> return
+    if !frame.tools.source {
+        return
+    }
     html.push("<section class=\"source\" aria-label=\"Source\" hidden><header><select aria-label=\"Source file\"></select><span class=\"rev\"></span><span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-refresh hidden>Facts changed — refresh</button><button class=\"btn quiet\" type=\"button\" data-src=\"close\">Close</button></header><textarea spellcheck=\"false\" autocapitalize=\"off\" autocomplete=\"off\" aria-label=\"Source text\" data-focus=\"tool:source-text\"></textarea><footer><button class=\"btn\" type=\"button\" data-src=\"check\">Check</button><button class=\"btn primary\" type=\"button\" data-src=\"apply\" disabled>Apply</button><button class=\"btn quiet\" type=\"button\" data-src=\"discard\" hidden>Discard draft</button><span class=\"result\" role=\"status\"></span></footer><pre class=\"out\" hidden></pre></section>")
 }
+
 browser_web_render_panel: fn(html: &[String], panel: BrowserPanelView, selection: BrowserSelection?) {
     node_id := String?{None}
     if selection == .Val(selected) {
@@ -557,13 +653,17 @@ browser_web_render_panel: fn(html: &[String], panel: BrowserPanelView, selection
     }
     html.push("</article>")
 }
+
 browser_web_render_selected: fn(html: &[String], frame: BrowserDevtoolsFrame) {
     selection: frame.selection ?? return
     panel: browser_web_find_panel(frame.panels, selection.panel_id) ?? return
     html.push("<section class=\"selected\" aria-label=\"Selected\"><div class=\"eyebrow\">Selected fact</div>")
-    if !browser_web_render_focus(html, panel, selection.node_id) -> html.push("<h3>{browser_web_html_escape(panel.title)}</h3>")
+    if !browser_web_render_focus(html, panel, selection.node_id) {
+        html.push("<h3>{browser_web_html_escape(panel.title)}</h3>")
+    }
     html.push("</section>")
 }
+
 browser_web_render_inspector: fn(html: &[String], frame: BrowserDevtoolsFrame) {
     html.push("<aside class=\"inspector\" data-scroll aria-label=\"Inspector\">")
     if frame.selection == .Val(selection) {
@@ -571,20 +671,18 @@ browser_web_render_inspector: fn(html: &[String], frame: BrowserDevtoolsFrame) {
             if !browser_web_render_focus(html, panel, selection.node_id) {
                 html.push("<h3>{browser_web_html_escape(panel.title)}</h3><dl class=\"kv\"><dt>status</dt><dd>{browser_web_html_escape(panel.status)}</dd><dt>facts</dt><dd>{panel.nodes.len()}</dd></dl>")
             }
-        } else {
-            html.push("<p class=\"empty\">Selected panel is not in the current catalog.</p>")
-        }
-    } else {
-        html.push("<p class=\"empty\">Select a fact to inspect it.</p>")
-    }
+        } else { html.push("<p class=\"empty\">Selected panel is not in the current catalog.</p>") }
+    } else { html.push("<p class=\"empty\">Select a fact to inspect it.</p>") }
     html.push("</aside>")
 }
+
 browser_web_find_panel: fn(panels: [BrowserPanelView], panel_id: String) -> BrowserPanelView? {
     loop panel in panels {
         if panel.panel_id == panel_id -> return Val(panel)
     }
     None
 }
+
 // The crumbs to the selected node, then its detail; false when no node is
 // selected or the panel no longer holds it.
 browser_web_render_focus: fn(html: &[String], panel: BrowserPanelView, node_id: String?) -> Bool {
@@ -594,6 +692,7 @@ browser_web_render_focus: fn(html: &[String], panel: BrowserPanelView, node_id: 
     browser_web_render_crumbs(html, panel, path)
     found && browser_web_render_found(html, panel.panel_id, panel.nodes, id)
 }
+
 browser_web_crumbs: fn(nodes: [BrowserNode], node_id: String, path: &[BrowserWebCrumb]) -> Bool {
     loop node in nodes {
         path.push(BrowserWebCrumb{id: "{node.id}", label: "{node.label}"})
@@ -602,14 +701,18 @@ browser_web_crumbs: fn(nodes: [BrowserNode], node_id: String, path: &[BrowserWeb
     }
     false
 }
+
 browser_web_render_crumbs: fn(html: &[String], panel: BrowserPanelView, path: [BrowserWebCrumb]) {
     panel_id: browser_web_html_escape(panel.panel_id)
     html.push("<div class=\"crumbs\"><span>{browser_web_html_escape(panel.title)}</span>")
     if path.len() > 1 {
-        loop index in 0..<(path.len() - 1) -> html.push("<span>›</span><button data-select=\"1\" data-panel=\"{panel_id}\" data-node=\"{browser_web_html_escape(path[index].id)}\">{browser_web_html_escape(path[index].label)}</button>")
+        loop index in 0..<(path.len() - 1) {
+            html.push("<span>›</span><button data-select=\"1\" data-panel=\"{panel_id}\" data-node=\"{browser_web_html_escape(path[index].id)}\">{browser_web_html_escape(path[index].label)}</button>")
+        }
     }
     html.push("<span class=\"grow\"></span><button class=\"btn quiet\" type=\"button\" data-clear=\"1\" data-focus=\"clear\">Clear</button></div>")
 }
+
 browser_web_render_found: fn(html: &[String], panel_id: String, nodes: [BrowserNode], node_id: String) -> Bool {
     loop node in nodes {
         if node.id == node_id {
@@ -620,12 +723,17 @@ browser_web_render_found: fn(html: &[String], panel_id: String, nodes: [BrowserN
     }
     false
 }
+
 // A node's leaf children render as a key/value list, the rest as a node list.
 browser_web_render_node_detail: fn(html: &[String], panel_id: String, node: BrowserNode) {
     status := ""
-    if node.status == .Val(text) -> status = " <small class=\"mono\">{browser_web_html_escape(text)}</small>"
+    if node.status == .Val(text) {
+        status = " <small class=\"mono\">{browser_web_html_escape(text)}</small>"
+    }
     html.push("<h3>{browser_web_html_escape(node.label)}{status}</h3>")
-    if node.value == .Val(value) -> html.push("<code class=\"value\">{browser_web_html_escape(value)}</code>")
+    if node.value == .Val(value) {
+        html.push("<code class=\"value\">{browser_web_html_escape(value)}</code>")
+    }
     leaves := 0
     loop child in node.children {
         if browser_web_is_leaf(child) -> leaves += 1
@@ -645,7 +753,11 @@ browser_web_render_node_detail: fn(html: &[String], panel_id: String, node: Brow
         html.push("</ul>")
     }
 }
-browser_web_is_leaf: fn(node: BrowserNode) -> Bool { node.children.len() == 0 && node.value != None }
+
+browser_web_is_leaf: fn(node: BrowserNode) -> Bool {
+    node.children.len() == 0 && node.value != None
+}
+
 browser_web_render_nodes: fn(html: &[String], panel_id: String, nodes: [BrowserNode], selected: String?, skip_leaves: Bool) {
     panel: browser_web_html_escape(panel_id)
     loop node in nodes {
@@ -660,6 +772,7 @@ browser_web_render_nodes: fn(html: &[String], panel_id: String, nodes: [BrowserN
         html.push("<li data-selected=\"{marked}\"><button class=\"node\" data-select=\"1\" data-panel=\"{panel}\" data-node=\"{id}\" data-focus=\"node:{panel}:{id}\" aria-pressed=\"{pressed}\"><span class=\"lbl\">{browser_web_html_escape(node.label)}</span>{status}</button></li>")
     }
 }
+
 browser_web_contains_node: fn(nodes: [BrowserNode], node_id: String?) -> Bool {
     id: node_id ?? return false
     loop node in nodes {
@@ -678,15 +791,20 @@ browser_web_parse_selection: fn(payload: [U8]) -> DevtoolsSelectionFact? Err! {
     panel_id: browser_web_string(selection, "panel_id", "browser selection")
     item_key := ""
     if recording_lookup(selection, "item_key") == .Val(key) {
-        if !(key == .Null) -> item_key = recording_text(key) ?? return Err("browser selection item_key must be a string")
+        if !(key == .Null) {
+            item_key = recording_text(key) ?? return Err("browser selection item_key must be a string")
+        }
     }
     Ok(Val(DevtoolsSelectionFact{panel_id: panel_id, item_key: item_key}))
 }
+
 browser_web_parse_action: fn(payload: [U8], default_placement: BrowserPlacement) -> BrowserHostAction Err! {
     object: browser_web_body_object(payload, "browser action")
     name: if recording_lookup(object, "action") != None -> browser_web_string(object, "action", "browser action") else -> browser_web_string(object, "op", "browser action")
     placement := default_placement
-    if recording_lookup(object, "placement") == .Val(value) -> placement = browser_web_placement(value)
+    if recording_lookup(object, "placement") == .Val(value) {
+        placement = browser_web_placement(value)
+    }
     if name == {
         "open" | "open_panel" -> Ok(BrowserHostAction.OpenPanel{placement: placement, panel_id: browser_web_string(object, "panel_id", "browser action")})
         "close" | "close_panel" -> Ok(BrowserHostAction.ClosePanel{placement: placement, panel_id: browser_web_string(object, "panel_id", "browser action")})
@@ -696,21 +814,26 @@ browser_web_parse_action: fn(payload: [U8], default_placement: BrowserPlacement)
         else -> Err("unknown browser action `{name}`")
     }
 }
+
 browser_web_source_grant: fn(object: [{key: String, value: Dyn}]) -> BrowserSourceGrant Err! {
     grant: browser_web_nested(object, "grant")
     source: browser_web_nested(grant, "source")
     function := String?{None}
     if recording_lookup(source, "function") == .Val(value) -> function = recording_text(value)
     column := 0
-    if recording_lookup(source, "column") == .Val(value) -> column = foundation_json_integer(value) ?? 0
+    if recording_lookup(source, "column") == .Val(value) {
+        column = foundation_json_integer(value) ?? 0
+    }
     if column < 0 -> column = 0
     location: BrowserSourceLocation{source_id: browser_web_string(source, "source_id", "browser action"), line: browser_web_count(source, "line"), column: column, function: function}
     Ok(BrowserSourceGrant{session_id: browser_web_string(grant, "session_id", "browser action"), revision: browser_web_count(grant, "revision"), panel_id: browser_web_string(grant, "panel_id", "browser action"), node_id: browser_web_string(grant, "node_id", "browser action"), source: location})
 }
+
 browser_web_action_grant: fn(object: [{key: String, value: Dyn}]) -> BrowserActionGrant Err! {
     grant: browser_web_nested(object, "grant")
     Ok(BrowserActionGrant{session_id: browser_web_string(grant, "session_id", "browser action"), revision: browser_web_count(grant, "revision"), panel_id: browser_web_string(grant, "panel_id", "browser action"), node_id: browser_web_string(grant, "node_id", "browser action"), action_id: browser_web_string(grant, "action_id", "browser action")})
 }
+
 browser_web_body_object: fn(payload: [U8], what: String) -> [{key: String, value: Dyn}] Err! {
     if payload.len() > MAX_REQUEST_BODY_BYTES -> return Err("{what} body is not valid bounded JSON")
     text: String.from_bytes(payload) ?? return Err("{what} body must be UTF-8 JSON")
@@ -718,23 +841,27 @@ browser_web_body_object: fn(payload: [U8], what: String) -> [{key: String, value
     fields: recording_object_fields(root) ?? return Err("{what} body must be an object")
     Ok(fields)
 }
+
 browser_web_nested: fn(object: [{key: String, value: Dyn}], key: String) -> [{key: String, value: Dyn}] Err! {
     value: recording_lookup(object, key) ?? return Err("browser action is missing `{key}`")
     fields: recording_object_fields(value) ?? return Err("browser action `{key}` must be an object")
     Ok(fields)
 }
+
 browser_web_string: fn(object: [{key: String, value: Dyn}], key: String, what: String) -> String Err! {
     value: recording_lookup(object, key) ?? return Err("{what} is missing `{key}`")
     text: recording_text(value) ?? return Err("{what} `{key}` must be a string")
     if text == "" -> return Err("{what} `{key}` must not be empty")
     Ok(text)
 }
+
 browser_web_count: fn(object: [{key: String, value: Dyn}], key: String) -> Int Err! {
     value: recording_lookup(object, key) ?? return Err("browser action is missing `{key}`")
     number: foundation_json_integer(value) ?? return Err("browser action `{key}` must be a non-negative integer")
     if number < 0 -> return Err("browser action `{key}` must be a non-negative integer")
     Ok(number)
 }
+
 browser_web_placement: fn(value: Dyn) -> BrowserPlacement Err! {
     text: recording_text(value) ?? return Err("browser action placement must be a string")
     if text == {
@@ -743,6 +870,7 @@ browser_web_placement: fn(value: Dyn) -> BrowserPlacement Err! {
         else -> Err("unknown browser placement `{text}`")
     }
 }
+
 // The browser docks a panel left, right, bottom or floating; it has no top dock.
 browser_web_dock: fn(value: String) -> DevtoolsDock Err! {
     if value == {
@@ -764,45 +892,53 @@ browser_web_effect_json: fn(outcome: BrowserHostEffect) -> String {
     }
     "{{\"schema\":{foundation_json_quote(BROWSER_PAGE_SCHEMA)},\"effect\":{body}}}"
 }
+
 browser_web_dispatch: fn(state: &BrowserWebState, action: BrowserHostAction) -> String BrowserHostError! {
     outcome: state.host.dispatch(action)
     Ok(browser_web_effect_json(outcome))
 }
+
 browser_web_html_escape: fn(value: String) -> String {
     pieces := [String]{}
     loop character in value.chars() {
         text: "{character}"
-        pieces.push(if text == {
-            "&" -> "&amp;"
-            "<" -> "&lt;"
-            ">" -> "&gt;"
-            "\"" -> "&quot;"
-            "'" -> "&#39;"
-            else -> if browser_web_is_control(text) -> " " else -> text
-        })
+        pieces.push(
+            if text == {
+                "&" -> "&amp;"
+                "<" -> "&lt;"
+                ">" -> "&gt;"
+                "\"" -> "&quot;"
+                "'" -> "&#39;"
+                else -> if browser_web_is_control(text) -> " " else -> text
+            },
+        )
     }
     pieces.join("")
 }
+
 // Text safe inside a double-quoted script literal within an HTML script element.
 browser_web_js_string: fn(value: String) -> String {
     pieces := [String]{}
     loop character in value.chars() {
         text: "{character}"
         bytes: text.bytes()
-        pieces.push(if text == {
-            "\\" -> "\\\\"
-            "\"" -> "\\\""
-            "\n" -> "\\n"
-            "\r" -> "\\r"
-            "\t" -> "\\t"
-            "<" -> "\\u003c"
-            ">" -> "\\u003e"
-            "&" -> "\\u0026"
-            else -> browser_web_js_scalar(text, bytes)
-        })
+        pieces.push(
+            if text == {
+                "\\" -> "\\\\"
+                "\"" -> "\\\""
+                "\n" -> "\\n"
+                "\r" -> "\\r"
+                "\t" -> "\\t"
+                "<" -> "\\u003c"
+                ">" -> "\\u003e"
+                "&" -> "\\u0026"
+                else -> browser_web_js_scalar(text, bytes)
+            },
+        )
     }
     pieces.join("")
 }
+
 // U+2028, U+2029 and the remaining controls as `\u` escapes.
 browser_web_js_scalar: fn(text: String, bytes: [U8]) -> String {
     if bytes.len() == 3 && bytes[0] == 226 && bytes[1] == 128 && bytes[2] == 168 -> return "\\u2028"
@@ -810,6 +946,7 @@ browser_web_js_scalar: fn(text: String, bytes: [U8]) -> String {
     if !browser_web_is_control(text) -> return "{text}"
     "\\u00{browser_web_hex_byte(Int{bytes[bytes.len() - 1]})}"
 }
+
 browser_web_hex_byte: fn(value: Int) -> String {
     digits: "0123456789abcdef"
     high: value /% 16

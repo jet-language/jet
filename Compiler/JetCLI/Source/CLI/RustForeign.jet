@@ -234,10 +234,10 @@ jet_cli_rust_foreign_cargo_error: fn(plan: JetDriverRustForeignPlan, stderr: Str
     detail: jet_cli_rust_foreign_cargo_detail(stderr, plan, cache)
     if signature && (stderr.contains("E0308") || stderr.contains("E0277") || stderr.contains("E0061") || stderr.contains("E0425") || stderr.contains("cannot find") || stderr.contains("mismatched types") || stderr.contains("arguments to this function")) {
         hint: if plan.entries.len() > 0 -> "`{plan.entries[0].declaration.name}` in `extern rust \"{plan.entries[0].crate_spec}\"`" else -> "an `extern rust` declaration"
-        return JetDriverRustForeignError{code: "E0705", what: "the Rust item doesn't match the Jet signature at {hint}", why: "the `= \"rust::path\"` on an `extern rust` line must name a safe Rust function whose parameters and return type match what you wrote", fix: "check the path and types on {hint}, or pick a different Rust function", detail: Val("  cargo said:\n{detail}")}
+        return JetDriverRustForeignError{code: "E0705", what: "the Rust item doesn't match the Jet signature at {hint}", why: "the `= \"rust::path\"` on an `extern rust` line must name a safe Rust function whose parameters and return type match what you wrote", fix: "check the path and types on {hint}, or pick a different Rust function", detail: Val("  Cargo said:\n{detail}")}
     }
     dependency: if plan.dependencies.len() > 0 -> "{plan.dependencies[0].name}@{plan.dependencies[0].version}" else -> "a foreign crate"
-    JetDriverRustForeignError{code: "E0704", what: "couldn't fetch or build `{dependency}`", why: "Cargo could not resolve or build this foreign crate bridge", fix: "check the crate version, network, and Cargo diagnostic, then try again", detail: Val("  cargo said:\n{detail}")}
+    JetDriverRustForeignError{code: "E0704", what: "couldn't fetch or build `{dependency}`", why: "Cargo could not resolve or build this foreign crate bridge", fix: "check the crate version, network, and Cargo diagnostic, then try again", detail: Val("  Cargo said:\n{detail}")}
 }
 
 // Core JSON's strict duplicate-key/depth/16MiB bound is the metadata preflight.

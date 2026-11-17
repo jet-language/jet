@@ -4,8 +4,20 @@
 use {
     edit_files: core.files
     jet_canvas.[
-        GraphEditAnchor, InlineExpr, NodeQueryRef, Projection, canvas_collapse_hints, ensure_no_symlink_directory, json_str, line_after, line_start,
-        read_source_without_symlinks, snippet, source_revision, write_new_file_without_symlinks, write_source_if_unchanged,
+        GraphEditAnchor,
+        InlineExpr,
+        NodeQueryRef,
+        Projection,
+        canvas_collapse_hints,
+        ensure_no_symlink_directory,
+        json_str,
+        line_after,
+        line_start,
+        read_source_without_symlinks,
+        snippet,
+        source_revision,
+        write_new_file_without_symlinks,
+        write_source_if_unchanged,
     ]
     jet_driver.[jet_driver_apply_edits]
     jet_foundation.[COMMENT_PREFIX, Item, NameLedger, Span, TextEdit, TraitMethodSig, core_module_for_alias, foundation_byte_text, sha256_hex, type_name]
@@ -18,7 +30,9 @@ apply_edit_transaction: fn(checker: LSPChecker, path: String, request: String) -
     src: read_source_without_symlinks(path) ?? return Err(edit_error("io", err.message))
     revision: required_string(request, "revision")
     current_revision: source_revision(src)
-    if revision != current_revision -> return Err(edit_conflict("source changed since this Canvas graph was drawn", current_revision))
+    if revision != current_revision {
+        return Err(edit_conflict("source changed since this Canvas graph was drawn", current_revision))
+    }
     if (json_int_field(request, "schema_version") ?? 0) != EDIT_SCHEMA_VERSION {
         return Err(edit_error("schema", "Canvas edit schema_version must be 1"))
     }
@@ -127,7 +141,9 @@ apply_edit_transaction: fn(checker: LSPChecker, path: String, request: String) -
                 return apply_exec_convergence(checker, path, src, graph_id, from_span, target_span, from_pin_name, strategy, function, json_string_field(request, "helper_name"))
             }
             source: required_string(request, "source")
-            if json_string_field(request, "undo_restore") != None -> return write_checked_source(checker, path, src, source)
+            if json_string_field(request, "undo_restore") != None {
+                return write_checked_source(checker, path, src, source)
+            }
             return write_checked_formatted(checker, path, src, source)
         }
         "insert_branch" | "insert_switch" | "insert_loop" | "insert_fallible_rail" -> {
@@ -250,12 +266,18 @@ apply_rename: fn(checker: LSPChecker, path: String, src: String, from: String, t
     index: checked.index ?? return Err(edit_error("check", "Canvas rename needs the semantic index of this file"))
     edits := [TextEdit]{}
     loop definition in index.definitions {
-        if definition.def.name == from && definition.def.module_path == module_path -> edits.push(edit(definition.def.def_span, to))
+        if definition.def.name == from && definition.def.module_path == module_path {
+            edits.push(edit(definition.def.def_span, to))
+        }
     }
     loop reference in index.references {
-        if reference.name == from && reference.module_path == module_path -> edits.push(edit(reference.span, to))
+        if reference.name == from && reference.module_path == module_path {
+            edits.push(edit(reference.span, to))
+        }
     }
-    if edits.len() == 0 -> return Err(edit_error("not_found", "Canvas rename found no matching binding"))
+    if edits.len() == 0 {
+        return Err(edit_error("not_found", "Canvas rename found no matching binding"))
+    }
     changed: jet_driver_apply_edits(src, edits) ?? return Err(edit_error("overlap", "Canvas rename edits overlapped"))
     formatted: jet_format_source(changed, false)
     if !formatted.ok -> return Err(diagnostics_error(path, changed, formatted.diagnostics))
@@ -270,7 +292,9 @@ record_canvas_rename: fn(path: String, before: String, after: String, from: Stri
     parent: edit_files.dirname(path)
     project: if parent == "" -> "." else -> parent
     directory: edit_files.join(project, ".jet/codemods")
-    if ensure_no_symlink_directory(directory) == .Err(error) -> return Err(edit_error("io", "could not record semantic rename: {error.message}"))
+    if ensure_no_symlink_directory(directory) == .Err(error) {
+        return Err(edit_error("io", "could not record semantic rename: {error.message}"))
+    }
     before_hash: sha256_hex(before)
     after_hash: sha256_hex(after)
     targets := [String]{}
@@ -288,7 +312,9 @@ record_canvas_rename: fn(path: String, before: String, after: String, from: Stri
         suffix += 1
         receipt = edit_files.join(directory, "{base}-{suffix}.log.json")
     }
-    if write_new_file_without_symlinks(receipt, log.bytes()) == .Err(error) -> return Err(edit_error("io", "could not record semantic rename: {error.message}"))
+    if write_new_file_without_symlinks(receipt, log.bytes()) == .Err(error) {
+        return Err(edit_error("io", "could not record semantic rename: {error.message}"))
+    }
     Ok()
 }
 
@@ -364,7 +390,9 @@ find_trait_location: fn(items: [Item], scope: String, close: Int, request: Trait
         } else if item == .CodeModule(code) {
             if code.body == .Val(body) {
                 module_close: if code.span.end > 0 -> code.span.end - 1 else -> 0
-                if find_trait_location(body, "{scope}{code.name}.", module_close, request, src, ledger) == .Val(found) -> return Val(found)
+                if find_trait_location(body, "{scope}{code.name}.", module_close, request, src, ledger) == .Val(found) {
+                    return Val(found)
+                }
             }
         }
     }
@@ -444,7 +472,9 @@ extract_inline_candidate: fn(checker: LSPChecker, path: String, src: String, inl
     projection: projection_for_edit(checker, path, src)
     span: inline_span(projection.inline_exprs, inline_id)
     expression: snippet(src, span)
-    if expression.contains("#Unsafe") -> return Err(edit_error("diagnostic", "Canvas extract cannot cross an unsafe source span"))
+    if expression.contains("#Unsafe") {
+        return Err(edit_error("diagnostic", "Canvas extract cannot cross an unsafe source span"))
+    }
     params: extract_params(projection.json, expression)
     signature: loop param in params -> "{param.name}: {param.ty}"
     args: loop param in params -> param.name
@@ -459,9 +489,13 @@ inline_helper_candidate: fn(checker: LSPChecker, path: String, src: String, inli
     if inline_id == .Val(id) -> span = inline_span(projection.inline_exprs, id)
     call: parse_simple_call(snippet(src, span)) ?? return Err(edit_error("diagnostic", "Canvas inline needs a direct helper call expression"))
     helper: find_simple_helper(src, call.name) ?? return Err(edit_error("diagnostic", "Canvas inline could not find a simple helper return body"))
-    if helper.params.len() != call.args.len() -> return Err(edit_error("diagnostic", "Canvas inline helper argument count changed"))
+    if helper.params.len() != call.args.len() {
+        return Err(edit_error("diagnostic", "Canvas inline helper argument count changed"))
+    }
     expression := helper.returned
-    loop at in 0..<helper.params.len() -> expression = replace_ident(expression, helper.params[at], call.args[at])
+    loop at in 0..<helper.params.len() {
+        expression = replace_ident(expression, helper.params[at], call.args[at])
+    }
     changed: jet_driver_apply_edits(src, [TextEdit]{edit(span, expression)}) ?? return Err(edit_error("overlap", "Canvas inline helper edit overlapped"))
     Ok(changed)
 }
@@ -470,7 +504,9 @@ inline_helper_candidate: fn(checker: LSPChecker, path: String, src: String, inli
 
 graph_anchor: fn(anchors: [GraphEditAnchor], graph_id: String) -> GraphEditAnchor Err! {
     loop anchor in anchors {
-        if anchor.graph_id == graph_id -> return Ok(GraphEditAnchor{graph_id: anchor.graph_id, insert_offset: anchor.insert_offset, fallible: anchor.fallible})
+        if anchor.graph_id == graph_id {
+            return Ok(GraphEditAnchor{graph_id: anchor.graph_id, insert_offset: anchor.insert_offset, fallible: anchor.fallible})
+        }
     }
     Err(edit_error("not_found", "Canvas graph no longer exists"))
 }
@@ -488,8 +524,12 @@ PinNode: struct {
 }
 
 pin_node: fn(pin_id: String) -> PinNode? Never! {
-    if pin_id.cut_last(":input:") == .Val(parts) -> return Val(PinNode{node_id: parts.before, direction: "input"})
-    if pin_id.cut_last(":output:") == .Val(parts) -> return Val(PinNode{node_id: parts.before, direction: "output"})
+    if pin_id.cut_last(":input:") == .Val(parts) {
+        return Val(PinNode{node_id: parts.before, direction: "input"})
+    }
+    if pin_id.cut_last(":output:") == .Val(parts) {
+        return Val(PinNode{node_id: parts.before, direction: "output"})
+    }
     None
 }
 
@@ -528,7 +568,9 @@ call_insert_target: fn(src: String, graph_id: String, projection: Projection, an
     pin_id: origin_pin_id ?? return Ok(InsertTarget{offset: anchor.insert_offset, indent: "    "})
     pin: pin_node(pin_id) ?? return Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
     node: widest_node(projection.node_refs, graph_id, pin.node_id, true) ?? return Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
-    if node.node_id.ends_with(":entry") -> return Ok(InsertTarget{offset: anchor.insert_offset, indent: "    "})
+    if node.node_id.ends_with(":entry") {
+        return Ok(InsertTarget{offset: anchor.insert_offset, indent: "    "})
+    }
     indent: indentation_at(src, node.span.start)
     statement_indent: if indent == "" -> "    " else -> indent
     line: line_start(src, node.span.start)
@@ -587,7 +629,9 @@ InsertCallPlan: struct {
 
 insert_call_plan: fn(src: String, callee: String, module_path: String?) -> InsertCallPlan {
     target: core_target_for_callee(src, callee, module_path) ?? return InsertCallPlan{callee: callee, import: None}
-    if imported_core_prefix(src, target.module_ref) == .Val(prefix) -> return InsertCallPlan{callee: "{prefix}.{target.member}", import: None}
+    if imported_core_prefix(src, target.module_ref) == .Val(prefix) {
+        return InsertCallPlan{callee: "{prefix}.{target.member}", import: None}
+    }
     alias: default_core_alias(target.module_ref)
     point: core_import_insert_point(src)
     suffix: if point.joins_use_block -> "\n" else -> "\n\n"
@@ -609,14 +653,20 @@ core_target_for_callee: fn(src: String, callee: String, module_path: String?) ->
     owner: member_cut.before
     two_parts: owner == head
     if module_path == .Val(module_ref) {
-        if module_ref.starts_with("core.") && two_parts && head == default_core_alias(module_ref) -> return Val(CoreCallTarget{module_ref: "{module_ref}", member: member})
+        if module_ref.starts_with("core.") && two_parts && head == default_core_alias(module_ref) {
+            return Val(CoreCallTarget{module_ref: "{module_ref}", member: member})
+        }
     }
     middle: if two_parts -> "" else -> owner.remove_prefix(head)
     if head == "core" && !two_parts -> return Val(CoreCallTarget{module_ref: owner, member: member})
     loop import in core_imports(src) {
-        if import.alias == head -> return Val(CoreCallTarget{module_ref: "{import.module_ref}{middle}", member: member})
+        if import.alias == head {
+            return Val(CoreCallTarget{module_ref: "{import.module_ref}{middle}", member: member})
+        }
     }
-    if core_module_for_alias(head) == .Val(module_ref) -> return Val(CoreCallTarget{module_ref: "{module_ref}{middle}", member: member})
+    if core_module_for_alias(head) == .Val(module_ref) {
+        return Val(CoreCallTarget{module_ref: "{module_ref}{middle}", member: member})
+    }
     None
 }
 
@@ -661,11 +711,15 @@ core_imports: fn(src: String) -> [CoreImport] {
         if row.split_once(": ") == .Val(named) {
             module_ref: named.after.trim()
             alias: ident_prefix(named.before.trim())
-            if module_ref.starts_with("core.") && alias != "" -> imports.push(CoreImport{module_ref: module_ref, alias: alias})
+            if module_ref.starts_with("core.") && alias != "" {
+                imports.push(CoreImport{module_ref: module_ref, alias: alias})
+            }
         } else {
             module_ref: row.trim()
             alias: default_core_alias(module_ref)
-            if module_ref.starts_with("core.") && alias != "" -> imports.push(CoreImport{module_ref: module_ref, alias: alias})
+            if module_ref.starts_with("core.") && alias != "" {
+                imports.push(CoreImport{module_ref: module_ref, alias: alias})
+            }
         }
     }
     imports
@@ -705,13 +759,9 @@ core_import_insert_point: fn(src: String) -> CoreImportPoint {
             saw_use = true
             if trimmed.starts_with("use {{") -> in_block = true
             insert_at = line_end
-        } else if saw_use {
-            break
-        } else if trimmed == "" || trimmed.starts_with(COMMENT_PREFIX) {
+        } else if saw_use { break } else if trimmed == "" || trimmed.starts_with(COMMENT_PREFIX) {
             insert_at = line_end
-        } else {
-            break
-        }
+        } else { break }
         offset = line_end
     }
     CoreImportPoint{offset: insert_at, joins_use_block: saw_use}
@@ -722,9 +772,13 @@ core_import_insert_point: fn(src: String) -> CoreImportPoint {
 canvas_action_candidate: fn(checker: LSPChecker, path: String, src: String, graph_id: String, action_id: String, callee: String, args: [String]) -> String Err! {
     projection: projection_for_edit(checker, path, src)
     anchor: graph_anchor(projection.graph_anchors, graph_id)
-    if !action_id.starts_with("canvas.action:") -> return Err(edit_error("bad_request", "Canvas action id must be a package Canvas action"))
+    if !action_id.starts_with("canvas.action:") {
+        return Err(edit_error("bad_request", "Canvas action id must be a package Canvas action"))
+    }
     descriptor: action_id.cut_last(":") ?? return Err(edit_error("bad_request", "Canvas action id has no checked source callee"))
-    if descriptor.after != callee -> return Err(edit_error("bad_request", "Canvas action callee does not match its checked descriptor"))
+    if descriptor.after != callee {
+        return Err(edit_error("bad_request", "Canvas action callee does not match its checked descriptor"))
+    }
     statement: "    {callee}({args.join(", ")})\n"
     changed: jet_driver_apply_edits(src, [TextEdit]{edit(Span{start: anchor.insert_offset, end: anchor.insert_offset}, statement)}) ?? return Err(edit_error("overlap", "Canvas action edit overlapped"))
     formatted: jet_format_source(changed, false)
@@ -745,14 +799,10 @@ apply_insert_structural: fn(checker: LSPChecker, path: String, src: String, grap
         statement = "{indent}if true {{\n{indent}    print(\"branch\")\n{indent}}} else {{\n{indent}    print(\"else\")\n{indent}}}\n"
     } else if op == "insert_switch" {
         statement = "{indent}if 0 == {{\n{indent}    0 -> {{ print(\"case\") }}\n{indent}    else -> {{ print(\"else\") }}\n{indent}}}\n"
-    } else if op == "insert_loop" {
-        statement = "{indent}loop {{\n{indent}    break\n{indent}}}\n"
-    } else if op == "insert_fallible_rail" {
+    } else if op == "insert_loop" { statement = "{indent}loop {{\n{indent}    break\n{indent}}}\n" } else if op == "insert_fallible_rail" {
         if !anchor.fallible -> return Err(edit_error("unavailable", "needs a fallible function"))
         statement = "{indent}fallible_value: Int.parse(\"1\")\n{indent}unwrapped: fallible_value ?? 0\n"
-    } else {
-        return Err(edit_error("unsupported", "unknown Canvas structural operation"))
-    }
+    } else { return Err(edit_error("unsupported", "unknown Canvas structural operation")) }
     changed: jet_driver_apply_edits(src, [TextEdit]{edit(Span{start: target.offset, end: target.offset}, statement)}) ?? return Err(edit_error("overlap", "Canvas structural insert overlapped"))
     write_checked_formatted(checker, path, src, changed)
 }
@@ -760,17 +810,27 @@ apply_insert_structural: fn(checker: LSPChecker, path: String, src: String, grap
 // A structural node wired from a pin connects through that pin's exec type.
 structural_insert_target: fn(src: String, graph_id: String, projection: Projection, anchor: GraphEditAnchor, origin_pin_id: String?, target_pin: String?) -> InsertTarget Err! {
     pin_id: origin_pin_id ?? {
-        if target_pin != None -> return Err(edit_error("bad_request", "Canvas structural wire origin is missing"))
+        if target_pin != None {
+            return Err(edit_error("bad_request", "Canvas structural wire origin is missing"))
+        }
         return Ok(InsertTarget{offset: anchor.insert_offset, indent: "    "})
     }
     target: target_pin ?? return Err(edit_error("bad_request", "Canvas structural wire target is missing"))
-    if target != "exec" -> return Err(edit_error("bad_request", "Canvas structural nodes connect through the exec pin"))
+    if target != "exec" {
+        return Err(edit_error("bad_request", "Canvas structural nodes connect through the exec pin"))
+    }
     pin: pin_node(pin_id) ?? return Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
     pin_marker: "\"pin_id\":{json_str(pin_id)}"
-    if !projection.json.contains(pin_marker) -> return Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
-    if !pin_is_exec(projection.json, pin_marker) -> return Err(edit_error("bad_request", "Canvas structural nodes connect through the exec pin"))
+    if !projection.json.contains(pin_marker) {
+        return Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
+    }
+    if !pin_is_exec(projection.json, pin_marker) {
+        return Err(edit_error("bad_request", "Canvas structural nodes connect through the exec pin"))
+    }
     node: widest_node(projection.node_refs, graph_id, pin.node_id, false) ?? return Err(edit_error("not_found", "Canvas insertion pin no longer exists"))
-    if node.node_id.ends_with(":entry") -> return Ok(InsertTarget{offset: anchor.insert_offset, indent: "    "})
+    if node.node_id.ends_with(":entry") {
+        return Ok(InsertTarget{offset: anchor.insert_offset, indent: "    "})
+    }
     insert: if pin.direction == "input" -> line_start(src, node.span.start) else -> line_after(src, node.span.end)
     indent: indentation_at(src, node.span.start)
     Ok(InsertTarget{offset: insert, indent: if indent == "" -> "    " else -> indent})
@@ -801,7 +861,9 @@ graph_exists: fn(anchors: [GraphEditAnchor], graph_id: String) -> Bool Never! {
 
 apply_create_comment_region: fn(checker: LSPChecker, path: String, src: String, graph_id: String, anchor: Span, title: String, color: String, alpha: String, raw_bounds: String) -> String Err! {
     projection: projection_for_edit(checker, path, src)
-    if !graph_exists(projection.graph_anchors, graph_id) -> return Err(edit_error("not_found", "Canvas graph no longer exists"))
+    if !graph_exists(projection.graph_anchors, graph_id) {
+        return Err(edit_error("not_found", "Canvas graph no longer exists"))
+    }
     validate_comment_color(color)
     validate_comment_alpha(alpha)
     bounds: normalize_bounds(raw_bounds)
@@ -838,11 +900,17 @@ apply_delete_hint_region: fn(checker: LSPChecker, path: String, src: String, reg
 
 apply_create_collapse_region: fn(checker: LSPChecker, path: String, src: String, graph_id: String, requested: Span, title: String) -> String Err! {
     projection: projection_for_edit(checker, path, src)
-    if !graph_exists(projection.graph_anchors, graph_id) -> return Err(edit_error("not_found", "Canvas graph no longer exists"))
-    if requested.start >= requested.end || requested.end > src.count_bytes() -> return Err(edit_error("bad_request", "Canvas collapse needs one valid source span"))
+    if !graph_exists(projection.graph_anchors, graph_id) {
+        return Err(edit_error("not_found", "Canvas graph no longer exists"))
+    }
+    if requested.start >= requested.end || requested.end > src.count_bytes() {
+        return Err(edit_error("bad_request", "Canvas collapse needs one valid source span"))
+    }
     selected: validated_collapse_selection(checker, path, src, graph_id, requested)
     loop hint in canvas_collapse_hints(src) {
-        if hint.anchor.start == selected.start && hint.anchor.end == selected.end -> return Err(edit_error("conflict", "Canvas selection is already collapsed"))
+        if hint.anchor.start == selected.start && hint.anchor.end == selected.end {
+            return Err(edit_error("conflict", "Canvas selection is already collapsed"))
+        }
     }
     insert_at: selected.end
     indent: indentation_at(src, clamp_to_source(src, insert_at))
@@ -867,7 +935,9 @@ validated_collapse_selection: fn(checker: LSPChecker, path: String, src: String,
 
 collapse_first: fn(locs: [StatementLoc], start: Int) -> Int? Never! {
     loop (at, loc) in locs {
-        if start == loc.anchor.start || start == loc.source.start || start == loc.full.start -> return Val(at)
+        if start == loc.anchor.start || start == loc.source.start || start == loc.full.start {
+            return Val(at)
+        }
     }
     loop (at, loc) in locs {
         if !loc.is_guard -> next

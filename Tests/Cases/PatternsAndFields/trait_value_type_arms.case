@@ -7,7 +7,8 @@
 # generic.jet: an arm that spells a generic's arguments (`.Box<Int>(b)`), and
 # a generic owner's implementation (`impl Shape` in `Box<T>`) dispatched, as
 # an arm's `else` and over a list of trait values, for each instance the
-# values hold.
+# values hold. instances.jet: `.Box<Int>(b)` and `.Box<String>(b)` separate
+# two instances of one generic, and a third instance reaches the `else`.
 fixture: TraitValueTypeArms.fixture
 step arms: jet run arms.jet
 exit: 0
@@ -33,3 +34,12 @@ stdout: == generic
 step generic_o2: jet run -O2 generic.jet
 exit: 0
 stdout: == generic
+step instances: jet run instances.jet
+exit: 0
+stdout: = "int box 3\nstring box x\nanother box\n"
+step instances_o0: jet run -O0 instances.jet
+exit: 0
+stdout: == instances
+step instances_o2: jet run -O2 instances.jet
+exit: 0
+stdout: == instances

@@ -9,6 +9,7 @@ impl JetDevtoolsPanelID {
     all: fn() -> [JetDevtoolsPanelID] Never! {
         [JetDevtoolsPanelID]{.Build, .Routes, .Queries, .Mutations, .Forms, .Table, .Store, .Traces, .Cost, .Gates, .Structure, .Tests, .Jobs, .UITree, .Database, .Topology, .Game, .World, .Profiler}
     }
+
     as_str: fn(self) -> String Never! {
         if self == {
             .Build -> "build"
@@ -32,6 +33,7 @@ impl JetDevtoolsPanelID {
             .Profiler -> "profiler"
         }
     }
+
     title: fn(self) -> String Never! {
         if self == {
             .Build -> "Build"
@@ -55,6 +57,7 @@ impl JetDevtoolsPanelID {
             .Profiler -> "Profiler"
         }
     }
+
     canonical_order: fn(self) -> Int Never! {
         if self == {
             .Build -> 1
@@ -78,6 +81,7 @@ impl JetDevtoolsPanelID {
             .Profiler -> 19
         }
     }
+
     // The event kinds this panel projects. The catalog owns this map so hosts
     // never rediscover semantic families from JSON field names.
     accepts_event: fn(self, event: JetDevtoolsEvent) -> Bool Never! {
@@ -118,6 +122,7 @@ impl JetDevtoolsHostKind {
     all: fn() -> [JetDevtoolsHostKind] Never! {
         [JetDevtoolsHostKind]{.BrowserInApp, .BrowserWorkbench, .Terminal, .Editor, .NativeOverlay, .Headless}
     }
+
     as_str: fn(self) -> String Never! {
         if self == {
             .BrowserInApp -> "browser-in-app"
@@ -138,6 +143,7 @@ impl JetDevtoolsPanelCapability {
     all: fn() -> [JetDevtoolsPanelCapability] Never! {
         [JetDevtoolsPanelCapability]{.BuildRead, .SourceRead, .RequestRead, .QueryRead, .MutationObserve, .FormInspect, .TableInspect, .StateInspect, .TraceRead, .TelemetryRead, .CostRead, .GateRead, .StructureRead, .TestRead, .JobRead, .UIInspect, .AccessibilityInspect, .DatabaseStatsRead, .DatabaseExplain, .TopologyRead, .GameInspect, .GameControl}
     }
+
     grant: fn(self) -> String Never! {
         if self == {
             .BuildRead -> "Devtools.BuildRead"
@@ -164,6 +170,7 @@ impl JetDevtoolsPanelCapability {
             .GameControl -> "Devtools.GameControl"
         }
     }
+
     as_str: fn(self) -> String Never! { self.grant() }
 }
 
@@ -192,15 +199,17 @@ JetDevtoolsPanelDescriptor: struct {
     freshness: JetDevtoolsPanelFreshnessPolicy,
 
     // A descriptor every host supports, ordered by its id's canonical order.
-    canonical: fn(id: JetDevtoolsPanelID, &&required_capabilities: [JetDevtoolsPanelCapability], authority: JetDevtoolsPanelCapability, freshness: JetDevtoolsPanelFreshnessPolicy) -> JetDevtoolsPanelDescriptor Never! {
+    canonical: fn(id: JetDevtoolsPanelID, required_capabilities: &&[JetDevtoolsPanelCapability], authority: JetDevtoolsPanelCapability, freshness: JetDevtoolsPanelFreshnessPolicy) -> JetDevtoolsPanelDescriptor Never! {
         JetDevtoolsPanelDescriptor{id, title: id.title(), order: id.canonical_order(), required_capabilities: required_capabilities.move(), authority, supported_hosts: JetDevtoolsHostKind.all(), freshness}
     }
+
     supports_host: fn(self, host: JetDevtoolsHostKind) -> Bool Never! {
         loop supported in self.supported_hosts {
             if supported == host -> return true
         }
         false
     }
+
     requires: fn(self, capability: JetDevtoolsPanelCapability) -> Bool Never! {
         loop required in self.required_capabilities {
             if required == capability -> return true
@@ -246,12 +255,14 @@ JetDevtoolsPanelUnavailableReason: enum {
             .MissingCapability(_) -> "missing-capability"
         }
     }
+
     host: fn(self) -> JetDevtoolsHostKind? Never! {
         if self == {
             .UnsupportedHost(host) -> Val(host)
             .MissingCapability(_) -> None
         }
     }
+
     capability: fn(self) -> JetDevtoolsPanelCapability? Never! {
         if self == {
             .UnsupportedHost(_) -> None
@@ -267,6 +278,7 @@ JetDevtoolsPanelAvailability: struct {
     reasons: [JetDevtoolsPanelUnavailableReason],
 
     is_available: fn(self) -> Bool Never! { self.reasons.len() == 0 }
+
     unavailable_reasons: fn(self) -> [JetDevtoolsPanelUnavailableReason] Never! { self.reasons }
 }
 
@@ -304,45 +316,65 @@ JetDevtoolsPanelCatalog: struct {
     descriptor_list: [JetDevtoolsPanelDescriptor],
 
     // Validate `descriptors` and keep them sorted by their unique order.
-    new: fn(&&descriptors: [JetDevtoolsPanelDescriptor]) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! {
+    new: fn(descriptors: &&[JetDevtoolsPanelDescriptor]) -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! {
         if descriptors.len() == 0 -> return Err(JetDevtoolsPanelCatalogError.Empty)
         loop descriptor in descriptors {
             id: descriptor.id
             if descriptor.order == 0 -> return Err(JetDevtoolsPanelCatalogError.ZeroOrder{id: id})
             if descriptor.title == "" -> return Err(JetDevtoolsPanelCatalogError.EmptyTitle{id: id})
-            if descriptor.required_capabilities.len() == 0 -> return Err(JetDevtoolsPanelCatalogError.NoCapabilities{id: id})
-            if descriptor.supported_hosts.len() == 0 -> return Err(JetDevtoolsPanelCatalogError.NoSupportedHosts{id: id})
-            if !descriptor.requires(descriptor.authority) -> return Err(JetDevtoolsPanelCatalogError.AuthorityNotRequired{id: id, authority: descriptor.authority})
+            if descriptor.required_capabilities.len() == 0 {
+                return Err(JetDevtoolsPanelCatalogError.NoCapabilities{id: id})
+            }
+            if descriptor.supported_hosts.len() == 0 {
+                return Err(JetDevtoolsPanelCatalogError.NoSupportedHosts{id: id})
+            }
+            if !descriptor.requires(descriptor.authority) {
+                return Err(JetDevtoolsPanelCatalogError.AuthorityNotRequired{id: id, authority: descriptor.authority})
+            }
             loop (index, capability) in descriptor.required_capabilities {
                 loop later in (index + 1)..<descriptor.required_capabilities.len() {
-                    if descriptor.required_capabilities[later] == capability -> return Err(JetDevtoolsPanelCatalogError.DuplicateCapability{id: id, capability: capability})
+                    if descriptor.required_capabilities[later] == capability {
+                        return Err(JetDevtoolsPanelCatalogError.DuplicateCapability{id: id, capability: capability})
+                    }
                 }
             }
             loop (index, host) in descriptor.supported_hosts {
                 loop later in (index + 1)..<descriptor.supported_hosts.len() {
-                    if descriptor.supported_hosts[later] == host -> return Err(JetDevtoolsPanelCatalogError.DuplicateHost{id: id, host: host})
+                    if descriptor.supported_hosts[later] == host {
+                        return Err(JetDevtoolsPanelCatalogError.DuplicateHost{id: id, host: host})
+                    }
                 }
             }
         }
         loop (index, descriptor) in descriptors {
             loop later in (index + 1)..<descriptors.len() {
-                if descriptors[later].id == descriptor.id -> return Err(JetDevtoolsPanelCatalogError.DuplicateID{id: descriptor.id})
-                if descriptors[later].order == descriptor.order -> return Err(JetDevtoolsPanelCatalogError.DuplicateOrder{order: descriptor.order})
+                if descriptors[later].id == descriptor.id {
+                    return Err(JetDevtoolsPanelCatalogError.DuplicateID{id: descriptor.id})
+                }
+                if descriptors[later].order == descriptor.order {
+                    return Err(JetDevtoolsPanelCatalogError.DuplicateOrder{order: descriptor.order})
+                }
             }
         }
         sorted := descriptors.move()
         sorted.sort_by(fn(a: JetDevtoolsPanelDescriptor, b: JetDevtoolsPanelDescriptor) { a.order <=> b.order })
         Ok(JetDevtoolsPanelCatalog{descriptor_list: sorted})
     }
+
     // The validated catalog of the first-party descriptors.
-    canonical: fn() -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! { JetDevtoolsPanelCatalog.new(descriptors()) }
+    canonical: fn() -> JetDevtoolsPanelCatalog JetDevtoolsPanelCatalogError! {
+        JetDevtoolsPanelCatalog.new(descriptors())
+    }
+
     descriptors: fn(self) -> [JetDevtoolsPanelDescriptor] Never! { self.descriptor_list }
+
     get: fn(self, id: JetDevtoolsPanelID) -> JetDevtoolsPanelDescriptor? Never! {
         loop descriptor in self.descriptor_list {
             if descriptor.id == id -> return Val(descriptor)
         }
         None
     }
+
     // The panel a protocol event belongs to, so no host adapter matches
     // event families itself.
     panel_for_event: fn(self, event: JetDevtoolsEvent) -> JetDevtoolsPanelID? Never! {
@@ -351,11 +383,13 @@ JetDevtoolsPanelCatalog: struct {
         }
         None
     }
+
     // Every descriptor in order. A row the host does not support or the
     // grants do not cover stays, with its typed reasons; no panel disappears.
     available_for: fn(self, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelAvailability] Never! {
         loop descriptor in self.descriptor_list -> devtools_panel_availability(descriptor, host, grants)
     }
+
     // Every first-party panel projected from one envelope.
     project: fn(self, envelope: JetDevtoolsEnvelope, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> [JetDevtoolsPanelProjection] Never! {
         selected_panel: if envelope.selection() == {
@@ -370,15 +404,17 @@ JetDevtoolsPanelCatalog: struct {
             loop (index, event) in events {
                 if id.accepts_event(event) -> matching.push(index)
             }
-            projections.push(JetDevtoolsPanelProjection{
-                selected: selected_panel == id.as_str(),
-                events: loop index in matching -> events[index],
-                availability,
-                cursor: envelope.cursor(),
-                freshness: envelope.freshness,
-                reset: envelope.reset,
-                truncated: envelope.truncated,
-            })
+            projections.push(
+                JetDevtoolsPanelProjection{
+                    selected: selected_panel == id.as_str(),
+                    events: loop index in matching -> events[index],
+                    availability,
+                    cursor: envelope.cursor(),
+                    freshness: envelope.freshness,
+                    reset: envelope.reset,
+                    truncated: envelope.truncated,
+                },
+            )
         }
         projections
     }
@@ -386,13 +422,17 @@ JetDevtoolsPanelCatalog: struct {
 
 devtools_panel_availability: fn(descriptor: JetDevtoolsPanelDescriptor, host: JetDevtoolsHostKind, grants: [JetDevtoolsPanelCapability]) -> JetDevtoolsPanelAvailability Never! {
     reasons := [JetDevtoolsPanelUnavailableReason]{}
-    if !descriptor.supports_host(host) -> reasons.push(JetDevtoolsPanelUnavailableReason.UnsupportedHost{host: host})
+    if !descriptor.supports_host(host) {
+        reasons.push(JetDevtoolsPanelUnavailableReason.UnsupportedHost{host: host})
+    }
     loop capability in descriptor.required_capabilities {
         granted := false
         loop grant in grants {
             if grant == capability -> granted = true
         }
-        if !granted -> reasons.push(JetDevtoolsPanelUnavailableReason.MissingCapability{capability: capability})
+        if !granted {
+            reasons.push(JetDevtoolsPanelUnavailableReason.MissingCapability{capability: capability})
+        }
     }
     JetDevtoolsPanelAvailability{descriptor, reasons}
 }

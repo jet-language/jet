@@ -3,13 +3,20 @@ use {
     core.tui.[TUIColorProfile]
 }
 
-terminal_style_test_edit: fn(source: String) -> TerminalStyleEdit { TerminalStyleEdit.new("app/style", source) }
+terminal_style_test_edit: fn(source: String) -> TerminalStyleEdit {
+    TerminalStyleEdit.new("app/style", source)
+}
+
 terminal_style_test_bytes: fn(text: String) -> [U8] {
     out := [U8]{}
     loop byte in text.bytes() -> out.push(byte)
     out
 }
-terminal_style_test_sgr: fn(codes: String) -> TerminalStyleValue? { Val(TerminalStyleValue.Sgr{codes: codes}) }
+
+terminal_style_test_sgr: fn(codes: String) -> TerminalStyleValue? {
+    Val(TerminalStyleValue.Sgr{codes: codes})
+}
+
 terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     adapter := TerminalStyleHostAdapter.new()
     adapter.inject(TerminalStyleHostSource.new("app/style", TERMINAL_CAPABILITY_DEFAULT) ?? panic("host source"))
@@ -28,6 +35,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     assert(forced.color_enabled())
     assert_eq(ansi256.fingerprint(), ansi256.fingerprint())
 }
+
 #Test("parser_produces_typed_roles_without_retaining_source") {
     document: TerminalStyleDocument.parse("# semantic roles\naccent=1;96\nsuccess=green\nerror=plain\n") ?? panic("style parses")
     assert_eq(document.value(TerminalStyleRole.Accent), terminal_style_test_sgr("1;96"))
@@ -39,6 +47,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     }
     assert(rejected)
 }
+
 #Test("style_reload_is_atomic_and_keeps_last_valid_snapshot_on_failure") {
     reload := TerminalStyleReload.new()
     subscriber: reload.subscribe() ?? panic("subscriber")
@@ -63,6 +72,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     assert_eq(notifications[1].change, TerminalStyleChangeKind.Invalid)
     assert_eq(notifications[1].revision, 1)
 }
+
 #Test("burst_coalescing_notifies_once_for_last_edit") {
     reload := TerminalStyleReload.new()
     subscriber: reload.subscribe() ?? panic("subscriber")
@@ -79,6 +89,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     current: reload.current ?? panic("current style")
     assert_eq(current.value(TerminalStyleRole.Accent), terminal_style_test_sgr("33"))
 }
+
 #Test("capability_change_applies_but_layout_or_type_change_requires_restart") {
     reload := TerminalStyleReload.new()
     base: TerminalCapabilityFacts.from_environment(Val("xterm-256color"), None, true, false, ColorChoice.Auto)
@@ -95,6 +106,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     assert_eq(type_change.change, TerminalStyleChangeKind.RestartRequired{reason: TerminalStyleRestartReason.TypeFingerprintChanged})
     assert_eq(type_change.revision, 2)
 }
+
 #Test("dependency_order_is_canonical") {
     first: TerminalStyleDependency.from_bytes(TerminalStyleDependencyKind.Source, "z", terminal_style_test_bytes("z")) ?? panic("first dependency")
     second: TerminalStyleDependency.from_bytes(TerminalStyleDependencyKind.Source, "a", terminal_style_test_bytes("a")) ?? panic("second dependency")
@@ -103,6 +115,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     assert_eq(a.dependencies, b.dependencies)
     assert_eq(a.fingerprint, b.fingerprint)
 }
+
 #Test("host_adapter_reports_unavailable_before_source_is_injected") {
     adapter := TerminalStyleHostAdapter.new()
     assert(adapter.source == None)
@@ -111,6 +124,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     assert(response.event.contains(`"outcome":"unavailable"`))
     assert(response.event.contains(`"reason":"source_not_injected"`))
 }
+
 #Test("host_adapter_applies_bounded_json_after_injection") {
     adapter := terminal_style_test_adapter()
     assert(adapter.source != None)
@@ -119,6 +133,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     assert(response.event.contains(`"outcome":"applied"`))
     assert(response.event.contains(`"fingerprint"`))
 }
+
 #Test("host_adapter_rejects_invalid_style_json") {
     adapter := terminal_style_test_adapter()
     response: adapter.apply_json(`{"source":"accent=1;;96"}`)
@@ -129,6 +144,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     assert_eq(code, Val(TerminalStyleErrorCode.InvalidStyle))
     assert(response.event.contains(`"outcome":"rejected"`))
 }
+
 #Test("host_adapter_rejects_restart_required_layout_change_without_reloading") {
     adapter := terminal_style_test_adapter()
     first: adapter.apply_json(`{"source":"accent=red"}`)
@@ -141,6 +157,7 @@ terminal_style_test_adapter: fn() -> TerminalStyleHostAdapter {
     assert_eq(response.outcome, TerminalStyleHostOutcome.Rejected{rejection: TerminalStyleHostRejection.RestartRequired{reason: TerminalStyleRestartReason.LayoutFingerprintChanged}})
     assert(response.event.contains(`"code":"layout_fingerprint_changed"`))
 }
+
 #Test("host_adapter_current_json_reports_unavailable_then_applied") {
     adapter := TerminalStyleHostAdapter.new()
     before: adapter.current_json()

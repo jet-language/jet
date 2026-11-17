@@ -122,7 +122,7 @@ jet_cli_project_status_render: fn(target: String, rows: [JetCLIProjectClaim], er
         fields: [JetCLIStatusField]{jet_cli_status_field("claims", jet_cli_status_array(claims)), jet_cli_status_field("error", if error == "" -> JetCLIStatusValue.Null else -> jet_cli_status_text(error)), jet_cli_status_field("target", jet_cli_status_text(target))}
         return jet_cli_done("{jet_cli_status_render("status", true, fields)}\n", "", JET_DRIVER_EXIT_OK)
     }
-    out := "target  {target}\n"
+    out := "Target  {target}\n"
     loop row in rows {
         out = "{out}{jet_cli_project_status_pad(row.name, 8)} {jet_cli_project_status_pad(row.state, 9)} receipt {row.receipt ?? "none"}"
         if row.state != "proven" -> out = "{out} · act: {row.action} · {row.reason}"

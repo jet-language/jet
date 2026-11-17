@@ -265,7 +265,6 @@ replace_ident: fn(expr: String, ident: String, replacement: String) -> String Ne
     out.join("").trim_end()
 }
 
-
 required_string: fn(text: String, key: String) -> String Err! {
     json_string_field(text, key) ?? return Err(edit_error("bad_request", "missing `{key}`"))
 }
@@ -303,9 +302,7 @@ json_bool_field: fn(text: String, key: String) -> Bool? Never! {
 leading_digits: fn(text: String) -> String Never! {
     bytes: text.bytes()
     end := 0
-    loop end < bytes.len() && (Int{bytes[end]}) >= 48 && (Int{bytes[end]}) <= 57 {
-        end += 1
-    }
+    loop end < bytes.len() && (Int{bytes[end]}) >= 48 && (Int{bytes[end]}) <= 57 -> end += 1
     foundation_byte_text(bytes, 0, end)
 }
 

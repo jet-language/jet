@@ -2,6 +2,7 @@ browser_test_panel: fn(status: String) -> BrowserPanelFact {
     nodes: [BrowserNode]{BrowserNode.new("go", DevtoolsNodeKind.Action, "Go"), BrowserNode.new("source", DevtoolsNodeKind.Text, "Source")}
     BrowserPanelFact.new("build", "Build", 12, status, nodes)
 }
+
 browser_test_event: fn(session: String, revision: Int, sequence: Int, status: String) -> BrowserHostEvent {
     BrowserHostEvent.new(session, revision, sequence, 100 + sequence, [BrowserPanelFact]{browser_test_panel(status)})
 }
@@ -29,6 +30,7 @@ browser_test_event: fn(session: String, revision: Int, sequence: Int, status: St
     }
     assert(wrong_session)
 }
+
 #Test("layout_and_selection_are_shared_but_open_state_is_placement_local") {
     host := BrowserHost.new("s1")
     host.apply_event(browser_test_event("s1", 1, 1, "ready")) ?? panic("event")
@@ -60,6 +62,7 @@ browser_test_event: fn(session: String, revision: Int, sequence: Int, status: St
         assert_eq(left.status, right.status)
     }
 }
+
 #Test("reconnect_is_bounded_and_cursor_resumes") {
     host := BrowserHost.new("s1")
     loop sequence in 1..<(MAX_RECONNECT_EVENTS + 3) {
@@ -79,6 +82,7 @@ browser_test_event: fn(session: String, revision: Int, sequence: Int, status: St
     }
     assert(ahead)
 }
+
 #Test("stale_wrong_session_and_ungranted_actions_are_rejected") {
     host := BrowserHost.new("s1")
     host.apply_event(browser_test_event("s1", 7, 1, "ready")) ?? panic("event")

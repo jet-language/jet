@@ -28,7 +28,7 @@ decode_test_event: fn(sequence: Int, kind: String, fields: String) -> String {
     extra_query: decode_test_event(1, "Query", "{{\"name\":\"users\",\"state\":\"fresh\",\"footprint\":3,\"extra\":1}}")
     decoded: decode_devtools_envelope(decode_test_events(extra_query)) ?? panic("untyped query")
     if decoded == {
-        .Events(envelope) -> assert(envelope.events()[0].body == None)
+        .Events(envelope) -> { assert(envelope.events()[0].body == None) }
         .Commands(_) -> panic("expected an event envelope")
     }
     extra_mutation: decode_test_event(1, "Mutation", "{{\"name\":\"save\",\"lifecycle\":\"started\",\"rollback\":false,\"extra\":1}}")
@@ -44,7 +44,7 @@ decode_test_event: fn(sequence: Int, kind: String, fields: String) -> String {
     commands: "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"s1\",\"started_at_ms\":10,\"direction\":\"host_to_runtime\",\"commands\":[{explain}]}}"
     decoded: decode_devtools_envelope(commands) ?? panic("command envelope")
     if decoded == {
-        .Commands(envelope) -> assert_eq(envelope.command_count(), 1)
+        .Commands(envelope) -> { assert_eq(envelope.command_count(), 1) }
         .Events(_) -> panic("expected a command envelope")
     }
     mixed: "{{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"s1\",\"started_at_ms\":10,\"direction\":\"host_to_runtime\",\"commands\":[],\"events\":[]}}"

@@ -17,10 +17,10 @@ fixture: Fixtures/ProgramOwnedMain
 env: NO_COLOR=1
 step: jet inspect decisions owned.jet
 exit: 0
-stdout: ~ "main: program-owned" # no stop edge cleans up, every route is root-free
+stdout: ~ "Main: program-owned" # no stop edge cleans up, every route is root-free
 step: jet inspect decisions rooted.jet
 exit: 0
-stdout: ~ "main: process root: " # the deferred close runs on a stop edge
+stdout: ~ "Main: process root: " # the deferred close runs on a stop edge
 step: jet run owned.jet
 exit: 70
 stdout: = "body\n"
@@ -68,7 +68,7 @@ stdout: = "body\nclose resource\n"
 stderr: ~ "Stop [E3010]" # the built image runs the close too
 step: jet inspect decisions exact.jet
 exit: 0
-stdout: ~ "main: program-owned" # big Int arithmetic, memory-only drops and cleanup scopes need no root
+stdout: ~ "Main: program-owned" # big Int arithmetic, memory-only drops and cleanup scopes need no root
 step: jet run --release exact.jet
 exit: 70
 stdout: = "big 1000008000032000080000138000168000144000080000026\n"
@@ -83,7 +83,7 @@ stdout: = "big 1000008000032000080000138000168000144000080000026\n"
 stderr: ~ "divided by zero" # the built image stops the same way
 step: jet inspect decisions cli.jet
 exit: 0
-stdout: ~ "main: program-owned" # the generated parser needs no root
+stdout: ~ "Main: program-owned" # the generated parser needs no root
 step: jet run cli.jet -- 7
 exit: 0
 stdout: = "half 3\n"

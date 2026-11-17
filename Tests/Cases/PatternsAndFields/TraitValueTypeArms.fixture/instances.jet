@@ -1,0 +1,28 @@
+// Two instances of one generic held by trait values: `.Box<Int>(b)` and
+// `.Box<String>(b)` each test their own instance, and a third instance
+// reaches the table's `else`.
+Shape: trait {
+    area: fn(self) -> Int,
+}
+
+Box: struct<T> {
+    value: T,
+
+    impl Shape {
+        area: fn(self) -> Int { 1 }
+    }
+}
+
+describe: fn(s: Shape) -> String {
+    if s == {
+        .Box<Int>(b) -> "int box {b.value}"
+        .Box<String>(b) -> "string box {b.value}"
+        else -> "another box"
+    }
+}
+
+run: fn() {
+    print(describe(Box<Int>{value: 3}))
+    print(describe(Box<String>{value: "x"}))
+    print(describe(Box<Bool>{value: true}))
+}

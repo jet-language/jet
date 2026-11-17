@@ -14,12 +14,12 @@ step: jet check inline.jet
 exit: 0
 step generic: jet explain effects generic.jet:4
 exit: 0
-stdout: = "effects at generic.jet:4, in `counter.bump`, nearest first\n  function  (none written)  generic.jet:3\n  type      (none written)\n  module    #FX(IO, !FS)    generic.jet:1\n  package   (none written)\n  run       everything else allowed; --deny wins\nreaches: IO (generic.jet:4)\n" # the instance function under its source name, with the template's cap at the module rung
+stdout: = "Effects at generic.jet:4, in `counter.bump`, nearest first\n  function  (none written)  generic.jet:3\n  type      (none written)\n  module    #FX(IO, !FS)    generic.jet:1\n  package   (none written)\n  run       everything else allowed; --deny wins\nReaches: IO (generic.jet:4)\n" # the instance function under its source name, with the template's cap at the module rung
 step caller: jet explain effects generic.jet:11
 exit: 0
-stdout: ~ "effects at generic.jet:11, in `step`, nearest first" # a caller outside the module
+stdout: ~ "Effects at generic.jet:11, in `step`, nearest first" # a caller outside the module
 stdout: ~ "  module    (none written)\n" # holds no module cap
-stdout: ~ "reaches: IO via generic.counter.bump (generic.jet:11)" # and reaches IO through the instance function, under its source name
+stdout: ~ "Reaches: IO via generic.counter.bump (generic.jet:11)" # and reaches IO through the instance function, under its source name
 stdout: !~ "__jet_" # no compiler-generated name
 step json: jet explain effects --json generic.jet:11
 exit: 0
@@ -30,7 +30,7 @@ exit: 0
 stdout: = "generic.jet:1  #FX(IO, !FS)  module tally\n" # the generic module's cap, once, under the template's name
 step inline: jet explain effects inline.jet:3
 exit: 0
-stdout: = "effects at inline.jet:3, in `tally.bump`, nearest first\n  function  (none written)  inline.jet:2\n  type      (none written)\n  module    #FX(IO, !FS)    inline.jet:1\n  package   (none written)\n  run       everything else allowed; --deny wins\nreaches: IO (inline.jet:3)\n" # an inline module's function, under its source name, with the module's cap
+stdout: = "Effects at inline.jet:3, in `tally.bump`, nearest first\n  function  (none written)  inline.jet:2\n  type      (none written)\n  module    #FX(IO, !FS)    inline.jet:1\n  package   (none written)\n  run       everything else allowed; --deny wins\nReaches: IO (inline.jet:3)\n" # an inline module's function, under its source name, with the module's cap
 step inlinecaps: jet explain effects --caps inline.jet
 exit: 0
 stdout: = "inline.jet:1  #FX(IO, !FS)  module tally\n" # the inline module's cap, listed once

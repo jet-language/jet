@@ -189,7 +189,7 @@ jet_cli_foreign_audit_list: fn(words: [String]) -> String Never! {
 // The human report of `audit`.
 jet_cli_foreign_audit_text: fn(audit: JetCLIForeignAudit) -> String Never! {
     count: if audit.declarations.len() == 0 -> "none" else -> "{audit.declarations.len()}"
-    out := "foreign declarations: {count}\n"
+    out := "Foreign declarations: {count}\n"
     loop row in audit.declarations {
         out = "{out}  {row.path}:{row.line}  {row.language}  {row.name} -> {row.symbol}\n"
     }
@@ -200,13 +200,13 @@ jet_cli_foreign_audit_text: fn(audit: JetCLIForeignAudit) -> String Never! {
         audit.loader.dynamic -> "a dynamic segment without an interpreter"
         else -> "none (static ELF, no needed libraries)"
     }
-    out = "{out}dynamic loader: {loader}\n"
+    out = "{out}Dynamic loader: {loader}\n"
     if audit.loader.needed.len() > 0 {
-        out = "{out}needed libraries: {audit.loader.needed.join(", ")}\n"
+        out = "{out}Needed libraries: {audit.loader.needed.join(", ")}\n"
     }
-    out = "{out}host effects: {jet_cli_foreign_audit_list(audit.host_effects)}\n"
+    out = "{out}Host effects: {jet_cli_foreign_audit_list(audit.host_effects)}\n"
     verdict: if jet_cli_foreign_audit_clean(audit) -> "none" else -> "present"
-    "{out}foreign code: {verdict}\n"
+    "{out}Foreign code: {verdict}\n"
 }
 
 // A JSON array of `words`.
@@ -354,7 +354,7 @@ jet_cli_elf_test_refusal: fn(bytes: [U8]) -> String Never! {
     static: JetCLIElfLoader{interpreter: None, dynamic: false, needed: [String]{}}
     clean: jet_cli_foreign_audit(facts, [String]{"GPU", "FS", "GPU"}, static)
     assert(jet_cli_foreign_audit_clean(clean))
-    assert_eq(jet_cli_foreign_audit_text(clean), "foreign declarations: none\nFFI effects reached: none\nC libraries linked: none\ndynamic loader: none (static ELF, no needed libraries)\nhost effects: FS, GPU\nforeign code: none\n")
+    assert_eq(jet_cli_foreign_audit_text(clean), "Foreign declarations: none\nFFI effects reached: none\nC libraries linked: none\nDynamic loader: none (static ELF, no needed libraries)\nHost effects: FS, GPU\nForeign code: none\n")
     assert_eq(jet_cli_foreign_audit_json(clean), "{{\"schema\":\"jet.status/v1\",\"action\":\"audit.foreign\",\"ok\":true,\"reports\":[],\"declarations\":[],\"ffi_effects\":[],\"c_libraries\":[],\"loader\":{{\"interpreter\":null,\"dynamic\":false,\"needed\":[]}},\"host_effects\":[\"FS\",\"GPU\"],\"foreign_free\":true}}\n")
     facts.declarations.push(JetDriverForeignDeclaration{name: "abs", language: "c", symbol: "abs", path: "/p/run.jet", line: 3})
     facts.libraries = [String]{"m"}
@@ -362,5 +362,5 @@ jet_cli_elf_test_refusal: fn(bytes: [U8]) -> String Never! {
     foreign: jet_cli_foreign_audit(facts, [String]{"FFI.C", "FS"}, static)
     assert(!jet_cli_foreign_audit_clean(foreign))
     assert_eq(foreign.c_libraries, [String]{"m", "z"})
-    assert_eq(jet_cli_foreign_audit_text(foreign), "foreign declarations: 1\n  /p/run.jet:3  c  abs -> abs\nFFI effects reached: FFI.C\nC libraries linked: m, z\ndynamic loader: none (static ELF, no needed libraries)\nhost effects: FS\nforeign code: present\n")
+    assert_eq(jet_cli_foreign_audit_text(foreign), "Foreign declarations: 1\n  /p/run.jet:3  c  abs -> abs\nFFI effects reached: FFI.C\nC libraries linked: m, z\nDynamic loader: none (static ELF, no needed libraries)\nHost effects: FS\nForeign code: present\n")
 }

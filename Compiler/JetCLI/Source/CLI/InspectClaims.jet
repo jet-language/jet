@@ -85,7 +85,7 @@ jet_cli_claims_grade_text: fn(view: JetCLIClaimsGradeView, file: String) -> Stri
         .Val(id) -> id.copy()
         .None -> "none for the current source; run `jet test {file}`"
     }
-    "claims grade: {grade}\nclaims floor: {floor}\nclaims evidence: {evidence}\n"
+    "Claims grade: {grade}\nClaims floor: {floor}\nClaims evidence: {evidence}\n"
 }
 
 JET_CLI_CLAIM_DISPOSITIONS: [String]{"planned", "implemented-unqualified", "passed", "failed", "stale", "unavailable", "unsupported", "owner-ratified-not-applicable"}
@@ -522,8 +522,8 @@ jet_cli_inspect_claims_manifest: fn(file: String, json: Bool, color: Bool) -[FS,
     }
     active: if JET_CLI_RELEASE_POLICY_ACTIVE -> "active" else -> "not active"
     ready: if release_ready -> "yes" else -> "no"
-    out := "claims\nrelease: {JET_CLI_RELEASE_CHANNEL} (disposition: {JET_CLI_RELEASE_DISPOSITION}; readiness: {JET_CLI_RELEASE_READINESS}; 1.0 compatibility policy: {JET_CLI_RELEASE_POLICY} [{JET_CLI_RELEASE_POLICY_DISPOSITION}; {active}])\nclaim source: {JET_CLI_RELEASE_CLAIM_SOURCE}\nrelease ready: {ready}\ncapability relation: {relation_status}\n"
-    if claims.len() == 0 -> out = "{out}none\n" else {
+    out := "Claims\nRelease: {JET_CLI_RELEASE_CHANNEL} (disposition: {JET_CLI_RELEASE_DISPOSITION}; readiness: {JET_CLI_RELEASE_READINESS}; 1.0 compatibility policy: {JET_CLI_RELEASE_POLICY} [{JET_CLI_RELEASE_POLICY_DISPOSITION}; {active}])\nClaim source: {JET_CLI_RELEASE_CLAIM_SOURCE}\nRelease ready: {ready}\nCapability relation: {relation_status}\n"
+    if claims.len() == 0 -> out = "{out}None\n" else {
         loop claim in claims {
             id: jet_cli_status_string(jet_cli_status_get(claim, "claim")) ?? "unknown"
             mode: jet_cli_status_string(jet_cli_status_get(claim, "mode")) ?? "unknown"

@@ -142,17 +142,17 @@ file: package.jet = "{cap:package_with_library}"
 step split_check: jet split env --check
 exit: 0
 stdout: ~ "No files changed." # original predicate
-stdout: ~ "package graph unchanged" # original predicate
+stdout: ~ "Package graph unchanged" # original predicate
 file: package.jet same-as {cap:package_before_split}
 file: .jet/lock same-as {cap:lock_before_transition}
 file: package/env.jet absent
-capture: split_check_before = prefixed stdout "package graph unchanged: " | "package graph before: "
-capture: split_check_after = prefixed stdout "package graph unchanged: " | "package graph after: "
+capture: split_check_before = prefixed stdout "Package graph unchanged: " | "Package graph before: "
+capture: split_check_after = prefixed stdout "Package graph unchanged: " | "Package graph after: "
 cap:split_check_before: = "{cap:split_check_after}"
 step split: jet split env
 exit: 0
-capture: split_before = prefixed stdout "package graph unchanged: " | "package graph before: "
-capture: split_after = prefixed stdout "package graph unchanged: " | "package graph after: "
+capture: split_before = prefixed stdout "Package graph unchanged: " | "Package graph before: "
+capture: split_after = prefixed stdout "Package graph unchanged: " | "Package graph after: "
 cap:split_before: = "{cap:split_after}"
 capture: journal = prefixed stdout "Transition journal: "
 file: {cap:journal} is-file
@@ -181,13 +181,13 @@ stdout: ~ "No files changed." # original predicate
 file: package.jet same-as {cap:package_after_split}
 file: package/env.jet same-as {cap:generated_after_split}
 file: .jet/lock same-as {cap:lock_before_transition}
-capture: fold_check_before = prefixed stdout "package graph unchanged: " | "package graph before: "
-capture: fold_check_after = prefixed stdout "package graph unchanged: " | "package graph after: "
+capture: fold_check_before = prefixed stdout "Package graph unchanged: " | "Package graph before: "
+capture: fold_check_after = prefixed stdout "Package graph unchanged: " | "Package graph after: "
 cap:fold_check_before: = "{cap:fold_check_after}"
 step fold: jet Fold package/env.jet
 exit: 0
-capture: fold_before = prefixed stdout "package graph unchanged: " | "package graph before: "
-capture: fold_after = prefixed stdout "package graph unchanged: " | "package graph after: "
+capture: fold_before = prefixed stdout "Package graph unchanged: " | "Package graph before: "
+capture: fold_after = prefixed stdout "Package graph unchanged: " | "Package graph after: "
 cap:fold_before: = "{cap:fold_after}"
 file: package.jet same-as {cap:package_before_split}
 file: package/env.jet absent

@@ -1,6 +1,4 @@
-use {
-    watch_test_files: core.files
-}
+use watch_test_files: core.files
 
 watch_test_dir: fn(name: String) -> String {
     watch_test_files.mkdtemp("jet_watch_{name}_") ?? panic("cannot make a temp dir: {err}")
@@ -116,7 +114,9 @@ watch_test_write: fn(path: String, body: String) {
     renamed: session.poll() ?? panic("rename")
     session.applied_generation = renamed.generation + 10
     watch_test_write(entry_path, "run: fn() {{ /* x */ }}\n")
-    if session.poll() == .Val(stale) -> assert(stale.change_kinds.contains("stale") || stale.closure.len() == 0)
+    if session.poll() == .Val(stale) {
+        assert(stale.change_kinds.contains("stale") || stale.closure.len() == 0)
+    }
     watch_test_files.remove_all(dir).drop("a leftover temp dir does not change the result")
 }
 

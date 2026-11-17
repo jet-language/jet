@@ -184,14 +184,14 @@ jet_cli_fix_memory_at: fn(root: String, args: [String], color: Bool, json: Bool)
         )
         return jet_cli_done("{jet_cli_status_render("fix.memory", true, [JetCLIStatusField]{jet_cli_status_field("memory", memory)})}\n", "", JET_DRIVER_EXIT_OK)
     }
-    out := "jet fix memory\ncoverage: exercised runs only\n"
-    if applied.len() == 0 -> out = "{out}applied: none\n"
+    out := "jet fix memory\nCoverage: exercised runs only\n"
+    if applied.len() == 0 -> out = "{out}Applied: none\n"
     loop entry in applied {
-        action: if dry_run && entry.changed -> "would apply" else if entry.changed -> "applied" else -> "already applied"
+        action: if dry_run && entry.changed -> "Would apply" else if entry.changed -> "Applied" else -> "Already applied"
         out = "{out}{action}: {entry.row.source}:{entry.row.span_start}..{entry.row.span_end} -> {entry.row.repairs[0]}\n"
     }
     loop row in options {
-        out = "{out}options: {row.source}:{row.span_start}..{row.span_end} {row.detail}\n"
+        out = "{out}Options: {row.source}:{row.span_start}..{row.span_end} {row.detail}\n"
         if row.repairs.len() == 0 -> out = "{out}  - no safe automatic repair is known\n"
         loop repair in row.repairs -> out = "{out}  - {repair}\n"
     }

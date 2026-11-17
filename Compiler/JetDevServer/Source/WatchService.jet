@@ -18,8 +18,11 @@ use {
 }
 
 WATCH_POLL_INTERVAL_MS: Int{5}
+
 WATCH_COALESCE_MS: Int{4}
+
 WATCH_SETTLE_MAX_MS: Int{250}
+
 EDIT_TO_VISIBLE_BUDGET_MS: Int{2000}
 
 impl RootKind {
@@ -126,7 +129,9 @@ WatchEvents: struct {
 
     refresh: fn(&self, paths: [String]) {
         directories: watch_directories(paths)
-        if directories == self.directories && self.handles.len() > 0 -> return
+        if directories == self.directories && self.handles.len() > 0 {
+            return
+        }
         loop handle in self.handles -> handle.cancel()
         handles := [WatchHandle]{}
         loop directory in directories {
@@ -230,8 +235,12 @@ WatchGraph: struct {
 
     new: fn() -> WatchGraph Never! {
         WatchGraph{
-            nodes: [String:WatchNode]{}, asset_roots: [String:Bool]{}, runtime_input_roots: [String:Bool]{},
-            reverse: [String:[String:Bool]]{}, forward: [String:[String:Bool]]{}, entry: None,
+            nodes: [String:WatchNode]{},
+            asset_roots: [String:Bool]{},
+            runtime_input_roots: [String:Bool]{},
+            reverse: [String:[String:Bool]]{},
+            forward: [String:[String:Bool]]{},
+            entry: None,
         }
     }
 
@@ -319,10 +328,14 @@ WatchGraph: struct {
 
     add_asset_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
         path: watch_canonicalize_loose(raw_path)
-        if visited.has_key(path) -> return
+        if visited.has_key(path) {
+            return
+        }
         visited[path] = true
         self.upsert(path, RootKind.Asset)
-        if !watch_files.is_dir(path) -> return
+        if !watch_files.is_dir(path) {
+            return
+        }
         loop child in watch_children(path) -> self.add_asset_tree(child, visited)
     }
 
@@ -335,7 +348,9 @@ WatchGraph: struct {
 
     add_new_asset_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
         path: watch_canonicalize_loose(raw_path)
-        if visited.has_key(path) -> return
+        if visited.has_key(path) {
+            return
+        }
         visited[path] = true
         is_dir: watch_files.is_dir(path)
         exists: watch_files.exists(path)
@@ -344,7 +359,9 @@ WatchGraph: struct {
         } else {
             self.nodes[path] = WatchNode{path: path, kind: RootKind.Asset, stamp: watch_stamp_missing(), is_dir: is_dir}
         }
-        if !is_dir -> return
+        if !is_dir {
+            return
+        }
         loop child in watch_children(path) -> self.add_new_asset_tree(child, visited)
     }
 
@@ -357,11 +374,15 @@ WatchGraph: struct {
 
     add_new_runtime_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
         path: watch_canonicalize_loose(raw_path)
-        if visited.has_key(path) -> return
+        if visited.has_key(path) {
+            return
+        }
         visited[path] = true
         exists: watch_files.exists(path)
         expected_dir := false
-        if !exists && self.nodes.get(path) == .Val(node) -> expected_dir = node.is_dir && !node.stamp.exists
+        if !exists && self.nodes.get(path) == .Val(node) {
+            expected_dir = node.is_dir && !node.stamp.exists
+        }
         is_dir: watch_files.is_dir(path) || expected_dir
         if self.nodes.has_key(path) {
             if exists -> self.reshape(path, is_dir, true)
@@ -370,7 +391,9 @@ WatchGraph: struct {
             self.nodes[path] = WatchNode{path: path, kind: kind, stamp: watch_stamp_missing(), is_dir: is_dir}
         }
         self.link_from_entry(path)
-        if !is_dir -> return
+        if !is_dir {
+            return
+        }
         loop child in watch_children(path) -> self.add_new_runtime_tree(child, visited)
     }
 
@@ -402,10 +425,16 @@ WatchGraph: struct {
 
     classify: fn(path: String) -> RootKind Never! {
         name: watch_ascii_lower(watch_files.basename(path))
-        if name == PACKAGE_FILE || name.ends_with(".manifest") || name == "web.manifest.json" -> return RootKind.Manifest
-        if name == "lock" || name.ends_with(".lock") || path.ends_with(".jet/lock") -> return RootKind.Lock
+        if name == PACKAGE_FILE || name.ends_with(".manifest") || name == "web.manifest.json" {
+            return RootKind.Manifest
+        }
+        if name == "lock" || name.ends_with(".lock") || path.ends_with(".jet/lock") {
+            return RootKind.Lock
+        }
         parents: "/{watch_files.dirname(path)}/"
-        if parents.contains("/generated/") || parents.contains("/.jet-gen/") -> return RootKind.Generated
+        if parents.contains("/generated/") || parents.contains("/.jet-gen/") {
+            return RootKind.Generated
+        }
         if watch_extension(name) == {
             "jet" -> RootKind.Import
             "html" | "htm" -> RootKind.HTML
@@ -451,7 +480,9 @@ WatchGraph: struct {
     // once they do.
     add_extra: fn(&self, path: String, kind: RootKind) {
         expected: kind == RootKind.Manifest || kind == RootKind.Lock || kind == RootKind.HTML
-        if !expected && !watch_files.exists(path) -> return
+        if !expected && !watch_files.exists(path) {
+            return
+        }
         self.upsert(path, kind)
         self.link_from_entry(path)
     }
@@ -461,9 +492,7 @@ WatchGraph: struct {
         checked: checker.check(entry, [LSPOverlay]{})
         seen := [String:Bool]{}
         loop loaded in checked.modules {
-            if loaded.physical_path != "" {
-                seen[loaded.physical_path] = true
-            } else if loaded.path != "" {
+            if loaded.physical_path != "" -> seen[loaded.physical_path] = true else if loaded.path != "" {
                 seen[loaded.path] = true
             }
         }
@@ -476,7 +505,9 @@ WatchGraph: struct {
         sources := [String]{}
         nodes: self.node_list()
         loop node in nodes.move() {
-            if node.kind == RootKind.Import || watch_extension(watch_ascii_lower(node.path)) == "jet" -> sources.push(node.path)
+            if node.kind == RootKind.Import || watch_extension(watch_ascii_lower(node.path)) == "jet" {
+                sources.push(node.path)
+            }
         }
         base: if self.entry == .Val(entry) -> watch_files.dirname(entry) else -> "."
         inputs := [String:Bool]{}
@@ -492,12 +523,16 @@ WatchGraph: struct {
         paths := inputs.keys().to_list()
         paths.sort()
         visited := [String:Bool]{}
-        loop path in paths -> self.add_runtime_input_node(path, visited, inputs.get(path) ?? false, true)
+        loop path in paths {
+            self.add_runtime_input_node(path, visited, inputs.get(path) ?? false, true)
+        }
     }
 
     add_runtime_input_node: fn(&self, raw_path: String, visited: &[String:Bool], dir_hint: Bool, register_root: Bool) {
         path: watch_canonicalize_loose(raw_path)
-        if visited.has_key(path) -> return
+        if visited.has_key(path) {
+            return
+        }
         visited[path] = true
         exists: watch_files.exists(path)
         is_dir: watch_files.is_dir(path) || (dir_hint && !exists)
@@ -509,8 +544,12 @@ WatchGraph: struct {
         }
         if register_root && dir_hint -> self.mark_runtime_root(path)
         self.link_from_entry(path)
-        if !is_dir -> return
-        loop child in watch_children(path) -> self.add_runtime_input_node(child, visited, false, false)
+        if !is_dir {
+            return
+        }
+        loop child in watch_children(path) {
+            self.add_runtime_input_node(child, visited, false, false)
+        }
     }
 
     scan_html_references: fn(&self, roots: [String]) {
@@ -520,14 +559,18 @@ WatchGraph: struct {
 
     add_reference_tree: fn(&self, raw_path: String, visited: &[String:Bool]) {
         path: watch_canonicalize_loose(raw_path)
-        if visited.has_key(path) -> return
+        if visited.has_key(path) {
+            return
+        }
         visited[path] = true
         self.upsert(path, WatchGraph.classify(path))
         self.link_from_entry(path)
         source: watch_files.read(path) ?? return
         parent: watch_files.dirname(path)
         loop reference in watch_referenced_paths(path, source) {
-            if watch_local_reference_path(parent, reference) == .Val(child) -> self.add_reference_tree(child, visited)
+            if watch_local_reference_path(parent, reference) == .Val(child) {
+                self.add_reference_tree(child, visited)
+            }
         }
     }
 }
@@ -677,9 +720,7 @@ watch_scan_method: fn(bytes: [U8], method: String, is_dir: Bool, inputs: &[Strin
                 inputs[value] = (inputs.get(value) ?? false) || is_dir
             }
             offset = quoted.end + 1
-        } else {
-            offset = cursor + 1
-        }
+        } else { offset = cursor + 1 }
     }
 }
 
@@ -689,13 +730,9 @@ watch_quoted_literal: fn(bytes: [U8], start: Int) -> WatchQuoted? Never! {
     if quote != 39 && quote != 34 -> return None
     cursor := start + 1
     loop cursor < bytes.len() {
-        if bytes[cursor] == 92 {
-            cursor += 2
-        } else if bytes[cursor] == quote {
+        if bytes[cursor] == 92 -> cursor += 2 else if bytes[cursor] == quote {
             return Val(WatchQuoted{value: watch_text(bytes, start + 1, cursor), end: cursor})
-        } else {
-            cursor += 1
-        }
+        } else { cursor += 1 }
     }
     None
 }
@@ -731,7 +768,9 @@ watch_referenced_paths: fn(path: String, source: String) -> [String] Never! {
             watch_extract_values(source, attribute, 61, false, attribute == "srcset", references)
         }
     }
-    if markup || extension == "css" -> watch_extract_values(source, "url", 40, false, false, references)
+    if markup || extension == "css" {
+        watch_extract_values(source, "url", 40, false, false, references)
+    }
     if extension == "js" || extension == "mjs" {
         watch_extract_values(source, "from", 0, false, false, references)
         watch_extract_values(source, "import", 0, true, false, references)
@@ -792,9 +831,7 @@ watch_extract_values: fn(source: String, keyword: String, delimiter: Int, option
                     word: watch_first_word(candidate)
                     if word != "" -> out.push(word)
                 }
-            } else {
-                out.push(value)
-            }
+            } else { out.push(value) }
         }
         offset = value_end + 1
     }
@@ -835,7 +872,7 @@ WatchSession: struct {
         WatchSession.from_graph(WatchGraph.discover(entry, checker))
     }
 
-    from_graph: fn(&&graph: WatchGraph) -> WatchSession {
+    from_graph: fn(graph: &&WatchGraph) -> WatchSession {
         events: WatchEvents.open(graph.watched_paths())
         WatchSession{graph: graph.move(), generation: 0, applied_generation: 0, coalesce_ms: WATCH_COALESCE_MS, edit_started: None, events: events}
     }
@@ -917,7 +954,9 @@ WatchSession: struct {
         stale: generation <= self.applied_generation
         if !stale {
             loop row in rows {
-                if self.graph.nodes.has_key(row.path) -> self.graph.set_stamp(row.path, watch_stamp_capture(row.path)) else -> self.graph.upsert(row.path, WatchGraph.classify(row.path))
+                if self.graph.nodes.has_key(row.path) {
+                    self.graph.set_stamp(row.path, watch_stamp_capture(row.path))
+                } else { self.graph.upsert(row.path, WatchGraph.classify(row.path)) }
             }
         }
         dev_entries: watch_dev_entries(rows, stale)
@@ -933,8 +972,14 @@ WatchSession: struct {
         }
         if stale {
             return Val(InvalidationReceipt{
-                generation: generation, changed: changed, closure: [String]{}, kinds: kinds, change_kinds: change_names,
-                content_digests: digests, dev_entries: dev_entries, edit_to_visible_ms: None,
+                generation: generation,
+                changed: changed,
+                closure: [String]{},
+                kinds: kinds,
+                change_kinds: change_names,
+                content_digests: digests,
+                dev_entries: dev_entries,
+                edit_to_visible_ms: None,
             })
         }
         closure: self.graph.closure_of(changed)
@@ -942,8 +987,14 @@ WatchSession: struct {
         if self.edit_started == .Val(started) -> edit_to_visible_ms = Val(started.elapsed_millis())
         self.edit_started = None
         Val(InvalidationReceipt{
-            generation: generation, changed: changed, closure: closure, kinds: kinds, change_kinds: change_names,
-            content_digests: digests, dev_entries: dev_entries, edit_to_visible_ms: edit_to_visible_ms,
+            generation: generation,
+            changed: changed,
+            closure: closure,
+            kinds: kinds,
+            change_kinds: change_names,
+            content_digests: digests,
+            dev_entries: dev_entries,
+            edit_to_visible_ms: edit_to_visible_ms,
         })
     }
 
@@ -955,11 +1006,15 @@ WatchSession: struct {
         loop clock.elapsed_millis() < WATCH_SETTLE_MAX_MS {
             truncated := false
             loop (index, path) in paths {
-                if (previous[index].size ?? -1) == 0 && self.graph.stamp_size(path) > 0 -> truncated = true
+                if (previous[index].size ?? -1) == 0 && self.graph.stamp_size(path) > 0 {
+                    truncated = true
+                }
             }
             self.events.coalesce(self.coalesce_ms)
             current: watch_stamps(paths)
-            if current == previous && !truncated -> return
+            if current == previous && !truncated {
+                return
+            }
             previous = current
         }
     }
@@ -993,7 +1048,9 @@ WatchSession: struct {
             self.acknowledge(receipt, checker)
             return
         }
-        if receipt.generation > self.applied_generation -> self.applied_generation = receipt.generation
+        if receipt.generation > self.applied_generation {
+            self.applied_generation = receipt.generation
+        }
         loop dependency in dependencies {
             path: watch_canonicalize_loose(dependency)
             if !self.graph.nodes.has_key(path) -> self.graph.upsert(path, WatchGraph.classify(path))
@@ -1003,7 +1060,9 @@ WatchSession: struct {
     }
 
     acknowledge: fn(&self, receipt: InvalidationReceipt, checker: LSPChecker) {
-        if receipt.generation > self.applied_generation -> self.applied_generation = receipt.generation
+        if receipt.generation > self.applied_generation {
+            self.applied_generation = receipt.generation
+        }
         entry: self.graph.entry_path() ?? return
         discovered: WatchGraph.discover(entry, checker)
         nodes: discovered.node_list()
@@ -1060,10 +1119,15 @@ watch_dev_entries: fn(rows: [WatchSettled], stale: Bool) -> [DevWatchEntry] Neve
             .HTML | .Style | .Manifest | .Lock | .Generated | .BuildInput | .TargetFact -> ""
         }
         if game_kind == "" -> next
-        entries.push(DevWatchEntry{
-            path: row.path, change_kind: row.change_kind.as_str(), game_kind: game_kind,
-            old_digest: if stale -> None else -> row.old_digest, new_digest: if stale -> None else -> row.new_digest,
-        })
+        entries.push(
+            DevWatchEntry{
+                path: row.path,
+                change_kind: row.change_kind.as_str(),
+                game_kind: game_kind,
+                old_digest: if stale -> None else -> row.old_digest,
+                new_digest: if stale -> None else -> row.new_digest,
+            },
+        )
     }
     entries
 }

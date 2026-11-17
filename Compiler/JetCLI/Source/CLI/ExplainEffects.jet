@@ -696,9 +696,9 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
     rungs := [JetCLIEffectsRung]{}
     reaches := [JetCLIEffectsReach]{}
     site: if job.line > 0 -> "{doc_module.path}:{job.line}" else -> doc_module.path
-    header := "effects at {site}, nearest first"
+    header := "Effects at {site}, nearest first"
     if found.function == .Val(function) {
-        header = "effects at {site}, in `{jet_cli_effects_source_name(function.name)}`, nearest first"
+        header = "Effects at {site}, in `{jet_cli_effects_source_name(function.name)}`, nearest first"
         scopes := [JetCLIEffectsScope]{}
         if offset >= 0 {
             jet_cli_effects_body_scopes(doc_module.tables, function.body, offset, scopes)
@@ -774,7 +774,7 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
     lines: loop rung in rungs -> jet_cli_effects_rung_line(rung, width)
     parts: loop reach in reached -> jet_cli_effects_reach_text(reach)
     reach_line: if parts.len() == 0 -> "nothing" else -> parts.join(", ")
-    JetDriverVerbOutput{stdout: "{header}\n{lines.join("\n")}\nreaches: {reach_line}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "{header}\n{lines.join("\n")}\nReaches: {reach_line}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 jet_cli_effects_cap_row: fn(doc_module: JetDriverDocModule, cap: ModuleCap, kind: String, name: String) -> JetCLIEffectsCapRow Never! {

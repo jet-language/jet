@@ -134,7 +134,7 @@ jet_cli_publish_root: fn() -[FS, Env]> String? Never! {
 }
 
 jet_cli_publish_no_root: fn(command: String) -> JetDriverVerbOutput Never! {
-    jet_cli_plain_failure("error: no package.jet found — run `jet registry {command}` inside a project\n", "E2104", "no package.jet found", "run `jet registry {command}` inside a project", JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_plain_failure("Error: no package.jet found — run `jet registry {command}` inside a project\n", "E2104", "no package.jet found", "run `jet registry {command}` inside a project", JET_DRIVER_EXIT_USER_ERROR)
 }
 
 jet_cli_publish_missing: fn(error: IOError) -> Bool Never! {
@@ -246,7 +246,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
     if dirty.len() > 0 {
         if !force {
             log.render(pkg_diagnostic_from_row("E2605", [{name: String, value: String}]{{name: "name", value: name}, {name: "version", value: version}}, None))
-            log.err("\n  uncommitted changes ({dirty.len()}):\n")
+            log.err("\n  Uncommitted changes ({dirty.len()}):\n")
             loop (index, line) in dirty {
                 if index >= 10 -> break
                 log.err("    {line}\n")
@@ -254,7 +254,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
             if dirty.len() > 10 -> log.err("    … and {dirty.len() - 10} more\n")
             return log.finish(JET_DRIVER_EXIT_USER_ERROR)
         }
-        log.err("warning [--force]: working tree has {dirty.len()} uncommitted change(s) — publishing anyway.\n")
+        log.err("Warning [--force]: working tree has {dirty.len()} uncommitted change(s) — publishing anyway.\n")
         loop (index, line) in dirty {
             if index >= 5 -> break
             log.err("  {line}\n")
@@ -294,8 +294,8 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
         }
     }
 
-    if !quiet -> log.out("publishing `{name}` v{version} ...")
-    if !quiet -> log.out("[1/3] checking build ...")
+    if !quiet -> log.out("Publishing `{name}` v{version} ...")
+    if !quiet -> log.out("[1/3] Checking build ...")
     notices := [String]{}
     entry := ""
     if jet_cli_find_project_entry(root, "publish", color, notices) == {
@@ -308,54 +308,54 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
         if jet_cli_publish_self(root, [String]{"check", entry}) == {
             .Val(checked) -> {
                 if checked.success {
-                    if !quiet -> log.out("  build: ok")
+                    if !quiet -> log.out("  Build: OK")
                     build_ok = true
                 } else if force {
-                    log.err("warning: build has errors — publishing anyway (--force)\n")
+                    log.err("Warning: build has errors — publishing anyway (--force)\n")
                 } else {
                     log.error("E2104", "`jet build` must pass before publishing")
                     log.err(checked.stderr)
-                    log.err("\n use `jet registry publish --force` to bypass this gate with a warning banner\n")
+                    log.err("\n Use `jet registry publish --force` to bypass this gate with a warning banner\n")
                     return log.finish(JET_DRIVER_EXIT_USER_ERROR)
                 }
             }
-            .None -> log.err("  build: failed — couldn't start `jet check`\n")
+            .None -> log.err("  Build: failed — couldn't start `jet check`\n")
         }
     } else {
-        log.err("  build: failed — no project entry `{if entry == "" -> root else -> entry}` was found\n")
+        log.err("  Build: failed — no project entry `{if entry == "" -> root else -> entry}` was found\n")
     }
 
     // Gate step 2: the project's real test command, before any registry mutation.
-    if !quiet -> log.out("[2/3] checking tests ...")
+    if !quiet -> log.out("[2/3] Checking tests ...")
     tests_ok := false
     if entry == "" || !publish_files.is_file(entry) {
-        log.err("  tests: failed — no project entry `{if entry == "" -> root else -> entry}` was found\n")
+        log.err("  Tests: failed — no project entry `{if entry == "" -> root else -> entry}` was found\n")
     } else if jet_cli_publish_self(root, [String]{"test", entry, "--show-default"}) == .Val(tested) {
         if tested.success {
             if !quiet {
                 log.raw_out(tested.stdout)
-                log.out("  tests: ok")
+                log.out("  Tests: OK")
             }
             tests_ok = true
         } else {
             log.raw_out(tested.stdout)
             log.err(tested.stderr)
-            log.err("  tests: failed (`jet test` exited with {tested.code})\n")
+            log.err("  Tests: failed (`jet test` exited with {tested.code})\n")
         }
-    } else { log.err("  tests: failed — couldn't start `jet test`\n") }
+    } else { log.err("  Tests: failed — couldn't start `jet test`\n") }
 
     if !build_ok || !tests_ok {
         if !force -> return log.finish(JET_DRIVER_EXIT_USER_ERROR)
-        log.err("warning [--force]: pre-publish gate failed but continuing anyway.\n")
-        log.err("  this publish would be rejected by a registry that enforces the pre-publish gate.\n")
+        log.err("Warning [--force]: pre-publish gate failed but continuing anyway.\n")
+        log.err("  This publish would be rejected by a registry that enforces the pre-publish gate.\n")
     }
 
     // Gate step 3 (E1218): sema's public API rows against the snapshot the
     // registry holds for the highest published version below this one. The
     // registry copy is the baseline, never the local cache, so clearing
     // `.jet/` cannot wave a breaking change through.
-    if !quiet -> log.out("[3/3] checking public API ...")
-    public_api: jet_cli_publish_public_api(root, entry, name, color) ?? JetCLIPublishAPI{rows: [PublicAPIItem]{}, refusal: "the compile stopped before sema produced the package's public API\n"}
+    if !quiet -> log.out("[3/3] Checking public API ...")
+    public_api: jet_cli_publish_public_api(root, entry, name, color) ?? JetCLIPublishAPI{rows: [PublicAPIItem]{}, refusal: "The compile stopped before sema produced the package's public API\n"}
     if public_api.refusal != "" {
         log.error("E2104", "the public API snapshot needs a package that compiles; `jet check` must pass before publishing")
         log.err(public_api.refusal)
@@ -401,13 +401,13 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
         before: publication_parse_semver(baseline.version) ?? release
         breaking: publication_diff_public_api(publication_api_snapshot_items(snapshot), api)
         if breaking.len() == 0 {
-            if !quiet -> log.out("  semver: ok — public API compatible with v{baseline.version}")
+            if !quiet -> log.out("  Semver: OK — public API compatible with v{baseline.version}")
         } else if publication_release_may_break(before, release) {
             if !quiet {
-                log.out("  semver: ok — v{version} is a breaking release after v{baseline.version} ({breaking.len()} breaking change(s))")
+                log.out("  Semver: OK — v{version} is a breaking release after v{baseline.version} ({breaking.len()} breaking change(s))")
             }
         } else if force {
-            log.err("warning [--force]: v{version} breaks {breaking.len()} public API item(s) of v{baseline.version} without a breaking version bump (E1218) — publishing anyway.\n")
+            log.err("Warning [--force]: v{version} breaks {breaking.len()} public API item(s) of v{baseline.version} without a breaking version bump (E1218) — publishing anyway.\n")
             loop change in breaking -> log.err("  {change.description}\n")
         } else {
             bump: publication_classify_bump(before, release)
@@ -416,11 +416,11 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
             }
             return log.finish(JET_DRIVER_EXIT_USER_ERROR)
         }
-    } else if !quiet { log.out("  semver: first release — no earlier published API to compare") }
+    } else if !quiet { log.out("  Semver: first release — no earlier published API to compare") }
     api_snapshot: pkg_api_snapshot_render(name, version, loop row in api -> row.signature.copy())
-    if !quiet -> log.out("\nok: `{name}` v{version} passes the pre-publish gate.")
+    if !quiet -> log.out("\nOK: `{name}` v{version} passes the pre-publish gate.")
     if !quiet {
-        log.out("publishing to registry index `{publication_redact_registry_url(registry.url)}` ...")
+        log.out("Publishing to registry index `{publication_redact_registry_url(registry.url)}` ...")
     }
 
     hashes: jet_cli_publish_hashes(root, name)
@@ -454,11 +454,11 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
     public_key := ""
     signature := ""
     if no_sign {
-        if !quiet -> log.out("  signing: skipped (--no-sign); tier-B checksum still applies.")
+        if !quiet -> log.out("  Signing: skipped (--no-sign); tier-B checksum still applies.")
     } else {
         if generated_seed != "" && !quiet {
-            log.out("  signing: generated a new key for registry `{registry.name}`.")
-            log.out("    public key: {generated_public}")
+            log.out("  Signing: generated a new key for registry `{registry.name}`.")
+            log.out("    Public key: {generated_public}")
             log.out("    `jet registry key backup` writes this to {generated_seed} — losing it means losing your ability to publish signed updates.")
         }
         seed_path: publication_key_paths(registry.name).seed_path
@@ -466,7 +466,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
         local_public_key: publication_read_public_key(registry.name) ?? ""
         pinned: publication_pinned_public_key(existing_entries) ?? ""
         public_key = if pinned != "" && pinned == local_public_key.trim() -> "" else -> local_public_key
-        if !quiet -> log.out("  signing: signed content hash with the `{registry.name}` key.")
+        if !quiet -> log.out("  Signing: signed content hash with the `{registry.name}` key.")
     }
 
     gate_status := publication_core_reviewed()
@@ -524,7 +524,7 @@ jet_cli_publish: fn(force: Bool, no_sign: Bool, quiet: Bool, color: Bool) -> Jet
         return log.finish(JET_DRIVER_EXIT_USER_ERROR)
     }
     if !quiet {
-        log.out("ok: published `{name}` v{version} to {publication_redact_registry_url(registry.url)}")
+        log.out("OK: published `{name}` v{version} to {publication_redact_registry_url(registry.url)}")
     }
     // The package's own copy is the lock fingerprint's input and is committed
     // with the package; the gate never reads it.
@@ -628,9 +628,9 @@ jet_cli_yank: fn(version: String, message: String?, color: Bool) -[FS, Env, Exec
         log.error("E2105", "couldn't remove registry checkout `{checkout.path}`: {error}")
         return log.finish(JET_DRIVER_EXIT_USER_ERROR)
     }
-    log.out("ok: yanked `{name}` v{version} in {publication_redact_registry_url(registry.url)}")
-    if message == .Val(reason) -> log.out("  reason: {reason}")
-    log.out("  the version stays reserved (immutable); it is hidden from new resolution.")
+    log.out("OK: yanked `{name}` v{version} in {publication_redact_registry_url(registry.url)}")
+    if message == .Val(reason) -> log.out("  Reason: {reason}")
+    log.out("  The version stays reserved (immutable); it is hidden from new resolution.")
     log.finish(JET_DRIVER_EXIT_OK)
 }
 

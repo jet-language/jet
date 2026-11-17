@@ -524,16 +524,16 @@ jet_cli_provenance_effects: fn(effects: [String]) -> String Never! {
 }
 
 jet_cli_provenance_text: fn(requirement: String, reports: [JetCLIProvenanceReport]) -> String Never! {
-    out := "provenance\nrequire: {requirement}\n"
+    out := "Provenance\nRequire: {requirement}\n"
     loop (index, report) in reports {
         if index > 0 -> out = "{out}\n"
         evidence: if report.integrity.status == "enforced" -> ", E1204" else -> ""
-        out = "{out}{report.name} {report.version}\n  integrity    {report.integrity.value} — matches .jet/lock ({report.integrity.status}{evidence})\n"
-        out = "{out}  transparency {report.transparency.value} ({report.transparency.status})\n"
-        out = "{out}  publisher    {report.publisher.value} ({report.publisher.status})\n"
-        out = "{out}  build        {report.build.value} ({report.build.status})\n"
-        out = "{out}  effect roles\n    required effects: {jet_cli_provenance_effects(report.required_effects)}\n"
-        out = "{out}    granted effects: {jet_cli_provenance_effects(report.granted_effects)}\n    denied effects: {jet_cli_provenance_effects(report.denied_effects)}\n    authority: {report.authority}\n"
+        out = "{out}{report.name} {report.version}\n  Integrity    {report.integrity.value} — matches .jet/lock ({report.integrity.status}{evidence})\n"
+        out = "{out}  Transparency {report.transparency.value} ({report.transparency.status})\n"
+        out = "{out}  Publisher    {report.publisher.value} ({report.publisher.status})\n"
+        out = "{out}  Build        {report.build.value} ({report.build.status})\n"
+        out = "{out}  Effect Roles\n    Required effects: {jet_cli_provenance_effects(report.required_effects)}\n"
+        out = "{out}    Granted effects: {jet_cli_provenance_effects(report.granted_effects)}\n    Denied effects: {jet_cli_provenance_effects(report.denied_effects)}\n    Authority: {report.authority}\n"
     }
     out
 }
@@ -572,7 +572,7 @@ jet_cli_provenance_json: fn(requirement: String, reports: [JetCLIProvenanceRepor
 // error), the lock (E1202 when absent or unreadable), then the project entry
 // whose package facts the host checks.
 jet_cli_inspect_provenance: fn(args: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env]> JetCLIPlan Never! {
-    root: jet_cli_inspect_package_root(cli_files.cwd() ?? ".") ?? return jet_cli_inspect_plain_error("error: no package.jet found — run `jet inspect provenance` inside a project\n", "no package.jet found", "run `jet inspect provenance` inside a project", JET_DRIVER_EXIT_USER_ERROR)
+    root: jet_cli_inspect_package_root(cli_files.cwd() ?? ".") ?? return jet_cli_inspect_plain_error("Error: no package.jet found — run `jet inspect provenance` inside a project\n", "no package.jet found", "run `jet inspect provenance` inside a project", JET_DRIVER_EXIT_USER_ERROR)
     if jet_cli_lock_load(root) == {
         .Missing -> return jet_cli_inspect_b_report("E1202", "no lockfile found — run `jet fetch` first", "the lockfile must contain the exact dependency graph before a locked or supply-chain command can run", "run `jet fetch`, then run the command again", color, json, JET_DRIVER_EXIT_USER_ERROR)
         .Unported(shape) -> return jet_cli_not_ported("inspect provenance <{shape}>", color)

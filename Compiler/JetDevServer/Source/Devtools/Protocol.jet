@@ -5,13 +5,19 @@
 use jet_foundation.[foundation_json_quote, JetDevtoolsEventBody, JetDevtoolsFormState, JetDevtoolsFunctionIdentity, JetDevtoolsGameLaunchPhase, JetDevtoolsMutationLifecycle, JetDevtoolsQueryState, JetDevtoolsSourceSpan, JetDevtoolsTraceKind]
 
 JET_DEVTOOLS_PROTOCOL: String{"jet.devtools.v1"}
+
 JET_DEVTOOLS_VERSION: Int{1}
+
 // Policy limits, not host hints: a host marshals the same envelope but never
 // widens them.
 JET_DEVTOOLS_MAX_EVENTS: Int{256}
+
 JET_DEVTOOLS_MAX_HISTORY: Int{256}
+
 JET_DEVTOOLS_MAX_TEXT_BYTES: Int{16384}
+
 JET_DEVTOOLS_MAX_ENVELOPE_BYTES: Int{1048576}
+
 JET_DEVTOOLS_MAX_LAUNCH_PHASES: Int{256}
 
 // `Stopped` is an intentional shutdown; `Unavailable` means no observation
@@ -34,9 +40,17 @@ JetDevtoolsFreshnessFact: struct {
     state: JetDevtoolsFreshnessState,
     observed_at_ms: Int,
 
-    fresh: fn(observed_at_ms: Int) -> JetDevtoolsFreshnessFact Never! { JetDevtoolsFreshnessFact{state: JetDevtoolsFreshnessState.Fresh, observed_at_ms: observed_at_ms} }
-    stale: fn(observed_at_ms: Int) -> JetDevtoolsFreshnessFact Never! { JetDevtoolsFreshnessFact{state: JetDevtoolsFreshnessState.Stale, observed_at_ms: observed_at_ms} }
-    unknown: fn(observed_at_ms: Int) -> JetDevtoolsFreshnessFact Never! { JetDevtoolsFreshnessFact{state: JetDevtoolsFreshnessState.Unknown, observed_at_ms: observed_at_ms} }
+    fresh: fn(observed_at_ms: Int) -> JetDevtoolsFreshnessFact Never! {
+        JetDevtoolsFreshnessFact{state: JetDevtoolsFreshnessState.Fresh, observed_at_ms: observed_at_ms}
+    }
+
+    stale: fn(observed_at_ms: Int) -> JetDevtoolsFreshnessFact Never! {
+        JetDevtoolsFreshnessFact{state: JetDevtoolsFreshnessState.Stale, observed_at_ms: observed_at_ms}
+    }
+
+    unknown: fn(observed_at_ms: Int) -> JetDevtoolsFreshnessFact Never! {
+        JetDevtoolsFreshnessFact{state: JetDevtoolsFreshnessState.Unknown, observed_at_ms: observed_at_ms}
+    }
 }
 
 // Privacy travels with the envelope so a reconnecting host cannot widen the
@@ -46,7 +60,9 @@ JetDevtoolsPrivacy: struct {
     payload_free_by_default: Bool,
     published_payloads: Bool,
 
-    development: fn() -> JetDevtoolsPrivacy Never! { JetDevtoolsPrivacy{loopback_only: true, payload_free_by_default: true, published_payloads: false} }
+    development: fn() -> JetDevtoolsPrivacy Never! {
+        JetDevtoolsPrivacy{loopback_only: true, payload_free_by_default: true, published_payloads: false}
+    }
 }
 
 // An absent component means the producer has not published that fact.
@@ -56,9 +72,10 @@ JetDevtoolsSourceIdentityFact: struct {
     revision: String?,
     world_id: String?,
 
-    new: fn(&&source_id: String?, &&build_id: String?, &&revision: String?, &&world_id: String?) -> JetDevtoolsSourceIdentityFact Never! {
+    new: fn(source_id: &&String?, build_id: &&String?, revision: &&String?, world_id: &&String?) -> JetDevtoolsSourceIdentityFact Never! {
         JetDevtoolsSourceIdentityFact{source_id: source_id.move(), build_id: build_id.move(), revision: revision.move(), world_id: world_id.move()}
     }
+
     validate: fn(self) Err! {
         if self.source_id == .Val(value) -> devtools_validate_text(value, "source_id")
         if self.build_id == .Val(value) -> devtools_validate_text(value, "build_id")
@@ -66,11 +83,14 @@ JetDevtoolsSourceIdentityFact: struct {
         if self.world_id == .Val(value) -> devtools_validate_text(value, "world_id")
         Ok()
     }
+
     // Only the published components, in wire order.
     json: fn(self) -> String Err! {
         self.validate()
         parts := [String]{}
-        if self.source_id == .Val(value) -> parts.push("\"source_id\":{foundation_json_quote(value)}")
+        if self.source_id == .Val(value) {
+            parts.push("\"source_id\":{foundation_json_quote(value)}")
+        }
         if self.build_id == .Val(value) -> parts.push("\"build_id\":{foundation_json_quote(value)}")
         if self.revision == .Val(value) -> parts.push("\"revision\":{foundation_json_quote(value)}")
         if self.world_id == .Val(value) -> parts.push("\"world_id\":{foundation_json_quote(value)}")
@@ -85,9 +105,12 @@ JetDevtoolsValue: struct {
     problem: String?,
 
     text: fn(value: String) -> JetDevtoolsValue Never! {
-        if value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES -> return JetDevtoolsValue{json: "null", problem: Val("jet.devtools.v1 payload text exceeds the Prelude limit")}
+        if value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES {
+            return JetDevtoolsValue{json: "null", problem: Val("jet.devtools.v1 payload text exceeds the Prelude limit")}
+        }
         JetDevtoolsValue{json: foundation_json_quote(value), problem: None}
     }
+
     validate: fn(self) Err! {
         if self.problem == .Val(problem) -> return Err("{problem}")
         Ok()
@@ -98,7 +121,9 @@ JetDevtoolsField: struct {
     key: String,
     value: JetDevtoolsValue,
 
-    new: fn(&&key: String, &&value: JetDevtoolsValue) -> JetDevtoolsField Never! { JetDevtoolsField{key: key.move(), value: value.move()} }
+    new: fn(key: &&String, value: &&JetDevtoolsValue) -> JetDevtoolsField Never! {
+        JetDevtoolsField{key: key.move(), value: value.move()}
+    }
 }
 
 // Values are absent unless an observation site publishes them explicitly;
@@ -106,20 +131,35 @@ JetDevtoolsField: struct {
 JetDevtoolsPayload: struct {
     fields: [JetDevtoolsField],
 
-    new: fn(&&fields: [JetDevtoolsField]) -> JetDevtoolsPayload Never! { JetDevtoolsPayload{fields: fields.move()} }
-    one: fn(&&key: String, &&value: JetDevtoolsValue) -> JetDevtoolsPayload Never! { JetDevtoolsPayload{fields: [JetDevtoolsField]{JetDevtoolsField.new(key, value)}} }
+    new: fn(fields: &&[JetDevtoolsField]) -> JetDevtoolsPayload Never! {
+        JetDevtoolsPayload{fields: fields.move()}
+    }
+
+    one: fn(key: &&String, value: &&JetDevtoolsValue) -> JetDevtoolsPayload Never! {
+        JetDevtoolsPayload{fields: [JetDevtoolsField]{JetDevtoolsField.new(key, value)}}
+    }
+
     validate: fn(self) Err! {
-        if self.fields.len() > JET_DEVTOOLS_MAX_HISTORY -> return Err("jet.devtools.v1 payload has too many fields")
+        if self.fields.len() > JET_DEVTOOLS_MAX_HISTORY {
+            return Err("jet.devtools.v1 payload has too many fields")
+        }
         seen := [String:Bool]{}
         loop (index, field) in self.fields {
-            if field.key == "" -> return Err("jet.devtools.v1 payload field {index} has an empty key")
-            if field.key.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES -> return Err("jet.devtools.v1 payload field key exceeds the Prelude limit")
+            if field.key == "" {
+                return Err("jet.devtools.v1 payload field {index} has an empty key")
+            }
+            if field.key.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES {
+                return Err("jet.devtools.v1 payload field key exceeds the Prelude limit")
+            }
             field.value.validate()
-            if seen.has_key(field.key) -> return Err("jet.devtools.v1 payload contains duplicate field `{field.key}`")
+            if seen.has_key(field.key) {
+                return Err("jet.devtools.v1 payload contains duplicate field `{field.key}`")
+            }
             seen["{field.key}"] = true
         }
         Ok()
     }
+
     // `{"fields":{...}}` with the keys in byte order.
     json: fn(self) -> String Err! {
         self.validate()
@@ -149,14 +189,15 @@ JetDevtoolsEvent: struct {
     payload: String?,
     body: JetDevtoolsEventBody?,
 
-    try_new: fn(timestamp_ms: Int, &&source: String, &&body: JetDevtoolsEventBody) -> JetDevtoolsEvent Err! {
+    try_new: fn(timestamp_ms: Int, source: &&String, body: &&JetDevtoolsEventBody) -> JetDevtoolsEvent Err! {
         fields: devtools_body_fields(body)
         event := JetDevtoolsEvent.from_parts(timestamp_ms, source, devtools_body_family(body), devtools_body_entity(body), fields)
         event.body = Val(body.move())
         Ok(event)
     }
+
     // A typed event rebuilt from its flat wire projection.
-    from_wire: fn(sequence: Int, timestamp_ms: Int, &&source: String, &&body: JetDevtoolsEventBody, &&fields_json: String, &&payload_json: String?) -> JetDevtoolsEvent Err! {
+    from_wire: fn(sequence: Int, timestamp_ms: Int, source: &&String, body: &&JetDevtoolsEventBody, fields_json: &&String, payload_json: &&String?) -> JetDevtoolsEvent Err! {
         if sequence <= 0 -> return Err("jet.devtools.v1 event sequence must be positive")
         event := JetDevtoolsEvent.try_new(timestamp_ms, source, body)
         devtools_validate_json_object(fields_json, "fields")
@@ -166,13 +207,15 @@ JetDevtoolsEvent: struct {
         event.assigned_sequence = sequence
         Ok(event)
     }
+
     // A host-marshaled event; `fields_json` must be one JSON object.
-    from_parts: fn(timestamp_ms: Int, &&source: String, &&kind: String, &&entity: String, &&fields_json: String) -> JetDevtoolsEvent Err! {
+    from_parts: fn(timestamp_ms: Int, source: &&String, kind: &&String, entity: &&String, fields_json: &&String) -> JetDevtoolsEvent Err! {
         JetDevtoolsEvent.from_parts_with_payload(timestamp_ms, source, kind, entity, fields_json, None)
     }
+
     // Game and package adapters attach their already-typed payload object
     // here; protocol and version stay outside it.
-    from_parts_with_payload: fn(timestamp_ms: Int, &&source: String, &&kind: String, &&entity: String, &&fields_json: String, &&payload_json: String?) -> JetDevtoolsEvent Err! {
+    from_parts_with_payload: fn(timestamp_ms: Int, source: &&String, kind: &&String, entity: &&String, fields_json: &&String, payload_json: &&String?) -> JetDevtoolsEvent Err! {
         devtools_validate_text(source, "source")
         devtools_validate_text(kind, "kind")
         devtools_validate_text(entity, "entity")
@@ -180,6 +223,7 @@ JetDevtoolsEvent: struct {
         if payload_json == .Val(payload) -> devtools_validate_json_object(payload, "payload")
         Ok(JetDevtoolsEvent{assigned_sequence: 0, timestamp_ms: timestamp_ms, event_source: source.move(), event_kind: kind.move(), event_entity: entity.move(), fields: fields_json.move(), payload: payload_json.move(), body: None})
     }
+
     // The only path that attaches values to an event.
     publish: fn(&&self, payload: JetDevtoolsPayload) -> JetDevtoolsEvent Err! {
         rendered: payload.json()
@@ -187,17 +231,26 @@ JetDevtoolsEvent: struct {
         published.payload = Val(rendered)
         Ok(published)
     }
+
     sequence: fn(self) -> Int Never! { self.assigned_sequence }
+
     source: fn(self) -> String Never! { "{self.event_source}" }
+
     kind: fn(self) -> String Never! { "{self.event_kind}" }
+
     entity: fn(self) -> String Never! { "{self.event_entity}" }
+
     fields_json: fn(self) -> String Never! { "{self.fields}" }
+
     payload_json: fn(self) -> String? Never! {
         if self.payload == .Val(payload) -> return Val("{payload}")
         None
     }
+
     json: fn(self) -> String Err! {
-        if self.assigned_sequence <= 0 -> return Err("jet.devtools.v1 event has no assigned sequence")
+        if self.assigned_sequence <= 0 {
+            return Err("jet.devtools.v1 event has no assigned sequence")
+        }
         devtools_validate_text(self.event_source, "source")
         devtools_validate_text(self.event_kind, "kind")
         devtools_validate_text(self.event_entity, "entity")
@@ -215,7 +268,10 @@ JetDevtoolsSelection: struct {
     panel_id: String,
     item_key: String?,
 
-    new: fn(&&panel_id: String, &&item_key: String?) -> JetDevtoolsSelection Never! { JetDevtoolsSelection{panel_id: panel_id.move(), item_key: item_key.move()} }
+    new: fn(panel_id: &&String, item_key: &&String?) -> JetDevtoolsSelection Never! {
+        JetDevtoolsSelection{panel_id: panel_id.move(), item_key: item_key.move()}
+    }
+
     json: fn(self) -> String Err! {
         devtools_validate_text(self.panel_id, "selection.panel_id")
         item_key := "null"
@@ -233,8 +289,14 @@ JetDevtoolsViewState: struct {
     selection: JetDevtoolsSelection?,
     cursor: Int?,
 
-    new: fn(&&selection: JetDevtoolsSelection?, cursor: Int?) -> JetDevtoolsViewState Never! { JetDevtoolsViewState{selection: selection.move(), cursor: cursor} }
-    set_selection: fn(&self, &&selection: JetDevtoolsSelection?) Never! { self.selection = selection.move() }
+    new: fn(selection: &&JetDevtoolsSelection?, cursor: Int?) -> JetDevtoolsViewState Never! {
+        JetDevtoolsViewState{selection: selection.move(), cursor: cursor}
+    }
+
+    set_selection: fn(&self, selection: &&JetDevtoolsSelection?) Never! {
+        self.selection = selection.move()
+    }
+
     set_cursor: fn(&self, cursor: Int?) Never! { self.cursor = cursor }
 }
 
@@ -254,15 +316,24 @@ JetDevtoolsEnvelope: struct {
     event_list: [JetDevtoolsEvent],
     next_sequence: Int,
 
-    new: fn(&&session_id: String, started_at_ms: Int) -> JetDevtoolsEnvelope Never! {
+    new: fn(session_id: &&String, started_at_ms: Int) -> JetDevtoolsEnvelope Never! {
         JetDevtoolsEnvelope{
-            session_id: session_id.move(), started_at_ms: started_at_ms, view: JetDevtoolsViewState.new(None, None),
-            lifecycle: JetDevtoolsLifecycleState.Starting, freshness: JetDevtoolsFreshnessFact.unknown(0), privacy: JetDevtoolsPrivacy.development(),
-            source_identity: None, reset: false, truncated: false, event_list: [JetDevtoolsEvent]{}, next_sequence: 1,
+            session_id: session_id.move(),
+            started_at_ms: started_at_ms,
+            view: JetDevtoolsViewState.new(None, None),
+            lifecycle: JetDevtoolsLifecycleState.Starting,
+            freshness: JetDevtoolsFreshnessFact.unknown(0),
+            privacy: JetDevtoolsPrivacy.development(),
+            source_identity: None,
+            reset: false,
+            truncated: false,
+            event_list: [JetDevtoolsEvent]{},
+            next_sequence: 1,
         }
     }
+
     // Appends one event and returns the sequence it assigned.
-    push: fn(&self, &&event: JetDevtoolsEvent) -> Int Never! {
+    push: fn(&self, event: &&JetDevtoolsEvent) -> Int Never! {
         sequence: self.next_sequence
         self.next_sequence = sequence + 1
         stamped := event.move()
@@ -276,7 +347,9 @@ JetDevtoolsEnvelope: struct {
         self.view.set_cursor(Val(sequence))
         sequence
     }
+
     events: fn(self) -> [JetDevtoolsEvent] Never! { self.event_list }
+
     // The retained events after `cursor`, oldest first; every event when no
     // cursor is given.
     events_since: fn(self, cursor: Int?) -> [JetDevtoolsEvent] Never! {
@@ -290,30 +363,48 @@ JetDevtoolsEnvelope: struct {
         }
         loop index in first..<self.event_list.len() -> self.event_list[index]
     }
+
     oldest_sequence: fn(self) -> Int? Never! {
         if self.event_list.len() == 0 -> return None
         Val(self.event_list[0].assigned_sequence)
     }
+
     latest_sequence: fn(self) -> Int? Never! {
         if self.event_list.len() == 0 -> return None
         Val(self.event_list[self.event_list.len() - 1].assigned_sequence)
     }
+
     event_count: fn(self) -> Int Never! { self.event_list.len() }
+
     selection: fn(self) -> JetDevtoolsSelection? Never! { self.view.selection }
+
     cursor: fn(self) -> Int? Never! { self.view.cursor }
-    set_selection: fn(&self, &&selection: JetDevtoolsSelection?) Never! { self.view.set_selection(selection) }
+
+    set_selection: fn(&self, selection: &&JetDevtoolsSelection?) Never! {
+        self.view.set_selection(selection)
+    }
+
     set_cursor: fn(&self, cursor: Int?) Never! { self.view.set_cursor(cursor) }
-    set_lifecycle: fn(&self, lifecycle: JetDevtoolsLifecycleState) Never! { self.lifecycle = lifecycle }
-    set_freshness: fn(&self, freshness: JetDevtoolsFreshnessFact) Never! { self.freshness = freshness }
-    set_source_identity: fn(&self, &&identity: JetDevtoolsSourceIdentityFact?) Err! {
+
+    set_lifecycle: fn(&self, lifecycle: JetDevtoolsLifecycleState) Never! {
+        self.lifecycle = lifecycle
+    }
+
+    set_freshness: fn(&self, freshness: JetDevtoolsFreshnessFact) Never! {
+        self.freshness = freshness
+    }
+
+    set_source_identity: fn(&self, identity: &&JetDevtoolsSourceIdentityFact?) Err! {
         if identity == .Val(fact) -> fact.validate()
         self.source_identity = identity.move()
         Ok()
     }
+
     // Metadata is written only once it differs from a fresh envelope's.
     has_metadata: fn(self) -> Bool Never! {
         self.lifecycle != JetDevtoolsLifecycleState.Starting || self.freshness.state != JetDevtoolsFreshnessState.Unknown || self.freshness.observed_at_ms != 0 || self.privacy.published_payloads || self.source_identity != None || self.reset || self.truncated
     }
+
     serialize: fn(self) -> String Err! {
         devtools_validate_text(self.session_id, "session_id")
         events := [String]{}
@@ -331,7 +422,9 @@ JetDevtoolsEnvelope: struct {
             out = "{out},\"lifecycle\":\"{self.lifecycle.as_str()}\",\"freshness\":{freshness},\"privacy\":{privacy},\"reset\":{self.reset},\"truncated\":{self.truncated},\"source_identity\":{identity}"
         }
         out = "{out}}}"
-        if out.bytes().len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES -> return Err("jet.devtools.v1 envelope exceeds the Prelude byte limit")
+        if out.bytes().len() > JET_DEVTOOLS_MAX_ENVELOPE_BYTES {
+            return Err("jet.devtools.v1 envelope exceeds the Prelude byte limit")
+        }
         Ok(out)
     }
 }
@@ -391,7 +484,9 @@ devtools_body_fields: fn(body: JetDevtoolsEventBody) -> String Err! {
     parts := [String]{}
     if body == {
         .Build(status, tier, diagnostics, kept, reset) -> {
-            if diagnostics.len() > JET_DEVTOOLS_MAX_HISTORY -> return Err("jet.devtools.v1 build has too many diagnostics")
+            if diagnostics.len() > JET_DEVTOOLS_MAX_HISTORY {
+                return Err("jet.devtools.v1 build has too many diagnostics")
+            }
             parts.push(devtools_text_field("status", status))
             parts.push(devtools_text_field("tier", tier))
             rendered := [String]{}
@@ -488,7 +583,9 @@ devtools_body_fields: fn(body: JetDevtoolsEventBody) -> String Err! {
             if gpu_ns == .Val(value) -> gpu = "{value}"
             parts.push("\"gpu_ns\":{gpu}")
             responsible := "null"
-            if responsible_function == .Val(function) -> responsible = devtools_function_json(function)
+            if responsible_function == .Val(function) {
+                responsible = devtools_function_json(function)
+            }
             parts.push("\"responsible_function\":{responsible}")
         }
         .GameDrawEvent(sequence, frame_id, scene, frame_index, build, revision, trace_id, event_index, event_id, function, phase, domain, start_ns, duration_ns, object_id, resource_id) -> {
@@ -510,7 +607,9 @@ devtools_body_fields: fn(body: JetDevtoolsEventBody) -> String Err! {
             parts.push(devtools_optional_text_field("resource_id", resource_id))
         }
         .GameLaunchProfile(target, run_mode, headless_compatible, phases) -> {
-            if phases.len() > JET_DEVTOOLS_MAX_LAUNCH_PHASES -> return Err("jet.devtools.v1 game launch profile exceeds phase limit")
+            if phases.len() > JET_DEVTOOLS_MAX_LAUNCH_PHASES {
+                return Err("jet.devtools.v1 game launch profile exceeds phase limit")
+            }
             parts.push(devtools_text_field("target", target))
             parts.push(devtools_text_field("run_mode", run_mode))
             parts.push("\"headless_compatible\":{headless_compatible}")
@@ -581,8 +680,12 @@ devtools_trace_kind_wire: fn(kind: JetDevtoolsTraceKind) -> String Never! {
 }
 
 devtools_source_span_json: fn(span: JetDevtoolsSourceSpan) -> String Err! {
-    if span.start_line == 0 || span.start_column == 0 || span.end_line == 0 || span.end_column == 0 -> return Err("jet.devtools.v1 source span starts or ends at zero")
-    if span.end_line < span.start_line || (span.end_line == span.start_line && span.end_column < span.start_column) -> return Err("jet.devtools.v1 source span ends before it starts")
+    if span.start_line == 0 || span.start_column == 0 || span.end_line == 0 || span.end_column == 0 {
+        return Err("jet.devtools.v1 source span starts or ends at zero")
+    }
+    if span.end_line < span.start_line || (span.end_line == span.start_line && span.end_column < span.start_column) {
+        return Err("jet.devtools.v1 source span ends before it starts")
+    }
     Ok("{{{devtools_text_field("source_id", span.source_id)},{devtools_text_field("file", span.file)},\"start_line\":{span.start_line},\"start_column\":{span.start_column},\"end_line\":{span.end_line},\"end_column\":{span.end_column}}}")
 }
 
@@ -609,7 +712,9 @@ devtools_text_json: fn(value: String) -> String Err! {
 }
 
 devtools_validate_text: fn(value: String, field: String) Err! {
-    if value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES -> return Err("jet.devtools.v1 {field} exceeds the Prelude text limit")
+    if value.bytes().len() > JET_DEVTOOLS_MAX_TEXT_BYTES {
+        return Err("jet.devtools.v1 {field} exceeds the Prelude text limit")
+    }
     Ok()
 }
 
@@ -619,32 +724,30 @@ devtools_validate_text: fn(value: String, field: String) Err! {
 devtools_validate_json_object: fn(value: String, field: String) Err! {
     trimmed: value.trim()
     bytes: trimmed.bytes()
-    if bytes.len() > JET_DEVTOOLS_MAX_TEXT_BYTES || !trimmed.starts_with("{{") || !trimmed.ends_with("}}") -> return Err("jet.devtools.v1 {field} must be a bounded JSON object")
+    if bytes.len() > JET_DEVTOOLS_MAX_TEXT_BYTES || !trimmed.starts_with("{{") || !trimmed.ends_with("}}") {
+        return Err("jet.devtools.v1 {field} must be a bounded JSON object")
+    }
     depth := 0
     in_string := false
     escaped := false
     loop byte in bytes {
         code: Int{byte}
-        if code < 32 || code == 127 -> return Err("jet.devtools.v1 {field} contains a control character")
+        if code < 32 || code == 127 {
+            return Err("jet.devtools.v1 {field} contains a control character")
+        }
         if in_string {
-            if escaped {
-                escaped = false
-            } else if code == 92 {
-                escaped = true
-            } else if code == 34 {
+            if escaped -> escaped = false else if code == 92 -> escaped = true else if code == 34 {
                 in_string = false
             }
             next
         }
-        if code == 34 {
-            in_string = true
-        } else if code == 123 {
-            depth += 1
-        } else if code == 125 {
+        if code == 34 -> in_string = true else if code == 123 -> depth += 1 else if code == 125 {
             if depth == 0 -> return Err("jet.devtools.v1 {field} has unbalanced braces")
             depth -= 1
         }
     }
-    if in_string || escaped || depth != 0 -> return Err("jet.devtools.v1 {field} has unbalanced JSON")
+    if in_string || escaped || depth != 0 {
+        return Err("jet.devtools.v1 {field} has unbalanced JSON")
+    }
     Ok()
 }

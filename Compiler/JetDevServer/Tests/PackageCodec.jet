@@ -3,7 +3,6 @@
 // output/instance/JSON/identity claims remain unregistered at the end: C4, S4 +
 // S5–S12/S20, actual PackageProvider/held source/lock and S19 are required.
 
-
 semindex_package_status_consumer: fn(raw: String, value: StatusValue, exact: Bool) Never! {
     rendered: StatusEnvelope.new("inspect-semindex", true).with_field("value", value).json()
     expected: "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect-semindex\",\"ok\":true,\"reports\":[],\"value\":{raw}}}"
@@ -16,11 +15,13 @@ semindex_package_status_consumer: fn(raw: String, value: StatusValue, exact: Boo
 #Test("semindex_output_payload_keeps_raw_numbers_and_ordered_duplicate_mime") {
     // OutputPayload is the real PackageModel enum. A bundle represented by
     // ordered pairs retains repeated MIME alternatives and payload bytes.
-    bundle: OutputPayload.Array([OutputPayload]{
-        OutputPayload.Array([OutputPayload]{OutputPayload.String("text/plain"), OutputPayload.String("first\n")}),
-        OutputPayload.Array([OutputPayload]{OutputPayload.String("text/html"), OutputPayload.String("<b>é</b>")}),
-        OutputPayload.Array([OutputPayload]{OutputPayload.String("text/plain"), OutputPayload.String("last")}),
-    })
+    bundle: OutputPayload.Array(
+        [OutputPayload]{
+            OutputPayload.Array([OutputPayload]{OutputPayload.String("text/plain"), OutputPayload.String("first\n")}),
+            OutputPayload.Array([OutputPayload]{OutputPayload.String("text/html"), OutputPayload.String("<b>é</b>")}),
+            OutputPayload.Array([OutputPayload]{OutputPayload.String("text/plain"), OutputPayload.String("last")}),
+        },
+    )
     assert_eq(semindex_json_output_payload(bundle), `[["text/plain","first\n"],["text/html","<b>é</b>"],["text/plain","last"]]`)
     assert_eq(semindex_json_output_payload(OutputPayload.Number("-0.00e+02")), "-0.00e+02")
     assert_eq(semindex_json_output_payload(OutputPayload.Number("18446744073709551615")), "18446744073709551615")
@@ -57,15 +58,15 @@ semindex_package_status_consumer: fn(raw: String, value: StatusValue, exact: Boo
 }
 
 #Test("semindex_output_payload_sorts_only_object_keys") {
-    fields := [String: OutputPayload]{}
+    fields := [String:OutputPayload]{}
     fields["z"] = OutputPayload.Array([OutputPayload]{OutputPayload.Number("2"), OutputPayload.Number("1"), OutputPayload.Number("2")})
     fields["a"] = OutputPayload.String("quote\"\\\né😀")
     assert_eq(semindex_json_output_payload(OutputPayload.Object(fields)), `{"a":"quote\"\\\né😀","z":[2,1,2]}`)
     assert_eq(semindex_json_output_payload(OutputPayload.Array([OutputPayload]{})), "[]")
-    assert_eq(semindex_json_output_payload(OutputPayload.Object([String: OutputPayload]{})), `{}`)
+    assert_eq(semindex_json_output_payload(OutputPayload.Object([String:OutputPayload]{})), `{}`)
     semindex_package_status_consumer(semindex_json_output_payload(OutputPayload.Object(fields)), semindex_status_output_payload(OutputPayload.Object(fields)) ?? panic("valid fields"), true)
     semindex_package_status_consumer("[]", semindex_status_output_payload(OutputPayload.Array([OutputPayload]{})) ?? panic("empty array"), true)
-    semindex_package_status_consumer("{{}}", semindex_status_output_payload(OutputPayload.Object([String: OutputPayload]{})) ?? panic("empty object"), true)
+    semindex_package_status_consumer("{{}}", semindex_status_output_payload(OutputPayload.Object([String:OutputPayload]{})) ?? panic("empty object"), true)
 }
 
 #Test("semindex_optional_values_distinguish_null_empty_and_duplicates") {
@@ -82,24 +83,31 @@ semindex_package_status_consumer: fn(raw: String, value: StatusValue, exact: Boo
 }
 
 #Test("semindex_service_preserves_explicit_ports_ready_and_fields") {
-    fields := [String: String]{}
+    fields := [String:String]{}
     fields["transport"] = "stdio"
     fields["authored_path"] = "./cache/../data"
     service: ServiceFact{enable: true, ports: [Int]{6379, 80, 6379}, ready: Val(""), fields: fields}
     assert_eq(semindex_json_service(service), `{"enable":true,"ports":[6379,80,6379],"ready":"","fields":{"authored_path":"./cache/../data","transport":"stdio"}}`)
-    assert_eq(semindex_json_service(ServiceFact{enable: false, ports: [Int]{}, ready: None, fields: [String: String]{}}), `{"enable":false,"ports":[],"ready":null,"fields":{}}`)
+    assert_eq(semindex_json_service(ServiceFact{enable: false, ports: [Int]{}, ready: None, fields: [String:String]{}}), `{"enable":false,"ports":[],"ready":null,"fields":{}}`)
     semindex_package_status_consumer(semindex_json_service(service), semindex_status_service(service) ?? panic("valid service"), true)
 }
 
 #Test("semindex_authority_preserves_vector_order_duplicates_and_null_bounds") {
-    authority: PackageAuthority{allow: None, deny: Val([String]{}), needs: [String]{"Net"}, grants: [PackageGrant]{
-        PackageGrant{package: "z", rights: [String]{"IO", "IO"}},
-        PackageGrant{package: "a", rights: [String]{}},
-        PackageGrant{package: "z", rights: [String]{"FS"}},
-    }, trust: None, providers: [ProviderAuthority]{
-        {provider: "remote", registry: "https://host/raw", allow: [String]{"b", "a", "b"}, deny: [String]{}},
-        {provider: "remote", registry: "other", allow: [String]{}, deny: [String]{"x"}},
-    }}
+    authority: PackageAuthority{
+        allow: None,
+        deny: Val([String]{}),
+        needs: [String]{"Net"},
+        grants: [PackageGrant]{
+            PackageGrant{package: "z", rights: [String]{"IO", "IO"}},
+            PackageGrant{package: "a", rights: [String]{}},
+            PackageGrant{package: "z", rights: [String]{"FS"}},
+        },
+        trust: None,
+        providers: [ProviderAuthority]{
+            {provider: "remote", registry: "https://host/raw", allow: [String]{"b", "a", "b"}, deny: [String]{}},
+            {provider: "remote", registry: "other", allow: [String]{}, deny: [String]{"x"}},
+        },
+    }
     assert_eq(semindex_json_package_authority(authority), `{"allow":null,"deny":[],"grants":{"z":["IO","IO"],"a":[],"z":["FS"]},"trust":null,"providers":{"remote":{"registry":"https://host/raw","allow":["b","a","b"],"deny":[]},"remote":{"registry":"other","allow":[],"deny":["x"]}}}`)
     trust: TrustPolicy{default: None, ci_prompt: Val(TrustDecision.Deny), services: [ServiceTrust]{ServiceTrust{service: "z", decision: TrustDecision.Prompt}, ServiceTrust{service: "z", decision: TrustDecision.Allow}}, require: None}
     with_trust := authority.copy()
@@ -108,7 +116,7 @@ semindex_package_status_consumer: fn(raw: String, value: StatusValue, exact: Boo
     // The raw helper preserves duplicate authored object keys; the canonical
     // Report consumer must refuse, not collapse them or clone a codec model.
     if semindex_status_package_authority(authority) == {
-        .Err(error) -> assert_eq(error.message, "duplicate status field `z`")
+        .Err(error) -> { assert_eq(error.message, "duplicate status field `z`") }
         .Ok(_) -> { panic("canonical Report accepted duplicate grants") }
     }
     unique := PackageAuthority.default()
@@ -118,13 +126,13 @@ semindex_package_status_consumer: fn(raw: String, value: StatusValue, exact: Boo
     trust_only := PackageAuthority.default()
     trust_only.trust = Val(trust)
     if semindex_status_package_authority(trust_only) == {
-        .Err(error) -> assert_eq(error.message, "duplicate status field `z`")
+        .Err(error) -> { assert_eq(error.message, "duplicate status field `z`") }
         .Ok(_) -> { panic("canonical Report accepted duplicate trust services") }
     }
 }
 
 #Test("semindex_overlay_discloses_authored_facts_without_resolving") {
-    priorities := [String: Int]{}
+    priorities := [String:Int]{}
     priorities["version"] = 7
     priorities["source"] = -3
     package: PackageOverride{package: "discord", source: Val("./a/../b"), version: None, flags: [String]{"b", "a", "b"}, priority: -1, field_priorities: priorities, env: [OverrideEnv]{OverrideEnv{key: "X", value: "first"}, OverrideEnv{key: "X", value: "last"}}, patches: [String]{"./p", "./p"}, allow_unfree: true}
@@ -185,12 +193,15 @@ dev: Config{ source: "local" }
 `,
     }
 }
+
 semindex_package_codec_test_shared_package: fn(facts: PackageFacts, index_json: String) {
     assert_eq(facts.name, "demo")
     assert(facts.outputs.has_key("app"))
     assert_eq(facts.configs, [String]{"release.jet"})
     found := false
-    loop origin in facts.provenance["outputs.app"] { if origin.ends_with("release.jet") -> found = true }
+    loop origin in facts.provenance["outputs.app"] {
+        if origin.ends_with("release.jet") -> found = true
+    }
     assert(found)
     fields: [String]{`"package_facts"`, `"semantic_digest":"`, `"jet":"a0.0"`, `"services":{"cache"`, `"environments":{"dev"`, `"defaults":{"run":"app"}`, `"resolved_config_paths":["release.jet"]`, `"inline_configs":{"dev"`, `"kind":"executable"`, `"authority":{"allow":["FS"],"deny":["Net"],"grants":{"textkit":["IO"]}`, `"required_effects":[]`, `"granted_effects":["FS"]`, `"denied_effects":["Net"]`, `"authority":"package.jet authority"`}
     loop field in fields -> assert(index_json.contains(field))
@@ -202,6 +213,7 @@ semindex_package_codec_test_shared_package: fn(facts: PackageFacts, index_json: 
 semindex_package_codec_test_workspace_fixture: fn(workspace_digest: String) -> String Never! {
     "version = 1\nworkspace_source_digest = \"{workspace_digest}\"\nworkspace_policy_allow_unfree = [\"discord\"]\n\n[[workspace_overlay]]\nname = \"beta\"\nprovider = \"nixpkgs\"\nchannel = \"plasma-beta\"\n\n[[workspace_overlay_package]]\noverlay = \"beta\"\npackage = \"discord\"\nallow_unfree = true\nfield_priorities = [\"version=7\"]\n"
 }
+
 semindex_package_codec_test_persisted_overlay: fn(policy: OverlayPolicy, index_json: String) {
     assert_eq(policy.allow_unfree, [String]{"discord"})
     assert_eq(policy.overlays[0].name, "beta")
@@ -217,6 +229,7 @@ b: boxed<Int>(3)
 run: fn() {}
 `
 }
+
 semindex_package_codec_test_checked_instance: fn(instances: [InstanceFact], definitions: [SymbolDef], module_path: String, index_json: String) {
     assert_eq(instances.len(), 1)
     instance: instances[0]
@@ -233,7 +246,9 @@ semindex_package_codec_test_checked_instance: fn(instances: [InstanceFact], defi
     assert_eq(instance.template_definition_id.len(), 64)
     names := [String]{}
     identity: "instance:{instance.fingerprint}"
-    loop definition in definitions { if definition.identity == identity -> names.push(definition.name) }
+    loop definition in definitions {
+        if definition.identity == identity -> names.push(definition.name)
+    }
     assert_eq(names, [String]{"a", "b"})
     assert(index_json.contains(instance.fingerprint))
     assert(index_json.contains(instance.full_key_hex))
@@ -268,16 +283,18 @@ semindex_package_codec_test_reorder_identities: fn(before: [SymbolDef], after: [
     loop fragment in fragments {
         found := false
         loop identity in before_ids {
-            if identity.contains(fragment) && (fragment != "type:" || identity.contains("Point")) && (fragment != "field:" || identity.contains("Point.x")) && (fragment != "variant:" || identity.contains("Light.Red")) && (fragment != "method:" || identity.contains("Point.sum")) -> found = true
+            if identity.contains(fragment) && (fragment != "type:" || identity.contains("Point")) && (fragment != "field:" || identity.contains("Point.x")) && (fragment != "variant:" || identity.contains("Light.Red")) && (fragment != "method:" || identity.contains("Point.sum")) {
+                found = true
+            }
         }
         assert(found)
     }
 }
 
 #Test("semindex_package_outputs_use_map_key_for_provenance_and_keep_payload") {
-    outputs := [String: OutputFact]{}
-    outputs["app"] = OutputFact{kind: PackageOutputKind.Executable, name: "display-name", entry: None, fields: [String: String]{}, payload: OutputPayload.Number("-0.0")}
-    provenance := [String: [String]]{}
+    outputs := [String:OutputFact]{}
+    outputs["app"] = OutputFact{kind: PackageOutputKind.Executable, name: "display-name", entry: None, fields: [String:String]{}, payload: OutputPayload.Number("-0.0")}
+    provenance := [String:[String]]{}
     provenance["outputs.app"] = [String]{"./release.jet", "./release.jet"}
     provenance["outputs.display-name"] = [String]{"wrong"}
     assert_eq(semindex_json_package_outputs(outputs, Val(provenance)), `{"name":"display-name","kind":"executable","entry":null,"fields":{},"payload":-0.0,"provenance":["./release.jet","./release.jet"]}`)
@@ -287,11 +304,11 @@ semindex_package_codec_test_reorder_identities: fn(before: [SymbolDef], after: [
 }
 
 #Test("semindex_config_discloses_environment_transports_and_authored_paths") {
-    services := [String: ServiceFact]{}
-    services["cache"] = ServiceFact{enable: true, ports: [Int]{6379}, ready: None, fields: [String: String]{"transport": "stdio"}}
-    environments := [String: EnvironmentFact]{}
-    environments["dev"] = EnvironmentFact{name: "dev", tools: [String]{"git", "git"}, services: services, secrets: [String: String]{"token": "x"}, fields: [String: String]{"path": "./a/../b"}}
-    config: ConfigFacts{name: None, version: Val(""), source: Val("./local/../src"), deps: [String: DepSource]{"textkit": DepSource.Version("1.0")}, services: [String: ServiceFact]{}, outputs: [String: OutputFact]{}, environments: environments, defaults: [String: String]{}, origin: "./release.jet"}
+    services := [String:ServiceFact]{}
+    services["cache"] = ServiceFact{enable: true, ports: [Int]{6379}, ready: None, fields: [String:String]{"transport": "stdio"}}
+    environments := [String:EnvironmentFact]{}
+    environments["dev"] = EnvironmentFact{name: "dev", tools: [String]{"git", "git"}, services: services, secrets: [String:String]{"token": "x"}, fields: [String:String]{"path": "./a/../b"}}
+    config: ConfigFacts{name: None, version: Val(""), source: Val("./local/../src"), deps: [String:DepSource]{"textkit": DepSource.Version("1.0")}, services: [String:ServiceFact]{}, outputs: [String:OutputFact]{}, environments: environments, defaults: [String:String]{}, origin: "./release.jet"}
     assert_eq(semindex_json_config_facts(config), `{"name":null,"version":"","source":"./local/../src","deps":[{"name":"textkit","source":"1.0"}],"services":{},"outputs":[],"environments":{"dev":{"name":"dev","tools":["git","git"],"services":{"cache":{"enable":true,"ports":[6379],"ready":null,"fields":{"transport":"stdio"}}},"secrets":{"token":"x"},"fields":{"path":"./a/../b"}}},"defaults":{},"origin":"./release.jet"}`)
     assert_eq(semindex_json_members([MemberRef]{MemberRef.Path("./a/../b"), MemberRef.Find("./*"), MemberRef.Path("./a/../b")}), `{"kind":"path","path":"./a/../b"},{"kind":"find","path":"./*"},{"kind":"path","path":"./a/../b"}`)
     semindex_package_status_consumer(semindex_json_config_facts(config), semindex_status_config_facts(config) ?? panic("valid config"), true)
@@ -423,11 +440,25 @@ run: fn() {}
 #Test("semindex_typed_package_uses_real_nested_payload_and_rejects_provider_duplicates") {
     facts := PackageFacts.default()
     facts.name = "real-codec-consumer"
-    facts.outputs["wire-key"] = OutputFact{kind: PackageOutputKind.Executable, name: "display", entry: None,
-        fields: [String: String]{}, payload: OutputPayload.Array([OutputPayload]{OutputPayload.Number("-0.00e+02"), OutputPayload.Null, OutputPayload.Array([OutputPayload]{})})}
+    facts.outputs["wire-key"] = OutputFact{
+        kind: PackageOutputKind.Executable,
+        name: "display",
+        entry: None,
+        fields: [String:String]{},
+        payload: OutputPayload.Array([OutputPayload]{OutputPayload.Number("-0.00e+02"), OutputPayload.Null, OutputPayload.Array([OutputPayload]{})}),
+    }
     facts.provenance["outputs.wire-key"] = [String]{"first", "first", "last"}
-    facts.inline_configs["empty"] = ConfigFacts{name: None, version: Val(""), source: None, deps: [String: DepSource]{},
-        services: [String: ServiceFact]{}, outputs: [String: OutputFact]{}, environments: [String: EnvironmentFact]{}, defaults: [String: String]{}, origin: "./raw/../config"}
+    facts.inline_configs["empty"] = ConfigFacts{
+        name: None,
+        version: Val(""),
+        source: None,
+        deps: [String:DepSource]{},
+        services: [String:ServiceFact]{},
+        outputs: [String:OutputFact]{},
+        environments: [String:EnvironmentFact]{},
+        defaults: [String:String]{},
+        origin: "./raw/../config",
+    }
     raw: package_facts_json(facts)
     assert(raw.contains(`"payload":[-0.00e+02,null,[]],"provenance":["first","first","last"]`))
     canonical: raw.replace(`"payload":[-0.00e+02,null,[]]`, `"payload":[-0,null,[]]`)
@@ -440,11 +471,10 @@ run: fn() {}
         {provider: "same", registry: "two", allow: [String]{}, deny: [String]{}},
     }
     if package_facts_status_value(facts) == {
-        .Err(error) -> assert_eq(error.message, "duplicate status field `same`")
+        .Err(error) -> { assert_eq(error.message, "duplicate status field `same`") }
         .Ok(_) -> { panic("canonical Report silently collapsed provider duplicates") }
     }
 }
-
 // Original deliberate-failure control: invert the existing raw number
 // expectation "-0.00e+02" above to "0" in the scratch proof unit, require the
 // original payload test to fail, restore. No proof has been exercised here.

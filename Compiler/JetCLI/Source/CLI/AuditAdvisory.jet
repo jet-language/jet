@@ -136,17 +136,17 @@ jet_cli_advisory_audit: fn(root: String, args: [String], color: Bool, json: Bool
         }
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render_with_reports("audit", !failed, jet_cli_reports_json(None, "", "", diagnostics), fields)}\n", stderr: "", exit_code: exit_code}
     }
-    stdout := "audit: feed sequence {report.receipt.sequence} verified (key {report.receipt.key_id}, digest {report.receipt.digest}, offline local feed).\n"
-    stdout = "{stdout}audit: policy maturity {report.receipt.maturity_seconds}s; exact exceptions use package#version; {lock.packages.len()} dependencies checked.\n"
+    stdout := "Audit: feed sequence {report.receipt.sequence} verified (key {report.receipt.key_id}, digest {report.receipt.digest}, offline local feed).\n"
+    stdout = "{stdout}Audit: policy maturity {report.receipt.maturity_seconds}s; exact exceptions use package#version; {lock.packages.len()} dependencies checked.\n"
     loop exception in report.source_exceptions {
-        stdout = "{stdout}audit: source policy exception applied: {exception}\n"
+        stdout = "{stdout}Audit: source policy exception applied: {exception}\n"
     }
     if diagnostics.len() == 0 {
-        return JetDriverVerbOutput{stdout: "{stdout}audit: no advisories found.\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        return JetDriverVerbOutput{stdout: "{stdout}Audit: no advisories found.\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     stderr := "{diagnostic_render_all("", "", diagnostics, color)}\n{report.matches.len()} advisory match(es) found ({critical} critical)\n"
     if failed {
-        stderr = "{stderr}audit: policy checks failed. Upgrade the affected dependencies or wait for an approved exception.\n"
+        stderr = "{stderr}Audit: policy checks failed. Upgrade the affected dependencies or wait for an approved exception.\n"
     }
     JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: exit_code}
 }
@@ -165,7 +165,7 @@ jet_cli_advisory_audit_explain: fn(advisory: PublicationAdvisory, json: Bool) ->
         }
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("audit.explain", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    out: "advisory {advisory.id}\n  package: {advisory.package}\n  affected: {advisory.affected.raw}\n  fixed in: {fixed}\n  severity: {publication_severity_label(advisory.severity)}\n  title: {advisory.title}\n"
+    out: "Advisory {advisory.id}\n  Package: {advisory.package}\n  Affected: {advisory.affected.raw}\n  Fixed in: {fixed}\n  Severity: {publication_severity_label(advisory.severity)}\n  Title: {advisory.title}\n"
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 

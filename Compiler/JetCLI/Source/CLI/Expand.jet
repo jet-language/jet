@@ -297,7 +297,7 @@ jet_cli_expand_templates: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact
 // check record, also used by the sibling inspect commands.
 jet_cli_expand_text: fn(index: SemIndex, lens: JetCLIExpandLensSpec, facts: [JetCLIExpandFact], check_text: String) -> String Never! {
     plural: if facts.len() == 1 -> "" else -> "s"
-    text := "effect roles\n  {jet_cli_effect_projection_line(index.effect_projection)}\n{lens.name} — {lens.summary} ({facts.len()} fact{plural})\n"
+    text := "Effect Roles\n  {jet_cli_effect_projection_line(index.effect_projection)}\n{lens.name} — {lens.summary} ({facts.len()} fact{plural})\n"
     if facts.len() == 0 -> text = "{text}  (none in this program)\n"
     loop fact in facts -> text = "{text}  {fact.text}\n"
     semindex_display_text(index, "{text}{check_text}")
@@ -426,7 +426,7 @@ JetCLIExpandParse: enum {
 }
 
 jet_cli_expand_available_lenses: fn() -> String Never! {
-    out := " available lenses:\n"
+    out := " Available Lenses:\n"
     loop lens in JET_CLI_EXPAND_LENSES {
         out = "{out}   {jet_cli_pad(lens.name, 8)} {lens.summary}\n"
     }

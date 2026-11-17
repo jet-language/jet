@@ -2,9 +2,13 @@
 use jet_foundation.[foundation_json_integer, foundation_json_parse, foundation_json_quote]
 
 RECORDING_DEVTOOLS_PROTOCOL: String{"jet.devtools.v1"}
+
 MAX_RECORDING_EVENTS: Int{256}
+
 MAX_RECORDING_BYTES: Int{1048576}
+
 MAX_RECORDING_TEXT_BYTES: Int{16384}
+
 MAX_RECORDING_ID_BYTES: Int{1024}
 
 // The source and build a recording belongs to; replay refuses any other.
@@ -17,8 +21,12 @@ SessionRecordingIdentity: struct {
         recording_validate_id(build_id, "build_id")
         SessionRecordingIdentity{source_id: source_id, build_id: build_id}
     }
-    matches: fn(self, other: SessionRecordingIdentity) -> Bool { self.source_id == other.source_id && self.build_id == other.build_id }
+
+    matches: fn(self, other: SessionRecordingIdentity) -> Bool {
+        self.source_id == other.source_id && self.build_id == other.build_id
+    }
 }
+
 SessionRecordingLimits: struct {
     max_events: Int,
     max_bytes: Int,
@@ -29,7 +37,9 @@ SessionRecordingLimits: struct {
         }
     }
 }
+
 SESSION_RECORDING_DEFAULT_LIMITS: SessionRecordingLimits{SessionRecordingLimits{max_events: MAX_RECORDING_EVENTS, max_bytes: MAX_RECORDING_BYTES}}
+
 // fields_json is a canonical JSON object; payload_json is a canonical object or absent.
 SessionEvent: struct {
     sequence: Int,
@@ -55,15 +65,19 @@ SessionEvent: struct {
             }
         }
         event: SessionEvent{sequence: sequence, timestamp_ms: timestamp_ms, source: source, kind: kind, entity: entity, fields_json: fields, payload_json: payload}
-        if event.wire_len() > MAX_RECORDING_BYTES -> return Err(RecordingError.EventTooLarge{bytes: event.wire_len(), limit: MAX_RECORDING_BYTES})
+        if event.wire_len() > MAX_RECORDING_BYTES {
+            return Err(RecordingError.EventTooLarge{bytes: event.wire_len(), limit: MAX_RECORDING_BYTES})
+        }
         event
     }
+
     // Bytes of this event's canonical wire object.
     wire_len: fn(self) -> Int {
         payload: self.payload_json ?? "null"
         "{{\"sequence\":{self.sequence},\"timestamp_ms\":{self.timestamp_ms},\"source\":{foundation_json_quote(self.source)},\"kind\":{foundation_json_quote(self.kind)},\"entity\":{foundation_json_quote(self.entity)},\"fields\":{self.fields_json},\"payload\":{payload}}}".bytes().len()
     }
 }
+
 TruncationFacts: struct {
     event_limit: Int,
     byte_limit: Int,
@@ -80,6 +94,7 @@ TruncationFacts: struct {
 
     truncated: fn(self) -> Bool { self.dropped_events != 0 }
 }
+
 #Error
 RecordingError: enum {
     InvalidIdentity(message: String),
@@ -116,8 +131,11 @@ RecordingError: enum {
         }
     }
 
-    impl Display { display: fn(self) -> String { self.message() } }
+    impl Display {
+        display: fn(self) -> String { self.message() }
+    }
 }
+
 ReplayStep: enum { Forward, Backward }
 
 // position counts the retained events already replayed; sequence is the last one's.
@@ -141,11 +159,14 @@ ReplayCursor: struct {
         self.sequence = Val(sequence)
         recording.projection(self)
     }
+
     seek_time: fn(&self, recording: SessionRecording, timestamp_ms: Int) -> ReplayProjection RecordingError! {
         self.check(recording)
         if recording.events.len() > 0 {
             first: recording.events[0]
-            if timestamp_ms < first.timestamp_ms && recording.dropped_events != 0 -> return Err(RecordingError.CursorUnavailable{sequence: first.sequence})
+            if timestamp_ms < first.timestamp_ms && recording.dropped_events != 0 {
+                return Err(RecordingError.CursorUnavailable{sequence: first.sequence})
+            }
         }
         position := 0
         loop (index, event) in recording.events.enumerate() {
@@ -155,6 +176,7 @@ ReplayCursor: struct {
         self.sequence = recording.sequence_before(position)
         recording.projection(self)
     }
+
     step: fn(&self, recording: SessionRecording, direction: ReplayStep) -> ReplayProjection RecordingError! {
         self.check(recording)
         if direction == {
@@ -171,12 +193,18 @@ ReplayCursor: struct {
         }
         recording.projection(self)
     }
+
     check: fn(self, recording: SessionRecording) RecordingError! {
-        if !self.identity.matches(recording.identity) -> return Err(RecordingError.IdentityMismatch{expected: self.identity, found: recording.identity})
+        if !self.identity.matches(recording.identity) {
+            return Err(RecordingError.IdentityMismatch{expected: self.identity, found: recording.identity})
+        }
         if self.generation != recording.generation -> return Err(RecordingError.RecordingChanged)
-        if self.position > recording.events.len() -> return Err(RecordingError.CheckpointUnavailable)
+        if self.position > recording.events.len() {
+            return Err(RecordingError.CheckpointUnavailable)
+        }
     }
 }
+
 SessionCheckpoint: struct {
     identity: SessionRecordingIdentity,
     generation: Int,
@@ -216,39 +244,64 @@ SessionRecording: struct {
     // Advances on every append; cursors and checkpoints from an older generation are refused.
     generation: Int,
 
-    new: fn(identity: SessionRecordingIdentity) -> SessionRecording RecordingError! { SessionRecording.with_limits(identity, SESSION_RECORDING_DEFAULT_LIMITS) }
+    new: fn(identity: SessionRecordingIdentity) -> SessionRecording RecordingError! {
+        SessionRecording.with_limits(identity, SESSION_RECORDING_DEFAULT_LIMITS)
+    }
+
     with_limits: fn(identity: SessionRecordingIdentity, limits: SessionRecordingLimits) -> SessionRecording RecordingError! {
         recording_validate_id(identity.source_id, "source_id")
         recording_validate_id(identity.build_id, "build_id")
         limits.validate()
         SessionRecording{
-            identity: identity, limits: limits, events: [SessionEvent]{}, retained_bytes: 0, dropped_events: 0, dropped_bytes: 0,
-            event_limit_reached: false, byte_limit_reached: false, first_dropped_sequence: None, last_dropped_sequence: None,
-            last_sequence: None, last_timestamp_ms: None, generation: 0,
+            identity: identity,
+            limits: limits,
+            events: [SessionEvent]{},
+            retained_bytes: 0,
+            dropped_events: 0,
+            dropped_bytes: 0,
+            event_limit_reached: false,
+            byte_limit_reached: false,
+            first_dropped_sequence: None,
+            last_dropped_sequence: None,
+            last_sequence: None,
+            last_timestamp_ms: None,
+            generation: 0,
         }
     }
+
     first_retained_sequence: fn(self) -> Int? {
         if self.events.len() == 0 -> return None
         Val(self.events[0].sequence)
     }
+
     last_retained_sequence: fn(self) -> Int? {
         if self.events.len() == 0 -> return None
         Val(self.events[self.events.len() - 1].sequence)
     }
+
     // The sequence of the event a cursor at `position` last replayed.
     sequence_before: fn(self, position: Int) -> Int? {
         if position < 1 || position > self.events.len() -> return None
         Val(self.events[position - 1].sequence)
     }
+
     truncation: fn(self) -> TruncationFacts {
         TruncationFacts{
-            event_limit: self.limits.max_events, byte_limit: self.limits.max_bytes,
-            retained_events: self.events.len(), retained_bytes: self.retained_bytes, dropped_events: self.dropped_events,
-            dropped_bytes: self.dropped_bytes, event_limit_reached: self.event_limit_reached, byte_limit_reached: self.byte_limit_reached,
-            first_dropped_sequence: self.first_dropped_sequence, last_dropped_sequence: self.last_dropped_sequence,
-            first_retained_sequence: self.first_retained_sequence(), last_retained_sequence: self.last_retained_sequence(),
+            event_limit: self.limits.max_events,
+            byte_limit: self.limits.max_bytes,
+            retained_events: self.events.len(),
+            retained_bytes: self.retained_bytes,
+            dropped_events: self.dropped_events,
+            dropped_bytes: self.dropped_bytes,
+            event_limit_reached: self.event_limit_reached,
+            byte_limit_reached: self.byte_limit_reached,
+            first_dropped_sequence: self.first_dropped_sequence,
+            last_dropped_sequence: self.last_dropped_sequence,
+            first_retained_sequence: self.first_retained_sequence(),
+            last_retained_sequence: self.last_retained_sequence(),
         }
     }
+
     append_event: fn(&self, event: SessionEvent) -> Int RecordingError! {
         events := [SessionEvent]{}
         events.push(event)
@@ -256,20 +309,30 @@ SessionRecording: struct {
         self.append_event_unchecked(event)
         event.sequence
     }
+
     record_envelope: fn(&self, bytes: [U8]) -> Int RecordingError! {
-        if bytes.len() > MAX_RECORDING_BYTES -> return Err(RecordingError.EnvelopeTooLarge{bytes: bytes.len(), limit: MAX_RECORDING_BYTES})
+        if bytes.len() > MAX_RECORDING_BYTES {
+            return Err(RecordingError.EnvelopeTooLarge{bytes: bytes.len(), limit: MAX_RECORDING_BYTES})
+        }
         events: recording_parse_envelope(bytes, self.identity)
         self.preflight(events)
         loop event in events -> self.append_event_unchecked(event)
         events.len()
     }
-    replay: fn(self) -> ReplayCursor { ReplayCursor{identity: self.identity, generation: self.generation, position: 0, sequence: None} }
+
+    replay: fn(self) -> ReplayCursor {
+        ReplayCursor{identity: self.identity, generation: self.generation, position: 0, sequence: None}
+    }
+
     replay_for: fn(self, identity: SessionRecordingIdentity) -> ReplayCursor RecordingError! {
         recording_validate_id(identity.source_id, "source_id")
         recording_validate_id(identity.build_id, "build_id")
-        if !self.identity.matches(identity) -> return Err(RecordingError.IdentityMismatch{expected: self.identity, found: identity})
+        if !self.identity.matches(identity) {
+            return Err(RecordingError.IdentityMismatch{expected: self.identity, found: identity})
+        }
         self.replay()
     }
+
     projection: fn(self, cursor: ReplayCursor) -> ReplayProjection RecordingError! {
         cursor.check(self)
         event := SessionEvent?{None}
@@ -280,48 +343,77 @@ SessionRecording: struct {
             timestamp_ms = Val(current.timestamp_ms)
         }
         next_sequence := Int?{None}
-        if cursor.position < self.events.len() -> next_sequence = Val(self.events[cursor.position].sequence)
+        if cursor.position < self.events.len() {
+            next_sequence = Val(self.events[cursor.position].sequence)
+        }
         ReplayProjection{
-            identity: self.identity, position: cursor.position, sequence: cursor.sequence, timestamp_ms: timestamp_ms, event: event,
-            previous_sequence: self.sequence_before(cursor.position - 1), next_sequence: next_sequence,
-            limits: self.limits, truncation: self.truncation(),
+            identity: self.identity,
+            position: cursor.position,
+            sequence: cursor.sequence,
+            timestamp_ms: timestamp_ms,
+            event: event,
+            previous_sequence: self.sequence_before(cursor.position - 1),
+            next_sequence: next_sequence,
+            limits: self.limits,
+            truncation: self.truncation(),
         }
     }
+
     checkpoint: fn(self, cursor: ReplayCursor) -> SessionCheckpoint RecordingError! {
         cursor.check(self)
         timestamp_ms := Int?{None}
         if cursor.position > 0 -> timestamp_ms = Val(self.events[cursor.position - 1].timestamp_ms)
         SessionCheckpoint{
-            identity: self.identity, generation: self.generation, position: cursor.position, sequence: cursor.sequence, timestamp_ms: timestamp_ms,
-            first_retained_sequence: self.first_retained_sequence(), last_retained_sequence: self.last_retained_sequence(),
+            identity: self.identity,
+            generation: self.generation,
+            position: cursor.position,
+            sequence: cursor.sequence,
+            timestamp_ms: timestamp_ms,
+            first_retained_sequence: self.first_retained_sequence(),
+            last_retained_sequence: self.last_retained_sequence(),
         }
     }
+
     restore_checkpoint: fn(self, checkpoint: SessionCheckpoint) -> ReplayCursor RecordingError! {
-        if !self.identity.matches(checkpoint.identity) -> return Err(RecordingError.IdentityMismatch{expected: self.identity, found: checkpoint.identity})
-        if checkpoint.generation != self.generation || checkpoint.position > self.events.len() -> return Err(RecordingError.CheckpointUnavailable)
+        if !self.identity.matches(checkpoint.identity) {
+            return Err(RecordingError.IdentityMismatch{expected: self.identity, found: checkpoint.identity})
+        }
+        if checkpoint.generation != self.generation || checkpoint.position > self.events.len() {
+            return Err(RecordingError.CheckpointUnavailable)
+        }
         if checkpoint.first_retained_sequence != self.first_retained_sequence() || checkpoint.last_retained_sequence != self.last_retained_sequence() {
             return Err(RecordingError.CheckpointUnavailable)
         }
-        if self.sequence_before(checkpoint.position) != checkpoint.sequence -> return Err(RecordingError.CheckpointUnavailable)
+        if self.sequence_before(checkpoint.position) != checkpoint.sequence {
+            return Err(RecordingError.CheckpointUnavailable)
+        }
         ReplayCursor{identity: self.identity, generation: self.generation, position: checkpoint.position, sequence: checkpoint.sequence}
     }
+
     // Every event must fit the byte limit and advance sequence and time; nothing is appended on failure.
     preflight: fn(self, events: [SessionEvent]) RecordingError! {
         previous_sequence := self.last_sequence
         previous_time := self.last_timestamp_ms
         loop event in events {
             bytes: event.wire_len()
-            if bytes > self.limits.max_bytes -> return Err(RecordingError.EventTooLarge{bytes: bytes, limit: self.limits.max_bytes})
+            if bytes > self.limits.max_bytes {
+                return Err(RecordingError.EventTooLarge{bytes: bytes, limit: self.limits.max_bytes})
+            }
             if previous_sequence == .Val(previous) {
-                if event.sequence <= previous -> return Err(RecordingError.NonMonotonicSequence{previous: previous, next: event.sequence})
+                if event.sequence <= previous {
+                    return Err(RecordingError.NonMonotonicSequence{previous: previous, next: event.sequence})
+                }
             }
             if previous_time == .Val(previous) {
-                if event.timestamp_ms < previous -> return Err(RecordingError.NonMonotonicTime{previous: previous, next: event.timestamp_ms})
+                if event.timestamp_ms < previous {
+                    return Err(RecordingError.NonMonotonicTime{previous: previous, next: event.timestamp_ms})
+                }
             }
             previous_sequence = Val(event.sequence)
             previous_time = Val(event.timestamp_ms)
         }
     }
+
     append_event_unchecked: fn(&self, event: SessionEvent) {
         self.last_sequence = Val(event.sequence)
         self.last_timestamp_ms = Val(event.timestamp_ms)
@@ -330,7 +422,9 @@ SessionRecording: struct {
         // Evict oldest events until both limits hold again.
         evicted := 0
         loop self.events.len() - evicted > self.limits.max_events || self.retained_bytes > self.limits.max_bytes {
-            if self.events.len() - evicted > self.limits.max_events -> self.event_limit_reached = true
+            if self.events.len() - evicted > self.limits.max_events {
+                self.event_limit_reached = true
+            }
             if self.retained_bytes > self.limits.max_bytes -> self.byte_limit_reached = true
             if evicted >= self.events.len() -> break
             oldest: self.events[evicted]
@@ -338,21 +432,28 @@ SessionRecording: struct {
             self.retained_bytes -= evicted_bytes
             self.dropped_events += 1
             self.dropped_bytes += evicted_bytes
-            if self.first_dropped_sequence == None -> self.first_dropped_sequence = Val(oldest.sequence)
+            if self.first_dropped_sequence == None {
+                self.first_dropped_sequence = Val(oldest.sequence)
+            }
             self.last_dropped_sequence = Val(oldest.sequence)
             evicted += 1
         }
-        if evicted > 0 -> self.events = loop index in evicted..<self.events.len() -> self.events[index]
+        if evicted > 0 {
+            self.events = loop index in evicted..<self.events.len() -> self.events[index]
+        }
         self.generation += 1
     }
 }
+
 recording_parse_envelope: fn(bytes: [U8], expected_identity: SessionRecordingIdentity) -> [SessionEvent] RecordingError! {
     text: String.from_bytes(bytes) ?? return Err(RecordingError.InvalidEnvelope{message: "envelope is not UTF-8"})
     root: recording_parse_json(text, "devtools envelope")
     fields: recording_object_fields(root) ?? return Err(RecordingError.InvalidEnvelope{message: "envelope must be an object"})
     protocol_value: recording_lookup(fields, "protocol") ?? return Err(RecordingError.InvalidEnvelope{message: "missing string `protocol`"})
     protocol: recording_text(protocol_value) ?? return Err(RecordingError.InvalidEnvelope{message: "missing string `protocol`"})
-    if protocol != RECORDING_DEVTOOLS_PROTOCOL -> return Err(RecordingError.InvalidEnvelope{message: "protocol is `{protocol}`, expected `{RECORDING_DEVTOOLS_PROTOCOL}`"})
+    if protocol != RECORDING_DEVTOOLS_PROTOCOL {
+        return Err(RecordingError.InvalidEnvelope{message: "protocol is `{protocol}`, expected `{RECORDING_DEVTOOLS_PROTOCOL}`"})
+    }
     recording_validate_envelope_identity(fields, expected_identity)
     values: recording_lookup(fields, "events") ?? return Err(RecordingError.InvalidEnvelope{message: "missing `events` array"})
     if values == {
@@ -364,6 +465,7 @@ recording_parse_envelope: fn(bytes: [U8], expected_identity: SessionRecordingIde
         else -> Err(RecordingError.InvalidEnvelope{message: "envelope `events` must be an array"})
     }
 }
+
 recording_parse_event: fn(value: Dyn) -> SessionEvent RecordingError! {
     fields: recording_object_fields(value) ?? return Err(RecordingError.InvalidEvent{message: "event must be an object"})
     sequence: recording_required_int(fields, "sequence")
@@ -372,7 +474,9 @@ recording_parse_event: fn(value: Dyn) -> SessionEvent RecordingError! {
     kind: recording_required_string(fields, "kind")
     entity: recording_required_string(fields, "entity")
     event_fields: recording_lookup(fields, "fields") ?? return Err(RecordingError.InvalidEvent{message: "missing event `fields`"})
-    if recording_object_fields(event_fields) == None -> return Err(RecordingError.InvalidEvent{message: "event fields must be an object"})
+    if recording_object_fields(event_fields) == None {
+        return Err(RecordingError.InvalidEvent{message: "event fields must be an object"})
+    }
     payload_json := String?{None}
     if recording_lookup(fields, "payload") == .Val(payload) {
         if payload == {
@@ -383,24 +487,34 @@ recording_parse_event: fn(value: Dyn) -> SessionEvent RecordingError! {
     }
     SessionEvent.new(sequence, timestamp_ms, source, kind, entity, recording_canonical_json(event_fields), payload_json)
 }
+
 recording_parse_json: fn(text: String, label: String) -> Dyn RecordingError! {
-    if text.bytes().len() > MAX_RECORDING_BYTES -> return Err(RecordingError.InvalidEvent{message: "{label} exceeds the {MAX_RECORDING_BYTES}-byte limit"})
+    if text.bytes().len() > MAX_RECORDING_BYTES {
+        return Err(RecordingError.InvalidEvent{message: "{label} exceeds the {MAX_RECORDING_BYTES}-byte limit"})
+    }
     invalid: "{label} is not valid bounded JSON"
     value: foundation_json_parse(text) ?? return Err(if label == "devtools envelope" -> RecordingError.InvalidEnvelope{message: invalid} else -> RecordingError.InvalidEvent{message: invalid})
     value
 }
+
 recording_canonical_object: fn(text: String, label: String) -> String RecordingError! {
-    if text.bytes().len() > MAX_RECORDING_TEXT_BYTES -> return Err(RecordingError.InvalidEvent{message: "{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte JSON object limit"})
+    if text.bytes().len() > MAX_RECORDING_TEXT_BYTES {
+        return Err(RecordingError.InvalidEvent{message: "{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte JSON object limit"})
+    }
     value: recording_parse_json(text, label)
-    if recording_object_fields(value) == None -> return Err(RecordingError.InvalidEvent{message: "{label} must be an object"})
+    if recording_object_fields(value) == None {
+        return Err(RecordingError.InvalidEvent{message: "{label} must be an object"})
+    }
     recording_canonical_json(value)
 }
+
 recording_object_fields: fn(value: Dyn) -> [{key: String, value: Dyn}]? {
     if value == {
         .Object(fields) -> Val(fields)
         else -> None
     }
 }
+
 // The last occurrence of a repeated key wins, as in the canonical object.
 recording_lookup: fn(fields: [{key: String, value: Dyn}], key: String) -> Dyn? {
     found := Dyn?{None}
@@ -409,24 +523,30 @@ recording_lookup: fn(fields: [{key: String, value: Dyn}], key: String) -> Dyn? {
     }
     found
 }
+
 recording_text: fn(value: Dyn) -> String? {
     if value == {
         .Text(text) -> Val(text)
         else -> None
     }
 }
+
 recording_required_string: fn(fields: [{key: String, value: Dyn}], key: String) -> String RecordingError! {
     value: recording_lookup(fields, key) ?? return Err(RecordingError.InvalidEvent{message: "missing string `{key}`"})
     text: recording_text(value) ?? return Err(RecordingError.InvalidEvent{message: "missing string `{key}`"})
     recording_validate_text(text, "event {key}")
     text
 }
+
 recording_required_int: fn(fields: [{key: String, value: Dyn}], key: String) -> Int RecordingError! {
     value: recording_lookup(fields, key) ?? return Err(RecordingError.InvalidEvent{message: "missing integer `{key}`"})
     number: foundation_json_integer(value) ?? return Err(RecordingError.InvalidEvent{message: "event `{key}` must be an exact integer"})
-    if number < 0 -> return Err(RecordingError.InvalidEvent{message: "event `{key}` must be a non-negative integer"})
+    if number < 0 {
+        return Err(RecordingError.InvalidEvent{message: "event `{key}` must be a non-negative integer"})
+    }
     number
 }
+
 // An envelope may name its identity; when it does, both ids must be present and match.
 recording_validate_envelope_identity: fn(fields: [{key: String, value: Dyn}], expected: SessionRecordingIdentity) RecordingError! {
     source: recording_lookup(fields, "source_id")
@@ -437,19 +557,28 @@ recording_validate_envelope_identity: fn(fields: [{key: String, value: Dyn}], ex
     build_value: build ?? return Err(RecordingError.InvalidEnvelope{message: "envelope `build_id` must be a string"})
     build_text: recording_text(build_value) ?? return Err(RecordingError.InvalidEnvelope{message: "envelope `build_id` must be a string"})
     found: SessionRecordingIdentity.new(source_text, build_text) ?? return Err(RecordingError.InvalidEnvelope{message: "invalid envelope identity: {err.message()}"})
-    if !expected.matches(found) -> return Err(RecordingError.IdentityMismatch{expected: expected, found: found})
+    if !expected.matches(found) {
+        return Err(RecordingError.IdentityMismatch{expected: expected, found: found})
+    }
 }
+
 recording_validate_id: fn(value: String, label: String) RecordingError! {
     bytes: value.bytes()
     invalid := bytes.len() == 0 || bytes.len() > MAX_RECORDING_ID_BYTES
     loop byte in bytes {
         if byte < 32 || byte == 127 -> invalid = true
     }
-    if invalid -> return Err(RecordingError.InvalidIdentity{message: "{label} must contain 1..={MAX_RECORDING_ID_BYTES} bytes and no control characters"})
+    if invalid {
+        return Err(RecordingError.InvalidIdentity{message: "{label} must contain 1..={MAX_RECORDING_ID_BYTES} bytes and no control characters"})
+    }
 }
+
 recording_validate_text: fn(value: String, label: String) RecordingError! {
-    if value.bytes().len() > MAX_RECORDING_TEXT_BYTES -> return Err(RecordingError.InvalidEvent{message: "{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte text limit"})
+    if value.bytes().len() > MAX_RECORDING_TEXT_BYTES {
+        return Err(RecordingError.InvalidEvent{message: "{label} exceeds the {MAX_RECORDING_TEXT_BYTES}-byte text limit"})
+    }
 }
+
 // Canonical JSON: object keys sorted, the last repeated key kept, no whitespace.
 recording_canonical_json: fn(value: Dyn) -> String {
     if value == {
@@ -465,12 +594,14 @@ recording_canonical_json: fn(value: Dyn) -> String {
             "[{parts.join(",")}]"
         }
         .Object(fields) -> {
-            members := [String: Dyn]{}
+            members := [String:Dyn]{}
             loop field in fields -> members[field.key] = field.value
             keys := members.keys().to_list()
             keys.sort()
             parts := [String]{}
-            loop key in keys -> parts.push("{foundation_json_quote(key)}:{recording_canonical_json(members[key])}")
+            loop key in keys {
+                parts.push("{foundation_json_quote(key)}:{recording_canonical_json(members[key])}")
+            }
             "{{{parts.join(",")}}}"
         }
         // The JSON parser produces no other variant.

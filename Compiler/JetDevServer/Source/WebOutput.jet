@@ -11,6 +11,7 @@ use {
 
 // Owner-only permission bits of the publication backup directory.
 WEB_OUTPUT_PRIVATE_MODE: 0o700
+
 // Backup directory names tried before publication gives up.
 WEB_OUTPUT_CHILD_ATTEMPTS: 100
 
@@ -49,14 +50,18 @@ WebOutputAuthority: struct {
         }
         self.directory.rename(name, name, into: Val(destination.directory), if_exists: .Replace)
         published: web_output_member(destination.directory, destination.path, name)
-        if published.id != source.id -> return Err(web_output_denied(files.join(destination.path, name), "published web output identity changed"))
+        if published.id != source.id {
+            return Err(web_output_denied(files.join(destination.path, name), "published web output identity changed"))
+        }
     }
 
     // Remove the member `name`; a missing member is success.
     remove_file_if_exists: fn(self, name: String) -[FS]> IOError! {
         web_output_normal_name(name)
         web_output_member(self.directory, self.path, name) ?? {
-            if err == .NotFound(_) -> return
+            if err == .NotFound(_) {
+                return
+            }
             return Err(err)
         }
         self.directory.remove(name)
@@ -90,7 +95,9 @@ WebOutputAuthority: struct {
     remove_child_directory: fn(self, name: String) -[FS]> IOError! {
         web_output_normal_name(name)
         self.directory.remove_directory(name) ?? {
-            if err == .NotFound(_) -> return
+            if err == .NotFound(_) {
+                return
+            }
             return Err(err)
         }
     }
@@ -104,7 +111,9 @@ web_output_open: fn(out_dir: String, root: String) -[FS, Env]> WebOutputAuthorit
     web_output_ensure_directory(out_dir)
     real: files.canonicalize(out_dir)
     prefix: if anchor.ends_with("/") -> anchor.copy() else -> "{anchor}/"
-    if real != anchor && !real.starts_with(prefix) -> return Err(web_output_denied(real, "web output directory escapes `{anchor}`"))
+    if real != anchor && !real.starts_with(prefix) {
+        return Err(web_output_denied(real, "web output directory escapes `{anchor}`"))
+    }
     directory := files.open_directory(anchor)
     if real != anchor {
         loop part in real.removeprefix(prefix).split("/") {
@@ -121,15 +130,21 @@ web_output_ensure_directory: fn(path: String) -[FS]> IOError! {
     missing := false
     if files.lstat(path) == {
         .Ok(info) -> {
-            if info.is_symlink -> return Err(web_output_denied(path, "web output directory must not be a symlink"))
-            if !info.is_dir -> return Err(IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val("web output path is not a directory")}))
+            if info.is_symlink {
+                return Err(web_output_denied(path, "web output directory must not be a symlink"))
+            }
+            if !info.is_dir {
+                return Err(IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val("web output path is not a directory")}))
+            }
         }
         .Err(error) -> {
             if !(error == .NotFound(_)) -> return Err(error)
             missing = true
         }
     }
-    if !missing -> return
+    if !missing {
+        return
+    }
     parent: files.dirname(path)
     if parent != "" && parent != path -> web_output_ensure_directory(parent)
     holder: files.open_directory(if parent == "" -> "." else -> parent)
@@ -149,7 +164,9 @@ web_output_publish: fn(staging: String, out_dir: String, root: String) -[FS, Env
     web_output_normal_name(staging_name)
     staging_parent: files.dirname(staging)
     real_parent: files.canonicalize(if staging_parent == "" -> "." else -> staging_parent)
-    if real_parent != output_root.path -> return Err(web_output_denied(staging, "web staging directory escapes the output directory"))
+    if real_parent != output_root.path {
+        return Err(web_output_denied(staging, "web staging directory escapes the output directory"))
+    }
     staging_root: output_root.open_existing_child(staging_name)
     // The members every web bundle publishes, then its optional source maps.
     members: [String]{"web.manifest.json", "jet_dom_runtime.js", "app.js", "app.wasm", "index.html"}
@@ -189,16 +206,20 @@ web_output_publish: fn(staging: String, out_dir: String, root: String) -[FS, Env
     loop name in staged_names {
         if failure != None -> break
         published.push(name.copy())
-        if staging_root.rename_file_to(name, output_root) == .Err(error) {
-            failure = Val(error)
-        }
+        if staging_root.rename_file_to(name, output_root) == .Err(error) -> failure = Val(error)
     }
     if failure == .Val(error) {
         published.reverse()
-        loop name in published -> output_root.remove_file_if_exists(name).drop("rollback continues past a member it can't remove")
+        loop name in published {
+            output_root.remove_file_if_exists(name).drop("rollback continues past a member it can't remove")
+        }
         backed_up.reverse()
-        loop name in backed_up -> backup.rename_file_to(name, output_root).drop("rollback continues past a member it can't restore")
-        loop name in names -> backup.remove_file_if_exists(name).drop("the backup directory is removed below when empty")
+        loop name in backed_up {
+            backup.rename_file_to(name, output_root).drop("rollback continues past a member it can't restore")
+        }
+        loop name in names {
+            backup.remove_file_if_exists(name).drop("the backup directory is removed below when empty")
+        }
         output_root.remove_child_directory(files.basename(backup.path)).drop("a leftover backup directory holds no published bytes")
         return Err(error)
     }
@@ -211,10 +232,14 @@ web_output_publish: fn(staging: String, out_dir: String, root: String) -[FS, Env
 web_output_member: fn(parent: Directory, parent_path: String, name: String) -[FS.Read]> Stat IOError! {
     resource: files.join(parent_path, name)
     entry: parent.entry_stat(name)
-    if entry.is_symlink || !entry.is_file || entry.links != 1 -> return Err(web_output_denied(resource, "web output member must be a regular file with one link"))
+    if entry.is_symlink || !entry.is_file || entry.links != 1 {
+        return Err(web_output_denied(resource, "web output member must be a regular file with one link"))
+    }
     reader: parent.open(name)
     held: reader.stat()
-    if held.id != entry.id || held.links != 1 -> return Err(web_output_denied(resource, "web output member changed while it was checked"))
+    if held.id != entry.id || held.links != 1 {
+        return Err(web_output_denied(resource, "web output member changed while it was checked"))
+    }
     Ok(held)
 }
 
@@ -240,7 +265,9 @@ web_output_test_members: fn() -> [String] {
 
 web_output_test_stage: fn(staging: String) -[FS]> {
     files.create_dir_all(staging) ?? panic("staging directory")
-    loop name in web_output_test_members() -> files.write(files.join(staging, name), "staged {name}") ?? panic("staged member")
+    loop name in web_output_test_members() {
+        files.write(files.join(staging, name), "staged {name}") ?? panic("staged member")
+    }
 }
 
 #Test("web output publication replaces the bundle and leaves no backup") {
@@ -321,7 +348,7 @@ web_output_test_stage: fn(staging: String) -[FS]> {
     files.create_dir_all(project) ?? panic("project directory")
     web_output_test_stage(files.join(output, ".staging"))
     if web_output_publish(files.join(output, ".staging"), output, project) == {
-        .Ok(_) -> panic("an output directory outside the project root must be refused")
+        .Ok(_) -> { panic("an output directory outside the project root must be refused") }
         .Err(error) -> assert(error == .PermissionDenied(_))
     }
     assert(!files.exists(files.join(output, "web.manifest.json")), "an escaping output directory receives no bytes")

@@ -6,19 +6,19 @@
 env: JET_ICE_SELF_TEST=1
 step: jet
 exit: 101
-stderr: ~ "internal compiler error: ICE self-test triggered by JET_ICE_SELF_TEST" # original predicate
+stderr: ~ "Internal compiler error: ICE self-test triggered by JET_ICE_SELF_TEST" # original predicate
 stderr: ~ "This is a bug in jet, NOT in your program. Please report it," # original predicate
 stderr: !~ "RUST_BACKTRACE" # original predicate
 stderr: !~ "thread 'main' panicked at" # original predicate
 step build: jet build gap.jet
 exit: 101
-stderr: ~ "internal compiler error: ICE self-test triggered by JET_ICE_SELF_TEST" # `jet build` reports the same report
+stderr: ~ "Internal compiler error: ICE self-test triggered by JET_ICE_SELF_TEST" # `jet build` reports the same report
 stderr: !~ "E2104" # an internal fault is never a user diagnostic
 step run: jet run gap.jet
 exit: 101
-stderr: ~ "internal compiler error: ICE self-test triggered by JET_ICE_SELF_TEST" # `jet run` reports the same report
+stderr: ~ "Internal compiler error: ICE self-test triggered by JET_ICE_SELF_TEST" # `jet run` reports the same report
 stderr: !~ "E2104" # an internal fault is never a user diagnostic
 step test: jet test gap.jet
 exit: 101
-stderr: ~ "internal compiler error: ICE self-test triggered by JET_ICE_SELF_TEST" # the test harness reports the same report
+stderr: ~ "Internal compiler error: ICE self-test triggered by JET_ICE_SELF_TEST" # the test harness reports the same report
 stderr: !~ "E2105" # an internal fault is never an operating-system failure

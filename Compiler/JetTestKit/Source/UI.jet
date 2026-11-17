@@ -267,13 +267,13 @@ kit_ui_discover: fn(ctx: KitCtx) -> [KitEntry] {
 kit_ui_rendered_only: fn(text: String) -> String {
     lines: text.split("\n").to_list()
     n: lines.len()
-    if n < 5 || lines[n - 1] != "" || !lines[n - 2].starts_with("run `jet explain ") || !lines[n - 2].ends_with("` to learn more") || lines[n - 4] != "" {
+    if n < 5 || lines[n - 1] != "" || !lines[n - 2].starts_with("Run `jet explain ") || !lines[n - 2].ends_with("` to learn more") || lines[n - 4] != "" {
         return text.copy()
     }
     summary: lines[n - 3]
     problem: summary.split(" ").to_list()
     counted: problem.len() == 3 && (Int.parse(problem[0]) ?? -1) >= 0 && (problem[1] == "problem" || problem[1] == "problems") && problem[2] == "found"
-    warnings: summary.starts_with("ok: `") && summary.contains("` has no errors (") && (summary.ends_with(" warning)") || summary.ends_with(" warnings)"))
+    warnings: summary.starts_with("OK: `") && summary.contains("` has no errors (") && (summary.ends_with(" warning)") || summary.ends_with(" warnings)"))
     if !counted && !warnings -> return text.copy()
     "{lines.slice(0, n - 4).join("\n")}\n"
 }

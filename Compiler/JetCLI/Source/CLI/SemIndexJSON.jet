@@ -330,17 +330,17 @@ jet_cli_effect_projection_line: fn(projection: SemEffectProjection) -> String Ne
 // `run_semindex` text mode, a lifted type spelled by its ledger path as in
 // the JSON document.
 jet_cli_semindex_text: fn(index: SemIndex) -> String {
-    out := "semantic index (schema v{SEMINDEX_SCHEMA_VERSION})\n"
-    out = "{out}  definitions: {index.definitions.len()}\n"
-    out = "{out}  references:  {index.references.len()}\n"
-    out = "{out}  call edges:  {index.calls.len()}\n"
-    out = "{out}  effects:     {index.effects.len()}\n"
-    out = "{out}effect roles\n  {jet_cli_effect_projection_line(index.effect_projection)}\n"
-    out = "{out}  arithmetic:  {index.arithmetic.len()}\n"
+    out := "Semantic Index (schema v{SEMINDEX_SCHEMA_VERSION})\n"
+    out = "{out}  Definitions: {index.definitions.len()}\n"
+    out = "{out}  References:  {index.references.len()}\n"
+    out = "{out}  Call edges:  {index.calls.len()}\n"
+    out = "{out}  Effects:     {index.effects.len()}\n"
+    out = "{out}Effect Roles\n  {jet_cli_effect_projection_line(index.effect_projection)}\n"
+    out = "{out}  Arithmetic:  {index.arithmetic.len()}\n"
     loop fact in index.arithmetic {
         out = "{out}    fixed-width {fact.operation}: .{fact.policy}; scope = {fact.module_path}:{fact.scope_span.start}..{fact.scope_span.end}; operation = {fact.operation_span.start}..{fact.operation_span.end}\n"
     }
-    out = "{out}failure contracts:\n"
+    out = "{out}Failure contracts:\n"
     loop definition in index.definitions {
         callable: semindex_callable(definition.def) ?? next
         if !callable.signature_facts_available -> next
@@ -354,12 +354,12 @@ jet_cli_semindex_text: fn(index: SemIndex) -> String {
         }
         out = "{out}  {definition.def.qualified_name}: unavailable\n"
     }
-    out = "{out}nominal type contracts:\n"
+    out = "{out}Nominal type contracts:\n"
     loop definition in index.definitions {
         base: definition.nominal_base ?? next
         out = "{out}  {definition.def.qualified_name}: distinct {base}\n"
         loop contract in definition.trait_contracts {
-            out = "{out}    implements {contract.trait_name}\n"
+            out = "{out}    Implements {contract.trait_name}\n"
             loop entry in contract.associated_types {
                 if entry.ty == .Val(ty) -> out = "{out}      type {entry.name} = {ty}\n" else {
                     out = "{out}      type {entry.name}\n"
@@ -368,5 +368,5 @@ jet_cli_semindex_text: fn(index: SemIndex) -> String {
             loop method in contract.methods -> out = "{out}      {method}\n"
         }
     }
-    semindex_display_text(index, "{out}note: pass --json for the full stable document\n")
+    semindex_display_text(index, "{out}Note: pass --json for the full stable document\n")
 }

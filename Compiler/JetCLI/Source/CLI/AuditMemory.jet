@@ -238,17 +238,17 @@ jet_cli_audit_memory_at: fn(root: String, args: [String], color: Bool, json: Boo
         return jet_cli_done("{jet_cli_status_render("audit.memory", true, [JetCLIStatusField]{jet_cli_status_field("memory", memory)})}\n", "", JET_DRIVER_EXIT_OK)
     }
     title: diagnostic_theme_paint(color, "1;36", "jet audit memory")
-    out := "{title}\ncoverage: exercised runs only\nwitnesses: {rows.len()}\n"
+    out := "{title}\nCoverage: exercised runs only\nWitnesses: {rows.len()}\n"
     if rows.len() == 0 -> out = "{out}\nNo runtime memory witnesses recorded.\n"
     loop row in rows {
-        out = "{out}\n{row.source}:{row.span_start}..{row.span_end}  {row.kind} {row.code}\n  scope: {row.scope}\n  provenance: {row.provenance}\n  witness: {row.detail}\n"
+        out = "{out}\n{row.source}:{row.span_start}..{row.span_end}  {row.kind} {row.code}\n  Scope: {row.scope}\n  Provenance: {row.provenance}\n  Witness: {row.detail}\n"
         if {
             row.repairs.len() == 1 && row.byte_spans && row.expected != None -> {
-                out = "{out}  static repair: {row.repairs[0]}\n"
+                out = "{out}  Static repair: {row.repairs[0]}\n"
             }
-            row.repairs.len() == 0 -> out = "{out}  static repair: none known\n"
+            row.repairs.len() == 0 -> out = "{out}  Static repair: none known\n"
             else -> {
-                out = "{out}  static repair options:\n"
+                out = "{out}  Static repair options:\n"
                 loop repair in row.repairs -> out = "{out}    - {repair}\n"
             }
         }

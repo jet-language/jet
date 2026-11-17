@@ -446,6 +446,13 @@ sema_pattern_trait_arm: fn(subject: Type, bounds: [String], variant: String, env
             diagnostics.push(sema_error("E0305", span, "pattern `{variant}` names no type", "an arm over a trait value names a type that implements `{trait_shown}`, as type position names it", "name a type in scope that implements `{trait_shown}`, or match the rest with `else`"))
             return result
         }
+        // A trait value holds one instance of a generic, so the arm spells
+        // which: the bare name of a generic names no one type it could hold.
+        if held == .Named(_) && graph.modules[row.module_index].nominals[row.row].generic_params.len() > 0 {
+            params: loop param in graph.modules[row.module_index].nominals[row.row].generic_params -> param.name
+            diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't say which instance of the generic `{variant}` it tests", "a trait value holds one instance of a generic, and `{variant}<Int>` and `{variant}<String>` are different types, so an arm over a trait value spells the instance's type arguments", "spell them in the arm, one for each of `{variant}`'s type parameters (`{params.join("`, `")}`), for example `.{variant}<Int>(b)`"))
+            return result
+        }
         key: sema_checked_nominal_key(graph, graph.modules[row.module_index], graph.modules[row.module_index].nominals[row.row])
         // A generic instance's identity spells its arguments, as the boxed
         // instance's payload key does (`Box<Int>` and `Box<String>` are two).

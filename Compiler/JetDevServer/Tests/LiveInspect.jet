@@ -15,20 +15,25 @@ use {
 live_view_u64: fn(out: &[U8], value: U64) Never! {
     loop index in 0..<8 -> out.push(U8{Int{(value >> (index * 8)) & U64{255}}})
 }
+
 live_view_words: fn(out: &[U8], words: [U64]) Never! {
     loop word in words -> live_view_u64(out, word)
 }
+
 live_view_text: fn(out: &[U8], text: String) Never! {
     live_view_u64(out, U64{text.bytes().len()})
     loop byte in text.bytes() -> out.push(byte)
 }
+
 // Process `pid`, writer boot-clock start `boot_ns` at 100 ticks per second,
 // one task blocked on a channel send, one unbounded channel and, when
 // `event_sequence` is set, one event record.
 live_view_fixture: fn(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int?) -> [U8] Never! {
     out := [U8]{}
     live_view_words(out, [U64]{U64{3550338754064696650}, U64{1}, U64{pid}, U64{captured}, U64{7}, boot_ns, U64{3}, U64{100}, U64{1}, U64{1}, U64{2}, U64{64}, U64{1}, U64{0}})
-    loop text in ([String]{"session", "app.jet", "build-1", "rev-1", "world\n1"}) -> live_view_text(out, text)
+    loop text in ([String]{"session", "app.jet", "build-1", "rev-1", "world\n1"}) {
+        live_view_text(out, text)
+    }
     live_view_words(out, [U64]{U64{1}, U64{1}, U64{2}, U64{3}, U64{0}, U64{2}, U64{0}, U64{0}, U64{0}, U64{18446744073709551615}})
     live_view_text(out, "channel send")
     live_view_words(out, [U64]{U64{2}, U64{1}, U64{0}, U64{0}, U64{0}, U64{0}, U64{1}, U64{0}, U64{0}})
@@ -66,14 +71,17 @@ live_view_fixture: fn(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int
 
 live_view_rejected: fn(pid: Int, message: String) {
     if live_inspect_read(pid) == {
-        .Err(error) -> assert(error.message.contains(message))
+        .Err(error) -> { assert(error.message.contains(message)) }
         .Ok(_) -> panic("unsafe live snapshot accepted: {message}")
     }
 }
+
 #Test("reader_serves_only_private_fresh_bound_snapshots") {
     // /proc start identity is the Linux/Android transport's actual authority.
     platform: live_sys.name()
-    if platform != "linux" && platform != "android" -> return
+    if platform != "linux" && platform != "android" {
+        return
+    }
     pid: live_process.current_pid()
     path: jet_live_snapshot_path(pid)
     target: "{path}.hostile-target"

@@ -10,30 +10,42 @@ CaptureTestRecord: struct {
 
     impl RecordIndexRetention {
         artifact_id: fn(self) -> String Never! { self.id.copy() }
+
         recorded_sequence: fn(self) -> U64 Never! { self.seq }
+
         size_bytes: fn(self) -> U64 Never! { self.bytes }
+
         saved: fn(self) -> Bool Never! { self.protected }
     }
 }
+
 CaptureProtectedRecord: struct {
     id: String,
     bytes: U64,
 
     impl RecordIndexRetention {
         artifact_id: fn(self) -> String Never! { self.id.copy() }
+
         recorded_sequence: fn(self) -> U64 Never! { U64{0} }
+
         size_bytes: fn(self) -> U64 Never! { self.bytes }
+
         saved: fn(self) -> Bool Never! { false }
+
         evictable: fn(self) -> Bool Never! { false }
     }
 }
+
 capture_test_record: fn(id: String, seq: U64, bytes: U64, protected: Bool) -> CaptureTestRecord Never! {
     CaptureTestRecord{id: id.copy(), seq, bytes, protected}
 }
+
 capture_test_error: fn(budget: CaptureBudget, records: [CaptureTestRecord], incoming: CaptureTestRecord?) -> CaptureBudgetError Never! {
     if plan_eviction_inner<CaptureTestRecord>(budget, records, incoming) == {
         .Err(error) -> error
-        .Ok(_) -> { panic("expected retention refusal") }
+        .Ok(_) -> {
+            panic("expected retention refusal")
+        }
     }
 }
 
@@ -88,7 +100,7 @@ capture_test_error: fn(budget: CaptureBudget, records: [CaptureTestRecord], inco
 
 #Test("capture_budget_rejects_zero_before_record_validation") {
     if CaptureBudget.new(U64{0}) == {
-        .Err(error) -> assert_eq(error, CaptureBudgetError.ZeroByteLimit)
+        .Err(error) -> { assert_eq(error, CaptureBudgetError.ZeroByteLimit) }
         .Ok(_) -> { panic("zero admitted") }
     }
     bad: [CaptureTestRecord]{capture_test_record("", U64{0}, U64.MAX, false)}
@@ -111,11 +123,14 @@ capture_test_error: fn(budget: CaptureBudget, records: [CaptureTestRecord], inco
     plan: CaptureBudget.new_unchecked(U64{7}).plan_eviction(records, incoming) ?? panic("plan")
     assert_eq(plan.retained_bytes, U64{7})
     assert(plan.fits())
-    assert_eq(plan.evicted, [CaptureEviction]{
-        {artifact_id: "a", recorded_sequence: U64{1}, size_bytes: U64{3}},
-        {artifact_id: "b", recorded_sequence: U64{1}, size_bytes: U64{3}},
-        {artifact_id: "c", recorded_sequence: U64{2}, size_bytes: U64{3}},
-    })
+    assert_eq(
+        plan.evicted,
+        [CaptureEviction]{
+            {artifact_id: "a", recorded_sequence: U64{1}, size_bytes: U64{3}},
+            {artifact_id: "b", recorded_sequence: U64{1}, size_bytes: U64{3}},
+            {artifact_id: "c", recorded_sequence: U64{2}, size_bytes: U64{3}},
+        },
+    )
     assert_eq(records, original)
 }
 

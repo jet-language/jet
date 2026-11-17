@@ -55,21 +55,21 @@ jet_cli_structure_report: fn(facts: [StructureFact], ledger: GateLedger, json: B
         structure: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("rows", jet_cli_status_array(rows)), jet_cli_status_field("facts", jet_cli_status_array(fact_rows)), jet_cli_status_field("gates", jet_cli_status_array(gate_rows))})
         return "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("structure", structure)})}\n"
     }
-    output := "structure\n"
+    output := "Structure\n"
     loop row in jet_cli_structure_rows() {
         output = "{output}  {row.name}  safe={row.safe_direction}  gates={row.gates.join(", ")}\n"
     }
-    output = "{output}facts: {facts.len()}\n"
+    output = "{output}Facts: {facts.len()}\n"
     if facts.len() == 0 -> output = "{output}  (none in this program)\n"
     loop fact in facts {
         output = "{output}  {jet_cli_structure_kind(fact.kind)}  {fact.source}:{fact.span.start}..{fact.span.end}  {fact.subject}  {fact.status} — {fact.detail}\n"
     }
-    output = "{output}gates: {gates.len()}\n"
+    output = "{output}Gates: {gates.len()}\n"
     if gates.len() == 0 -> output = "{output}  (none in this program)\n"
     loop entry in gates {
         span: entry.span ?? Span{start: 0, end: 0}
         output = "{output}  {entry.scope}  {entry.source}:{span.start}..{span.end}  {entry.subject}  {entry.reason ?? "unknown"} — {entry.detail}\n"
-        loop provenance in entry.provenance -> output = "{output}    provenance {provenance}\n"
+        loop provenance in entry.provenance -> output = "{output}    Provenance {provenance}\n"
     }
     output
 }
@@ -150,15 +150,15 @@ jet_cli_structure_core: fn(json: Bool) -> JetDriverVerbOutput Never! {
         core: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("bootstrap", jet_cli_status_array(bootstrap)), jet_cli_status_field("root_types", jet_cli_status_texts(CORE_ROOT_TYPES)), jet_cli_status_field("modules", jet_cli_status_array(modules)), jet_cli_status_field("sources", jet_cli_status_array(sources)), jet_cli_status_field("calls", jet_cli_status_array(calls))})
         return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("core", core)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
-    output := "core\nbootstrap:\n"
+    output := "Core\nBootstrap:\n"
     loop (index, step) in CORE_BOOTSTRAP_STEPS {
         output = "{output}  {index + 1}. {step.name}  depends_on [{if step.dependencies.len() == 0 -> "none" else -> step.dependencies.join(", ")}]\n"
     }
-    output = "{output}root types: {CORE_ROOT_TYPES.join(", ")}\nmodules: {CORE_MODULE_DECLARATIONS.len()}\n"
+    output = "{output}Root types: {CORE_ROOT_TYPES.join(", ")}\nModules: {CORE_MODULE_DECLARATIONS.len()}\n"
     loop core_module in CORE_MODULE_DECLARATIONS {
-        output = "{output}  module {core_module.module_name}  depends_on [{if core_module.dependencies.len() == 0 -> "none" else -> core_module.dependencies.join(", ")}]\n    members: {core_module.members.join(", ")}\n"
-        if core_module.type_exports.len() == 0 -> output = "{output}    types: (none)\n" else {
-            output = "{output}    types:\n"
+        output = "{output}  Module {core_module.module_name}  depends_on [{if core_module.dependencies.len() == 0 -> "none" else -> core_module.dependencies.join(", ")}]\n    Members: {core_module.members.join(", ")}\n"
+        if core_module.type_exports.len() == 0 -> output = "{output}    Types: (none)\n" else {
+            output = "{output}    Types:\n"
             loop entry in core_module.type_exports {
                 kind: if entry.kind == {
                     .Plain -> "plain"

@@ -1,0 +1,26 @@
+# A build on one thread and a build on sixteen write the same executable byte
+# for byte, its DWARF sections included: every part of a parallel build lays
+# a struct out alike and spells it by its declaration, so the struct's debug
+# type has one name and one member list whichever thread built the code that
+# reached it. Each build runs in a directory and store of its own, so neither
+# reuses the other's image.
+fixture: ThreadCountBuildsAreByteIdentical.fixture
+env: NO_COLOR=1
+mkdir: serial
+mkdir: parallel
+copy: main.jet serial/main.jet
+copy: shapes.jet serial/shapes.jet
+copy: main.jet parallel/main.jet
+copy: shapes.jet parallel/shapes.jet
+step: jet build main.jet --threads 1
+cwd: serial
+env: JET_STORE_DIR={work}/serial-store
+exit: 0
+step: jet build main.jet --threads 16
+cwd: parallel
+env: JET_STORE_DIR={work}/parallel-store
+exit: 0
+file: serial/.jet/build/main == parallel/.jet/build/main # the whole image, debug sections included
+step: {work}/serial/.jet/build/main
+exit: 0
+stdout: = "root 3 root\nhello 1\nheld node\n12 4\n"

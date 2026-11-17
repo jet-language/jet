@@ -143,7 +143,7 @@ project_context_for_entry: fn(path: String) -> ProjectContext {
     manifest_diagnostic := Diagnostic?{None}
     manifest_root := String?{None}
     if pkg_find_manifest_root_checked(cache, entry_dir) == {
-        .Ok(found) -> manifest_root = found
+        .Ok(found) -> { manifest_root = found }
         .Err(error) -> manifest_diagnostic = Val(error.diagnostic)
     }
     if manifest_root == .Val(manifest) {
@@ -308,8 +308,12 @@ workspace_view: fn(cache: &WorkspaceDeclarationCache, root: String) -> Workspace
     }
     source: if resolver.resolve_workspace_source(cache) == {
         .Val(found) -> found
-        .None -> return WorkspaceView{source_path: None, members: [WorkspacePlanMember]{}, diagnostic: None, source_failed: false}
-        .Err(error) -> return WorkspaceView{source_path: None, members: [WorkspacePlanMember]{}, diagnostic: Val(error.workspace_diagnostic()), source_failed: true}
+        .None -> {
+            return WorkspaceView{source_path: None, members: [WorkspacePlanMember]{}, diagnostic: None, source_failed: false}
+        }
+        .Err(error) -> {
+            return WorkspaceView{source_path: None, members: [WorkspacePlanMember]{}, diagnostic: Val(error.workspace_diagnostic()), source_failed: true}
+        }
     }
     path: source.path
     if source.role != WorkspaceSourceRole.Index {

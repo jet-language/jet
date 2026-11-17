@@ -7,16 +7,27 @@ use {
 }
 
 PAUSED_EVALUATE_PROTOCOL: "jet.devtools.v1"
+
 PAUSED_EVALUATE_SCHEMA_VERSION: 1
+
 INSPECT_AUTHORITY: "devtools.inspect"
+
 EVALUATE_AUTHORITY: "devtools.evaluate"
+
 MUTATE_AUTHORITY: "devtools.mutate"
+
 MAX_REQUEST_BYTES: 65536
+
 MAX_EXPRESSION_BYTES: 16384
+
 MAX_SCOPES: 256
+
 MAX_VALUE_DEPTH: 64
+
 MAX_VALUE_NODES: 4096
+
 MAX_VALUE_BYTES: 1048576
+
 MAX_EVALUATION_STEPS: 1000000
 
 // A paused-boundary contract violation, in words the client is shown.
@@ -103,9 +114,11 @@ TypedValue: enum {
 
     validate: fn(self) PausedEvaluateError! {
         if self == {
-            .Text(text) -> valid_text(text, "typed text", MAX_VALUE_BYTES)
+            .Text(text) -> { valid_text(text, "typed text", MAX_VALUE_BYTES) }
             .Bytes(_, sha256) -> {
-                if sha256.len() != 64 || !paused_is_hex(sha256) -> return Err(paused_error("typed bytes must carry a 64-character SHA-256 digest"))
+                if sha256.len() != 64 || !paused_is_hex(sha256) {
+                    return Err(paused_error("typed bytes must carry a 64-character SHA-256 digest"))
+                }
             }
             else -> {}
         }
@@ -157,7 +170,9 @@ SourceLocation: struct {
     validate: fn(self) PausedEvaluateError! {
         valid_id(self.source_id, "source id")
         valid_id(self.source_revision, "source revision")
-        if self.start < 0 || self.end < self.start -> return Err(paused_error("source location ends before it starts"))
+        if self.start < 0 || self.end < self.start {
+            return Err(paused_error("source location ends before it starts"))
+        }
         Ok()
     }
 
@@ -257,7 +272,9 @@ AuthoritySet: struct {
 
     allows: fn(self, requirement: AuthorityRequirement) -> Bool Never! {
         loop grant in self.grants {
-            if grant.capability == requirement.capability && grant.scope_id == requirement.scope_id -> return true
+            if grant.capability == requirement.capability && grant.scope_id == requirement.scope_id {
+                return true
+            }
         }
         false
     }
@@ -302,8 +319,7 @@ EvaluationBudget: struct {
     }
 
     validate: fn(self) PausedEvaluateError! {
-        if self.max_depth <= 0 || self.max_depth > MAX_VALUE_DEPTH || self.max_nodes <= 0 || self.max_nodes > MAX_VALUE_NODES
-            || self.max_bytes <= 0 || self.max_bytes > MAX_VALUE_BYTES || self.max_steps <= 0 || self.max_steps > MAX_EVALUATION_STEPS {
+        if self.max_depth <= 0 || self.max_depth > MAX_VALUE_DEPTH || self.max_nodes <= 0 || self.max_nodes > MAX_VALUE_NODES || self.max_bytes <= 0 || self.max_bytes > MAX_VALUE_BYTES || self.max_steps <= 0 || self.max_steps > MAX_EVALUATION_STEPS {
             return Err(paused_error("paused evaluation budget is outside its bounded range"))
         }
         Ok()
@@ -345,14 +361,14 @@ Cancellation: struct {
 
     validate: fn(self) PausedEvaluateError! {
         if self.reason == .Val(reason) -> valid_text(reason, "cancellation reason", 256)
-        if !self.requested && self.reason != None -> return Err(paused_error("a non-requested cancellation cannot carry a reason"))
+        if !self.requested && self.reason != None {
+            return Err(paused_error("a non-requested cancellation cannot carry a reason"))
+        }
         Ok()
     }
 }
 
-cancellation_none: fn() -> Cancellation Never! {
-    Cancellation{requested: false, reason: None}
-}
+cancellation_none: fn() -> Cancellation Never! { Cancellation{requested: false, reason: None} }
 
 cancellation_requested: fn(reason: String) -> Cancellation PausedEvaluateError! {
     valid_text(reason, "cancellation reason", 256)
@@ -422,23 +438,33 @@ value_projection_absent: fn(id: String, name: String, type_name: String, source:
 }
 
 validate_projection: fn(value: ValueProjection, identity: SessionIdentity?, depth: Int, ids: &[String:Bool], nodes: &Int) PausedEvaluateError! {
-    if depth > MAX_VALUE_DEPTH -> return Err(paused_error("paused value exceeds the maximum projection depth"))
+    if depth > MAX_VALUE_DEPTH {
+        return Err(paused_error("paused value exceeds the maximum projection depth"))
+    }
     nodes += 1
-    if nodes > MAX_VALUE_NODES -> return Err(paused_error("paused value exceeds the maximum projection node count"))
+    if nodes > MAX_VALUE_NODES {
+        return Err(paused_error("paused value exceeds the maximum projection node count"))
+    }
     valid_id(value.id, "value id")
     valid_text(value.name, "value name", 256)
     valid_id(value.type_name, "value type")
     value.source.validate()
-    if ids.get(value.id) != None -> return Err(paused_error("paused value ids must be unique within a projection"))
+    if ids.get(value.id) != None {
+        return Err(paused_error("paused value ids must be unique within a projection"))
+    }
     ids[value.id] = true
     if identity == .Val(session) {
-        if !session.source_matches(value.source) -> return Err(paused_error("paused value source identity does not match the session"))
+        if !session.source_matches(value.source) {
+            return Err(paused_error("paused value source identity does not match the session"))
+        }
     }
     if {
         value.publication == .Published -> {
             typed: value.value ?? return Err(paused_error("published value is missing its typed payload"))
             typed.validate()
-            if !typed.is_aggregate() && value.children.len() > 0 -> return Err(paused_error("only aggregate values may carry projected children"))
+            if !typed.is_aggregate() && value.children.len() > 0 {
+                return Err(paused_error("only aggregate values may carry projected children"))
+            }
         }
         value.value != None || value.children.len() > 0 -> return Err(paused_error("redacted or absent values cannot carry a payload"))
         else -> {}
@@ -448,7 +474,9 @@ validate_projection: fn(value: ValueProjection, identity: SessionIdentity?, dept
 }
 
 measure_projection: fn(value: ValueProjection, depth: Int, usage: &EvaluationUsage) Never! {
-    if value.publication == .Absent -> return
+    if value.publication == .Absent {
+        return
+    }
     if depth > usage.depth -> usage.depth = depth
     usage.nodes += 1
     payload: if value.value == {
@@ -478,7 +506,9 @@ LexicalScope: struct {
         if self.parent_id == .Val(parent) -> valid_id(parent, "parent scope id")
         self.source.validate()
         if identity == .Val(session) {
-            if !session.source_matches(self.source) -> return Err(paused_error("lexical scope source identity does not match the session"))
+            if !session.source_matches(self.source) {
+                return Err(paused_error("lexical scope source identity does not match the session"))
+            }
         }
         ids := [String:Bool]{}
         nodes := 0
@@ -547,10 +577,12 @@ project_scope: fn(scope: LexicalScope, identity: SessionIdentity, budget: Evalua
         value: project_root(binding, identity, budget, stats)
         projected.push(value)
     }
-    Ok(ScopeProjectionResult{
-        scope: ScopeProjection{id: scope.id, name: scope.name, parent_id: scope.parent_id, source: scope.source, bindings: projected},
-        stats: stats,
-    })
+    Ok(
+        ScopeProjectionResult{
+            scope: ScopeProjection{id: scope.id, name: scope.name, parent_id: scope.parent_id, source: scope.source, bindings: projected},
+            stats: stats,
+        },
+    )
 }
 
 PausedSession: struct {
@@ -579,16 +611,22 @@ paused_session: fn(identity: SessionIdentity, state: SessionState, scopes: [Lexi
     identity.validate()
     budget.validate()
     authority.validate()
-    if scopes.len() > MAX_SCOPES -> return Err(paused_error("paused session exceeds the lexical scope limit"))
+    if scopes.len() > MAX_SCOPES {
+        return Err(paused_error("paused session exceeds the lexical scope limit"))
+    }
     ids := [String:Bool]{}
     loop scope in scopes {
         scope.validate(Val(identity))
-        if ids.get(scope.id) != None -> return Err(paused_error("paused session scope ids must be unique"))
+        if ids.get(scope.id) != None {
+            return Err(paused_error("paused session scope ids must be unique"))
+        }
         ids[scope.id] = true
     }
     loop scope in scopes {
         if scope.parent_id == .Val(parent) {
-            if ids.get(parent) == None -> return Err(paused_error("paused lexical scope refers to a missing parent"))
+            if ids.get(parent) == None {
+                return Err(paused_error("paused lexical scope refers to a missing parent"))
+            }
         }
     }
     Ok(PausedSession{identity: identity, state: state, scopes: scopes, authority: authority, budget: budget, cancellation: cancellation_none()})
@@ -639,7 +677,9 @@ EvaluateRequest: struct {
         self.identity.validate()
         valid_id(self.scope_id, "scope id")
         valid_text(self.expression, "evaluation expression", MAX_EXPRESSION_BYTES)
-        if self.mode == .Mutate && self.effects.len() == 0 -> return Err(paused_error("mutating evaluation requires at least one checked effect"))
+        if self.mode == .Mutate && self.effects.len() == 0 {
+            return Err(paused_error("mutating evaluation requires at least one checked effect"))
+        }
         loop effect_ref in self.effects -> valid_id(effect_ref, "evaluation effect")
         self.budget.validate()
         self.cancellation.validate()
@@ -683,8 +723,12 @@ ObservationFact: struct {
     }
 
     matches: fn(self, session: PausedSession, request: EvaluateRequest) -> Bool Never! {
-        if self.session_id != session.identity.session_id || self.source_id != session.identity.source_id -> return false
-        if self.source_revision != session.identity.source_revision || self.scope_id != request.scope_id -> return false
+        if self.session_id != session.identity.session_id || self.source_id != session.identity.source_id {
+            return false
+        }
+        if self.source_revision != session.identity.source_revision || self.scope_id != request.scope_id {
+            return false
+        }
         request.effects.contains(self.effect_ref)
     }
 
@@ -892,9 +936,13 @@ inspect: fn(session: PausedSession, request: InspectRequest) -> InspectResponse 
         loop binding in scope.bindings {
             if binding.id != value_id -> next
             found = true
-            if binding.publication == .Absent -> return Err(reject("paused.inspect", request.request_id, request.identity, request.scope_id, authority, .ValueNotPublished, zero))
+            if binding.publication == .Absent {
+                return Err(reject("paused.inspect", request.request_id, request.identity, request.scope_id, authority, .ValueNotPublished, zero))
+            }
         }
-        if !found -> return Err(reject("paused.inspect", request.request_id, request.identity, request.scope_id, authority, .ValueNotFound, zero))
+        if !found {
+            return Err(reject("paused.inspect", request.request_id, request.identity, request.scope_id, authority, .ValueNotFound, zero))
+        }
     }
     projected: project_scope(scope, session.identity, request.budget, request.value_id) ?? return Err(reject("paused.inspect", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, zero))
     stats: projected.stats
@@ -908,48 +956,70 @@ evaluate: fn(session: PausedSession, request: EvaluateRequest, result: Evaluator
     if validate_common(session, request.identity, request.request_id, request.scope_id, request.budget, request.cancellation, authority) == .Err(why) {
         return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, why, usage))
     }
-    if result.identity != request.identity || result.scope_id != request.scope_id -> return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
+    if result.identity != request.identity || result.scope_id != request.scope_id {
+        return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
+    }
     carries_payload: result.value != None || result.changed || result.observation != None
     invalid_shape: if result.status == {
         .Completed -> result.error != None
         .Failed -> carries_payload || !evaluator_error_valid(result.error)
         .Cancelled -> carries_payload || result.error != None
     }
-    if invalid_shape -> return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
-    if result.status == .Failed -> return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .EvaluatorFailed, usage))
-    if result.status == .Cancelled -> return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .Cancelled, usage))
-    if !request.budget.fits(usage) -> return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .BudgetExceeded, usage))
+    if invalid_shape {
+        return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
+    }
+    if result.status == .Failed {
+        return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .EvaluatorFailed, usage))
+    }
+    if result.status == .Cancelled {
+        return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .Cancelled, usage))
+    }
+    if !request.budget.fits(usage) {
+        return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .BudgetExceeded, usage))
+    }
     if result.changed || result.observation != None {
-        if request.mode != .Mutate -> return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .MutationNotAllowed, usage))
-        if result.changed && result.observation == None -> return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .ObservationMissing, usage))
-        if !result.changed -> return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
+        if request.mode != .Mutate {
+            return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .MutationNotAllowed, usage))
+        }
+        if result.changed && result.observation == None {
+            return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .ObservationMissing, usage))
+        }
+        if !result.changed {
+            return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
+        }
     }
     observation_id := String?{None}
     if result.observation == .Val(observation) {
-        if !observation.matches(session, request) -> return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
+        if !observation.matches(session, request) {
+            return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
+        }
         observation_id = Val(observation.event_id)
     }
     stats := projection_stats_zero()
     value := ValueProjection?{None}
     if result.value == .Val(supplied) {
-        if supplied.validate_for_session(session.identity) == .Err(_) -> return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
+        if supplied.validate_for_session(session.identity) == .Err(_) {
+            return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
+        }
         if supplied.publication != .Absent {
             if supplied.publication == .Published -> stats.published = 1 else -> stats.redacted = 1
             value = Val(project_root(supplied, session.identity, request.budget, stats))
         }
     }
     audit: audit_receipt("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .Accepted, None, usage, stats.truncated, stats.published, stats.redacted, observation_id)
-    Ok(EvaluateResponse{
-        identity: request.identity,
-        scope_id: request.scope_id,
-        expression_hash: "sha256-{sha256_hex(request.expression)}",
-        mode: request.mode,
-        value: value,
-        changed: result.changed,
-        observation: result.observation,
-        truncated: stats.truncated,
-        audit: audit,
-    })
+    Ok(
+        EvaluateResponse{
+            identity: request.identity,
+            scope_id: request.scope_id,
+            expression_hash: "sha256-{sha256_hex(request.expression)}",
+            mode: request.mode,
+            value: value,
+            changed: result.changed,
+            observation: result.observation,
+            truncated: stats.truncated,
+            audit: audit,
+        },
+    )
 }
 
 // A failed evaluator result names a nonempty bounded error.
@@ -1002,7 +1072,9 @@ PausedEvaluateHost: struct {
 
     cancel_session: fn(&self, reason: String) PausedEvaluateHostError! {
         session := self.session ?? return Err(PausedEvaluateHostError.SessionUnavailable)
-        if session.cancel(reason) == .Err(failure) -> return Err(PausedEvaluateHostError.InvalidRequest{detail: failure.message})
+        if session.cancel(reason) == .Err(failure) {
+            return Err(PausedEvaluateHostError.InvalidRequest{detail: failure.message})
+        }
         self.session = Val(session)
         Ok()
     }
@@ -1014,7 +1086,9 @@ PausedEvaluateHost: struct {
         }
     }
 
-    set_evaluator_result: fn(&self, result: EvaluatorResult) Never! { self.evaluator_result = Val(result) }
+    set_evaluator_result: fn(&self, result: EvaluatorResult) Never! {
+        self.evaluator_result = Val(result)
+    }
 
     clear_evaluator_result: fn(&self) Never! { self.evaluator_result = None }
 
@@ -1055,7 +1129,9 @@ evaluate_authority: fn(request: EvaluateRequest) -> [AuthorityRequirement] Never
     authority.push(AuthorityRequirement{capability: EVALUATE_AUTHORITY, scope_id: request.scope_id})
     if request.mode == .Mutate {
         authority.push(AuthorityRequirement{capability: MUTATE_AUTHORITY, scope_id: request.scope_id})
-        loop effect_ref in request.effects -> authority.push(AuthorityRequirement{capability: effect_ref, scope_id: request.scope_id})
+        loop effect_ref in request.effects {
+            authority.push(AuthorityRequirement{capability: effect_ref, scope_id: request.scope_id})
+        }
     }
     authority_requirements_canonical(authority)
 }
@@ -1065,12 +1141,24 @@ validate_common: fn(session: PausedSession, identity: SessionIdentity, request_i
     if session.state != .Paused {
         return Err(if session.state == .Cancelled || cancellation.requested -> RejectReason.Cancelled else -> RejectReason.SessionNotPaused)
     }
-    if !request_shape_valid(identity, request_id, scope_id, budget, cancellation, authority) -> return Err(RejectReason.InvalidRequest)
-    if identity.session_id != session.identity.session_id -> return Err(RejectReason.SessionIdentityMismatch)
-    if identity.source_id != session.identity.source_id || identity.source_revision != session.identity.source_revision -> return Err(RejectReason.SourceIdentityMismatch)
-    if identity.pause_id != session.identity.pause_id -> return Err(RejectReason.PauseIdentityMismatch)
-    if identity.frame_id != session.identity.frame_id -> return Err(RejectReason.FrameIdentityMismatch)
-    if session.cancellation.requested || cancellation.requested -> return Err(RejectReason.Cancelled)
+    if !request_shape_valid(identity, request_id, scope_id, budget, cancellation, authority) {
+        return Err(RejectReason.InvalidRequest)
+    }
+    if identity.session_id != session.identity.session_id {
+        return Err(RejectReason.SessionIdentityMismatch)
+    }
+    if identity.source_id != session.identity.source_id || identity.source_revision != session.identity.source_revision {
+        return Err(RejectReason.SourceIdentityMismatch)
+    }
+    if identity.pause_id != session.identity.pause_id {
+        return Err(RejectReason.PauseIdentityMismatch)
+    }
+    if identity.frame_id != session.identity.frame_id {
+        return Err(RejectReason.FrameIdentityMismatch)
+    }
+    if session.cancellation.requested || cancellation.requested {
+        return Err(RejectReason.Cancelled)
+    }
     if !session.budget.contains(budget) -> return Err(RejectReason.BudgetExceeded)
     loop requirement in authority {
         if !session.authority.allows(requirement) -> return Err(RejectReason.InsufficientAuthority)
@@ -1079,7 +1167,9 @@ validate_common: fn(session: PausedSession, identity: SessionIdentity, request_i
 }
 
 request_shape_valid: fn(identity: SessionIdentity, request_id: String, scope_id: String, budget: EvaluationBudget, cancellation: Cancellation, authority: [AuthorityRequirement]) -> Bool Never! {
-    if identity.validate() == .Err(_) || valid_id(request_id, "request id") == .Err(_) || valid_id(scope_id, "scope id") == .Err(_) -> return false
+    if identity.validate() == .Err(_) || valid_id(request_id, "request id") == .Err(_) || valid_id(scope_id, "scope id") == .Err(_) {
+        return false
+    }
     if budget.validate() == .Err(_) || cancellation.validate() == .Err(_) -> return false
     loop requirement in authority {
         if requirement.validate() == .Err(_) -> return false
@@ -1138,12 +1228,14 @@ project_node: fn(value: ValueProjection, identity: SessionIdentity, budget: Eval
                 stats.truncated = true
                 projected.truncated = true
             }
-            else -> loop child in value.children {
-                if project_node(child, identity, budget, depth + 1, false, stats) == {
-                    .Val(projected_child) -> projected.children.push(projected_child)
-                    else -> {
-                        stats.truncated = true
-                        projected.truncated = true
+            else -> {
+                loop child in value.children {
+                    if project_node(child, identity, budget, depth + 1, false, stats) == {
+                        .Val(projected_child) -> projected.children.push(projected_child)
+                        else -> {
+                            stats.truncated = true
+                            projected.truncated = true
+                        }
                     }
                 }
             }
@@ -1183,12 +1275,16 @@ paused_is_hex: fn(value: String) -> Bool Never! {
 }
 
 valid_id: fn(value: String, label: String) PausedEvaluateError! {
-    if value == "" || value.len() > 256 || paused_has_control(value) -> return Err(paused_error("{label} is empty, too long, or contains control text"))
+    if value == "" || value.len() > 256 || paused_has_control(value) {
+        return Err(paused_error("{label} is empty, too long, or contains control text"))
+    }
     Ok()
 }
 
 valid_text: fn(value: String, label: String, max_bytes: Int) PausedEvaluateError! {
-    if value.len() > max_bytes || paused_has_control(value) -> return Err(paused_error("{label} exceeds its bounded text contract"))
+    if value.len() > max_bytes || paused_has_control(value) {
+        return Err(paused_error("{label} exceeds its bounded text contract"))
+    }
     Ok()
 }
 
@@ -1202,7 +1298,9 @@ requirements_json: fn(requirements: [AuthorityRequirement]) -> String Never! {
 
 // A paused request's top-level JSON object, at most MAX_REQUEST_BYTES.
 request_object: fn(raw: String) -> [String:Dyn] PausedEvaluateError! {
-    if raw.len() > MAX_REQUEST_BYTES -> return Err(paused_error("paused request is not valid bounded JSON"))
+    if raw.len() > MAX_REQUEST_BYTES {
+        return Err(paused_error("paused request is not valid bounded JSON"))
+    }
     root: paused_json.parse(raw) ?? return Err(paused_error("paused request is not valid bounded JSON"))
     dyn_object(root) ?? return Err(paused_error("paused request must be a JSON object"))
 }
@@ -1244,7 +1342,9 @@ optional_string: fn(fields: [String:Dyn], key: String) -> String? PausedEvaluate
 required_count: fn(fields: [String:Dyn], key: String) -> Int PausedEvaluateError! {
     value: fields.get(key) ?? return Err(paused_error("paused request requires non-negative integer `{key}`"))
     number: foundation_json_integer(value) ?? return Err(paused_error("paused request requires non-negative integer `{key}`"))
-    if number < 0 -> return Err(paused_error("paused request requires non-negative integer `{key}`"))
+    if number < 0 {
+        return Err(paused_error("paused request requires non-negative integer `{key}`"))
+    }
     Ok(number)
 }
 
@@ -1262,15 +1362,24 @@ parse_identity: fn(fields: [String:Dyn]) -> SessionIdentity PausedEvaluateError!
     if fields.get("identity") == .Val(nested) {
         identity = dyn_object(nested) ?? return Err(paused_error("paused request `identity` must be an object"))
     }
-    SessionIdentity.new(paused_required_string(identity, "session_id"), paused_required_string(identity, "source_id"),
-        paused_required_string(identity, "source_revision"), paused_required_string(identity, "pause_id"), paused_required_string(identity, "frame_id"))
+    SessionIdentity.new(
+        paused_required_string(identity, "session_id"),
+        paused_required_string(identity, "source_id"),
+        paused_required_string(identity, "source_revision"),
+        paused_required_string(identity, "pause_id"),
+        paused_required_string(identity, "frame_id"),
+    )
 }
 
 parse_budget: fn(fields: [String:Dyn]) -> EvaluationBudget PausedEvaluateError! {
     value: fields.get("budget") ?? return Ok(DEFAULT_EVALUATION_BUDGET)
     budget: dyn_object(value) ?? return Ok(DEFAULT_EVALUATION_BUDGET)
-    EvaluationBudget.new(required_count(budget, "max_depth"), required_count(budget, "max_nodes"),
-        required_count(budget, "max_bytes"), required_count(budget, "max_steps"))
+    EvaluationBudget.new(
+        required_count(budget, "max_depth"),
+        required_count(budget, "max_nodes"),
+        required_count(budget, "max_bytes"),
+        required_count(budget, "max_steps"),
+    )
 }
 
 parse_authority: fn(fields: [String:Dyn]) -> [AuthorityRequirement] PausedEvaluateError! {
@@ -1289,11 +1398,17 @@ parse_authority: fn(fields: [String:Dyn]) -> [AuthorityRequirement] PausedEvalua
 }
 
 validate_header: fn(fields: [String:Dyn], kind: String) PausedEvaluateError! {
-    if paused_required_string(fields, "protocol") != PAUSED_EVALUATE_PROTOCOL -> return Err(paused_error("paused request protocol does not match jet.devtools.v1"))
+    if paused_required_string(fields, "protocol") != PAUSED_EVALUATE_PROTOCOL {
+        return Err(paused_error("paused request protocol does not match jet.devtools.v1"))
+    }
     schema_value: fields.get("schema_version") ?? return Err(paused_error("paused request schema_version is missing or invalid"))
     schema: foundation_json_integer(schema_value) ?? return Err(paused_error("paused request schema_version is missing or invalid"))
-    if schema != PAUSED_EVALUATE_SCHEMA_VERSION -> return Err(paused_error("paused request schema_version is unsupported"))
-    if paused_required_string(fields, "kind") != kind -> return Err(paused_error("paused request kind must be `{kind}`"))
+    if schema != PAUSED_EVALUATE_SCHEMA_VERSION {
+        return Err(paused_error("paused request schema_version is unsupported"))
+    }
+    if paused_required_string(fields, "kind") != kind {
+        return Err(paused_error("paused request kind must be `{kind}`"))
+    }
     Ok()
 }
 
@@ -1324,7 +1439,9 @@ parse_evaluate_request: fn(raw: String) -> EvaluateRequest PausedEvaluateError! 
     mode: if paused_required_string(fields, "mode") == {
         "read_only" -> EvaluationMode.ReadOnly
         "mutate" -> EvaluationMode.Mutate
-        else -> { return Err(paused_error("paused evaluation mode is unsupported")) }
+        else -> {
+            return Err(paused_error("paused evaluation mode is unsupported"))
+        }
     }
     effects := [String]{}
     if fields.get("effects") == .Val(listed) {
@@ -1336,7 +1453,9 @@ parse_evaluate_request: fn(raw: String) -> EvaluateRequest PausedEvaluateError! 
                             valid_id(text, "evaluation effect")
                             effects.push(text)
                         }
-                        else -> { return Err(paused_error("paused evaluation effects must be strings")) }
+                        else -> {
+                            return Err(paused_error("paused evaluation effects must be strings"))
+                        }
                     }
                 }
             }

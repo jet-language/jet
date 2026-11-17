@@ -208,7 +208,9 @@ collect_game_items: fn(tables: ASTTables, items: [Item], source_id: String, src:
                 ast_visit_body(tables, method.body, fn(expression: ExprNode) { note_game_call(tables, out, source_id, src, expression) }, true)
             }
         } else if item == .CodeModule(module_value) {
-            if module_value.body == .Val(body) -> collect_game_items(tables, body, source_id, src, out)
+            if module_value.body == .Val(body) {
+                collect_game_items(tables, body, source_id, src, out)
+            }
         }
     }
 }
@@ -544,7 +546,9 @@ event_receiver: fn(src: String, index: SemIndex, call_span: Span, module_path: S
         if reference.module_path != module_path || reference.span.end > call_span.start || call_span.start > src.count_bytes() {
             next
         }
-        if foundation_byte_text(src.bytes(), reference.span.end, call_span.start).trim() != "." -> next
+        if foundation_byte_text(src.bytes(), reference.span.end, call_span.start).trim() != "." {
+            next
+        }
         if best == .Val(current) && current.span.end > reference.span.end -> next
         best = Val(reference)
     }

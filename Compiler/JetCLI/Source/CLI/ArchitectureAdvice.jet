@@ -214,21 +214,21 @@ jet_cli_architecture_value: fn(inspection: JetCLIArchitectureInspection) -> JetC
 }
 
 jet_cli_architecture_text: fn(inspection: JetCLIArchitectureInspection) -> String Never! {
-    output := "architecture advice (advisory, operator may reject):\n"
-    if inspection.reason == .Val(reason) -> output = "{output}  status: unavailable — {reason}\n" else if inspection.rows.len() == 0 {
-        output = "{output}  no checked agreement candidate; local complexity is not proof of a cross-boundary invariant\n"
+    output := "Architecture Advice (advisory, operator may reject):\n"
+    if inspection.reason == .Val(reason) -> output = "{output}  Status: unavailable — {reason}\n" else if inspection.rows.len() == 0 {
+        output = "{output}  No checked agreement candidate; local complexity is not proof of a cross-boundary invariant\n"
     } else {
         loop row in inspection.rows {
             output = "{output}  {row.kind} `{row.subject}` [{row.scope}]\n"
             loop evidence in row.evidence {
-                output = "{output}    evidence: {evidence.role} {evidence.module_path}:{evidence.span.start}..{evidence.span.end}\n"
+                output = "{output}    Evidence: {evidence.role} {evidence.module_path}:{evidence.span.start}..{evidence.span.end}\n"
             }
-            loop boundary in row.boundaries -> output = "{output}    boundary: {boundary}\n"
-            output = "{output}    check: checked_reference_resolution=passed (the compiler semantic index resolved the definitions and call sites)\n    check: consumer_behavior=not_run (this read-only inspection does not execute user code)\n    check: cross_mode_agreement=unknown (no runtime or change-task receipt was supplied)\n"
+            loop boundary in row.boundaries -> output = "{output}    Boundary: {boundary}\n"
+            output = "{output}    Check: checked_reference_resolution=passed (the compiler semantic index resolved the definitions and call sites)\n    Check: consumer_behavior=not_run (this read-only inspection does not execute user code)\n    Check: cross_mode_agreement=unknown (no runtime or change-task receipt was supplied)\n"
             loop uncertainty in row.uncertainty {
-                output = "{output}    uncertainty: {uncertainty}\n"
+                output = "{output}    Uncertainty: {uncertainty}\n"
             }
         }
     }
-    "{output}  measurement: benchmark/change-task not measured; no advantage claim\n"
+    "{output}  Measurement: benchmark/change-task not measured; no advantage claim\n"
 }

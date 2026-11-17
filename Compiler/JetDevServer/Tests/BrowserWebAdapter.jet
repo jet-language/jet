@@ -1,12 +1,23 @@
 browser_web_test_projection: fn(sequence: Int) -> DevtoolsProjection {
     DevtoolsProjection{
-        protocol: JET_DEVTOOLS_PROTOCOL, session_id: "s1", source_id: None, build_id: None, revision: "rev", world_id: None,
-        sequence: sequence, observed_at: 100 + sequence, panels: [JetDevtoolsEvent]{}, selection: None,
+        protocol: JET_DEVTOOLS_PROTOCOL,
+        session_id: "s1",
+        source_id: None,
+        build_id: None,
+        revision: "rev",
+        world_id: None,
+        sequence: sequence,
+        observed_at: 100 + sequence,
+        panels: [JetDevtoolsEvent]{},
+        selection: None,
         status: DevtoolsStatusFact{state: .Ready, diagnostic_code: None, diagnostic: None, accepted_revision: None, last_good_revision: None, run_target: None, run_output: None, test_state: None},
         command_capabilities: DevtoolsCommandCapabilities{project_rebuild: false, project_rebuild_reason: Val("no rebuild executor is registered for this host")},
-        command_receipts: [JetDevtoolsCommandReceipt]{}, reset: sequence == 1, truncation: false,
+        command_receipts: [JetDevtoolsCommandReceipt]{},
+        reset: sequence == 1,
+        truncation: false,
     }
 }
+
 browser_web_test_panels: fn(sequence: Int) -> [JetDevtoolsPanelProjection] {
     envelope := JetDevtoolsEnvelope.new("s1", 0)
     event: JetDevtoolsEvent.from_parts(100 + sequence, "devserver", "state", "session", "{{\"state\":\"ready\"}}") ?? panic("event")
@@ -25,6 +36,7 @@ browser_web_test_panels: fn(sequence: Int) -> [JetDevtoolsPanelProjection] {
     assert_eq(in_app.panels[0].panel_id, workbench.panels[0].panel_id)
     assert(in_app.route != workbench.route)
 }
+
 #Test("typed_status_and_identity_stay_frame_metadata") {
     projected := browser_web_test_projection(1)
     projected.source_id = Val("src/main.jet")
@@ -46,6 +58,7 @@ browser_web_test_panels: fn(sequence: Int) -> [JetDevtoolsPanelProjection] {
     assert(json.contains("\"receipts\":[]"))
     assert(!json.contains("__session_status"))
 }
+
 #Test("page_offers_tools_only_where_the_host_has_them") {
     projected := browser_web_test_projection(1)
     projected.status.state = .Error
@@ -64,6 +77,7 @@ browser_web_test_panels: fn(sequence: Int) -> [JetDevtoolsPanelProjection] {
     assert(source_page.contains("data-tool=\"source\" data-focus=\"tool:source\" data-file=\"app.jet\">Fix in source"))
     assert(source_page.contains("class=\"source\""))
 }
+
 #Test("reconnect_reset_returns_bounded_snapshot_events") {
     state := BrowserWebState.new("s1")
     state.sync(browser_web_test_projection(1), browser_web_test_panels(1)) ?? panic("sync")
@@ -76,6 +90,7 @@ browser_web_test_panels: fn(sequence: Int) -> [JetDevtoolsPanelProjection] {
     assert(truncated.contains("\"complete\":false"))
     assert(truncated.contains("\"events\":[]"))
 }
+
 #Test("action_parser_requires_typed_grant_for_source_navigation") {
     body: "{{\"action\":\"navigate_source\",\"panel_id\":\"build\",\"node_id\":\"source\"}}"
     rejected: if browser_web_parse_action(body.bytes(), .InApp) == {
@@ -84,6 +99,7 @@ browser_web_test_panels: fn(sequence: Int) -> [JetDevtoolsPanelProjection] {
     }
     assert(rejected)
 }
+
 #Test("escaping_keeps_markup_and_script_text_inert") {
     assert_eq(browser_web_html_escape("<a href='x'>&\"</a>"), "&lt;a href=&#39;x&#39;&gt;&amp;&quot;&lt;/a&gt;")
     assert_eq(browser_web_js_string("</script>\n\"\\"), "\\u003c/script\\u003e\\n\\\"\\\\")

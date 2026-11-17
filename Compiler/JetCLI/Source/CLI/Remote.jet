@@ -256,7 +256,7 @@ jet_cli_remote_list: fn(json: Bool) -[FS, Env, Time.Wait]> JetDriverVerbOutput J
             }
         }
     }
-    if names.len() == 0 -> text = "no remote builders are bound\n"
+    if names.len() == 0 -> text = "No remote builders are bound\n"
     if json {
         text = "{jet_cli_status_render("remote.list", true, [JetCLIStatusField]{jet_cli_status_field("builders", jet_cli_status_array(rows))})}\n"
     }
@@ -282,7 +282,7 @@ jet_cli_remote: fn(args: [String], json: Bool, color: Bool) -[FS, Env, Time]> Je
     }
     if action == "bind" {
         binding: jet_cli_remote_bind(args) ?? return jet_cli_report_output("", "E2104", err.message, "", "run `jet remote help`", color, 2)
-        return JetDriverVerbOutput{stdout: if json -> "{jet_cli_status_render("remote.bind", true, jet_cli_remote_binding_fields(binding, false))}\n" else -> "bound remote builder `{binding.builder}`\n", stderr: "", exit_code: 0}
+        return JetDriverVerbOutput{stdout: if json -> "{jet_cli_status_render("remote.bind", true, jet_cli_remote_binding_fields(binding, false))}\n" else -> "Bound remote builder `{binding.builder}`\n", stderr: "", exit_code: 0}
     }
     if action == "list" {
         output: jet_cli_remote_list(json) ?? return jet_cli_report_output("", "E2104", err.message, "", "run `jet remote help`", color, 2)
@@ -290,7 +290,7 @@ jet_cli_remote: fn(args: [String], json: Bool, color: Bool) -[FS, Env, Time]> Je
     }
     if action == "remove" {
         jet_cli_remote_remove(args) ?? return jet_cli_report_output("", "E2104", err.message, "", "run `jet remote help`", color, 2)
-        return JetDriverVerbOutput{stdout: "removed remote builder `{args[2]}`\n", stderr: "", exit_code: 0}
+        return JetDriverVerbOutput{stdout: "Removed remote builder `{args[2]}`\n", stderr: "", exit_code: 0}
     }
     jet_cli_report_output("", "E2104", "unknown remote subcommand `{action}`", "", "run `jet remote help`", color, 2)
 }

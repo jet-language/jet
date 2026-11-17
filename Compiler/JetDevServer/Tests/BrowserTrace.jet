@@ -28,7 +28,9 @@ browser_trace_test_lines: fn(action: String) -> [String] {
 // One test owns the per-process relay path for its whole sequence, so no two
 // relays of this process overlap.
 #Test("relay is owner-only, maps payload-free rows, rejects extra fields and caps rows") {
-    if !browser_trace_test_supported() -> return
+    if !browser_trace_test_supported() {
+        return
+    }
     relay := BrowserTraceRelay.new(browser_trace_test_manifest()) ?? panic("relay failed: {err.message}")
     path: browser_trace_relay_path(browser_trace_test_sys.pid())
     stat: browser_trace_test_files.stat(path) ?? panic("cannot stat relay: {err}")
@@ -54,12 +56,16 @@ browser_trace_test_lines: fn(action: String) -> [String] {
 }
 
 #Test("relay refuses a manifest without a compiler trace map") {
-    if !browser_trace_test_supported() -> return
+    if !browser_trace_test_supported() {
+        return
+    }
     assert(BrowserTraceRelay.new("{{}}\n") == .Err(_))
 }
 
 #Test("collection request is consumed once and refuses a stale process session") {
-    if !browser_trace_test_supported() -> return
+    if !browser_trace_test_supported() {
+        return
+    }
     pid: browser_trace_test_sys.pid()
     path: browser_trace_request_path(pid)
     started: browser_trace_process_start(pid) ?? panic("process start marker is unavailable")

@@ -1,29 +1,55 @@
 terminal_test_event: fn(sequence: Int, panel_id: JetDevtoolsPanelID, kind: String, entity: String) -> TerminalHostEvent {
     TerminalHostEvent{
-        protocol: JET_DEVTOOLS_PROTOCOL, session_id: "session", revision: "revision-a", sequence: sequence, observed_at: sequence * 10,
-        source: "src/main.jet", kind: kind, entity: entity, panel_id: panel_id, facts: [TerminalHostFact]{TerminalHostFact.redacted("value")},
+        protocol: JET_DEVTOOLS_PROTOCOL,
+        session_id: "session",
+        revision: "revision-a",
+        sequence: sequence,
+        observed_at: sequence * 10,
+        source: "src/main.jet",
+        kind: kind,
+        entity: entity,
+        panel_id: panel_id,
+        facts: [TerminalHostFact]{TerminalHostFact.redacted("value")},
     }
 }
-terminal_test_panel_ids: fn() -> [Int: JetDevtoolsPanelID] {
-    ids := [Int: JetDevtoolsPanelID]{}
+
+terminal_test_panel_ids: fn() -> [Int:JetDevtoolsPanelID] {
+    ids := [Int:JetDevtoolsPanelID]{}
     ids[1] = JetDevtoolsPanelID.Build
     ids
 }
+
 terminal_test_projection: fn() -> DevtoolsProjection {
     envelope := JetDevtoolsEnvelope.new("session", 0)
     envelope.push(JetDevtoolsEvent.from_parts_with_payload(1200, "devserver", "Build", "build", `{"accepted":true}`, Val(`{"output":"ok"}`)) ?? panic("devtools event"))
     DevtoolsProjection{
-        protocol: JET_DEVTOOLS_PROTOCOL, session_id: "session", source_id: Val("src/main.jet"),
-        build_id: Val("build-42"), revision: "revision-a", world_id: Val("world-7"), sequence: 1, observed_at: 1234,
-        panels: envelope.events(), selection: Val(DevtoolsSelectionFact{panel_id: "build", item_key: "event:revision-a:1:Build:build"}),
+        protocol: JET_DEVTOOLS_PROTOCOL,
+        session_id: "session",
+        source_id: Val("src/main.jet"),
+        build_id: Val("build-42"),
+        revision: "revision-a",
+        world_id: Val("world-7"),
+        sequence: 1,
+        observed_at: 1234,
+        panels: envelope.events(),
+        selection: Val(DevtoolsSelectionFact{panel_id: "build", item_key: "event:revision-a:1:Build:build"}),
         status: DevtoolsStatusFact{
-            state: JetDevtoolsLifecycleState.Ready, diagnostic_code: Val("E0001"), diagnostic: Val("diagnostic"),
-            accepted_revision: Val("revision-a"), last_good_revision: Val("revision-a"), run_target: Val("native"), run_output: Val("ok"), test_state: Val("passed"),
+            state: JetDevtoolsLifecycleState.Ready,
+            diagnostic_code: Val("E0001"),
+            diagnostic: Val("diagnostic"),
+            accepted_revision: Val("revision-a"),
+            last_good_revision: Val("revision-a"),
+            run_target: Val("native"),
+            run_output: Val("ok"),
+            test_state: Val("passed"),
         },
         command_capabilities: DevtoolsCommandCapabilities{project_rebuild: false, project_rebuild_reason: Val("terminal host test projection has no rebuild executor")},
-        command_receipts: [JetDevtoolsCommandReceipt]{}, reset: true, truncation: false,
+        command_receipts: [JetDevtoolsCommandReceipt]{},
+        reset: true,
+        truncation: false,
     }
 }
+
 // Visible characters: every byte that does not continue a UTF-8 sequence.
 terminal_test_columns: fn(text: String) -> Int {
     count := 0
@@ -32,12 +58,14 @@ terminal_test_columns: fn(text: String) -> Int {
     }
     count
 }
+
 terminal_test_has_escape: fn(text: String) -> Bool {
     loop byte in text.bytes() {
         if byte == TERMINAL_ESC -> return true
     }
     false
 }
+
 terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
     if operation == {
         .Insert(id, _) -> id
@@ -67,6 +95,7 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
     assert_eq(host.handle_key(TerminalKey.Character{text: "r"}), TerminalAction.Ignored)
     loop line in frame.lines -> assert(terminal_test_columns(terminal_strip_ansi(line)) <= 32)
 }
+
 #Test("quiet_suppresses_text_without_dropping_typed_tree") {
     capabilities: TerminalHostCapabilities.new(false, false, true, 20, false, true, TerminalHostAccess.interactive())
     host := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), capabilities))
@@ -74,6 +103,7 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
     assert_eq(frame.lines.len(), 0)
     assert_eq(frame.tree.panel_count, descriptors().len())
 }
+
 #Test("same_facts_keep_nodes_stable_across_capabilities") {
     plain := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.plain()))
     color := TerminalHost.new(TerminalHostConfig.new(TerminalViewport.new(80, 24), TerminalHostCapabilities.color()))
@@ -86,6 +116,7 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
     assert(terminal_test_has_escape(color_frame.text()))
     assert(color_frame.diff(plain_frame).metadata_changed)
 }
+
 #Test("keyboard_paths_update_explicit_focus_and_return_actions") {
     host := TerminalHost.new(TerminalHostConfig.standard())
     host.append_event(terminal_test_event(1, JetDevtoolsPanelID.Tests, "Tests", "fails")) ?? panic("event")
@@ -93,6 +124,7 @@ terminal_test_diff_id: fn(operation: TerminalDiffOperation) -> String {
     assert_eq(host.handle_key(TerminalKey.Escape), TerminalAction.ReturnToPanel)
     assert(host.focus.item_key == None)
 }
+
 #Test("diff_operations_are_ordered_and_bounded") {
     host := TerminalHost.new(TerminalHostConfig.standard())
     host.append_event(terminal_test_event(1, JetDevtoolsPanelID.Build, "Build", "one")) ?? panic("first event")

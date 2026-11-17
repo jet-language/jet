@@ -12,15 +12,15 @@ use files: core.files
         {name: "alpha", version: "0.1.2", source: .Registry{registry: "community", reference: "alpha#0.1.2", output: "other", source_hash: "hash", repository: "repo", authority: "auth", tier: "community", gate_status: "local"}},
     }
     fetched: PackageFetchResult{lock: lock, directories: [String:String]{}}
-    tiers: "resolved `zeta` 2.3.4 from registry `stable` (tier: core; gate status: passed)\nresolved `alpha` 0.1.2 from registry `community` (tier: community; gate status: local)\n"
-    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{}), "{tiers}fetched all dependencies\n")
-    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{locked: true}), "{tiers}lock verified\n")
-    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{update: true}), "{tiers}updated all moving selectors\n")
-    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{update: true, update_dep: Val("local")}), "{tiers}updated `local`\n")
+    tiers: "Resolved `zeta` 2.3.4 from registry `stable` (tier: core; gate status: passed)\nResolved `alpha` 0.1.2 from registry `community` (tier: community; gate status: local)\n"
+    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{}), "{tiers}Fetched all dependencies\n")
+    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{locked: true}), "{tiers}Lock verified\n")
+    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{update: true}), "{tiers}Updated all moving selectors\n")
+    assert_eq(cli_package_dependency_success(fetched, PackageFetchOptions{update: true, update_dep: Val("local")}), "{tiers}Updated `local`\n")
     replaced: PackageFetchResult{lock: lock, directories: [String:String]{}, replaced_views: [String]{"local"}}
-    assert_eq(cli_package_dependency_success(replaced, PackageFetchOptions{update: true}), "{tiers}replaced the stale dependency view `local` with a verified copy of its store entry\nupdated all moving selectors\n")
-    assert_eq(cli_package_dependency_edit_success("add", "local", "/project/package.jet"), "added `local` to /project/package.jet\n")
-    assert_eq(cli_package_dependency_edit_success("remove", "local", "/project/run.jet"), "removed `local` from /project/run.jet\n")
+    assert_eq(cli_package_dependency_success(replaced, PackageFetchOptions{update: true}), "{tiers}Replaced the stale dependency view `local` with a verified copy of its store entry\nUpdated all moving selectors\n")
+    assert_eq(cli_package_dependency_edit_success("add", "local", "/project/package.jet"), "Added `local` to /project/package.jet\n")
+    assert_eq(cli_package_dependency_edit_success("remove", "local", "/project/run.jet"), "Removed `local` from /project/run.jet\n")
 }
 
 #Test("package dependency host publication errors name their phase") {

@@ -9,7 +9,7 @@ step: jet test --show-default --capture=all --serial --profile=compact --filter=
 exit: 0
 stdout: ~ "assert_eq passes: pass" # the passing test's report line
 stdout: ~ "1 passed, 0 failed, 0 skipped" # the summary line
-stderr: !~ "internal compiler error" # no generated-Rust ICE
+stderr: !~ "Internal compiler error" # no generated-Rust ICE
 step: jet test --show-default --capture=all --serial --profile=compact --filter=wrong main.jet
 exit: 1
 stdout: ~ "assert_eq wrong value: FAIL" # the failing test's report line
@@ -18,7 +18,7 @@ stderr: ~ "Stop [E3001]: `panic: expected: 99, got: 2`" # what
 stderr: ~ "--> main.jet:9" # the failing assert's Jet line
 stderr: ~ " Why: The program hit a `panic`, `assert`, or `assert_eq` call that failed" # why
 stderr: ~ " Fix: Fix the logic that led to the failure." # fix
-stderr: !~ "internal compiler error" # no generated-Rust ICE
+stderr: !~ "Internal compiler error" # no generated-Rust ICE
 step: jet test --json --serial --profile=compact --filter=wrong main.jet
 exit: 1
 json: stdout doc $.ok = false
@@ -27,4 +27,4 @@ json: stdout doc $.evidence.build.profile = "compact"
 json: stdout doc $.evidence.evidence has {"claim":"assert_eq wrong value","kind":"unit","outcome":"failed"}
 json: stdout doc $.evidence.evidence has {"claim":"E3001","kind":"runtime","outcome":"failed"}
 stderr: ~ "Stop [E3001]: `panic: expected: 99, got: 2`" # the human report moves to stderr
-stderr: !~ "internal compiler error" # no generated-Rust ICE
+stderr: !~ "Internal compiler error" # no generated-Rust ICE

@@ -56,28 +56,28 @@ jet_cli_memory_entry_key: fn(key: String) -> String Never! {
 jet_cli_memory_stack_text: fn(bound: IRX64StackBound) -> String Never! {
     chain: bound.path.join(" -> ")
     if bound.open == "recursion" {
-        return "stack: unbounded, recursion via {chain} (add #MaxDepth(n))"
+        return "Stack: unbounded, recursion via {chain} (add #MaxDepth(n))"
     }
     if bound.open == "dynamic" {
-        return "stack: unbounded, a call through a function value via {chain} (seal its targets)"
+        return "Stack: unbounded, a call through a function value via {chain} (seal its targets)"
     }
-    "stack: {bound.bytes} B via {chain}"
+    "Stack: {bound.bytes} B via {chain}"
 }
 
 // The report of each entry's `bounds` row, `keys` its function's key.
 jet_cli_memory_report: fn(bounds: [IRX64StackBound], keys: [String], sema: [JetCLIMemorySema], scope: String, file: String, profile: String, level: Int, json: Bool) -> String Never! {
     if !json {
-        text := "memory: scope={scope} source={file} profile={profile} level=O{level}\n"
+        text := "Memory: scope={scope} source={file} profile={profile} level=O{level}\n"
         loop (index, bound) in bounds {
             name: bound.path[0]
-            text = "{text}entry {name}\n  {jet_cli_memory_stack_text(bound)}\n"
+            text = "{text}Entry {name}\n  {jet_cli_memory_stack_text(bound)}\n"
             row: jet_cli_memory_sema_row(sema, keys[index])
             if row >= 0 && sema[row].stack != "" {
-                text = "{text}  stack bound: {sema[row].stack}\n"
+                text = "{text}  Stack bound: {sema[row].stack}\n"
             }
-            if row >= 0 && sema[row].heap != "" -> text = "{text}  heap: {sema[row].heap}\n"
+            if row >= 0 && sema[row].heap != "" -> text = "{text}  Heap: {sema[row].heap}\n"
             if bound.runtime.len() > 0 {
-                text = "{text}  runtime frames not counted: {bound.runtime.join(", ")}\n"
+                text = "{text}  Runtime frames not counted: {bound.runtime.join(", ")}\n"
             }
         }
         return text

@@ -63,7 +63,7 @@ jet_cli_test_code_layer: fn(root: String) -[FS, Env, Exec]> [TestSetting] TestSe
     plan: jet_cli_rooted_join(scratch.path, "settings")
     ran: cli_process.cmd([String]{cli_sys.executable(), "test", root.copy()}).env(TEST_SETTINGS_PLAN_ENV, plan).stdout(.Capture).stderr(.Capture).run() ?? return Err(TestSettingError{message: "couldn't run the plan step `jet test {root}`: {err}"})
     if !ran.success {
-        return Err(TestSettingError{message: "the plan step that runs test.jet's `test: fn` stopped (exit code {ran.code}):\n{ran.errors.trim_end()}"})
+        return Err(TestSettingError{message: "The plan step that runs test.jet's `test: fn` stopped (exit code {ran.code}):\n{ran.errors.trim_end()}"})
     }
     text: cli_files.read(plan) ?? ""
     test_settings_parse_lines(text, "fn test")

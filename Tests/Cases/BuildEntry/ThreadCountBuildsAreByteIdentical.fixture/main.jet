@@ -1,0 +1,52 @@
+// Structs reached from many functions, so a parallel build lays each out on
+// more than one part: a recursive cycle (Node, Meta, Detail), a generic
+// struct in two instances, and structs a sibling module spells by its own
+// names.
+use "shapes"
+
+Node: struct {
+    name: String,
+    meta: Meta,
+}
+
+Meta: struct {
+    note: String,
+    count: Int,
+    children: [Node],
+    detail: Detail,
+}
+
+Detail: struct {
+    label: String,
+    seen: [Node],
+}
+
+Box: struct<T> {
+    value: T,
+    tags: [String],
+}
+
+leaf: fn(name: String) -> Node {
+    Node{name: name, meta: Meta{note: name, count: 0, children: [Node]{}, detail: Detail{label: name, seen: [Node]{}}}}
+}
+
+grown: fn(root: Node, count: Int) -> Node {
+    value := root
+    loop index in 0..<count -> value.meta.children.push(leaf("child {index}"))
+    value
+}
+
+boxed_text: fn(text: String) -> Box<String> { Box<String>{value: text, tags: [String]{"text"}} }
+
+boxed_node: fn(node: Node) -> Box<Node> { Box<Node>{value: node, tags: [String]{"node"}} }
+
+run: fn() {
+    tree: grown(leaf("root"), 3)
+    print("{tree.name} {tree.meta.children.len()} {tree.meta.detail.label}")
+    text: boxed_text("hello")
+    print("{text.value} {text.tags.len()}")
+    node: boxed_node(leaf("held"))
+    print("{node.value.name} {node.tags[0]}")
+    rect: shapes.rect(3, 4)
+    print("{shapes.area(rect)} {shapes.corner(rect).x}")
+}

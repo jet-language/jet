@@ -197,7 +197,7 @@ jet_cli_gates_report: fn(ledger: GateLedger, modules: [JetDriverSourceQueryModul
         gates: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("entries", jet_cli_status_array(entries)), jet_cli_status_field("counts", jet_cli_status_object(fields))})
         return "{jet_cli_status_render("inspect.gates", true, [JetCLIStatusField]{jet_cli_status_field("gates", gates)})}\n"
     }
-    out := "gates: {selected.len()}\n"
+    out := "Gates: {selected.len()}\n"
     index := 0
     loop index < selected.len() {
         entry_kind: ledger.rows[selected[index]].kind
@@ -218,7 +218,7 @@ jet_cli_gates_report: fn(ledger: GateLedger, modules: [JetDriverSourceQueryModul
                 status: if entry.status == .Val(value) -> " status={value}" else -> ""
                 reason: if entry.reason == .Val(value) -> " reason={value}" else -> ""
                 out = "{out}    {location}  {entry.subject}  {entry.detail}{status}{reason}\n"
-                loop provenance in entry.provenance -> out = "{out}      provenance {provenance}\n"
+                loop provenance in entry.provenance -> out = "{out}      Provenance {provenance}\n"
                 loop operation in entry.operations {
                     site: operation.span
                     out = "{out}      {entry.source}:{diagnostic_line_at(source, site.start)}:{diagnostic_column_at(source, site.start)}  {operation.kind}  {if operation.discharged -> "discharged" else -> "missing"}  required=[{operation.required.join(",")}] asserted=[{operation.asserted.join(",")}]\n"

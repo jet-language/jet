@@ -151,7 +151,7 @@ jet check run.jet
 A successful check exits with code zero and prints one line:
 
 ```text
-ok: `run.jet` has no problems
+OK: `run.jet` has no problems
 ```
 
 `jet check` is a source check; it does not run `run: fn`. Add `--verbose` to see

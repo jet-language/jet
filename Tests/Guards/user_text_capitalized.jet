@@ -1,0 +1,348 @@
+// Text the CLI prints starts with a capital: a readout line, a report
+// heading, a label and a help line. Labels and headings are Title Case and
+// prose is sentence case. A line that opens with a code span, an
+// interpolation, a number, a path, a flag or an identifier (a word with `_`,
+// `-` or `.`, or the program's own name) stays as written, and so do machine
+// formats.
+//
+// The census reads the Jet sources of the CLI: the commands, the driver's
+// verb readouts, the package manager's CLI and the command registry's help.
+// Component tests (a `Tests` folder), `#Test` blocks and build output are
+// left out. It reads three kinds of string literal:
+// - a literal that ends a line (holds `\n`) is printed text, and each line
+//   in it is read;
+// - a literal given straight to a `print` or `eprint` call is a printed
+//   line, and each line in it is read;
+// - a literal given to a `help:`, `summary:`, `label:` or `title:` field is a
+//   help line or a label, and its first line is read.
+// A line fails when it opens with a lowercase label (`word:` or `two words:`),
+// or with lowercase prose (a word and a space, or a lone word) that starts a
+// paragraph rather than continuing the line before it. A line continues the
+// one before when that line ends in a lowercase letter, `,`, `;`, `(`, `-`
+// or a backtick. A diagnostic's what, why and fix are not read here: the
+// renderer starts each of their lines with a capital.
+//
+// The files below keep lowercase lines, each for its reason, and the count
+// pins how many.
+use utc_files: core.files
+
+UTC_CLI_ROOTS: [String]{
+    "Compiler/JetCLI/Source",
+    "Compiler/JetDriver/Source",
+    "Jetpack/CLI/Source",
+    "Compiler/JetFoundation/Source/Registry/CLICommands.jet",
+}
+
+UTC_SKIPPED: [String]{"Tests", ".jet"}
+
+// The program names: identifiers, written lowercase where a line opens with
+// them.
+UTC_NAMES: [String]{"jet", "jetpack"}
+
+// The fields whose text is a help line or a label.
+UTC_LABEL_FIELDS: [String]{"help: ", "summary: ", "label: ", "title: "}
+
+UserTextRow: struct {
+    path: String,
+    count: Int,
+    // Why the file keeps its lowercase lines.
+    reason: String,
+}
+
+UTC_ALLOWED: [UserTextRow]{
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/Codemod.jet", count: 3, reason: "the Jet programs a codemod rule rewrites, as source"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/DevtoolsExample.jet", count: 1, reason: "the scaffolded example program, as source"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/Docs.jet", count: 2, reason: "a callable's `failure:` line inside its signature block, which the JSON `signature` field carries too"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/EditorGrammars.jet", count: 7, reason: "editor grammar scope names and the generated JavaScript constants"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/Expand.jet", count: 8, reason: "each lens summary is also the JSON `summary` field"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/FixCommands.jet", count: 2, reason: "each fix title is also the JSON `title` field"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/Host.jet", count: 49, reason: "the starter project sources, package.jet and the toolchain pin file it writes"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/ImportFiles.jet", count: 3, reason: "the `use` lines of the Jet modules an import writes"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/InspectB.jet", count: 1, reason: "the `module` and `items` column header the digest is looked up by"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/InspectFacts.jet", count: 4, reason: "the fields of a generated Jet struct, as source"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/NativeTests.jet", count: 3, reason: "a test's failure message rides the outcome wire into the JSON report"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/NewApp.jet", count: 11, reason: "the app sources it writes and the `kind:`/`name:` receipt rows tools read back"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/ProgramCompletions.jet", count: 22, reason: "shell completion scripts, whose descriptions mirror the program's own help schema"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/RemoteRun.jet", count: 1, reason: "the `use` line of the launcher script it writes, as source"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/Repl.jet", count: 1, reason: "the `run: fn()` wrapper of a session, as source"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/Request.jet", count: 3, reason: "the `use` and `main: fn` lines of a probe program, as source"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/RustForeign.jet", count: 3, reason: "the rustc identity text the bridge's cache key is built from"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/ScriptCache.jet", count: 3, reason: "the `use` and `run: fn()` lines a script is wrapped in, as source"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/SelfDocs.jet", count: 16, reason: "shell completion scripts"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/SelfMaintenance.jet", count: 1, reason: "the scaffolded UI test program, as source"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/SemIndexJSON.jet", count: 2, reason: "an associated `type` declaration, as Jet source"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/SyntaxDictionaryData.jet", count: 66, reason: "the syntax dictionary's Jet examples, as source"},
+    UserTextRow{path: "Compiler/JetCLI/Source/CLI/TestCompare.jet", count: 1, reason: "the `key=value` comparison record, whose replay line tools read back"},
+    UserTextRow{path: "Compiler/JetDriver/Source/Driver/RustForeign.jet", count: 4, reason: "the Cargo.toml and Rust source of the foreign bridge crate"},
+    UserTextRow{path: "Compiler/JetDriver/Source/Driver/RustForeignSource.jet", count: 9, reason: "the Rust source of the foreign bridge crate"},
+    UserTextRow{path: "Compiler/JetDriver/Source/Driver/ToolStages.jet", count: 1, reason: "the `use` block of a generated tool stage, as source"},
+    UserTextRow{path: "Compiler/JetFoundation/Source/Registry/CLICommands.jet", count: 16, reason: "usage synopses that open with the command, and a help page's code example"},
+    UserTextRow{path: "Jetpack/CLI/Source/Bin/TrustRootPublisher.jet", count: 1, reason: "the message follows the `jetpack-trust-root: ` prefix mid-line"},
+    UserTextRow{path: "Jetpack/CLI/Source/Commands/AddRemoveCommands.jet", count: 3, reason: "the `Pkg.adapt` declaration it prints for pasting, as source"},
+    UserTextRow{path: "Jetpack/CLI/Source/Env/EnvInfo.jet", count: 3, reason: "service fields named as the manifest spells them"},
+    UserTextRow{path: "Jetpack/CLI/Source/Migration/ImportPlan.jet", count: 7, reason: "the package.jet an import writes"},
+    UserTextRow{path: "Jetpack/CLI/Source/Services/ServicesCommand.jet", count: 3, reason: "health states shared with the JSON `health` field"},
+    UserTextRow{path: "Jetpack/CLI/Source/Tools/ToolProfile.jet", count: 1, reason: "the `complete` marker file a tool profile writes"},
+}
+
+// The printed lines of one string literal and the index of its closing quote.
+// An interpolation reads as `{}`.
+UtcLiteral: struct {
+    lines: [String],
+    end: Int,
+}
+
+// The index just past the `}` that closes the interpolation opened before
+// `start`, skipping nested braces and string literals.
+utc_hole_end: fn(bytes: [U8], start: Int) -> Int Never! {
+    depth := 1
+    at := start
+    loop at < bytes.len() {
+        code: Int{bytes[at]}
+        if code == 34 {
+            at = utc_literal(bytes, at + 1).end + 1
+            next
+        }
+        if code == 123 -> depth += 1
+        if code == 125 {
+            depth -= 1
+            if depth == 0 -> return at + 1
+        }
+        at += 1
+    }
+    at
+}
+
+// The literal whose text starts at `start`, one past its opening quote.
+utc_literal: fn(bytes: [U8], start: Int) -> UtcLiteral Never! {
+    lines := [String]{}
+    current := [U8]{}
+    at := start
+    loop at < bytes.len() {
+        code: Int{bytes[at]}
+        if code == 34 -> break
+        if code == 92 && at + 1 < bytes.len() {
+            if {
+                (Int{bytes[at + 1]}) == 110 -> {
+                    lines.push(String.from_bytes(current.move()) ?? "")
+                    current = [U8]{}
+                }
+                else -> current.push(bytes[at + 1])
+            }
+            at += 2
+            next
+        }
+        if (code == 123 || code == 125) && at + 1 < bytes.len() && (Int{bytes[at + 1]}) == code {
+            current.push(bytes[at])
+            at += 2
+            next
+        }
+        if code == 123 {
+            current.push(U8{123})
+            current.push(U8{125})
+            at = utc_hole_end(bytes, at + 1)
+            next
+        }
+        current.push(bytes[at])
+        at += 1
+    }
+    lines.push(String.from_bytes(current.move()) ?? "")
+    UtcLiteral{lines: lines, end: at}
+}
+
+UtcOpening: enum {
+    Other,
+    Label,
+    Prose,
+}
+
+utc_lower: fn(code: Int) -> Bool Never! { code >= 97 && code <= 122 }
+
+// How a printed line opens, past its indent. A line may open with one
+// interpolation that a word of two or more letters extends (`{out}word`), or
+// that an indent of two or more spaces follows (`{out}  word`).
+utc_opening: fn(line: String) -> UtcOpening Never! {
+    bytes: line.bytes()
+    start := 0
+    loop start < bytes.len() && (Int{bytes[start]}) == 32 -> start += 1
+    extended := false
+    if start + 1 < bytes.len() && (Int{bytes[start]}) == 123 && (Int{bytes[start + 1]}) == 125 {
+        hole_end: start + 2
+        start = hole_end
+        loop start < bytes.len() && (Int{bytes[start]}) == 32 -> start += 1
+        if start - hole_end == 1 || start >= bytes.len() || !utc_lower(Int{bytes[start]}) {
+            return .Other
+        }
+        extended = start == hole_end
+    }
+    end := start
+    loop end < bytes.len() && utc_lower(Int{bytes[end]}) -> end += 1
+    if end == start || (extended && end - start < 2) -> return .Other
+    if UTC_NAMES.contains(String.from_bytes(bytes[start..<end]) ?? "") -> return .Other
+    if end == bytes.len() -> return if !extended && end - start >= 2 -> .Prose else -> .Other
+    after: Int{bytes[end]}
+    if after != 58 && after != 32 -> return .Other
+    // A label is lowercase words and spaces up to a `:` that ends the line or
+    // precedes a space.
+    at := end
+    loop at < bytes.len() && (utc_lower(Int{bytes[at]}) || (Int{bytes[at]}) == 32) -> at += 1
+    if at < bytes.len() && (Int{bytes[at]}) == 58 && (at + 1 == bytes.len() || (Int{bytes[at + 1]}) == 32) {
+        return .Label
+    }
+    if after == 32 && end + 1 < bytes.len() -> .Prose else -> .Other
+}
+
+// Whether a line after `previous` continues it.
+utc_continues: fn(previous: String) -> Bool Never! {
+    bytes: previous.bytes()
+    if bytes.len() == 0 -> return false
+    last: Int{bytes[bytes.len() - 1]}
+    utc_lower(last) || [44, 59, 40, 45, 96].contains(last)
+}
+
+// The lines of one literal that open lowercase. `whole` reads every line;
+// otherwise only the first.
+utc_literal_flags: fn(lines: [String], whole: Bool) -> [String] Never! {
+    flagged := [String]{}
+    loop (index, line) in lines {
+        if index > 0 && !whole -> break
+        opening: utc_opening(line)
+        failed: if opening == {
+            .Label -> true
+            .Prose -> index == 0 || !utc_continues(lines[index - 1])
+            .Other -> false
+        }
+        if failed -> flagged.push(line.copy())
+    }
+    flagged
+}
+
+// The lines that open lowercase in the literals of one source line. A `//`
+// outside a string ends the code of the line.
+utc_line_flags: fn(line: String) -> [String] Never! {
+    bytes: line.bytes()
+    flagged := [String]{}
+    at := 0
+    loop at < bytes.len() {
+        code: Int{bytes[at]}
+        if code == 47 && at + 1 < bytes.len() && (Int{bytes[at + 1]}) == 47 -> break
+        if code != 34 {
+            at += 1
+            next
+        }
+        before: String.from_bytes(bytes[0..<at]) ?? ""
+        literal: utc_literal(bytes, at + 1)
+        at = literal.end + 1
+        labeled := false
+        loop field in UTC_LABEL_FIELDS {
+            if before.ends_with(field) -> labeled = true
+        }
+        printed: before.ends_with("print(")
+        if literal.lines.len() > 1 || labeled || printed {
+            loop text in utc_literal_flags(literal.lines, literal.lines.len() > 1 || printed) {
+                flagged.push(text)
+            }
+        }
+    }
+    flagged
+}
+
+// Each line `source` prints lowercase, as `path:line: text`.
+utc_source_flags: fn(path: String, source: String) -> [String] Never! {
+    flagged := [String]{}
+    testing := false
+    loop (index, line) in source.lines() {
+        if testing {
+            if line == "}}" -> testing = false
+            next
+        }
+        word: line.trim()
+        if word.starts_with("#Test(") {
+            testing = !word.ends_with("}}")
+            next
+        }
+        if word.starts_with("//") -> next
+        loop text in utc_line_flags(line) -> flagged.push("{path}:{index + 1}: {text}")
+    }
+    flagged
+}
+
+utc_walk: fn(path: String, out: &[String]) {
+    if !utc_files.is_dir(path) {
+        if path.ends_with(".jet") -> out.push(path.copy())
+        return
+    }
+    loop child in (utc_files.list_dir(path) ?? panic("list {path}: {err}")) {
+        if !UTC_SKIPPED.contains(child.name) -> utc_walk(child.path, out)
+    }
+}
+
+// The census against the closed list: each file whose count differs, with
+// its lowercase lines.
+utc_findings: fn(found: [String:[String]], allowed_rows: [UserTextRow]) -> [String] Never! {
+    findings := [String]{}
+    allowed := [String:Int]{}
+    loop row in allowed_rows -> allowed[row.path] = row.count
+    loop path in found.keys() {
+        flagged: found[path]
+        if allowed.get(path) == {
+            .Val(expected) -> {
+                if flagged.len() != expected {
+                    findings.push("{path}: {flagged.len()} lowercase lines, the list allows {expected}; capitalize the new ones or update its row:\n{flagged.join("\n")}")
+                }
+            }
+            .None -> {
+                findings.push("{path}: {flagged.len()} lowercase lines and no row; capitalize them:\n{flagged.join("\n")}")
+            }
+        }
+    }
+    loop row in allowed_rows {
+        if found.get(row.path) == None {
+            findings.push("{row.path}: no lowercase lines left; delete its row")
+        }
+    }
+    findings.sort()
+    findings
+}
+
+// Every lowercase line of the sources under `roots`, by file.
+utc_census: fn(roots: [String]) -> [String:[String]] {
+    sources := [String]{}
+    loop root in roots -> utc_walk(root, sources)
+    assert(sources.len() > 100, "the census found only {sources.len()} Jet sources")
+    found := [String:[String]]{}
+    loop path in sources {
+        flagged: utc_source_flags(path, utc_files.read(path) ?? panic("read {path}: {err}"))
+        if flagged.len() > 0 -> found[path] = flagged
+    }
+    found
+}
+
+#Test("user_text_capitalized: the CLI prints every readout, heading, label and help line with a capital") {
+    guards_enter_root()
+    assert_eq(utc_findings(utc_census(UTC_CLI_ROOTS), UTC_ALLOWED).join("\n"), "")
+}
+
+#Test("user_text_capitalized: the census reads printed lines and labels, not identifiers or continued prose") {
+    source: [String]{
+        "a: print(\"usage: jet x\\nmore text\\n\")",
+        "b: out.push(\"Readout: {{name}}\\n{{out}}ready now\\n\")",
+        "c: \"jet test: settings\\n`code` first\\n{{x}} items\\nwrapped line\\ncontinues here\\n\"",
+        "d: Row{{help: \"shows the plan\", note: \"left alone\"}}",
+        "e: \"Label:\\nkey_name: x\\ncheck-paths: y\\n{{join(\", \")}}two words: z\\n\"",
+        "f: \"lone\\n\" // \"comment line: x\\n\"",
+        "h: \"{{out}}  indented: x\\n{{out}}none\\n\"",
+        "i: term.eprint(\"no file here\")",
+        "j: print(\"jet run: ok\")",
+        "#Test(\"t\") {{",
+        "    g: \"inside a test: x\\n\"",
+        "}}",
+        "// \"comment: x\\n\"",
+    }.join("\n")
+    flagged: utc_source_flags("a.jet", source)
+    assert_eq(flagged.join("|"), "a.jet:1: usage: jet x|a.jet:2: {{}}ready now|a.jet:4: shows the plan|a.jet:5: {{}}two words: z|a.jet:6: lone|a.jet:7: {{}}  indented: x|a.jet:8: no file here")
+    found := [String:[String]]{}
+    found["a.jet"] = flagged
+    rows: [UserTextRow]{UserTextRow{path: "b.jet", count: 1, reason: "test"}}
+    assert_eq(utc_findings(found, rows).len(), 2)
+}

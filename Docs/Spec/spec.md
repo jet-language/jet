@@ -979,8 +979,10 @@ shape; it can be shown a way only when every type implementing the trait can.
 A type arm over a trait value tests the type it holds and binds that value in
 place, with no copy: `if shape == { .Square(q) -> q.side else -> 0 }`. The arm
 names a type as type position names it (`.geo.Point(p)`), and that type must
-implement the trait (E0305). A trait value may hold any implementing type, so
-the table needs `else` (E0307).
+implement the trait (E0305). A generic arm always spells its arguments
+(`.Box<Int>(b)` and `.Box<String>(s)` test two instances); the bare `.Box(b)`
+names no one type a trait value could hold, so it is E0305. A trait value may
+hold any implementing type, so the table needs `else` (E0307).
 Generic bounds use `f: fn<T: Bound>(…)` and `Pair: struct<T> { … }`. Inside
 such a function `T.name(…)` calls a static method a bound declares (one
 without `self`, such as `zero: fn() -> Self`): `Self` reads as `T`, and each
@@ -1263,7 +1265,7 @@ cannot read. AMD and other vendors publish no such statement, and a
 WebAssembly engine picks its own instructions. So a program with fixed values
 runs on any host by default: `core.sys.timing_host()` says whether the host
 it runs on is confirmed, and `jet inspect decisions` prints the build's
-`timing host:` row. A package that sets `policy.harden` admits only a
+`Timing host:` row. A package that sets `policy.harden` admits only a
 confirmed host: its native entry checks the host before `run` and refuses to
 start anywhere else, giving the reason. A build of such a package for web or
 another wasm32 target is E0744 (D-SECRET-CT1).
