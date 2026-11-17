@@ -22007,6 +22007,30 @@ WholeFileRead: struct {
     }
 }
 
+HiddenCostInLoop: struct {
+    operation: String,
+    fix_text: String,
+
+    impl Diagnostic {
+        code: "L2510",
+        meaning: "A hidden dynamic cost repeated inside a loop",
+        severity: .Lint,
+        lint_name: "hidden_cost_in_loop",
+        stage: [.Compile],
+        detail: true,
+        no_fix: .Behavior,
+        fix_next: "Take the copy or fallback out of the loop, or make it explicit where it happens.",
+
+        what: fn(self) -> String { "{self.operation} inside a loop" }
+
+        why: fn(self) -> String {
+            "A repeated copy or representation fallback can make a growing value's cost super-linear."
+        }
+
+        fix: fn(self) -> String { "To keep the loop's cost linear, {self.fix_text}." }
+    }
+}
+
 ReduceMarkerOutsideReduce: struct {
     impl Diagnostic {
         code: "E2510",

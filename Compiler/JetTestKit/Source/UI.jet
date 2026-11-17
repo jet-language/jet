@@ -70,6 +70,9 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // `jet lint --a11y` is the only surface of E2930/E2931 and exits
         // nonzero when it finds one (syntax-decisions.md:3891).
         {name: "a11y_cli", argv: ["lint", "--a11y", "$file"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
+        // `jet lint --cost` is the surface of L2510 and exits nonzero when a
+        // loop repeats a hidden dynamic cost.
+        {name: "cost_cli", argv: ["lint", "--cost", "$file"], parent: false, exit: "nonzero", streams: "rendered", capability: ""},
         {name: "repl_deny", argv: ["repl", "--deny=FS"], parent: false, exit: "nonzero", streams: "stderr", capability: ""},
         {name: "CommandOverrideConflict", argv: ["run"], parent: true, exit: "nonzero", streams: "both", capability: ""},
         {name: "gate", argv: ["check", "--gate", "$arg", "$file"], parent: false, exit: "any", streams: "rendered", capability: ""},
@@ -82,7 +85,7 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         // runs it, and one with none is refused (kit_ui_invocation).
         {name: "programmable_build", argv: [], parent: false, exit: "any", streams: "", capability: ""},
     }
-    loop name in ["parent_control_cancel", "jetpack_retired_store_verbs", "cost_cli"] {
+    loop name in ["parent_control_cancel", "jetpack_retired_store_verbs"] {
         rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
     }
     rows
@@ -172,7 +175,7 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         }
         call.parent = row.parent
         call.exit = row.exit
-        call.streams = if lint && row.name != "a11y_cli" -> "lint" else -> row.streams
+        call.streams = if lint && row.name != "a11y_cli" && row.name != "cost_cli" -> "lint" else -> row.streams
         call.unlocked_toolchain = row.name == "jetpack_e1250"
         call.hangar_tamper = row.name == "jetpack_hangar_digest_mismatch"
         call.fetch_first = row.name == "fetched_build_locked"

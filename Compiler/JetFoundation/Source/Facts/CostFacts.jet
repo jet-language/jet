@@ -75,3 +75,145 @@ checked_builtin_mutates_receiver: fn(operation: TBuiltinOp) -> Bool Never! {
         .AtomicMethod(_) | .LenString | .LenList | .IsEmpty | .ListTryNew | .ListTryWithCapacity | .MapMerge | .MapMergeWith | .CountList | .Counts | .ConcatList | .GetMap | .GetList | .First | .Last | .Contains | .IndexOf | .OrderingThen | .OrderingReverse | .JoinSep | .Sum(_, _) | .Product(_) | .Min(_) | .Max(_) | .Flatten | .Intersperse | .Unzip | .Chars | .Bytes(_) | .StringFromBytes | .StringFromBytesLossy | .StringWithCapacity | .Trim | .TrimStart | .TrimEnd | .PadStart | .PadEnd | .StringIndexOf | .StringCount | .StringIsAlphabetic | .StringIsNumeric | .StringIsWhitespace | .StringIsASCII | .StringToTitle | .StringMethod(_) | .StringSplitOnce | .StringCutLast | .Split | .Lines | .ParseInt | .ParseFloat | .IntToRadix | .IntFromRadix | .StartsWith | .EndsWith | .Replace | .ToUpper | .ToLower | .ToASCIILower | .ToASCIIUpper | .Repeat | .Slice(_) | .After | .Before | .TrimView | .AfterView | .BeforeView | .Keys | .Values | .ContainsKey | .ToString | .Take | .Skip | .IterToList | .IterCollect | .ListLazy | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare | .IterSplit | .ListSlice | .ListEqual | .ListBinarySearch | .ListUnion | .ListIntersection | .ListDifference | .ListRandom | .ListMinMax | .MapEqual | .MapFirst | .MapToList | .MapTopN | .MapMin | .MapMax | .MapIntersection | .MapSliceKeys | .MapFromKeys | .MapContainsValue | .Indexed | .Indexes | .Zip(_, _, _, _, _, _) | .OptionZip(_) | .SetFrom | .SetToList | .SetUnion | .SetIntersection | .SetDifference | .SetSymmetricDifference | .SetIsSubset | .SetIsSuperset | .SetIsDisjoint | .SetEqual | .SetCapacity | .SetFirst | .SetValues | .SetSort | .SetShuffle | .SortedSetFrom | .SortedSetToList | .SortedSetUnion | .SortedSetIntersection | .SortedSetDifference | .SortedSetSymmetricDifference | .SortedSetIsSubset | .SortedSetIsSuperset | .SortedSetIsDisjoint | .PriorityQueueFrom | .PriorityQueuePeek | .PriorityQueueToSortedList | .KeyOrdered(_, _) | .LRUCapacity | .LRUKeys | .BitSetCount | .BitSetToList | .ByteBufferFrom | .ByteBufferToBytes | .ByteBufferWithCapacity | .BagHas | .BagCount | .DequePeekFront | .DequePeekBack | .DequeCapacity | .DequeContains | .DequeGet | .DequeToList | .DequeJoin | .DequeFrom | .TryCollect | .ViewNew(_) -> return false
     }
 }
+
+// One checked expression's run-time cost: what it may do on a hot path and
+// whether a typed proof removed it.
+TCostFact: struct {
+    kind: TCostKind,
+    state: TCostState,
+}
+
+// The checked type of node `id` of `tree`, when the tree files one.
+body_cost_type: fn(tree: BodyTree, id: Int) -> Type? Never! {
+    row: checked_expr_type_id(tree.expr_types, id) ?? return None
+    Val(tree.types.types[row])
+}
+
+// Whether `bounds` stays on the packed Int rail, which never spills.
+checked_cost_fits_inline: fn(bounds: TIntegerBounds) -> Bool Never! {
+    bounds.lo >= TCOST_INLINE_MIN && bounds.hi <= TCOST_INLINE_MAX
+}
+
+// The values node `id` of a checked body may take, proved as JetSema
+// CostTree.jet checked_cost_integer_bounds proves them over the checked tree:
+// a literal, a local's recorded bounds, an inline-range or `i64` conversion,
+// a negation or arithmetic of bounded operands, a `??` of bounded sides; else
+// the bounds of the node's type.
+body_cost_integer_bounds: fn(tree: BodyTree, id: Int) -> TIntegerBounds? Never! {
+    node: body_node(tree, id)
+    bounds := TIntegerBounds?{None}
+    if node.kind == .IntLit(value, _) -> bounds = Val(integer_bounds_exact(value)) else if node.kind == .CtLit(value) {
+        if value == .Int(number) -> bounds = Val(integer_bounds_exact(number))
+    } else if node.kind == .Local(local) { bounds = local.integer_bounds } else if node.kind == .NumericMethod(receiver, operation) {
+        if operation == .InlineRange(lo, hi, _) -> bounds = Val(TIntegerBounds{lo: lo, hi: hi}) else if operation == .CastAs(destination) {
+            if destination == "i64" && body_cost_integer_bounds(tree, receiver) == .Val(original) && original.lo >= -9223372036854775808 && original.hi <= 9223372036854775807 {
+                bounds = Val(original)
+            }
+        }
+    } else if node.kind == .Unary(op, operand) {
+        if op == TUnaryOp.Neg && body_cost_integer_bounds(tree, operand) == .Val(inner) {
+            bounds = checked_cost_bounded(-inner.hi, -inner.lo)
+        }
+    } else if node.kind == .Binary(op, _, _, left, right) {
+        if body_cost_integer_bounds(tree, left) == .Val(lhs) && body_cost_integer_bounds(tree, right) == .Val(rhs) {
+            bounds = checked_cost_combine_bounds(op, lhs, rhs)
+        }
+    } else if node.kind == .OrFallback(value, fallback, _) {
+        success := TIntegerBounds?{None}
+        if body_cost_type(tree, value) == .Val(carrier) {
+            if carrier == .Option(inner) -> success = checked_cost_type_bounds(inner) else if carrier == .Result(ok, _) {
+                success = checked_cost_type_bounds(ok)
+            }
+        }
+        if fallback == .Value(alternative) {
+            if success == .Val(normal) && body_cost_integer_bounds(tree, alternative) == .Val(other) {
+                bounds = Val(TIntegerBounds{lo: checked_cost_min(normal.lo, other.lo), hi: checked_cost_max(normal.hi, other.hi)})
+            }
+        } else { bounds = success }
+    }
+    if bounds != None -> return bounds
+    ty: body_cost_type(tree, id) ?? return None
+    checked_cost_type_bounds(ty)
+}
+
+// An exact Int operation's cost: removed when its operands and its result
+// all stay on the packed Int rail, else a possible spill to a bigint.
+checked_cost_int_fact: fn(operands: [TIntegerBounds?], result: TIntegerBounds?) -> TCostFact Never! {
+    removed := result != None
+    if result == .Val(bounds) && !checked_cost_fits_inline(bounds) -> removed = false
+    loop operand in operands {
+        if operand == .Val(bounds) {
+            if !checked_cost_fits_inline(bounds) -> removed = false
+        } else { removed = false }
+    }
+    TCostFact{kind: TCostKind.ExactIntSpill, state: if removed -> TCostState.OptimizerRemoved else -> TCostState.SemanticRemainder}
+}
+
+// The cost of node `node` of a checked body, as the Rust reference's
+// cost_fact_for_expr reads a typed expression: a read-only view made owned,
+// an edit of a map's possibly shared backing store, exact Int `+`, `-`, `*`
+// or negation, a list read through the generic representation, or an
+// operation that builds an Option or a Result. The `Ok` checking wraps a
+// fallible function's plain result in spans exactly its payload; no
+// construction is written there, so it is no site.
+body_cost_fact: fn(tree: BodyTree, node: BodyNode) -> TCostFact? Never! {
+    ty: body_cost_type(tree, node.id) ?? return None
+    if node.kind == .MaterializeView(_) {
+        return Val(TCostFact{kind: TCostKind.ViewMaterialization, state: TCostState.SemanticRemainder})
+    }
+    if node.kind == .BuiltinMethod(receiver, operation, _) {
+        if checked_builtin_mutates_receiver(operation) && body_cost_type(tree, receiver) == .Val(receiver_type) {
+            if receiver_type == .Map(_, _, _) {
+                return Val(TCostFact{kind: TCostKind.CollectionCopyOnWrite, state: TCostState.SemanticRemainder})
+            }
+        }
+    }
+    if ty == Type.Int {
+        if node.kind == .Binary(op, _, _, left, right) {
+            if op == TBinaryOp.Add || op == TBinaryOp.Sub || op == TBinaryOp.Mul {
+                lhs: body_cost_integer_bounds(tree, left)
+                rhs: body_cost_integer_bounds(tree, right)
+                result := TIntegerBounds?{None}
+                if lhs == .Val(first) && rhs == .Val(second) {
+                    result = checked_cost_combine_bounds(op, first, second)
+                }
+                return Val(checked_cost_int_fact([TIntegerBounds?]{lhs, rhs}, result))
+            }
+        } else if node.kind == .Unary(op, operand) {
+            if op == TUnaryOp.Neg {
+                inner: body_cost_integer_bounds(tree, operand)
+                result := TIntegerBounds?{None}
+                if inner == .Val(bounds) -> result = checked_cost_bounded(-bounds.hi, -bounds.lo)
+                return Val(checked_cost_int_fact([TIntegerBounds?]{inner}, result))
+            }
+        }
+    }
+    if node.kind == .Index(base, _, kind, _, _, _) {
+        if kind != TIndexKind.Map && body_cost_type(tree, base) == .Val(base_type) {
+            fallback: TCostFact{kind: TCostKind.RepresentationFallback, state: TCostState.SemanticRemainder}
+            if base_type == .List(_) -> return Val(fallback)
+            if base_type == .FixedList(_, _) -> return Val(fallback)
+        }
+    }
+    if node.kind == .Ok(value) {
+        payload: body_node(tree, value).span
+        if payload.start == node.span.start && payload.end == node.span.end -> return None
+    }
+    if body_cost_builds_outcome(node.kind) {
+        outcome: TCostFact{kind: TCostKind.OutcomeConstruction, state: TCostState.SemanticRemainder}
+        if ty == .Option(_) -> return Val(outcome)
+        if ty == .Result(_, _) -> return Val(outcome)
+    }
+    None
+}
+
+// Whether a node of kind `kind` builds the Option or Result it has: a
+// constructor, a call or a fallible conversion, not a read of one held.
+body_cost_builds_outcome: fn(kind: NodeKind) -> Bool Never! {
+    if kind == {
+        .Absent | .Present(_) | .Ok(_) | .Err(_) | .Call(_, _, _) | .IndirectCall(_, _, _, _) | .MethodCall(_, _, _, _) | .StaticCall(_, _, _, _, _) | .BuiltinMethod(_, _, _) | .ClosureMethod(_, _, _) | .HandleMethod(_, _, _) | .CoreCall(_, _, _, _, _, _) | .HostCall(_) | .DecodeUnder(_, _) | .OptionLift2(_, _, _) | .OptField(_, _, _) | .OptMethodCall(_, _, _, _) | .TaskGroupAll(_) | .TaskGroupRace(_) | .TaskGroupAny(_) -> true
+        .DistinctConvert(_, _, _, _, fallible) -> fallible
+        .UnitConvert(_, _, _, _, fallible, _, _, _) -> fallible
+        .IntLit(_, _) | .FloatLit(_) | .BoolLit(_) | .CharLit(_) | .StrLit(_) | .Local(_) | .Unit | .InlineBlock(_) | .Uninit | .CtLit(_) | .ConstRef(_) | .TraitConst(_, _, _) | .NumberParam(_) | .CopyPhase(_, _, _, _) | .GlobalShared(_, _) | .DistinctCtor(_) | .TraitBox(_, _) | .MathBuiltin(_, _, _) | .PreciseBuiltin(_, _, _) | .Print(_) | .Drop(_) | .Close(_) | .Move(_) | .RequireStop(_, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _) | .Unary(_, _) | .StructLit(_) | .Field(_, _) | .Index(_, _, _, _, _, _) | .Slice(_, _, _, _, _) | .Range(_, _, _) | .Tuple(_) | .List(_, _) | .Map(_) | .EnumCtor(_, _, _) | .Try(_, _, _) | .TryWithContext(_, _, _, _, _, _) | .Lambda(_) | .Borrow(_, _) | .RawAddressOf(_) | .Deref(_) | .PtrFromAddr(_, _) | .LayoutLiteral(_) | .LayoutCompare(_, _, _) | .SharedGuardValue(_) | .SharedGuardMap(_, _, _) | .SharedGuardSplit(_, _, _, _) | .SharedGuardWait(_, _, _) | .ConditionNotify(_, _) | .AllocNew(_, _) | .EnumLit(_, _, _) | .JSONLit(_, _, _) | .ListLit(_) | .ListSpread(_) | .MapLit(_) | .PoolSlot(_, _, _, _, _, _) | .Clone(_, _) | .ExplicitCopy(_) | .MaterializeView(_) | .IfExpr(_, _, _, _, _) | .RawOf(_) | .InvariantViolation(_, _) | .DistinctRaw(_) | .OrFallback(_, _, _) | .PatternMatches(_, _) | .NumericMethod(_, _) | .NumericBinaryMethod(_, _, _) | .OverflowOpt(_, _, _, _, _) | .CoreClosureCall(_) | .SelectStart | .SelectRecv(_, _) | .SelectAfter(_, _, _) | .SelectWait(_, _) | .FnValue(_) | .Never(_, _) | .TypeTest(_, _) | .TypePath(_) -> false
+    }
+}

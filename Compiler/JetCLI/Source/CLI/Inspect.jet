@@ -1738,6 +1738,9 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     if job.action == "memory" -> return jet_cli_inspect_memory_host(job, source)
     if job.action == "choices" -> return jet_cli_inspect_choices_host(job, source)
     if job.action == "facts" -> return jet_cli_inspect_facts_host(job, source)
+    if job.action == "explain-cost" {
+        return jet_cli_explain_cost(job.file, source, job.color, job.json, job.threads)
+    }
     if job.action == "graph" || job.action == "query" || job.action == "explain-build" {
         return jet_cli_inspect_checked_build_host(job)
     }

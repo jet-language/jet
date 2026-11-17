@@ -914,13 +914,14 @@ The five reportable cost rows are:
 5. **Generic representation fallback:** a collection uses its generic
    representation because no shape proof selected a direct representation.
 
-The sema checker supplies view-copy hidden-cost lint rows (card #6652). The checked program supplies
-the other four rows and the complete explain projection. Before projection, the
-shared cost seam requires every sema-checked reachable callable to have a
-matching checked body. Type-parameterized, foreign, and otherwise uncovered
-reachable surfaces are explicit completeness failures; they are never silently
-omitted. `jet check` and `jet lint --cost` merge these sources and deduplicate
-identical source-site diagnostics. They retain semantic remainders inside loops.
+The checked program supplies all five rows and the complete explain
+projection, as L2510 (`HiddenCostInLoop`) lint rows. Before projection, the
+shared cost seam requires every reachable callable to have a matching checked
+body: each generic specialization is checked as its own body, and a foreign
+row is a call the projection does not enter. A reachable callable with neither
+is an explicit completeness failure (E2104); it is never silently omitted.
+`jet lint --cost` reports one row per source site and operation, and only
+semantic remainders inside loops.
 `jet explain --cost` also retains optimizer-proven removals. Backends do not
 reconstruct cost from emitted code.
 
@@ -934,8 +935,8 @@ loop item in items {
 }
 ```
 
-`jet check` keeps ordinary code quiet unless a semantic remainder repeats in a
-loop. `jet lint --cost file.jet` reports those rows directly.
+Cost lints are opt-in: `jet check` keeps ordinary code quiet and never reports
+L2510. `jet lint --cost file.jet` reports the semantic remainders a loop repeats.
 `jet explain --cost file.jet` reports semantic remainders and
 optimizer-proven removals, so a missing lint row is explainable rather than
 silent.

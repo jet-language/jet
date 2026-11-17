@@ -2088,14 +2088,14 @@ JetCLIOverlay: struct {
 // `settings` are the command line's `--set` writers and `profile` the
 // `--profile` it selects ("" keeps the request's default; `jet check`);
 // `target_machine` is the machine without an OS it checks for ("" for the
-// host; `jet check --target`); `hold_check_state` as in
-// jet_cli_compile_prepared.
-jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}) -> JetCLICompiled {
+// host; `jet check --target`); `hold_check_state` and `capture_cost_report`
+// as in jet_cli_compile_prepared.
+jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}) -> JetCLICompiled {
     overlays := [JetCLIOverlay]{}
     if entry_source == .Val(replacement) {
         overlays.push(JetCLIOverlay{path: file, source: replacement})
     }
-    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile, target_machine, hold_check_state: hold_check_state)
+    jet_cli_compile_overlays(file, file, overlays, color, threads, mode, trace_sink, settings, profile, target_machine, hold_check_state: hold_check_state, capture_cost_report: capture_cost_report)
 }
 
 // An overlay or entry path as the snapshot spells it: the canonical path of a
@@ -2195,12 +2195,13 @@ jet_cli_unread_file_what: fn(file: String) -[FS]> String Never! {
 // walked file, or adds an absent `.jet` file the walk would have read; the
 // source loader and its authorization stay the one in this file. The source
 // walk is the `sources` span; the request carries `trace_sink` into the
-// driver's phases; `hold_check_state` as in jet_cli_compile_prepared.
-jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}) -> JetCLICompiled {
+// driver's phases; `hold_check_state` and `capture_cost_report` as in
+// jet_cli_compile_prepared.
+jet_cli_compile_overlays: fn(anchor: String, entry: String, overlays: [JetCLIOverlay], color: Bool, threads: Int?, mode: JetDriverCompileMode, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}) -> JetCLICompiled {
     if trace_sink == .Val(sink) -> sink.begin("sources", "", -1, -1)
     prepared: jet_cli_prepare_overlays(anchor, entry, overlays, color, threads, mode)
     if trace_sink == .Val(sink) -> sink.end("sources", jet_cli_prepared_file_count(prepared))
-    jet_cli_compile_prepared(prepared, None, trace_sink, settings, profile, target_machine: target_machine, hold_check_state: hold_check_state)
+    jet_cli_compile_prepared(prepared, None, trace_sink, settings, profile, target_machine: target_machine, hold_check_state: hold_check_state, capture_cost_report: capture_cost_report)
 }
 
 // How many source files a prepared compile authorizes; -1 for a refusal.
@@ -2222,7 +2223,9 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 // `hold_check_state`: the caller ends the process with the result still held
 // (Host.jet jet_cli_finish), so a check's compile state moves into the
 // result and is never dropped (JetDriverCompileRequest.hold_check_state).
-jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}, target_machine: String{""}, hold_check_state: Bool{false}) -> JetCLICompiled {
+// `capture_cost_report`: a check keeps its typed cost report and its L2510
+// lints (`explain --cost`, `lint --cost`).
+jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, prelude: Bool{false}, every_core_body: Bool{false}, core_layers: [ModuleLayer]{[ModuleLayer]{}}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}) -> JetCLICompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLICompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -2237,6 +2240,7 @@ jet_cli_compile_prepared: fn(prepared: &&JetCLIPrepared, input_log: Shared<JetDr
             selected.every_core_body = every_core_body
             selected.core_layers = core_layers
             selected.hold_check_state = hold_check_state
+            selected.capture_cost_report = capture_cost_report
             // A check of a program over the built-in Core loads that Core's
             // function checks as a bound native compile does. Neither a
             // Prelude source's check nor `jet check Core` does, as they check

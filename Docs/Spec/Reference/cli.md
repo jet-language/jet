@@ -256,7 +256,7 @@ jet add [args]                       Add and download a dependency
 jet jobs [<name>]                    List named project jobs or show one
 jet cc [options] <sources>           Compile and link C with the pinned Jetpack toolchain
 jet bind <header.h> --pkg <lib>      Resolve and record a checked foreign binding plan
-jet lint --a11y|--complexity <file.jet> Run optional code-quality checks
+jet lint --a11y|--complexity|--cost <file.jet> Run optional code-quality checks
 jet image [args]                     Build a declared container image
 jet status [<file.jet|dir>]          Show what the project has proved
 jet gc <command>                     Show values moved into automatic memory management
@@ -1412,10 +1412,16 @@ first proves callable coverage using sema-owned roots, direct calls and stored
 function references, including source methods and selected outputs. A reachable
 callable without a complete checked body or specialization refuses with E2104;
 it never produces a clean-cost claim. The collector retains nested loop depth
-through control flow and closure bodies. `lint --cost` merges and deduplicates
-hidden-cost lint rows (card #6652), omits optimizer-proven removals, and reports retained costs
-inside loops. View-materialization lints remain sema-owned. Findings exit 1
-on stderr (diagnostic JSON Lines under `--json`); clean invocations exit 0.
+through control flow and closure bodies. `lint --cost` reports each retained
+cost inside a loop once per site and operation as L2510 (view
+materialization included) and omits optimizer-proven removals; `jet check`
+does not report L2510. Findings exit 1 on stderr (diagnostic JSON Lines under
+`--json`) with a `N hidden dynamic cost warnings found` line; clean
+invocations exit 0. `explain --cost` lists every cost site, removed ones
+included, one `file:line fn name — kind — state (loop depth N;
+tier=shared-tir)` line each, or the `explain.cost` status envelope under
+`--json` with a `sites` list of `{function, line, kind, state, loop_depth,
+tier}`.
 Bare `inspect explain-build <file>` selects the authorized invocation entry
 under its authenticated workspace root, then reads the authenticated last-run
 record. It always reports the planned steps the compiler knows: the JSON
