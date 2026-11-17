@@ -467,7 +467,7 @@ ir_stmt_body: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, statement: Int) Neve
             // write borrow's edits reach the owner. A range borrow keeps its
             // View value below, and a `Pin<T>` (`mem.pin(place)`) the
             // place's address.
-            if local.address_lifetime == None && local.persist_key == None && ir_body_node(p, b, init).kind == .Borrow(borrowed, _) && ir_pin_target(ir_ty(p, b, init)) == None {
+            if local.address_lifetime == None && local.persist_key == None && ir_body_node(p, b, init).kind == .Borrow(borrowed, _) && ir_pin_target(p, ir_ty(p, b, init)) == None {
                 if local.deref || !(ir_body_node(p, b, borrowed).kind == .Slice(_, _, _, _, _)) {
                     return ir_bind_pin(m, p, b, local, init, span)
                 }
@@ -2331,7 +2331,7 @@ ir_expr_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, expression: Int) -> 
                 return ir_default_err_field(m, p, b, expression_ty, receiver, field.name, span)
             }
             // A field through a `Pin<T>` is read in the pinned storage.
-            base: if ir_pin_target(ir_ty(p, b, receiver)) != None -> ir_pin_window(m, p, b, receiver, span) else -> ir_expr(m, p, b, receiver)
+            base: if ir_pin_target(p, ir_ty(p, b, receiver)) != None -> ir_pin_window(m, p, b, receiver, span) else -> ir_expr(m, p, b, receiver)
             if ir_failed(b) -> return -1
             if base >= 0 && ir_kind_of(m, b, base) == .Pointer {
                 if ir_process_member(m, p, ir_ty(p, b, receiver), field.name) == .Val(member) {
@@ -4716,7 +4716,7 @@ ir_precise_division: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, fun
 // copies would both drop its old member). A scalar or box place's value is then
 // read from its address. Any other place is its value.
 ir_write_base: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, span: Span) -> Int Never! {
-    if ir_pin_target(ir_ty(p, b, place)) != None -> return ir_pin_window(m, p, b, place, span)
+    if ir_pin_target(p, ir_ty(p, b, place)) != None -> return ir_pin_window(m, p, b, place, span)
     if !ir_place_needs_address(m, p, b, place) -> return ir_expr(m, p, b, place)
     backs := [IRWriteBack]{}
     address: ir_place_address(m, p, b, place, backs, span)
@@ -4758,7 +4758,7 @@ ir_place_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, place: Int, back
     if ir_body_node(p, b, place).kind == .Move(inner) {
         return ir_place_address(m, p, b, inner, backs, span)
     }
-    if ir_pin_target(place_ty) != None -> return ir_pin_window(m, p, b, place, span)
+    if ir_pin_target(p, place_ty) != None -> return ir_pin_window(m, p, b, place, span)
     if ir_body_node(p, b, place).kind == .Local(local) {
         binding: ir_lookup_local(b, local) ?? return ir_fail_slot(b, span, "write of unknown local {local.name}")
         if binding.indirect >= 0 || ir_kind_of(m, b, binding.slot) == .Aggregate {
@@ -8177,7 +8177,7 @@ ir_range_value: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, start: I
 // holder keeps; a written aggregate is the address of its storage, which a
 // `Pin<T>` (`mem.pin(place)`) holds as a pointer.
 ir_borrow: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, value: Int, access: AccessConvention, span: Span) -> Int Never! {
-    if ir_pin_target(ty) != None -> return ir_pin_address(m, p, b, ty, value, span)
+    if ir_pin_target(p, ty) != None -> return ir_pin_address(m, p, b, ty, value, span)
     value_ty: ir_ty(p, b, value)
     if access == .Read {
         if ir_body_node(p, b, value).kind == .Slice(base, start, end, range, location) {
@@ -8289,7 +8289,7 @@ ir_pin_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, place: I
 // `T`'s aggregate row, whose fields are read and written in place.
 ir_pin_window: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, pin: Int, span: Span) -> Int Never! {
     pin_ty: ir_ty(p, b, pin)
-    target: ir_pin_target(pin_ty) ?? return ir_fail_slot(b, span, "pin window of {ir_type_name(pin_ty)}")
+    target: ir_pin_target(p, pin_ty) ?? return ir_fail_slot(b, span, "pin window of {ir_type_name(pin_ty)}")
     row: ir_value_type(m, p, target) ?? return ir_type_fail(b, span, target)
     if m.types[row].kind != .Aggregate {
         return ir_fail_slot(b, span, "pin of {ir_type_name(target)}")

@@ -2443,7 +2443,9 @@ ir_move_receiver: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, receiver: Int, s
 // owns it on every path here, or an inline member of one. None for any other.
 ir_owned_member: fn(m: &IRModule, p: IRProgram, b: IRBuilder, receiver: Int, name: String) -> IRMember? Never! {
     ty: ir_ty(p, b, receiver)
-    if ir_reactive_type(p, ty) || ir_default_err(p, ty) || ir_pin_target(ty) != None -> return None
+    if ir_reactive_type(p, ty) || ir_default_err(p, ty) || ir_pin_target(p, ty) != None {
+        return None
+    }
     row: ir_value_type(m, p, ty) ?? return None
     if m.types[row].kind != .Aggregate -> return None
     member: ir_member_of_row(m, p, row, name) ?? return None
