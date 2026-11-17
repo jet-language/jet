@@ -6,12 +6,13 @@
 # the same whole, as text and a part at a time, and Crewboard's desktop
 # import (a copy of Examples/Apps/Crewboard's Desktop and Logic) adds its
 # rows to a project as tasks. With no dialog to ask, no file is picked and
-# a notice says why. A browser's file chooser answers after the page's code
-# returns, and the page runtime can't wait for it yet; a page's drop gives
-# the browser's own file handles, which it can't hand to the app yet. So the
-# same app built for the web output is an E-APP-TARGET-FEATURE compile error
-# at each open_file call, Crewboard's import_tasks among them, and at
-# Crewboard's drop_files call.
+# a notice says why. In a page (web/main.jet, built for the web output) the
+# browser's file chooser asks: a hidden file input offers the kinds' name
+# endings and media types, and the page keeps the picked file, whose bytes
+# read the same there. Crewboard's import_tasks asks the chooser again and
+# imports the same CSV as on Linux. A drop of files on a `drop_files` body
+# gives the files of a kind it takes, read the same way, and a drop with
+# none of them calls nothing.
 fixture: PickedFileReadsTheSameBytesOnLinuxAndTheWeb.fixture
 requires: os-name:linux
 env: NO_COLOR=1
@@ -31,10 +32,13 @@ env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
 exit: 0
 stdout: ~ "picked: none" # no dialog to ask, so no file
 stdout: ~ "notice: Couldn't open a file:" # the notice says why
+when tool node
 step: jet build --target web main.jet
-exit: nonzero
-stderr: ~ "App feature `.open_file` needs target `native`, but the resolved target is `Web`." # never a file made up for the person
-stderr: ~ "main.jet:17:" # at the app's open_file call
-stderr: ~ "Desktop/files.jet:43:" # at Crewboard's import_tasks
-stderr: ~ "App feature `.drop_files` needs target `native`, but the resolved target is `Web`." # never dropped files made up
-stderr: ~ "Desktop/files.jet:57:" # at Crewboard's drop_csv
+cwd: web
+exit: 0
+copy: web/page.mjs web/.jet/build/page.mjs
+step: node page.mjs
+cwd: web/.jet/build
+exit: 0
+stdout: = "the chooser offers .csv,text/csv, from a hidden input on the page\npicked: crew-tasks.csv, 59 bytes, text\nwhole, text and stream agree: true\nthe chooser offers .csv,text/csv, from a hidden input on the page\nimported 2 tasks\nGate repair: 2 open\nSpring fair: 3 open\nthe chooser's input is gone: true\nscene: div:\"board: 0 drops\"\nthe board takes a drag: true\ndropped: crew-tasks.csv, 59 bytes, text\nwhole, text and stream agree: true\nscene: div:\"board: 1 drops\"\nafter a drop of only the note, scene: div:\"board: 1 drops\"\n"
+end when

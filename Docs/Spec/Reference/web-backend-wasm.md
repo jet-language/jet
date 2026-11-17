@@ -67,8 +67,8 @@ rendering and its other scripts run. The program's run, each click and
 each drop is one entry, and entries take turns: a click or drop that
 arrives while one is suspended runs once that one has ended. A device
 request the browser answers later (`app.ask`, `app.take_photo`,
-`app.location`, the reads of a photo the page keeps, and each reading
-`app.location_updates`, `app.orientation_updates` and
+`app.location`, `app.open_file`, the reads of a file the page keeps, and
+each reading `app.location_updates`, `app.orientation_updates` and
 `app.heading_updates` give, through the page's UI provider) suspends the
 program the same way until the browser's promise settles.
 
@@ -98,7 +98,10 @@ a button runs its Jet handler once the program's `run` has returned 0. A drop
 on a text input built with `on_drop:` runs its handler once per dropped item,
 in the order `core.ui.host.drag_drop` reads a drop: nonempty `text/plain` as a
 `UIDropItem.Text`, then each `text/uri-list` line that is neither empty nor a
-`#` comment as a `UIDropItem.URI`. The paint a handler causes (for example a
+`#` comment as a `UIDropItem.URI`. A drop of files on the element of an
+`app.drop_files` body hands them to the page's UI provider, which keeps
+them, then runs the body's handler, which takes them from the provider as
+picked files. The paint a handler causes (for example a
 `ui.reactive_render` effect re-running on a signal it read) replaces the
 elements again. Under `node app.js` there is no document and nothing is
 recorded.

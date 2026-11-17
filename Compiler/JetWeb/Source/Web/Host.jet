@@ -212,9 +212,10 @@ function providerRecord(fields) {
 // live clipboard only to a user gesture, and a write's later refusal by the
 // browser is not seen. A saved file is a download of its bytes under its
 // name, which the browser keeps in its downloads folder or where the person
-// says when it asks. File dialogs and font shaping are absent: a file input
-// answers later than the synchronous seam and gives no filesystem path. A
-// device request is answered the browser's way (deviceRequest).
+// says when it asks. The file dialogs that answer a path (dialogRequest) and
+// font shaping are absent: a page gives no filesystem path. A device request,
+// the app's file chooser and the files dropped on it among them, is answered
+// the browser's way (deviceRequest).
 const UI_QUEUE = 256;
 
 // How long a location request waits for the person: then it is refused, as
@@ -312,6 +313,28 @@ async function takePhoto(doc) {
   } finally {
     for (const track of stream.getTracks()) track.stop();
   }
+}
+
+// The file the person picks in the browser's file chooser, which offers
+// `accept` (an `<input type=file>`'s, empty for any file): a promise of the
+// grant and the File, null when the person closed the chooser without one.
+// A page without a document has no chooser to ask with: `restricted`.
+function pickFile(doc, accept) {
+  if (!doc?.createElement) return Promise.resolve({ grant: "restricted", file: null });
+  const input = doc.createElement("input");
+  input.type = "file";
+  if (accept !== "") input.accept = accept;
+  input.style.display = "none";
+  (doc.body ?? doc.documentElement).append(input);
+  return new Promise((resolve) => {
+    const picked = (file) => {
+      input.remove();
+      resolve({ grant: "granted", file });
+    };
+    input.addEventListener("change", () => picked(input.files?.[0] ?? null));
+    input.addEventListener("cancel", () => picked(null));
+    input.click();
+  });
 }
 
 // How long a sensor stream waits for its sensor's first reading: a browser
@@ -483,9 +506,13 @@ function shareLink(url) {
 // the number the provider keeps it under and its size), 3 the bytes of the
 // kept file `<number> <offset> <limit>` names, 4 a sensor stream's start
 // (watchSensor), 5 its next reading and 6 its stop, each naming the watch's
-// number, 7 the clipboard's text (pasteText) and 8 a share of the link
-// `request` (shareLink). An answer may be a promise.
-function deviceRequest(doc, kept, watches, kind, request) {
+// number, 7 the clipboard's text (pasteText), 8 a share of the link
+// `request` (shareLink), 9 the record of the file the person picks in the
+// browser's file chooser, which offers `request` (pickFile: its grant and,
+// when picked, its number, size and name) and 10 the record of the files
+// the page's last drop on a body that takes them gave (filesDropped: each
+// one's number, size and name), null for none. An answer may be a promise.
+function deviceRequest(doc, kept, watches, drops, kind, request) {
   if (kind === 0) return askPermission(request);
   if (kind === 1) return findPlace().then(providerRecord);
   if (kind === 2) {
@@ -507,16 +534,33 @@ function deviceRequest(doc, kept, watches, kind, request) {
   if (kind === 6) return stopWatch(watches, Number(request));
   if (kind === 7) return pasteText();
   if (kind === 8) return shareLink(request);
+  if (kind === 9) {
+    return pickFile(doc, request).then(({ grant, file }) =>
+      providerRecord(file ? [grant, ...keptFile(kept, file)] : [grant]),
+    );
+  }
+  if (kind === 10) {
+    const files = drops.shift();
+    return files === undefined ? null : providerRecord(files.flatMap((file) => keptFile(kept, file)));
+  }
   return null;
 }
 
+// The fields a record gives for `file`, which `kept` now holds: the number
+// it holds it under, its size and its name.
+function keptFile(kept, file) {
+  return [String(kept.push(file) - 1), String(file.size), file.name];
+}
 function defaultUiProvider(doc) {
   const queues = [[], [], []];
   const claims = new Set();
   let clipboard = null;
-  // The files the app was given (a photo), by number; each lives as long as
-  // the page. The sensors its streams follow, by number, until each stops.
+  // The files the app was given (a photo, a picked or dropped file), by
+  // number; each lives as long as the page. The files of each drop on a body
+  // that takes them, until the app takes them. The sensors its streams
+  // follow, by number, until each stops.
   const kept = [];
+  const drops = [];
   const watches = { count: 0, held: new Map() };
   const enqueue = (queue, fields) => {
     const records = queues[queue];
@@ -578,7 +622,8 @@ function defaultUiProvider(doc) {
     eventPop: (queue) => queues[queue]?.shift() ?? null,
     dialogRequest: () => -1,
     dialogResult: () => null,
-    device: (kind, request) => deviceRequest(doc, kept, watches, kind, request),
+    device: (kind, request) => deviceRequest(doc, kept, watches, drops, kind, request),
+    filesDropped: (files) => drops.push(files),
     keyClaim: (claim) => {
       claims.add(claim);
       return true;
@@ -1090,6 +1135,8 @@ class Host {
   // TextInput, a span for a Text and a div for any other leaf, each placed
   // at its frame. An element with a click slot runs its handler on click; one
   // with a drop slot accepts drops and runs its handler on each dropped item;
+  // one with a files slot accepts a drop of files, which the provider keeps
+  // (filesDropped) for the handler it then clicks to take (deviceRequest);
   // one with context menu entries opens them (openMenu) on contextmenu in
   // place of the browser's own menu.
   paintScene() {
@@ -1123,7 +1170,7 @@ class Host {
       return text;
     };
     while (offset < bytes.length) {
-      const [kind, slot, dropSlot, entries, x, y, width, height, color, length] = fields(10);
+      const [kind, slot, dropSlot, filesSlot, entries, x, y, width, height, color, length] = fields(11);
       const text = label(length);
       const menu = [];
       for (let index = 0; index < Number(entries); index += 1) {
@@ -1143,11 +1190,18 @@ class Host {
       const id = Number(slot);
       if (id !== 0) element.addEventListener("click", () => this.click(id));
       const dropId = Number(dropSlot);
-      if (dropId !== 0) {
+      const filesId = Number(filesSlot);
+      if (dropId !== 0 || filesId !== 0) {
         element.addEventListener("dragover", (event) => event.preventDefault());
         element.addEventListener("drop", (event) => {
           event.preventDefault();
-          return this.drop(dropId, event.dataTransfer);
+          const files = Array.from(event.dataTransfer?.files ?? []);
+          if (filesId !== 0 && files.length > 0) {
+            globalThis.jetUiProvider?.filesDropped?.(files);
+            return this.click(filesId);
+          }
+          if (dropId !== 0) return this.drop(dropId, event.dataTransfer);
+          return Promise.resolve();
         });
       }
       if (menu.length > 0) {
