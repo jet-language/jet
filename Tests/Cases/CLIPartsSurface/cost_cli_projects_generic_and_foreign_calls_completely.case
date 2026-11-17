@@ -10,28 +10,28 @@ fixture: Fixtures/Cost
 step: jet check {work}/tests/cli/cost_incomplete_generic.jet
 env: NO_COLOR=1
 exit: 0
-stderr: !~ "E2104"
+stderr: !~ "E2104" # the reachable generic or foreign call is projected, not refused as unbuilt
 step: jet lint --cost {work}/tests/cli/cost_incomplete_generic.jet
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "no hidden dynamic costs in loops"
-stderr: !~ "E2104"
+stdout: ~ "no hidden dynamic costs in loops" # the complete projection finds no loop cost here
+stderr: !~ "E2104" # the reachable generic or foreign call is projected, not refused as unbuilt
 step: jet explain --cost {work}/tests/cli/cost_incomplete_generic.jet --json
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "\"action\":\"explain.cost\""
-stderr: !~ "E2104"
+stdout: ~ "\"action\":\"explain.cost\"" # the JSON report names its action
+stderr: !~ "E2104" # the reachable generic or foreign call is projected, not refused as unbuilt
 step: jet check {work}/tests/cli/cost_incomplete_foreign.jet
 env: NO_COLOR=1
 exit: 0
-stderr: !~ "E2104"
+stderr: !~ "E2104" # the reachable generic or foreign call is projected, not refused as unbuilt
 step: jet lint --cost {work}/tests/cli/cost_incomplete_foreign.jet
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "no hidden dynamic costs in loops"
-stderr: !~ "E2104"
+stdout: ~ "no hidden dynamic costs in loops" # the complete projection finds no loop cost here
+stderr: !~ "E2104" # the reachable generic or foreign call is projected, not refused as unbuilt
 step: jet explain --cost {work}/tests/cli/cost_incomplete_foreign.jet --json
 env: NO_COLOR=1
 exit: 0
-stdout: ~ "\"action\":\"explain.cost\""
-stderr: !~ "E2104"
+stdout: ~ "\"action\":\"explain.cost\"" # the JSON report names its action
+stderr: !~ "E2104" # the reachable generic or foreign call is projected, not refused as unbuilt
