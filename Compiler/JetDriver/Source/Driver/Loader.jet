@@ -2138,9 +2138,9 @@ jet_driver_build_source_catalog: fn(request: JetDriverCompileRequest) -> JetDriv
                 source_segments: jet_driver_unparsed_source_segments(path, generated.source.count_bytes(), SemaSourceOrigin.CompilerGenerated),
                 source_origin: SemaSourceOrigin.CompilerGenerated,
                 // A generated module shares its package's namespace; a package
-                // without a manifest (a lone build file) shares it with its entry
-                // file below.
-                in_namespace: !packages[owner].inline_package,
+                // without a manifest (a lone build file) or with an inline one
+                // shares it with its entry file below.
+                in_namespace: true,
             },
         )
     }
@@ -2168,16 +2168,17 @@ jet_driver_build_source_catalog: fn(request: JetDriverCompileRequest) -> JetDriv
         diagnostics.push(jet_driver_diagnostic_without_span("E0603", "the entry file is not a Jet source in the selected package root", "compilation begins from one checked `.jet` file", "select a source file from the authorized package root"))
     }
     // Handwritten code uses what its `build: fn` generates by name (spec
-    // "Programmable builds"): in a package without a manifest, the entry file
-    // joins the namespace of the modules generated for its package, and so
-    // does every other source a build target lists beside it.
+    // "Programmable builds"): in a package without a manifest, or whose
+    // manifest is its entry file's inline `package: { … }` block, the entry
+    // file joins the namespace of the modules generated for its package, and
+    // so does every other source a build target lists beside it.
     entry_generates: loop generated in request.generated_modules {
         if generated.package_identity == entry_package_identity {
             break true
         }
     } ?? false
     root_row: entry_root_index ?? -1
-    if (entry_generates || request.target_sources.len() > 0) && root_row >= 0 && packages[root_row].manifest_path == None {
+    if (entry_generates || request.target_sources.len() > 0) && root_row >= 0 && (packages[root_row].manifest_path == None || packages[root_row].inline_package) {
         loop index in 0..<source_units.len() {
             if source_units[index].root_identity != snapshot.entry_root_identity || source_units[index].in_namespace {
                 next
