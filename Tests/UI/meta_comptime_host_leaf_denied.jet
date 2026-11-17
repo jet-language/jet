@@ -1,0 +1,12 @@
+// E3411: the package denies the single leaf `Meta.Host`, and a deny wins over
+// the `allow` row that names it.
+package: { name: "main", authority: { allow: [Meta.Host], deny: [Meta.Host] } }
+
+use fs: core.files
+
+run: fn() {
+    #Impure("probe a file while compiling") {
+        found: #run fs.exists("meta_comptime_host_leaf_denied.jet")
+        print("{found}")
+    }
+}

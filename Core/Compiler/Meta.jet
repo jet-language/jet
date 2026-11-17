@@ -4,8 +4,10 @@
 // declarations is `-[Meta.Generate]>`. Changing the program beyond adding
 // checked declarations is the `Meta.Code` family: replacing a declaration's
 // body is `Meta.Code.Rewrite`, and adding a type from text checks `Generate`,
-// `Code.Types` and `Code.Raw` together. The bare `#FX` lists no machine
-// effect: host work keeps its own machine effects and gates.
+// `Code.Types` and `Code.Raw` together. Reaching the host while compiling,
+// the calls of an `#Impure` block that a `#run` value makes, is `Meta.Host`.
+// The bare `#FX` lists no machine effect: host work keeps its own machine
+// effects and gates.
 //
 // An expert effect is never held by default, and holding its parent never
 // covers it: only the main package holds one, by naming it (or an expert
@@ -19,9 +21,10 @@ Meta: enum {
     Generate,
     Include,
     Code,
+    Host,
 
     impl Effect {
-        expert: fn(self) -> Bool { self == .Code }
+        expert: fn(self) -> Bool { self == .Code || self == .Host }
     }
 }
 

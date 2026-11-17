@@ -21,7 +21,10 @@ PolicyGateParseError: struct {
     message: String,
 }
 
-// One `--gate name=allow` argument: the audited gate it opens.
+// One `--gate name=allow` argument: the audited gate it opens. The `impure`
+// policy still governs the `#Impure` source gate, but no invocation opens
+// host access while compiling: that is the expert effect `Meta.Host`, which
+// the main package names in its package file.
 policy_gate_parse: fn(spec: String) -> PolicyKey PolicyGateParseError! {
     raw: spec.bytes()
     split := -1
@@ -35,6 +38,9 @@ policy_gate_parse: fn(spec: String) -> PolicyKey PolicyGateParseError! {
     name: (String.from_bytes(raw[0..<split]) ?? "").trim()
     value: (String.from_bytes(raw[split + 1..<raw.len()]) ?? "").trim()
     key: policy_key_parse(name) ?? return Err(PolicyGateParseError{message: "`{name}` is not an audited gate"})
+    if key == PolicyKey.Impure {
+        return Err(PolicyGateParseError{message: "reaching the host while compiling is the expert effect `Meta.Host`, which the main package holds by naming it in its `authority: {{ allow: [...] }}` row"})
+    }
     if !policy_key_is_audited_gate(key) || value != "allow" {
         return Err(PolicyGateParseError{message: "`--gate {spec}` must name an audited gate with `=allow`"})
     }

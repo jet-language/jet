@@ -1,7 +1,7 @@
 // Read-only fn-build staging: ordinary Driver checking and comptime execution,
 // followed by Core's checked finish. No action or generated-file write occurs.
 use {
-    jet_foundation.[DIAGNOSTIC_ERROR, CompilerThreads, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, ModuleID, PolicyKey, SourceFile, Span, TComptimeValue, TextEdit, Type, compiler_threads_limit, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, name_find, name_index, name_intern, name_table, policy_gate_allows, sha256_hex]
+    jet_foundation.[DIAGNOSTIC_ERROR, CompilerThreads, Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, Item, ModuleID, SourceFile, Span, TComptimeValue, TextEdit, Type, compiler_threads_limit, diagnostic_from_registry, diagnostic_registry_row, diagnostic_sentence_case_line, diagnostic_with_source_path, name_find, name_index, name_intern, name_table, sha256_hex]
     jet_eval.[jet_eval_build_context_value, jet_eval_build_session_input, jet_eval_build_session_diagnostic, jet_eval_runtime_config]
     jet_eval.[jet_eval_build_failed_diagnostic]
     core.build.[BuildGraph, BuildGraphNode, BuildGraphInputDigest]
@@ -435,8 +435,9 @@ jet_driver_query_build_plan: fn(owned_request: &&JetDriverCompileRequest, scope:
     build_session_set_dependencies(session, sources.dependency_roots)
     build_session_set_identity(session, package)
     config := jet_eval_runtime_config(request.eval_config)
-    // A refused effect inside `#Impure` is reported for this gate (E3411).
-    config.impure_gate = policy_gate_allows(request.gate_set, PolicyKey.Impure)
+    // The `#Impure` file calls of `build: fn` run natively when the package
+    // holds `Meta.Host`; any other refused effect inside `#Impure` is E3411.
+    config.host_held = sources.host_held
     // copy: the evaluator's build adapter gets a session and the request's input handles of its
     // own. This query keeps `session` to abort or finish it, and `request` is returned in every
     // response.

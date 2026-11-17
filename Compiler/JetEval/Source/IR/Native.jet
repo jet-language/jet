@@ -195,11 +195,11 @@ JetEvalIRState: struct {
     // standard output are refused as `jet eval` refuses them.
     eval_entry: Bool,
     // config.impure: a Tier-2 effect of an item inside `#Impure` is refused
-    // for the missing invocation gate (E3411); config.impure_gate: the gate
-    // was opened, so the child admits the file calls the item makes
-    // (jet_eval_native_admit).
+    // for the `Meta.Host` its package doesn't hold (E3411);
+    // config.host_held: the package holds it, so the child admits the file
+    // calls the item makes (jet_eval_native_admit).
     impure: Bool,
-    impure_gate: Bool,
+    host_held: Bool,
     // The `#Impure` calls of a build invocation now running (the host marks
     // Impure.enter and Impure.leave, IRProgram.invocation): the child admits
     // their file calls under the gate, and a system call refused inside one
@@ -688,7 +688,7 @@ jet_eval_native_run: fn(program: &JetEvalNativeProgram, item: Int, args: [TCompt
         runtime_execution: program.runtime_execution,
         eval_entry: config.eval_entry,
         impure: config.impure,
-        impure_gate: config.impure_gate,
+        host_held: config.host_held,
         effect_call: config.effect_call,
         span: span,
         failure: None,
@@ -1041,16 +1041,16 @@ jet_eval_ir_effect_refused: fn(s: &JetEvalIRState, what: String, nondeterministi
         return
     }
     impure: s.impure || s.impure_sites > 0
-    if impure && s.impure_gate {
-        s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Effect, s.span, "`{what}` inside `#Impure` is a Tier-2 comptime effect the compile-time child doesn't admit", "`--gate impure=allow` admits the file system calls of an `#Impure` block, which run natively as they do at run time; other host effects stay refused", "keep the call at runtime"))
+    if impure && s.host_held {
+        s.failure = Val(jet_eval_diagnostic(JetEvalErrorKind.Effect, s.span, "`{what}` inside `#Impure` is a Tier-2 comptime effect the compile-time child doesn't admit", "`Meta.Host` admits the file system calls of an `#Impure` block, which run natively as they do at run time; other host effects stay refused", "keep the call at runtime"))
         return
     }
     if impure {
         entry: diagnostic_registry_row("E3411") ?? panic("E3411 has no registry row")
-        s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_from_registry("E3411", Val(s.span), "`{what}` inside `#Impure` is a Tier-2 comptime effect, but `--gate impure=allow` was not passed", entry.why, entry.fix)})
+        s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_from_registry("E3411", Val(s.span), "`{what}` inside `#Impure` is a Tier-2 comptime effect, but its package doesn't hold `Meta.Host`", entry.why, entry.fix)})
         return
     }
-    s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_from_registry("E3410", Val(s.span), "`{what}` is a Tier-2 comptime effect — it requires a `#Impure` gate", "effectful Core APIs are not allowed in pure comptime evaluation", "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and pass `--gate impure=allow` to the build, or keep the call at runtime")})
+    s.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_from_registry("E3410", Val(s.span), "`{what}` is a Tier-2 comptime effect — it requires a `#Impure` gate", "effectful Core APIs are not allowed in pure comptime evaluation", "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and name `Meta.Host` in the main package's `authority: {{ allow: [...] }}` row, or keep the call at runtime")})
 }
 
 jet_eval_ir_result: fn(s: JetEvalIRState, value: TComptimeValue?) -> JetEvalIRResult Never! {
@@ -1264,12 +1264,12 @@ jet_eval_native_command: fn(s: &JetEvalIRState, kind: Int, operands: [Int], payl
 }
 
 // Opens the child's admission of file calls while the code it runs is an
-// `#Impure` item or block under `--gate impure=allow`, and closes it
+// `#Impure` item or block whose package holds `Meta.Host`, and closes it
 // otherwise: an admitted file call runs natively, as the same call does at
 // run time. Sema checked the block's authority, so a denied effect never
 // reaches the child. False once the child is gone.
 jet_eval_native_admit: fn(s: &JetEvalIRState) -> Bool {
-    x64_comptime_admit(s.child, open: s.impure_gate && !s.eval_entry && (s.impure || s.impure_sites > 0))
+    x64_comptime_admit(s.child, open: s.host_held && !s.eval_entry && (s.impure || s.impure_sites > 0))
 }
 
 jet_eval_native_forget: fn(s: &JetEvalIRState) {

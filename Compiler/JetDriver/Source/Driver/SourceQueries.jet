@@ -28,6 +28,10 @@ JetDriverSourceQueryResult: struct {
     // The folder of each package the entry package's manifest lists, by
     // its name there.
     dependency_roots: [String:String]{[String:String]{}},
+    // The entry package holds `Meta.Host` and no `deny` row covers it, so
+    // the `#Impure` file calls of its `build: fn` or `dev: fn` run natively
+    // (jet_driver_comptime_host_packages).
+    host_held: Bool{false},
 }
 
 jet_driver_source_query: fn(request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
@@ -89,7 +93,8 @@ jet_driver_source_query_loaded: fn(load: JetDriverLoadResult, request: JetDriver
     loop (index, module_row) in load.modules {
         if module_row.module_identity == load.entry_module_identity -> entry_index = index
     }
-    JetDriverSourceQueryResult{modules: modules, diagnostics: load.diagnostics, complete: load.complete, entry_package_version: entry_package_version, entry_module_index: entry_index, names: load.names, dependency_roots: dependency_roots}
+    host_held: jet_driver_comptime_host_packages(jet_driver_registration_package_policies(request, load), load.package_identity).contains(load.package_identity)
+    JetDriverSourceQueryResult{modules: modules, diagnostics: load.diagnostics, complete: load.complete, entry_package_version: entry_package_version, entry_module_index: entry_index, names: load.names, dependency_roots: dependency_roots, host_held: host_held}
 }
 
 // The name facts read each module's items once: the items move out of the

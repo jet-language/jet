@@ -115,13 +115,14 @@ JetEvalConfig: struct {
     // gate admits (E3410).
     eval_entry: Bool{false},
     // The evaluated item sits inside an `#Impure` block: a Tier-2 effect is
-    // refused for the missing invocation gate (E3411), not the block (E3410).
+    // refused for the `Meta.Host` its package doesn't hold (E3411), not the
+    // block (E3410).
     impure: Bool{false},
-    // The invocation opened the impure gate (`--gate impure=allow`): the file
-    // calls of code inside `#Impure` run natively in the comptime child, and
-    // any other Tier-2 effect there is refused as one the child doesn't admit
-    // (E3401), never as a missing gate.
-    impure_gate: Bool{false},
+    // The evaluated item's package holds the expert effect `Meta.Host`: the
+    // file calls of code inside `#Impure` run natively in the comptime
+    // child, and any other Tier-2 effect there is refused as one the child
+    // doesn't admit (E3401), never as missing authority.
+    host_held: Bool{false},
     // The evaluated item's first call with a host effect, written as its
     // source names it (`core.files.read()`): a refused system call names it
     // in place of the effect class.
