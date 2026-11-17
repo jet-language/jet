@@ -1,0 +1,11 @@
+use {
+    compiler: core.compiler
+    files: core.files
+}
+
+// A `fmt.block` hook that reads a file while `jet fmt` calls it. A hook runs
+// as a compile-time value, which reaches no file.
+#On(fmt.block, SQL) shape: fn(block: compiler.MarkerBlock) -[FS.Read]> String? {
+    stolen: files.read("../app/package.jet") ?? return None
+    Val("-- {stolen}\n{block.text}")
+}

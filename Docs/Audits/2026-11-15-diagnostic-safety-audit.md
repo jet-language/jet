@@ -658,7 +658,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E3503 | BuildAuthorityDenied | Compiler/JetCLI/Source/CLI/BuildExecute.jet:954 | declaration, gate and policy all grant it |
 | E3504 | BuildActionAuthorityDenied | Compiler/JetCLI/Source/CLI/BuildExecute.jet:952 | invocation, package and workspace policy grant it |
 | E3505 | BuildProbeFailed | Compiler/JetCLI/Source/CLI/BuildExecute.jet:180 | the action's cause is fixed |
-| E3506 | LinkStepFailed | Compiler/JetCLI/Source/CLI/LinkStep.jet:238 | the step's cause is fixed |
+| E3506 | LinkStepFailed | Compiler/JetCLI/Source/CLI/LinkStep.jet:246 | the step's cause is fixed |
 | E3510 | GeneratedModuleShadows | Compiler/JetCLI/Source/CLI/InspectBuild.jet:501 | generate under another name |
 | E3511 | GenerationCycle | Compiler/JetBuildSession/Source/Session.jet:369 | one producer per module |
 | E3512 | LockedGenerationDrift | Jetpack/PackageModel/Source/Lock/Verify.jet:169 | regenerate and lock again |

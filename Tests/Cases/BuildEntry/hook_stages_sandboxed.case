@@ -1,0 +1,43 @@
+# Claim: every hook stage Jet runs runs in the Jet sandbox with its declared
+# authority only. A tool-stage hook (`#On(fmt.block, SQL)`) and a build hook
+# (`#On(build.link)`, `#On(build.before_write)`) run as a compile-time value,
+# which reaches no file, process or network: a hook that reads a file stops
+# with the registered E3410 of that refusal, and the tool keeps what it had.
+# The step a build hook returns runs in the build sandbox: its Jet link reads
+# only paths inside the project (E3506), and its command gets only the
+# effects the build grants (E3504).
+fixture: HookStagesSandboxed.fixture
+requires: tool:sh
+requires: tool:bwrap
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+copy: fmt/app/main.jet fmt/app/main.before
+step: jet fmt main.jet
+cwd: fmt/app
+exit: nonzero
+stderr: ~ "`fmt.block` hook for `main.jet` did not run" # the hook stopped at its call
+stderr: ~ "jet-lang.dev/e/E3410" # with the refusal's own code
+file: fmt/app/main.jet == fmt/app/main.before
+step: jet build --link=tools.peek --allow=Exec,FS app.jet
+cwd: link
+exit: nonzero
+stderr: ~ "names the link step `tools.peek`, which did not run" # the link hook stopped at its call
+stderr: ~ "jet-lang.dev/e/E3410" # with the refusal's own code
+file: link/.jet/build/app absent
+step: jet build --link=tools.borrow --allow=Exec,FS app.jet
+cwd: link
+exit: nonzero
+stderr: ~ "whose Jet link reads `../borrowed.o`, outside the project" # the Jet link reads nothing outside the project
+stderr: ~ "jet-lang.dev/e/E3506" # a failed link step
+file: link/.jet/build/app absent
+step: jet build --link=tools.dial --allow=Exec,FS app.jet
+cwd: link
+exit: nonzero
+stderr: ~ "jet-lang.dev/e/E3504" # the step asks for Net, which the build doesn't grant
+file: link/.jet/build/app absent
+step: jet build --post-link=tools.stamp --allow=Exec,FS app.jet
+cwd: link
+exit: nonzero
+stderr: ~ "names the post-link step `tools.stamp`, which did not run" # the post-link hook stopped at its call
+stderr: ~ "jet-lang.dev/e/E3410" # with the refusal's own code
+file: link/.jet/build/app absent

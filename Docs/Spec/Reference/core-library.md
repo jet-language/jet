@@ -521,12 +521,14 @@ answer's type is the stage's:
 | `lsp.semantic_tokens` | `[SemanticToken]` | `at` and `length` in body bytes, `kind` a protocol token type (`keyword`, `string`, …). |
 | `lsp.inlay_hints` | `[InlayHint]` | `at` in body bytes, `label`. |
 
-The hook runs as a compile-time value, under the same rules. A row outside its
-block, or a token of an unknown kind, is left out. `jet fmt` compiles a file's
-hooks only when a source of its package or of a dependency declares a
-`fmt.block` hook for the marker of one of the file's blocks. It reads those
-sources once per package per run, with a parse and no check, so a file whose
-blocks no hook reads compiles nothing.
+The hook runs as a compile-time value, under the same rules: a hook that
+reaches past them, such as one that reads a file (E3410), stops the tool with
+that refusal's own code, and `jet fmt` keeps the file as written. A row
+outside its block, or a token of an unknown kind, is left out. `jet fmt`
+compiles a file's hooks only when a source of its package or of a dependency
+declares a `fmt.block` hook for the marker of one of the file's blocks. It
+reads those sources once per package per run, with a parse and no check, so a
+file whose blocks no hook reads compiles nothing.
 
 ```jet
 use compiler: core.compiler

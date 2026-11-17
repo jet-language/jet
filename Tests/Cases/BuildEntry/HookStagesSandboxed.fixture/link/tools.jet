@@ -1,0 +1,28 @@
+use {
+    build: core.build
+    compiler: core.compiler
+    files: core.files
+}
+
+// A link hook that reads a file of the package while the build calls it. A
+// hook runs as a compile-time value, which reaches no file.
+#On(build.link) peek: fn(inputs: compiler.LinkInputs) -[FS.Read]> build.BuildAction {
+    _: files.read("secret.txt") ?? ""
+    inputs.default
+}
+
+// A link hook whose Jet link reads an object outside the project.
+#On(build.link) borrow: fn(inputs: compiler.LinkInputs) -> build.BuildAction {
+    build.action("link", run: [], inputs: ["../borrowed.o"], outputs: [inputs.output], allow: [])
+}
+
+// A link hook whose step asks for the network, which the build doesn't grant.
+#On(build.link) dial: fn(inputs: compiler.LinkInputs) -> build.BuildAction {
+    build.action("relink", run: ["sh", "-c", "cp \"$1\" \"$0\"", inputs.output, inputs.objects[0]], inputs: inputs.objects, outputs: [inputs.output], allow: [.Exec, .FS, .Net])
+}
+
+// A post-link hook that reads a file of the package while the build calls it.
+#On(build.before_write) stamp: fn(artifact: compiler.Artifact) -[FS.Read]> build.BuildAction {
+    _: files.read("secret.txt") ?? ""
+    build.action("stamp", run: ["cp", artifact.path, artifact.next], inputs: [artifact.path], outputs: [artifact.next], allow: [.Exec, .FS])
+}

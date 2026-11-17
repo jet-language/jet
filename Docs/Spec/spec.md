@@ -6083,17 +6083,22 @@ libraries, under `.jet/build/link/<name>/`, and calls the hook on a
 executable's name and path, each relative to the package root. The hook
 returns a `build.BuildAction`. One with no command (`inputs.default`, or
 any action whose `run` is empty) is Jet's own link, in process, over the
-action's `inputs` to its one output, the executable. Any other runs as a
+action's `inputs` to its one output, the executable; it reads only relative
+paths inside the project. Any other runs as a
 build step: the program `run[0]` is found as a `find_program` probe finds
 it, the rest of `run` are its arguments, it reads `inputs`, makes `outputs`,
 which must hold the executable, and uses the effects in `allow`, which the
-package, its workspace or `--allow` must grant. It runs in the build
-sandbox, and the executable is the file it wrote. A hook path no function
-marked `#On(build.link)` declares, a hook that doesn't check, and a step
-that fails or writes no executable are E3506, naming the executable and
-where `link` was written; Jet never links the executable another way.
-Example:
-[`Tests/Cases/BuildEntry/custom_link_step.case`](../../Tests/Cases/BuildEntry/custom_link_step.case).
+package, its workspace or `--allow` must grant (E3504 names one they
+don't). It runs in the build sandbox, and the executable is the file it
+wrote. A hook path no function marked `#On(build.link)` declares, a Jet
+link input outside the project, and a step that fails or writes no
+executable are E3506, naming the executable and where `link` was written;
+Jet never links the executable another way. The hook itself runs as a
+compile-time value, so it may only use what compile-time code may: a hook
+that doesn't check, or reaches past that (a file read is E3410), stops with
+that report's own code. Examples:
+[`Tests/Cases/BuildEntry/custom_link_step.case`](../../Tests/Cases/BuildEntry/custom_link_step.case),
+[`Tests/Cases/BuildEntry/hook_stages_sandboxed.case`](../../Tests/Cases/BuildEntry/hook_stages_sandboxed.case).
 `jet run`, `jet test` and `jet dev` link their image in memory, and a web
 build writes a WebAssembly module, so each refuses a link hook with E2104.
 
@@ -6106,10 +6111,11 @@ file before the step and `next` the file the step writes: the next
 Each hook returns a `build.BuildAction` with a command, which runs as a link
 step's does: it reads `path`, must list `next` in its outputs, and uses the
 effects in `allow`, which the package, its workspace or `--allow` must
-grant. A hook path no function marked `#On(build.before_write)` declares, a
-hook that doesn't check, an action with no command, and a step that fails
-or writes no file are E3506, naming the executable and where `post_link` was
-written, and leave no executable. Example:
+grant. A hook path no function marked `#On(build.before_write)` declares,
+an action with no command, and a step that fails or writes no file are
+E3506, naming the executable and where `post_link` was written; a hook that
+doesn't run stops with its report's own code, as a link hook does. Each
+leaves no executable. Example:
 [`Tests/Cases/BuildEntry/post_link_step_signs_artifact.case`](../../Tests/Cases/BuildEntry/post_link_step_signs_artifact.case).
 Every other command, and a web build, refuses a post-link step with E2104.
 
