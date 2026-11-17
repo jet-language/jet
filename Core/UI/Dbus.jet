@@ -12,18 +12,21 @@ use {
 // Speaks the D-Bus wire protocol itself over the session bus's Unix socket:
 // no libdbus. It authenticates with SASL EXTERNAL (the kernel vouches for
 // the process's uid), says Hello, calls methods and waits for their
-// replies, answers calls made to it with UnknownMethod, and queues the
-// signals its match rules ask for. It writes little-endian messages and
-// reads every value type in them within the specification's limits; a
-// malformed message is a typed `.Protocol` error, never a fault. No Unix
-// descriptors are negotiated, so none ride along.
+// replies, and queues the signals its match rules ask for. It answers the
+// calls made to the objects it serves (`serve`) and every other call made
+// to it with UnknownMethod. It writes little-endian messages and reads
+// every value type in them within the specification's limits; a malformed
+// message is a typed `.Protocol` error, never a fault. No Unix descriptors
+// are negotiated, so none ride along.
 //
 // The portal half reads org.freedesktop.appearance through
 // org.freedesktop.portal.Settings (the colour scheme, the accent colour and
 // the contrast preference) and follows its SettingChanged signals and the
 // portal's restarts. It also asks the person for the camera and the
 // location (org.freedesktop.portal.Camera and .Location) and reads their
-// answer from the request's Response signal.
+// answer from the request's Response signal. The tray half puts an icon
+// with a menu in the desktop's tray (org.kde.StatusNotifierItem and
+// com.canonical.dbusmenu).
 
 // The specification's limits: a whole message, one array, and how deep
 // arrays and structs may each nest in a signature (values, variants
@@ -42,11 +45,20 @@ RECEIVE_MAX: 65536
 // The longest authentication line the bus may answer with.
 LINE_MAX: 16384
 
-// Signals kept until `signals` takes them; older ones go first.
+// Signals kept until `signals` takes them, and calls kept until `next_call`
+// does; older ones go first.
 QUEUE_MAX: 256
 
 // The header flag that asks for no reply.
 NO_REPLY_EXPECTED: 1
+
+// RequestName's flag that asks for a name no one owns, never a place in
+// its queue, and the answers that mean the caller owns the name.
+DO_NOT_QUEUE: 4
+
+PRIMARY_OWNER: 1
+
+ALREADY_OWNER: 4
 
 // What `number`, `hex_digit`, `field_code` and `type_end` give for none.
 NO_VALUE: -1
@@ -147,13 +159,17 @@ DbusMessage: struct {
 }
 
 // A connection to a bus: the unique name Hello gave, bytes read but not yet
-// a whole message, and the signals that arrived while a call waited.
+// a whole message, the signals that arrived while a call waited, the
+// object paths it serves (`serve`) and the calls made to them not yet
+// taken (`next_call`).
 DbusConnection: struct {
     stream: net.UnixStream,
     serial: Int,
     name: String,
     inbox: [U8],
     queued: [DbusMessage],
+    served: [String],
+    calls: [DbusMessage],
 }
 
 // A decoded message and the bytes it took; `used` is 0 while the bytes
@@ -227,7 +243,7 @@ session_path: fn(address: String, runtime: String) -> String DbusError! {
 
 // Authenticates as `uid` on a connected `stream` and says Hello.
 start: fn(stream: &&net.UnixStream, uid: Int, timeout_ns: Int) -[Net, Time]> DbusConnection DbusError! {
-    c := DbusConnection{stream: stream.move(), serial: 0, name: "", inbox: [U8]{}, queued: [DbusMessage]{}}
+    c := DbusConnection{stream: stream.move(), serial: 0, name: "", inbox: [U8]{}, queued: [DbusMessage]{}, served: [String]{}, calls: [DbusMessage]{}}
     deadline: now() + timeout_ns
     // The credentials byte, then the EXTERNAL mechanism with the uid as
     // hex-encoded decimal text.
@@ -326,7 +342,16 @@ add_match: fn(c: &DbusConnection, rule: String, timeout_ns: Int) -[Net, Time]> D
 // The signals queued and those that arrive within `timeout_ns` (0: only
 // what is already here), oldest first.
 signals: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> [DbusMessage] DbusError! {
-    ready: net.unix_wait(c.stream, if c.queued.len() > 0 -> 0 else -> timeout_ns) ?? return Err(DbusError.Connect("waiting for the bus failed: {err}"))
+    gather(c, if c.queued.len() > 0 -> 0 else -> timeout_ns) ?? return Err(err)
+    out: c.queued.copy()
+    c.queued.clear()
+    Ok(out)
+}
+
+// Reads what arrives within `timeout_ns` (0: only what is already here) and
+// sets each whole message aside (`set_aside`).
+gather: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> DbusError! {
+    ready: net.unix_wait(c.stream, timeout_ns) ?? return Err(DbusError.Connect("waiting for the bus failed: {err}"))
     if ready -> take_bytes(c) ?? return Err(err)
     loop {
         got: if next_message(c) == {
@@ -341,27 +366,95 @@ signals: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> [DbusMessage] Dbu
         }
         break
     }
-    out: c.queued.copy()
-    c.queued.clear()
-    Ok(out)
+    Ok()
 }
 
 // A message that is no reply being waited for: a signal is queued, a call
-// that wants a reply hears that no method is here, and the rest go.
+// to a served object waits for `next_call`, any other call that wants a
+// reply hears that no method is here, and the rest go.
 set_aside: fn(c: &DbusConnection, m: DbusMessage) -[Net, Time]> DbusError! {
     if m.kind == .Signal {
         if c.queued.len() >= QUEUE_MAX -> c.queued = c.queued[1..<c.queued.len()].copy()
         c.queued.push(m.copy())
         return Ok()
     }
-    if m.kind != .Call || m.flags & NO_REPLY_EXPECTED != 0 -> return Ok()
+    if m.kind != .Call -> return Ok()
+    if c.served.contains(m.path) {
+        if c.calls.len() >= QUEUE_MAX -> c.calls = c.calls[1..<c.calls.len()].copy()
+        c.calls.push(m.copy())
+        return Ok()
+    }
+    refuse(c, m, UNKNOWN_METHOD, "no method {m.interface}.{m.member} here")
+}
+
+// ---- serving objects
+
+// Keeps the calls made to the object at `path` for `next_call`, which this
+// connection answers (`answer`, `refuse`), instead of saying no method is
+// there.
+serve: fn(c: &DbusConnection, path: String) {
+    if !c.served.contains(path) -> c.served.push(path.copy())
+}
+
+// Asks the bus for the well-known `name`, waiting at most `timeout_ns`;
+// true when this connection owns it now, false when another does.
+request_name: fn(c: &DbusConnection, name: String, timeout_ns: Int) -[Net, Time]> Bool DbusError! {
+    reply: call(c, BUS_NAME, BUS_PATH, BUS_NAME, "RequestName", [DbusValue]{DbusValue.Text(name), DbusValue.Uint32(DO_NOT_QUEUE)}, timeout_ns) ?? return Err(err)
+    if reply.body.len() == 1 {
+        if reply.body[0] == .Uint32(code) {
+            return Ok(code == PRIMARY_OWNER || code == ALREADY_OWNER)
+        }
+    }
+    Err(DbusError.Protocol("RequestName answered {reply.signature}, not a code"))
+}
+
+// The oldest call to a served object that is here or arrives within
+// `timeout_ns` (0: only what is already here); None when none came.
+next_call: fn(c: &DbusConnection, timeout_ns: Int) -[Net, Time]> DbusMessage? DbusError! {
+    gather(c, if c.calls.len() > 0 -> 0 else -> timeout_ns) ?? return Err(err)
+    if c.calls.len() == 0 -> return Ok(None)
+    first: c.calls[0].copy()
+    c.calls = c.calls[1..<c.calls.len()].copy()
+    Ok(Val(first))
+}
+
+// Answers the call `m` with `body`; a call that asked for no reply gets
+// none.
+answer: fn(c: &DbusConnection, m: DbusMessage, body: [DbusValue]) -[Net, Time]> DbusError! {
+    if m.flags & NO_REPLY_EXPECTED != 0 -> return Ok()
+    reply := blank(DbusKind.Return)
+    reply.flags = NO_REPLY_EXPECTED
+    reply.reply_serial = m.serial
+    reply.destination = m.sender.copy()
+    reply.body = body
+    _: send(c, reply) ?? return Err(err)
+    Ok()
+}
+
+// Answers the call `m` with the error `name`, which `text` explains; a call
+// that asked for no reply gets none.
+refuse: fn(c: &DbusConnection, m: DbusMessage, name: String, text: String) -[Net, Time]> DbusError! {
+    if m.flags & NO_REPLY_EXPECTED != 0 -> return Ok()
     reply := blank(DbusKind.Error)
     reply.flags = NO_REPLY_EXPECTED
     reply.reply_serial = m.serial
-    reply.error_name = UNKNOWN_METHOD
+    reply.error_name = name
     reply.destination = m.sender.copy()
-    reply.body = [DbusValue]{DbusValue.Text("no method {m.interface}.{m.member} here")}
+    reply.body = [DbusValue]{DbusValue.Text(text)}
     _: send(c, reply) ?? return Err(err)
+    Ok()
+}
+
+// Sends the signal `member` of `interface` from the object at `path` to
+// whoever's match rules ask for it.
+emit: fn(c: &DbusConnection, path: String, interface: String, member: String, body: [DbusValue]) -[Net, Time]> DbusError! {
+    message := blank(DbusKind.Signal)
+    message.flags = NO_REPLY_EXPECTED
+    message.path = path
+    message.interface = interface
+    message.member = member
+    message.body = body
+    _: send(c, message) ?? return Err(err)
     Ok()
 }
 
@@ -1627,6 +1720,245 @@ notification_end: fn(c: &DbusConnection, id: Int, timeout_ns: Int) -[Net, Time]>
     Ok(None)
 }
 
+// ---- the tray
+
+WATCHER: "org.kde.StatusNotifierWatcher"
+
+WATCHER_PATH: "/StatusNotifierWatcher"
+
+ITEM: "org.kde.StatusNotifierItem"
+
+ITEM_PATH: "/StatusNotifierItem"
+
+MENU: "com.canonical.dbusmenu"
+
+MENU_PATH: "/MenuBar"
+
+INVALID_ARGS: "org.freedesktop.DBus.Error.InvalidArgs"
+
+// The dbusmenu version this menu speaks.
+MENU_VERSION: 3
+
+// One entry of a tray's menu: a label the person can choose, one shown
+// but not `enabled`, or a separator line.
+TrayEntry: struct {
+    label: String,
+    enabled: Bool,
+    separator: Bool,
+}
+
+// A tray icon this connection serves: its title, its icon (a name in the
+// desktop's icon theme), its menu's entries, and the revision of the
+// menu's layout, which grows each time the entries change (`tray_show`).
+// The menu's root is item 0 and entry `i` is item `i + 1`.
+Tray: struct {
+    title: String,
+    icon: String,
+    entries: [TrayEntry],
+    revision: Int,
+}
+
+// Puts the icon `icon` titled `title` in the desktop's tray as the item of
+// the process `pid`, with an empty menu until `tray_show`, waiting at most
+// `timeout_ns`. It takes the item's well-known name, serves the item and
+// its menu, and registers the item with the desktop's
+// StatusNotifierWatcher; a desktop with no tray has none, and that call
+// fails. `tray_answer` answers what the desktop then asks.
+tray_start: fn(c: &DbusConnection, title: String, icon: String, pid: Int, timeout_ns: Int) -[Net, Time]> Tray DbusError! {
+    deadline: now() + timeout_ns
+    name: "{ITEM}-{pid}-1"
+    owned: request_name(c, name, timeout_ns) ?? return Err(err)
+    if !owned {
+        return Err(DbusError.Failed{name: "org.freedesktop.DBus.Error.AddressInUse", message: "another connection owns {name}"})
+    }
+    serve(c, ITEM_PATH)
+    serve(c, MENU_PATH)
+    _: call_until(c, WATCHER, WATCHER_PATH, WATCHER, "RegisterStatusNotifierItem", [DbusValue]{DbusValue.Text(name)}, deadline) ?? return Err(err)
+    Ok(Tray{title: title, icon: icon, entries: [TrayEntry]{}, revision: 1})
+}
+
+// Makes `entries` the tray's menu. When they differ from the menu it has,
+// the layout's revision grows and the desktop hears LayoutUpdated, so it
+// reads the menu again.
+tray_show: fn(c: &DbusConnection, tray: &Tray, entries: [TrayEntry]) -[Net, Time]> DbusError! {
+    if entries == tray.entries -> return Ok()
+    tray.entries = entries
+    tray.revision += 1
+    emit(c, MENU_PATH, MENU, "LayoutUpdated", [DbusValue]{DbusValue.Uint32(tray.revision), DbusValue.Int32(0)})
+}
+
+// Answers `m`, a call the desktop made to the tray's item or its menu, and
+// gives the index of the entry the person chose when `m` says they clicked
+// one that is enabled.
+tray_answer: fn(c: &DbusConnection, tray: Tray, m: DbusMessage) -[Net, Time]> Int? DbusError! {
+    if m.interface == PROPERTIES && (m.member == "GetAll" || (m.member == "Get" && m.body.len() == 2)) {
+        found: if m.path == ITEM_PATH -> tray_item_properties(tray) else -> tray_menu_properties()
+        if m.member == "GetAll" {
+            answer(c, m, [DbusValue]{options_of(found)}) ?? return Err(err)
+            return Ok(None)
+        }
+        name: string_of(m.body[1])
+        answer_property(c, m, found, name, "no property {name} here") ?? return Err(err)
+        return Ok(None)
+    }
+    // A click, a middle click, a right click or a scroll on the icon: the
+    // item is its menu (ItemIsMenu), so the desktop shows the menu.
+    clicked: m.member == "Activate" || m.member == "SecondaryActivate" || m.member == "ContextMenu" || m.member == "Scroll"
+    if m.path == ITEM_PATH && on(m, ITEM) && clicked {
+        answer(c, m, [DbusValue]{}) ?? return Err(err)
+        return Ok(None)
+    }
+    if m.path == MENU_PATH && on(m, MENU) -> return tray_menu_answer(c, tray, m)
+    refuse(c, m, UNKNOWN_METHOD, "no method {m.interface}.{m.member} here") ?? return Err(err)
+    Ok(None)
+}
+
+// Answers a dbusmenu call; see `tray_answer`.
+tray_menu_answer: fn(c: &DbusConnection, tray: Tray, m: DbusMessage) -[Net, Time]> Int? DbusError! {
+    if m.member == "GetLayout" && m.body.len() == 3 {
+        parent: int_of(m.body[0]) ?? -1
+        depth: int_of(m.body[1]) ?? -1
+        if parent < 0 || parent > tray.entries.len() {
+            refuse(c, m, INVALID_ARGS, "no menu item {parent} here") ?? return Err(err)
+            return Ok(None)
+        }
+        answer(c, m, [DbusValue]{DbusValue.Uint32(tray.revision), tray_layout(tray, parent, depth)}) ?? return Err(err)
+        return Ok(None)
+    }
+    if m.member == "GetGroupProperties" && m.body.len() == 2 {
+        ids := [Int]{}
+        if m.body[0] == .Array(_, items) {
+            loop item in items -> ids.push(int_of(item) ?? -1)
+        }
+        if ids.len() == 0 {
+            loop i in 0..<(tray.entries.len() + 1) -> ids.push(i)
+        }
+        found := [DbusValue]{}
+        loop id in ids {
+            if id < 0 || id > tray.entries.len() -> next
+            found.push(DbusValue.Struct([DbusValue]{DbusValue.Int32(id), options_of(tray_item_props(tray, id))}))
+        }
+        answer(c, m, [DbusValue]{DbusValue.Array{signature: "(ia{ascii(123)}sv{ascii(125)})", items: found}}) ?? return Err(err)
+        return Ok(None)
+    }
+    if m.member == "GetProperty" && m.body.len() == 2 {
+        id: int_of(m.body[0]) ?? -1
+        name: string_of(m.body[1])
+        props: if id >= 0 && id <= tray.entries.len() -> tray_item_props(tray, id) else -> [DbusValue]{}
+        answer_property(c, m, props, name, "menu item {id} has no property {name}") ?? return Err(err)
+        return Ok(None)
+    }
+    if m.member == "Event" && m.body.len() == 4 {
+        answer(c, m, [DbusValue]{}) ?? return Err(err)
+        return Ok(tray_chosen(tray, m.body[0], m.body[1]))
+    }
+    if m.member == "EventGroup" && m.body.len() == 1 {
+        chosen := Int?{None}
+        if m.body[0] == .Array(_, events) {
+            loop event in events {
+                if chosen != None -> break
+                if event == .Struct(fields) {
+                    if fields.len() == 4 -> chosen = tray_chosen(tray, fields[0], fields[1])
+                }
+            }
+        }
+        answer(c, m, [DbusValue]{DbusValue.Array{signature: "i", items: [DbusValue]{}}}) ?? return Err(err)
+        return Ok(chosen)
+    }
+    // The menu is current before it opens: the tray says LayoutUpdated
+    // whenever its entries change.
+    if m.member == "AboutToShow" && m.body.len() == 1 {
+        answer(c, m, [DbusValue]{DbusValue.Bool(false)}) ?? return Err(err)
+        return Ok(None)
+    }
+    if m.member == "AboutToShowGroup" && m.body.len() == 1 {
+        none: DbusValue.Array{signature: "i", items: [DbusValue]{}}
+        answer(c, m, [DbusValue]{none.copy(), none}) ?? return Err(err)
+        return Ok(None)
+    }
+    refuse(c, m, UNKNOWN_METHOD, "no method {m.interface}.{m.member} here") ?? return Err(err)
+    Ok(None)
+}
+
+// Whether the call `m` is to `interface`; a call may leave its interface
+// out.
+on: fn(m: DbusMessage, interface: String) -> Bool { m.interface == interface || m.interface == "" }
+
+// Answers the call `m` with the property `name` of `props` (`a{sv}`
+// entries), as a variant, else with InvalidArgs saying `missing`.
+answer_property: fn(c: &DbusConnection, m: DbusMessage, props: [DbusValue], name: String, missing: String) -[Net, Time]> DbusError! {
+    found: option_value(options_of(props), name) ?? return refuse(c, m, INVALID_ARGS, missing)
+    answer(c, m, [DbusValue]{DbusValue.Variant(found)})
+}
+
+// The number an Int32 or Uint32 holds.
+int_of: fn(value: DbusValue) -> Int? {
+    if value == .Int32(n) -> return Val(n)
+    if value == .Uint32(n) -> return Val(n)
+    None
+}
+
+// The entry index an Event with the item `id` and the event `event` chose:
+// a click on an enabled entry that is no separator.
+tray_chosen: fn(tray: Tray, id: DbusValue, event: DbusValue) -> Int? {
+    if event != DbusValue.Text("clicked") -> return None
+    index: (int_of(id) ?? 0) - 1
+    if index < 0 || index >= tray.entries.len() -> return None
+    entry: tray.entries[index]
+    if entry.separator || !entry.enabled -> return None
+    Val(index)
+}
+
+// The `(ia{sv}av)` layout of the item `id` (0, the root, holds the entries)
+// with its children `depth` levels down (-1: all).
+tray_layout: fn(tray: Tray, id: Int, depth: Int) -> DbusValue {
+    children := [DbusValue]{}
+    if id == 0 && depth != 0 {
+        loop i in 1..<(tray.entries.len() + 1) {
+            children.push(DbusValue.Variant(tray_layout(tray, i, 0)))
+        }
+    }
+    DbusValue.Struct([DbusValue]{DbusValue.Int32(id), options_of(tray_item_props(tray, id)), DbusValue.Array{signature: "v", items: children}})
+}
+
+// The properties of the menu item `id`: the root opens a submenu, a
+// separator says so, and an entry has its label (`_` doubled, since a
+// single one marks an access key) and says when it is not enabled.
+tray_item_props: fn(tray: Tray, id: Int) -> [DbusValue] {
+    if id == 0 -> return [DbusValue]{entry_of("children-display", DbusValue.Text("submenu"))}
+    entry: tray.entries[id - 1]
+    if entry.separator -> return [DbusValue]{entry_of("type", DbusValue.Text("separator"))}
+    props := [DbusValue]{entry_of("label", DbusValue.Text(entry.label.replace("_", "__")))}
+    if !entry.enabled -> props.push(entry_of("enabled", DbusValue.Bool(false)))
+    props
+}
+
+// The StatusNotifierItem's properties: an app's icon, always shown, whose
+// menu is the whole item.
+tray_item_properties: fn(tray: Tray) -> [DbusValue] {
+    tip: DbusValue.Struct([DbusValue]{DbusValue.Text(""), DbusValue.Array{signature: "(iiay)", items: [DbusValue]{}}, DbusValue.Text(tray.title), DbusValue.Text("")})
+    [DbusValue]{
+        entry_of("Category", DbusValue.Text("ApplicationStatus")),
+        entry_of("Id", DbusValue.Text(tray.title)),
+        entry_of("Title", DbusValue.Text(tray.title)),
+        entry_of("Status", DbusValue.Text("Active")),
+        entry_of("IconName", DbusValue.Text(tray.icon)),
+        entry_of("ToolTip", tip),
+        entry_of("ItemIsMenu", DbusValue.Bool(true)),
+        entry_of("Menu", DbusValue.Path(MENU_PATH)),
+    }
+}
+
+// The dbusmenu object's properties.
+tray_menu_properties: fn() -> [DbusValue] {
+    [DbusValue]{
+        entry_of("Version", DbusValue.Uint32(MENU_VERSION)),
+        entry_of("TextDirection", DbusValue.Text("ltr")),
+        entry_of("Status", DbusValue.Text("normal")),
+        entry_of("IconThemePath", DbusValue.Array{signature: "s", items: [DbusValue]{}}),
+    }
+}
+
 // ---- test fixtures
 
 // A connected pair of sockets: the client's end and a fake bus's.
@@ -2294,6 +2626,116 @@ repeat: fn(text: String, times: Int) -> String {
     options: messages_heard(cancelled.server)[2].body[2]
     assert_eq(option_value(options, "filters"), DbusValue?{None})
     assert_eq(option_value(options, "current_name"), Val(DbusValue.Text("notes.txt")))
+}
+
+#Test("a tray serves its item and menu, says when the menu changes and hears what the person chose") {
+    ok: "OK 0123456789abcdef0123456789abcdef\r\n".bytes()
+    bus := test_bus("tray")
+    script := ok.copy()
+    append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.60")}), 1))
+    append(script, wire(reply_to(2, [DbusValue]{DbusValue.Uint32(PRIMARY_OWNER)}), 2))
+    append(script, wire(reply_to(3, [DbusValue]{}), 3))
+    // The desktop reads the item and the menu, then the person clicks the
+    // second entry and the separator; a call to no served object is
+    // refused.
+    append(script, wire(desktop_call(ITEM_PATH, PROPERTIES, "GetAll", [DbusValue]{DbusValue.Text(ITEM)}), 4))
+    append(script, wire(desktop_call(MENU_PATH, MENU, "GetLayout", [DbusValue]{DbusValue.Int32(0), DbusValue.Int32(-1), texts([String]{})}), 5))
+    append(script, wire(desktop_call(MENU_PATH, MENU, "Event", menu_click(2)), 6))
+    append(script, wire(desktop_call(MENU_PATH, "", "Event", menu_click(3)), 7))
+    append(script, wire(desktop_call("/elsewhere", MENU, "GetLayout", [DbusValue]{DbusValue.Int32(0), DbusValue.Int32(-1), texts([String]{})}), 8))
+    bus_says(bus.server, script)
+    c := start(bus.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    tray := tray_start(c, "Crewboard", "crewboard", 42, 1000000000) ?? panic("tray: {err}")
+    quit: TrayEntry{label: "Quit", enabled: true, separator: false}
+    line: TrayEntry{label: "", enabled: true, separator: true}
+    first: [TrayEntry]{TrayEntry{label: "Gate repair", enabled: true, separator: false}, TrayEntry{label: "Spring_fair", enabled: true, separator: false}, line.copy(), quit.copy()}
+    tray_show(c, tray, first.copy()) ?? panic("show: {err}")
+    chosen := [String]{}
+    loop _ in 0..<4 {
+        m: found_call(next_call(c, 1000000000)) ?? panic("no call came")
+        got: found_choice(tray_answer(c, tray, m))
+        chosen.push(if got == .Val(index) -> "{index}" else -> "-")
+    }
+    assert_eq(chosen.join(" "), "- - 1 -")
+    assert_eq(found_call(next_call(c, 0)), DbusMessage?{None})
+    // The same entries again change nothing; a new one is a new revision.
+    tray_show(c, tray, first.copy()) ?? panic("show: {err}")
+    tray_show(c, tray, [TrayEntry]{TrayEntry{label: "Launch", enabled: false, separator: false}, quit.copy()}) ?? panic("show: {err}")
+    assert_eq(tray.revision, 3)
+    heard: messages_heard(bus.server)
+    said := [String]{}
+    loop m in heard {
+        said.push(
+            if m.kind == {
+                .Call -> m.member.copy()
+                .Signal -> "{m.member} {m.body}"
+                .Return -> "return {m.reply_serial}"
+                .Error -> "error {m.reply_serial} {m.error_name}"
+            },
+        )
+    }
+    assert_eq(said.join("\n"), "Hello\nRequestName\nRegisterStatusNotifierItem\nLayoutUpdated [Uint32(2), Int32(0)]\nerror 8 {UNKNOWN_METHOD}\nreturn 4\nreturn 5\nreturn 6\nreturn 7\nLayoutUpdated [Uint32(3), Int32(0)]")
+    assert_eq(heard[1].body, [DbusValue]{DbusValue.Text("org.kde.StatusNotifierItem-42-1"), DbusValue.Uint32(DO_NOT_QUEUE)})
+    assert_eq(heard[2].body, [DbusValue]{DbusValue.Text("org.kde.StatusNotifierItem-42-1")})
+    item: heard[5].body[0]
+    assert_eq(option_value(item, "IconName"), Val(DbusValue.Text("crewboard")))
+    assert_eq(option_value(item, "ItemIsMenu"), Val(DbusValue.Bool(true)))
+    assert_eq(option_value(item, "Menu"), Val(DbusValue.Path(MENU_PATH)))
+    assert_eq(heard[6].body[0], DbusValue.Uint32(2))
+    assert_eq(layout_labels(heard[6].body[1]), [String]{"Gate repair", "Spring__fair", "separator", "Quit"})
+}
+
+// A method call the desktop makes to the app's connection.
+desktop_call: fn(path: String, interface: String, member: String, body: [DbusValue]) -> DbusMessage {
+    m := blank(DbusKind.Call)
+    m.path = path
+    m.interface = interface
+    m.member = member
+    m.sender = ":1.9"
+    m.destination = ":1.60"
+    m.body = body
+    m
+}
+
+// A dbusmenu Event's arguments: a click on the menu item `id`.
+menu_click: fn(id: Int) -> [DbusValue] {
+    [DbusValue]{DbusValue.Int32(id), DbusValue.Text("clicked"), DbusValue.Variant(DbusValue.Int32(0)), DbusValue.Uint32(0)}
+}
+
+// The label of each child of a GetLayout answer's root, or its type when
+// it has no label.
+layout_labels: fn(layout: DbusValue) -> [String] {
+    out := [String]{}
+    if layout == .Struct(fields) {
+        if fields[2] == .Array(_, children) {
+            loop child in children {
+                if child == .Variant(inner) {
+                    if inner == .Struct(parts) {
+                        found: option_value(parts[1], "label") ?? option_value(parts[1], "type") ?? DbusValue.Text("?")
+                        out.push(string_of(found))
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+// The call a read gave, or the test fails with its error.
+found_call: fn(got: DbusMessage? DbusError!) -> DbusMessage? {
+    if got == {
+        .Err(err) -> panic("call: {err}")
+        .Ok(found) -> found
+    }
+}
+
+// The entry an answer said the person chose, or the test fails with its
+// error.
+found_choice: fn(got: Int? DbusError!) -> Int? {
+    if got == {
+        .Err(err) -> panic("answer: {err}")
+        .Ok(found) -> found
+    }
 }
 
 // The text a read gave, or the test fails with its error.
