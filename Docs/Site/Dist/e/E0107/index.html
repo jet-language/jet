@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Did you mean `score`?</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0107</code>: <code>Tests/UI/CBOREncodeDeprecated/stderr</code>.</p>
-<pre class="diag">Error [jet.UnknownName]: `_` is not a name, so it has no value to read
-  --&gt; Tests/UI/CBOREncodeDeprecated/run.jet:8:5
+<p>First UI snapshot mentioning <code>E0107</code>: <code>Tests/UI/ambient_err_scope.stderr</code>.</p>
+<pre class="diag">Error [jet.UnknownName]: Nothing named `err` exists here
+  --&gt; Tests/UI/ambient_err_scope.jet:1:19
     |
-  8 |     _ = cbor.encode(tree)
-    |     ^
- Why: `_` throws a value away where a binding would go; it never names one
- Fix: To throw a value away write `_: value`; to read it, bind it to a name and read that name
+  1 | run: fn() { print(err) }
+    |                   ^^^
+ Why: A name must be declared before it&#39;s used
+ Fix: Declare it first: `err: ...`
 More: jet-lang.dev/e/E0107
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

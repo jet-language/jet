@@ -1,0 +1,195 @@
+// The public moments of a compile and a build: the one list of their names,
+// their `core.compiler.Event` variants and their payloads. `#On` hooks, the
+// ordered `stages()` view, the driver's event sink and `jet build --json`
+// name a moment only through these rows, and the `--json` schema is generated
+// from them; Core/Compiler/Compiler.jet declares the same enum and payload
+// structs for Jet code. A new moment is a new row, a new variant and, when its
+// payload is new, a new payload row: a versioned public change.
+
+// One moment: its dotted name (`compiler.settled`), its `Event` variant and
+// the payload struct the variant carries.
+CompilerEvent: struct {
+    name: String,
+    variant: String,
+    payload: String,
+}
+
+// One field of a payload struct: its name and its type as Core spells it
+// (`String`, `Int`, `Bool`, `[String]`, or another payload, `CheckedProgram`).
+CompilerEventField: struct {
+    name: String,
+    ty: String,
+}
+
+// One payload struct and its fields, in declaration order.
+CompilerEventPayload: struct {
+    name: String,
+    fields: [CompilerEventField],
+}
+
+COMPILER_EVENT_PARSED: "compiler.parsed"
+
+COMPILER_EVENT_IMPORTED: "compiler.imported"
+
+COMPILER_EVENT_DECLARED: "compiler.declared"
+
+COMPILER_EVENT_CHECKED: "compiler.checked"
+
+COMPILER_EVENT_SETTLED: "compiler.settled"
+
+COMPILER_EVENT_EMITTED: "compiler.emitted"
+
+COMPILER_EVENT_FINISHED: "compiler.finished"
+
+COMPILER_EVENT_BUILD_PLANNED: "build.planned"
+
+COMPILER_EVENT_BUILD_ASSET: "build.asset"
+
+COMPILER_EVENT_BUILD_LINK: "build.link"
+
+COMPILER_EVENT_BUILD_BEFORE_WRITE: "build.before_write"
+
+COMPILER_EVENT_BUILD_AFTER_WRITE: "build.after_write"
+
+// Every moment, compile moments in the order a compile reaches them, then the
+// build's.
+COMPILER_EVENTS: [CompilerEvent]{
+    CompilerEvent{name: COMPILER_EVENT_PARSED, variant: "Parsed", payload: "File"},
+    CompilerEvent{name: COMPILER_EVENT_IMPORTED, variant: "Imported", payload: "Module"},
+    CompilerEvent{name: COMPILER_EVENT_DECLARED, variant: "Declared", payload: "Declaration"},
+    CompilerEvent{name: COMPILER_EVENT_CHECKED, variant: "Checked", payload: "CheckedProgram"},
+    CompilerEvent{name: COMPILER_EVENT_SETTLED, variant: "Settled", payload: "Round"},
+    CompilerEvent{name: COMPILER_EVENT_EMITTED, variant: "Emitted", payload: "Artifact"},
+    CompilerEvent{name: COMPILER_EVENT_FINISHED, variant: "Finished", payload: "Outcome"},
+    CompilerEvent{name: COMPILER_EVENT_BUILD_PLANNED, variant: "Planned", payload: "Plan"},
+    CompilerEvent{name: COMPILER_EVENT_BUILD_ASSET, variant: "Asset", payload: "Asset"},
+    CompilerEvent{name: COMPILER_EVENT_BUILD_LINK, variant: "Link", payload: "LinkInputs"},
+    CompilerEvent{name: COMPILER_EVENT_BUILD_BEFORE_WRITE, variant: "BeforeWrite", payload: "Artifact"},
+    CompilerEvent{name: COMPILER_EVENT_BUILD_AFTER_WRITE, variant: "AfterWrite", payload: "Artifact"},
+}
+
+// Every payload struct the moments carry, each before the payloads that hold
+// it.
+COMPILER_EVENT_PAYLOADS: [CompilerEventPayload]{
+    CompilerEventPayload{
+        name: "File",
+        fields: [CompilerEventField]{
+            CompilerEventField{name: "path", ty: "String"},
+            CompilerEventField{name: "module", ty: "String"},
+        },
+    },
+    CompilerEventPayload{
+        name: "Module",
+        fields: [CompilerEventField]{
+            CompilerEventField{name: "name", ty: "String"},
+            CompilerEventField{name: "files", ty: "[String]"},
+        },
+    },
+    CompilerEventPayload{
+        name: "Declaration",
+        fields: [CompilerEventField]{
+            CompilerEventField{name: "name", ty: "String"},
+            CompilerEventField{name: "module", ty: "String"},
+            CompilerEventField{name: "calls", ty: "[String]"},
+            CompilerEventField{name: "complete", ty: "Bool"},
+        },
+    },
+    CompilerEventPayload{
+        name: "CheckedProgram",
+        fields: [CompilerEventField]{
+            CompilerEventField{name: "declarations", ty: "[Declaration]"},
+        },
+    },
+    CompilerEventPayload{
+        name: "Round",
+        fields: [CompilerEventField]{
+            CompilerEventField{name: "round", ty: "Int"},
+            CompilerEventField{name: "program", ty: "CheckedProgram"},
+            CompilerEventField{name: "new_items", ty: "[Declaration]"},
+        },
+    },
+    CompilerEventPayload{
+        name: "Artifact",
+        fields: [CompilerEventField]{
+            CompilerEventField{name: "output", ty: "String"},
+            CompilerEventField{name: "path", ty: "String"},
+            CompilerEventField{name: "next", ty: "String"},
+        },
+    },
+    CompilerEventPayload{
+        name: "Outcome",
+        fields: [CompilerEventField]{
+            CompilerEventField{name: "ok", ty: "Bool"},
+            CompilerEventField{name: "errors", ty: "Int"},
+            CompilerEventField{name: "warnings", ty: "Int"},
+        },
+    },
+    CompilerEventPayload{
+        name: "Plan",
+        fields: [CompilerEventField]{
+            CompilerEventField{name: "outputs", ty: "[String]"},
+            CompilerEventField{name: "steps", ty: "[String]"},
+        },
+    },
+    CompilerEventPayload{
+        name: "Asset",
+        fields: [CompilerEventField]{
+            CompilerEventField{name: "path", ty: "String"},
+            CompilerEventField{name: "kind", ty: "String"},
+        },
+    },
+    CompilerEventPayload{
+        name: "LinkInputs",
+        fields: [CompilerEventField]{
+            CompilerEventField{name: "objects", ty: "[String]"},
+            CompilerEventField{name: "libraries", ty: "[String]"},
+            CompilerEventField{name: "args", ty: "[String]"},
+            CompilerEventField{name: "output_name", ty: "String"},
+            CompilerEventField{name: "output", ty: "String"},
+            CompilerEventField{name: "default", ty: "[String]"},
+        },
+    },
+}
+
+// One moment as a compile met it: its row name and its payload as one JSON
+// object whose keys are the payload row's fields, in row order. The
+// compile result carries them in the order `stages()` and `jet build
+// --json` give them.
+CompilerEventRecord: struct {
+    name: String,
+    data: String,
+}
+
+// The payload struct the moment `name` carries; "" for a name no row has.
+compiler_event_payload_name: fn(name: String) -> String Never! {
+    loop row in COMPILER_EVENTS {
+        if row.name == name -> return row.payload
+    }
+    ""
+}
+
+// The JSON object of payload struct `payload`: each of its row's fields,
+// in row order, with the JSON value at the same position of `values`.
+compiler_event_object: fn(payload: String, values: [String]) -> String Never! {
+    members := [String]{}
+    loop row in COMPILER_EVENT_PAYLOADS {
+        if row.name != payload -> next
+        loop (index, field) in row.fields {
+            value: if index < values.len() -> values[index] else -> "null"
+            members.push("{foundation_json_quote(field.name)}:{value}")
+        }
+    }
+    "{{{members.join(",")}}}"
+}
+
+// The record of the moment `name`, its payload's field values given as
+// JSON in the payload row's field order.
+compiler_event_record: fn(name: String, values: [String]) -> CompilerEventRecord Never! {
+    CompilerEventRecord{name: name, data: compiler_event_object(compiler_event_payload_name(name), values)}
+}
+
+// The JSON object of `record` that `jet build --json` lists and the session
+// wire sends: `{"event":<name>,"data":<payload object>}`.
+compiler_event_json: fn(record: CompilerEventRecord) -> String Never! {
+    "{{\"event\":{foundation_json_quote(record.name)},\"data\":{record.data}}}"
+}

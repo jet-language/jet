@@ -36,24 +36,15 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Implement `Display` for the type or use an explicit formatter.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0915</code>: <code>Tests/UI/E0915_fix_never_offers_a_failing_debug_hole.stderr</code>.</p>
-<pre class="diag">Error [jet.MissingDisplay]: `Job` has no `Display` implementation
-  --&gt; Tests/UI/E0915_fix_never_offers_a_failing_debug_hole.jet:9:21
+<p>First UI snapshot mentioning <code>E0915</code>: <code>Tests/UI/crypto_secret_display.stderr</code>.</p>
+<pre class="diag">Error [jet.MissingDisplay]: Secret-bearing `Secret` has no `Display` implementation
+  --&gt; Tests/UI/crypto_secret_display.jet:6:13
     |
-  9 |     print(&quot;running {job}&quot;)
-    |                     ^^^
- Why: Bare `{value}` interpolation calls `Display` — there is no default for user types
- Fix: Add `impl Job.Display { display: fn(self) -&gt; String { … } }`
+  6 |     print(&quot;{secret}&quot;)
+    |             ^^^^^^
+ Why: Cryptographic secrets cannot enter logs or strings through interpolation
+ Fix: Remove the interpolation; log a public operation label or key identifier instead
 More: jet-lang.dev/e/E0915
-
-Error [jet.ValueTypeMismatch]: `Job` can&#39;t be shown with :Debug yet
-  --&gt; Tests/UI/E0915_fix_never_offers_a_failing_debug_hole.jet:10:19
-    |
- 10 |     print(&quot;debug {job:Debug}&quot;)
-    |                   ^^^
- Why: Debug interpolation needs a debuggable value
- Fix: Implement `Debug` for `Job`
-More: jet-lang.dev/e/E0112
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

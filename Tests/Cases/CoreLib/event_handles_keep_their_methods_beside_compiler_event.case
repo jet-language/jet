@@ -1,0 +1,11 @@
+# Claim: core.compiler declares its own `Event` enum, a different type from core.event's built-in `Event<T>` handle. Loading core.compiler beside core.event and core.watcher leaves the handle's methods in place, both for the program's `event.new<Int>()` value and for core.watcher's `WatchHandle.on`, which subscribes through its own `Event<WatchEvent>`. Only a program that declares or imports an `Event` of its own shadows the handle.
+# Hand-derived: the one listener prints `got 7`, so the emit summary reports one delivery. One listener stays subscribed, and `CompilerStage.Parsed` is labelled `parsed`.
+fixture: EventHandlesKeepTheirMethodsBesideCompilerEvent.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run -O0 main.jet
+exit: 0 # o0
+stdout: = event_handles_keep_their_methods_beside_compiler_event.out # o0
+step: jet run -O2 main.jet
+exit: 0 # o2
+stdout: = event_handles_keep_their_methods_beside_compiler_event.out # o2

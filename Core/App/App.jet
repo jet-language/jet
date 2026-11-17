@@ -4639,12 +4639,16 @@ priv app_graph_window: fn() -> AppWindow? Never! {
 // window shows the current screen's tree (`app_window_tree`), opened again
 // when another screen opens, and routes each event to it (`__input`), which
 // keeps its focus until then; a drop on a body that takes dropped files
-// (`drop_files`) gives them to its handler (`app_window_drop`). A frame
-// draws the tree when nothing is drawn yet, the tree is new or an event
-// changed it, or the window took another size. A display that is missing
-// or fails leaves a notice.
+// (`drop_files`) gives them to its handler (`app_window_drop`). The tree is
+// opened again too when a live binding the screen read changes with no
+// input (`app_window_wake`), which wakes the frames. A frame draws the tree
+// when nothing is drawn yet, the tree is new or an event changed it, or the
+// window took another size. A display that is missing or fails leaves a
+// notice.
 priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Read, Net, Time]> Never! {
     window: ui.open(width: size.width, height: size.height, title: title) ?? return app_window_lost("{err}")
+    // Taken before the frames: a frame's wait holds the window.
+    app_window_watch(window.__waker())
     tree := ui.box([UINode]{})
     focused := -1
     drawn := false
@@ -4657,9 +4661,10 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
             if tree.__input(frame, event, focused) -> stale = true
         }
         now: app_graph_current()
-        if now != shown {
+        changed: app_window_take_stale()
+        if now != shown || changed {
+            if now != shown -> focused = -1
             tree = app_window_tree(now)
-            focused = -1
             shown = now
             stale = true
         }
@@ -4689,6 +4694,76 @@ priv app_window_tree: fn(now: AppCurrent?) -[FS.Read, Net]> UINode Never! {
 // Keeps a notice that the window couldn't be shown or kept, and why.
 priv app_window_lost: fn(why: String) Never! {
     __keep_notice(Notice{text: "Couldn't show the app's window: {why}"})
+}
+
+// The window's wake (`app_window_watch`) while it shows, and whether a live
+// binding of the screen it shows changed since it last opened the screen.
+priv AppWindowWake: struct {
+    wakes: [Sender<Int>],
+    stale: Bool,
+}
+
+priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false}}
+
+// Wakes the window's frames through `waker` (`Window.__waker`) each time a
+// change to the data its screen shows comes (`app_window_wake`): the code
+// that changes data may not touch a file, so it sends on a channel and a
+// task of the window's writes the wake.
+priv app_window_watch: fn(waker: &&sys.Fd?) -[Env, Time.Wait]> Never! {
+    fd: waker ?? return
+    pair: tasks.__channel_new<Int>()
+    held := APP_WINDOW_WAKE.guard_edit()
+    held.value.wakes = [Sender<Int>]{pair.sender}
+    relaying: task { app_window_relay(pair.receiver, fd) }
+    relaying.detach()
+}
+
+// Writes a wake to `waker` for each change `changes` brings, until the
+// channel closes. Nothing waits for the window: a full pipe already holds
+// a wake.
+priv app_window_relay: fn(changes: Receiver<Int>, waker: sys.Fd) -[Env, Time.Wait]> Never! {
+    loop {
+        _: changes.receive() ?? return
+        _: waker.write([U8]{1}, 0) ?? 0
+    }
+}
+
+// Whether a live binding of the screen the window shows changed since the
+// last call; the window then opens the screen again.
+priv app_window_take_stale: fn() -> Bool Never! {
+    held := APP_WINDOW_WAKE.guard_edit()
+    stale: held.value.stale
+    held.value.stale = false
+    stale
+}
+
+// Wakes the window's frames when one of the bindings `ids`, just
+// invalidated or given a new value, is route data of the screen it shows
+// (app_graph_route_data): its next frame opens the screen again, which
+// reads them anew. One wake waits at most: a change while one does joins
+// it. Without a window it does nothing.
+priv app_window_wake: fn(ids: [Int]) Never! {
+    if !app_graph_shows(ids) {
+        return
+    }
+    held := APP_WINDOW_WAKE.guard_edit()
+    if held.value.wakes.len() == 0 || held.value.stale {
+        return
+    }
+    held.value.stale = true
+    app_window_send(held.value.wakes[0]).drop("the window's relay holds the channel's other end while the app runs")
+}
+
+// Sends a wake to the window's relay (`app_window_relay`).
+priv app_window_send: fn(wake: Sender<Int>) Err! { wake.send(1) }
+
+// Whether one of the bindings `ids` is route data of the screen open now.
+priv app_graph_shows: fn(ids: [Int]) -> Bool Never! {
+    held: APP_GRAPH.guard_read()
+    loop id in ids {
+        if held.value.route_data.contains(id) -> return true
+    }
+    false
 }
 
 #Test("a tray shows its items, a notice can't be chosen, and an item's failed run joins the notices") {
@@ -6640,8 +6715,10 @@ live_value_state: fn<T: [Encode, Decode], E: [Encode, Decode]>(text: String) -> 
 // current: its start publishes the binding's event with `after_ms`, so a
 // watching client that read the held result reads again once it ends, and the
 // first current result after a hold publishes the event again, so every
-// watcher reads it. A push (`started` None) is current as stored. `now`, the
-// time the run began, < 0 keeps the last run time.
+// watcher reads it. A push (`started` None) is current as stored, and one
+// that changes the value wakes the app's window when it shows the binding
+// (`app_window_wake`). `now`, the time the run began, < 0 keeps the last run
+// time.
 live_store: fn(id: Int, value: String, now: Int, started: Int?) {
     if value.len() > LIVE_MAX_PAYLOAD {
         return
@@ -6650,7 +6727,8 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
         seen: live_cell_load()
         registry := live_decode(seen) ?? return
         index: live_index(registry, id) ?? return
-        if registry.records[index].value != value {
+        changed: registry.records[index].value != value
+        if changed {
             registry.records[index].value = value.copy()  // copy: a lost race retries with the same value
             registry.changes += 1
         }
@@ -6679,6 +6757,7 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
         if now >= 0 -> registry.records[index].ran_ns = now
         if live_cell_replace(seen, live_encode(registry)) {
             if event != "" -> rt_web.live_publish("live:{id}", event)
+            if started == None && changed -> app_window_wake([Int]{id})
             return
         }
     }
@@ -6689,10 +6768,11 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
 // hub: topic `live:<id>`, the event `live_event` (with the rest of its hold
 // when the binding is held). Only connections that watch that binding
 // (`watch`) receive it; one that starts watching later first receives the
-// topic's latest. A whole-source invalidation also marks every binding that
-// read `source`: of those that read it narrowed (`live_reads`), only the ones
-// whose narrowed read is in `reached`, when it is given. The binding `skip`
-// (none when 0) is never marked: its own run made the change.
+// topic's latest. The app's window wakes when it shows one of them
+// (`app_window_wake`). A whole-source invalidation also marks every binding
+// that read `source`: of those that read it narrowed (`live_reads`), only the
+// ones whose narrowed read is in `reached`, when it is given. The binding
+// `skip` (none when 0) is never marked: its own run made the change.
 live_invalidate: fn(source: String, key: String?, reached: [String]?, skip: Int) {
     loop {
         seen: live_cell_load()
@@ -6723,6 +6803,7 @@ live_invalidate: fn(source: String, key: String?, reached: [String]?, skip: Int)
         registry.ws_pushes += 1
         if live_cell_replace(seen, live_encode(registry)) {
             loop at in 0..<hits.len() -> rt_web.live_publish("live:{hits[at]}", events[at])
+            app_window_wake(hits)
             return
         }
     }

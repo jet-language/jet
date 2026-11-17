@@ -36,18 +36,18 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Move the `#SingleUse` value instead of lending or sharing it.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0142</code>: <code>Tests/UI/Ownership/two_binding_borrowed_task_list_reports_e0120.stderr</code>.</p>
+<p>First UI snapshot mentioning <code>E0142</code>: <code>Tests/UI/loop_borrowed_task_list.stderr</code>.</p>
 <pre class="diag">Error [jet.ReadOnlyValueNotOwned]: `hs` was not moved here, so this loop can&#39;t take its handles
-  --&gt; Tests/UI/Ownership/two_binding_borrowed_task_list_reports_e0120.jet:3:20
+  --&gt; Tests/UI/loop_borrowed_task_list.jet:3:15
     |
-  3 |     loop (i, h) in hs -&gt; total += (h.join() ?? 0) + i
-    |                    ^^
+  3 |     loop h in hs -&gt; total += h.join() ?? 0
+    |               ^^
  Why: Each step hands you the handle itself, and a task handle cannot be copied — so the loop takes the whole list
  Fix: Take the list: `hs: &amp;&amp;[Task&lt;Int&gt;]`, or collect the work in a canonical `task.all` or `task.group` block
 More: jet-lang.dev/e/E0120
 
 Error [jet.SingleUseLent]: `handles` still owes `consume`, so it can&#39;t be shared
-  --&gt; Tests/UI/Ownership/two_binding_borrowed_task_list_reports_e0120.jet:9:17
+  --&gt; Tests/UI/loop_borrowed_task_list.jet:9:17
     |
   9 |     print(drain(handles))
     |                 ^^^^^^^
@@ -56,9 +56,9 @@ Error [jet.SingleUseLent]: `handles` still owes `consume`, so it can&#39;t be sh
 More: jet-lang.dev/e/E0142
 
 Error [jet.SingleUseDropped]: `handles` still owes `consume`
-  --&gt; Tests/UI/Ownership/two_binding_borrowed_task_list_reports_e0120.jet:8:5
+  --&gt; Tests/UI/loop_borrowed_task_list.jet:8:5
     |
-  8 |     handles: [task 1]
+  8 |     handles: [task 1, task 2]
     |     ^^^^^^^
  Why: This value&#39;s type is `#SingleUse`, so it carries a job that has to be done — dropping it without doing that job leaves the work undone (an unjoined task, an unreleased lock)
  Fix: Consume it exactly once: pass it to a `&amp;&amp;` parameter, or `return` it — or write `#Unsafe(&quot;reason&quot;) { consume(handles) }` to discard it deliberately

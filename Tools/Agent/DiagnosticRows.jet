@@ -915,7 +915,7 @@ ui_snapshots: fn(root: String, directory: String, lint: Bool) -[FS]> [TextFile] 
     at: if root == "" -> directory.copy() else -> "{root}/{directory}"
     if !files.exists(at) -> return Ok(found)
     children := files.list_dir(at) ?? return Err(rows_fail("cannot list {directory}: {err}"))
-    children.sort_by(fn(child) { child.name })
+    children.sort_by(fn(left: files.DirEntry, right: files.DirEntry) { folded_name_order(left.name, right.name) })
     loop child in children {
         if child.name.starts_with(".") -> next
         shown: "{directory}/{child.name}"
@@ -954,7 +954,7 @@ case_snapshots: fn(root: String, directory: String) -[FS]> [TextFile] Diagnostic
     at: if root == "" -> directory.copy() else -> "{root}/{directory}"
     if !files.exists(at) -> return Ok(found)
     children := files.list_dir(at) ?? return Err(rows_fail("cannot list {directory}: {err}"))
-    children.sort_by(fn(child) { child.name })
+    children.sort_by(fn(left: files.DirEntry, right: files.DirEntry) { folded_name_order(left.name, right.name) })
     loop child in children {
         if child.is_dir || !child.name.ends_with(".warn") -> next
         loop snapshot in (owned_snapshot(root, "{directory}/{child.name}") ?? return Err(err)) {
@@ -962,6 +962,15 @@ case_snapshots: fn(root: String, directory: String) -[FS]> [TextFile] Diagnostic
         }
     }
     Ok(found)
+}
+
+// The order a page's example search walks a directory in: names compare with
+// case set aside, then by their bytes, so renaming a folder to TitleCase never
+// moves a page's example ahead of a snapshot whose name sorts before it.
+folded_name_order: fn(left: String, right: String) -> Ordering Never! {
+    folded: left.lower() <=> right.lower()
+    if folded != .Equal -> return folded
+    left <=> right
 }
 
 // Each `[jet.Name]` marker's first snapshot, as an index into `snapshots`.
@@ -1919,6 +1928,13 @@ MINIMAL_MEANING: "        meaning: \"A route that doesn't start at the root\",\n
     assert(first.get("jet.Foo") == Val(0))
     assert(first.get("jet.Bar") == Val(1))
     assert(first.get("jet.Baz") == None)
+}
+
+#Test("a page's example search orders names with case set aside") {
+    names: [String]{"CffiEnumBoundaries", "caret_is_not_power.jet", "bare_error_mark.jet", "Bare_error_mark.jet"}
+    ordered := names.copy()
+    ordered.sort_by(fn(left: String, right: String) { folded_name_order(left, right) })
+    assert_eq(ordered, [String]{"Bare_error_mark.jet", "bare_error_mark.jet", "caret_is_not_power.jet", "CffiEnumBoundaries"})
 }
 
 #Test("a page's example comes only from the snapshots the ui suite runs") {

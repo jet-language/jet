@@ -172,6 +172,7 @@ use {
         authority_expert_answer,
         AuthorityVerdict,
         CompilerThreads,
+        CompilerEventRecord,
         compiler_threads_admit,
         compiler_threads_failure_text,
         CompilerTraceSink,
@@ -466,6 +467,7 @@ jet_driver_compile_result: fn(
         allocator: jet_driver_entry_allocator(load),
         log_filter: jet_driver_entry_log(load),
         harden: jet_driver_entry_harden(load),
+        events: trace.events,
     }
 }
 
@@ -5402,7 +5404,14 @@ jet_driver_compile_stages: fn(request: JetDriverCompileRequest, kg: &JetDriverKe
         // none: every loop's value is then missing.
         loop_values = probe.root_loop_values.move() ?? jet_driver_root_loop_waits(load)
     }
+    events := if request.compiler_events -> jet_driver_load_events(load) else -> [CompilerEventRecord]{}
     result := jet_driver_compile_loaded_stages(request, kg, load, checked_projection, capture, loop_values, false)
+    if request.compiler_events {
+        finished: jet_driver_finished_event(result)
+        loop event in result.events.move() -> events.push(event)
+        events.push(finished)
+        result.events = events.move()
+    }
     loop diagnostic in layer_diagnostics -> result.diagnostics.push(diagnostic)
     // The compile is over: no comptime child may outlive it (Native.jet).
     if request.eval_config.native == .Val(session) -> jet_eval_native_session_close(session)
@@ -6109,6 +6118,11 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
     validation.values = [SemaComptimeItemValue]{}
     comptime_functions = validation.functions.move()
     validation.functions = [SemaComptimeFunctionResult]{}
+    if request.compiler_events {
+        loop event in jet_driver_checked_events(checked_graph, registration_graph.symbols, canonical_effect_module_identity) {
+            trace.events.push(event)
+        }
+    }
     if request.capture_build_nodes && checked_graph.complete && !jet_driver_has_errors(load.diagnostics) {
         jet_driver_trace_step_begin(request.trace_sink, "driver.prelower.build_nodes")
         load.build_nodes = jet_driver_build_compiler_nodes(request, load, checked_graph, canonical_effect_module_identity)

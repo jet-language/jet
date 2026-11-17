@@ -577,6 +577,14 @@ unix_wait: fn(stream: &UnixStream, timeout_ns: Int) -[Net, Time.Wait]> Bool NetE
     Ok(ready != 0)
 }
 
+// Waits like `unix_wait`, and also ends once `wake` has something to read
+// (a pipe another task writes to wake this one): bit 1 of the result says
+// `stream` is readable and bit 2 `wake`; 0 says `timeout_ns` passed.
+unix_wait_wake: fn(stream: &UnixStream, wake: sys.Fd, timeout_ns: Int) -[Net, Time.Wait]> Int NetError! {
+    ready: core.net.__unix_wait_wake_raw(stream, sys.__fd_token(wake), timeout_ns)
+    Ok(ready)
+}
+
 unix_shutdown: fn(stream: &UnixStream, how: NetShutdown) -[Net]> NetError! {
     core.net.__unix_shutdown(stream, how)
 }

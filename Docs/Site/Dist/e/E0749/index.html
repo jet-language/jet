@@ -36,16 +36,27 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Remove the offending effect, return a fallible result, add facts or a `#Pre`/refinement proof, widen the ceiling, or drop the prohibition</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0749</code>: <code>Tests/UI/Effects/library_effect_case_denial_whole_is_e0749.stderr</code>.</p>
-<pre class="diag">Error [jet.ProhibitedEffectReached]: `keep` reaches the library effect `Disk`, which it prohibits with `-[!Disk.Write]&gt;`
-  --&gt; Tests/UI/Effects/library_effect_case_denial_whole_is_e0749.jet:13:27
+<p>First UI snapshot mentioning <code>E0749</code>: <code>Tests/UI/build_io_net_denied.stderr</code>.</p>
+<pre class="diag">Error [jet.ProhibitedEffectReached]: `offline_banner` reaches the `Net` effect, which it prohibits with `-[!Net]&gt;`
+  --&gt; Tests/UI/build_io_net_denied.jet:6:25
     |
- 13 | keep: fn(path: String) -[!Disk.Write]&gt; String { load(path) }
-    |                           ^^^^^^^^^^
- Why: A `-[!Disk.Write]&gt;` row means the function and every callee it can reach must not use `Disk.Write`; a function uses a library effect when its row names the effect or one of its cases
- Fix: Remove the call that introduces `Disk`, or drop the `-[!Disk.Write]&gt;` prohibition
+  6 | offline_banner: fn() -[!Net]&gt; String {
+    |                         ^^^
+ Why: A `-[!Net]&gt;` row means the function and every callee it can reach must not use `Net`
+ Fix: Remove the call that introduces `Net`, or drop the `-[!Net]&gt;` prohibition
  Denial: invocation
- Call chain: keep
+ Call chain: offline_banner
+More: jet-lang.dev/e/E0749
+
+Error [jet.ProhibitedEffectReached]: `build` reaches the `Net` effect, which it prohibits with `-[!Net]&gt;`
+  --&gt; Tests/UI/build_io_net_denied.jet:10:24
+    |
+ 10 | build: fn(b: Build) -[!Net]&gt; {
+    |                        ^^^
+ Why: A `-[!Net]&gt;` row means the function and every callee it can reach must not use `Net`
+ Fix: Remove the call that introduces `Net`, or drop the `-[!Net]&gt;` prohibition
+ Denial: invocation
+ Call chain: build
 More: jet-lang.dev/e/E0749
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

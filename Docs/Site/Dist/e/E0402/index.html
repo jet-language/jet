@@ -36,42 +36,15 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Handle, propagate, or explicitly discard the fallible result.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0402</code>: <code>Tests/UI/SecretsExpiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths.stderr</code>.</p>
-<pre class="diag">Error [jet.MissingMoveMarker]: ExpiringSecret loan `borrowed` cannot be moved
-  --&gt; Tests/UI/SecretsExpiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths.jet:15:17
+<p>First UI snapshot mentioning <code>E0402</code>: <code>Tests/UI/discarded_pure_e0402.stderr</code>.</p>
+<pre class="diag">Error [jet.FallibleCallIgnored]: This call can fail and nothing checks it
+  --&gt; discarded_pure_e0402.jet:9:5
     |
- 15 |         consume(borrowed)
-    |                 ^^^^^^^^
- Why: The callback receives temporary read access; moving, changing, or dropping it could let the credential escape its expiry boundary
- Fix: Use the loan only for read-only operations inside this callback
-More: jet-lang.dev/e/E0201
-
-Error [jet.FallibleCallIgnored]: This call can fail and nothing checks it
-  --&gt; Tests/UI/SecretsExpiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths.jet:15:9
-    |
- 15 |         consume(borrowed)
-    |         ^^^^^^^
+  9 |     half(4)
+    |     ^^^^
  Why: A fallible result can&#39;t be ignored — handle it or say failure is impossible
  Fix: Use `?`, `??`, `panic ...`, or `.drop(&quot;reason&quot;)` to intentionally discard
 More: jet-lang.dev/e/E0402
-
-Error [jet.ReturnTypeMismatch]: This value is Int (a whole number), but this lambda returns Err!
-  --&gt; Tests/UI/SecretsExpiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths.jet:16:16
-    |
- 16 |         return 0
-    |                ^
- Why: This lambda&#39;s result is Err!, so the value it hands back must be Err!
- Fix: Hand back a Err! value: convert this value to Err!, or return the value you meant
-More: jet-lang.dev/e/E0113
-
-Error [jet.MissingErrorConversion]: This implicit fallible call can&#39;t convert `Expired` into `Err` — no declared conversion exists
-  --&gt; Tests/UI/SecretsExpiry/expiring_secret_loan_rejects_move_variadic_and_drop_paths.jet:14:17
-    |
- 14 |     _ := secret.with(fn(borrowed) {
-    |                 ^^^^
- Why: Ordinary fallible calls propagate automatically; `Expired` can reach `Err` only through `impl Err.From(Expired)`
- Fix: Handle this call locally with `??`, add `impl Err.From(Expired) { … }`, or change the return type
-More: jet-lang.dev/e/E2402
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

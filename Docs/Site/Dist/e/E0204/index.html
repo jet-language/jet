@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Pass the value only once, or pass a copy of it.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0204</code>: <code>Tests/UI/E0204_call_arg_lent_and_moved.stderr</code>.</p>
-<pre class="diag">Error [jet.UseWhileWriteActive]: `t` is already lent to this call, so `pair` can&#39;t take it here too
-  --&gt; Tests/UI/E0204_call_arg_lent_and_moved.jet:5:19
+<p>First UI snapshot mentioning <code>E0204</code>: <code>Tests/UI/borrow_conflict.stderr</code>.</p>
+<pre class="diag">Error [jet.UseWhileWriteActive]: `x` is being changed in this call, so it can&#39;t be used again here
+  --&gt; Tests/UI/borrow_conflict.jet:5:13
     |
-  5 |     print(pair(t, t))
-    |                   ^
- Why: An earlier argument lets `pair` read `t` for the whole call, so this argument can&#39;t hand the same value over
- Fix: Pass a copy to one of the two parameters with `t.copy()`
+  5 |     both(x, x)
+    |             ^
+ Why: While something is being changed through a write parameter, nobody else may be looking at it
+ Fix: Pass `x` only once, or copy first with `x.copy()`
 More: jet-lang.dev/e/E0204
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

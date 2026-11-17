@@ -36,24 +36,19 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Add the effect to the main package&#39;s `authority: { allow: [...] }` row, or for a dependency to the main package&#39;s `authority: { grants: { &quot;name&quot;: [...] } }` line, or stop using it</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0777</code>: <code>Tests/UI/MetaExpertLeafRootOnlyDependencyRaw/stderr</code>.</p>
-<pre class="diag">Error [jet.ExpertEffectNotHeld]: `shapes` needs `Meta.Code.Raw`: `install` uses it, and the main package doesn&#39;t grant it
-  --&gt; shapes/shapes.jet:1:36
+<p>First UI snapshot mentioning <code>E0777</code>: <code>Tests/UI/meta_expert_leaf_root_only_meta_leaves_code_out.stderr</code>.</p>
+<pre class="diag">Error [jet.ExpertEffectNotHeld]: `build` uses the expert effect `Meta.Code.Rewrite`, which the main package doesn&#39;t hold
+  --&gt; Tests/UI/meta_expert_leaf_root_only_meta_leaves_code_out.jet:11:10
     |
-  1 | install: fn(meta: Compiler) { meta.add(&quot;Shape: struct {{\n    id: I64,\n}}\n&quot;, scope: &quot;shape&quot;) }
-    |                                    ^^^
- Why: Only the main package holds an expert effect; a dependency uses one only where the main package lends it with `authority.grants`
- Fix: Add `authority: { grants: { &quot;shapes&quot;: [Meta.Code.Raw] } }` to the main package&#39;s manifest, or stop using `Meta.Code.Raw` in `install`
+ 11 |     meta.rewrite_body(
+    |          ^^^^^^^^^^^^
+ Why: `allow: [Meta]` holds only the effects under `Meta` that are not expert; it leaves out the expert effects `Meta.Code`, `Meta.Host`, which must be named
+ Fix: Add `Meta.Code.Rewrite` to the main package&#39;s `authority: { allow: [...] }` row, or stop using it in `build`
  Denial: expert
- Call chain: install
+ Call chain: build
 More: jet-lang.dev/e/E0777
 
-Error [jet.DependencyCheckFailed]: Dependency package `shapes` has errors
- Why: A dependency package is checked as its own package; its errors, shown above, fail every package that imports it
- Fix: Fix the errors shown above; `jet check shapes` checks that package on its own
-More: jet-lang.dev/e/E0626
-
-2 problems found
+1 problem found
 run `jet explain E0777` to learn more
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

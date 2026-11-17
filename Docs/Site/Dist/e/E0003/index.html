@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Write the complete statement form named by the diagnostic</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0003</code>: <code>Tests/UI/CffiEnumBoundaries/CffiEnumUnknownTagWidthStaysAtTheCheckedBoundary/stderr</code>.</p>
-<pre class="diag">Error [jet.InvalidStatement]: Expected a name after `fn`, found the keyword `take`
-  --&gt; Tests/UI/CffiEnumBoundaries/CffiEnumUnknownTagWidthStaysAtTheCheckedBoundary/run.jet:8:5
+<p>First UI snapshot mentioning <code>E0003</code>: <code>Tests/UI/bare_error_mark_is_not_a_contract.stderr</code>.</p>
+<pre class="diag">Error [jet.InvalidStatement]: A unit-fallible signature has no `-&gt;`
+  --&gt; Tests/UI/bare_error_mark_is_not_a_contract.jet:4:27
     |
-  8 |     take: fn(value: BadTag) -&gt; I32 = &quot;take_bad_tag&quot;
-    |     ^^^^
- Why: Names start with a letter or `_`
- Fix: e.g. `main`, `count`, `_tmp`
+  4 | bare: fn(text: String) -&gt; Int ! {
+    |                           ^^^^^
+ Why: A function that can fail but returns no value has no result payload for an arrow to introduce
+ Fix: Write `save: fn(path: String) IOError!`, or omit the contract for implicit `Err`
 More: jet-lang.dev/e/E0003
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>

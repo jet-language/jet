@@ -36,20 +36,15 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Add `Meta.Host` to the main package&#39;s `authority: { allow: [...] }` row; for a dependency, add `Meta.Host` to the main package&#39;s `authority: { grants: { &quot;name&quot;: [...] } }` line for it.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E3411</code>: <code>Tests/UI/MetaComptimeHostDependencyNotGranted/stderr</code>.</p>
-<pre class="diag">Error [jet.ImpureGateNotAllowed]: `core.files.exists()` inside `#Impure` is a Tier-2 comptime effect, but its package doesn&#39;t hold `Meta.Host`
-  --&gt; hostdep/hostdep.jet:5:24
+<p>First UI snapshot mentioning <code>E3411</code>: <code>Tests/UI/impure_helper_read_needs_the_gate.stderr</code>.</p>
+<pre class="diag">Error [jet.ImpureGateNotAllowed]: `greeting()` inside `#Impure` is a Tier-2 comptime effect, but its package doesn&#39;t hold `Meta.Host`
+  --&gt; Tests/UI/impure_helper_read_needs_the_gate.jet:15:22
     |
-  5 |         found: #run fs.exists(&quot;hostdep.jet&quot;)
-    |                        ^^^^^^
+ 15 |         text: #run { greeting(&quot;greeting.txt&quot;) }
+    |                      ^^^^^^^^
  Why: The `#Impure` block opts in to ambient I/O, but reaching the host while compiling is also the expert effect `Meta.Host`, which no package holds by default: the main package holds it by naming it, and lends it to a dependency with `authority.grants`, so the package file shows every build that touches the host.
  Fix: Add `Meta.Host` to the main package&#39;s `authority: { allow: [...] }` row; for a dependency, add `Meta.Host` to the main package&#39;s `authority: { grants: { &quot;name&quot;: [...] } }` line for it.
 More: jet-lang.dev/e/E3411
-
-Error [jet.DependencyCheckFailed]: Dependency package `hostdep` has errors
- Why: A dependency package is checked as its own package; its errors, shown above, fail every package that imports it
- Fix: Fix the errors shown above; `jet check hostdep` checks that package on its own
-More: jet-lang.dev/e/E0626
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

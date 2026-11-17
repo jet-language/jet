@@ -1,0 +1,28 @@
+# A Linux app's window redraws when a live binding its screen read changes
+# with no input. A fake compositor on $WAYLAND_DISPLAY reads the frame the
+# window draws: the board screen's blue panel, its color read through a
+# live binding. It writes first.frame once it has seen that frame; the
+# app's main task then changes the color and invalidates the binding, with
+# no input and nothing polling. The window's frame loop wakes, draws the
+# board again and the compositor reads the red panel. Then it closes the
+# window, which ends the app.
+fixture: AppWindowRedrawsWhenItsDataChanges.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+mkdir: run
+spawn compositor: jet run compositor/fake_compositor.jet
+stdout: file compositor.stdout
+stderr: file compositor.stderr
+await: file compositor.ready timeout 120s every 10ms # the fake compositor listens
+step: jet run main.jet
+env: WAYLAND_DISPLAY={work}/wl.sock
+exit: 0
+stdout: empty
+wait: compositor timeout 60s
+exit: 0
+file: compositor.stdout = "board: 200x100, panel [51, 102, 255, 255]\nwrote first.frame\nredrawn: 200x100, panel [204, 51, 51, 255]\nclosed the window\n"

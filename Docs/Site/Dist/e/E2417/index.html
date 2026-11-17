@@ -36,24 +36,24 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2417</code>: <code>Tests/UI/E0405_refutable_test_bind_route_must_diverge.stderr</code>.</p>
-<pre class="diag">Error [jet.FailureDomainNotErrorType]: Explicit failure domain `String (text)` is not an Error type
-  --&gt; Tests/UI/E0405_refutable_test_bind_route_must_diverge.jet:1:20
+<p>First UI snapshot mentioning <code>E2417</code>: <code>Tests/UI/carrier_partial_not_kept.stderr</code>.</p>
+<pre class="diag">Error [jet.FailureDomainNotErrorType]: Explicit failure domain `ImportErr` is not an Error type
+  --&gt; Tests/UI/carrier_partial_not_kept.jet:7:36
     |
-  1 | parse_age: fn() -&gt; Int String! { return .Ok(42) }
-    |                    ^^^^^^^^^^^
+  7 | import_rows: fn(rows: [String]) -&gt; [String] ImportErr! {
+    |                                    ^^^^^^^^^^^^^^^^^^^
  Why: A `!` contract may name `Err`, a Core error, a type marked `#Error`, an all-error union, or `Never`; arbitrary value types do not describe failures.
  Fix: Use a Core error, add `#Error` to a local error type, or remove the explicit error contract.
 More: jet-lang.dev/e/E2417
 
-Error [jet.FallbackTypeMismatch]: `??` must diverge after a refutable binding
-  --&gt; Tests/UI/E0405_refutable_test_bind_route_must_diverge.jet:3:40
+Error [jet.MissingErrorConversion]: This implicit fallible call can&#39;t convert `ImportErr` into `Err` — no declared conversion exists
+  --&gt; Tests/UI/carrier_partial_not_kept.jet:13:13
     |
-  3 | run: fn() { parse_age() == .Ok(age) ?? 0 }
-    |                                        ^
- Why: A failed pattern match cannot continue without defining the captures
- Fix: Use `return`, `panic(...)`, `break`, or `next` as the fallback
-More: jet-lang.dev/e/E0405
+ 13 |     spotty: import_rows([String]{})
+    |             ^^^^^^^^^^^
+ Why: Ordinary fallible calls propagate automatically; `ImportErr` can reach `Err` only through `impl Err.From(ImportErr)`
+ Fix: Handle this call locally with `??`, add `impl Err.From(ImportErr) { … }`, or change the return type
+More: jet-lang.dev/e/E2402
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

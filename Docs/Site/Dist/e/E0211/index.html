@@ -36,12 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Call `.copy()` only on a copyable value, or take the value with `.move()` instead.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0211</code>: <code>Tests/UI/CoreLibPartsDerives/user_derive_generated_non_clonable_copy_is_rejected_in_sema.stderr</code>.</p>
-<pre class="diag">Error [jet.CopyNotSupported]: `fn(Int) -&gt; Int` can&#39;t be copied
-  --&gt; Tests/UI/CoreLibPartsDerives/user_derive_generated_non_clonable_copy_is_rejected_in_sema.jet:6:53
+<p>First UI snapshot mentioning <code>E0211</code>: <code>Tests/UI/atomic_copy_noncloneable.stderr</code>.</p>
+<pre class="diag">Error [jet.CopyNotSupported]: `Atomic&lt;Int&gt;` can&#39;t be copied
+  --&gt; Tests/UI/atomic_copy_noncloneable.jet:3:42
     |
-  6 |             duplicate: fn(self) -&gt; fn(Int) -&gt; Int { self.callback.copy() }
-    |                                                     ^^^^^^^^^^^^^^^^^^
+  3 | copy_atomic: fn(value: Atomic&lt;Int&gt;) { _: value.copy() }
+    |                                          ^^^^^^^^^^
  Why: Copy needs a value made only of duplicable parts; this type holds something Jet can&#39;t duplicate — a function value, a trait value, or a type from outside Jet
  Fix: Move it instead with `.move()` if this is its last use, or change the type so every part can be copied
 More: jet-lang.dev/e/E0211

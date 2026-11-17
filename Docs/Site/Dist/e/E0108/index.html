@@ -36,33 +36,15 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Put the value in text with interpolation: &quot;{x}&quot;</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E0108</code>: <code>Tests/UI/Closures/parallel_adapters_reject_unsafe_boundaries_before_codegen_6.stderr</code>.</p>
-<pre class="diag">Error [jet.BindingTypeMismatch]: Argument 2 to `.para_fold()` should be fn(fn(Int) -[]&gt; Int Never!, Int) -&gt; fn(Int) -[]&gt; Int Never!, not fn(fn(Int) -&gt; Int, Int) -[]&gt; (fn(Int) -&gt; Int) Never!
-  --&gt; Tests/UI/Closures/parallel_adapters_reject_unsafe_boundaries_before_codegen_6.jet:4:9
+<p>First UI snapshot mentioning <code>E0108</code>: <code>Tests/UI/assert_eq_map_identity.stderr</code>.</p>
+<pre class="diag">Error [jet.BindingTypeMismatch]: This needs [String:Int], but the value is [String:String]
+  --&gt; Tests/UI/assert_eq_map_identity.jet:9:22
     |
-  4 |         fn(callback: fn(Int) -&gt; Int, n: Int) { callback },
-    |         ^^
- Why: Built-in methods need arguments of the right type
- Fix: Use fn(fn(Int) -[]&gt; Int Never!, Int) -&gt; fn(Int) -[]&gt; Int Never! here
+  9 |     assert_eq(first, labels)
+    |                      ^^^^^^
+ Why: The value here does not have the type required by this declaration
+ Fix: Use a value of the required type or convert it explicitly
 More: jet-lang.dev/e/E0108
-
-Error [jet.BindingTypeMismatch]: Argument 3 to `.para_fold()` should be fn(fn(Int) -[]&gt; Int Never!, fn(Int) -[]&gt; Int Never!) -&gt; fn(Int) -[]&gt; Int Never!, not fn(fn(Int) -&gt; Int, fn(Int) -&gt; Int) -[]&gt; (fn(Int) -&gt; Int) Never!
-  --&gt; Tests/UI/Closures/parallel_adapters_reject_unsafe_boundaries_before_codegen_6.jet:5:9
-    |
-  5 |         fn(left: fn(Int) -&gt; Int, right: fn(Int) -&gt; Int) { left },
-    |         ^^
- Why: Built-in methods need arguments of the right type
- Fix: Use fn(fn(Int) -[]&gt; Int Never!, fn(Int) -[]&gt; Int Never!) -&gt; fn(Int) -[]&gt; Int Never! here
-More: jet-lang.dev/e/E0108
-
-Error [jet.ValueNotSendable]: `parallel result` can&#39;t cross a parallel worker boundary because `fn(Int) -[]&gt; Int Never!` isn&#39;t sendable
-  --&gt; Tests/UI/Closures/parallel_adapters_reject_unsafe_boundaries_before_codegen_6.jet:2:18
-    |
-  2 |     ignored: [1].para_fold(
-    |                  ^^^^^^^^^
- Why: A function value carries executable state, not a worker data value; this concurrent boundary moves owned values between workers
- Fix: Copy plain owned data into the worker, or keep this operation sequential
-More: jet-lang.dev/e/E1102
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
 </article>

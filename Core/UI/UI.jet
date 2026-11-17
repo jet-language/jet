@@ -21,6 +21,7 @@ use {
     markup: core.text.html
     draw: __core_ui_draw
     wayland: __core_ui_wayland
+    sys: core.sys
     internal.[checksum, has_nul, without_key, without_button, leaf, backend_state, measure_tree, layout_state, mount_state, paint_state, dispatch, focus_ring, focused_text, push_scalar, float_text]
 }
 
@@ -955,6 +956,20 @@ Window: struct {
     failure: fn(self) -> UIError? {
         guard: self.state.guard_read()
         guard.value.failure
+    }
+
+    // A descriptor whose write wakes the window's frames from their wait
+    // for the display server: the next frame comes at once, with no
+    // events, so the program can draw what changed meanwhile. None for a
+    // headless window, or when it can't be made. Take it before the
+    // frames: a frame's wait holds the window.
+    __waker: fn(self) -[Env]> sys.Fd? {
+        guard: self.state.guard_read()
+        if guard.value.link == .Val(link) {
+            connection: link.guard_read()
+            return connection.value.waker()
+        }
+        None
     }
 
     // The FNV-1a checksum of each frame a headless window showed.

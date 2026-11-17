@@ -36,14 +36,14 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Declare the caller with `{source}` as its failure domain, or add `impl {target}.From({source}) { … }`; otherwise handle `{callee}` locally with `??`</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E2404</code>: <code>Tests/UI/E2404_alloc_error_into_never.stderr</code>.</p>
-<pre class="diag">Error [jet.ErrorNotPropagatable]: `try_push()` fails with `AllocError`, which can&#39;t propagate into `Never` here
-  --&gt; Tests/UI/E2404_alloc_error_into_never.jet:5:10
+<p>First UI snapshot mentioning <code>E2404</code>: <code>Tests/UI/callback_error_generic_mismatch.stderr</code>.</p>
+<pre class="diag">Error [jet.ErrorNotPropagatable]: `sort_by` fails with `PriceError`, which can&#39;t propagate into `KeyError` here
+  --&gt; Tests/UI/callback_error_generic_mismatch.jet:29:53
     |
-  5 |     rows.try_push(1)
-    |          ^^^^^^^^
- Why: `try_push()` is defined at `Core or generated callable (no user source location)` with effective failure contract `inferred failure contract`; the caller&#39;s `explicit Never! (proven unreachable)` contract has no route from `AllocError` to `Never`
- Fix: The caller is declared `Never!`, so it can&#39;t fail: declare `AllocError!` in its return type, or handle `try_push()` locally with `??`
+ 29 | sorted: fn(names: [String]) -&gt; [String] KeyError! { sort_by(names, parse_price) }
+    |                                                     ^^^^^^^
+ Why: `sort_by` is defined at `callback_error_generic_mismatch.jet:15:1` with effective failure contract `explicit E!`; the caller&#39;s `explicit KeyError!` contract has no route from `PriceError` to `KeyError`
+ Fix: Declare the caller with `PriceError` as its failure domain, or add `impl KeyError.From(PriceError) { … }`; otherwise handle `sort_by` locally with `??`
 More: jet-lang.dev/e/E2404
 </pre>
 <p><a href="../index.html">Back to all error codes</a></p>
