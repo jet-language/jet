@@ -106005,6 +106005,831 @@
       "completedAt": "2026-11-14T09:02:54.276Z",
       "questions": [],
       "retiredAt": "2026-11-17T09:04:40.835Z"
+    },
+    {
+      "id": "c00de14z",
+      "num": 956,
+      "title": "Epoch 5 gate: durable evidence and independent closeout",
+      "body": "Final integration gate for Epoch 5 Jetpack. This card owns durable evidence, clean-machine and platform acceptance, the single epoch-wide full-suite run, and independent closeout after every Epoch 5 delivery card is verified or explicitly excluded by a ratified decision. It does not implement missing child scope or substitute aggregate evidence for a child's targeted proof.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": "e5-m08-platform-acceptance",
+      "phase": "done",
+      "priority": "P1",
+      "plan": "**Goal**\nClose Epoch 5 (Jetpack) with durable evidence: integrated clean-machine, offline, platform, store, registry, environment and dogfood workflows, the single epoch-wide full-suite run, and an independent closeout. This card implements no product scope.\n\n**Current state**\n- Census 2026-09-01: every Epoch 5 card is done except this one; criteria 1 and 3 are met (no stub, skip ledger, hidden Nix shell-out or compatibility path supports a claim). #955 is done.\n- Remaining: criterion 2 (integrated workflows), criterion 4 (full suite), criterion 5 (evidence record). The criterion text names `scripts/agent/jet-env full scripts/agent/verify-full.sh`; the scripts now live at Tools/agent/jet-env and Tools/agent/verify-full.sh, which needs the milestone token (AGENTS.md \"Environment and proof\").\n- The Jetpack port to Jet (Jetpack/, #3590) is in flight; this gate proves the shipped Epoch 5 surface, not the port.\n\n**Changes**\n1. Re-run the Epoch 5 acceptance paths on the integrated tree through production components: clean machine, offline install, supported platform, store, registry, environment and dogfood workflows. Record commands, platform, artifacts and failures.\n2. Run `Tools/agent/jet-env full Tools/agent/verify-full.sh` once with the milestone token. Investigate failures; do not waive failures caused by Epoch 5 work, and card any other failure to its owner.\n3. Independent fresh-context review of the evidence; record in Tower and a dated Docs/audits/ epoch-5 closeout note.\n\n**Proof**\n- `Tools/agent/jet-env full Tools/agent/verify-full.sh` exits 0 on the integrated tree.\n- The closeout note and card log list each workflow command with exit status, platform and artifact identity, plus the reviewer's artifact id.\n\n**Batch**\nbatch-measure: milestone evidence run; no code change.\n\n**Dependencies**\nNone open (#955 done). Needs the owner's milestone token for verify-full.\n",
+      "blockedBy": [],
+      "workOrder": 3690,
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: re-phased (no building work logged since before 2026-10-20)."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Overnight proof 2026-09-29: BLOCKED. Proof is `Tools/agent/jet-env full Tools/agent/verify-full.sh`, which AGENTS.md reserves for milestone/release operation behind the required token; this worker has no token and the brief forbids project-wide suites. The clean-machine/offline/store/registry/environment dogfood workflows (crit 2) need a clean machine. Not run."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-measure."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (misc2b, Opus 5.5): F_PROOF. Epoch 5 (Jetpack) gate: every other e5 card is done (census 2026-09-01). Only the integrated workflow run, the verify-full run and the durable evidence record remain; #955 is done, so the blockedBy edge is stale. Evidence: card log 2026-09-01 census (191 cards, all done except #956); crit 1 and 3 met; Tools/agent/verify-full.sh (plan still says scripts/agent/...); Tower #955 lane done Proof owed: Tools/agent/jet-env full Tools/agent/verify-full.sh (needs the milestone token), plus the e5 clean-machine/offline/store/registry/environment dogfood workflows. Pass: verify-full exits 0 on the integrated tree, and a receipt with commands, platform and artifacts is logged on the card."
+        },
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Owner instruction 2026-09-03: this gate is its own testing card for Epoch 5 (verify-full, integrated workflows, evidence record). Its remaining criteria are the runs; nothing moves."
+        },
+        {
+          "at": "2026-09-01",
+          "by": "Main",
+          "text": "Live Epoch 5 census: 191 cards; excluding #956, every card is done and all criteria are met/verified. #955 is done although #956 still carries its stale blockedBy edge. Final gate remains open: host-integrated verify-full and durable receipt are pending, and criterion 2 still requires native macOS/Windows CI evidence. Untracked tests/jetpack_nix_closure_replay.rs must be in the target inventory before closure."
+        },
+        {
+          "at": "2026-08-19",
+          "by": "fable",
+          "text": "Naming note (board alignment 2026-08-19): the \"Epoch N gate\" title uses legacy epoch numbering from before the epoch-list rename. This card lives in e5 (jetpack), milestone e5-platform-acceptance, and gates e5 closeout. Read \"Epoch 4\"/\"Epoch 5\" as historical labels, not the current e-ids."
+        },
+        {
+          "at": "2026-08-01",
+          "by": "codex-plan-audit",
+          "text": "Plan audit: corrected the stale Epoch 4 label; this is the Epoch 5 integration and full-suite gate."
+        },
+        {
+          "at": "2026-08-01",
+          "by": "codex-plan-audit",
+          "text": "Plan audit: made this the single Epoch 5 full-suite and durable-evidence gate."
+        },
+        {
+          "at": "2026-08-01",
+          "by": "codex-plan-audit",
+          "text": "Plan audit: replaced thin generic gates with intent, production-path, failure, and targeted-proof criteria."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 6,
+          "text": "Superseded: the Epoch 5 gate is replaced by the goal-model closure rule, and examples and goldens are a standing gate.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Obsolete (CardCloser-1, verified by Main 2026-11-14): the Epoch 5 gate is superseded by the goal-model closure rule (owner overnight orders, rule 21) and the standing examples/goldens gate (ruling 11); its criteria were removed 2026-11-13.",
+          "at": "2026-11-14T13:08:41.811Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [
+        "docs/plans/epoch-4/world-class-package-manager.md",
+        "docs/spec/roadmap.md",
+        "tests/jetpack_engine.rs",
+        "tests/jetpack_dispatch.rs"
+      ],
+      "needsAcceptance": false,
+      "created": "2026-07-26T01:05:08.533Z",
+      "updated": "2026-11-14T13:08:43.314Z",
+      "updatedBy": "Main",
+      "tags": [
+        "p0-proof",
+        "batch-measure",
+        "wayfinder:task"
+      ],
+      "parentId": "c0uwol3w",
+      "probe": null,
+      "visualMedia": [],
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-14T13:08:43.314Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:09:03.403Z"
+    },
+    {
+      "id": "c0rak5ve",
+      "num": 2514,
+      "title": "Automatic build optimization: one graph, hidden units, one store",
+      "body": "Epic for docs/proposals/automatic-build-optimization.md (2026-09-01).\n\nACTUAL: jet build runs the whole front end every time, emits one Rust crate per program with dependencies flattened in, runs one rustc, and pays thin LTO over the runtime at every link. Eleven reuse mechanisms coexist with separate keys, stores, and failure rules. Measured 2026-09-01 (debug compiler; rustc/link phases unaffected): nbody edit 2.95s vs cargo release edit 0.55s; 3349-line program spends 29s in link on a no-change build; cold builds pay 17-21s compiling the runtime rlib; receipts never replay.\n\nEXPECTED: one content-addressed action graph in one machine-wide store; hidden compile units inside each package; per-unit bitcode with a persistent ThinLTO cache; persisted memoized module checks; Cranelift fast lens wired; sealed dependency unit sets; prebuilt runtime objects; live board + explain-build --html; matched Cargo benchmark with a strict win gate against out-of-box and tuned Cargo.\n\nOwner decisions 2026-09-01 are in the proposal's Appendix A. Ballots: D-BUILD-UNITS1, D-BUILD-NOCHANGE1, D-BUILD-SESSION1, D-BUILD-STORE1, D-BUILD-PREBUILT1, D-BUILDBENCH1, D-BUILD-UI1.\n\nInvariants: I1 (unsafe only in vetted internals; units ballot decides), I2 (rustc rejection is an ICE; the inline-monolith retry is deleted), I3, I4 (every new note/tool error snapshotted), I5, I6 (jet-store is std-only path dep), I9 (every hostile case differential across AOT release, AOT debug, jet run, --interpret). Hard rule: package/subpackage/workspace boundaries, authority, policy, visibility, outputs, and dependency edges never change.\n\nNon-goals: package boundary inference; de-optimizing AOT; a rustc fork; a background daemon; changes to dogfood/jetpack.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e11",
+      "milestoneId": "e11-m02-fast-compiler-loop",
+      "phase": "done",
+      "priority": "P1",
+      "plan": "## Goal\nCoordinate the automatic-build-optimization epic (`Docs/proposals/automatic-build-optimization.md`, 2026-09-01): one content-addressed action graph, hidden units inside declared package boundaries, and one store. It closes when every child card is integrated and the legacy mechanisms are gone. The epic does not implement or measure anything itself.\n\n## Current state\n- Done children: #2515, #2516, #2518, #2535, #2536.\n- Open children: #2517, #2519-#2534 (#2519 is retargeted to the self-hosted JetDriver/JetCodegen unit emission) and the measurement gate #2859.\n- Legacy names still present: `Source/ReceiptStore.rs:1933` and `Source/CmdCompile.rs:465,5547,5756` (`JET_RECEIPT_BYPASS`), `Source/RunCache.rs` (`JET_RUN_CACHE_DIR`/`JET_RUN_TRACE`), and the Tools/ callers `Tools/perf/dashboard.sh:1040-1041`, `Tools/ci/compiled-workload-runner.mjs:1037` and `Tools/agent-eval/selfhost/run.mjs:224`.\n- Criterion 3 is marked met, but `tests/hostile_invalidation.rs` does not exist (#2531 is open). That status is unsupported by the tree and should be reopened.\n\n## Changes\n1. Integrate children in proposal III.7 order:\n   - determinism, store and persisted checks (#2517);\n   - hidden units (#2519, #2520);\n   - sealed sets (#2521), ThinLTO (#2522), fast lens (#2523), run artifacts (#2524), prebuilt runtime (#2525);\n   - scheduler (#2526), board (#2527), explain-build (#2528), session (#2529);\n   - benchmark, hostile matrix (#2531), web graph, codegen, cleanup (#2534).\n\n   Each child owns its paths, proof and deletions.\n2. #2859 alone owns compiler-speed measurement and may refresh criteria 2 and 3.\n3. Criterion 4 is a source census after #2517, #2524 and #2534 land.\n\nInvariants I1/I2/I3/I4/I5/I6/I9 apply; package boundaries, authority, visibility, outputs and dependency edges never change.\n\n## Proof\n- Criterion 4: a `grep` for `BuildCache|RuntimeCache|RunCache|ReceiptStore|BuildPlanReplay|JET_TIMING|JET_RUN_TRACE|JET_RECEIPT_BYPASS|\\.jet/build-cache` over `Source/ crates/ Tools/ Docs/spec/` returns nothing.\n- `Tools/agent/jet-env cargo test --test hostile_invalidation` passes (backs criterion 3).\n- The #2859 build matrix passes against out-of-box and tuned Cargo.\n\n## Batch\nbatch-host-cli: coordination of the retained build host. Each child lands in its own batch.\n\n## Dependencies\n#2534 (cleanup) is real. So are every open child and #2859.\n",
+      "checkSteps": null,
+      "blockedBy": [
+        "c071xcez"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "2026-11-12: the dashboard.sh:1040-1041 JET_RECEIPT_BYPASS caller named in this body is removed by G4Ports-dash0 (the script is deleted, not ported)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 4 criteria from archived #2111, #3398: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4571 \"Adaptive specialization: rebuild with a run record (D-ADAPTIVE-TIER1)\" (CardTrim 2026-10-28: single-root task step of map #2514 (Automatic build optimization: one graph, hidden units, one); 2 criteria, 1 ratified decisions). Body: Implement the ratified D-ADAPTIVE-TIER1 choice (B): a profile record from real runs drives a rebuild on the one native backend, with an optional in-program re-optimize. The Cranelift JIT is retired (D-EXEC1) and is not a target. Acceptance: a record-and-rebuild loop exists and is measured in a golden. Earlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired): Owner 2026-10-04: \"would it be possible for jit to outperform aot? if we are trying to squeeze absolute maximum possible performance out of every possible scenario, is there any benefit of keeping a jit in some form, even an evolutionary modern hybrid form?\" Ruling for ton"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "Main",
+          "text": "Destination: Automatic build optimization, cross compilation, aarch64 and importers.\nNotes: Batch BIG of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: per-card criteria. Order: #2517 #4136 #758 #1346 #4571 #4727.\nDecisions so far: D-ADOPT-TIER1 (ratified=A) on #1346; D-ADAPTIVE-TIER1 (ratified=B) on #4571; D-CACHE-CONTROL1 (ratified=A) on #4727; D-BUILD-NOCHANGE1 (ratified=A) on #2517\nFog: none recorded.\nOut of scope: cards outside this list; other batches of the consolidation plan."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #2519, #2520, #2521, #2522, #2524, #2526, #2527, #2528, #2529, #2531, #2532, #2534; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #2519, #2520, #2521, #2522, #2524, #2526, #2527, #2528, #2529, #2531, #2532, #2534; their criteria are carried here verbatim as [#n] rows."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Retargeted to the Jet compiler under the Rust freeze, 2026-10-01 (owner): the Rust compiler only gets stage-zero blockers, deletions and C-ABI runtime exports. The build graph and store live in the Jet-owned CLI (D-JETCLI-HOST1); Rust work here is limited to deleting the retired caches."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-host-cli."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (jetpack1a, Opus 5.5): G_BLOCKED. This coordination epic stays open. Criteria 2-3 are met; 16 child cards and the #2859 measurement gate are still open. ReceiptStore/JET_RECEIPT_BYPASS still exist, so criterion 4 is open. Evidence: Source/ReceiptStore.rs:372 and Source/lib.rs:118-120 (ReceiptStore, RunCache still present); Source/ReceiptStore.rs:1933 (JET_RECEIPT_BYPASS); Tower: 2517,2519-2534 ready, 2859 ready; 2515/2516/2518/2535/2536 done"
+        },
+        {
+          "at": "2026-09-11",
+          "by": "Main",
+          "text": "Preparation complete: plan and exit criteria are present; linked owner choices are ratified where applicable. Ready means implementation-ready, not implemented; unresolved dependencies still block the card. DOCS ONLY."
+        },
+        {
+          "at": "2026-09-11",
+          "by": "Main",
+          "text": "Preparation complete: source-grounded plan, references and observable criteria. The epic plan is a coordination plan, but its only remaining closure gate is measurement card #2859. Preserve criteria 2 and 3 as already met and keep compiler-speed measurement ownership in #2859. DOCS ONLY; no implementation or product proof."
+        },
+        {
+          "at": "2026-09-03",
+          "by": "fable-orchestrator",
+          "text": "Epic stays open; its run-gated criteria are tracked on #2859 (owner instruction 2026-09-03). Closes when #2859 and its remaining children close."
+        },
+        {
+          "at": "2026-09-02",
+          "by": "fable",
+          "text": "Plan records child order and 'blockedBy: none' at the epic level (lint blocker-unpopulated finding)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 2,
+          "text": "The matched Cargo build matrix (tools/perf build-matrix) reports Jet/peer < 1.00 on wall clock for every cell against both the out-of-box and the tuned Cargo columns on the real-program corpus, or the owner has ratified a named exception per cell.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Obsolete (CardCloser-1, verified by Main on dev 26afb1a0e6): the Cargo build matrix was carried to #2859 (merged into #2858) and dropped there, item #59: Tools/perf/build-matrix.sh and its Cargo matrix no longer exist; the Rust implementation was deleted by c9129d174d (R7a).",
+          "at": "2026-11-14T13:08:18.637Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 3,
+          "text": "The hostile invalidation suite (30 cases, proposal III.3) passes on AOT release, AOT debug, default jet run, and jet run --interpret with identical outputs and diagnostics.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Obsolete (CardCloser-1, verified by Main): hostile_invalidation was carried to #2859 (merged into #2858) and dropped there, item #56: owner ruling, no cross-run compile cache (AGENTS.md Performance gate, landed 6714384b6e on dev).",
+          "at": "2026-11-14T13:08:19.565Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [
+        "docs/proposals/automatic-build-optimization.md"
+      ],
+      "tags": [
+        "build-optimization",
+        "p0-blocked",
+        "batch-host-cli",
+        "retargeted",
+        "wayfinder:map"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-09-02T03:37:13.935Z",
+      "updated": "2026-11-14T13:08:21.155Z",
+      "updatedBy": "Main",
+      "probe": null,
+      "visualMedia": [],
+      "criteriaLastN": 21,
+      "completedAt": "2026-11-14T13:08:21.155Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:09:03.403Z"
+    },
+    {
+      "id": "c0cshs43",
+      "num": 3029,
+      "title": "Contracts: #Pre/#Post through one checked-IR node with proof-keyed erasure, and opt-in deep checks (D-DEEP-CHECK1=A)",
+      "body": "Let developers request expensive bug checks without slowing ordinary runs. D-DEEP-CHECK1 compares one opt-in compiler control, with optional package/function targeting, against existing per-package settings. Required contracts and safety stay unchanged. Independent erased-code isolation remains #3043.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "## Goal\nDeliver D-DEEP-CHECK1=A (ratified): one opt-in compiler control for expensive in-memory checks, with optional package/function targeting, and no weakening of required contracts or safety. It extends the existing `#DebugOnly` path; it is not a second assertion mechanism.\n\nRatified A example (package \"tree\"):\n```jet\nfn run() {\n    tree := sample_tree()\n    tree.cached_size = 4\n    #DebugOnly(.deep) {\n        assert(deep_consistent(tree), \"tree size is wrong\")\n    }\n    serve(tree)\n}\n```\n`jet run app.jet` prints 4 and runs no deep check. `--deep-checks` fails before `serve`. `--deep-checks=tree` targets this package; `--deep-checks=tree.run` targets `fn run` in every version.\n\n## Current state\n- #3043 (erased-code isolation) is done, so it is a stale blocker.\n- Parser: `Compiler/JetParser/Source/Parser/Statements.jet:611` maps `Off | DebugOnly` to `Stmt.Switched(marker, body, span)`. No `.deep` argument is recognised.\n- Sema: `Compiler/JetSema/Source/Sema/Statements.jet:3304-3316` checks the erased scope against snapshots (scopes/state/context) and emits `TStmt.DebugOnly`.\n- Codegen: `Compiler/JetCodegen/Source/Codegen/Statements.jet:95-96` `jet_codegen_lower_debug_only` → `MirScopeKind.DebugOnly`, dispatched at :1908.\n- Driver: `Compiler/JetDriver/Source/Driver/Identity.jet:39` `JetDriverCompileRequest` has no check-selection field. No `--deep-checks` exists in Source/ or Compiler/ (grep).\n\n## Changes\n1. JetParser: accept `#DebugOnly(.deep)` as the only new marker argument (registered spelling). Any other argument is a registered error.\n2. JetSema: a `.deep` body keeps the current erased-scope isolation even when off: captures are read-only, only fresh non-escaping local mutation is allowed, external/authority effects are rejected transitively, `Mem.*`/Panic follow normal reachable-effect denial, and nonlocal exits are rejected. Each site records its owner (package, module, fn).\n3. JetDriver: add a typed `deep_checks` selection (off | all | scopes) to `JetDriverCompileRequest`. It resolves scopes to authored sites before checking and lowering (global, package/module/function, repeated union, same-named instance, and unmatched scope as a registered diagnostic). It keys unit, artifact and resident-module identity by the resolved sites, so equivalent selections reuse artifacts, changed selections rebuild only affected units, and missing selection metadata fails closed.\n4. JetCodegen: lower a selected `.deep` site as a live scope and an unselected one as today's erased scope.\n5. Host (Source/ CLI, REPL/notebook, debugger engines, compiler wrappers): parse `--deep-checks[=scope,...]` once into the same typed request. Sessions keep their starting selection. The flag is off in every profile. Keep `--no-prepare`/locked admission unchanged. Register the flag and diagnostics (`crates/jet-codegen/src/Prelude/Diagnostics.jet` → `node Compiler/Bootstrap/generate-diagnostic-rows.mjs`) with snapshots.\n6. Option B's settings path is not built. No SQLite bridge, Invariant revival, or public prebuilt format.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile golden contracts/deep_checks_tree` passes (default off, valid and corrupt data). `Tools/agent/jet-env jet run --deep-checks Examples/features/contracts/deep_checks_tree.jet` fails with the assert on the corrupt tree.\n- A Jet test or case row proves deep-check selection: global, package, `pkg.fn`, repeated union, unmatched scope, cache reuse on an equal selection, and a rebuild on a changed one.\n- `jet test Compiler --profile ui deep_check_` passes (captured-state write, IO effect, `return` inside the scope, unknown scope).\n\n## Batch\nbatch-jetc-driver: the selection resolution and identity keying in JetDriver are the load-bearing boundary. Parser, sema and codegen edits land in the same build.\n\n## Dependencies\nNone open (#3043 done). No performance claim is made; any perf adoption waits for the strict paired gate.\n",
+      "checkSteps": "After owner selection, implement and prove only that option. For A, prove default-off, global/package/function selection, repeated-union behavior, blocking empty/unmatched occurrences and copyable dotted method scopes, declaration ownership and same-name instances. Prove valid/corrupt outcomes, disabled type checks, no escaped facts, nonlocal-exit rejection and Panic denial. Check resolved-selection cache reuse, changed-unit rebuilds, independent resident-session selections and missing-source refusals. Exercise all applicable engines and CLI and embedded compiler-option entry points. Preserve required contracts and the strict performance policy.\n\nThis ballot is a design, not runtime evidence. Cover missing, unreadable and unsupported selection identity with and without admitted source, including the default-off request.",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c2 stays open (Main, 2026-11-13): on dev 7c2c9133ab, cases --filter erased_ gives 5 PASS and 1 KNOWN-FAILING, tests/cases/effects/erased_authority_delegations_do_not_enter_effect_facts.case, which is known-failing under #6419 (`core.process` has no item `run`). The authority family of the witness matrix is unproven until #6419 builds core.process.run."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c3 SUB G6Meta-3029c3 (E0515 exit, E0516 propagation, E0517 captured-state write, E0713 transitive external effect in #On(.Deep) bodies) queued for batch 9. Tightened-rule sweep on dev 779653d916 over Core, Compiler, Jetpack, Tools, Examples and tests/: 8 #On(.Deep) bodies, none refused (all asserts over reads and pure calls)."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "D-DEEP-SPELL1 posted for the owner's vote, after a cross-family adversarial review (Review3, sol-reviewer, 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/ballot-review.md: PASS after repair). The review added the strongest missing option, a .DeepDisabled condition on the existing #Off marker (now A, recommended), kept #On(.Deep), #DeepCheck, a revived #DebugOnly(.deep) and an ordinary checks.deep() call as B to E, and corrected the costs and edge cases. The validator reports ok. The spelling-independent request and diagnostics (G6Decl-44, E2119-E2121) proceed meanwhile."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Deep-check spelling: D-DEEP-CHECK1=A spelled the marker #DebugOnly(.deep), and D-OFF-RELEASE1=A later retired #DebugOnly, so c1 and c10 have no current marker spelling. Ballot D-DEEP-SPELL1 is drafted at $JET_SCRATCH_ROOT/lanes/G6Decl/ballot-deep/D-DEEP-SPELL1.json (options A #On(.Deep), recommended; B #DeepCheck; C #DebugOnly(.deep); D if checks.deep(), which can't see its scope unless it's folded per declaration, so it would be a hidden marker that duplicates #Off). Validate.jet passes. It waits for its cross-family adversarial review in the next free agent slot, and then goes to the owner. The scope flag spelling is --deep-checks=tree.run, since :: is retired. G6Decl is building the spelling-independent parts meanwhile."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Ballot D-PREPOST-STRIP1 withdrawn 2026-11-11 after an adversarial rewrite (owner order: confusing or parallel ballots are redone, and questions an existing mechanism answers are decided rather than balloted). Decided: Add strip_contracts as an owned-module list in the existing build-option table; checks stay on by default and stripping never supplies safety proof. It extends: origin/dev:Compiler/JetFoundation/Source/Registry/BuildOptions.jet:1-21 defines one row across profiles, flags and build methods; :30-45 defines removal metadata. origin/dev:Compiler/JetSema/Source/Sema/Contracts.jet:709-715 owns checked versus proved dispositions. D-PREPOST1 outcome A explicitly approves per-module build-policy stripping. The full record is $JET_SCRATCH_ROOT/lanes/Main/ballots-v4/D-PREPOST-STRIP1/verdict.md. Withdrawal decides the direction; it does not mean the build is done."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "G6Decl-1's notes: c12 (a web require breach) is blocked on the #5201 web stop path (a failed assert or panic traps \"unreachable\" with exit 134 on wasm), and c14 is the D-PREPOST-STRIP1 ballot."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c12 is partly done by G1Lead-3-contracts (landed 973d760c89): a #Pre breach reports the call site and a #Post breach the body, with E3005 on every tier. No `require` surface exists to pin, so c12 stays open for that part."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Tagged G6 and retitled: this is the contracts card now. D-DEEP-CHECK1=A is ratified (c1 rewritten). Gained #5201 c13-c17 (the #Pre/#Post stream, was #1531). c10's proof no longer cites the retired Rust tests."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c10: Examples/features/contracts/deep_checks_tree.jet -> Examples/ErrorsAndEffects/Contracts/DeepChecksTree.jet [new path does not exist yet: the criterion still has to create it]."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main: the --deep-checks scope selector names Jet paths, so it follows D-DECL-COLON1 (`.` separates package and function); the cargo proof line is replaced by a Jet row. CardCleanup Q(a)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Retargeted to the Jet compiler under the Rust freeze, 2026-10-01 (owner): the Rust compiler only gets stage-zero blockers, deletions and C-ABI runtime exports."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-jetc-driver."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (misc2b, Opus 5.5): E_BUILD. D-DEEP-CHECK1=A ratified and blocker #3043 done. No .deep / --deep-checks surface exists; the DebugOnly path it extends is present in the Jet compiler. Evidence: Compiler/JetParser/Source/Parser/Statements.jet:610 (Off|DebugOnly -> Stmt.Switched); Compiler/JetSema/Source/Sema/Statements.jet:3273-3283 (erased-scope check, TStmt.DebugOnly); Compiler/JetCodegen/Source/Codegen/Statements.jet:95 (lower_debug_only); Compiler/JetCodegen/Source/Emit/Operations.jet:1920 (DebugOnly emits ()); grep of Compiler/Source for deep-checks and .deep: no match"
+        },
+        {
+          "at": "2026-09-11",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-09-11",
+          "by": "Main",
+          "text": "Owner-requested ballot redesign: replaced all-or-nothing A with one switch that can target existing packages/modules/functions. Reuse resolved matching artifacts and rebuild only affected code. Moved diagnostic isolation into one technical contract; retained safety, permissions and source-admission obligations. No implementation or runtime proof."
+        },
+        {
+          "at": "2026-09-11",
+          "by": "Main",
+          "text": "D-DEEP-CHECK1 is owner-ready after fresh beginner and adversarial review and zero ballotGaps. Replaced stale option-order criteria with the complete selected-model contract; implementation remains blocked on the open decision and #3043. DOCS ONLY."
+        },
+        {
+          "at": "2026-09-10",
+          "by": "idea-prep",
+          "text": "Prepared from the owner interview on 2026-09-10 and checked against existing ownership. Implementation and runtime proof have not run; criteria remain open. The orchestrator owns future integration and closure."
+        },
+        {
+          "at": "2026-09-10",
+          "text": "Promoted from Ideas"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-DEEP-CHECK1=A is built: #DebugOnly(.deep) marks an in-memory check once, and one compiler switch turns on every deep check or only selected packages or functions; required contracts and safety checks stay on either way. A case proves the global, package/module/function, repeated-union, same-named-instance and unmatched-scope behavior. Separate tools and foreign libraries are not silently reconfigured.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 7c2c9133ab (built in 63b7f3ae40): cases marker_cutover/on_deep_runs_only_where_deep_checks_select 1/0. Lander5, gate-p60 jet on an export of dev 7c2c9133ab ($JET_STATE_ROOT/lander3-tmp/rows3029/).",
+          "at": "2026-11-14T08:09:45.724Z"
+        },
+        {
+          "n": 2,
+          "text": "#3043 is closed on its complete witness matrix. Required Pre/Post and safety remain unchanged; removed code supplies no live semantic facts or effect edges.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 26afb1a0e6 (GoalsA-1, gate-p62 jet, 2026-11-14): #3043 is archived done with all 6 criteria DURABLE in the closure audit (CLOSURE-AUDIT-v2.tsv:10433-10438, 97fe25181b). Witnesses: jet test Compiler --profile ui --filter erased_ -> 5/0 (effects/erased_scope_restores_refinement_and_effect_facts: an erased #Off scope supplies no refinement and no FS effect edge, the active one is E0740); --profile cases --filter erased_ -> 5 PASS + 1 KNOWN-FAILING (erased_authority_delegations_do_not_enter_effect_facts, fixture calls retired process.run, tracked #6419); --profile cases --filter deep_checks_grant_no_effect_and_leave_assertions_panicking -> 1/0; --profile golden --filter DeepChecksTree -> 1/0 (required Pre/Post stay on).",
+          "at": "2026-11-14T13:04:27.293Z"
+        },
+        {
+          "n": 3,
+          "text": "A always type-checks its diagnostic scope: captured state is read-only, only fresh nonescaping local mutation is permitted, and external/authority effects are rejected transitively. Private Mem.* work and Panic obey normal reachable-effect denial. B receives no special key semantics. Nonlocal exits from the enclosing function or loops are rejected even when the diagnostic scope is disabled.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 7c2c9133ab (3e68c54798, 13ee30dce9): ui deep_check_break 1/0, deep_check_changes_state 1/0, deep_check_effect 2/0, deep_check_try 1/0, deep_check_effect_through_calls 1/0. Lander5, gate-p60 jet on an export of dev 7c2c9133ab ($JET_STATE_ROOT/lander3-tmp/rows3029/).",
+          "at": "2026-11-14T08:09:47.400Z"
+        },
+        {
+          "n": 4,
+          "text": "A defaults off in every profile. CLI and embedded compiler options share one typed request and resolved meaning. Bare/deep eligibility, standalone -- and debugger behavior match the ballot. REPL/notebook/dev selections are immutable per session; a new selection neither resets nor migrates the old session.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 7c2c9133ab (13ee30dce9, 54baa177a8, 63b7f3ae40): cases marker_cutover/deep_checks_follow_a_repl_session_as_it_changes 1/0; ui deep_checks_unmatched_scope, deep_checks_unknown_scope, deep_checks_malformed_scope and deep_checks_dotted_scope each 1/0. Lander5, gate-p60 jet on an export of dev 7c2c9133ab ($JET_STATE_ROOT/lander3-tmp/rows3029/).",
+          "at": "2026-11-14T08:09:49.210Z"
+        },
+        {
+          "n": 7,
+          "text": "One complete tree example proves valid/corrupt and on/off outputs with one traversal. Application/library targeting, declaration ownership, transitive effect denials, resident changes and missing-source boundaries have focused evidence on every applicable engine.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 7c2c9133ab (13ee30dce9, 95534ec9b7): golden Examples/ErrorsAndEffects/Contracts/DeepChecksTree (one tree, valid and corrupt, on and off, one traversal) 1/0; cases marker_cutover/deep_checks_belong_to_the_package_and_function_that_declare_them 1/0. Lander5, gate-p60 jet on an export of dev 7c2c9133ab ($JET_STATE_ROOT/lander3-tmp/rows3029/).",
+          "at": "2026-11-14T08:09:50.414Z"
+        },
+        {
+          "n": 8,
+          "text": "O0, O1, O2 and web where applicable preserve one selected meaning. Ordinary assertions retain Panic and no implicit grant; no SQLite bridge, revived Invariant mechanism, compatibility branch or public prebuilt format is introduced.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 7c2c9133ab (13ee30dce9): cases marker_cutover/deep_checks_grant_no_effect_and_leave_assertions_panicking 1/0 and marker_cutover/deep_check_tree_keeps_its_meaning_on_web 1/0; the DeepChecksTree case steps run O0, O1 and O2 (--release) with one output. Lander5, gate-p60 jet on an export of dev 7c2c9133ab ($JET_STATE_ROOT/lander3-tmp/rows3029/).",
+          "at": "2026-11-14T08:09:51.893Z"
+        },
+        {
+          "n": 10,
+          "text": "Proof: a golden example contracts/deep_checks_tree (to be written; it is not on dev 6a06b917cb) prints its default-off output under jet run, stops before serve under jet run --deep-checks, and honors --deep-checks=tree, --deep-checks=tree::run and an unmatched scope (a registered diagnostic with a UI snapshot), on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 7c2c9133ab (95534ec9b7): golden DeepChecksTree 1/0. Its Examples/ErrorsAndEffects/Contracts/DeepChecksTree.case runs off, --deep-checks, --deep-checks=tree, --deep-checks=tree::run and the unmatched tree::nowhere (E2120) as steps at --optimize=none, basic and --release. The unmatched-scope UI snapshot is ui deep_checks_unmatched_scope 1/0. Lander5, gate-p60 jet on an export of dev 7c2c9133ab ($JET_STATE_ROOT/lander3-tmp/rows3029/).",
+          "at": "2026-11-14T08:09:53.836Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #1531 c1) #Pre and #Post lower through one contract node in the checked IR; no tier-specific contract path remains. (was #5201 c13)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 97462b6d92 (train t19, 0efcf91a49..97462b6d92), SUB G6Decl-1. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t19/REPORT.md). The checked IR's .Contract and .ContractScope statements are lowered only by JetIR BuildContracts.jet ir_contract/ir_contract_scope. Native O0/O1/O2, the built binary and wasm all compile that one IR, and no other backend matches a contract node. contract_breach_output_matches_aot_jit_and_interpreter and web_contracts_execute_with_canonical_e3005_on_js_and_wasm (now built with --target web and run under node, exiting 70 with the E3005 report; its known-failing row is removed) both pass.",
+          "at": "2026-11-11T04:40:46.483Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #1531 c2) A #Pre breach reports the call site and a #Post or require breach reports the body, on every tier, with the E3005 report from the stop family [precut audit: failing on 9c7ddf1359: C:web_build/web_contracts_execute_with_canonical_e3005_on_js_and_wasm KNOWN-FAILING #5201 pins the retired JS emitter's build (manifest `\"status\": \"m2\"`, JS output and exports); the wasm build writes none of it: file byte predicat (known-failing…] (was #5201 c14)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main goal sweep 2026-11-13 on the batch-15 jet (gate-p20, dev 734568e5cd): jet test Compiler --profile cases --filter web_build/web_contracts_execute_with_canonical_e3005_on_js_and_wasm gives PASS with 0 FAIL, 0 KNOWN-FAILING and 0 ERROR (Lander5 sweep, results row in $JET_SCRATCH_ROOT/lanes/Main/sweep/results.tsv).",
+          "at": "2026-11-14T00:44:59.116Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #1531 c3) A condition proved by an interval fact emits no runtime check; a targeted test compares emitted code with and without the proof [precut audit: failing on 9c7ddf1359: C:web_build/web_contracts_execute_with_canonical_e3005_on_js_and_wasm KNOWN-FAILING #5201 pins the retired JS emitter's build (manifest `\"status\": \"m2\"`, JS output and exports); the wasm build writes none of it: file byte predicat (known-failing…] (was #5201 c15)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 97462b6d92 (train t19, 0efcf91a49..97462b6d92), SUB G6Decl-1. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t19/REPORT.md). contract_interval_proof_erases_only_the_runtime_check compares `jet emit --ir --fn run`: an unproved #Pre keeps the gt and the jet_rt_require_stop, while #Pre(value.raw() > 0) on Positive: distinct Int(1..10) emits neither, and both print 1 at O0 and O2.",
+          "at": "2026-11-11T04:40:47.745Z"
+        },
+        {
+          "n": 14,
+          "text": "(was #1531 c4) The ratified explicit per-module strip from D-PREPOST1 still works and is unchanged; erasure under proof is a second, proof-keyed disposition [precut audit: failing on 9c7ddf1359: C:web_build/web_contracts_execute_with_canonical_e3005_on_js_and_wasm KNOWN-FAILING #5201 pins the retired JS emitter's build (manifest `\"status\": \"m2\"`, JS output and exports); the wasm build writes none of it: file byte predicat (known-failing…] (was #5201 c16)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main goal sweep 2026-11-13 on the batch-15 jet (gate-p20, dev 734568e5cd): jet test Compiler --profile cases --filter web_build/web_contracts_execute_with_canonical_e3005_on_js_and_wasm gives PASS with 0 FAIL, 0 KNOWN-FAILING and 0 ERROR (Lander5 sweep, results row in $JET_SCRATCH_ROOT/lanes/Main/sweep/results.tsv).",
+          "at": "2026-11-14T00:45:00.149Z"
+        },
+        {
+          "n": 15,
+          "text": "(was #1531 c5) I9 parity inside this card: one contracts example produces byte-identical stop output on O0, O1 and O2, and `jet run` no longer skips contracts [precut audit: failing on 9c7ddf1359: C:web_build/web_contracts_execute_with_canonical_e3005_on_js_and_wasm KNOWN-FAILING #5201 pins the retired JS emitter's build (manifest `\"status\": \"m2\"`, JS output and exports); the wasm build writes none of it: file byte predicat (known-failing…] (was #5201 c17)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G1Lead-3-contracts. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md).",
+          "at": "2026-11-10T05:07:02.834Z"
+        },
+        {
+          "n": 16,
+          "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (D-DEEP-CHECK1 #DebugOnly(.deep) and the deep-check switch). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in light2 (980e02feb4..6fd8510b1f, Lander5), proved on the batch-15 jet (gate-p20) over the fit tree: 0cb4e5f19b plus the #DebugOnly(.deep) rows: jet self devtools grammars, then git status --short Tools/editors is empty; guards grammar 9/0; the Data/Syntax row and the syntax-decisions entry exist (grep hits 1/1).",
+          "at": "2026-11-14T01:18:24.720Z"
+        }
+      ],
+      "refs": [
+        "b0xyh7ro",
+        "D-CANVASSTATE1",
+        "D-PREPOST1",
+        "docs/spec/syntax-decisions.md",
+        "crates/jet-sema/src/Sema/CheckerCore/statements.rs",
+        "crates/jet-foundation/src/Syntax/core_surface.rs",
+        "crates/jet-driver/src/Driver/mod.rs",
+        "#2919",
+        "#3043",
+        "D-CONF-KEY1",
+        "D-CONF-MERGE1",
+        "D-HARDENED1",
+        "examples/features/packages/typed_settings/package.jet",
+        "examples/features/packages/typed_settings/run.jet"
+      ],
+      "tags": [
+        "cluster-jetsema-deep-checks",
+        "batch-jetc-driver",
+        "retargeted",
+        "wayfinder:task"
+      ],
+      "parentId": "c018gdah",
+      "needsAcceptance": false,
+      "created": "2026-09-10T22:59:00.365Z",
+      "updated": "2026-11-14T13:04:29.087Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 19,
+      "completedAt": "2026-11-14T13:04:29.087Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:09:03.403Z"
+    },
+    {
+      "id": "c0aqxcv5",
+      "num": 4486,
+      "title": "jetos NixOS backend: boot.kernel.profile defaults to latest for arbitrary values; standalone profile accepted without kernel",
+      "body": "crates/jetpack/src/JetOS/nixos_backend.rs 394-400: an arbitrary boot.kernel.profile value silently defaults to the latest kernel, and a profile without a kernel declaration is accepted. Possible conflict with D-JOS-NIXBACKEND1=C (no silent drops). The Jet port preserves the Rust behavior exactly until the owner decides whether unknown profiles should refuse (E1291) or map.",
+      "kind": "idea",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Obsolete: no NixOS backend exists to default boot.kernel.profile.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Obsolete (CardCloser-1, verified by Main on dev 26afb1a0e6): crates/jetpack/src/JetOS/nixos_backend.rs was deleted in c9129d174d (R7a); git grep -il nixos Jetpack/JetOS/Source and git grep boot.kernel.profile Jetpack both empty. D-NIX-FREE1=A rules out Nix; D-JOS-BOOTKERNEL2=B owns the kernel default.",
+          "at": "2026-11-14T13:08:26.929Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-03T17:00:27.393Z",
+      "updated": "2026-11-14T13:08:28.514Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T13:08:28.514Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:09:03.404Z"
+    },
+    {
+      "id": "c0uh3nvf",
+      "num": 5456,
+      "title": "JetOS security update lane: fixes apply within a window, separate from feature pins, with automatic rollback",
+      "body": "A declaration pins features, but security fixes flow on their own lane and apply within a declared window. Each update builds a new generation, switches atomically, runs health checks (boot, services, declared probes) and rolls back automatically on failure. People skip updates because they fear breakage; this removes the fear. Owner question Q1 on the parent (automatic by default or opt-in). Related: #3033.",
+      "kind": "idea",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Duplicate of #5455 (direction 2: the security update lane).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Duplicate (CardCloser-1, verified by Main): the security update lane is #5455 direction 2 plus its owner question on automatic vs opt-in updates (a ballot); the built half is frozen #845 (D-JOS-LIFECYCLE1=A).",
+          "at": "2026-11-14T13:08:30.355Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c00tizy7",
+      "needsAcceptance": false,
+      "created": "2026-10-23T08:10:31.463Z",
+      "updated": "2026-11-14T13:08:31.987Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T13:08:31.987Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:09:03.404Z"
+    },
+    {
+      "id": "c0pqgjqc",
+      "num": 5461,
+      "title": "Per-program authority on JetOS, and capability-limited AI agent sessions by default",
+      "body": "Every JetOS program and service declares its authorities (files, network, devices, spawn) and is refused anything else, so a compromised component (for example an image parser) has nowhere to go. Software run by AI agents gets a capability-limited sandbox by default, and widening it is an explicit, logged grant, which limits prompt-injection damage. Related: #4195, #4268.",
+      "kind": "idea",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Duplicate of #4268 c20, c23, c24 and #5455 direction 5.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Duplicate (CardCloser-1, verified by Main): per-program authority is #4268 c20/c23/c24 (the declared fs/process/network/device policy enforced by the platform backend; agent_executor shares one policy digest and fails closed); sandbox-by-default for agent sessions is #5455 direction 5 (ballot).",
+          "at": "2026-11-14T13:08:33.925Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c00tizy7",
+      "needsAcceptance": false,
+      "created": "2026-10-23T08:10:39.884Z",
+      "updated": "2026-11-14T13:08:35.872Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T13:08:35.872Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:09:03.404Z"
+    },
+    {
+      "id": "c0cyzxlq",
+      "num": 6716,
+      "title": "Dev stays buildable by the admitted seed: compiler-side uses of new Core and runtime API land one seed later",
+      "body": "The 2026-11-09 all-land left dev unbuildable by seed a0_041. The compiler and its seam packages (JetCli, JetTestKit, the runtime pack, build.jet) used Core and runtime API that landed in the same batch, so a0_041's sema refused them. A bisect over a1fb1f809e..c5e353595a found 2f6cbd424d (JetCli Request.jet imports private core.devtools toolchain_core_asset), which cascades into about 1040 errors. Other two-step uses: the core.math __to_bits_f32/__from_bits_f32 typed rows; core.tasks quiesce, cpu_ns, current_task and TaskID as a map key; core.testing.skip; the os_fill_words_i64 runtime intrinsic; the deleted Core/Game/Raylib.jet that the seed's compiled-in Core table names; and Compiler/test.jet's TestRows filter/selects. Main bootstrapped through a shimmed tree (bootstrap-only rewrites, never committed). The rule needs a gate: the census preflight must build the compiler with the admitted seed before a landing, and the landing must refuse a compiler-side use of API the seed lacks. The guidance must say to stage such uses behind the next seed.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The census preflight checks and builds the compiler with the admitted seed, and a launch without a clean receipt from that seed is refused. Proof: jet test Tools/agent/Land.jet --filter 'a receipt admits only the source identity'.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 26afb1a0e6 (CardCloser-1, gate-p62 jet, 2026-11-14): jet test Tools/agent/Land.jet --filter 'a receipt admits only the source identity' -> 1 passed. Land.jet census phase A runs check Compiler/JetCli and build Compiler with seed_dir(); Chain.jet and the release tools refuse without the receipt (landed 82813834b7, 6e90d19243).",
+          "at": "2026-11-14T13:08:54.706Z"
+        },
+        {
+          "n": 2,
+          "text": "The landing refuses a submission whose touched files carry a seed check row (Land.jet prebuild_gate, rule 1) unless its meta declares a seed: split, and intake.md tells workers to stage such uses behind the next seed (part a / part b). Proof: Tools/agent/Land.jet prebuild_gate and seed_split; .agents/skills/orchestration/references/intake.md.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 26afb1a0e6: Tools/agent/Land.jet prebuild_gate (rule 1) and seed_split (Land.jet:2477, used at :2645), landed by 82813834b7 (Land batch train rules) and 6e90d19243 (rule 1 durable); intake.md lines 53-58 (part a / part b, seed: split) and 115-120 (gate before the build), landed by 8ef5415943. Checked by Main.",
+          "at": "2026-11-14T13:08:55.747Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T11:36:13.235Z",
+      "updated": "2026-11-14T13:08:57.438Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-14T13:08:57.438Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:09:03.404Z"
+    },
+    {
+      "id": "c09ok528",
+      "num": 3410,
+      "title": "Complete LSP 3.18 protocol negotiation and lifecycle",
+      "body": "## Outcome\n\nDeliver the complete applicable LSP 3.18 protocol contract through the real Jet server, with truthful capabilities and an executable applicability inventory.\n\n## Shared stream contract\n\nThis card owns its Outcome, implementation plan, and criteria. The rules below are shared context for the complete idea stream. Sibling cards own the other portions; they are not duplicate acceptance work on this card.\n\n- All current stable LSP 3.18 Jet-applicable capabilities crossed with every applicable Jet construct. Explicit reason for each inapplicable item; no advertised empty/no-op implementations.\n- Real end-to-end VS Code, Zed, Neovim acceptance; protocol harness also required. No notebook visual or Canvas-node redesign.\n\n## Origin and authority\n\nSource idea `bhg7rahc`, recorded 2026-09-12T19:16:49.469Z:\n\nInspect LSP standard to ensure 100% jet support",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "**Goal**\nThe real Jet LSP server implements the complete applicable stable LSP 3.18 protocol and lifecycle contract. It advertises capabilities truthfully, negotiates client support, and ships an executable applicability inventory. Any N/A needs a concrete reason; unknown or unimplemented behavior never counts as inapplicable. Real VS Code, Zed and Neovim acceptance is also required. There is no notebook visual or Canvas-node redesign. The server stays in the Rust CLI host, since LSP is part of the retained host boundary.\n\n**Current state**\n- The server is `Source/LSP/Server.rs`. The old path `crates/jet-codegen/src/Source/LSP` is stale. Other LSP modules: `Check.rs`, `Features.rs`, `Completion.rs`, `Position.rs`, `SymbolDB.rs`, `Adapter.rs`, `EnvironmentResources.rs`.\n- Dispatch: `Server.rs:354-357` handles `initialize` by calling `configure_workspace_roots` and then `initialize_response(id)`. The response ignores the client capabilities.\n- The static capability JSON near :551 carries the MCP-shaped `\"protocolVersion\": \"2025-11-25\"` mixed into LSP initialize.\n- There is no `positionEncoding` negotiation anywhere (`Position.rs` fixes one encoding).\n- Cancellation returns -32800 before and after running (`Server.rs:253-258`).\n- `tests/lsp.rs:765` `lsp_initialize_capabilities_have_named_test_coverage` is a source-marker test. The card says to delete it rather than re-pin it.\n- #3196 owns overlapping-edit freshness and cancellation release (`tests/lsp.rs:3188`).\n\n**Changes**\n1. Add `Tools/lsp/lsp-3.18-inventory.json`, pinned to the official 3.18 spec. It lists every request, notification, capability, option and lifecycle rule, each marked applicable, client-dependent or N/A with a reason and a witness test name. Add `Tools/lsp/check-inventory.mjs` to validate it.\n2. `Server.rs`:\n   - Parse client capabilities on `initialize`, and advertise only complete handlers.\n   - Negotiate `positionEncoding` (utf-16 default, utf-8/utf-32 when offered) through `Position.rs`.\n   - Separate the LSP initialize result from MCP initialization data without breaking a distinct MCP consumer.\n   - Add dynamic registration where the client supports it, `$/progress` and workDoneProgress, `$/setTrace`/`$/logTrace`, `shutdown`→`exit` ordering (requests after shutdown get InvalidRequest), and correct partial-frame and ContentModified/RequestFailed errors.\n3. `tests/lsp.rs`:\n   - Delete `lsp_initialize_capabilities_have_named_test_coverage`.\n   - Add the `lsp318_*` fixtures: UTF-8/UTF-16 positions over non-BMP text, partial messages, request/notification errors, cancellation races, versioned edits, disconnect, and client-feature negotiation.\n4. Update the client-facing 3.17 wording to the exercised 3.18 contract.\n\n**Proof**\n- `Tools/agent/jet-env cargo test --test lsp -- lsp318_` → pass.\n- `node Tools/lsp/check-inventory.mjs` → no unknown or unwitnessed row.\n- Real-editor acceptance: VS Code, Zed and Neovim session transcripts attached to the card.\n\n**Batch**\nbatch-host-cli: Source/LSP.\n\n**Dependencies**\n#3196 (freshness and cancellation proof, criterion 4).",
+      "checkSteps": "After rebuilding, launch the actual LSP process through a framed protocol harness. Exercise initialize/initialized, negotiated encodings, didOpen/didChange/didClose, errors, cancellation, progress, shutdown/exit, and malformed framing. Run only the focused conformance matrix plus #3196 witnesses; capture requests, responses, source versions, and exit behavior.\n\nExisting focused starting commands, not yet run and not substitutes for the full criterion witness:\nscripts/agent/jet-env cargo test --test lsp lsp_json_transcripts\nscripts/agent/jet-env cargo test --test lsp lsp_incremental_sync_rejects_stale_and_malformed_edits",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: the open decision in this card is drafted as owner ballot D-LSP-SESSION1 (draft for Main to file). The card text is background, not the decision."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: Implementation homes named in this card (Rust crates and host files, TIR/MIR/LIR, the JIT, generated Rust) are retired. The work lands in Compiler/ and Core/ on the JetIR path (#5073) with Rust removed (#4717); the rest of the card stands."
+        },
+        {
+          "at": "2026-10-17",
+          "by": "Main",
+          "text": "D-INCR-PARK1=C (2026-10-17) amends D-LSP1: one compiler service stays, and editor answers recheck the whole package per edit (no item-level reuse). D-SESSION-MCP1=A bears on c2/c5: the JetLSP port's MCP methods and initialize fields (Requests.jet:17-19, :86, :156) are removed by N4."
+        },
+        {
+          "at": "2026-10-17",
+          "by": "Main",
+          "text": "Session ballots ratified 2026-10-17: WIRE1=A (NDJSON jet.session.v1), ENTRY1=C (`--listen=-` on check/build/test/run/dev; no hidden `__session`), OWNER1=A (`jet dev --serve` and `jet self lsp --serve`), COMPILER-EVENT1=A (one compiler.Event enum; work on #5009), JETPACK-SERVICE1=A (Jetpack uses `jet check --listen=-`), MCP1=A (the LSP speaks only LSP; MCP adapter over the session). Follow-through cards N1-N4 ($JET_SCRATCH_ROOT/discovery/ballots/cards.json). D-LSP-BUILDSAVE1 is still open on this card."
+        },
+        {
+          "at": "2026-10-17",
+          "by": "Main",
+          "text": "Owner 2026-10-17: the LSP is 1:1 Rust-to-Jet parity work and is ported onto the one compiler session (D-LSP1=C); the plan line keeping the LSP in the Rust host is superseded. Existing Jet port on origin/port/tools (Compiler/JetLSP) is being revived (PortToolsRevive)."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3003, #3411, #3412, #3413; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Retargeted to the Jet compiler under the Rust freeze, 2026-10-01 (owner): the Rust compiler only gets stage-zero blockers, deletions and C-ABI runtime exports."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-host-cli."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (toolwebmem1a, Opus 5.5): G_BLOCKED. LSP protocol/lifecycle completion is still open: Source/LSP/Server.rs dispatches handlers, but there is no positionEncoding negotiation or 3.18 applicability inventory. The card is blocked on #3196 (freshness/cancellation proof, planning). The server is Rust in the CLI host, and the new direction does not say whether it stays there. Evidence: Source/LSP/Server.rs:383-387 (dispatch); no `positionEncoding` anywhere in Source/, crates/, or Compiler/; tower #3196 phase=planning"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 11,
+          "text": "Duplicate of #4917, which carries this card's c2 and c3 (merged) and the LSP 3.18 inventory criterion.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Duplicate (CardCloser-1, verified by Main): #4917 carries '(merged from #3410 c2)', '(merged from #3410 c3)' and the LSP 3.18 inventory criterion; #3410's plan names the deleted Rust Source/LSP/Server.rs.",
+          "at": "2026-11-14T13:12:21.042Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [
+        "https://microsoft.github.io/language-server-protocol/specifications/lsp/3.18/specification/",
+        "Source/LSP/Server.rs",
+        "#3196",
+        "crates/jet-codegen/src/Source/LSP/Server.rs",
+        "crates/jet-codegen/src/Source/LSP/Check.rs",
+        "crates/jet-codegen/src/Source/LSP/Adapter.rs"
+      ],
+      "tags": [
+        "idea-prep-2026-09-14",
+        "p0-blocked",
+        "batch-host-cli",
+        "retargeted",
+        "wayfinder:task"
+      ],
+      "parentId": "c0bk3yid",
+      "needsAcceptance": false,
+      "created": "2026-09-15T00:25:00.352Z",
+      "updated": "2026-11-14T13:12:22.631Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 11,
+      "completedAt": "2026-11-14T13:12:22.630Z",
+      "questions": [
+        {
+          "id": "q0d271iq",
+          "cardId": "c09ok528",
+          "decisionId": "D-LSP-BUILDSAVE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "I think this is probably something that should happen with a check command OR be something that is opt in for on save. Given ability to execute comptime code, saving frequnetly could cause many issues and perform actions silently that a user doesn’t expect",
+          "status": "answered",
+          "answer": "# D-LSP-BUILDSAVE1 — answer to q0d271iq\n\n**Question (owner):** \"I think this is probably something that should happen with a check command OR be something that is opt in for on save. Given ability to execute comptime code, saving frequently could cause many issues and perform actions silently that a user doesn't expect.\"\n\n**Answer.** Agreed. The old recommendation ran the whole build plan on every save. Compile-time code and hooks in that plan can start programs, download or write files, so a save could do things nobody asked for. The revision does what you asked and goes one step further: the plan runs from a check command, running it on save is opt-in, and no check can touch the outside world at all, wherever it starts.\n\nWhat changed:\n\n- **One rule for every check.** `jet check`, the editor while you type, the plan check and an attached session request all run compile-time code under a read-only ceiling. That code may compute, read files inside the workspace and use values already in Jet's cache. It never starts a program, uses the network, writes a project file, calls a foreign library or runs an `#Impure` block, and it never asks for trust. The ceiling is the existing tighten rule of the one authority model (D-AUTHORITY-MODEL1=A), not a second checker.\n- **The plan runs on request.** `jet check --plan` and the editor command *Jet: Check build plan* run `fn build`, its compile-time code and its hooks under that ceiling. Nothing is linked or written. An editor setting, `\"jet.checkPlanOnSave\": true`, does the same on each save. It is **off by default**.\n- **Nothing hidden.** Steps a check did not run (`b.action`, `#Impure` blocks, process probes) appear as notes naming the step and its line (\"not run in a check; runs at `jet build`\"). A pinned download whose bytes are not cached yet is reported as not downloaded, so you don't get false errors.\n- **Outside work only in build, run, test and dev.** No setting gives a check more rights.\n\nHow D-EXEC, comptime authority and the session fit together: under D-COMPTIME-WORD1=A every `::` value is computed early when it can be, so even a plain check runs compile-time code; D-EXEC1 gives one engine and one step budget for it. The session (compiler-session-protocol §2.4–2.5) gains a `plan` flag on its `check` request. The read-only ceiling is part of that request's authority, so the session's cache stays keyed by grants as §2.5 rule 5 already requires. A cached result from a full `jet build` is never shown as a check result unless its grants match.\n\nOptions now on the ballot: **A** safe checks with the plan on request or opt-in save (recommended); **B** the same safe plan check on every save; **C** an opt-in save that runs the plan with the full rights of `jet build`, as Zig's and Rust's editors do. C is the risk you described, so it is listed but not recommended.\n\nRevised ballot: `D-LSP-BUILDSAVE1.json` (short profile; Tower gate passes).",
+          "created": "2026-10-17T22:45:33.687Z",
+          "answeredAt": "2026-10-17",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-17T13:18:45.698Z"
+    },
+    {
+      "id": "c04gcx43",
+      "num": 6771,
+      "title": "I2: the IR builder refuses a build fn that loops over b.program.types() ([TypeInfo] host record list)",
+      "body": "G12Docs-4 found on 2026-11-12 that seed-b12 and seed-b13 both ICE on the existing case run_tier_diagnostics/programmable_build_check_matches_aot_interpreter_dev_and_web. jet build main.jet fails: 'the IR builder refused the invocation's code: build [...]: type [TypeInfo]'. Any 'loop x in b.program.types()' in a build fn hits it, which blocks the #3526 c18 and c19 proofs. Suspected root: JetIR ir_value_type for a list of a host record. Under I2 the backend refusing checked code is an internal compiler error, so this is a compiler defect.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The root is fixed in the Core load closure (compiler-owned records load the Core structs their fields hold; G12Docs-53b), with no TypeInfo special case. b.program.types() and functions() list only the program's own modules, never Core-source modules loaded for layout. The case run_tier_diagnostics/programmable_build_check_matches_aot_interpreter_dev_and_web passes, and a second build fn that loops over functions() and a type's fields builds and prints its generated module at O0.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 26afb1a0e6 (CardCloser-1, gate-p62 jet, 2026-11-14): root fix in the Core load closure by 2368741c9b (CORE_RECORD_SOURCE_DEMANDS over layout dependencies, no TypeInfo special case). jet test Compiler --profile cases --filter run_tier_diagnostics/programmable_build_check_matches_aot_interpreter_dev_and_web -> PASS 1; second build fn case build_entry/build_reads_functions_and_type_fields_as_record_lists (9d07cd3da7) -> PASS 1, exact stdout scale/run/Point.x/Point.y/6 shows functions() and types() list only the program's own declarations.",
+          "at": "2026-11-14T13:12:17.246Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T10:25:18.575Z",
+      "updated": "2026-11-14T13:12:18.780Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-14T13:12:18.780Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T13:18:45.700Z"
     }
   ]
 }
