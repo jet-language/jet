@@ -1748,6 +1748,13 @@ sources, `entropy`, `scheduler`, `byte_sink`, `startup`), `provider_facts`,
 whose audit policy has no dossier lens has no dossier, and an unknown name is
 refused with the list of declared machines.
 
+`jet inspect events --schema` prints the JSON Schema (draft 2020-12) of one
+item of the `events` list in the `build.effects` status of `jet build --json`.
+It renders the schema from the toolchain's compiler event rows, so it reads no
+project: each moment is an object of its `event` name and its `data` payload,
+and each payload a closed object of its fields. Without `--schema`, or with a
+file, `--live` or `--replay` scope, it is refused (E2104).
+
 Build graph inspection (`inspect build`, `inspect graph`, and `inspect query
 build`) shares the driver's checked plan projection. Its `files` and
 `affected_files` fields both list the static file universe; this is distinct

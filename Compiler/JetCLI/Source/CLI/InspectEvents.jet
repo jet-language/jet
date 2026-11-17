@@ -1,0 +1,19 @@
+// `jet inspect events --schema`: the JSON Schema of one item of the `events`
+// list `jet build --json` prints, rendered from the toolchain's moment rows
+// (compiler_event_schema). It reads no project, so it takes no scope.
+use {
+    jet_driver.[JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
+    jet_foundation.[compiler_event_schema]
+}
+
+jet_cli_inspect_events: fn(request: JetCLIInspectRequest, color: Bool{false}) -> JetCLIPlan Never! {
+    fix: "run `jet inspect events --schema`"
+    if request.scope == {
+        .Package -> {}
+        .Target(_) | .Live(_) | .Replay(_) -> return jet_cli_fail("E2104", "`jet inspect events` reads no project, live process or replay", jet_cli_why("E2104"), fix, color, JET_DRIVER_EXIT_USAGE)
+    }
+    if !request.options.contains("--schema") {
+        return jet_cli_fail("E2104", "`jet inspect events` needs `--schema`", jet_cli_why("E2104"), fix, color, JET_DRIVER_EXIT_USAGE)
+    }
+    jet_cli_done(compiler_event_schema(), "", JET_DRIVER_EXIT_OK)
+}

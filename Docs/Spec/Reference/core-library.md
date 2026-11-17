@@ -541,8 +541,8 @@ use compiler: core.compiler
 `Event` lists every public moment of a compile and a build, each with one
 payload. `#On` hooks, the ordered `stages()` view, `jet build --json` and the
 session wire name a moment the same way and carry the same fields. The
-compiler's registry rows (`COMPILER_EVENTS`) are the one list; the `--json`
-schema is generated from them.
+compiler's registry rows (`COMPILER_EVENTS`) are the one list; `jet inspect
+events --schema` prints the `--json` schema from them.
 
 | Moment | Variant | Payload fields |
 | --- | --- | --- |
@@ -566,6 +566,8 @@ is the command Jet's own link runs, so a hook that changes one argument keeps
 the rest. In `jet build --json`, the one `build.effects` status lists the
 compile's moments in order under `events`, each one object, such as
 `{"event":"compiler.settled","data":{"round":2,"program":{…},"new_items":[…]}}`.
+Each object follows the JSON Schema that `jet inspect events --schema` prints
+from the moment rows.
 A build whose compile fails prints only its `diagnostics` status.
 A build reads the same moments as `Event` values with `meta.stages()` on its
 `Compiler` value: the program's moments up to `compiler.settled`, in one
