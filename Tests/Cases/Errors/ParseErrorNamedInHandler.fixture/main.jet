@@ -3,7 +3,7 @@
 // as a parameter, a return and a list element.
 describe: fn(err: ParseError) -> String { "rejected: {err.message}" }
 
-keep: fn(err: ParseError) -> ParseError { err }
+keep: fn(err: &&ParseError) -> ParseError { err }
 
 run: fn() {
     whole: Int.parse("x") ?? {
@@ -16,7 +16,8 @@ run: fn() {
     }
     seen := [ParseError]{}
     count: "12a".to_int() ?? {
-        seen.push(err) - 1
+        seen.push(err)
+        2
     }
     print("{whole} {count} {seen.len()} {real == 0.0}")
 }

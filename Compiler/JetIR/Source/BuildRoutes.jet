@@ -6963,11 +6963,13 @@ ir_plugin_guest: fn(m: &IRModule, artifact: String) -> Int Never! {
     id
 }
 
-// `plugin.load(artifact, authority)`: the load route also takes the address
-// of the literal artifact's guest entry (ir_plugin_guest; 0 for an artifact
-// only known at run time, which loads as a guest failure).
+// `plugin.load(artifact, authority, limits:)`: the load route also takes the
+// address of the literal artifact's guest entry (ir_plugin_guest; 0 for an
+// artifact only known at run time, which loads as a guest failure), then
+// each field of the `Limits` (sema fills an absent label from its field
+// defaults), so the runtime holds no budget numbers of its own.
 ir_plugin_load: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 2 -> return ir_fail_slot(b, span, "plugin.load with {args.len()} arguments")
+    if args.len() != 3 -> return ir_fail_slot(b, span, "plugin.load with {args.len()} arguments")
     literal := ""
     known := false
     artifact := args[0]
@@ -6985,6 +6987,13 @@ ir_plugin_load: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [I
     if ir_failed(b) -> return -1
     wire: ir_expr(m, p, b, args[1])
     if ir_failed(b) -> return -1
+    limits: ir_expr(m, p, b, args[2])
+    if ir_failed(b) -> return -1
+    if limits < 0 || ir_kind_of(m, b, limits) != .Aggregate {
+        shown: ir_type_name(ir_ty(p, b, args[2]))
+        return ir_fail_slot(b, span, "plugin.load limits of {shown}")
+    }
+    inputs := [Int]{path, wire}
     word_row: ir_word_row(m)
     entry: ir_temp(m, b, word_row)
     if known {
@@ -6992,7 +7001,15 @@ ir_plugin_load: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [I
         address: ir_lazy_address(m, b, guest)
         ir_emit(b.f, IROp.Copy, entry, address, -1, -1, b.line)
     } else { ir_emit(b.f, IROp.Const, entry, 0, -1, -1, b.line) }
-    ir_route(m, p, b, "jet_plugin_load", [Int]{path, wire, entry}, [Bool]{true, true, true}, ty, span)
+    inputs.push(entry)
+    fields: [String]{"fuel", "memory_bytes", "table_elements", "timeout"}
+    loop field in fields {
+        member: ir_member_of(m, p, b, limits, field) ?? return ir_fail_slot(b, span, "plugin.load limits without {field}")
+        inputs.push(ir_member_read(m, b, limits, member))
+    }
+    loaded: ir_route(m, p, b, "jet_plugin_load", inputs, [Bool]{true, true, true, true, true, true, true}, ty, span)
+    if b.views.get(limits) == None && !ir_lent(b, limits) -> ir_release(m, b, limits)
+    loaded
 }
 
 // `testing.world(world -> …)`: jet_testing_world installs a deterministic

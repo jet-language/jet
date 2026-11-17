@@ -1,0 +1,43 @@
+# Claim: plugin.load(path, authority, limits: plugin.Limits{...}) caps each
+# budget at its field, on jet run and jet run --release. Without `limits:` the
+# load takes the declared defaults, under which two more pages, four more
+# table elements and 100,000 loop iterations fit. Fuel refills before each
+# call: two 3,000-iteration calls each fit a 4,000-unit budget, and a
+# 10,000-iteration call fails as Budget(.Fuel). Memory caps the component's
+# life: three pages allow one two-page grow and fail the next as
+# Budget(.Memory). Four table elements fail a four-element grow of a
+# one-element table as Budget(.Table). A 50 ms timeout stops a call that never
+# ends as Budget(.Time), and the plugin keeps serving calls. Zero fuel, memory
+# above 4 GiB and a zero timeout refuse the load as Guest with export `load`.
+fixture: LimitsCapEachBudgetOnAllHostedTiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run main.jet
+exit: 0
+stdout: ~ "defaults: grow 3, extend 5, burn 1\n" # default: the declared defaults fit the guest's growth and loop
+stdout: ~ "fuel refills per call: 2\n" # default: each call starts with the whole fuel budget
+stdout: ~ "fuel: Budget, the expected limit, in burn: " # default: past its fuel the call fails as Budget(.Fuel)
+stdout: ~ "memory grows once: 3\n" # default: one grow fits three pages
+stdout: ~ "memory: Budget, the expected limit, in grow: " # default: memory is capped for the component's life
+stdout: ~ "table: Budget, the expected limit, in extend: " # default: past its table elements the call fails as Budget(.Table)
+stdout: ~ "time: Budget, the expected limit, in crawl: " # default: past its timeout the call fails as Budget(.Time)
+stdout: ~ "ping after the deadline: 7\n" # default: the plugin keeps serving calls
+stdout: ~ "zero fuel: Guest in load: user-error:couldn't load plugin `budget.wat`: limits.fuel must be above zero\n" # default: zero fuel refuses the load
+stdout: ~ "huge memory: Guest in load: user-error:couldn't load plugin `budget.wat`: limits.memory_bytes must be at most 4294967296 (4 GiB)\n" # default: memory above 4 GiB refuses the load
+stdout: ~ "zero timeout: Guest in load: user-error:couldn't load plugin `budget.wat`: limits.timeout must be above zero\n" # default: a zero timeout refuses the load
+stdout: !~ "returned" # default: no capped call returns
+step: jet run --release main.jet
+exit: 0
+stdout: ~ "defaults: grow 3, extend 5, burn 1\n" # release: the declared defaults fit the guest's growth and loop
+stdout: ~ "fuel refills per call: 2\n" # release: each call starts with the whole fuel budget
+stdout: ~ "fuel: Budget, the expected limit, in burn: " # release: past its fuel the call fails as Budget(.Fuel)
+stdout: ~ "memory grows once: 3\n" # release: one grow fits three pages
+stdout: ~ "memory: Budget, the expected limit, in grow: " # release: memory is capped for the component's life
+stdout: ~ "table: Budget, the expected limit, in extend: " # release: past its table elements the call fails as Budget(.Table)
+stdout: ~ "time: Budget, the expected limit, in crawl: " # release: past its timeout the call fails as Budget(.Time)
+stdout: ~ "ping after the deadline: 7\n" # release: the plugin keeps serving calls
+stdout: ~ "zero fuel: Guest in load: user-error:couldn't load plugin `budget.wat`: limits.fuel must be above zero\n" # release: zero fuel refuses the load
+stdout: ~ "huge memory: Guest in load: user-error:couldn't load plugin `budget.wat`: limits.memory_bytes must be at most 4294967296 (4 GiB)\n" # release: memory above 4 GiB refuses the load
+stdout: ~ "zero timeout: Guest in load: user-error:couldn't load plugin `budget.wat`: limits.timeout must be above zero\n" # release: a zero timeout refuses the load
+stdout: !~ "returned" # release: no capped call returns

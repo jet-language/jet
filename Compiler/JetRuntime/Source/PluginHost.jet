@@ -47,7 +47,17 @@ PG_PLUGIN_AREA: I64{80}
 
 PG_PLUGIN_ACTIVE: I64{88}
 
-PG_PLUGIN_BYTES: I64{96}
+// The load's `plugin.Limits`: fuel and wall-clock nanoseconds per call,
+// linear-memory pages and table elements for the component's life.
+PG_PLUGIN_FUEL: I64{96}
+
+PG_PLUGIN_TIME_NS: I64{104}
+
+PG_PLUGIN_PAGES: I64{112}
+
+PG_PLUGIN_TABLE: I64{120}
+
+PG_PLUGIN_BYTES: I64{128}
 
 PG_ARG_BYTES: I64{24}
 
@@ -102,22 +112,18 @@ PG_TRAP_USER: I64{7}
 
 PG_TRAP_TIME: I64{8}
 
-// Budgets: fuel per call, wall-clock time per call, linear-memory pages, table
-// elements, trap frames, and the bytes one string argument or result may carry
-// across the wire. Fuel is handed out in slices: the instance's fuel word holds
-// the current slice and the reserve the rest; the deadline is checked each
-// time a slice runs out.
-PG_FUEL: I64{10000000}
-
+// Budgets the load's limits do not set: trap frames and the bytes one string
+// argument or result may carry across the wire. Fuel is handed out in slices:
+// the instance's fuel word holds the current slice and the reserve the rest;
+// the deadline is checked each time a slice runs out.
 PG_FUEL_SLICE: I64{4096}
-
-PG_TIME_NS: I64{1000000000}
-
-PG_MAX_PAGES: I64{256}
 
 PG_PAGE: I64{65536}
 
-PG_MAX_TABLE: I64{10000}
+// A 32-bit memory addresses at most 4 GiB: 65,536 pages.
+PG_MEMORY_BYTES_MAX: I64{4294967296}
+
+PG_I64_MAX: I64{9223372036854775807}
 
 PG_MAX_FRAMES: I64{32}
 
@@ -315,6 +321,20 @@ pg_table: fn(instance: I64, index: I64) -> I64 {
     pg_word(wrapping(instance + PG_INST_TABLES)) + index * I64{24}
 }
 
+// The pages and table elements a plugin's limits allow each memory and
+// table, and the bytes each reserves for them (one page at least, so a
+// sub-page limit still maps the zero-page memory it allows).
+pg_max_pages: fn(plugin: I64) -> I64 { pg_word(wrapping(plugin + PG_PLUGIN_PAGES)) }
+
+pg_max_table: fn(plugin: I64) -> I64 { pg_word(wrapping(plugin + PG_PLUGIN_TABLE)) }
+
+pg_memory_reserve: fn(plugin: I64) -> I64 {
+    pages: pg_max_pages(plugin)
+    if (pages < I64{1}) -> PG_PAGE else -> pages * PG_PAGE
+}
+
+pg_table_reserve: fn(plugin: I64) -> I64 { pg_max_table(plugin) * I64{8} }
+
 pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
     start >= I64{0} && count >= I64{0} && start <= size && count <= size - start
 }
@@ -326,7 +346,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
     wanted: pages + more
     maximum: pg_word(wrapping(memory + I64{16}))
     if (maximum >= I64{0} && wanted > maximum) { return I64{-1} }
-    if (wanted > PG_MAX_PAGES) {
+    if (wanted > pg_max_pages(pg_word(wrapping(instance + PG_INST_PLUGIN)))) {
         pg_set_trap(instance, PG_TRAP_MEMORY, jet_rt_string_clone(rt_static_text("memory budget exhausted")))
         jet_plugin_frame(instance, fid, offset)
         return I64{-1}
@@ -395,7 +415,7 @@ pg_in_bounds: fn(start: I64, count: I64, size: I64) -> Bool {
     wanted: size + (delta & PG_U32)
     maximum: pg_word(wrapping(table + I64{16}))
     if (maximum >= I64{0} && wanted > maximum) { return I64{-1} }
-    if (wanted > PG_MAX_TABLE) {
+    if (wanted > pg_max_table(pg_word(wrapping(instance + PG_INST_PLUGIN)))) {
         pg_set_trap(instance, PG_TRAP_TABLE, jet_rt_string_clone(rt_static_text("table budget exhausted")))
         jet_plugin_frame(instance, fid, offset)
         return I64{-1}
@@ -1051,10 +1071,10 @@ pg_instantiate: fn(plugin: I64, desc: I64, path: I64) -> I64 {
     loop at < memories {
         record: desc + pg_desc(desc, I64{12}) + at * I64{16}
         pages: pg_word(record)
-        if (pages > PG_MAX_PAGES) {
+        if (pages > pg_max_pages(plugin)) {
             return pg_instantiate_failure(PLUGIN_ERROR_BUDGET, PG_LIMIT_MEMORY, path, rt_static_text("memory budget exhausted"))
         }
-        base: pg_mmap(PG_MAX_PAGES * PG_PAGE)
+        base: pg_mmap(pg_memory_reserve(plugin))
         if (base == I64{0}) {
             return pg_instantiate_failure(PLUGIN_ERROR_DEFECT, I64{0}, path, rt_static_text("couldn't reserve plugin linear memory"))
         }
@@ -1067,10 +1087,10 @@ pg_instantiate: fn(plugin: I64, desc: I64, path: I64) -> I64 {
     loop at < tables {
         record: desc + pg_desc(desc, I64{14}) + at * I64{16}
         size: pg_word(record)
-        if (size > PG_MAX_TABLE) {
+        if (size > pg_max_table(plugin)) {
             return pg_instantiate_failure(PLUGIN_ERROR_BUDGET, PG_LIMIT_TABLE, path, rt_static_text("table budget exhausted"))
         }
-        data: pg_mmap(PG_MAX_TABLE * I64{8})
+        data: pg_mmap(pg_table_reserve(plugin))
         if (data == I64{0}) {
             return pg_instantiate_failure(PLUGIN_ERROR_DEFECT, I64{0}, path, rt_static_text("couldn't reserve a plugin table"))
         }
@@ -1146,9 +1166,16 @@ pg_reset: fn(instance: I64) {
     pg_store(wrapping(instance + PG_INST_TRAP), I64{0})
     jet_rt_string_drop(pg_word(wrapping(instance + PG_INST_MESSAGE)))
     pg_store(wrapping(instance + PG_INST_MESSAGE), I64{0})
-    pg_store(wrapping(instance + PG_INST_FUEL), PG_FUEL_SLICE)
-    pg_store(wrapping(instance + PG_INST_FUEL_RESERVE), PG_FUEL - PG_FUEL_SLICE)
-    pg_store(wrapping(instance + PG_INST_DEADLINE), time_host_monotonic_i64() + PG_TIME_NS)
+    // Each call starts with the load's whole fuel and time budgets.
+    plugin: pg_word(wrapping(instance + PG_INST_PLUGIN))
+    fuel: pg_word(wrapping(plugin + PG_PLUGIN_FUEL))
+    slice: if (fuel < PG_FUEL_SLICE) -> fuel else -> PG_FUEL_SLICE
+    pg_store(wrapping(instance + PG_INST_FUEL), slice)
+    pg_store(wrapping(instance + PG_INST_FUEL_RESERVE), fuel - slice)
+    now: time_host_monotonic_i64()
+    budget: pg_word(wrapping(plugin + PG_PLUGIN_TIME_NS))
+    deadline: if (budget > PG_I64_MAX - now) -> PG_I64_MAX else -> now + budget
+    pg_store(wrapping(instance + PG_INST_DEADLINE), deadline)
     pg_store(wrapping(instance + PG_INST_DEPTH), I64{0})
     pg_store(wrapping(instance + PG_INST_FRAME_COUNT), I64{0})
 }
@@ -1187,8 +1214,40 @@ pg_load: fn(plugin: I64, path: I64, wire: I64) -> I64 {
     pg_instantiate(plugin, desc, path)
 }
 
-#Export(c) jet_plugin_load: fn(path: I64, wire: I64, guest: I64) -> I64 {
+// A limit field as a word: an exact Int past I64 saturates toward its sign,
+// so pg_limits_refusal refuses it instead of the conversion stopping the host.
+pg_limit_word: fn(value: I64) -> I64 {
+    if int_word_sized(value) -> return jet_int_owned_to_i64(value)
+    if int_negative(value) -> return I64{-1}
+    PG_I64_MAX
+}
+
+// Why the load's limits are refused, before the artifact is read: each must
+// be above zero, and memory at most what a 32-bit memory addresses. 0 when
+// they hold.
+pg_limits_refusal: fn(fuel: I64, memory_bytes: I64, table_elements: I64, timeout_ns: I64) -> I64 {
+    if (fuel <= I64{0}) { return rt_static_text("`: limits.fuel must be above zero") }
+    if (memory_bytes <= I64{0}) {
+        return rt_static_text("`: limits.memory_bytes must be above zero")
+    }
+    if (memory_bytes > PG_MEMORY_BYTES_MAX) {
+        return rt_static_text("`: limits.memory_bytes must be at most 4294967296 (4 GiB)")
+    }
+    if (table_elements <= I64{0}) {
+        return rt_static_text("`: limits.table_elements must be above zero")
+    }
+    if (timeout_ns <= I64{0}) { return rt_static_text("`: limits.timeout must be above zero") }
+    I64{0}
+}
+
+// `plugin.load(path, authority, limits:)`: the limits arrive as exact Ints,
+// the timeout in nanoseconds; tables cap at the 32-bit indices a table has.
+#Export(c) jet_plugin_load: fn(path: I64, wire: I64, guest: I64, fuel: I64, memory_bytes: I64, table_elements: I64, timeout_ns: I64) -> I64 {
     code: jet_int_owned_to_i64(guest)
+    fuel_budget: pg_limit_word(fuel)
+    memory_budget: pg_limit_word(memory_bytes)
+    table_budget: pg_limit_word(table_elements)
+    time_budget: pg_limit_word(timeout_ns)
     plugin: jet_rt_alloc(PG_PLUGIN_BYTES, I64{8})
     coll_zero(plugin, PG_PLUGIN_BYTES)
     pg_store(wrapping(plugin + PG_PLUGIN_RC), I64{1})
@@ -1198,7 +1257,13 @@ pg_load: fn(plugin: I64, path: I64, wire: I64) -> I64 {
     pg_store(wrapping(plugin + PG_PLUGIN_AREA), jet_rt_alloc(PG_AREA_BYTES, I64{8}))
     pg_store(wrapping(plugin + PG_PLUGIN_ARG_CAP), I64{8})
     pg_store(wrapping(plugin + PG_PLUGIN_ARG_DATA), jet_rt_alloc(I64{8} * PG_ARG_BYTES, I64{8}))
-    pg_store(wrapping(plugin + PG_PLUGIN_FAILURE), pg_load(plugin, path, wire))
+    pg_store(wrapping(plugin + PG_PLUGIN_FUEL), fuel_budget)
+    pg_store(wrapping(plugin + PG_PLUGIN_TIME_NS), time_budget)
+    pg_store(wrapping(plugin + PG_PLUGIN_PAGES), memory_budget /% PG_PAGE)
+    pg_store(wrapping(plugin + PG_PLUGIN_TABLE), if (table_budget > PG_U32) -> PG_U32 else -> table_budget)
+    refusal: pg_limits_refusal(fuel_budget, memory_budget, table_budget, time_budget)
+    failure: if (refusal != I64{0}) -> pg_load_failure(PLUGIN_ERROR_GUEST, pg_path_detail(rt_static_text("couldn't load plugin `"), path, refusal)) else -> pg_load(plugin, path, wire)
+    pg_store(wrapping(plugin + PG_PLUGIN_FAILURE), failure)
     plugin
 }
 
@@ -1228,13 +1293,13 @@ pg_load: fn(plugin: I64, path: I64, wire: I64) -> I64 {
         memories: pg_desc(desc, I64{11})
         at := I64{0}
         loop at < memories {
-            pg_munmap(pg_word(pg_memory(instance, at)), PG_MAX_PAGES * PG_PAGE)
+            pg_munmap(pg_word(pg_memory(instance, at)), pg_memory_reserve(plugin))
             at += I64{1}
         }
         tables: pg_desc(desc, I64{13})
         at = I64{0}
         loop at < tables {
-            pg_munmap(pg_word(pg_table(instance, at)), PG_MAX_TABLE * I64{8})
+            pg_munmap(pg_word(pg_table(instance, at)), pg_table_reserve(plugin))
             at += I64{1}
         }
         jet_rt_free(pg_word(wrapping(instance + PG_INST_MEMORIES)), memories * I64{24} + I64{8}, I64{8})

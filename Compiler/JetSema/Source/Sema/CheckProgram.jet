@@ -12483,6 +12483,9 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     sema_web_partition_check(modules, final_graph, diagnostics, threads)
     // Code the entry reaches uses only the effects its target provides.
     sema_target_denial_check(modules, final_graph, diagnostics)
+    // Nothing the entry reaches on a machine with no OS uses a module that
+    // needs one, in Core and packages as in the program's own code.
+    sema_target_no_os_reach_check(modules, final_graph, diagnostics)
     // `#Target(OS.…)` impls: the axis conflict and ungated signature uses.
     sema_os_target_check(final_graph, diagnostics)
     // The typestate flow's findings (each body's checked receiver types,

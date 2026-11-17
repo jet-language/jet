@@ -268,6 +268,15 @@ declares a monotonic clock, so `time.instant()` is accepted for it and
 `time.now()` is refused, as `Tests/UI/target_missing_capability_e3311.stderr`
 shows.
 
+E3301 and `#Live` are refused in the program's own code, the modules of the
+package being built. A body outside it, in Core or a package alike, is judged
+by reachability, with no exemption by name: a module that needs an OS which
+the program's entries reach through Core or a package is E3301 at the
+program's own call that leads to it (`sema_target_no_os_reach_check` in
+`Compiler/JetSema/Source/Sema/TargetDenials.jet`), and a body the program
+never reaches, such as Core's file handling in a program that never opens a
+file, is never refused.
+
 ## No-heap E3303 contract
 
 On a machine with no OS whose allocator provides no heap (`// @no-os`,

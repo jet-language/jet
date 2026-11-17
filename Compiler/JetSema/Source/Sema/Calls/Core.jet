@@ -28,6 +28,7 @@ use jet_foundation.[
     EffectRowEntry,
     EnumLitArg,
     Expr,
+    ExprField,
     FunctionDefaultRef,
     NodeKind,
     SharedLifetime,
@@ -1327,6 +1328,8 @@ sema_call_core_default_expr: fn(default: CoreCallDefault, span: Span) -> Expr Ne
             id: AST_NODE_GENERATED,
         }
         .StaticEnum(type_name, variant) -> Expr.EnumLit{type_name: type_name, variant: variant, variant_span: None, args: [EnumLitArg]{}, leading_dot: false, span: span, id: AST_NODE_GENERATED}
+        // `{}` against the parameter's type: every field takes its default.
+        .FieldDefaults -> Expr.StructLit{type_name: "", type_args: [Type]{}, import_ns: None, as_trait: None, fields: [ExprField]{}, inferred: true, span: span, id: AST_NODE_GENERATED}
     }
 }
 
