@@ -180,29 +180,35 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
         out.types.push(parts[part].types[local].copy())
         out.type_keys.push(parts[part].type_keys[local].copy())
     }
-    // The members of each struct the program reached, one line each as the
-    // emission log prints them (X64Module.jet ir_x64_log_fields), then taken
-    // out by merged row for the DWARF types, each member's type a merged row:
-    // the part memos that hold them name part rows and are not merged. Each
-    // struct identity has a list of its own (BuildTypes.jet), so a list goes
-    // to one row.
+    // Each struct row's members as its layout placed them (BuildTypes.jet
+    // ir_struct_row_laid) and each List row's element row, for the DWARF
+    // types, from the first part that holds them: the parts that interned
+    // one key laid it out alike, and a member's or element's row is the
+    // merged row of its sharing group, whichever part reached it, so neither
+    // depends on which part built what. Each struct's members are also one
+    // line each as the emission log prints them (X64Module.jet
+    // ir_x64_log_fields), in merged row order.
+    logged := [[String]]{}
+    loop _ in 0..<out.types.len() -> logged.push([String]{})
     loop part in 0..<parts.len() {
+        // The part's member lists the merged rows take, by list.
         wanted := [Int:Int]{}
-        loop at in 0..<parts[part].struct_members.texts.len() {
-            identity: parts[part].struct_members.texts[at]
-            local: name_rows_value(parts[part].layouts, "struct:{identity}") ?? -1
-            if local < 0 -> next
-            row: g.sides[part].type_new[local]
+        loop (local, list) in parts[part].debug_members {
+            row: ir_merge_reached_type(g, part, local)
             if row < 0 || out.debug_members.get(row) != None -> next
-            list: parts[part].struct_members.rows[at]
+            identity: ir_type_name(parts[part].types[local].ty)
             loop member in parts[part].member_lists[list] {
                 size: if member.boxed || member.ty < 0 -> 8 else -> parts[part].types[member.ty].size
                 // The member's checked type last (it may hold spaces): a
                 // reader folds an offset into a nested list or Option by it.
-                ty: if member.ty < 0 -> "-" else if member.boxed -> "box" else -> ir_type_name(parts[part].types[member.ty].ty)
-                out.struct_fields.push("field {identity} {member.offset} {size} {member.name} {ty}")
+                ty: if {
+                    member.boxed -> "box"
+                    member.ty < 0 -> "-"
+                    else -> ir_type_name(parts[part].types[member.ty].ty)
+                }
+                logged[row].push("field {identity} {member.offset} {size} {member.name} {ty}")
             }
-            out.debug_members[row] = [IRMember]{}
+            out.debug_members[row] = -1
             wanted[list] = row
         }
         lists := compiler_take_rows<[IRMember]>(parts[part].member_lists)
@@ -211,19 +217,19 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
             members := lists.pop() ?? panic("a nonempty member list failed to pop")
             row: wanted.get(list) ?? next
             loop index in 0..<members.len() {
-                if members[index].ty >= 0 {
-                    members[index].ty = g.sides[part].type_new[members[index].ty]
-                }
+                members[index].ty = ir_merge_reached_type(g, part, members[index].ty)
             }
-            out.debug_members[row] = members.move()
+            out.debug_members[row] = out.member_lists.len()
+            out.member_lists.push(members.move())
         }
-        // Each List row's element row, as merged rows.
         loop (local, element) in parts[part].list_elements {
-            row: g.sides[part].type_new[local]
-            if row < 0 || element < 0 || out.list_elements.get(row) != None -> next
-            out.list_elements[row] = g.sides[part].type_new[element]
+            row: ir_merge_reached_type(g, part, local)
+            reached: ir_merge_reached_type(g, part, element)
+            if row < 0 || reached < 0 || out.list_elements.get(row) != None -> next
+            out.list_elements[row] = reached
         }
     }
+    loop lines in logged.move() -> out.struct_fields.extend(lines.move())
     loop (row, part) in g.name_part -> out.names.push(parts[part].names[g.name_local[row]].copy())
     loop (row, part) in g.data_part {
         local: g.data_local[row]
@@ -609,6 +615,16 @@ ir_merge_type: fn(g: &IRMerge, parts: [IRModule], part: Int, row: Int) -> Int Ne
 
 ir_merge_same_type: fn(a: IRType, b: IRType) -> Bool Never! {
     a.kind == b.kind && a.size == b.size && a.align == b.align && a.drop == b.drop && a.clone == b.clone
+}
+
+// The merged row of type row `local` of part `part`: its sharing group's,
+// whichever part's function reached it; -1 when the walk never did (or
+// `local` is negative).
+ir_merge_reached_type: fn(g: IRMerge, part: Int, local: Int) -> Int Never! {
+    if local < 0 -> return -1
+    group: g.type_group[part][local]
+    if group < 0 -> return -1
+    g.type_ids[group]
 }
 
 ir_merge_name: fn(g: &IRMerge, parts: [IRModule], part: Int, name: Int) -> Int Never! {

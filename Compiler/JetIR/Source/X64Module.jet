@@ -311,8 +311,9 @@ ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows
                 members: [X64DebugMember]{X64DebugMember{name: "len", offset: 0, ty: shared.word}, X64DebugMember{name: "cap", offset: 8, ty: shared.word}, X64DebugMember{name: "data", offset: 16, ty: data}}
                 return X64DebugType{name: ir_type_name(ty.ty), size: ty.size, kind: X64DebugTypeKind.Struct{members: members}}
             }
-            if m.debug_members.get(row) == .Val(fields) {
-                members: loop field in fields -> X64DebugMember{name: field.name, offset: field.offset, ty: if field.boxed -> shared.pointer else -> field.ty}
+            list: m.debug_members.get(row) ?? -1
+            if list >= 0 {
+                members: loop field in m.member_lists[list] -> X64DebugMember{name: field.name, offset: field.offset, ty: if field.boxed -> shared.pointer else -> field.ty}
                 return X64DebugType{name: ir_type_name(ty.ty), size: ty.size, kind: X64DebugTypeKind.Struct{members: members}}
             }
             X64DebugType{name: "Aggregate", size: ty.size, kind: X64DebugTypeKind.Opaque}
