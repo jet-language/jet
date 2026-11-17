@@ -1,9 +1,10 @@
 // The public moments a compile reaches (JetFoundation Registry/CompilerEvents.jet),
 // recorded when the request asks for them (JetDriverCompileRequest
-// .compiler_events) and handed back in the compile result's `events`. The
-// driver names a moment only through the registry's rows and fills its
-// payload through the payload row's fields, so `stages()`, `jet build
-// --json` and the session wire read one list.
+// .compiler_events) and handed back in the compile result's `events`, and
+// listed for a build's `meta.stages()` (jet_driver_stages). The driver names
+// a moment only through the registry's rows and fills its payload through
+// the payload row's fields, so `stages()`, `jet build --json` and the
+// session wire read one list.
 //
 // The order is fixed, whatever the thread count: the load's moments by file
 // path (each file parsed, then each module other than the entry imported),
@@ -24,10 +25,11 @@ use {
         DIAGNOSTIC_LINT,
         ModuleID,
         SymbolTable,
-        compiler_event_object,
+        TComptimeValue,
+        compiler_event_payload,
         compiler_event_payload_name,
         compiler_event_record,
-        foundation_json_quote,
+        compiler_event_stage,
         module_is_core,
         module_text,
         symbol_is_local,
@@ -37,8 +39,7 @@ use {
     jet_sema.[SemaGraphResult]
 }
 
-// One row to order by: its path, already a JSON string, and its position in
-// the list it indexes.
+// One row to order by: its path and its position in the list it indexes.
 JetDriverEventOrder: struct {
     path: String,
     index: Int,
@@ -48,25 +49,56 @@ jet_driver_event_order: fn(rows: &[JetDriverEventOrder]) Never! {
     rows.sort_by(fn(left: JetDriverEventOrder, right: JetDriverEventOrder) { (left.path <=> right.path).then(left.index <=> right.index) })
 }
 
+// One checked declaration a `compiler.declared` moment names: its name, its
+// module, the names of the declarations it calls in first-call order, and
+// whether its module checked whole.
+JetDriverDeclared: struct {
+    name: String,
+    module: String,
+    calls: [String],
+    complete: Bool,
+}
+
+// The `Declaration` payload of `row`.
+jet_driver_declaration_value: fn(row: JetDriverDeclared) -> TComptimeValue Never! {
+    calls := [TComptimeValue]{}
+    loop call in row.calls -> calls.push(TComptimeValue.String{value: call})
+    values: [TComptimeValue]{
+        TComptimeValue.String{value: row.name},
+        TComptimeValue.String{value: row.module},
+        TComptimeValue.List{values: calls},
+        TComptimeValue.Bool{value: row.complete},
+    }
+    compiler_event_payload(compiler_event_payload_name(COMPILER_EVENT_DECLARED), values.move())
+}
+
+// The `Declaration` payloads of `rows`, in order.
+jet_driver_declaration_list: fn(rows: [JetDriverDeclared]) -> TComptimeValue Never! {
+    values := [TComptimeValue]{}
+    loop row in rows -> values.push(jet_driver_declaration_value(row))
+    TComptimeValue.List{values: values}
+}
+
 // The parsed and imported moments of a load: each loaded module outside
 // Core by its file's path; the entry module is parsed, not imported.
 jet_driver_load_events: fn(load: JetDriverLoadResult) -> [CompilerEventRecord] Never! {
     order := [JetDriverEventOrder]{}
     loop (index, loaded) in load.modules {
         if module_is_core(loaded.module_identity) -> next
-        order.push(JetDriverEventOrder{path: foundation_json_quote(load.source_units[loaded.source_unit_index].relative_path), index: index})
+        order.push(JetDriverEventOrder{path: load.source_units[loaded.source_unit_index].relative_path, index: index})
     }
     jet_driver_event_order(order)
     events := [CompilerEventRecord]{}
     loop row in order {
-        name: foundation_json_quote(module_text(load.module_table, load.modules[row.index].module_identity))
-        events.push(compiler_event_record(COMPILER_EVENT_PARSED, [String]{row.path, name}))
+        name: module_text(load.module_table, load.modules[row.index].module_identity)
+        events.push(compiler_event_record(COMPILER_EVENT_PARSED, [TComptimeValue]{TComptimeValue.String{value: row.path}, TComptimeValue.String{value: name}}))
     }
     loop row in order {
         loaded: load.modules[row.index]
         if loaded.module_identity == load.entry_module_identity -> next
-        name: foundation_json_quote(module_text(load.module_table, loaded.module_identity))
-        events.push(compiler_event_record(COMPILER_EVENT_IMPORTED, [String]{name, "[{row.path}]"}))
+        name: module_text(load.module_table, loaded.module_identity)
+        files: TComptimeValue.List{values: [TComptimeValue]{TComptimeValue.String{value: row.path}}}
+        events.push(compiler_event_record(COMPILER_EVENT_IMPORTED, [TComptimeValue]{TComptimeValue.String{value: name}, files}))
     }
     events
 }
@@ -81,50 +113,34 @@ jet_driver_checked_events: fn(graph: SemaGraphResult, symbols: SymbolTable, effe
         if module_is_core(graph_module.module_identity) || graph_module.module_identity == effects {
             next
         }
-        order.push(JetDriverEventOrder{path: foundation_json_quote(graph_module.module_path), index: index})
+        order.push(JetDriverEventOrder{path: graph_module.module_path, index: index})
     }
-    jet_driver_event_order(order)
-    declaration_payload: compiler_event_payload_name(COMPILER_EVENT_DECLARED)
-    declarations := [String]{}
+    declared := [JetDriverDeclared]{}
     events := [CompilerEventRecord]{}
     loop row in order {
         graph_module: graph.modules[row.index]
-        // Each caller's callees, as JSON strings: `callers` places a caller
-        // key's row of `called`.
-        callers := [String:Int]{}
-        called := [[String]]{}
+        // Each function's row of `declared`, by its key.
+        first: declared.len()
+        places := [String:Int]{}
+        loop function in graph_module.functions {
+            places[function.key] = declared.len()
+            declared.push(JetDriverDeclared{name: function.name, module: graph_module.module_name, calls: [String]{}, complete: graph_module.complete})
+        }
         loop fact in graph_module.call_facts {
             callee: fact.callee ?? next
             if symbol_is_none(callee) || symbol_is_local(callee) -> next
             parts: symbol_table_key(symbols, callee).rpartition(":")
             if parts.sep == "" -> next
-            name: foundation_json_quote(parts.tail)
-            caller: foundation_json_quote(fact.caller_key)
-            at := callers.get(caller) ?? -1
-            if at < 0 {
-                at = called.len()
-                callers[caller] = at
-                called.push([String]{})
-            }
-            if !called[at].contains(name) -> called[at].push(name)
+            at: places.get(fact.caller_key) ?? next
+            if !declared[at].calls.contains(parts.tail) -> declared[at].calls.push(parts.tail)
         }
-        loop function in graph_module.functions {
-            at: callers.get(foundation_json_quote(function.key)) ?? -1
-            calls: if at < 0 -> "[]" else -> "[{called[at].join(",")}]"
-            values: [String]{
-                foundation_json_quote(function.name),
-                foundation_json_quote(graph_module.module_name),
-                calls,
-                if graph_module.complete -> "true" else -> "false",
-            }
-            declarations.push(compiler_event_object(declaration_payload, values))
-            events.push(compiler_event_record(COMPILER_EVENT_DECLARED, values))
+        loop at in first..<declared.len() {
+            events.push(CompilerEventRecord{name: COMPILER_EVENT_DECLARED, data: jet_driver_declaration_value(declared[at])})
         }
     }
-    listed: "[{declarations.join(",")}]"
-    program: compiler_event_object(compiler_event_payload_name(COMPILER_EVENT_CHECKED), [String]{listed})
-    events.push(compiler_event_record(COMPILER_EVENT_CHECKED, [String]{listed}))
-    events.push(compiler_event_record(COMPILER_EVENT_SETTLED, [String]{"1", program, listed}))
+    program: compiler_event_payload(compiler_event_payload_name(COMPILER_EVENT_CHECKED), [TComptimeValue]{jet_driver_declaration_list(declared)})
+    events.push(compiler_event_record(COMPILER_EVENT_CHECKED, [TComptimeValue]{jet_driver_declaration_list(declared)}))
+    events.push(compiler_event_record(COMPILER_EVENT_SETTLED, [TComptimeValue]{TComptimeValue.Int{value: 1}, program.move(), jet_driver_declaration_list(declared)}))
     events
 }
 
@@ -137,5 +153,22 @@ jet_driver_finished_event: fn(result: JetDriverCompileResult) -> CompilerEventRe
         if diagnostic.severity == DIAGNOSTIC_LINT -> warnings += 1
     }
     ok: result.complete && errors == 0
-    compiler_event_record(COMPILER_EVENT_FINISHED, [String]{if ok -> "true" else -> "false", "{errors}", "{warnings}"})
+    compiler_event_record(COMPILER_EVENT_FINISHED, [TComptimeValue]{TComptimeValue.Bool{value: ok}, TComptimeValue.Int{value: errors}, TComptimeValue.Int{value: warnings}})
+}
+
+// What `meta.stages()` lists for the build of a checked program: its load's
+// moments, then its checked declarations', each as its
+// `core.compiler.Event`, in the fixed order above. The build runs before the
+// program is emitted, so the list ends at the settled round.
+jet_driver_stages: fn(load: JetDriverLoadResult, graph: SemaGraphResult, symbols: SymbolTable, effects: ModuleID) -> [TComptimeValue] Never! {
+    stages := [TComptimeValue]{}
+    loaded: jet_driver_load_events(load)
+    loop record in loaded.move() {
+        stages.push(compiler_event_stage(record.name, record.data.move()))
+    }
+    checked: jet_driver_checked_events(graph, symbols, effects)
+    loop record in checked.move() {
+        stages.push(compiler_event_stage(record.name, record.data.move()))
+    }
+    stages
 }

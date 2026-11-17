@@ -1,7 +1,7 @@
 // Exact compiler-value contract::build_context_method_*. This table is
 // arity-polymorphic; Core owns the session semantics, not sema.
 use {
-    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, AccessConvention, Binding, BuildOptionKind, BuildOptionRow, Call, CallArg, CtValue, DeriveBodyItem, Diagnostic, EffectRowEntry, EnumLitArg, Expr, ForKind, Item, Marker, MarkerDecl, NamedCtValue, ParamZone, Span, Stmt, StrPart, SymbolKind, TComptimeField, TComptimeValue, Type, ast_func, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, diagnostic_registry_row, expr_span, type_name]
+    jet_foundation.[AST_EMPTY_CALL_ARG_FLAGS, AST_NODE_GENERATED, AccessConvention, Binding, BuildOptionKind, BuildOptionRow, COMPILER_EVENT_TYPE, Call, CallArg, CtValue, DeriveBodyItem, Diagnostic, EffectRowEntry, EnumLitArg, Expr, ForKind, Item, Marker, MarkerDecl, NamedCtValue, ParamZone, Span, Stmt, StrPart, SymbolKind, TComptimeField, TComptimeValue, Type, ast_func, ast_program, build_option_accepts, build_option_argument, build_option_duration_ms, build_option_list_value, build_option_method_values, build_option_refusal, build_option_row, build_option_value_of_variant, build_option_variants_text, diagnostic_registry_row, expr_span, type_name]
     jet_parser.[jfmt_format_program_with_tokens]
     jet_lexer.[Token]
 }
@@ -354,9 +354,12 @@ sema_call_try_compiler_method: fn(receiver: Expr, receiver_value: TExpr, method:
     if method == "report.finding" {
         return sema_call_compiler_report_finding(receiver, receiver_value, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
+    if method == "stages" {
+        return sema_call_compiler_stages(receiver, receiver_value, args, span, expected, environment, program, scopes, state, context, diagnostics)
+    }
     shape: "meta.add(#code {{ ... }}, scope: \"name\")"
     if method != "add" {
-        diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}`, `meta.add_struct(\"Name\", fields, scope: \"name\")`, `meta.find_type(\"Name\")`, `meta.rewrite_body(f, #code {{ ... }})`, `meta.allow_rewrite(package: \"name\")`, `meta.events(watch: .Functions{{marked: Traced{{}}}}, handler)` or `meta.report(finding, at: c)`"))
+        diagnostics.push(sema_error("E0102", span, "`Compiler` has no method `{method}`", "`Compiler` is a protected Core type with a closed method surface", "write `{shape}`, `meta.add_struct(\"Name\", fields, scope: \"name\")`, `meta.find_type(\"Name\")`, `meta.rewrite_body(f, #code {{ ... }})`, `meta.allow_rewrite(package: \"name\")`, `meta.events(watch: .Functions{{marked: Traced{{}}}}, handler)`, `meta.stages()` or `meta.report(finding, at: c)`"))
         return failed
     }
     code := CallArg?{None}
@@ -1165,6 +1168,32 @@ sema_call_compiler_events_read: fn(receiver: Expr, receiver_value: TExpr, method
     element: if method == "events.calls" -> "CompilerCall" else -> "FunctionInfo"
     items: Type.List{element: Type.Named{name: element}}
     call: sema_tree_node(items, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: [TExpr]{name}}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(call, expected, environment, program, diagnostics)}
+}
+
+// `meta.stages()`: the moments the build's program reached, each its
+// `core.compiler.Event`, in their fixed order, which the build host reads
+// from the value's checked program (JetDriver jet_driver_stages). Reading
+// them changes nothing, so it uses no Meta effect. The list's type is
+// core.compiler's, which the program loads with `use core.compiler`.
+sema_call_compiler_stages: fn(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
+    if args.len() != 0 {
+        diagnostics.push(sema_error("E0104", span, "`Compiler.stages` expects 0 arguments, got {args.len()}", "`meta.stages()` lists every moment the build's program reached", "write `meta.stages()`"))
+        return failed
+    }
+    if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Read, scopes, span, diagnostics) {
+        return failed
+    }
+    if sema_scope_checked_type_row_qualified(program, COMPILER_EVENT_TYPE) == None {
+        diagnostics.push(sema_error("E0119", span, "`meta.stages()` lists `compiler.Event` values, a type this program doesn't load", "the moments are core.compiler's `Event` enum, which only a program that uses core.compiler can name", "add `compiler: core.compiler` to the file's `use` block"))
+        return failed
+    }
+    if !sema_effect_record_intrinsic_effects(environment, program, scopes, context, "Compiler.stages", span, [EffectRowEntry]{}, diagnostics) {
+        return failed
+    }
+    items: Type.List{element: Type.Named{name: COMPILER_EVENT_TYPE}}
+    call: sema_tree_node(items, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: "stages", args: [TExpr]{}}}, span)
     SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(call, expected, environment, program, diagnostics)}
 }
 

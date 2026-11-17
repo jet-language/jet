@@ -567,6 +567,9 @@ the rest. In `jet build --json`, the one `build.effects` status lists the
 compile's moments in order under `events`, each one object, such as
 `{"event":"compiler.settled","data":{"round":2,"program":{…},"new_items":[…]}}`.
 A build whose compile fails prints only its `diagnostics` status.
+A build reads the same moments as `Event` values with `meta.stages()` on its
+`Compiler` value: the program's moments up to `compiler.settled`, in one
+order whatever the thread count (Metaprogramming reference).
 
 ### `core.meta` — module and package metadata
 

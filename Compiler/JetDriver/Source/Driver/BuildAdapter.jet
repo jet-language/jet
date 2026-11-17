@@ -250,6 +250,18 @@ jet_driver_compiler_call: fn(session: &BuildSession, member: String, args: [TCom
         events: heard ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
         return JetEvalBuildReply.Value{value: events}
     }
+    // `meta.stages()`: the moments the value's checked program reached, as
+    // ProgramInfo's `stages` holds them (jet_driver_stages).
+    if member == "Compiler.stages" && args.len() == 1 {
+        held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
+        checked: build_session_call(session, "compiler.live", [BuildSessionValue]{held}, None, false, span.start, span.end)
+        if checked == .Failure(error) {
+            return JetEvalBuildReply.Failure{diagnostic: jet_eval_build_session_diagnostic(error)}
+        }
+        program: jet_eval_build_field(args[0], "program") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its checked program")
+        stages: jet_eval_build_field(program, "stages") ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value's checked program lost what `{member}` reads")
+        return JetEvalBuildReply.Value{value: stages}
+    }
     if member == "Compiler.handoff" && args.len() == 2 {
         held: compiler ?? return jet_driver_build_host_failure(session, span, "the `Compiler` value lost its build")
         step: jet_eval_build_session_input(args[1]) ?? return jet_driver_build_host_failure(session, span, "`{member}` lost its place")

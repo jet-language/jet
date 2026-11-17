@@ -2188,7 +2188,7 @@ jet_cli_build_result: fn(file: String, name: String, source: String, color: Bool
             .Written(path, lines, reused) -> {
                 log = lines
                 if json {
-                    emitted = Val(compiler_event_record(COMPILER_EVENT_EMITTED, [String]{jet_cli_json_string(name), jet_cli_json_string(path), "\"\""}))
+                    emitted = Val(compiler_event_record(COMPILER_EVENT_EMITTED, [TComptimeValue]{TComptimeValue.String{value: name}, TComptimeValue.String{value: path}, TComptimeValue.String{value: ""}}))
                 }
                 if sbom -> built = jet_cli_build_sbom(file, name, source, path, color, quiet)
                 built.reused = reused
