@@ -1462,6 +1462,22 @@ gains: [Float#3]{0.5, 1.0, 2.0}
 print(gains * 2 + gains)  // [1.5, 3.0, 6.0]
 ```
 
+A `[T#N]` with `N` from 1 to 4, and every Core vector and lane type (`Vec3`,
+`F32x4`, `I32x4`, `U8x16`, …), takes swizzles: `.x .y .z .w` and `.r .g .b .a`
+name its first four slots, up to four letters of one set at a time. One letter
+reads or writes that slot. Several read those slots in order, repeats allowed
+(`a.wzyx`, `a.xxyy`), and write them in one statement (`a.yw = …` or
+`a.xy += …`). A vector type's own result type applies (`v.zyx` on `Vec3` is a
+`Vec3`, `F32x4.xy` a `Vec2`); otherwise several slots read as `[T#K]`. A
+letter past the slots is **E3110**, and a write that names one slot twice is
+**E3111**.
+
+```jet
+rgba := [U8#4]{255, 128, 0, 255}
+print(rgba.bgr)  // [0, 128, 255]
+rgba.a = 0
+```
+
 A wrong destructuring count is **E0963**. `push`, `pop`, `insert`, `remove`,
 and `clear` on a fixed-size list are **E0964**. A literal index outside
 `0..N-1` is **E0965**. A proven `distinct Int(lo..hi)` or sized-integer

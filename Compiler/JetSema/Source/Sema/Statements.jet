@@ -112,6 +112,7 @@ use jet_foundation.[
     diagnostic_with_edit_grade,
     diagnostic_with_structured_edit,
     checked_persistent_local,
+    pipe_value_name,
 ]
 
 SemaStatementResult: struct {
@@ -8436,29 +8437,37 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
             }
         }
     }
-    // Swizzle write: `v.yx = value` on a Core vector or swizzleable lane
-    // type is the declaration's own `__swizzle_setN(lanes…, value)` on the
-    // written place; `v.xy += value` writes `v.xy + value`.
+    // Swizzle write: `v.yx = value` writes those slots (Places.jet): through
+    // the declaration's own `__swizzle_setN(lanes…, value)` on the written
+    // place when it has one, else as a write of the slots. `v.xy += value`
+    // writes `v.xy + value`.
     if target == .Field(swizzle_base, member, swizzle_span) && sema_stmt_swizzle_member(member) {
-        vector: sema_stmt_swizzle_base_vector(swizzle_base, environment, program, scopes, state, tail_store, context, diagnostics)
-        if vector == .Val(vector_name) {
-            parsed: sema_expression_math_swizzle_parse(vector_name, member, swizzle_span, diagnostics)
+        found: sema_stmt_swizzle_base_slots(swizzle_base, environment, program, scopes, state, tail_store, context, diagnostics)
+        if found == .Val(slots) {
+            parsed: sema_expression_math_swizzle_parse(slots, member, swizzle_span, diagnostics)
             if parsed == .InvalidLane {
                 return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment swizzle lane")
             }
             if parsed == .Lanes(packed, count, overlaps) {
                 if overlaps {
                     root: sema_expr_place_root_ident(swizzle_base) ?? "v"
-                    diagnostics.push(sema_error("E3111", swizzle_span, "write swizzle `{member}` repeats a lane on `{vector_name}`", "each lane may be written at most once — overlapping patterns like `v.xx` have no single meaning", "assign each lane once, e.g. `{root}.xy = …` instead of `{root}.{member} = …`"))
+                    diagnostics.push(sema_error("E3111", swizzle_span, "write swizzle `{member}` repeats a lane on `{slots.shown}`", "each lane may be written at most once — overlapping patterns like `v.xx` have no single meaning", "assign each lane once, e.g. `{root}.xy = …` instead of `{root}.{member} = …`"))
                     return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment swizzle overlap")
                 }
                 value: if op == .Val(operator) -> Expr.Binary{op: operator, left: Expr.Field{base: swizzle_base.copy(), member: member, span: swizzle_span, id: AST_NODE_GENERATED}, right: expr, span: Span{start: swizzle_span.start, end: expr_span(expr).end}, id: AST_NODE_GENERATED} else -> expr
+                value_span: expr_span(value)
+                if !slots.lanes || slots.declared & (1 << (SEMA_SWIZZLE_SET_BIT + count)) == 0 {
+                    write: sema_stmt_swizzle_slots_write(swizzle_base, slots, packed, count, value, swizzle_span) ?? {
+                        diagnostics.push(sema_error("E0111", expr_span(swizzle_base), "this write needs a place, not a temporary", "write access can only be granted to stable storage, not a temporary expression", "bind the value to a `:=` name first, then pass the name"))
+                        return sema_stmt_assign_exit(context, diagnostics, exit_diagnostics, exit_reasons, "projected_assignment swizzle place")
+                    }
+                    return sema_stmt_check_projected_assignment(write.target, None, op_span, write.value, environment, program, scopes, state, tail_store, context, diagnostics)
+                }
                 args := [CallArg]{}
                 loop index in 0..<count {
                     lane: (packed >> (index * 2)) & 3
                     args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Int{value: lane, span: swizzle_span, width: None, raw: None, id: AST_NODE_GENERATED}, span: swizzle_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
                 }
-                value_span: expr_span(value)
                 args.push(CallArg{convention: AccessConvention.Read, expr: value, span: value_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
                 receiver: Expr.Place{value: swizzle_base, access: PlaceAccess.Write, span: expr_span(swizzle_base), id: AST_NODE_GENERATED}
                 call: Expr.MethodCall{receiver: receiver, method: "__swizzle_set{count}", method_span: swizzle_span, owner_type_args: [Type]{}, type_args: [Type]{}, args: args, id: AST_NODE_GENERATED}
@@ -8508,21 +8517,82 @@ sema_stmt_check_projected_assignment: fn(target: LValue, op: BinOp?, op_span: Sp
     sema_stmt_check_place_assignment(target, place, op, op_span, expr, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
-// A field name that spells a swizzle: one to four of x, y, z and w.
+// A field name that spells a swizzle: one to four of x, y, z and w, or of
+// r, g, b and a.
 sema_stmt_swizzle_member: fn(member: String) -> Bool Never! {
     if member.len() == 0 || member.len() > 4 -> return false
     loop byte in member.bytes() {
-        code: Int{byte}
-        if code != 120 && code != 121 && code != 122 && code != 119 -> return false
+        if sema_expression_swizzle_letter(Int{byte}) == None -> return false
     }
     true
 }
 
-// The Core vector or swizzleable lane type (`Vec3`, `F64x2`) a swizzle
-// write's base is, probed without keeping the check.
-sema_stmt_swizzle_base_vector: fn(base: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> String? {
+// The slots a swizzle write's base has (Places.jet), probed without keeping
+// the check.
+sema_stmt_swizzle_base_slots: fn(base: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaSwizzleSlots? {
     probed: sema_expr_probe_type(base, false, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-    sema_expression_core_vector_name(probed, environment, program)
+    sema_expression_swizzle_slots(probed, environment, program)
+}
+
+// `base.xy = value` on slots whose declaration has no `__swizzle_setK`. One
+// slot is written as an item. Several are written whole: each named slot
+// takes its part of `value`, which is evaluated once, and every other slot
+// keeps its value. None when `base` is not a place.
+sema_stmt_swizzle_slots_write: fn(base: Expr, slots: SemaSwizzleSlots, packed: Int, count: Int, value: Expr, span: Span) -> {target: LValue, value: Expr}? {
+    path: sema_stmt_swizzle_path(base) ?? return None
+    if count == 1 {
+        return Val({target: LValue.Index{base: sema_expression_swizzle_owner(path, slots, span), index: sema_stmt_swizzle_number(packed & 3, span), span: span, kind: IndexKind.Unknown}, value: value})
+    }
+    name: pipe_value_name(span.start)
+    elements := [Expr]{}
+    loop slot in 0..<slots.length {
+        part := -1
+        loop index in 0..<count {
+            if ((packed >> (index * 2)) & 3) == slot -> part = index
+        }
+        // A named slot reads its part of the value; any other keeps its own.
+        source: if part >= 0 -> Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED} else -> sema_expression_swizzle_owner(sema_stmt_swizzle_path(path) ?? return None, slots, span)
+        elements.push(Expr.Index{base: source, index: sema_stmt_swizzle_number(if part >= 0 -> part else -> slot, span), span: span, kind: IndexKind.Unknown, id: AST_NODE_GENERATED})
+    }
+    target: sema_stmt_swizzle_target(sema_expression_swizzle_owner(path, slots, span)) ?? return None
+    Val({target: target, value: sema_expression_swizzle_bound(value, name, count, sema_expression_swizzle_literal(slots.element, elements, span), span)})
+}
+
+sema_stmt_swizzle_number: fn(value: Int, span: Span) -> Expr Never! {
+    Expr.Int{value: value, span: span, width: None, raw: None, id: AST_NODE_GENERATED}
+}
+
+// A fresh copy of the place path `value`: a name, its fields, and its items
+// at a written number or path. None for any other expression, which is no
+// place to write.
+sema_stmt_swizzle_path: fn(value: Expr) -> Expr? Never! {
+    if value == .Ident(name, span, _) {
+        return Val(Expr.Ident{name: name, span: span, id: AST_NODE_GENERATED})
+    }
+    if value == .Int(number, span, _, _, _) -> return Val(sema_stmt_swizzle_number(number, span))
+    if value == .Paren(inner, _, _) -> return sema_stmt_swizzle_path(inner)
+    if value == .Field(inner, member, span, _) {
+        base: sema_stmt_swizzle_path(inner) ?? return None
+        return Val(Expr.Field{base: base, member: member, span: span, id: AST_NODE_GENERATED})
+    }
+    if value == .Index(inner, index, span, kind, _) {
+        base: sema_stmt_swizzle_path(inner) ?? return None
+        at: sema_stmt_swizzle_path(index) ?? return None
+        return Val(Expr.Index{base: base, index: at, span: span, kind: kind, id: AST_NODE_GENERATED})
+    }
+    None
+}
+
+// The assignment target a place path from sema_stmt_swizzle_path names.
+sema_stmt_swizzle_target: fn(path: Expr) -> LValue? Never! {
+    if path == .Ident(name, span, _) -> return Val(LValue.Local{name: name, name_span: span})
+    if path == .Field(base, member, span, _) {
+        return Val(LValue.Field{base: base, field: member, span: span})
+    }
+    if path == .Index(base, index, span, kind, _) {
+        return Val(LValue.Index{base: base, index: index, span: span, kind: kind})
+    }
+    None
 }
 
 // An index or field write whose path passes through a `ViewMut` or `Pin`
