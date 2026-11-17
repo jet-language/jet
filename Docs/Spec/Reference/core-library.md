@@ -6324,12 +6324,18 @@ itself: on Linux the app goes to the background when its window loses
 the focus and to the foreground when the window takes it again, and the
 machine goes to sleep and wakes when logind says `PrepareForSleep` on the
 system bus. Coming to the foreground or waking after the app was in the
-background or asleep is a resume, and `on_resume` runs then, in a task of
-its own, so the window never waits on it. The app does not see the other
-moments. When `on_resume` fails, its `Notice` shows on a red bar over the
-top of the window that came back, until a click on the bar dismisses it;
-with no window open it joins `app.notices()`. A desktop with no system
-bus or no logind resumes on the focus alone.
+background or asleep is a resume. A resume runs in a task of its own, so
+the window never waits on it. The app does not see the other moments.
+
+Each resume, with or without `on_resume`, first sends the writes the
+device queued (`graph.offline(.Queue)`), then re-runs every live binding
+at its next read, so the screen shows what changed while the app was
+away; the app writes no code for this. Only then does `on_resume` run. When
+`on_resume` fails, its `Notice` shows on a red bar over the top of the
+window that came back, until a click on the bar dismisses it; with no
+window open it joins `app.notices()`. An app with a window, a queue or an
+`on_resume` follows the machine's sleep. A desktop with no system bus or
+no logind resumes on the focus alone.
 
 `graph.window(width:, height:)` shows the app in a Linux desktop window of
 `width` by `height` logical pixels from `graph.launch()` on, titled the

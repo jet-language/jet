@@ -774,6 +774,17 @@ priv queue_drain: fn(client: String) -[Net, Time]> Bool Never! {
     sent
 }
 
+// Sends every client's queued writes (`queue_drain`), each client's in
+// order, when the app comes back (`app_resume_run`): the link they waited
+// on may be back.
+priv queue_resume: fn() -[Net, Time]> Never! {
+    clients := [String]{}
+    loop write in queue_decode(queue_load()) {
+        if !clients.contains(write.client) -> clients.push(write.client.copy())
+    }
+    loop client in clients -> _: queue_drain(client)
+}
+
 priv queue_send: fn(client: String) -[Net, Time]> Bool Never! {
     loop {
         if links_cut(client) -> return false
@@ -1138,11 +1149,11 @@ __live_push: fn<T: Encode>(source: String, args: [String], value: T) Never! {
 
 // `invalidate(source, args...)`: exactly that argument list re-runs.
 __live_invalidate: fn(source: String, args: [String]) Never! {
-    live_invalidate(source, Val(live_key(args)), None, 0)
+    live_invalidate(Val(source), Val(live_key(args)), None, 0)
 }
 
 // `invalidate(source)`: every binding of `source` re-runs.
-__live_invalidate_all: fn(source: String) Never! { live_invalidate(source, None, None, 0) }
+__live_invalidate_all: fn(source: String) Never! { live_invalidate(Val(source), None, None, 0) }
 
 // One argument's part of a binding's identity, and one argument of a queued
 // job's call: the argument encoded, or `_`, which no JSON reads, when it
@@ -1201,7 +1212,7 @@ priv(package) live_reads: module {
     // all of it, and every one whose read set holds one of the narrowed reads
     // `held` (`narrowed`): those whose condition holds for a changed row.
     invalidate: fn(source: String, held: [String]) Never! {
-        live_invalidate(source, None, Val(held), 0)
+        live_invalidate(Val(source), None, Val(held), 0)
     }
 }
 
@@ -1300,7 +1311,9 @@ LIVE_PRESENCE_SOURCE: "app.presence:"
 live_presence_settle: fn(id: Int, acting: Acting?, asked: [String]) {
     account: if acting == .Val(.Account(who)) -> who.raw() else -> ""
     changed: live_presence_keep(id, account, asked)
-    loop address in changed -> live_invalidate("{LIVE_PRESENCE_SOURCE}{address}", None, None, id)
+    loop address in changed {
+        live_invalidate(Val("{LIVE_PRESENCE_SOURCE}{address}"), None, None, id)
+    }
 }
 
 // Makes `asked` the addresses `account` is present at through binding `id`
@@ -1367,7 +1380,9 @@ priv live_left: fn(topics: String) Never! {
         if !topic.starts_with("live:") -> next
         id: Int.parse(topic.slice(5, topic.len())) ?? next
         changed: live_presence_keep(id, "", [String]{})
-        loop address in changed -> live_invalidate("{LIVE_PRESENCE_SOURCE}{address}", None, None, 0)
+        loop address in changed {
+            live_invalidate(Val("{LIVE_PRESENCE_SOURCE}{address}"), None, None, 0)
+        }
     }
 }
 
@@ -2322,7 +2337,7 @@ App: struct {
     // `$XDG_DATA_HOME`, else `~/.local/share`; `{config}` is
     // `$XDG_CONFIG_HOME`, else `~/.config`. It starts the graph's background
     // work (`background`), puts its tray in the desktop's (`tray`) and
-    // follows the machine's sleep for the graph's resume (`lifecycle`).
+    // follows the machine's sleep to resume the app (`lifecycle`).
     // Then it opens the link the launch was given (`open_link`), else,
     // when the graph has a window (`window`), the address `/`, opens the
     // window, and is true. That link is the first argument that is one, as
@@ -2415,10 +2430,13 @@ App: struct {
     // it, and when the machine wakes from sleep (logind's PrepareForSleep
     // on the system bus). The moments in between (the app starting, going
     // to the background, the machine going to sleep, the window closing)
-    // only drive the runtime. A notice `on_resume` fails with shows at the
-    // top of the window that came back until a click dismisses it; with no
-    // window open it joins the app's notice list (`notices`). Gives back
-    // the graph.
+    // only drive the runtime. Coming back, with or without `on_resume`,
+    // first sends the writes the device queued (`offline(.Queue)`) and then
+    // re-runs every live binding at its next read, so the screen shows what
+    // changed while the app was away. A notice `on_resume` fails with shows
+    // at the top of the window that came back until a click dismisses it;
+    // with no window open it joins the app's notice list (`notices`). Gives
+    // back the graph.
     lifecycle: fn(self, on_resume: &&fn() Notice!) -> App Never! {
         held := APP_GRAPH.guard_edit()
         held.value.resume = Val(Shared{AppResume{run: on_resume.move()}})
@@ -3736,7 +3754,7 @@ priv APP_AWAY: Shared{AppAway{away: false}}
 
 // The app reaches `moment`; coming back, to the foreground or awake, after
 // it was away resumes it (`app_resume_start`).
-priv app_moment: fn(moment: AppMoment) Never! {
+priv app_moment: fn(moment: AppMoment) -[Net, Time]> Never! {
     if app_came_back(moment) -> app_resume_start()
 }
 
@@ -3753,18 +3771,26 @@ priv app_graph_resume: fn() -> Shared<AppResume>? Never! {
     held.value.resume.copy()
 }
 
-// Runs the graph's `on_resume` (`App.lifecycle`) in a task of its own, so
-// the window's frames and the sleep watch never wait on it.
-priv app_resume_start: fn() Never! {
-    resume: app_graph_resume() ?? return
+// Resumes the app in a task of its own, so the window's frames and the
+// sleep watch never wait on it (`app_resume_run`).
+priv app_resume_start: fn() -[Net, Time]> Never! {
+    resume: app_graph_resume()
     running: task { app_resume_run(resume) }
     running.detach()
 }
 
-// Runs `on_resume` once; the notice it fails with shows at the top of the
-// window (`app_window_resumed`), or joins the notice list without one.
-priv app_resume_run: fn(resume: Shared<AppResume>) Never! {
-    held: resume.guard_read()
+// Resumes the app, with no code of its own: the writes the device queued
+// while it was away go to the server (`queue_resume`), then every live
+// binding re-runs at its next read (`live_invalidate`), so what the screen
+// reads again holds them, and then the graph's `on_resume`
+// (`App.lifecycle`), when it has one, runs once. The notice it fails with
+// shows at the top of the window (`app_window_resumed`), or joins the
+// notice list without one.
+priv app_resume_run: fn(resume: Shared<AppResume>?) -[Net, Time]> Never! {
+    queue_resume()
+    live_invalidate(None, None, None, 0)
+    on_resume: resume ?? return
+    held: on_resume.guard_read()
     app_resume_once(held.value.run)
 }
 
@@ -3778,11 +3804,13 @@ priv app_resume_once: fn(run: fn() Notice!) Never! {
 priv APP_SLEEP_WAIT_NS: 60000000000
 
 // Follows the machine going to sleep and waking, from `launch` on, when
-// the graph runs something on resume: logind says PrepareForSleep(true)
-// before the sleep and PrepareForSleep(false) after the wake, on the
-// system bus. Without a system bus or logind there is nothing to follow.
+// the app has something to resume (`app_resume_run`): a window, a queue
+// (`offline(.Queue)`) or an `on_resume`. logind says
+// PrepareForSleep(true) before the sleep and PrepareForSleep(false) after
+// the wake, on the system bus. Without a system bus or logind there is
+// nothing to follow.
 priv app_sleep_start: fn() -[Env, Net, Time]> Never! {
-    if app_graph_resume() == None {
+    if app_graph_resume() == None && !queue_on() && app_graph_window() == None {
         return
     }
     watching: task { app_sleep_watch() }
@@ -5924,18 +5952,25 @@ priv app_graph_shows: fn(ids: [Int]) -> Bool Never! {
     assert_eq(after[after.len() - 1].text, "The board is offline")
 }
 
-#Test("the app resumes only when it comes back from away, and a failed resume with no window joins the notices") {
+#Test("the app resumes only when it comes back from away, re-running every live binding, and a failed resume with no window joins the notices") {
     assert(!app_came_back(.Foreground))
     assert(!app_came_back(.Background))
     assert(app_came_back(.Foreground))
     assert(!app_came_back(.Foreground))
     assert(!app_came_back(.Suspend))
     assert(app_came_back(.Wake))
+    binding: __live_bind<Int, AppError>("app.test.resumed", [String]{}, fn() { resume_test_square() })
+    _: state(binding)
+    assert(live_current(binding.id, rt.clock_mono_ns()).value != None, "a binding just read is current")
     before: notices().len()
-    app_resume_run(Shared{AppResume{run: fn() Notice! { Err(Notice{text: "Couldn't refresh the board"}) }}})
+    app_resume_run(Val(Shared{AppResume{run: fn() Notice! { Err(Notice{text: "Couldn't refresh the board"}) }}}))
+    assert(live_current(binding.id, rt.clock_mono_ns()).value == None, "coming back made the binding re-run")
     after: notices()
     assert_eq(after.len(), before + 1)
     assert_eq(after[after.len() - 1].text, "Couldn't refresh the board")
+    // Without an on_resume, coming back keeps no notice.
+    app_resume_run(None)
+    assert_eq(notices().len(), after.len())
 }
 
 #Test("a drop zone takes only its own type and refuses another program's drop, and every move works without a drag") {
@@ -7983,6 +8018,7 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
 }
 
 // Marks dirty every binding of `source`, or only the one whose key is `key`,
+// or, with no `source`, every binding (sync's session records are none),
 // then publishes each marked binding's invalidation to the WebSocket live
 // hub: topic `live:<id>`, the event `live_event` (with the rest of its hold
 // when the binding is held). Only connections that watch that binding
@@ -7992,7 +8028,7 @@ live_store: fn(id: Int, value: String, now: Int, started: Int?) {
 // that read `source`: of those that read it narrowed (`live_reads`), only the
 // ones whose narrowed read is in `reached`, when it is given. The binding
 // `skip` (none when 0) is never marked: its own run made the change.
-live_invalidate: fn(source: String, key: String?, reached: [String]?, skip: Int) {
+live_invalidate: fn(source: String?, key: String?, reached: [String]?, skip: Int) {
     loop {
         seen: live_cell_load()
         registry := live_decode(seen) ?? return
@@ -8001,13 +8037,15 @@ live_invalidate: fn(source: String, key: String?, reached: [String]?, skip: Int)
         events := [String]{}
         loop index in 0..<registry.records.len() {
             if registry.records[index].id == skip -> next
-            // An exact-key invalidation names one binding of `source`; a
-            // whole-source one also reaches every binding that read it.
-            if registry.records[index].source == source {
-                if key == .Val(only) && registry.records[index].key != only -> next
-            } else if key != None || !live_read_hit(registry.records[index].reads, source, reached) {
-                next
-            }
+            if source == .Val(named) {
+                // An exact-key invalidation names one binding of `named`; a
+                // whole-source one also reaches every binding that read it.
+                if registry.records[index].source == named {
+                    if key == .Val(only) && registry.records[index].key != only -> next
+                } else if key != None || !live_read_hit(registry.records[index].reads, named, reached) {
+                    next
+                }
+            } else if registry.records[index].source == LIVE_SYNC_SOURCE { next }
             registry.records[index].dirty = true
             registry.records[index].generation += 1
             id: registry.records[index].id
