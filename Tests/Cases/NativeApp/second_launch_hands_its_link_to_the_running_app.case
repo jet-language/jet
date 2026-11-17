@@ -1,0 +1,21 @@
+# The desktop app runs once. While the first launch runs the app, a second
+# launch given crewboard://tasks/42 hands the link and the activation token
+# the desktop gave it to the running app, through the app's socket in the
+# runtime directory, and exits. The running app opens the task's screen
+# state and keeps the token, which brings its window to the front.
+fixture: SecondLaunchHandsItsLinkToTheRunningApp.fixture
+requires: os-name:linux
+env: NO_COLOR=1
+env: XDG_DATA_HOME={work}/data
+env: XDG_CONFIG_HOME={work}/config
+env: XDG_RUNTIME_DIR={work}/run
+mkdir: run
+session first raw: jet run main.jet
+await: file run/crewboard.link timeout 120s every 10ms # the running app listens
+step: jet run main.jet -- crewboard://tasks/42
+env: XDG_ACTIVATION_TOKEN=second-launch-token
+exit: 0
+stdout: = "handed crewboard://tasks/42 to the running app\n"
+wait first timeout 60s
+exit: 0
+stdout: = "running: none\nopened TaskView{id: 42} and focused with second-launch-token\n"

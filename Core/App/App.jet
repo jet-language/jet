@@ -35,6 +35,8 @@ use {
     files: core.files
     sys: core.sys
     process: core.process
+    net: core.net
+    core.net.[UnixListener, UnixStream]
     builtin: jet_builtins
 }
 
@@ -2308,23 +2310,46 @@ App: struct {
         now.fields.get(C_APP_LOST_LINK).copy()
     }
 
-    // Starts the app on a Linux desktop. When the graph has a link scheme
+    // Starts the app on a Linux desktop, as its one running copy. While a
+    // copy runs, a launch hands it the link it was given and its activation
+    // token, and is false: the caller exits. The running copy opens that
+    // link (`open_link`) and keeps the token (`activations`). The copy
+    // listens at `{runtime}/{id}.link`: `{runtime}` is `$XDG_RUNTIME_DIR`,
+    // else the temporary directory, and `{id}` is the desktop entry's. When
+    // no copy runs, this launch becomes it. When the graph has a link scheme
     // (`url_scheme`), it installs the app's desktop entry
-    // (`{data}/applications/{id}.desktop`, `desktop_entry`) and makes it
-    // the default handler of each scheme's links in `{config}/mimeapps.list`,
-    // as `xdg-mime default` does; `{data}` is `$XDG_DATA_HOME`, else
-    // `~/.local/share`, and `{config}` is `$XDG_CONFIG_HOME`, else
-    // `~/.config`. Then it opens the link the launch was given, the first
-    // argument that is one (`open_link`), as the desktop passes a link the
-    // entry's `%u` names. True: this process runs the app.
-    launch: fn(self) -[Env, Exec.Args, FS.Read, FS.Write, Net]> Bool Never! {
-        if app_graph_schemes().len() > 0 -> app_link_register(self.title)
+    // (`{data}/applications/{id}.desktop`, `desktop_entry`). It also makes
+    // that entry the default handler of each scheme's links in
+    // `{config}/mimeapps.list`, as `xdg-mime default` does. `{data}` is
+    // `$XDG_DATA_HOME`, else `~/.local/share`; `{config}` is
+    // `$XDG_CONFIG_HOME`, else `~/.config`. Then it opens the link the
+    // launch was given (`open_link`) and is true. That link is the first
+    // argument that is one, as the desktop passes the link the entry's `%u`
+    // names.
+    launch: fn(self) -[Env, Exec.Args, FS.Read, FS.Write, Net, Time.Wait]> Bool Never! {
+        link := ""
         loop given in process.args() {
             if app_link_address(given) == None -> next
-            _: self.open_link(given)
+            link = given.copy()
             break
         }
+        socket: "{app_runtime_dir()}/{app_desktop_id(self.title)}.link"
+        token: sys.get("XDG_ACTIVATION_TOKEN") ?? sys.get("DESKTOP_STARTUP_ID") ?? ""
+        if app_launch_hand(socket, link, token) -> return false
+        if app_graph_schemes().len() > 0 -> app_link_register(self.title)
+        app_launch_listen(App{title: self.title.copy()}, socket)
+        if link != "" -> _: self.open_link(link)
         true
+    }
+
+    // The activation token of each later launch that handed this running
+    // copy its link (`launch`), in order, "" for a launch the desktop gave
+    // none. A launch's token is the one the desktop's activation protocol
+    // takes to bring the app's window to the front:
+    // `$XDG_ACTIVATION_TOKEN` (Wayland), else `$DESKTOP_STARTUP_ID` (X11).
+    activations: fn(self) -> [String] Never! {
+        held: APP_GRAPH.guard_read()
+        held.value.activations.copy()
     }
 
     // The text of the app's Linux desktop entry: an application named
@@ -2627,7 +2652,7 @@ Query: struct {
 // heads, queue or links yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
-    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}}
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}}
     heads := APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
     App{title: title}
@@ -3118,8 +3143,9 @@ AppInstall: struct {
 // (`.api`), the endpoints of the services it mounts by `{service}/{method}`,
 // its screens in the order it adds them, its offline mode, how a browser
 // installs it, the screen open now and that screen's route data: the ids of
-// the live bindings its view read, and the link schemes and web domains
-// whose links open its screens (`.url_scheme`, `.app_links`).
+// the live bindings its view read, the link schemes and web domains whose
+// links open its screens (`.url_scheme`, `.app_links`), and the activation
+// tokens of the later launches that handed it their links (`.launch`).
 priv AppGraph: struct {
     title: String
     apis: [String:AppAPI]
@@ -3131,9 +3157,10 @@ priv AppGraph: struct {
     route_data: [Int]
     schemes: [String]
     link_domains: [String]
+    activations: [String]
 }
 
-priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}}}
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}}}
 
 // The most bytes one call's body to the service `service` (its key) may
 // hold, when the app graph's `.api<S>(path, max_upload:)` names it.
@@ -3316,6 +3343,71 @@ priv app_link_register: fn(title: String) -[Env, FS.Read, FS.Write]> Never! {
     list: "{config}/mimeapps.list"
     kept: if files.exists(list) -> files.read(list) ?? return else -> ""
     files.write(list, app_mimeapps_with(kept, app_graph_schemes(), id)) ?? return
+}
+
+// How long a launch and the running copy of the app wait for each other's
+// next text (`App.launch`).
+C_APP_HANDOFF_WAIT_NS: 5000000000
+
+// The directory of the app's link socket (`App.launch`): `$XDG_RUNTIME_DIR`
+// when it is an absolute path, else the temporary directory.
+priv app_runtime_dir: fn() -[Env]> String Never! {
+    if sys.get("XDG_RUNTIME_DIR") == .Val(dir) && dir.starts_with("/") -> return dir
+    sys.temp_dir()
+}
+
+// Hands `link` and `token` to the running copy of the app that listens at
+// `socket` (`App.launch`), as one JSON line `[link, token]`, and waits for
+// it to take them. True once they are sent; false when no copy listens.
+priv app_launch_hand: fn(socket: String, link: String, token: String) -[Net, Time.Wait]> Bool Never! {
+    stream := net.unix_connect(socket) ?? return false
+    message: live_json.to_string<[String]>([String]{link, token}) ?? return false
+    net.unix_write(stream, "{message}\n") ?? return false
+    _: app_launch_line(stream)
+    net.unix_close(stream) ?? return true
+    true
+}
+
+// Makes this process the running copy of the app that `graph` is
+// (`App.launch`), listening at `socket`; listening replaces a socket left
+// there, which is stale: a launch that could not hand it a link found no
+// copy behind it. For each later launch, a task opens the link the launch
+// hands over (`open_link`) and keeps its activation token, then answers
+// `ok`. When nothing can listen at `socket`, the app runs without taking
+// later launches.
+priv app_launch_listen: fn(graph: App, socket: String) -[FS.Read, Net, Time.Wait]> Never! {
+    listener: net.unix_listen(socket) ?? return
+    serving: task { app_launch_serve(graph, listener) }
+    serving.detach()
+}
+
+// Takes each later launch that connects to `listener` (`App.launch`): opens
+// the link it hands over and keeps its activation token, then answers `ok`.
+priv app_launch_serve: fn(graph: App, listener: UnixListener) -[Net, FS.Read, Time.Wait]> Never! {
+    loop {
+        peer := net.unix_accept(listener) ?? return
+        given: live_json.decode<[String]>(app_launch_line(peer)) ?? [String]{}
+        if given.len() == 2 {
+            if given[0] != "" -> _: graph.open_link(given[0])
+            held := APP_GRAPH.guard_edit()
+            held.value.activations.push(given[1].copy())
+        }
+        net.unix_write(peer, "ok\n") ?? next
+        net.unix_close(peer) ?? next
+    }
+}
+
+// The next line `stream` gives, without its end; what came when it ends or
+// goes quiet first.
+priv app_launch_line: fn(stream: &UnixStream) -[Net, Time.Wait]> String Never! {
+    text := ""
+    loop !text.contains("\n") {
+        if !(net.unix_wait(stream, C_APP_HANDOFF_WAIT_NS) ?? false) -> break
+        part: net.unix_read(stream) ?? break
+        if part == "" -> break
+        text = "{text}{part}"
+    }
+    text.removesuffix("\n")
 }
 
 // `$name` when it is an absolute path, else `{home}/{fallback}`; None

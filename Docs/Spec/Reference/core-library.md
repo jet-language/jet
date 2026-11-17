@@ -5591,7 +5591,8 @@ tasks never read or change the process registry. The module source is
 | `graph.app_links(domain: String) -> App` | graph | Make the web links of `domain` the app's own: `https://{domain}/tasks/7` opens what `/tasks/7` opens; give back the graph. See below. |
 | `graph.open_link(link: String) -[Net, FS.Read]> Bool` | opened | Open the screen state `link` addresses through the graph's route set, or the not-found state; true when a screen opened. See below. |
 | `graph.lost_link() -> String?` | link | The link the not-found state shows; `None` while a screen is open. |
-| `graph.launch() -[Env, Exec.Args, FS.Read, FS.Write, Net]> Bool` | runs | Start the app on a Linux desktop: install its desktop entry and open the link the launch was given. See below. |
+| `graph.launch() -[Env, Exec.Args, FS.Read, FS.Write, Net, Time.Wait]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. See below. |
+| `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
 | `graph.desktop_entry(exec: String) -> String` | text | The app's Linux desktop entry, running `exec` with the link it opens. |
 | `url_of(state) -> String` | address | The address of the screen whose state is `state`'s type, filled from `state`'s fields. See below. |
 | `presence(state) -> [auth.AccountID]` | accounts | The accounts that have `state` open now and whose last read of its data passed its policies, sorted; a live binding that asks it re-runs when they change. See below. |
@@ -6080,19 +6081,32 @@ digits, `+`, `-` or `.`; `http`, `https` and `file` are refused, and a
 domain must be a host name alone. Schemes and domains compare without case;
 an invalid one panics.
 
-`graph.launch()` starts the app on a Linux desktop. When the graph has a
-scheme, it writes the app's desktop entry (`graph.desktop_entry(exec)`, with
-the running program as `exec`) to `{data}/applications/{id}.desktop`, where
-`{data}` is `$XDG_DATA_HOME` or `~/.local/share` and `{id}` is the title's
-letters and digits in lowercase joined by `-`. The entry runs the program
-with the link it opens (`Exec="…" %u`) and lists
-`MimeType=x-scheme-handler/{scheme};` for each scheme. In
-`{config}/mimeapps.list` (`$XDG_CONFIG_HOME` or `~/.config`) the
+`graph.launch()` starts the app on a Linux desktop, as its one running
+copy. The first argument that is a link is the launch's link, as the
+desktop passes the link the entry's `%u` names. The running copy listens
+on a Unix socket at `{runtime}/{id}.link`, where `{runtime}` is
+`$XDG_RUNTIME_DIR` (else the temporary directory) and `{id}` is the title's
+letters and digits in lowercase joined by `-`. While a copy runs, a launch
+sends it the line `[link, token]` (JSON; `link` is "" when the launch has
+none), waits for its `ok`, and `launch` is false: the caller exits. `token`
+is the activation token the desktop gave the launch,
+`$XDG_ACTIVATION_TOKEN` (Wayland) or else `$DESKTOP_STARTUP_ID` (X11), ""
+without one. The running copy opens the link (`graph.open_link`) and
+appends the token to `graph.activations()`: the desktop's activation
+protocol takes it to bring the app's window to the front. When no copy
+runs, the launch becomes it, replacing a socket a copy that is gone left;
+when nothing can listen there, the app runs without taking later launches.
+Then, when the graph has a scheme, it writes the app's desktop entry
+(`graph.desktop_entry(exec)`, with the running program as `exec`) to
+`{data}/applications/{id}.desktop`, where `{data}` is `$XDG_DATA_HOME` or
+`~/.local/share`. The entry runs the program with the link it opens
+(`Exec="…" %u`) and lists `MimeType=x-scheme-handler/{scheme};` for each
+scheme. In `{config}/mimeapps.list` (`$XDG_CONFIG_HOME` or `~/.config`) the
 `[Default Applications]` group names the entry for each
 `x-scheme-handler/{scheme}`, as `xdg-mime default` does, and every other
 line stays. A file that can't be written leaves the links unregistered and
-the app runs. Then the first argument that is a link opens
-(`graph.open_link`), and `launch` is true.
+the app runs. Then the launch's link opens (`graph.open_link`), and
+`launch` is true.
 
 `graph.cache<V>(policy)` sets how the replies of the type `V` may be kept,
 and the last call for a type holds. `CachePolicy` is `.Private` or
