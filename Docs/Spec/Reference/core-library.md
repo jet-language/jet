@@ -5703,6 +5703,7 @@ tasks never read or change the process registry. The module source is
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
 | `graph.menu_bar(menus: fn() -> [Menu] Notice!) -> App` | graph | Give the app's window the menus `menus` makes, kept current: on Linux the window's menu, and each item's key equivalent in the window; give back the graph. See below. |
+| `graph.lifecycle(on_resume: fn() Notice!) -> App` | graph | Run `on_resume` each time the app comes back: on Linux when its window takes the focus again, and when the machine wakes from sleep; give back the graph. See below. |
 | `graph.window(width: Int, height: Int) -> App` | graph | Show the app in a Linux desktop window from `launch` on, drawing the current screen's tree; give back the graph. See below. |
 | `item(label: String, run: fn() Notice!, key: String = "", enabled: Bool = true) -> MenuItem` / `separator() -> MenuItem` / `quit_item() -> MenuItem` | item | A menu item that runs `run` when chosen, with the key equivalent `key` (such as `"Cmd+N"`) and greyed out unless `enabled`; a separator line; and the item that quits the app (Cmd+Q). |
 | `menu(title: String, items: [MenuItem]) -> Menu` / `edit_menu() -> Menu` / `window_menu() -> Menu` | menu | A menu bar's menu titled `title` holding `items`; the Edit menu (Cut, Copy, Paste); and the Window menu (Minimize, Close). |
@@ -6312,6 +6313,19 @@ chosen. Choosing an item runs its `run`, and a run that fails adds its
 A desktop with no session bus or no global menu shows no menu, and the
 key equivalents still work. A key that names no key, or a modifier that
 isn't one of these, panics.
+
+`graph.lifecycle(on_resume:)` runs `on_resume` each time the app comes
+back, from `graph.launch()` on. The runtime follows the app's moments
+itself: on Linux the app goes to the background when its window loses
+the focus and to the foreground when the window takes it again, and the
+machine goes to sleep and wakes when logind says `PrepareForSleep` on the
+system bus. Coming to the foreground or waking after the app was in the
+background or asleep is a resume, and `on_resume` runs then, in a task of
+its own, so the window never waits on it. The app does not see the other
+moments. When `on_resume` fails, its `Notice` shows on a red bar over the
+top of the window that came back, until a click on the bar dismisses it;
+with no window open it joins `app.notices()`. A desktop with no system
+bus or no logind resumes on the focus alone.
 
 `graph.window(width:, height:)` shows the app in a Linux desktop window of
 `width` by `height` logical pixels from `graph.launch()` on, titled the

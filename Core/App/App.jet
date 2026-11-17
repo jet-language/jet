@@ -2321,11 +2321,12 @@ App: struct {
     // `{config}/mimeapps.list`, as `xdg-mime default` does. `{data}` is
     // `$XDG_DATA_HOME`, else `~/.local/share`; `{config}` is
     // `$XDG_CONFIG_HOME`, else `~/.config`. It starts the graph's background
-    // work (`background`) and puts its tray in the desktop's (`tray`). Then
-    // it opens the link the launch was given (`open_link`), else, when the
-    // graph has a window (`window`), the address `/`, opens the window, and
-    // is true. That link is the first argument that is one, as the desktop
-    // passes the link the entry's `%u` names.
+    // work (`background`), puts its tray in the desktop's (`tray`) and
+    // follows the machine's sleep for the graph's resume (`lifecycle`).
+    // Then it opens the link the launch was given (`open_link`), else,
+    // when the graph has a window (`window`), the address `/`, opens the
+    // window, and is true. That link is the first argument that is one, as
+    // the desktop passes the link the entry's `%u` names.
     launch: fn(self) -[Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool Never! {
         link := ""
         loop given in process.args() {
@@ -2340,6 +2341,7 @@ App: struct {
         app_launch_listen(App{title: self.title.copy()}, socket)
         app_background_start(self.title)
         app_tray_start(self.title)
+        app_sleep_start()
         if link != "" -> _: self.open_link(link) else if app_graph_window() != None {
             _: self.open_link("/")
         }
@@ -2405,6 +2407,21 @@ App: struct {
     menu_bar: fn(self, menus: &&fn() -> [Menu] Notice!) -> App Never! {
         held := APP_GRAPH.guard_edit()
         held.value.menu_bar = Val(Shared{AppMenuBar{menus: menus.move()}})
+        self.copy()
+    }
+
+    // Runs `on_resume` each time the app comes back from `launch` on: on
+    // a Linux desktop, when its window takes the focus again after it lost
+    // it, and when the machine wakes from sleep (logind's PrepareForSleep
+    // on the system bus). The moments in between (the app starting, going
+    // to the background, the machine going to sleep, the window closing)
+    // only drive the runtime. A notice `on_resume` fails with shows at the
+    // top of the window that came back until a click dismisses it; with no
+    // window open it joins the app's notice list (`notices`). Gives back
+    // the graph.
+    lifecycle: fn(self, on_resume: &&fn() Notice!) -> App Never! {
+        held := APP_GRAPH.guard_edit()
+        held.value.resume = Val(Shared{AppResume{run: on_resume.move()}})
         self.copy()
     }
 
@@ -2744,7 +2761,7 @@ Query: struct {
 // heads, queue or links yet.
 new: fn(title: String) -> App Never! {
     held := APP_GRAPH.guard_edit()
-    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None}
+    held.value = AppGraph{title: title.copy(), apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None, resume: None}
     heads := APP_HEADS.guard_edit()
     heads.value = [String:Shared<AppHead>]{}
     App{title: title}
@@ -3256,9 +3273,10 @@ priv AppGraph: struct {
     tray: AppTray?,
     window: AppWindow?,
     menu_bar: Shared<AppMenuBar>?,
+    resume: Shared<AppResume>?,
 }
 
-priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None}}
+priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}, tray: None, window: None, menu_bar: None, resume: None}}
 
 // One piece of a graph's background work (`App.background`): it runs every
 // `every_ns` nanoseconds while the app runs, and at login when `at_login`.
@@ -3281,6 +3299,11 @@ priv AppTray: struct {
 
 priv AppTrayMenu: struct {
     menu: fn() -> [MenuItem] Notice!,
+}
+
+// What a graph runs each time the app comes back (`App.lifecycle`).
+priv AppResume: struct {
+    run: fn() Notice!,
 }
 
 // A graph's window (`App.window`): its size in logical pixels.
@@ -3691,6 +3714,93 @@ priv app_background_run: fn(every_ns: Int, work: Shared<AppBackgroundRun>) -[Tim
 
 priv app_background_once: fn(run: fn() Notice!) Never! {
     if run() == .Err(notice) -> __keep_notice(notice)
+}
+
+// The moments the runtime follows while the app runs: its window took or
+// lost the focus, and the machine went to sleep or woke. They stay inside
+// the runtime; the app hears only that it came back (`App.lifecycle`).
+priv AppMoment: enum {
+    Foreground,
+    Background,
+    Suspend,
+    Wake,
+}
+
+// Whether the app has been away, in the background or asleep, since it
+// last came back.
+priv AppAway: struct {
+    away: Bool,
+}
+
+priv APP_AWAY: Shared{AppAway{away: false}}
+
+// The app reaches `moment`; coming back, to the foreground or awake, after
+// it was away resumes it (`app_resume_start`).
+priv app_moment: fn(moment: AppMoment) Never! {
+    if app_came_back(moment) -> app_resume_start()
+}
+
+// Whether reaching `moment` brings the app back from away.
+priv app_came_back: fn(moment: AppMoment) -> Bool Never! {
+    held := APP_AWAY.guard_edit()
+    was: held.value.away
+    held.value.away = moment == .Background || moment == .Suspend
+    was && !held.value.away
+}
+
+priv app_graph_resume: fn() -> Shared<AppResume>? Never! {
+    held: APP_GRAPH.guard_read()
+    held.value.resume.copy()
+}
+
+// Runs the graph's `on_resume` (`App.lifecycle`) in a task of its own, so
+// the window's frames and the sleep watch never wait on it.
+priv app_resume_start: fn() Never! {
+    resume: app_graph_resume() ?? return
+    running: task { app_resume_run(resume) }
+    running.detach()
+}
+
+// Runs `on_resume` once; the notice it fails with shows at the top of the
+// window (`app_window_resumed`), or joins the notice list without one.
+priv app_resume_run: fn(resume: Shared<AppResume>) Never! {
+    held: resume.guard_read()
+    app_resume_once(held.value.run)
+}
+
+priv app_resume_once: fn(run: fn() Notice!) Never! {
+    if run() == .Err(notice) {
+        if !app_window_resumed(notice) -> __keep_notice(notice)
+    }
+}
+
+// How long the sleep watch waits on the system bus at a time.
+priv APP_SLEEP_WAIT_NS: 60000000000
+
+// Follows the machine going to sleep and waking, from `launch` on, when
+// the graph runs something on resume: logind says PrepareForSleep(true)
+// before the sleep and PrepareForSleep(false) after the wake, on the
+// system bus. Without a system bus or logind there is nothing to follow.
+priv app_sleep_start: fn() -[Env, Net, Time]> Never! {
+    if app_graph_resume() == None {
+        return
+    }
+    watching: task { app_sleep_watch() }
+    watching.detach()
+}
+
+priv app_sleep_watch: fn() -[Env, Net, Time]> Never! {
+    bus := dbus.system(ASK_BUS_WAIT_NS) ?? return
+    dbus.add_match(bus, "type='signal',interface='org.freedesktop.login1.Manager',member='PrepareForSleep',path='/org/freedesktop/login1'", ASK_BUS_WAIT_NS) ?? return
+    loop {
+        got: dbus.signals(bus, APP_SLEEP_WAIT_NS) ?? return
+        loop signal in got {
+            if signal.member != "PrepareForSleep" || signal.body.len() != 1 -> next
+            if signal.body[0] == .Bool(sleeping) {
+                app_moment(if sleeping -> AppMoment.Suspend else -> AppMoment.Wake)
+            }
+        }
+    }
 }
 
 // Installs the app's XDG autostart entry (`{config}/autostart/{id}.desktop`,
@@ -4469,7 +4579,7 @@ priv app_notice_draw: fn(frame: ui.Frame) Never! {
     if listed.len() == 0 {
         return
     }
-    frame.__draw_notice(listed[listed.len() - 1].text, frame.__pixels(APP_NOTICE_BAR))
+    frame.__draw_notice(listed[listed.len() - 1].text, frame.__pixels(APP_NOTICE_BAR), false)
 }
 
 // Whether the pointer of `frame` is on the bar the window shows the
@@ -4479,6 +4589,22 @@ priv app_notice_dismissed: fn(frame: ui.Frame) -> Bool Never! {
     if listed.len() == 0 -> return false
     if frame.get_mouse_y() < frame.height - frame.__pixels(APP_NOTICE_BAR) -> return false
     __dismiss(listed.len() - 1)
+    true
+}
+
+// Draws `notice`, which a resume failed with (`App.lifecycle`), into
+// `frame`, on a bar over the top of the screen, which a click dismisses
+// (`app_resumed_dismissed`).
+priv app_resumed_draw: fn(frame: ui.Frame, notice: Notice) Never! {
+    frame.__draw_notice(notice.text, frame.__pixels(APP_NOTICE_BAR), true)
+}
+
+// Whether the pointer of `frame` is on the bar at the top of the window
+// that shows `back`, the notice a resume failed with; if it is, the notice
+// is dismissed.
+priv app_resumed_dismissed: fn(frame: ui.Frame, back: &Notice?) -> Bool Never! {
+    if back == None || frame.get_mouse_y() >= frame.__pixels(APP_NOTICE_BAR) -> return false
+    back = None
     true
 }
 
@@ -4970,10 +5096,13 @@ priv app_graph_window: fn() -> AppWindow? Never! {
 // (`App.menu_bar`) the window names its menu (`app_menu_bar_start`), a key
 // with an item's key equivalent chooses the item instead of going to the
 // tree (`app_menu_bar_keyed`), and the items of the Edit and Window menus
-// chosen from the bar wake the frames to act (`app_window_act`). A frame
-// draws the tree when nothing is drawn yet, the tree is new or an event
-// changed it, or the window took another size. A display that is missing
-// or fails leaves a notice.
+// chosen from the bar wake the frames to act (`app_window_act`). The
+// window taking or losing the focus brings the app to the foreground or
+// the background (`app_moment`); a resume that fails shows its notice at
+// the top until a click there dismisses it. A frame draws the tree when
+// nothing is drawn yet, the tree is new or an event changed it, or the
+// window took another size. A display that is missing or fails leaves a
+// notice.
 priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Read, Net, Time]> Never! {
     window: ui.open(width: size.width, height: size.height, title: title) ?? return app_window_lost("{err}")
     // Taken before the frames: a frame's wait holds the window.
@@ -4986,10 +5115,14 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
     drawn := false
     shown := AppCurrent?{None}
     open := AppOpenMenu?{None}
+    back := Notice?{None}
     loop frame in window.frames() {
         stale := !drawn
         loop event in frame.events() {
             if event == .Resize(_, _) -> stale = true
+            if event == .Focus(on) {
+                app_moment(if on -> AppMoment.Foreground else -> AppMoment.Background)
+            }
             if event == .Drop(x, y, items) -> app_window_drop(tree.__files_at(frame, x, y), items)
             if event == .PointerDown(.Right) {
                 open = app_context_open(frame, tree.__menu_at(frame, frame.get_mouse_x(), frame.get_mouse_y()))
@@ -5012,6 +5145,10 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
                     stale = true
                     next
                 }
+            }
+            if event == .PointerDown(.Left) && app_resumed_dismissed(frame, back) {
+                stale = true
+                next
             }
             if event == .PointerDown(.Left) && app_notice_dismissed(frame) {
                 stale = true
@@ -5036,6 +5173,10 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
         }
         loop asked in woken.pastes { asked.send(app_window_clipboard(window)) ?? next }
         if woken.noticed -> stale = true
+        if woken.resumed == .Val(notice) {
+            back = Val(notice.copy())
+            stale = true
+        }
         now: app_graph_current()
         if now != shown || woken.stale {
             if now != shown {
@@ -5050,6 +5191,7 @@ priv app_window_run: fn(title: String, size: AppWindow) -[Env, Exec.Exit, FS.Rea
         tree.__draw(frame)
         if open == .Val(menu) -> app_context_draw(frame, menu)
         app_notice_draw(frame)
+        if back == .Val(notice) -> app_resumed_draw(frame, notice)
         drawn = true
     }
     if window.failure() == .Val(failure) -> app_window_lost("{failure}")
@@ -5221,10 +5363,11 @@ priv app_window_lost: fn(why: String) Never! {
 // binding of the screen it shows changed since it last opened the screen,
 // whether the app kept a notice since its last frame, the menu bar's items
 // chosen for it to act on since that frame, the newest text the app copied
-// since then (`copy_text`) and whether it shared that text (`share`), and
-// the pastes other tasks wait on (`paste_text`), all taken by
-// `app_window_take`; whether a wake waits for that frame; and the window
-// itself and the task its frames run in (`app_window_keep`).
+// since then (`copy_text`) and whether it shared that text (`share`), the
+// pastes other tasks wait on (`paste_text`), and the newest notice a
+// resume failed with (`App.lifecycle`), all taken by `app_window_take`;
+// whether a wake waits for that frame; and the window itself and the task
+// its frames run in (`app_window_keep`).
 priv AppWindowWake: struct {
     wakes: [Sender<Int>],
     stale: Bool,
@@ -5233,12 +5376,13 @@ priv AppWindowWake: struct {
     copied: String?,
     shared: Bool,
     pastes: [Sender<String?>],
+    resumed: Notice?,
     woken: Bool,
     window: ui.Window?,
     task: TaskID?,
 }
 
-priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, copied: None, shared: false, pastes: [Sender<String?>]{}, woken: false, window: None, task: None}}
+priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, copied: None, shared: false, pastes: [Sender<String?>]{}, resumed: None, woken: false, window: None, task: None}}
 
 // Keeps `window`, whose frames run in this task, for the clipboard
 // (`copy_text`, `paste_text`).
@@ -5275,8 +5419,9 @@ priv app_window_relay: fn(changes: Receiver<Int>, waker: sys.Fd) -[Env, Time.Wai
 // screen it shows changed, so it opens the screen again, whether the app
 // kept a notice, so it draws the frame again, the menu bar's items chosen
 // for it to act on, in order, the newest text the app copied and whether
-// it shared it, and the pastes other tasks wait on.
-priv app_window_take: fn() -> {stale: Bool, noticed: Bool, acts: [MenuItem], copied: String?, shared: Bool, pastes: [Sender<String?>]} Never! {
+// it shared it, the pastes other tasks wait on, and the newest notice a
+// resume failed with.
+priv app_window_take: fn() -> {stale: Bool, noticed: Bool, acts: [MenuItem], copied: String?, shared: Bool, pastes: [Sender<String?>], resumed: Notice?} Never! {
     held := APP_WINDOW_WAKE.guard_edit()
     stale: held.value.stale
     noticed: held.value.noticed
@@ -5284,14 +5429,16 @@ priv app_window_take: fn() -> {stale: Bool, noticed: Bool, acts: [MenuItem], cop
     copied: held.value.copied.copy()
     shared: held.value.shared
     pastes: held.value.pastes.copy()
+    resumed: held.value.resumed.copy()
     held.value.stale = false
     held.value.noticed = false
     held.value.acts = [MenuItem]{}
     held.value.copied = None
     held.value.shared = false
     held.value.pastes = [Sender<String?>]{}
+    held.value.resumed = None
     held.value.woken = false
-    {stale: stale, noticed: noticed, acts: acts, copied: copied, shared: shared, pastes: pastes}
+    {stale: stale, noticed: noticed, acts: acts, copied: copied, shared: shared, pastes: pastes, resumed: resumed}
 }
 
 // Wakes the window's frames to draw the notice the app just kept
@@ -5304,6 +5451,17 @@ priv app_window_noticed: fn() Never! {
     }
     held.value.noticed = true
     app_window_rouse(held.value)
+}
+
+// Wakes the window's frames to show `notice`, which a resume failed with
+// (`App.lifecycle`), at the top of the window. Whether there is a window
+// to show it.
+priv app_window_resumed: fn(notice: Notice) -> Bool Never! {
+    held := APP_WINDOW_WAKE.guard_edit()
+    if held.value.wakes.len() == 0 -> return false
+    held.value.resumed = Val(notice.copy())
+    app_window_rouse(held.value)
+    true
 }
 
 // `copy_text` on Linux: wakes the window's frames to put `text` on the
@@ -5453,6 +5611,20 @@ priv app_graph_shows: fn(ids: [Int]) -> Bool Never! {
     after: notices()
     assert_eq(after.len(), before + 1)
     assert_eq(after[after.len() - 1].text, "The board is offline")
+}
+
+#Test("the app resumes only when it comes back from away, and a failed resume with no window joins the notices") {
+    assert(!app_came_back(.Foreground))
+    assert(!app_came_back(.Background))
+    assert(app_came_back(.Foreground))
+    assert(!app_came_back(.Foreground))
+    assert(!app_came_back(.Suspend))
+    assert(app_came_back(.Wake))
+    before: notices().len()
+    app_resume_run(Shared{AppResume{run: fn() Notice! { Err(Notice{text: "Couldn't refresh the board"}) }}})
+    after: notices()
+    assert_eq(after.len(), before + 1)
+    assert_eq(after[after.len() - 1].text, "Couldn't refresh the board")
 }
 
 #Test("a menu bar's menus hold their items with their keys, and a key equivalent names its keys") {

@@ -1,0 +1,70 @@
+// Crewboard in a Linux window that refreshes the board each time the app
+// comes back (`lifecycle(on_resume:)`). The board's panel counts the
+// resumes: blue before one, yellow after the first, green after the
+// second. The second refresh finds the server offline, so its notice
+// shows on a bar over the top of the window. The compositor takes the
+// window's focus away and gives it back, the machine sleeps and wakes, and
+// the compositor dismisses the notice and closes the window, which ends
+// the app.
+use {
+    app
+    ui: core.ui
+    tasks: core.tasks
+    core.color.[Color]
+    core.ui.[UINode]
+}
+
+#Error
+BoardError: enum {
+    Offline,
+}
+
+Board: struct {
+    resumes: Int,
+}
+
+BOARD: Shared{Board{resumes: 0}}
+
+resumes: fn() -[DB.Read]> Int BoardError! {
+    held: BOARD.guard_read()
+    Ok(held.value.resumes)
+}
+
+count_resume: fn() -> Int {
+    held := BOARD.guard_edit()
+    held.value.resumes += 1
+    held.value.resumes
+}
+
+refresh: fn() app.Notice! {
+    count: count_resume()
+    app.invalidate(resumes)
+    if count == 2 -> return Err(app.Notice{text: "The board is offline"})
+    Ok()
+}
+
+BoardView: struct {}
+
+board: fn(_view: BoardView) -> UINode Never! {
+    count: if app.state(app.live(resumes)) == {
+        .Loaded(count) -> count
+        .Failed(_) | .Idle | .Loading -> 0
+    }
+    color: if {
+        count == 0 -> Color{r: 51, g: 102, b: 255, a: 255}
+        count == 1 -> Color{r: 230, g: 180, b: 30, a: 255}
+        else -> Color{r: 51, g: 153, b: 51, a: 255}
+    }
+    ui.box([ui.node_color("", 200.0, 30.0, color), ui.text("Today")])
+}
+
+run: fn() {
+    graph: app.new("Crewboard").screen("/", board).window(width: 200, height: 100).lifecycle(on_resume: fn() app.Notice! { refresh() })
+    if !graph.launch() {
+        return
+    }
+    // Closing the window ends the app; it waits up to a minute for that.
+    loop _ in 0..<6000 -> tasks.sleep(10)
+    loop notice in app.notices() -> print("notice: {notice.text}")
+    print("the window stayed open")
+}
