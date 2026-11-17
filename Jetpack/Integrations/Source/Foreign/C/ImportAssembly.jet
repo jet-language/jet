@@ -12,7 +12,7 @@
 // loader's (`Compiler/JetDriver/Source/Driver/ForeignProviders.jet`).
 use {
     jet_foundation.[CModuleKind, Diagnostic]
-    jetpack_foundation.[PACKAGE_FILE]
+    jetpack_foundation.[C_MODULE_ROOT, PACKAGE_FILE]
     files: core.files
     jet_pkg_model.[
         BindingInputs,
@@ -27,7 +27,6 @@ use {
         ForeignArtifactCoverage,
         ForeignBoundaryContract,
         ForeignBridgeError,
-        ForeignLanguage,
         HandleOverlay,
         PointerCountFact,
         PointerRetention,
@@ -440,7 +439,7 @@ pkg_cffi_resolve_header_path: fn(header_path: String, project_root: String) -> S
 // a stale one is refused before the loader parses it.
 pkg_cffi_check_cache_descriptor: fn(source: String, path: String, lib: String) -> Diagnostic? Never! {
     if !source.contains("#Bindgen") -> return None
-    descriptor: pkg_binder_descriptor(ForeignLanguage.C) ?? return None
+    descriptor: pkg_binder_descriptor(C_MODULE_ROOT) ?? return None
     expected: descriptor.stamp()
     loop line in pkg_bridge_text_lines(source) {
         if !line.starts_with("// jet-ffi-descriptor=") -> next
@@ -479,7 +478,7 @@ pkg_cffi_prepare_binding_caches: fn(project_root: String, imports: [CBindingImpo
     loop lib in libs {
         overlay: overlays.get(lib) ?? HandleOverlay.empty()
         request: CBindingRequest{project_root: project_root, lib: lib, header_path: headers.get(lib), overlay: overlay, overlay_supplied: overlays.has_key(lib), entry: entry, frozen: frozen}
-        cache_path: pkg_cffi_binding_cache_file(project_root, ForeignLanguage.C, lib)
+        cache_path: pkg_cffi_binding_cache_file(project_root, C_MODULE_ROOT, lib)
         if loaded_paths.contains(cache_path) {
             if pkg_cffi_prepare_loaded_cache(request, cache_path, preparation) == .Err(error) {
                 preparation.diagnostics.push(pkg_cffi_e3208(cache_path, lib, error.message))

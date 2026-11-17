@@ -2,7 +2,6 @@ use {
     jet_pkg_model.[
         BinderDescriptor,
         BinderStatus,
-        ForeignLanguage,
         pkg_bytes_text,
         pkg_cbind_find,
         pkg_foreign_binders,
@@ -79,7 +78,7 @@ pkg_test_plan_source_parses: fn(source: String) -> Bool Never! {
     }
     // The canonical active binder registry and the generator registry agree.
     assert_eq(matched, registry.len())
-    languages := [ForeignLanguage]{}
+    languages := [String]{}
     loop renderer in registry {
         assert(!languages.contains(renderer.language))
         languages.push(renderer.language)
@@ -88,7 +87,7 @@ pkg_test_plan_source_parses: fn(source: String) -> Bool Never! {
     loop renderer in registry {
         found := BinderDescriptor?{None}
         loop descriptor in binders {
-            if descriptor.language == renderer.language {
+            if descriptor.root == renderer.language {
                 found = Val(descriptor)
                 break
             }
@@ -114,7 +113,7 @@ pkg_test_plan_source_parses: fn(source: String) -> Bool Never! {
             assert(!body.contains("json.parse(raw)"))
             assert(!body.contains("response.field(\"ok\")"))
         }
-        if renderer.language == ForeignLanguage.Lua {
+        if renderer.language == "lua" {
             view_externs: pkg_test_plan_externs(source, [String]{"deadline_ms: Int) Int ="}, true)
             // The Lua probe has view externs.
             assert(view_externs.len() > 0)

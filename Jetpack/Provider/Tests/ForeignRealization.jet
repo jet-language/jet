@@ -13,7 +13,7 @@ provider_foreign_test_root: fn(label: String) -[FS]> String {
 // descriptor stamp.
 provider_foreign_test_write_binding: fn(root: String, name: String) -[FS]> String {
     source: files.join(root, "provider")
-    language: ForeignLanguage.Py
+    language: "py"
     descriptor: pkg_binder_descriptor(language) ?? panic("Python binder descriptor")
     binding: provider_foreign_binding_in(source, language, name)
     files.create_dir_all(files.dirname(binding)) ?? panic("binding directory")
@@ -25,7 +25,7 @@ provider_foreign_test_projection_error: fn(verification: &StoreVerification, roo
     store_root: files.join(root, "store")
     roots: HangarRoots.at(store_root)
     ctx: ProviderCtx{fixtures: None, store_dir: store_root, offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
-    if provider_realize_foreign_one(verification, roots, root, name, ForeignLanguage.Py, "./provider#version=1.0.0", ctx) == {
+    if provider_realize_foreign_one(verification, roots, root, name, "py", "./provider#version=1.0.0", ctx) == {
         .Ok(_) -> panic("the foreign projection must fail")
         .Err(error) -> error
     }

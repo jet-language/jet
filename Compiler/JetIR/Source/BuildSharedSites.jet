@@ -109,18 +109,50 @@ ir_computed_constant_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, item_ke
         return ir_call_row_values(m, p, b, item, [Int]{}, span)
     }
     site: ir_shared_site_word(m, b, "computed:{item_key}")
+    held: ir_process_cell_open(m, b, site)
+    value: ir_call_row_values(m, p, b, item, [Int]{}, span)
+    if ir_failed(b) -> return -1
+    ir_process_cell_read(m, p, b, site, held, value, inner, row, span)
+}
+
+// A read of module event `definition` (`NAME: event.new<T>()`, an Event<T>
+// constant the build lands no value for, sema_comptime_module_event): a
+// Process site keyed by the constant holds the cell of the event its first
+// reader made, and every read borrows that event in place, so every reader
+// shares its listeners. The cell lives as long as the program.
+ir_event_holder_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
+    row: ir_value_type(m, p, definition.ty) ?? return ir_type_fail(b, span, definition.ty)
+    site: ir_shared_site_word(m, b, "event:{definition.key}")
+    held: ir_process_cell_open(m, b, site)
+    event: ir_event_new(m, p, b, definition.ty, span)
+    if ir_failed(b) -> return -1
+    ir_process_cell_read(m, p, b, site, held, event, definition.ty, row, span)
+}
+
+// Opens the first reader's branch of Process cell site `site`, taken while
+// the site is empty, which builds the cell's value in the program heap: the
+// value outlives any `#Context(allocator:)` block. Gives the heap mark
+// ir_process_cell_read restores.
+ir_process_cell_open: fn(m: &IRModule, b: &IRBuilder, site: Int) -> Int Never! {
     word_row: ir_word_row(m)
-    pointer_row: ir_pointer_row(m)
     zero: ir_word_const(m, b, 0)
     current: ir_load_at(m, b, site, 0, word_row)
     empty: ir_bool_op(m, b, IROp.Eq, current, zero)
     ir_open_if(b.f, empty, b.line)
-    held: ir_runtime(m, b, "jet_rt_move_enter", [Int]{zero}, word_row)
-    value: ir_call_row_values(m, p, b, item, [Int]{}, span)
-    if ir_failed(b) -> return -1
+    ir_runtime(m, b, "jet_rt_move_enter", [Int]{zero}, word_row)
+}
+
+// Closes the branch ir_process_cell_open opened (`held` its heap mark) by
+// publishing `value`, of type `inner` and row `row`, in a new cell, the
+// first reader's cell standing, and borrows the published cell's value in
+// place. The published cell is never edited, so its value is read without
+// a permit.
+ir_process_cell_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, site: Int, held: Int, value: Int, inner: Type, row: Int, span: Span) -> Int Never! {
     candidate: ir_shared_new(m, p, b, [Int]{value}, Type.Shared{inner: inner}, span)
     if ir_failed(b) -> return -1
     _: ir_runtime(m, b, "jet_rt_move_leave", [Int]{held}, -1)
+    word_row: ir_word_row(m)
+    pointer_row: ir_pointer_row(m)
     process: ir_word_const(m, b, 0)
     _: ir_runtime(m, b, "jet_rt_shared_site_publish", [Int]{site, candidate, process}, word_row)
     b.fresh[candidate] = false

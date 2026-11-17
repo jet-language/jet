@@ -249,7 +249,7 @@ pkg_lock_reference_source_name: fn(reference: String) -> String Never! {
 // Hangar projection that supplied the generated binding. Upserting by
 // foreign dependency name keeps a provider change visible and preserves the
 // receipt only when the identity and envelope are unchanged.
-pkg_lock_record_foreign_realization: fn(project_root: String, name: String, version: String, language: ForeignLanguage, reference: String, output: String, envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait]> LockError! {
+pkg_lock_record_foreign_realization: fn(project_root: String, name: String, version: String, language: String, reference: String, output: String, envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait]> LockError! {
     lock := pkg_lock_load_for_update(project_root)
     lock.version = PKG_LOCK_VERSION
     source: LockSource.Foreign{language: language, reference: reference, output: output}

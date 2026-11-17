@@ -23,5 +23,5 @@ fire("drop", "none", "refused");
 fire("dragenter", "move");
 fire("drop", "move", "kept");
 fire("dragleave", "none");
-instance.exports.jet_export_run();
+await instance.exports.jet_export_run();
 if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");

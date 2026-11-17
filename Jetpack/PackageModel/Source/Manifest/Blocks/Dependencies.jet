@@ -1,6 +1,6 @@
 // `deps: { … }` (S59): the typed dependency source of each entry, its
 // display/audit spelling, and the one dependency-name path boundary.
-use jetpack_foundation.[DEP_PROVIDER_C, REF_PROVIDER_AT]
+use jetpack_foundation.[C_MODULE_ROOT, DEP_PROVIDER_C, REF_PROVIDER_AT]
 
 // Where a dependency resolves from.
 DepSource: enum {
@@ -8,7 +8,8 @@ DepSource: enum {
     Provider(provider: RefSource, target: String),
     Git(url: String, selector: GitSelector),
     CLib(target: String),
-    Foreign(language: ForeignLanguage, reference: String),
+    // `language` is the binder's mount root.
+    Foreign(language: String, reference: String),
 }
 
 // The selector from a `name#version` registry ref (or a quoted selector).
@@ -27,7 +28,7 @@ pkg_dep_display: fn(source: DepSource) -> String Never! {
         }
         .Git(url, selector) -> "{{ git: {pkg_debug_str(url)}, {selector.field()}: {pkg_debug_str(selector.value())} }}"
         .CLib(target) -> "lib: {target}"
-        .Foreign(language, reference) -> "{language.root()}{REF_PROVIDER_AT}{pkg_debug_str(reference)}"
+        .Foreign(language, reference) -> "{language}{REF_PROVIDER_AT}{pkg_debug_str(reference)}"
     }
 }
 
@@ -162,11 +163,11 @@ pkg_parse_c_lib_ref: fn(value: String) -> String? Never! {
 // the native `c@target` form.
 pkg_parse_foreign_ref: fn(name: String, value: String) -> DepSource? PackageParseError! {
     parts: value.split_once(REF_PROVIDER_AT) ?? return Ok(None)
-    language: ForeignLanguage.from_root(parts.before.trim()) ?? return Ok(None)
-    if language == ForeignLanguage.C -> return Ok(None)
+    language: pkg_foreign_language(parts.before.trim()) ?? return Ok(None)
+    if language == C_MODULE_ROOT -> return Ok(None)
     reference: parts.after.trim()
     if !reference.starts_with("\"") || !reference.ends_with("\"") {
-        return Err(PackageParseError.Composition("foreign dependency `{name}` must quote its provider ref as `{language.root()}@\"ref\"`"))
+        return Err(PackageParseError.Composition("foreign dependency `{name}` must quote its provider ref as `{language}@\"ref\"`"))
     }
     unquoted: pkg_unquote(reference)
     if unquoted.trim() == "" {

@@ -400,7 +400,11 @@ so no such value is ever stored. A `name: Shared{value}`
 global holds one process-wide cell: the build computes `value`, which must be
 literal data, and every read shares the one cell; a mutable
 `name := Shared{value}` global holds such a cell until an assignment replaces
-it. Only an explicit
+it. A `NAME: event.new<T>()` global is one process-wide event: an event is a
+runtime handle the build can't make, so the program makes it at its first
+read, once, and every read, from any task, shares it and its listeners; a
+mutable `name := event.new<T>()` global starts from a fresh event made at its
+first use. Only an explicit
 `#run { … }` reads build
 inputs. Both globals are visible to functions in the file; only the mutable
 form may be assigned after initialization. A local value whose call reads a

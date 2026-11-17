@@ -5,12 +5,11 @@
 // initializes `dart_api_dl`, and pins isolate-local callbacks for Jet calls.
 use {
     jet_foundation.[JET_TYPE_NAMES]
-    jetpack_foundation.[JET_KEYWORD_LIST, foundation_sanitize_crate_name]
+    jetpack_foundation.[DART_MODULE_ROOT, JET_KEYWORD_LIST, foundation_sanitize_crate_name]
     files: core.files
     jet_pkg_model.[
         BinderHostOS,
         ForeignBindError,
-        ForeignLanguage,
         pkg_binder_append_artifact_boundary,
         pkg_binder_append_field,
         pkg_binder_canonicalize,
@@ -163,7 +162,7 @@ pkg_dart_bind: fn(path: String, source: String, lib: String, cache: String) -[FS
     pkg_binder_append_field(identity, sdk.bytes())
     loop byte in dart.bytes() -> identity.push(byte)
     provenance := "schema={DART_BIND_SCHEMA}\nsha256={pkg_sha256_hex(identity)}\ndart={dart}\nsdk={sdk}\ncontract={canonical}\n"
-    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Dart, "Dart", lib, canonical, archive, "dart={dart};{pkg_binder_cc_ar_identity()}")
+    pkg_binder_append_artifact_boundary(provenance, DART_MODULE_ROOT, "Dart", lib, canonical, archive, "dart={dart};{pkg_binder_cc_ar_identity()}")
     bound := [String]{}
     loop function in functions -> bound.push(function.jet)
     result: DartBindResult{

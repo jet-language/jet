@@ -2,12 +2,11 @@
 // jet_pkg_model::PerlBind.
 use {
     jet_foundation.[JET_TYPE_NAMES]
-    jetpack_foundation.[JET_KEYWORD_LIST]
+    jetpack_foundation.[JET_KEYWORD_LIST, PERL_MODULE_ROOT]
     files: core.files
     jet_pkg_model.[
         ForeignBindError,
         ForeignBindResult,
-        ForeignLanguage,
         pkg_ascii_lower,
         pkg_binder_append_artifact_boundary,
         pkg_binder_canonicalize,
@@ -106,7 +105,7 @@ PerlBoundFunction: struct {
 
 // Bind the named top-level subs of the Perl script at `path`.
 pkg_perl_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
-    language: ForeignLanguage.Perl
+    language: PERL_MODULE_ROOT
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
     perl: pkg_binder_resolved_tool_path("perl") ?? return Err(ForeignBindError.ToolMissing("perl"))
@@ -130,7 +129,7 @@ pkg_perl_bind: fn(path: String, source: String, lib: String, cache: String) -[FS
     archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write Perl process bridge")
     digest: pkg_binder_identity_digest([String]{"jet-perl-bind-v1", source, script, perl, worker_source})
     provenance := "schema=jet-perl-bind-v1\nsha256={digest}\nperl={perl}\nscript={script}\nworker={worker}\n"
-    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Perl, "Perl", lib, script, archive, "perl={perl};{pkg_binder_cc_ar_identity()}")
+    pkg_binder_append_artifact_boundary(provenance, language, "Perl", lib, script, archive, "perl={perl};{pkg_binder_cc_ar_identity()}")
     bound := [String]{}
     loop function in functions -> bound.push(function.jet)
     result: ForeignBindResult{source: pkg_perl_render_jet(lib, functions), bound: bound, archive: archive, provenance: provenance}

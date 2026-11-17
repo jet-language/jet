@@ -6,6 +6,7 @@
 // supervised Node worker. Dynamic or callback-shaped declarations fail closed.
 use {
     files: core.files
+    jetpack_foundation.[JS_MODULE_ROOT]
     process: core.process
 }
 
@@ -19,7 +20,7 @@ pkg_javascript_bind: fn(declaration_path: String, declarations: String, runtime_
         return Err(ForeignBindError.Source("{lib} is not a valid Jet library name"))
     }
     functions: pkg_javascript_parse(declarations)
-    descriptor: pkg_binder_descriptor_for(ForeignLanguage.JS, "JS")
+    descriptor: pkg_binder_descriptor_for(JS_MODULE_ROOT, "JS")
     declaration: pkg_binder_canonicalize(declaration_path, "could not resolve TypeScript declarations")
     on_disk: pkg_binder_read_text(declaration, "could not read TypeScript declarations from {declaration}")
     if on_disk != declarations {

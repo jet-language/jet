@@ -172,6 +172,13 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const hosts = new WeakMap();
 const sleeper = new Int32Array(new SharedArrayBuffer(4));
+// JavaScript promise integration: a wasm call made through
+// WebAssembly.promising may suspend on a promise an import wrapped in
+// WebAssembly.Suspending returns, and resumes once it settles.
+const JSPI = typeof WebAssembly.Suspending === "function" && typeof WebAssembly.promising === "function";
+// The program's entries (Host.turn) of every host, each after the one
+// before it.
+let turns = Promise.resolve();
 
 function alignUp(value, align) {
   return Math.ceil(value / align) * align;
@@ -449,6 +456,10 @@ class Host {
     this.files = new Map();
     this.lines = ["", "", ""];
     this.outcome = null;
+    // The running entry may wait (Host.waitable), and it is waiting now
+    // (Host.wait).
+    this.waitable = false;
+    this.waiting = false;
     this.dom = false;
     // The scene's open context menu (openMenu), null for none.
     this.menu = null;
@@ -542,34 +553,68 @@ class Host {
     if (at !== 0) this.u8().fill(0, at, at + length);
   }
 
-  // Runs `body` unless the program has exited; an exit records its status.
+  // Runs `body` unless the program has exited.
   enter(body) {
     if (this.outcome !== null) return;
     try {
       body();
     } catch (error) {
-      this.flushLines();
-      if (error instanceof JetHostExit) {
-        this.outcome = error.status;
-        return;
-      }
-      this.outcome = TRAP_STATUS;
-      this.error = new JetHostWasmError("the program trapped: " + error.message, { cause: error });
-      throw this.error;
+      this.fail(error);
     }
   }
 
-  // The program's run, as the native process runs main and then exits: its
-  // exit status.
+  // An entry's failure: an exit records its status; anything else is a
+  // trap, recorded and thrown on as JetHostWasmError.
+  fail(error) {
+    this.flushLines();
+    if (error instanceof JetHostExit) {
+      this.outcome = error.status;
+      return;
+    }
+    this.outcome = TRAP_STATUS;
+    this.error = new JetHostWasmError("the program trapped: " + error.message, { cause: error });
+    throw this.error;
+  }
+
+  // Runs the async `body`, one of the program's entries, once every entry
+  // before it finished, so only one is ever under way: a promise of what
+  // it answers. A failure goes to `fail`; the next entry runs regardless.
+  turn(body) {
+    const result = turns.then(async () => {
+      try {
+        return await body();
+      } catch (error) {
+        this.fail(error);
+      }
+    });
+    turns = result.catch(() => {});
+    return result;
+  }
+
+  // The wasm export `call` with `args`, called where it may wait (wait): a
+  // promise of its result. Without JSPI it runs straight through, and a
+  // wait blocks as a native thread's does.
+  async waitableCall(call, ...args) {
+    if (!JSPI) return call(...args);
+    this.waitable = true;
+    try {
+      return await WebAssembly.promising(call)(...args);
+    } finally {
+      this.waitable = false;
+    }
+  }
+
+  // The program's run, as the native process runs main and then exits: a
+  // promise of its exit status.
   run() {
-    this.enter(() => {
-      const status = Number(BigInt.asIntN(32, this.app.jet_export_run())) & 255;
+    return this.turn(async () => {
+      if (this.outcome !== null) return;
+      const status = Number(BigInt.asIntN(32, await this.waitableCall(this.app.jet_export_run))) & 255;
       this.rt.jet_web_fini();
       this.flushLines();
       this.outcome = status;
       this.paintScene();
-    });
-    return this.outcome;
+    }).then(() => this.outcome);
   }
 
   // The scene the runtime's last core.ui paint recorded (UiBackends.jet), as
@@ -634,7 +679,7 @@ class Host {
         element.addEventListener("dragover", (event) => event.preventDefault());
         element.addEventListener("drop", (event) => {
           event.preventDefault();
-          this.drop(dropId, event.dataTransfer);
+          return this.drop(dropId, event.dataTransfer);
         });
       }
       if (menu.length > 0) {
@@ -681,7 +726,7 @@ class Host {
       if (entry.kind === "3" && entry.slot !== 0) {
         item.addEventListener("click", () => {
           this.closeMenu();
-          this.click(entry.slot);
+          return this.click(entry.slot);
         });
       } else item.disabled = true;
       box.appendChild(item);
@@ -714,34 +759,28 @@ class Host {
     this.menu = null;
   }
 
-  // A click on a scene element after the program's run returned 0: runs the
-  // element's handler, drains stdout, then shows the scene it painted.
+  // A click on a scene element, once the program's run returned 0: runs the
+  // element's handler as the next entry (turn), drains stdout, then shows
+  // the scene it painted. A promise of the handler's end.
   click(id) {
-    if (this.outcome !== 0) return;
-    try {
-      this.rt.jet_ui_click(BigInt(id));
+    return this.turn(async () => {
+      if (this.outcome !== 0) return;
+      await this.waitableCall(this.rt.jet_ui_click, BigInt(id));
       this.rt.jet_rt_stdout_flush();
-    } catch (error) {
       this.flushLines();
-      if (error instanceof JetHostExit) {
-        this.outcome = error.status;
-        return;
-      }
-      this.outcome = TRAP_STATUS;
-      this.error = new JetHostWasmError("the program trapped: " + error.message, { cause: error });
-      throw this.error;
-    }
-    this.flushLines();
-    this.paintScene();
+      this.paintScene();
+    });
   }
 
   // A drop on a scene element with a drop slot, as core.ui.host.drag_drop
   // reads one: nonempty `text/plain` is one Text item (kind 0) and each
   // `text/uri-list` line that is neither empty nor a `#` comment one URI item
-  // (kind 1). Each item runs the element's handler in order, then stdout
-  // drains and the scene it painted shows.
+  // (kind 1). The items are read while the drop is dispatched; then, once
+  // the program's run returned 0, each runs the element's handler in order
+  // as the next entry (turn), stdout drains and the scene it painted shows.
+  // A promise of the last handler's end.
   drop(id, data) {
-    if (this.outcome !== 0 || !data) return;
+    if (!data) return Promise.resolve();
     const items = [];
     const text = data.getData("text/plain");
     if (text.length > 0) items.push([0, text]);
@@ -749,26 +788,18 @@ class Host {
       const uri = line.trim();
       if (uri.length > 0 && !uri.startsWith("#")) items.push([1, uri]);
     }
-    try {
+    return this.turn(async () => {
+      if (this.outcome !== 0) return;
       for (const [kind, value] of items) {
         const bytes = encoder.encode(value);
         const at = Number(this.rt.jet_ui_web_drop_buffer(BigInt(bytes.length)));
         this.u8().set(bytes, at);
-        this.rt.jet_ui_web_drop(BigInt(id), BigInt(kind));
+        await this.waitableCall(this.rt.jet_ui_web_drop, BigInt(id), BigInt(kind));
       }
       this.rt.jet_rt_stdout_flush();
-    } catch (error) {
       this.flushLines();
-      if (error instanceof JetHostExit) {
-        this.outcome = error.status;
-        return;
-      }
-      this.outcome = TRAP_STATUS;
-      this.error = new JetHostWasmError("the program trapped: " + error.message, { cause: error });
-      throw this.error;
-    }
-    this.flushLines();
-    this.paintScene();
+      this.paintScene();
+    });
   }
 
   // The argument and environment strings and their pointer arrays at the top
@@ -1032,6 +1063,21 @@ class Host {
     return 0;
   }
 
+  // The timed futex wait of an entry that can wait (JetRuntime Sync.jet
+  // jet_rt_host_wait): -EAGAIN at once when the word at `address` is not
+  // `expected`, else a promise of -ETIMEDOUT once the monotonic clock
+  // reaches `deadline`, in nanoseconds. The program stays suspended until
+  // then while the page's event loop runs; the next entry waits its turn.
+  wait(address, expected, deadline) {
+    if (this.view().getInt32(Number(address), true) !== Number(BigInt.asIntN(32, expected))) return BigInt(-E.AGAIN);
+    const milliseconds = Math.max(0, Math.ceil(Number(deadline - nowNanoseconds(1)) / 1000000));
+    this.waiting = true;
+    return new Promise((resolve) => setTimeout(resolve, milliseconds)).then(() => {
+      this.waiting = false;
+      return BigInt(-E.TIMEDOUT);
+    });
+  }
+
   terminate(signal) {
     this.flushLines();
     throw new JetHostExit(128 + signal);
@@ -1070,6 +1116,10 @@ class Host {
         if (capacity > 0n) host.u8().set(lines.subarray(0, Math.min(lines.length, Number(capacity))), Number(buffer));
         return BigInt(lines.length);
       },
+      // The wait seam (wait): an entry can wait while it runs under JSPI
+      // (waitableCall) and is not already suspended.
+      jet_rt_host_can_wait: () => (host.waitable && !host.waiting ? 1n : 0n),
+      jet_rt_host_wait: JSPI ? new WebAssembly.Suspending((address, expected, deadline) => host.wait(address, expected, deadline)) : () => BigInt(-E.NOSYS),
       getauxval: (type) => {
         if (type === 6n) return 4096n;
         if (type === 25n) return BigInt(AUX_RANDOM);
@@ -1349,7 +1399,7 @@ const SYSCALLS = {
 
 // Loads the program partition at `path` (beside web.manifest.json and the
 // runtime partition) with the runtime started; its `jet_export_run` runs the
-// program once and returns its exit status.
+// program once: a promise of its exit status.
 export async function instantiateWasm(path, args = ["app"], environment = []) {
   const host = await Host.open(new URL(path, import.meta.url), args, environment);
   const exports = Object.freeze({ ...host.app, jet_export_run: () => host.run() });

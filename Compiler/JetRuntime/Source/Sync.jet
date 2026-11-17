@@ -77,11 +77,17 @@ sync_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 {
     sync_futex_wait(address, expected, deadline_ns)
 }
 
-// The futex wait itself: it blocks the calling OS thread, fiber or not.
+// The futex wait itself: it blocks the calling OS thread, fiber or not. A
+// timed wait while the host can wait (jet_rt_host_can_wait) is the host's
+// instead: the web page's event loop must not block, so the wait suspends
+// the program there and the loop runs until the deadline.
 sync_futex_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 {
     #Unsafe("futex borrows live state; timed wait uses this attached thread's reserved TCB scratch until the syscall returns") {
         if (deadline_ns < I64{0}) {
             return os_syscall_i64(I64{202}, address, I64{128}, expected, I64{0}, I64{0}, I64{0})
+        }
+        if (jet_rt_host_can_wait() != I64{0}) {
+            return jet_rt_host_wait(address, expected, deadline_ns)
         }
         timeout: wrapping(os_tls_base_i64() + I64{216})
         os_store_i64(timeout, deadline_ns /% I64{1000000000})
@@ -89,6 +95,18 @@ sync_futex_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 {
         return os_syscall_i64(I64{202}, address, I64{137}, expected, timeout, I64{0}, I64{4294967295})
     }
 }
+
+// The host's wait seam (JetIR IR.jet IR_HOST_PROVIDER). A host whose event
+// loop the program must not block (the web, JetWeb Host.jet) defines both
+// in place of these: jet_rt_host_can_wait is 1 while the running entry can
+// suspend, and jet_rt_host_wait is then the timed futex wait on `address`
+// as a promise: -EAGAIN at once when its low 32 bits are not `expected`,
+// else -ETIMEDOUT once the monotonic clock reaches `deadline_ns`, the host's
+// event loop running meanwhile. A native thread blocks instead, so here the
+// host never can.
+#Export(c) jet_rt_host_can_wait: fn() -> I64 { I64{0} }
+
+#Export(c) jet_rt_host_wait: fn(address: I64, expected: I64, deadline_ns: I64) -> I64 { I64{-38} }
 
 // The kernel's vDSO clock_gettime reads its time page in user space; a raw
 // syscall 228 enters the kernel on every clock read. 0 until resolved, then

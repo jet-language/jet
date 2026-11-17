@@ -33,7 +33,7 @@ use {
         SWIFT_MODULE_ROOT,
         TCL_MODULE_ROOT,
     ]
-    jet_foundation.[Namespace]
+    jet_foundation.[EFFECT_VOCABULARY_LEAVES, Namespace]
     jetpack_trust_root.[CacheProvenance]
 }
 
@@ -41,88 +41,63 @@ FOREIGN_DESCRIPTOR_SCHEMA: "jet-ffi-descriptor-v1"
 
 FOREIGN_ABI_CONTRACT_VERSION: 1
 
-// The registered foreign languages are ForeignLanguage's cases, written from
-// the FFI effect's cases (Foreign/Bridge/ForeignLanguages.jet); each one's
-// binder row is in pkg_foreign_binders below.
-impl ForeignLanguage {
-    // The `<lang>` mount root of `<lang>.<lib>`.
-    root: fn(self) -> String Never! {
-        if self == {
-            .C -> C_MODULE_ROOT
-            .Cpp -> CPP_MODULE_ROOT
-            .Asm -> ASM_MODULE_ROOT
-            .Rust -> KW_RUST
-            .Py -> PY_MODULE_ROOT
-            .JS -> JS_MODULE_ROOT
-            .Swift -> SWIFT_MODULE_ROOT
-            .Go -> GO_MODULE_ROOT
-            .Java -> JAVA_MODULE_ROOT
-            .DotNet -> CS_MODULE_ROOT
-            .Tcl -> TCL_MODULE_ROOT
-            .Lua -> LUA_MODULE_ROOT
-            .Fortran -> FORTRAN_MODULE_ROOT
-            .Cobol -> COBOL_MODULE_ROOT
-            .Ada -> ADA_MODULE_ROOT
-            .Pascal -> PASCAL_MODULE_ROOT
-            .Dart -> DART_MODULE_ROOT
-            .PowerShell -> PWSH_MODULE_ROOT
-            .Perl -> PERL_MODULE_ROOT
-            .Ruby -> RUBY_MODULE_ROOT
-            .Php -> PHP_MODULE_ROOT
-            .R -> R_MODULE_ROOT
-            .Octave -> OCTAVE_MODULE_ROOT
-            .Com -> COM_MODULE_ROOT
-        }
-    }
+// A foreign language is the binder that owns its `<lang>` mount root (the
+// root of `<lang>.<lib>`): the language is named by that root, and its row
+// in pkg_foreign_binders below is the one place its binder is registered.
+// While the compiler builds, FOREIGN_LANGUAGE_COUNT checks the table's
+// languages against the `FFI.*` leaves the toolchain tree's
+// Compiler/Prelude/Effects.jet declares (JetFoundation
+// EFFECT_VOCABULARY_LEAVES), and a difference stops the build (E3010)
+// naming each missing and extra language.
+FOREIGN_LANGUAGE_COUNT: #run pkg_foreign_language_count(EFFECT_VOCABULARY_LEAVES)
 
-    // The language whose mount root is `root`.
-    from_root: fn(root: String) -> ForeignLanguage? Never! {
-        loop language in ForeignLanguage.all() {
-            if language.root() == root -> return Val(language)
-        }
-        None
-    }
+// The registered root `root`, or `None` when no binder owns it.
+pkg_foreign_language: fn(root: String) -> String? Never! {
+    if pkg_binder_descriptor(root) == None -> return None
+    Val(root)
+}
 
-    bindings_subdir: fn(self) -> String Never! { "{BINDINGS_ROOT_SUBDIR}/{self.root()}" }
+// Every registered root in the binder table's order: the order of the
+// `FFI` effect's cases.
+pkg_foreign_language_roots: fn() -> [String] Never! {
+    loop descriptor in pkg_foreign_binders() -> descriptor.root
+}
 
-    // Prefix used by generated bridge symbols. It lives beside the descriptor
-    // table so the loader cannot grow a second language map.
-    bridge_prefix: fn(self) -> String Never! {
-        if self == {
-            .C -> ""
-            .Cpp -> "jet_cpp_"
-            .Asm -> ""
-            .Rust -> "jet_rust_"
-            .Py -> "jet_py_"
-            .JS -> "jet_js_"
-            .Swift -> "jet_swift_"
-            .Go -> "jet_go_"
-            .Java -> "jet_java_"
-            .DotNet -> "jet_cs_"
-            .Tcl -> "jet_tcl_"
-            .Lua -> "jet_lua_"
-            .Fortran -> "jet_fortran_"
-            .Cobol -> "jet_cobol_"
-            .Ada -> "jet_ada_"
-            .Pascal -> "jet_pascal_"
-            .Dart -> "jet_dart_"
-            .PowerShell -> "jet_pwsh_"
-            .Perl -> "jet_perl_"
-            .Ruby -> "jet_ruby_"
-            .Php -> "jet_php_"
-            .R -> "jet_r_"
-            .Octave -> "jet_octave_"
-            .Com -> "jet_com_"
-        }
-    }
+// The number of binder languages, once the table names the `FFI.*` leaves
+// of `leaves` in their order; else the build stops naming the difference.
+pkg_foreign_language_count: fn(leaves: [String]) -> Int {
+    named: loop descriptor in pkg_foreign_binders() -> descriptor.name
+    problem: pkg_foreign_language_problem(named, leaves)
+    if problem != "" -> panic(problem)
+    named.len()
+}
 
-    abi_contract: fn(self) -> ForeignABIContract Never! {
-        if self == {
-            .C | .Cpp | .Asm | .Swift | .Go | .Fortran | .Cobol | .Ada | .Pascal -> ForeignABIContract.c()
-            .Rust -> ForeignABIContract.native()
-            .Py | .JS | .Java | .DotNet | .Tcl | .Lua | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .Octave | .Com -> ForeignABIContract.message()
-        }
-    }
+// What is wrong with `named` (the binder table's languages) against the
+// `FFI.*` leaves of `leaves`, naming each missing and each extra language,
+// or "".
+pkg_foreign_language_problem: fn(named: [String], leaves: [String]) -> String {
+    declared: loop leaf in leaves if leaf.starts_with("FFI.") -> leaf.removeprefix("FFI.")
+    if named == declared -> return ""
+    missing: loop name in declared if !named.contains(name) -> name.copy()
+    extra: loop name in named if !declared.contains(name) -> name.copy()
+    "BinderDescriptor.jet: the binder table's languages differ from the `FFI` cases of Compiler/Prelude/Effects.jet: missing [{missing.join(", ")}], extra [{extra.join(", ")}] (the order must match too)"
+}
+
+// `bindings/<root>`: where the language's generated bindings live.
+pkg_foreign_bindings_subdir: fn(root: String) -> String Never! { "{BINDINGS_ROOT_SUBDIR}/{root}" }
+
+// The prefix of the language's generated bridge symbols ("" when the root
+// has no binder).
+pkg_foreign_bridge_prefix: fn(root: String) -> String Never! {
+    descriptor: pkg_binder_descriptor(root) ?? return ""
+    descriptor.bridge_prefix
+}
+
+// The language's spelling in descriptor stamps and messages (the root when
+// no binder owns it).
+pkg_foreign_language_name: fn(root: String) -> String Never! {
+    descriptor: pkg_binder_descriptor(root) ?? return root
+    descriptor.name
 }
 
 BinderSurface: enum {
@@ -593,7 +568,12 @@ ForeignStubFile: enum {
 }
 
 BinderDescriptor: struct {
-    language: ForeignLanguage,
+    // The `<lang>` mount root the binder owns: the language's name.
+    root: String,
+    // The language's spelling in the stamp (`Cpp`, `DotNet`).
+    name: String,
+    // The prefix of the generated bridge symbols ("" for a direct C ABI).
+    bridge_prefix: String,
     surface: BinderSurface,
     status: BinderStatus,
     runtime: BinderRuntime,
@@ -614,13 +594,13 @@ BinderDescriptor: struct {
     }
 
     stamp: fn(self) -> String Never! {
-        "{FOREIGN_DESCRIPTOR_SCHEMA};language={self.language.debug_name()};surface={self.surface.debug_name()};status={self.status.debug_name()};runtime={self.runtime.debug_name()};stub={self.stub_kind.debug_name()};contract={self.contract.stamp()};effect={self.effect_root};provider={self.provider.debug_name()};cache={self.cache_extension};type-stub={self.type_stub_file.debug_name()};capabilities={self.capabilities_debug()};bridge={self.language.bridge_prefix()}"
+        "{FOREIGN_DESCRIPTOR_SCHEMA};language={self.name};surface={self.surface.debug_name()};status={self.status.debug_name()};runtime={self.runtime.debug_name()};stub={self.stub_kind.debug_name()};contract={self.contract.stamp()};effect={self.effect_root};provider={self.provider.debug_name()};cache={self.cache_extension};type-stub={self.type_stub_file.debug_name()};capabilities={self.capabilities_debug()};bridge={self.bridge_prefix}"
     }
 
     capability_report: fn(self) -> BinderCapabilityReport Never! {
         BinderCapabilityReport{
             schema: FOREIGN_DESCRIPTOR_SCHEMA,
-            language: self.language,
+            language: self.root,
             status: self.status,
             contract: self.contract,
             effect_root: self.effect_root,
@@ -632,7 +612,7 @@ BinderDescriptor: struct {
 
 BinderCapabilityReport: struct {
     schema: String,
-    language: ForeignLanguage,
+    language: String,
     status: BinderStatus,
     contract: ForeignABIContract,
     effect_root: String,
@@ -654,65 +634,71 @@ pkg_binder_adapter_capabilities: fn() -> [BinderCapability] Never! {
 
 pkg_binder_planned_capabilities: fn() -> [BinderCapability] Never! { pkg_binder_c_capabilities() }
 
-pkg_binder_row: fn(language: ForeignLanguage, runtime: BinderRuntime, stub_kind: BindingStubKind, status: BinderStatus, contract: ForeignABIContract, capabilities: [BinderCapability], effect_root: String, provider: ForeignProvider, type_stub_file: ForeignStubFile) -> BinderDescriptor Never! {
+// One binder row. A binder with a direct C ABI exports its symbols as they
+// are; every other prefixes them with `jet_<root>_`.
+pkg_binder_row: fn(root: String, name: String, runtime: BinderRuntime, stub_kind: BindingStubKind, status: BinderStatus, contract: ForeignABIContract, capabilities: [BinderCapability], provider: ForeignProvider, type_stub_file: ForeignStubFile) -> BinderDescriptor Never! {
     BinderDescriptor{
-        language: language,
+        root: root,
+        name: name,
+        bridge_prefix: if runtime == BinderRuntime.DirectCABI -> "" else -> "jet_{root}_",
         surface: BinderSurface.Namespace,
         status: status,
         runtime: runtime,
         stub_kind: stub_kind,
         contract: contract,
         capabilities: capabilities,
-        effect_root: effect_root,
+        effect_root: if root == C_MODULE_ROOT -> "FFI" else -> "FFI.{name}",
         provider: provider,
         cache_extension: "jet",
         type_stub_file: type_stub_file,
     }
 }
 
-// Canonical descriptor table (`FOREIGN_BINDERS`). Driver routing and package
-// binders both read this table; no language adapter owns a parallel contract.
+// Canonical descriptor table (`FOREIGN_BINDERS`), in the order of the `FFI`
+// effect's cases. Driver routing and package binders both read this table;
+// no language adapter owns a parallel contract.
 pkg_foreign_binders: fn() -> [BinderDescriptor] Never! {
     c: ForeignABIContract.c()
     message: ForeignABIContract.message()
     no_stub: ForeignStubFile.NoStub
     [BinderDescriptor]{
-        pkg_binder_row(ForeignLanguage.C, BinderRuntime.DirectCABI, BindingStubKind.CHeader, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Cpp, BinderRuntime.ClangCppShim, BindingStubKind.CppHeader, BinderStatus.Active, ForeignABIContract.cxx(), pkg_binder_c_capabilities(), "FFI.Cpp", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Asm, BinderRuntime.DirectCABI, BindingStubKind.CHeader, BinderStatus.Planned, c, pkg_binder_planned_capabilities(), "FFI.Asm", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Rust, BinderRuntime.LegacyRustExtern, BindingStubKind.RustExternBlock, BinderStatus.Planned, ForeignABIContract.native(), pkg_binder_planned_capabilities(), "FFI.Rust", ForeignProvider.Cargo, no_stub),
-        pkg_binder_row(ForeignLanguage.Py, BinderRuntime.SupervisedPythonSidecar, BindingStubKind.PythonIntrospection, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Py", ForeignProvider.PyPi, no_stub),
-        pkg_binder_row(ForeignLanguage.JS, BinderRuntime.TargetDispatchedJS, BindingStubKind.TypeScriptDeclarations, BinderStatus.Active, message, pkg_binder_target_capabilities(), "FFI.JS", ForeignProvider.Npm, ForeignStubFile.Suffix("d.ts")),
-        pkg_binder_row(ForeignLanguage.Swift, BinderRuntime.SwiftCABIBridge, BindingStubKind.SwiftModule, BinderStatus.Planned, c, pkg_binder_planned_capabilities(), "FFI.Swift", ForeignProvider.SwiftPM, no_stub),
-        pkg_binder_row(ForeignLanguage.Go, BinderRuntime.GoCArchive, BindingStubKind.GoExports, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI.Go", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Java, BinderRuntime.EmbeddedJVM, BindingStubKind.JVMClass, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Java", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.DotNet, BinderRuntime.EmbeddedDotNet, BindingStubKind.DotNetAssembly, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.DotNet", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Tcl, BinderRuntime.EmbeddedTcl, BindingStubKind.TclScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Tcl", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Lua, BinderRuntime.EmbeddedLua, BindingStubKind.LuaScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Lua", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Fortran, BinderRuntime.FortranIsoCBinding, BindingStubKind.FortranIsoCBinding, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI.Fortran", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Cobol, BinderRuntime.GnuCobolCABI, BindingStubKind.GnuCobolCopybook, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI.Cobol", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Ada, BinderRuntime.AdaGnatCABI, BindingStubKind.AdaSpec, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI.Ada", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Pascal, BinderRuntime.FreePascalCdecl, BindingStubKind.PascalSource, BinderStatus.Active, c, pkg_binder_c_capabilities(), "FFI.Pascal", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Dart, BinderRuntime.DartAPIDl, BindingStubKind.DartContract, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Dart", ForeignProvider.System, ForeignStubFile.StemSuffix("_host.dart")),
-        pkg_binder_row(ForeignLanguage.PowerShell, BinderRuntime.SupervisedPowerShell, BindingStubKind.PowerShellScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.PowerShell", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Perl, BinderRuntime.SupervisedPerl, BindingStubKind.PerlScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Perl", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Ruby, BinderRuntime.SupervisedRuby, BindingStubKind.RubyScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Ruby", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Php, BinderRuntime.SupervisedPhpPool, BindingStubKind.PhpScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Php", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.R, BinderRuntime.SupervisedR, BindingStubKind.RScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.R", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Octave, BinderRuntime.SupervisedOctave, BindingStubKind.OctaveScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Octave", ForeignProvider.System, no_stub),
-        pkg_binder_row(ForeignLanguage.Com, BinderRuntime.WindowsComAutomation, BindingStubKind.ComTypeLibrary, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), "FFI.Com", ForeignProvider.System, no_stub),
+        pkg_binder_row(GO_MODULE_ROOT, "Go", BinderRuntime.GoCArchive, BindingStubKind.GoExports, BinderStatus.Active, c, pkg_binder_c_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(JAVA_MODULE_ROOT, "Java", BinderRuntime.EmbeddedJVM, BindingStubKind.JVMClass, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(CS_MODULE_ROOT, "DotNet", BinderRuntime.EmbeddedDotNet, BindingStubKind.DotNetAssembly, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(FORTRAN_MODULE_ROOT, "Fortran", BinderRuntime.FortranIsoCBinding, BindingStubKind.FortranIsoCBinding, BinderStatus.Active, c, pkg_binder_c_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(COBOL_MODULE_ROOT, "Cobol", BinderRuntime.GnuCobolCABI, BindingStubKind.GnuCobolCopybook, BinderStatus.Active, c, pkg_binder_c_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(TCL_MODULE_ROOT, "Tcl", BinderRuntime.EmbeddedTcl, BindingStubKind.TclScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(LUA_MODULE_ROOT, "Lua", BinderRuntime.EmbeddedLua, BindingStubKind.LuaScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(ADA_MODULE_ROOT, "Ada", BinderRuntime.AdaGnatCABI, BindingStubKind.AdaSpec, BinderStatus.Active, c, pkg_binder_c_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(PASCAL_MODULE_ROOT, "Pascal", BinderRuntime.FreePascalCdecl, BindingStubKind.PascalSource, BinderStatus.Active, c, pkg_binder_c_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(DART_MODULE_ROOT, "Dart", BinderRuntime.DartAPIDl, BindingStubKind.DartContract, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, ForeignStubFile.StemSuffix("_host.dart")),
+        pkg_binder_row(PWSH_MODULE_ROOT, "PowerShell", BinderRuntime.SupervisedPowerShell, BindingStubKind.PowerShellScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(PERL_MODULE_ROOT, "Perl", BinderRuntime.SupervisedPerl, BindingStubKind.PerlScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(RUBY_MODULE_ROOT, "Ruby", BinderRuntime.SupervisedRuby, BindingStubKind.RubyScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(PHP_MODULE_ROOT, "Php", BinderRuntime.SupervisedPhpPool, BindingStubKind.PhpScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(R_MODULE_ROOT, "R", BinderRuntime.SupervisedR, BindingStubKind.RScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(COM_MODULE_ROOT, "Com", BinderRuntime.WindowsComAutomation, BindingStubKind.ComTypeLibrary, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(C_MODULE_ROOT, "C", BinderRuntime.DirectCABI, BindingStubKind.CHeader, BinderStatus.Active, c, pkg_binder_c_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(CPP_MODULE_ROOT, "Cpp", BinderRuntime.ClangCppShim, BindingStubKind.CppHeader, BinderStatus.Active, ForeignABIContract.cxx(), pkg_binder_c_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(ASM_MODULE_ROOT, "Asm", BinderRuntime.DirectCABI, BindingStubKind.CHeader, BinderStatus.Planned, c, pkg_binder_planned_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(PY_MODULE_ROOT, "Py", BinderRuntime.SupervisedPythonSidecar, BindingStubKind.PythonIntrospection, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.PyPi, no_stub),
+        pkg_binder_row(OCTAVE_MODULE_ROOT, "Octave", BinderRuntime.SupervisedOctave, BindingStubKind.OctaveScript, BinderStatus.Active, message, pkg_binder_adapter_capabilities(), ForeignProvider.System, no_stub),
+        pkg_binder_row(KW_RUST, "Rust", BinderRuntime.LegacyRustExtern, BindingStubKind.RustExternBlock, BinderStatus.Planned, ForeignABIContract.native(), pkg_binder_planned_capabilities(), ForeignProvider.Cargo, no_stub),
+        pkg_binder_row(JS_MODULE_ROOT, "JS", BinderRuntime.TargetDispatchedJS, BindingStubKind.TypeScriptDeclarations, BinderStatus.Active, message, pkg_binder_target_capabilities(), ForeignProvider.Npm, ForeignStubFile.Suffix("d.ts")),
+        pkg_binder_row(SWIFT_MODULE_ROOT, "Swift", BinderRuntime.SwiftCABIBridge, BindingStubKind.SwiftModule, BinderStatus.Planned, c, pkg_binder_planned_capabilities(), ForeignProvider.SwiftPM, no_stub),
     }
 }
 
-pkg_binder_descriptor: fn(language: ForeignLanguage) -> BinderDescriptor? Never! {
+// The binder that owns the mount root `root`.
+pkg_binder_descriptor: fn(root: String) -> BinderDescriptor? Never! {
     loop descriptor in pkg_foreign_binders() {
-        if descriptor.language == language -> return Val(descriptor)
+        if descriptor.root == root -> return Val(descriptor)
     }
     None
 }
 
-pkg_foreign_abi_contract: fn(language: ForeignLanguage) -> ForeignABIContract Never! {
-    descriptor: pkg_binder_descriptor(language) ?? return ForeignABIContract.message()
+pkg_foreign_abi_contract: fn(root: String) -> ForeignABIContract Never! {
+    descriptor: pkg_binder_descriptor(root) ?? return ForeignABIContract.message()
     descriptor.contract
 }
 

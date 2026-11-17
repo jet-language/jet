@@ -1,7 +1,7 @@
 // Lifecycle is a projection of resolved name/call sites. Adapted
 // deprecation_from_markers. Payloads belong to written markers or the checked
 // Core registry, never a name table.
-use jet_foundation.[CoreMarkerApplication, Diagnostic, MARKER_DEPRECATED, Marker, StructureFact, StructureFactKind, Span, SymbolKind, TextEdit, Type, diagnostic_with_edit, symbol_is_local, symbol_kind_name, symbol_table_key, type_identity_equal]
+use jet_foundation.[AccessConvention, BinOp, Call, CallArg, CoreMarkerApplication, Diagnostic, Expr, MARKER_DEPRECATED, Marker, Param, StrPart, StructureFact, StructureFactKind, Span, SymbolID, SymbolKind, TextEdit, Type, diagnostic_with_edit, expr_source_span, expr_source_start, expr_span, symbol_is_local, symbol_kind_name, symbol_table_key, type_identity_equal]
 
 SemaLifecycleResult: struct {
     diagnostics: [Diagnostic],
@@ -43,10 +43,340 @@ sema_lifecycle_marker: fn(markers: [Marker], name: String) -> CoreMarkerApplicat
     None
 }
 
-sema_lifecycle_functions: fn(functions: [SemaRegistrationFunction], payloads: &[U32:CoreMarkerApplication]) Never! {
+// Whether the `#Deprecated` marker among `markers` writes `inline: true`:
+// `jet fix` replaces each call with the function's body
+// (sema_lifecycle_inline_edit).
+sema_lifecycle_inline_requested: fn(markers: [Marker]) -> Bool Never! {
+    loop marker in markers {
+        if marker.name != MARKER_DEPRECATED -> next
+        index := 3
+        loop (slot, name) in marker.arg_labels {
+            if name == .Val(named) && named.name == "inline" {
+                index = slot
+                break
+            }
+        }
+        if index >= marker.args.len() -> return false
+        argument: marker.args[index]
+        if argument == .Expr(value) {
+            if value == .Bool(flag, _, _) -> return flag
+        }
+        return false
+    }
+    false
+}
+
+// One read of a parameter in the body of a `#Deprecated(inline: true)`
+// function: which parameter, where it is written, whether it is an operand
+// (an argument that isn't one term needs parentheses there), whether only
+// some runs reach it (the right side of `&&` or `||`), and how many calls
+// and operators the body runs before it.
+SemaLifecycleInlineUse: struct {
+    parameter: Int,
+    span: Span,
+    operand: Bool,
+    conditional: Bool,
+    effects_before: Int,
+}
+
+// What sema_lifecycle_inline_walk reads in such a body: the parameter
+// reads, where every other name it reads or calls is written (each must mean
+// the same at the call), and the calls and operators it runs.
+SemaLifecycleInlineBody: struct {
+    uses: [SemaLifecycleInlineUse],
+    free_names: [Span],
+    effects: Int,
+}
+
+// The position of the parameter named `name`.
+sema_lifecycle_inline_parameter: fn(parameters: [Param], name: String) -> Int? Never! {
+    loop (index, parameter) in parameters {
+        if parameter.name == name -> return Val(index)
+    }
+    None
+}
+
+// Walks the body in the order it runs. False when the body holds an
+// expression this walk doesn't follow (a lambda, a block, a branch, a
+// literal with fields, a type argument): such a call is never inlined.
+sema_lifecycle_inline_walk: fn(expr: Expr, parameters: [Param], operand: Bool, conditional: Bool, body: &SemaLifecycleInlineBody) -> Bool Never! {
+    if expr == {
+        .Ident(name, span, _) -> {
+            if {
+                sema_lifecycle_inline_parameter(parameters, name) == .Val(index) -> {
+                    body.uses.push(SemaLifecycleInlineUse{parameter: index, span: Span{start: span.start, end: span.end}, operand: operand, conditional: conditional, effects_before: body.effects})
+                }
+                else -> body.free_names.push(Span{start: span.start, end: span.end})
+            }
+            return true
+        }
+        .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .Unit(_, _) -> return true
+        .Str(parts, _, _) -> return sema_lifecycle_plain_text(parts)
+        .Paren(inner, _, _) -> return sema_lifecycle_inline_walk(inner, parameters, false, conditional, body)
+        .Field(base, _, _, _) -> return sema_lifecycle_inline_walk(base, parameters, true, conditional, body)
+        .Unary(_, inner, _, _) -> {
+            if !sema_lifecycle_inline_walk(inner, parameters, true, conditional, body) {
+                return false
+            }
+            body.effects += 1
+            return true
+        }
+        .Binary(op, left, right, _, _) -> {
+            if !sema_lifecycle_inline_walk(left, parameters, true, conditional, body) {
+                return false
+            }
+            if !sema_lifecycle_inline_walk(right, parameters, true, conditional || op == BinOp.And || op == BinOp.Or, body) {
+                return false
+            }
+            body.effects += 1
+            return true
+        }
+        .Call(call, _) -> {
+            if call.type_args.len() > 0 || sema_lifecycle_inline_parameter(parameters, call.name) != None {
+                return false
+            }
+            if !sema_lifecycle_inline_walk_args(call.args, parameters, conditional, body) {
+                return false
+            }
+            body.free_names.push(Span{start: call.name_span.start, end: call.name_span.end})
+            body.effects += 1
+            return true
+        }
+        .MethodCall(receiver, _, _, owner_type_args, type_args, args, _) -> {
+            if owner_type_args.len() > 0 || type_args.len() > 0 -> return false
+            if !sema_lifecycle_inline_walk(receiver, parameters, true, conditional, body) {
+                return false
+            }
+            if !sema_lifecycle_inline_walk_args(args, parameters, conditional, body) -> return false
+            body.effects += 1
+            return true
+        }
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> return false
+    }
+}
+
+// The arguments of a call in such a body, in order; a spread or a marked
+// argument (`&x`, `&&x`) is not followed.
+sema_lifecycle_inline_walk_args: fn(args: [CallArg], parameters: [Param], conditional: Bool, body: &SemaLifecycleInlineBody) -> Bool Never! {
+    loop argument in args {
+        if argument.spread || argument.mark != None -> return false
+        if !sema_lifecycle_inline_walk(argument.expr, parameters, false, conditional, body) {
+            return false
+        }
+    }
+    true
+}
+
+// Whether a string literal interpolates nothing.
+sema_lifecycle_plain_text: fn(parts: [StrPart]) -> Bool Never! {
+    loop part in parts {
+        if part == .Interp(_, _) -> return false
+    }
+    true
+}
+
+// An argument that moving or repeating changes nothing: a name or a
+// literal that interpolates nothing.
+sema_lifecycle_inline_trivial: fn(expr: Expr) -> Bool Never! {
+    if expr == {
+        .Ident(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .Unit(_, _) -> return true
+        .Str(parts, _, _) -> return sema_lifecycle_plain_text(parts)
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) -> return false
+    }
+}
+
+// An expression that reads as one term wherever it is put: no parentheses
+// are needed around it as an operand.
+sema_lifecycle_inline_term: fn(expr: Expr) -> Bool Never! {
+    if sema_lifecycle_inline_trivial(expr) -> return true
+    if expr == {
+        .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .Field(_, _, _, _) | .Paren(_, _, _) | .Index(_, _, _, _, _) -> return true
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Ident(_, _, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> return false
+    }
+}
+
+// The first byte at or after `at` that isn't a space, tab or line break.
+sema_lifecycle_skip_spaces: fn(raw: [U8], at: Int) -> Int Never! {
+    index := at
+    loop index < raw.len() {
+        byte: raw[index]
+        if byte != (U8{32}) && byte != (U8{9}) && byte != (U8{10}) && byte != (U8{13}) -> break
+        index += 1
+    }
+    index
+}
+
+// Where an expression sema_lifecycle_inline_walk follows starts and ends in
+// `raw`: a call's own span is only its name, so its end is the `)` that
+// closes its arguments. None for any other expression.
+sema_lifecycle_inline_start: fn(expr: Expr) -> Int Never! {
+    if expr == .Binary(_, left, _, _, _) -> return sema_lifecycle_inline_start(left)
+    expr_source_start(expr)
+}
+
+sema_lifecycle_inline_end: fn(raw: [U8], expr: Expr) -> Int? Never! {
+    if expr == {
+        .Call(call, _) -> return sema_expr_call_source_end(raw, call.name_span.end)
+        .MethodCall(_, _, method_span, _, _, _, _) -> return sema_expr_call_source_end(raw, method_span.end)
+        .Binary(_, _, right, _, _) -> return sema_lifecycle_inline_end(raw, right)
+        .Unary(_, operand, _, _) -> return sema_lifecycle_inline_end(raw, operand)
+        .Ident(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .Unit(_, _) | .Str(_, _, _) | .Paren(_, _, _) | .Field(_, _, _, _) -> return Val(expr_span(expr).end)
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .OptField(_, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> return None
+    }
+}
+
+// Where each argument of `call` is written and the end of the call past its
+// `)`, when only spaces and commas stand around the arguments; None when
+// anything else does (a comment there would be lost by the edit).
+SemaLifecycleInlineCall: struct {
+    spans: [Span],
+    end: Int,
+}
+
+sema_lifecycle_inline_call: fn(raw: [U8], call: Call) -> SemaLifecycleInlineCall? Never! {
+    at := call.name_span.end
+    if at >= raw.len() || raw[at] != (U8{40}) -> return None
+    at += 1
+    spans := [Span]{}
+    loop (index, argument) in call.args {
+        at = sema_lifecycle_skip_spaces(raw, at)
+        if index > 0 {
+            if at >= raw.len() || raw[at] != (U8{44}) -> return None
+            at = sema_lifecycle_skip_spaces(raw, at + 1)
+        }
+        if at != argument.span.start -> return None
+        at = sema_lifecycle_inline_end(raw, argument.expr) ?? return None
+        spans.push(Span{start: sema_lifecycle_inline_start(argument.expr), end: at})
+    }
+    at = sema_lifecycle_skip_spaces(raw, at)
+    if call.args.len() > 0 && at < raw.len() && raw[at] == (U8{44}) {
+        at = sema_lifecycle_skip_spaces(raw, at + 1)
+    }
+    if at >= raw.len() || raw[at] != (U8{41}) -> return None
+    Val(SemaLifecycleInlineCall{spans: spans, end: at + 1})
+}
+
+// The `jet fix` edit for a call of a `#Deprecated(inline: true)` function:
+// the whole call replaced by the function's one-expression body, with each
+// argument written where its parameter is read. None when the substitution
+// could change what the call does, and the warning says to edit it by hand:
+// - an argument that isn't a name or literal must be read exactly once, on
+//   every run, before the body calls anything, and in the order the
+//   arguments are written, so it is still evaluated once and in order;
+// - every other name the body reads or calls must mean the same at the call:
+//   no local or parameter there takes it, and outside the function's module
+//   it is that module's function;
+// - the function has no type parameters, every parameter is read-only, a
+//   left-out argument has a literal default, and nothing but spaces and
+//   commas stands among the call's arguments.
+sema_lifecycle_inline_edit: fn(call: Call, callee: SymbolID?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> TextEdit? {
+    symbol: callee ?? return None
+    graph: program.registration_graph ?? return None
+    row: sema_registration_callable_row_of(graph, symbol) ?? return None
+    if row == .Function(module_index, index) {
+        // The marker test reads the row in place: binding the declaration
+        // copies the callee's whole body, which only an inlined call needs.
+        if graph.modules[module_index].functions[index].declaration.markers.len() == 0 || !sema_lifecycle_inline_requested(graph.modules[module_index].functions[index].declaration.markers) {
+            return None
+        }
+        declaration: graph.modules[module_index].functions[index].declaration
+        if declaration.type_params.len() > 0 || declaration.head_pattern != None || call.type_args.len() > 0 || declaration.body.len() != 1 {
+            return None
+        }
+        if call.args.len() > declaration.params.len() -> return None
+        caller: sema_scope_caller_index(environment, graph) ?? return None
+        if declaration.body[0] == .Expr(value) {
+            body := SemaLifecycleInlineBody{uses: [SemaLifecycleInlineUse]{}, free_names: [Span]{}, effects: 0}
+            if !sema_lifecycle_inline_walk(value, declaration.params, false, false, body) {
+                return None
+            }
+            raw: graph.modules[caller].source.bytes()
+            declared: graph.modules[module_index].source.bytes()
+            loop written in body.free_names {
+                name: sema_stmt_source_text(declared, written) ?? return None
+                binding: sema_scope_resolve_index_at(scopes, name, call.name_span) ?? return None
+                kind: scopes.bindings[binding].symbol.kind
+                if kind == SymbolKind.Local || kind == SymbolKind.Parameter -> return None
+                if caller != module_index {
+                    found := false
+                    loop function in graph.modules[module_index].functions {
+                        if function.symbol.name == name && function.symbol.id.id == scopes.bindings[binding].symbol.id.id {
+                            found = true
+                        }
+                    }
+                    if !found -> return None
+                }
+            }
+            site: sema_lifecycle_inline_call(raw, call) ?? return None
+            texts := [String]{}
+            terms := [Bool]{}
+            last_read := -1
+            loop (position, parameter) in declaration.params {
+                if parameter.variadic || parameter.convention != AccessConvention.Read {
+                    return None
+                }
+                if position >= call.args.len() {
+                    fallback: parameter.default ?? return None
+                    if !sema_lifecycle_inline_trivial(fallback) || fallback == .Ident(_, _, _) {
+                        return None
+                    }
+                    texts.push(sema_stmt_source_text(declared, expr_source_span(fallback)) ?? return None)
+                    terms.push(true)
+                    next
+                }
+                argument: call.args[position]
+                if argument.spread || argument.mark != None -> return None
+                if argument.label == .Val(label) {
+                    if {
+                        parameter.public_label == .Val(outer) -> {
+                            if label.name != outer.name -> return None
+                        }
+                        label.name != parameter.name -> return None
+                        else -> {}
+                    }
+                }
+                if !sema_lifecycle_inline_trivial(argument.expr) {
+                    reads := 0
+                    loop (order, read) in body.uses {
+                        if read.parameter != position -> next
+                        reads += 1
+                        if read.conditional || read.effects_before > 0 || order < last_read {
+                            return None
+                        }
+                        last_read = order
+                    }
+                    if reads != 1 -> return None
+                }
+                texts.push(sema_stmt_source_text(raw, site.spans[position]) ?? return None)
+                terms.push(sema_lifecycle_inline_term(argument.expr))
+            }
+            start: sema_lifecycle_inline_start(value)
+            finish: sema_lifecycle_inline_end(declared, value) ?? return None
+            text := ""
+            at := start
+            loop read in body.uses {
+                text = "{text}{sema_stmt_source_text(declared, Span{start: at, end: read.span.start}) ?? ""}"
+                written: texts[read.parameter]
+                text = if read.operand && !terms[read.parameter] -> "{text}({written})" else -> "{text}{written}"
+                at = read.span.end
+            }
+            text = "{text}{sema_stmt_source_text(declared, Span{start: at, end: finish}) ?? ""}"
+            if !sema_lifecycle_inline_term(value) -> text = "({text})"
+            return Val(TextEdit{span: Span{start: call.name_span.start, end: site.end}, new_text: text})
+        }
+    }
+    None
+}
+
+// Each function's `#Deprecated` payload, and in `inlines` each one whose
+// marker writes `inline: true`.
+sema_lifecycle_functions: fn(functions: [SemaRegistrationFunction], payloads: &[U32:CoreMarkerApplication], inlines: &[U32:Bool]) Never! {
     loop function in functions {
         payload: sema_lifecycle_marker(function.declaration.markers, function.symbol.name) ?? next
         payloads[function.symbol.id.id] = payload
+        if sema_lifecycle_inline_requested(function.declaration.markers) {
+            inlines[function.symbol.id.id] = true
+        }
     }
 }
 
@@ -156,8 +486,11 @@ sema_lifecycle_edit: fn(payload: CoreMarkerApplication, span: Span) -> TextEdit?
 // (sema_lifecycle_renames; None: not known, and it is offered). `hidden`: at
 // this use the replacement's name means a local or parameter, or nothing, so
 // the rename wouldn't call it. A use it can't rename gets no edit, and its Fix
-// says to edit it by hand.
-sema_lifecycle_record: fn(payload: CoreMarkerApplication, rename: Bool?, hidden: Bool, source: String, span: Span, edition: String, result: &SemaLifecycleResult, seen: &[String:Bool]) {
+// says to edit it by hand. `inlined`: the function's marker writes
+// `inline: true`, so `jet fix` migrates a call by `inline_edit`
+// (sema_lifecycle_inline_edit) and never by a rename; a use with no such
+// edit is edited by hand.
+sema_lifecycle_record: fn(payload: CoreMarkerApplication, rename: Bool?, hidden: Bool, inlined: Bool, inline_edit: TextEdit?, source: String, span: Span, edition: String, result: &SemaLifecycleResult, seen: &[String:Bool]) {
     key: "{source}|{span.start}|{span.end}|{payload.member}"
     if seen.get(key) != None {
         return
@@ -177,8 +510,11 @@ sema_lifecycle_record: fn(payload: CoreMarkerApplication, rename: Bool?, hidden:
     result.facts.push(StructureFact{kind: StructureFactKind.Lifecycle, subject: payload.member, source: source, span: span, status: status, detail: detail, gate: None})
     item: payload.member
     since: sema_lifecycle_version_phrase(payload.since)
-    renamable: !hidden && (rename ?? true)
-    fix: if hidden -> "edit this use by hand to use `{payload.replacement}`: here its name doesn't refer to it, so `jet fix` can't rename it." else if !renamable -> "edit this use by hand to use `{payload.replacement}`, which doesn't take the same arguments, so `jet fix` can't rename it." else -> "use `{payload.replacement}` instead, or run `jet fix` to migrate automatically."
+    renamable: !inlined && !hidden && (rename ?? true)
+    fix := if hidden -> "edit this use by hand to use `{payload.replacement}`: here its name doesn't refer to it, so `jet fix` can't rename it." else if !renamable -> "edit this use by hand to use `{payload.replacement}`, which doesn't take the same arguments, so `jet fix` can't rename it." else -> "use `{payload.replacement}` instead, or run `jet fix` to migrate automatically."
+    if inlined {
+        fix = if inline_edit == None -> "edit this use by hand to use `{payload.replacement}`: `jet fix` puts `{item}`'s body in place of a call only where that can't change what the call does." else -> "use `{payload.replacement}` instead, or run `jet fix` to put `{item}`'s body in place of this call."
+    }
     diagnostic := if status == "removed" -> sema_error("E2002", span, "`{item}` was removed in {sema_lifecycle_version_phrase(payload.removed_in ?? "this edition")}", "`{item}` was deprecated in {since} and no longer exists in this edition; it has reached the end of its migration window.", fix) else -> {
         why := "`{item}` was deprecated in {since}; it still works for now but should be migrated."
         if payload.removed_in == .Val(removed) {
@@ -186,10 +522,14 @@ sema_lifecycle_record: fn(payload: CoreMarkerApplication, rename: Bool?, hidden:
         }
         sema_lint("L2001", span, "`{item}` is deprecated", why, fix)
     }
-    if renamable {
-        if sema_lifecycle_edit(payload, span) == .Val(edit) {
-            diagnostic = diagnostic_with_edit(diagnostic, edit)
+    if {
+        inline_edit == .Val(edit) -> diagnostic = diagnostic_with_edit(diagnostic, edit)
+        renamable -> {
+            if sema_lifecycle_edit(payload, span) == .Val(edit) {
+                diagnostic = diagnostic_with_edit(diagnostic, edit)
+            }
         }
+        else -> {}
     }
     result.diagnostics.push(diagnostic)
 }
@@ -197,15 +537,16 @@ sema_lifecycle_record: fn(payload: CoreMarkerApplication, rename: Bool?, hidden:
 sema_lifecycle_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy]) -> SemaLifecycleResult {
     result := SemaLifecycleResult{diagnostics: [Diagnostic]{}, facts: [StructureFact]{}}
     payloads := [U32:CoreMarkerApplication]{}
+    inlines := [U32:Bool]{}
     editions := [String:String]{}
     loop policy in policies -> editions[policy.package_identity] = policy.edition
     loop graph_module_index in 0..<graph.modules.len() {
-        sema_lifecycle_functions(graph.modules[graph_module_index].functions, payloads)
+        sema_lifecycle_functions(graph.modules[graph_module_index].functions, payloads, inlines)
         loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() {
-            sema_lifecycle_functions(graph.modules[graph_module_index].impls[implementation_index].methods, payloads)
+            sema_lifecycle_functions(graph.modules[graph_module_index].impls[implementation_index].methods, payloads, inlines)
         }
         loop nominal_index in 0..<graph.modules[graph_module_index].nominals.len() {
-            sema_lifecycle_functions(graph.modules[graph_module_index].nominals[nominal_index].methods, payloads)
+            sema_lifecycle_functions(graph.modules[graph_module_index].nominals[nominal_index].methods, payloads, inlines)
             markers := [Marker]{}
             if graph.modules[graph_module_index].nominals[nominal_index].source == .SourceAST(item) {
                 if item == {
@@ -234,24 +575,29 @@ sema_lifecycle_structure: fn(graph: SemaRegistrationGraph, modules: [SemaGraphMo
             if segments.len() > 0 && sema_source_location_at(segments, reference.span) == None {
                 next
             }
-            sema_lifecycle_record(payload, renames.get(reference.symbol.id.id), false, graph_module.source_file, reference.span, edition, result, seen)
+            sema_lifecycle_record(payload, renames.get(reference.symbol.id.id), false, inlines.get(reference.symbol.id.id) != None, None, graph_module.source_file, reference.span, edition, result, seen)
         }
         loop call in checked.call_facts {
             // A Core member carries its resolved marker; a declared function
             // answers through its own written marker.
             declared := CoreMarkerApplication?{None}
             rename := Bool?{None}
+            inlined := false
             if call.callee == .Val(callee) {
                 if !symbol_is_local(callee) && symbol_table_key(graph.symbols, callee).starts_with("{symbol_kind_name(SymbolKind.Function)}:") {
                     declared = payloads.get(callee.id)
                     rename = renames.get(callee.id)
+                    inlined = inlines.get(callee.id) != None
                 }
             }
             detail: sema_call_site_detail(call)
-            if detail.lifecycle != None -> rename = None
+            if detail.lifecycle != None {
+                rename = None
+                inlined = false
+            }
             payload: detail.lifecycle ?? declared ?? next
             if segments.len() > 0 && sema_source_location_at(segments, call.span) == None -> next
-            sema_lifecycle_record(payload, rename, detail.replacement_hidden, graph_module.source_file, call.span, edition, result, seen)
+            sema_lifecycle_record(payload, rename, detail.replacement_hidden, inlined, detail.lifecycle_inline, graph_module.source_file, call.span, edition, result, seen)
         }
         sema_attach_diagnostic_source_locations(result.diagnostics, start, graph_module.source_segments)
     }

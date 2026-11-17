@@ -416,7 +416,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
 
 // Foreign bridges are dependencies, never root/path maturity exemptions.
 #Test("publication audit_lockfile_includes_foreign_rust_bridge_packages") {
-    lock: publication_advisory_test_lock("base64", "0.22.1", .Foreign{language: .Rust, reference: "base64@0.22.1", output: "sha256-bridge"})
+    lock: publication_advisory_test_lock("base64", "0.22.1", .Foreign{language: "rust", reference: "base64@0.22.1", output: "sha256-bridge"})
     feed: publication_advisory_test_feed("advisory|RUSTSEC-TEST|base64|^0.22||bridge advisory|high\n")
     matches: publication_audit_lockfile(lock, feed.advisories) ?? panic("foreign audit")
     assert_eq(matches.len(), 1)
@@ -425,7 +425,7 @@ publication_advisory_test_authorization_error: fn(policy: PublicationAdvisoryPol
 }
 
 #Test("publication maturity_window_applies_to_foreign_rust_bridge_packages") {
-    lock: publication_advisory_test_lock("base64", "0.22.1", .Foreign{language: .Rust, reference: "base64@0.22.1", output: "sha256-bridge"})
+    lock: publication_advisory_test_lock("base64", "0.22.1", .Foreign{language: "rust", reference: "base64@0.22.1", output: "sha256-bridge"})
     feed: publication_advisory_test_feed("release|base64#0.22.1|100|third-party\n")
     immature: publication_lock_maturity_diagnostics(lock, feed, 86400, 200, [PackagePolicyException]{}) ?? panic("foreign maturity")
     assert_eq(immature.source_exceptions.len(), 0)

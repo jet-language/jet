@@ -80,6 +80,7 @@ use {
         sema_comptime_local_value_failure,
         sema_comptime_local_value_ahead_site,
         sema_comptime_local_value_unstorable,
+        sema_comptime_module_event,
         sema_comptime_shared_payload,
         sema_comptime_graph_apply_sites,
         sema_comptime_graph_apply_values,
@@ -3649,6 +3650,14 @@ jet_driver_comptime_run: fn(
                             return jet_driver_comptime_run_result(values, checked_functions, trace, false, false)
                         }
                     }
+                }
+                // A module event (`NAME: event.new<T>()`) lands no value:
+                // the program makes the event on its first read, once per
+                // process, and every read shares it.
+                if folded == None && source.module_value && sema_comptime_module_event(environments[0], programs[0], comptime_request.expression.tree, comptime_request.expression.root) {
+                    values.push(jet_driver_comptime_item_value(source, TComptimeValue.Unit, comptime_request.expression))
+                    made_progress = true
+                    next
                 }
                 // A module `Shared{X}` holder lands the payload the build
                 // folds; the program allocates its cell on the first read. A

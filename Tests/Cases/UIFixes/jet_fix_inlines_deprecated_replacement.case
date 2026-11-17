@@ -1,0 +1,20 @@
+# `#Deprecated(inline: true)` retires a function whose one-expression body is
+# its replacement: `jet fix` puts that body in place of every call it can, each
+# argument where its parameter is read and still run once and in order, and
+# L2001 leaves a call whose argument the body would run twice to edit by hand.
+fixture: JetFixInlinesDeprecatedReplacement.fixture
+env: NO_COLOR=1
+step: jet check run.jet
+exit: 0
+stderr: ~ "run `jet fix` to put `double`'s body in place of this call"
+stderr: ~ "`jet fix` puts `twice`'s body in place of a call only where that can't change what the call does"
+step: jet fix run.jet
+exit: 0
+stderr: !~ "rolled back" # every inlined call still checks
+stderr: ~ "applied 3 fixes" # both `double` calls and `twice(3)`
+file: run.jet = jet_fix_inlines_deprecated_replacement.fixed
+step: jet check run.jet
+exit: 0
+step: jet run run.jet
+exit: 0
+stdout: = "8\nseven\n14\n12\nseven\n14\n"

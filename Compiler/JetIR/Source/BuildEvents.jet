@@ -35,6 +35,18 @@ ir_event_with_policy: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: T
     event
 }
 
+// A fresh synchronous `Event<T>` of type `ty`, as `event.new<T>()` makes it:
+// a module event's (ir_event_holder_read, ir_storage_init).
+ir_event_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Int Never! {
+    policy_ty: Type.Named{name: "EventPolicy"}
+    policy_row: ir_value_type(m, p, policy_ty) ?? return ir_type_fail(b, span, policy_ty)
+    policy: ir_runtime(m, b, "jet_event_policy_sync", [Int]{}, policy_row)
+    event_row: ir_event_row(m, ty)
+    event: ir_runtime(m, b, "jet_event_with_policy", [Int]{policy}, event_row)
+    ir_release(m, b, policy)
+    event
+}
+
 // Every `core.event` method row the providers implement; None leaves any
 // other to ir_handle_method.
 ir_event_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, operation: BodyHandleOp, args: [Int], span: Span) -> Int? Never! {

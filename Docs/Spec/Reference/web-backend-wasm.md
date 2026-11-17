@@ -26,7 +26,8 @@ environment and exits with its status. A page or a harness imports
 with `JetHostExitError` (its `status`) otherwise, `JetHostWasmError` on a
 trap, or `JetHostAbiError` when the files are not one build's.
 `instantiateWasm` and `takeWasmError` from `jet_dom_runtime.js` drive the
-modules directly.
+modules directly; the `jet_export_run` that `instantiateWasm` returns runs the
+program once and answers a promise of its exit status.
 
 The manifest's `binding` and `app.js`'s `JET_TARGET_BINDING` hold the same
 target binding: the machine the program was checked for (`targetMachine`,
@@ -58,6 +59,16 @@ file system is the program's; a page has none, so file calls fail with
 ENOSYS. The host runs one thread: the build refuses a `task.group` with
 `E-WEB-UNSUPPORTED`, and a program that starts any other `task` stops with
 E3001 (`tasks are not available on the web target yet`).
+
+A program that waits does not block the page. Where the JavaScript engine
+has promise integration (`WebAssembly.Suspending` and
+`WebAssembly.promising`), a timed wait on the program's thread, such as
+`time.sleep`, suspends the program on a promise the host settles at the
+wait's deadline, and the page goes on meanwhile: its timers, its rendering
+and its other scripts run. The program's run, each click and each drop is
+one entry, and entries take turns: a click or drop that arrives while one
+is suspended runs once that one has ended. Without promise integration the
+wait holds the thread until its deadline, as a native thread's does.
 
 When the page has a `document`, the host shows what the program's `core.ui`
 backend paints. Each paint (a `ui.mount`, or a `paint` after `layout`)

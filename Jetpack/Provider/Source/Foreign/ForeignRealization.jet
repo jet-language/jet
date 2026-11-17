@@ -10,7 +10,8 @@ use {
 // The result of one package-provider projection.
 ForeignRealization: struct {
     name: String,
-    language: ForeignLanguage,
+    // The binder's mount root.
+    language: String,
     // The provider ref inside the language-qualified manifest value.
     reference: String,
     // The canonical cache/lock identity (`<language>@<provider-ref>`).
@@ -37,16 +38,16 @@ provider_realize_foreign_dependencies: fn(verification: &StoreVerification, root
     Ok(realized)
 }
 
-provider_realize_foreign_one: fn(verification: &StoreVerification, roots: HangarRoots, project_root: String, name: String, language: ForeignLanguage, reference: String, ctx: ProviderCtx) -[FS, Env, Time]> ForeignRealization ProviderError! {
+provider_realize_foreign_one: fn(verification: &StoreVerification, roots: HangarRoots, project_root: String, name: String, language: String, reference: String, ctx: ProviderCtx) -[FS, Env, Time]> ForeignRealization ProviderError! {
     provider_validate_library_name(name)
     spec: ProviderRef.classify(reference) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} has an invalid provider ref {reference}: {err}"))
     source: provider_foreign_artifact_root(project_root, spec, ctx, name)
     expected_binding: provider_foreign_binding_in(source, language, name)
     provider_require_regular_file(expected_binding, "generated foreign binding")
-    descriptor: pkg_binder_descriptor(language) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} has no binder descriptor for {language.root()}"))
+    descriptor: pkg_binder_descriptor(language) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} has no binder descriptor for {language}"))
     provider_require_descriptor_stamp(expected_binding, descriptor.stamp())
 
-    foreign_reference: "{language.root()}{REF_PROVIDER_AT}{reference}"
+    foreign_reference: "{language}{REF_PROVIDER_AT}{reference}"
     version: provider_foreign_exact_version(spec) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} must pin its provider package with `#version=...`"))
     source_fingerprint: foundation_try_tree_hash(source) ?? return Err(ProviderError.ForeignProjection("foreign dependency {name} source tree `{source}` could not be hashed: {err.message()}"))
     identity: CacheIdentity{
@@ -63,7 +64,7 @@ provider_realize_foreign_one: fn(verification: &StoreVerification, roots: Hangar
         references: [String]{},
         outputs: [String:String]{"out": source},
         signature: "",
-        provenance: "foreign-provider-v1 language={language.root()} provider={spec.provider.label()} reference={reference}",
+        provenance: "foreign-provider-v1 language={language} provider={spec.provider.label()} reference={reference}",
         platform_artifact_kind: "",
     }
     ingested: store_ingest_tree(verification, roots, request) ?? return Err(ProviderError.Ingest(err.what()))
@@ -75,24 +76,24 @@ provider_realize_foreign_one: fn(verification: &StoreVerification, roots: Hangar
     binding: provider_foreign_binding_path(project_root, language, name)
     provider_copy_verified_file(stored_binding, binding)
     provenance: provider_foreign_provenance_path(project_root, language, name)
-    provenance_text: "schema = foreign-binding-v1\nlanguage = {language.root()}\nname = {name}\nreference = {foreign_reference}\ndescriptor = {descriptor.stamp()}\nstore-id = {entry.id}\noutput-hash = {entry.envelope.output_hash}\n"
+    provenance_text: "schema = foreign-binding-v1\nlanguage = {language}\nname = {name}\nreference = {foreign_reference}\ndescriptor = {descriptor.stamp()}\nstore-id = {entry.id}\noutput-hash = {entry.envelope.output_hash}\n"
     provider_write_verified_file(provenance, provenance_text.bytes())
     Ok(ForeignRealization{name: name, language: language, reference: reference, provider_reference: foreign_reference, entry: entry, binding: binding, provenance: provenance})
 }
 
 // `<root>/.jet/bindings/<lang>/<name>.jet`.
-provider_foreign_binding_in: fn(root: String, language: ForeignLanguage, name: String) -> String Never! {
-    files.join(files.join(files.join(root, SOURCE_ROOT_DIR), language.bindings_subdir()), "{name}.{FILE_EXT}")
+provider_foreign_binding_in: fn(root: String, language: String, name: String) -> String Never! {
+    files.join(files.join(files.join(root, SOURCE_ROOT_DIR), pkg_foreign_bindings_subdir(language)), "{name}.{FILE_EXT}")
 }
 
 // The project-side binding the compiler foreign loader reads.
-provider_foreign_binding_path: fn(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
+provider_foreign_binding_path: fn(project_root: String, language: String, name: String) -> String Never! {
     provider_foreign_binding_in(project_root, language, name)
 }
 
 // The provenance sidecar beside the project binding.
-provider_foreign_provenance_path: fn(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
-    files.join(files.join(files.join(project_root, SOURCE_ROOT_DIR), language.bindings_subdir()), "{name}.provenance")
+provider_foreign_provenance_path: fn(project_root: String, language: String, name: String) -> String Never! {
+    files.join(files.join(files.join(project_root, SOURCE_ROOT_DIR), pkg_foreign_bindings_subdir(language)), "{name}.provenance")
 }
 
 // A local `path` provider artifact, or the verified fixture artifact of any

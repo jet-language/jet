@@ -6,6 +6,7 @@
 // scalar adapters. Unsupported annotations fail before an artifact exists.
 use {
     files: core.files
+    jetpack_foundation.[PY_MODULE_ROOT]
     process: core.process
 }
 
@@ -21,7 +22,7 @@ pkg_python_bind: fn(source_path: String, source: String, lib: String, cache: Str
         return Err(ForeignBindError.Source("{lib} is not a valid Jet library name"))
     }
     functions: pkg_python_parse(source)
-    descriptor: pkg_binder_descriptor_for(ForeignLanguage.Py, "Python")
+    descriptor: pkg_binder_descriptor_for(PY_MODULE_ROOT, "Python")
     path: pkg_binder_canonicalize(source_path, "could not resolve Python source")
     on_disk: pkg_binder_read_text(path, "could not read Python source")
     if on_disk != source {

@@ -5,7 +5,7 @@ use {
         pkg_powershell_render_jet,
         pkg_powershell_render_worker,
     ]
-    jet_pkg_model.[ForeignLanguage, pkg_worker_require_supported_host]
+    jet_pkg_model.[pkg_worker_require_supported_host]
 }
 
 #Test("projects powershell names without changing foreign lookup") {
@@ -46,7 +46,7 @@ use {
 }
 
 #Test("powershell non posix hosts fail instead of emitting a posix facade") {
-    error: if pkg_worker_require_supported_host(ForeignLanguage.PowerShell, false) == {
+    error: if pkg_worker_require_supported_host("pwsh", false) == {
         .Ok(_) -> panic("a non-POSIX host was accepted")
         .Err(error) -> error
     }

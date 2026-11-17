@@ -35,7 +35,6 @@ use {
     jet_pkg_model.[
         FFIHandleFact,
         FFILinkClosure,
-        ForeignLanguage,
         pkg_sha256_hex,
     ]
     jet_testkit.[kit_require_tool]
@@ -190,7 +189,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
     assert_eq(package.version, "0.22.1")
     assert_eq(package.dependencies, [String]{"serde"})
     assert_eq(package.content_hash, Val("sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"))
-    assert_eq(package.source, LockSource.Foreign{language: ForeignLanguage.Rust, reference: "base64@0.22.1", output: "sha256-artifact"})
+    assert_eq(package.source, LockSource.Foreign{language: "rust", reference: "base64@0.22.1", output: "sha256-artifact"})
 }
 
 #Test("tampered bridge artifact reports e2604") {
@@ -218,7 +217,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
 #Test("generated rust bridge carries the canonical descriptor stamp") {
     entry: pkg_ffi_test_entry("rust_max", "std::cmp::max", [{convention: AccessConvention, ty: Type}]{{convention: AccessConvention.Read, ty: Type.Int}}, [String]{"value"}, Val(Type.Int), "extern rust rust_max")
     source: pkg_ffi_test_wrapper_lib([ExternEntry]{entry})
-    assert(source.contains("// jet-ffi-descriptor={pkg_ffi_foreign_descriptor_stamp(ForeignLanguage.Rust)}"))
+    assert(source.contains("// jet-ffi-descriptor={pkg_ffi_foreign_descriptor_stamp("rust")}"))
 }
 
 // Builds with the host's cargo, and reports skip without it on PATH.
@@ -239,7 +238,7 @@ pkg_ffi_test_occurrences: fn(text: String, needle: String) -> Int Never! {
     entry.c_abi = true
     entry.c_module = true
     source: pkg_ffi_test_wrapper_lib([ExternEntry]{entry})
-    assert(source.contains("// jet-ffi-descriptor={pkg_ffi_foreign_descriptor_stamp(ForeignLanguage.Com)}"))
+    assert(source.contains("// jet-ffi-descriptor={pkg_ffi_foreign_descriptor_stamp("com")}"))
 }
 
 #Test("generated bridge reports through host callback") {

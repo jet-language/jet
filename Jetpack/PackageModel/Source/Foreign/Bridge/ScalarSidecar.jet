@@ -37,10 +37,10 @@ pkg_bridge_scalar_bridge_identity: fn(descriptor: BinderDescriptor, lib: String,
 // renderer; adapters may add declaration files or other local inputs.
 pkg_bridge_scalar_bridge_identity_with_sources: fn(descriptor: BinderDescriptor, lib: String, abi: String, runtime: String, sources: [BridgeSource], worker: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_bridge_validate_scalar_bridge(abi, descriptor, functions)
-    if abi != "{descriptor.language.bridge_prefix()}{lib}" {
+    if abi != "{descriptor.bridge_prefix}{lib}" {
         return Err(pkg_bridge_error("foreign bridge ABI name does not match its descriptor language"))
     }
-    pkg_bridge_scalar_bridge_identity_with_descriptor(descriptor.language.root(), lib, abi, runtime, descriptor.stamp(), sources, worker, functions)
+    pkg_bridge_scalar_bridge_identity_with_descriptor(descriptor.root, lib, abi, runtime, descriptor.stamp(), sources, worker, functions)
 }
 
 pkg_bridge_scalar_bridge_identity_with_descriptor: fn(language: String, lib: String, abi: String, runtime: String, descriptor: String, sources: [BridgeSource], worker: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
@@ -166,8 +166,8 @@ pkg_bridge_write_scalar_provenance_with_sources: fn(cache: String, lib: String, 
     }
     contract: descriptor_row.contract
     descriptor: descriptor_row.stamp()
-    language: descriptor_row.language
-    abi: "jet_{language.root()}_{lib}"
+    language: descriptor_row.root
+    abi: "jet_{language}_{lib}"
     identity: pkg_bridge_scalar_bridge_identity_with_sources(descriptor_row, lib, abi, runtime, sources, worker, functions)
     runtime_toolchain: pkg_bridge_tool_identity(runtime)
     cc: pkg_bridge_tool_identity("cc")
@@ -187,7 +187,7 @@ pkg_bridge_write_scalar_provenance_with_sources: fn(cache: String, lib: String, 
     }
     provenance: files.join(cache, "{lib}.provenance")
     fields := [{name: String, value: String}]{
-        {name: "language", value: language.root()},
+        {name: "language", value: language},
         {name: "abi", value: abi},
         {name: "runtime", value: runtime},
         {name: "transport", value: "supervised-scalar-sidecar"},
@@ -358,12 +358,12 @@ pkg_bridge_scalar_zero_value: fn(scalar: ForeignScalar) -> String? Never! {
 pkg_bridge_validate_scalar_bridge: fn(abi: String, descriptor: BinderDescriptor, functions: [ScalarBridgeFunction]) ForeignBridgeError! {
     pkg_bridge_scalar_bridge_library(abi, descriptor)
     if !descriptor.contract.same_as(ForeignABIContract.message()) {
-        return Err(pkg_bridge_error("foreign binder `{descriptor.language.root()}` does not expose the checked adapter contract"))
+        return Err(pkg_bridge_error("foreign binder `{descriptor.root}` does not expose the checked adapter contract"))
     }
     required: [BinderCapability]{BinderCapability.TypedStub, BinderCapability.SafeWrapper, BinderCapability.OwnershipConversion, BinderCapability.LayoutValidation, BinderCapability.ErrorConversion, BinderCapability.CacheProvenance}
     loop capability in required {
         if !descriptor.capabilities.contains(capability) {
-            return Err(pkg_bridge_error("foreign binder `{descriptor.language.root()}` is missing capability `{capability.debug_name()}`"))
+            return Err(pkg_bridge_error("foreign binder `{descriptor.root}` is missing capability `{capability.debug_name()}`"))
         }
     }
     names := [String]{}
@@ -388,7 +388,7 @@ pkg_bridge_validate_scalar_bridge: fn(abi: String, descriptor: BinderDescriptor,
 
 // The library segment of `<bridge prefix><library>`.
 pkg_bridge_scalar_bridge_library: fn(abi: String, descriptor: BinderDescriptor) -> String ForeignBridgeError! {
-    prefix: descriptor.language.bridge_prefix()
+    prefix: descriptor.bridge_prefix
     if abi.starts_with(prefix) {
         lib: abi.removeprefix(prefix)
         if pkg_bridge_is_identifier(lib) -> return Ok(lib)

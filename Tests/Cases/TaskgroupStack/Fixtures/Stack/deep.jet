@@ -1,9 +1,9 @@
 // A task group's `stack:` gives its tasks, and the groups and tasks they
-// open, at least that much stack (D-THREAD-STACK1=A). The soft stack limit
-// is set to 8 MiB first, so every other task gets 8 MiB: shallow.jet's same
-// recursion outside the group stops with E3012. Here it runs in a task of
-// the group, in a group a task of it opens, and in a task one starts
-// outside any group.
+// open, at least that much stack of their own. The soft stack limit is set
+// to 8 MiB first, so every other task starts on 8 MiB and runs deeper only
+// on stack segments, up to the stack budget (shallow.jet). Here the
+// recursion runs in a task of the group, in a group a task of it opens, and
+// in a task one starts outside any group.
 package: {
     name: "taskgroup_stack"
     authority: { allow: [Env, Exec, FS, FS.Read, IO] }

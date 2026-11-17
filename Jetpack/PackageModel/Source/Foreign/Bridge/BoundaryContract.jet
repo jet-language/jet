@@ -6,27 +6,30 @@
 // (jet_foundation::TestingComparison) are referenced by their Rust-derived
 // names: EvidenceIdentity, EvidenceRecord, EvidenceOutcome, ComparisonRecord,
 // TEST_COMPARISON_SCHEMA_VERSION.
-use jet_foundation.[
-    ComparisonRecord,
-    DerivationRecord,
-    EvidenceIdentity,
-    EvidenceOutcome,
-    EvidenceRecord,
-    DerivationRef,
-    TEST_COMPARISON_SCHEMA_VERSION,
-    comparison_assertion_error_text,
-    comparison_record_artifact_id,
-    comparison_record_assert_equal,
-    comparison_status_as_str,
-    derivation_record_reference,
-    derivation_record_validate,
-    evidence_expectation_error_text,
-    evidence_outcome_is_failure,
-    evidence_outcome_is_incomplete,
-    evidence_outcome_name,
-    evidence_record_validate,
-    observation_relation_as_str,
-]
+use {
+    jetpack_foundation.[ADA_MODULE_ROOT, COM_MODULE_ROOT, CPP_MODULE_ROOT, CS_MODULE_ROOT, C_MODULE_ROOT, GO_MODULE_ROOT, JAVA_MODULE_ROOT, JS_MODULE_ROOT, PASCAL_MODULE_ROOT, PY_MODULE_ROOT]
+    jet_foundation.[
+        ComparisonRecord,
+        DerivationRecord,
+        EvidenceIdentity,
+        EvidenceOutcome,
+        EvidenceRecord,
+        DerivationRef,
+        TEST_COMPARISON_SCHEMA_VERSION,
+        comparison_assertion_error_text,
+        comparison_record_artifact_id,
+        comparison_record_assert_equal,
+        comparison_status_as_str,
+        derivation_record_reference,
+        derivation_record_validate,
+        evidence_expectation_error_text,
+        evidence_outcome_is_failure,
+        evidence_outcome_is_incomplete,
+        evidence_outcome_name,
+        evidence_record_validate,
+        observation_relation_as_str,
+    ]
+}
 
 FOREIGN_SOURCE_RECEIPT_SCHEMA: "jet-ffi-source-receipt-v1"
 
@@ -109,8 +112,9 @@ ForeignBoundaryObservation: struct {
 }
 
 // Family-level capability projection over the canonical binder descriptor.
+// `language` is the family's mount root.
 ForeignBoundaryCapability: struct {
-    language: ForeignLanguage,
+    language: String,
     disposition: ForeignBoundaryDisposition,
     source_import: Bool,
     mixed_debug: Bool,
@@ -123,19 +127,13 @@ ForeignBoundaryCapability: struct {
 // Active descriptors provide an executable binder. Only the named narrow
 // conversion families claim source import; C/C++ source import and
 // COM/Ada/Pascal semantic translation remain explicitly unavailable.
-pkg_foreign_boundary_capability: fn(language: ForeignLanguage) -> ForeignBoundaryCapability Never! {
-    active: if pkg_binder_descriptor(language) == {
+pkg_foreign_boundary_capability: fn(root: String) -> ForeignBoundaryCapability Never! {
+    active: if pkg_binder_descriptor(root) == {
         .Val(descriptor) -> descriptor.status == BinderStatus.Active
         .None -> false
     }
-    source_import: if language == {
-        .Py | .Java | .DotNet | .JS | .Go -> true
-        .Fortran | .Cobol | .Tcl | .Lua | .Ada | .Pascal | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .Com | .C | .Cpp | .Asm | .Octave | .Rust | .Swift -> false
-    }
-    binder_only: if language == {
-        .Com | .Ada | .Pascal -> true
-        .Go | .Java | .DotNet | .Fortran | .Cobol | .Tcl | .Lua | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .C | .Cpp | .Asm | .Py | .Octave | .Rust | .JS | .Swift -> false
-    }
+    source_import: [String]{PY_MODULE_ROOT, JAVA_MODULE_ROOT, CS_MODULE_ROOT, JS_MODULE_ROOT, GO_MODULE_ROOT}.contains(root)
+    binder_only: [String]{COM_MODULE_ROOT, ADA_MODULE_ROOT, PASCAL_MODULE_ROOT}.contains(root)
     disposition: if {
         !active -> ForeignBoundaryDisposition.Unsupported
         binder_only -> ForeignBoundaryDisposition.BinderOnly
@@ -146,29 +144,23 @@ pkg_foreign_boundary_capability: fn(language: ForeignLanguage) -> ForeignBoundar
         .BinderOnly -> "binder/adapter path is executable; semantic source translation is unavailable"
         .Unsupported -> "no active binder descriptor is registered for this family"
     }
-    mixed_debug: if language == {
-        .C | .Cpp | .Py | .Java | .DotNet | .JS | .Go -> true
-        .Fortran | .Cobol | .Tcl | .Lua | .Ada | .Pascal | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .Com | .Asm | .Octave | .Rust | .Swift -> false
-    }
-    native: if language == {
-        .C | .Cpp -> true
-        .Go | .Java | .DotNet | .Fortran | .Cobol | .Tcl | .Lua | .Ada | .Pascal | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .Com | .Asm | .Py | .Octave | .Rust | .JS | .Swift -> false
-    }
-    ForeignBoundaryCapability{language: language, disposition: disposition, source_import: source_import, mixed_debug: mixed_debug, native_export: native, build_host: native, reason: reason}
+    mixed_debug: [String]{C_MODULE_ROOT, CPP_MODULE_ROOT, PY_MODULE_ROOT, JAVA_MODULE_ROOT, CS_MODULE_ROOT, JS_MODULE_ROOT, GO_MODULE_ROOT}.contains(root)
+    native: root == C_MODULE_ROOT || root == CPP_MODULE_ROOT
+    ForeignBoundaryCapability{language: root, disposition: disposition, source_import: source_import, mixed_debug: mixed_debug, native_export: native, build_host: native, reason: reason}
 }
 
 // The complete family matrix used by foreign inspection and comparison views.
 pkg_foreign_boundary_capabilities: fn() -> [ForeignBoundaryCapability] Never! {
     rows := [ForeignBoundaryCapability]{}
-    loop language in ForeignLanguage.all() -> rows.push(pkg_foreign_boundary_capability(language))
+    loop root in pkg_foreign_language_roots() -> rows.push(pkg_foreign_boundary_capability(root))
     rows
 }
 
 // Build the canonical boundary row for an import operation. The capability
 // matrix stays the authority for semantic conversion; binder-only families
 // are never upgraded here.
-pkg_source_import_boundary: fn(language: ForeignLanguage, library: String, identity: ForeignBoundaryIdentity, coverage: ForeignArtifactCoverage) -> ForeignBoundaryContract ForeignBridgeError! {
-    descriptor: pkg_binder_descriptor(language) ?? return Err(pkg_bridge_error("missing binder descriptor for {language.debug_name()}"))
+pkg_source_import_boundary: fn(root: String, library: String, identity: ForeignBoundaryIdentity, coverage: ForeignArtifactCoverage) -> ForeignBoundaryContract ForeignBridgeError! {
+    descriptor: pkg_binder_descriptor(root) ?? return Err(pkg_bridge_error("missing binder descriptor for {pkg_foreign_language_name(root)}"))
     boundary: ForeignBoundaryContract.new(descriptor, library, identity).with_artifact_coverage(coverage)
     boundary.validate()
     Ok(boundary)
@@ -297,7 +289,8 @@ pkg_bridge_scalar_width: fn(scalar: ForeignScalar) -> String Never! {
 // The one consumed boundary row for a binder invocation.
 ForeignBoundaryContract: struct {
     schema: String,
-    language: ForeignLanguage,
+    // The language's mount root.
+    language: String,
     library: String,
     descriptor: String,
     abi: ForeignABIContract,
@@ -332,7 +325,7 @@ ForeignBoundaryContract: struct {
     obligations: [ForeignObligationEvidence],
 
     new: fn(descriptor: BinderDescriptor, library: String, identity: ForeignBoundaryIdentity) -> ForeignBoundaryContract Never! {
-        capability: pkg_foreign_boundary_capability(descriptor.language)
+        capability: pkg_foreign_boundary_capability(descriptor.root)
         contract: descriptor.contract
         scalar_widths := [String:String]{}
         scalar_widths["integer"] = pkg_bridge_scalar_width(contract.integer)
@@ -340,8 +333,8 @@ ForeignBoundaryContract: struct {
         scalar_widths["boolean"] = pkg_bridge_scalar_width(contract.boolean)
         scalar_widths["character"] = pkg_bridge_scalar_width(contract.character)
         scalar_widths["string"] = pkg_bridge_scalar_width(contract.string)
-        is_cpp: descriptor.language == ForeignLanguage.Cpp
-        is_c: descriptor.language == ForeignLanguage.C
+        is_cpp: descriptor.root == CPP_MODULE_ROOT
+        is_c: descriptor.root == C_MODULE_ROOT
         artifact_coverage: ForeignArtifactCoverage.new("not-recorded", identity.target, identity.generator)
         coverage_digest: artifact_coverage.digest()
         obligations := [ForeignObligationEvidence]{}
@@ -355,7 +348,7 @@ ForeignBoundaryContract: struct {
         }
         ForeignBoundaryContract{
             schema: FOREIGN_BOUNDARY_SCHEMA,
-            language: descriptor.language,
+            language: descriptor.root,
             library: library,
             descriptor: descriptor.stamp(),
             abi: contract,
@@ -420,7 +413,7 @@ ForeignBoundaryContract: struct {
             return Err(pkg_bridge_error("foreign boundary evidence requires a checked derivation reference"))
         }
         if !self.source_import && self.source_authority == ForeignSourceAuthority.ReplacementAccepted {
-            return Err(pkg_bridge_error("foreign source replacement is unavailable for {self.language.root()}"))
+            return Err(pkg_bridge_error("foreign source replacement is unavailable for {self.language}"))
         }
         accepted: self.source_authority == ForeignSourceAuthority.ReplacementAccepted
         if self.source_receipt == {
@@ -529,7 +522,7 @@ ForeignBoundaryContract: struct {
         FFIBoundaryFacts{
             schema: self.schema,
             digest: self.digest(),
-            language: self.language.root(),
+            language: self.language,
             library: self.library,
             effect_root: self.effect_root,
             effects: self.effects,
@@ -663,7 +656,7 @@ ForeignBoundaryContract: struct {
 
     mark_replacement_accepted: fn(&self) ForeignBridgeError! {
         if !self.source_import {
-            return Err(pkg_bridge_error("foreign source replacement is unavailable for {self.language.root()}"))
+            return Err(pkg_bridge_error("foreign source replacement is unavailable for {self.language}"))
         }
         if self.derivation == None || self.evidence.len() == 0 {
             return Err(pkg_bridge_error("cannot accept a foreign replacement without checked derivation and evidence references"))
@@ -701,7 +694,7 @@ ForeignBoundaryContract: struct {
 
     // Compact source-safe marker carried by generated bindings.
     stamp: fn(self) -> String Never! {
-        "{self.schema};language={self.language.root()};library={self.library};disposition={self.disposition.as_str()};source-authority={self.source_authority.as_str()};digest={self.digest()}"
+        "{self.schema};language={self.language};library={self.library};disposition={self.disposition.as_str()};source-authority={self.source_authority.as_str()};digest={self.digest()}"
     }
 
     sorted_width_names: fn(self) -> [String] Never! {
@@ -716,7 +709,7 @@ ForeignBoundaryContract: struct {
         fields := [{name: String, value: String}]{
             {name: "boundary-schema", value: self.schema},
             {name: "boundary-digest", value: self.digest()},
-            {name: "boundary-language", value: self.language.root()},
+            {name: "boundary-language", value: self.language},
             {name: "boundary-library", value: self.library},
             {name: "boundary-descriptor", value: self.descriptor},
             {name: "boundary-disposition", value: self.disposition.as_str()},
@@ -780,7 +773,7 @@ ForeignBoundaryContract: struct {
         }
         fields := [{name: String, value: String}]{
             {name: "schema", value: self.schema},
-            {name: "language", value: self.language.root()},
+            {name: "language", value: self.language},
             {name: "library", value: self.library},
             {name: "descriptor", value: self.descriptor},
             {name: "abi", value: self.abi.stamp()},

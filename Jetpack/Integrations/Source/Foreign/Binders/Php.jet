@@ -3,12 +3,11 @@
 // the shared supervisor in Foreign/WorkerSupervisor.jet.
 use {
     jet_foundation.[JET_TYPE_NAMES]
-    jetpack_foundation.[JET_KEYWORD_LIST]
+    jetpack_foundation.[JET_KEYWORD_LIST, PHP_MODULE_ROOT]
     files: core.files
     jet_pkg_model.[
         ForeignBindError,
         ForeignBindResult,
-        ForeignLanguage,
         pkg_ascii_lower,
         pkg_binder_append_artifact_boundary,
         pkg_binder_canonicalize,
@@ -22,6 +21,7 @@ use {
         pkg_binder_require_lib_name,
         pkg_binder_resolved_tool_path,
         pkg_binder_write,
+        pkg_worker_action,
         pkg_worker_build_archive,
         pkg_worker_invoke_wrapper,
         pkg_worker_prepare_build,
@@ -163,7 +163,7 @@ PKG_PHP_RESERVED: [String]{"open", "take_error", "cancel", "close", "decode_resp
 
 // Bind the top-level one-argument functions of the PHP script at `path`.
 pkg_php_bind: fn(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
-    language: ForeignLanguage.Php
+    language: PHP_MODULE_ROOT
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
     php: pkg_binder_resolved_tool_path("php") ?? return Err(ForeignBindError.ToolMissing("php"))
@@ -182,7 +182,7 @@ pkg_php_bind: fn(path: String, source: String, lib: String, cache: String) -[FS,
     archive: pkg_worker_build_archive(language, abi, build, cache, bridge, "could not write PHP pool bridge")
     digest: pkg_binder_identity_digest([String]{"jet-php-bind-v1", source, script, php, worker_source})
     provenance := "schema=jet-php-bind-v1\nsha256={digest}\nphp={php}\nscript={script}\nworker={worker}\npool_workers=4\n"
-    pkg_binder_append_artifact_boundary(provenance, ForeignLanguage.Php, "PHP", lib, script, archive, "php={php};{pkg_binder_cc_ar_identity()}")
+    pkg_binder_append_artifact_boundary(provenance, language, "PHP", lib, script, archive, "php={php};{pkg_binder_cc_ar_identity()}")
     result: ForeignBindResult{source: pkg_php_render_jet(lib, functions), bound: functions, archive: archive, provenance: provenance}
     pkg_binder_remove_tree_quiet(build)
     Ok(result)
@@ -190,11 +190,11 @@ pkg_php_bind: fn(path: String, source: String, lib: String, cache: String) -[FS,
 
 // `php -n -l`: any failing status is reported as a parse error.
 pkg_php_lint: fn(php: String, script: String) -[Exec, Time.Wait]> ForeignBindError! {
-    if pkg_worker_run_tool([String]{php, "-n", "-l", script}, "php", ForeignLanguage.Php, true) == {
+    if pkg_worker_run_tool([String]{php, "-n", "-l", script}, "php", PHP_MODULE_ROOT, true) == {
         .Ok(_) -> {}
         .Err(error) -> {
             if error == {
-                .ToolFailed(_, _, _) -> return Err(ForeignBindError.ToolFailed{tool: "php", action: (ForeignLanguage.Php).worker_action(), detail: "the PHP source has a parse error"})
+                .ToolFailed(_, _, _) -> return Err(ForeignBindError.ToolFailed{tool: "php", action: pkg_worker_action(PHP_MODULE_ROOT), detail: "the PHP source has a parse error"})
                 .Source(_) | .IO(_) | .ToolMissing(_) | .SelectedToolMissing(_) | .ToolchainRejected(_) | .ABIMismatch(_) | .UnsupportedHost(_) | .PlainToolMissing(_) | .PlainToolFailed(_, _, _) -> return Err(error)
             }
         }
@@ -203,7 +203,7 @@ pkg_php_lint: fn(php: String, script: String) -[Exec, Time.Wait]> ForeignBindErr
 
 // Static discovery through PHP's own tokenizer.
 pkg_php_discover_functions: fn(php: String, script: String) -[Exec, Time.Wait]> [String] ForeignBindError! {
-    output: pkg_worker_run_tool([String]{php, "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", PKG_PHP_TOKEN_ANALYZER, "--", script}, "php", ForeignLanguage.Php, true)
+    output: pkg_worker_run_tool([String]{php, "-d", "auto_prepend_file=", "-d", "auto_append_file=", "-r", PKG_PHP_TOKEN_ANALYZER, "--", script}, "php", PHP_MODULE_ROOT, true)
     pkg_php_parse_discovery(output)
 }
 

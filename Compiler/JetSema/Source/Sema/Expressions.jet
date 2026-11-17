@@ -3719,6 +3719,12 @@ sema_expr_check_declared_direct_call: fn(call: Call, expected: Type?, environmen
     if !sema_expr_record_call_fact(environment, program, scopes, context, call.name_span, value, diagnostics) {
         return None
     }
+    last: context.call_facts.len() - 1
+    if sema_lifecycle_inline_edit(call, context.call_facts[last].callee, environment, program, scopes) == .Val(edit) {
+        detail := sema_call_site_detail(context.call_facts[last])
+        detail.lifecycle_inline = Val(edit)
+        context.call_facts[last].detail = sema_call_site_detail_of(detail)
+    }
     Val(value.value)
 }
 

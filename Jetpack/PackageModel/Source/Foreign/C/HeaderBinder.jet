@@ -1,6 +1,6 @@
 use {
     cbind_core_files: core.files
-    jetpack_foundation.[SYSTEM_LIB_TARGET, foundation_generated_snake_name]
+    jetpack_foundation.[C_MODULE_ROOT, SYSTEM_LIB_TARGET, foundation_generated_snake_name]
 }
 
 // Native C header -> Jet `#Bindgen` cache generator, ported from
@@ -129,8 +129,8 @@ C_BINDER_SCHEMA: "jet-c-bind-v1"
 // digests, the boundary row the cache stamps, and the cache and metadata
 // artifacts.
 pkg_cbind_provenance: fn(bound: CBindFiles, lib: String, stem: String, header_path: String, header_src: String, cache_path: String, dependency: String?, archives: [ArchiveInput]) -[Env]> String ForeignBridgeError! {
-    descriptor: pkg_binder_descriptor(ForeignLanguage.C) ?? return Err(pkg_bridge_error("C binder descriptor is not registered"))
-    language: (ForeignLanguage.C).root()
+    descriptor: pkg_binder_descriptor(C_MODULE_ROOT) ?? return Err(pkg_bridge_error("C binder descriptor is not registered"))
+    language: C_MODULE_ROOT
     header_sha: pkg_sha256_hex(header_src.bytes())
     cache_sha: pkg_sha256_hex(bound.cache.bytes())
     identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
@@ -425,7 +425,7 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
 }
 
 pkg_cbind_c_descriptor: fn() -> BinderDescriptor CBindError! {
-    descriptor: pkg_binder_descriptor(ForeignLanguage.C) ?? return Err(CBindError{message: "C binder descriptor is not registered"})
+    descriptor: pkg_binder_descriptor(C_MODULE_ROOT) ?? return Err(CBindError{message: "C binder descriptor is not registered"})
     Ok(descriptor)
 }
 

@@ -23,8 +23,9 @@ class Element {
   addEventListener(name, handler) {
     if (name === "click") this.clicks.push(handler);
   }
+  // Runs the click listeners; settles once each handler's run has ended.
   click() {
-    for (const handler of this.clicks) handler({ type: "click", target: this });
+    return Promise.all(this.clicks.map((handler) => handler({ type: "click", target: this })));
   }
 }
 const body = new Element("body");
@@ -40,5 +41,5 @@ await jet_main();
 const container = document.getElementById("jet-app");
 const text = () => container.children.map((child) => child.textContent).join("");
 console.log(`initial: children=${container.children.length} text=${JSON.stringify(text())}`);
-container.children.find((child) => child.tagName === "button").click();
+await container.children.find((child) => child.tagName === "button").click();
 console.log(`after click: children=${container.children.length} text=${JSON.stringify(text())}`);

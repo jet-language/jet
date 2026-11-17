@@ -46,6 +46,6 @@ provider.eventPop = (queue) => {
   }
   return eventPop(queue);
 };
-instance.exports.jet_export_run();
+await instance.exports.jet_export_run();
 if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
 for (const [name, event] of pressed ?? []) console.log(`${name} default prevented: ${event.defaultPrevented}`);

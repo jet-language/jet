@@ -7,11 +7,35 @@
 use {
     jet_foundation.[Diagnostic, diagnostic_from_registry]
     jetpack_foundation.[
+        ADA_MODULE_ROOT,
+        ASM_MODULE_ROOT,
+        COBOL_MODULE_ROOT,
+        COM_MODULE_ROOT,
+        CPP_MODULE_ROOT,
+        CS_MODULE_ROOT,
+        C_MODULE_ROOT,
+        DART_MODULE_ROOT,
         DEP_PROVIDER_C,
+        FORTRAN_MODULE_ROOT,
+        GO_MODULE_ROOT,
+        JAVA_MODULE_ROOT,
+        JS_MODULE_ROOT,
+        KW_RUST,
+        LUA_MODULE_ROOT,
+        OCTAVE_MODULE_ROOT,
         PACKAGE_FILE,
+        PASCAL_MODULE_ROOT,
+        PERL_MODULE_ROOT,
+        PHP_MODULE_ROOT,
+        PWSH_MODULE_ROOT,
+        PY_MODULE_ROOT,
         REF_PROVIDER_AT,
+        RUBY_MODULE_ROOT,
+        R_MODULE_ROOT,
         SOURCE_ROOT_DIR,
+        SWIFT_MODULE_ROOT,
         SYSTEM_LIB_TARGET,
+        TCL_MODULE_ROOT,
     ]
     files: core.files
     sys: core.sys
@@ -19,7 +43,6 @@ use {
     jet_pkg_model.[
         CFFI,
         ForeignBridgeError,
-        ForeignLanguage,
         PackageFacts,
         pkg_ascii_lower,
         pkg_bridge_error,
@@ -29,6 +52,9 @@ use {
         pkg_bytes_space_width,
         pkg_bytes_text,
         pkg_extract_inline_package,
+        pkg_foreign_bindings_subdir,
+        pkg_foreign_bridge_prefix,
+        pkg_foreign_language_roots,
     ]
 }
 
@@ -140,15 +166,13 @@ pkg_cffi_resolve_link_for_target: fn(lib: String, project_root: String, target: 
     pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, target, None)
 }
 
-// The foreign language whose generated bridge prefix names `lib`, among the
-// families that link a generated archive.
-pkg_cffi_generated_link_language: fn(lib: String) -> ForeignLanguage? Never! {
-    loop language in ForeignLanguage.all() {
-        if language == {
-            .C | .Asm | .Rust | .Swift -> next
-            .Go | .Java | .DotNet | .Fortran | .Cobol | .Tcl | .Lua | .Ada | .Pascal | .Dart | .PowerShell | .Perl | .Ruby | .Php | .R | .Com | .Cpp | .Py | .Octave | .JS -> {}
-        }
-        if lib.starts_with(language.bridge_prefix()) -> return Val(language)
+// The root of the foreign language whose generated bridge prefix names
+// `lib`, among the families that link a generated archive.
+pkg_cffi_generated_link_language: fn(lib: String) -> String? Never! {
+    unlinked: [String]{C_MODULE_ROOT, ASM_MODULE_ROOT, KW_RUST, SWIFT_MODULE_ROOT}
+    loop root in pkg_foreign_language_roots() {
+        if unlinked.contains(root) -> next
+        if lib.starts_with(pkg_foreign_bridge_prefix(root)) -> return Val(root)
     }
     None
 }
@@ -157,8 +181,8 @@ pkg_cffi_generated_link_language: fn(lib: String) -> ForeignLanguage? Never! {
 // declared `c@…` dependency, else pkg-config, else E3201.
 pkg_cffi_resolve_link_for_target_with_entry: fn(lib: String, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFFIError! {
     if pkg_cffi_generated_link_language(lib) == .Val(language) {
-        actual: lib.removeprefix(language.bridge_prefix())
-        dir: files.join(files.join(project_root, SOURCE_ROOT_DIR), language.bindings_subdir())
+        actual: lib.removeprefix(pkg_foreign_bridge_prefix(language))
+        dir: files.join(files.join(project_root, SOURCE_ROOT_DIR), pkg_foreign_bindings_subdir(language))
         flags: pkg_cffi_generated_link(language, lib, actual, dir, target) ?? return Err(pkg_cffi_error(pkg_cffi_e3201(lib)))
         return Ok(flags)
     }
@@ -207,25 +231,30 @@ pkg_cffi_archive_link: fn(dir: String, archive: String, links: [String]) -[FS]> 
     Val(flags)
 }
 
-// The link flags of one generated foreign binding, or `None` (E3201) when
-// its archive, runtime, or link record is missing or stale.
-pkg_cffi_generated_link: fn(language: ForeignLanguage, lib: String, actual: String, dir: String, target: String) -[FS, Env, Exec, Time.Wait]> LinkFlags? Never! {
+// The link flags of one generated foreign binding (the language rooted at
+// `language`), or `None` (E3201) when its archive, runtime, or link record is
+// missing or stale.
+pkg_cffi_generated_link: fn(language: String, lib: String, actual: String, dir: String, target: String) -[FS, Env, Exec, Time.Wait]> LinkFlags? Never! {
     archive: files.join(dir, "lib{lib}.a")
     static_link: "static={lib}"
-    if language == {
-        .Cpp -> pkg_cffi_cpp_link(lib, actual, dir, archive, target)
-        .Go -> pkg_cffi_archive_link(dir, archive, [String]{static_link, "pthread", "dl", "m"})
-        .JS | .Dart | .Fortran -> pkg_cffi_archive_link(dir, archive, [String]{static_link})
-        .DotNet -> pkg_cffi_archive_link(dir, archive, [String]{static_link, "pthread", "dl"})
-        .PowerShell | .Py | .Perl | .Ruby | .Php | .R | .Octave -> pkg_cffi_archive_link(dir, archive, [String]{static_link, "pthread"})
-        .Java -> pkg_cffi_runtime_link(dir, archive, actual, "jvm", "jvm", [String]{static_link, "jvm", "pthread", "dl"})
-        .Tcl -> pkg_cffi_runtime_link(dir, archive, actual, "tcl", "tcl", [String]{static_link, "tcl", "pthread", "dl"})
-        .Lua -> pkg_cffi_runtime_link(dir, archive, actual, "lua", "lua", [String]{static_link, "lua", "pthread", "dl", "m"})
-        .Ada -> pkg_cffi_runtime_link(dir, archive, actual, "ada", "gnat", [String]{static_link, "gnat", "pthread", "dl", "m"})
-        .Cobol -> pkg_cffi_runtime_link(dir, archive, actual, "cobol", "cob", [String]{static_link, "dylib=cob", "pthread", "dl", "m"})
-        .Pascal -> pkg_cffi_pascal_link(lib, dir, archive)
-        .Com -> pkg_cffi_com_link(dir, archive, target, static_link)
-        .C | .Asm | .Rust | .Swift -> None
+    // The bare archive families, and the supervised-worker families whose
+    // archive also needs the thread library.
+    bare: [String]{JS_MODULE_ROOT, DART_MODULE_ROOT, FORTRAN_MODULE_ROOT}
+    workers: [String]{PWSH_MODULE_ROOT, PY_MODULE_ROOT, PERL_MODULE_ROOT, RUBY_MODULE_ROOT, PHP_MODULE_ROOT, R_MODULE_ROOT, OCTAVE_MODULE_ROOT}
+    if {
+        language == CPP_MODULE_ROOT -> pkg_cffi_cpp_link(lib, actual, dir, archive, target)
+        language == GO_MODULE_ROOT -> pkg_cffi_archive_link(dir, archive, [String]{static_link, "pthread", "dl", "m"})
+        bare.contains(language) -> pkg_cffi_archive_link(dir, archive, [String]{static_link})
+        language == CS_MODULE_ROOT -> pkg_cffi_archive_link(dir, archive, [String]{static_link, "pthread", "dl"})
+        language == JAVA_MODULE_ROOT -> pkg_cffi_runtime_link(dir, archive, actual, "jvm", "jvm", [String]{static_link, "jvm", "pthread", "dl"})
+        language == TCL_MODULE_ROOT -> pkg_cffi_runtime_link(dir, archive, actual, "tcl", "tcl", [String]{static_link, "tcl", "pthread", "dl"})
+        language == LUA_MODULE_ROOT -> pkg_cffi_runtime_link(dir, archive, actual, "lua", "lua", [String]{static_link, "lua", "pthread", "dl", "m"})
+        language == ADA_MODULE_ROOT -> pkg_cffi_runtime_link(dir, archive, actual, "ada", "gnat", [String]{static_link, "gnat", "pthread", "dl", "m"})
+        language == COBOL_MODULE_ROOT -> pkg_cffi_runtime_link(dir, archive, actual, "cobol", "cob", [String]{static_link, "dylib=cob", "pthread", "dl", "m"})
+        language == PASCAL_MODULE_ROOT -> pkg_cffi_pascal_link(lib, dir, archive)
+        language == COM_MODULE_ROOT -> pkg_cffi_com_link(dir, archive, target, static_link)
+        workers.contains(language) -> pkg_cffi_archive_link(dir, archive, [String]{static_link, "pthread"})
+        else -> None
     }
 }
 

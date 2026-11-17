@@ -17,7 +17,6 @@ use {
     jet_foundation.[Diagnostic, diagnostic_render_all]
     jet_pkg_model.[
         ForeignBindError,
-        ForeignLanguage,
         WorkspaceDeclarationCache,
         pkg_ada_bind,
         pkg_cobol_bind,
@@ -49,7 +48,8 @@ use {
 
 // One language's `inspect bind` surface.
 JetCLIForeignBinder: struct {
-    language: ForeignLanguage,
+    // The language's mount root (`tcl`, `cs`, `pwsh`).
+    language: String,
     // The usage line after `jet inspect bind `.
     usage: String,
     // The help-only line printed under the usage ("" for none).
@@ -68,48 +68,47 @@ JetCLIForeignBinder: struct {
 // The binder `inspect bind <root>` runs, or `None` for a root without one
 // here (`c` binds a header, `com` refuses away from Windows).
 jet_cli_foreign_binder: fn(root: String) -> JetCLIForeignBinder? Never! {
-    language: ForeignLanguage.from_root(root) ?? return None
-    if language == {
-        .Tcl -> Val(jet_cli_foreign_scalar(language, "<script.tcl>", false, "the script", "use a valid Tcl initialization script and rerun `jet inspect bind tcl` inside the provisioned Jet environment."))
-        .Lua -> Val(jet_cli_foreign_scalar(language, "<script.lua>", false, "the script", "define top-level `function name(input)` routines and rerun `jet inspect bind lua` inside the provisioned Jet environment."))
-        .Ada -> Val(jet_cli_foreign_scalar(language, "<package.ads>", true, "the package spec", "export `Interfaces.C.long_long` or `Interfaces.C.double` functions with `Convention => C` and `External_Name`, then rerun `jet inspect bind ada`."))
-        .Pascal -> Val(jet_cli_foreign_scalar(language, "<library.pas>", true, "the Pascal source", "export `Int64`/`Double` cdecl routines plus `<class>_new`, `<class>_free`, and pointer-first scalar method wrappers, then rerun `jet inspect bind pascal`."))
-        .PowerShell -> Val(jet_cli_foreign_scalar(language, "<script.ps1>", true, "the PowerShell script", "define named PowerShell functions with Jet-compatible identifiers and rerun `jet inspect bind pwsh` inside the provisioned Jet environment."))
-        .Perl -> Val(jet_cli_foreign_scalar(language, "<script.pl>", true, "the Perl script", "define named main-package Perl functions with Jet-compatible identifiers and rerun `jet inspect bind perl` inside the provisioned Jet environment."))
-        .Ruby -> Val(jet_cli_foreign_scalar(language, "<script.rb>", true, "the Ruby script", "define top-level Ruby methods with one required positional argument and Jet-compatible names, then rerun `jet inspect bind ruby`."))
-        .Php -> Val(jet_cli_foreign_scalar(language, "<script.php>", true, "the PHP script", "define top-level PHP functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind php` inside the provisioned Jet environment."))
-        .R -> Val(jet_cli_foreign_scalar(language, "<script.R>", true, "the R script", "define top-level R functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind r`."))
-        .Py -> Val(jet_cli_foreign_scalar(language, "<script.py>", true, "the Python script", "define top-level Python functions with Jet-compatible names and required scalar annotations (`int`, `float`, or `bool`), then rerun `jet inspect bind py` inside the provisioned Jet environment."))
-        .Octave -> Val(jet_cli_foreign_scalar(language, "<script.m>", true, "the Octave script", "define top-level Octave functions with one matrix input and one matrix output, then rerun `jet inspect bind octave` in the provisioned Jet environment."))
-        .Java -> Val(jet_cli_foreign_scalar(language, "<source.java>", false, "the source file", "use a public Java class with one public long/double constructor and non-overloaded long/double methods, then rerun `jet inspect bind java`."))
-        .DotNet -> Val(jet_cli_foreign_scalar(language, "<source.cs>", true, "the C# source", "use one public C# class with one public long/double constructor and non-overloaded public long/double methods, then rerun `jet inspect bind cs`."))
-        .Go -> {
-            binder := jet_cli_foreign_scalar(language, "<source.go>", false, "the source file", "export `int64`/`float64` scalars or move-only `uintptr` handles with `//export Name`, then rerun `jet inspect bind go`.")
+    if root == {
+        "tcl" -> Val(jet_cli_foreign_scalar(root, "<script.tcl>", false, "the script", "use a valid Tcl initialization script and rerun `jet inspect bind tcl` inside the provisioned Jet environment."))
+        "lua" -> Val(jet_cli_foreign_scalar(root, "<script.lua>", false, "the script", "define top-level `function name(input)` routines and rerun `jet inspect bind lua` inside the provisioned Jet environment."))
+        "ada" -> Val(jet_cli_foreign_scalar(root, "<package.ads>", true, "the package spec", "export `Interfaces.C.long_long` or `Interfaces.C.double` functions with `Convention => C` and `External_Name`, then rerun `jet inspect bind ada`."))
+        "pascal" -> Val(jet_cli_foreign_scalar(root, "<library.pas>", true, "the Pascal source", "export `Int64`/`Double` cdecl routines plus `<class>_new`, `<class>_free`, and pointer-first scalar method wrappers, then rerun `jet inspect bind pascal`."))
+        "pwsh" -> Val(jet_cli_foreign_scalar(root, "<script.ps1>", true, "the PowerShell script", "define named PowerShell functions with Jet-compatible identifiers and rerun `jet inspect bind pwsh` inside the provisioned Jet environment."))
+        "perl" -> Val(jet_cli_foreign_scalar(root, "<script.pl>", true, "the Perl script", "define named main-package Perl functions with Jet-compatible identifiers and rerun `jet inspect bind perl` inside the provisioned Jet environment."))
+        "ruby" -> Val(jet_cli_foreign_scalar(root, "<script.rb>", true, "the Ruby script", "define top-level Ruby methods with one required positional argument and Jet-compatible names, then rerun `jet inspect bind ruby`."))
+        "php" -> Val(jet_cli_foreign_scalar(root, "<script.php>", true, "the PHP script", "define top-level PHP functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind php` inside the provisioned Jet environment."))
+        "r" -> Val(jet_cli_foreign_scalar(root, "<script.R>", true, "the R script", "define top-level R functions with one required positional argument and Jet-compatible names, then rerun `jet inspect bind r`."))
+        "py" -> Val(jet_cli_foreign_scalar(root, "<script.py>", true, "the Python script", "define top-level Python functions with Jet-compatible names and required scalar annotations (`int`, `float`, or `bool`), then rerun `jet inspect bind py` inside the provisioned Jet environment."))
+        "octave" -> Val(jet_cli_foreign_scalar(root, "<script.m>", true, "the Octave script", "define top-level Octave functions with one matrix input and one matrix output, then rerun `jet inspect bind octave` in the provisioned Jet environment."))
+        "java" -> Val(jet_cli_foreign_scalar(root, "<source.java>", false, "the source file", "use a public Java class with one public long/double constructor and non-overloaded long/double methods, then rerun `jet inspect bind java`."))
+        "cs" -> Val(jet_cli_foreign_scalar(root, "<source.cs>", true, "the C# source", "use one public C# class with one public long/double constructor and non-overloaded public long/double methods, then rerun `jet inspect bind cs`."))
+        "go" -> {
+            binder := jet_cli_foreign_scalar(root, "<source.go>", false, "the source file", "export `int64`/`float64` scalars or move-only `uintptr` handles with `//export Name`, then rerun `jet inspect bind go`.")
             binder.summary = "Generate typed Jet bindings for scalar and uintptr //export Go functions."
             Val(binder)
         }
-        .Fortran -> {
-            binder := jet_cli_foreign_scalar(language, "<source.f90>", false, "the source file", "use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar `value` inputs or fixed-shape `intent(in)` arrays, then rerun `jet inspect bind fortran`.")
+        "fortran" -> {
+            binder := jet_cli_foreign_scalar(root, "<source.f90>", false, "the source file", "use explicit `bind(C, name=\"...\")` routines with ISO_C_BINDING scalar `value` inputs or fixed-shape `intent(in)` arrays, then rerun `jet inspect bind fortran`.")
             binder.summary = "Generate typed Jet bindings for scalar and fixed-shape input ISO_C_BINDING functions."
             Val(binder)
         }
-        .Dart -> {
-            binder := jet_cli_foreign_scalar(language, "<contract.dart> --jet <compute.jet>", true, "the Dart contract", "mark top-level scalar Dart callbacks with `@pragma('vm:entry-point')`, pass a valid Jet plugin source with `--jet`, and rerun inside the provisioned Jet environment.")
+        "dart" -> {
+            binder := jet_cli_foreign_scalar(root, "<contract.dart> --jet <compute.jet>", true, "the Dart contract", "mark top-level scalar Dart callbacks with `@pragma('vm:entry-point')`, pass a valid Jet plugin source with `--jet`, and rerun inside the provisioned Jet environment.")
             binder.flags = [String]{"--jet"}
             Val(binder)
         }
-        .JS -> {
-            binder := jet_cli_foreign_scalar(language, "<module.d.ts> --runtime <module.js>", true, "the TypeScript declaration file", "export typed scalar functions in a `.d.ts` file, provide the matching JavaScript module with `--runtime`, and rerun `jet inspect bind js` inside the provisioned Jet environment.")
+        "js" -> {
+            binder := jet_cli_foreign_scalar(root, "<module.d.ts> --runtime <module.js>", true, "the TypeScript declaration file", "export typed scalar functions in a `.d.ts` file, provide the matching JavaScript module with `--runtime`, and rerun `jet inspect bind js` inside the provisioned Jet environment.")
             binder.flags = [String]{"--runtime"}
             Val(binder)
         }
-        .Cobol -> {
-            binder := jet_cli_foreign_scalar(language, "<program.cob> --copybook <record.cpy>", true, "the program", "use one GnuCOBOL PROGRAM-ID with a level-01 copybook containing level-05 X(n), COMP-5, or COMP-3 fields, then rerun `jet inspect bind cobol`.")
+        "cobol" -> {
+            binder := jet_cli_foreign_scalar(root, "<program.cob> --copybook <record.cpy>", true, "the program", "use one GnuCOBOL PROGRAM-ID with a level-01 copybook containing level-05 X(n), COMP-5, or COMP-3 fields, then rerun `jet inspect bind cobol`.")
             binder.flags = [String]{"--copybook"}
             Val(binder)
         }
-        .Cpp -> Val(JetCLIForeignBinder{
-            language: language,
+        "cpp" -> Val(JetCLIForeignBinder{
+            language: root,
             usage: "cpp <header.hpp> --target <triple> --clang <absolute-path> --ar <absolute-path> [--pkg <lib>] [--namespace <name>] [--instantiate <qualified=type:jet-name>] [-I <dir>] [-L <dir>] [-l <lib>] [-o <out.jet>]",
             summary: "",
             flags: [String]{"--target", "--clang", "--ar", "-I", "-L", "-l", "--namespace", "--instantiate"},
@@ -118,15 +117,15 @@ jet_cli_foreign_binder: fn(root: String) -> JetCLIForeignBinder? Never! {
             subject: "C++ bindings",
             fix: "select an explicit target/toolchain, expose public scalar declarations, and request templates with `--instantiate`, then rerun `jet inspect bind cpp`.",
         })
-        .C | .Rust | .Swift | .Com | .Asm -> None
+        else -> None
     }
 }
 
 // The binder of a `<root> <source> [--pkg <lib>] [-o <out.jet>]` language.
-jet_cli_foreign_scalar: fn(language: ForeignLanguage, source: String, lower: Bool, input: String, fix: String) -> JetCLIForeignBinder Never! {
+jet_cli_foreign_scalar: fn(root: String, source: String, lower: Bool, input: String, fix: String) -> JetCLIForeignBinder Never! {
     JetCLIForeignBinder{
-        language: language,
-        usage: "{language.root()} {source} [--pkg <lib>] [-o <out.jet>]",
+        language: root,
+        usage: "{root} {source} [--pkg <lib>] [-o <out.jet>]",
         summary: "",
         flags: [String]{},
         lower: lower,
@@ -195,7 +194,7 @@ jet_cli_foreign_parse: fn(binder: JetCLIForeignBinder, args: [String], color: Bo
         flag: args[index]
         if flag != "--pkg" && flag != "-o" && flag != "--out" && !binder.flags.contains(flag) {
             shared: jet_cli_diagnostic_copy("E2102")
-            output := jet_cli_report_output("", "E2102", "unknown `inspect bind {binder.language.root()}` flag `{flag}`", shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
+            output := jet_cli_report_output("", "E2102", "unknown `inspect bind {binder.language}` flag `{flag}`", shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
             output.stderr = "{output.stderr}{usage}"
             return JetCLIForeignParse.Done{output: output}
         }
@@ -235,11 +234,11 @@ jet_cli_foreign_instantiation: fn(value: String) -> CppTemplateInstantiation? Ne
 jet_cli_foreign_lib: fn(binder: JetCLIForeignBinder, request: JetCLIForeignBindRequest) -> String Never! {
     if request.pkg == .Val(lib) -> return lib
     base: if request.path.cut_last("/") == .Val(split) -> split.after else -> request.path
-    suffix: if binder.language == .JS && base.ends_with(".d.ts") -> ".d.ts" else -> "."
+    suffix: if binder.language == "js" && base.ends_with(".d.ts") -> ".d.ts" else -> "."
     stem: if base.cut_last(suffix) == .Val(split) -> split.before else -> base
     if !binder.lower -> return stem
     lowered: jet_cli_ascii_lower(stem)
-    if binder.language == .Cobol -> return lowered.split("-").to_list().join("_")
+    if binder.language == "cobol" -> return lowered.split("-").to_list().join("_")
     lowered
 }
 
@@ -293,29 +292,29 @@ jet_cli_foreign_bind: fn(binder: JetCLIForeignBinder, args: [String], color: Boo
 }
 
 jet_cli_foreign_bind_request: fn(binder: JetCLIForeignBinder, request: JetCLIForeignBindRequest, color: Bool) -> JetDriverVerbOutput {
-    if binder.language == .Dart && request.companion == None {
+    if binder.language == "dart" && request.companion == None {
         shared: jet_cli_diagnostic_copy("E2104")
         output := jet_cli_report_output("", "E2104", "`inspect bind dart` requires `--jet <compute.jet>` so the Dart host has real native Jet code to load", shared.why, shared.fix, color, JET_DRIVER_EXIT_USAGE)
         output.stderr = "{output.stderr}{jet_cli_foreign_usage(binder)}"
         return output
     }
-    if binder.language == .Cobol && request.companion == None {
+    if binder.language == "cobol" && request.companion == None {
         return jet_cli_foreign_usage_failure_output(binder)
     }
-    if binder.language == .Cpp && (request.target == None || request.clang == None || request.archiver == None) {
+    if binder.language == "cpp" && (request.target == None || request.clang == None || request.archiver == None) {
         return jet_cli_foreign_usage_failure_output(binder)
     }
     lib: jet_cli_foreign_lib(binder, request)
     // The C++ binder reads the header itself.
     source := ""
-    if binder.language != .Cpp {
+    if binder.language != "cpp" {
         source = cli_files.read(request.path) ?? return jet_cli_foreign_fail(binder, request.path, "{binder.input} could not be read ({jet_cli_io_error_text(err)})", color)
     }
-    if binder.language == .JS && request.companion == None {
+    if binder.language == "js" && request.companion == None {
         return jet_cli_foreign_fail(binder, request.path, "the Node broker is opt-in; provide the matching runtime with `--runtime <module.js>`", color)
     }
     copybook := ""
-    if binder.language == .Cobol && request.companion == .Val(copybook_path) {
+    if binder.language == "cobol" && request.companion == .Val(copybook_path) {
         copybook = cli_files.read(copybook_path) ?? return jet_cli_foreign_fail(binder, copybook_path, "the copybook could not be read ({jet_cli_io_error_text(err)})", color)
     }
     if jet_cli_foreign_output(binder, request, lib, source) == {
@@ -327,7 +326,7 @@ jet_cli_foreign_bind_request: fn(binder: JetCLIForeignBinder, request: JetCLIFor
 // Bind into the cache `out` and its directory.
 jet_cli_foreign_bind_to: fn(binder: JetCLIForeignBinder, request: JetCLIForeignBindRequest, source: String, copybook: String, lib: String, out: String, color: Bool) -> JetDriverVerbOutput {
     cache: jet_cli_parent(out) ?? "."
-    if binder.language == .Dart {
+    if binder.language == "dart" {
         return jet_cli_foreign_bind_dart(binder, request, source, lib, out, cache, color)
     }
     bound: jet_cli_foreign_generate(binder, request, source, copybook, lib, out, cache) ?? return jet_cli_foreign_fail(binder, request.path, err.message(), color)
@@ -348,27 +347,27 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
     provenance: "{cache}/{lib}.provenance"
     recorded: "the binding provenance"
     if binder.language == {
-        .Tcl -> {
+        "tcl" -> {
             result: pkg_tcl_bind(source, lib, cache)
             return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.tcl-path", text: "{result.lib_dir}\n", what: "the Tcl runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "Bound in-process Tcl session from `{path}` → {out}\n"}
         }
-        .Lua -> {
+        "lua" -> {
             result: pkg_lua_bind(path, source, lib, cache)
             return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.lua-path", text: "{result.lib_dir}\n", what: "the Lua runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "Bound {jet_cli_foreign_count(result.bound.len(), "in-process Lua function")} from `{path}` → {out}\n"}
         }
-        .Ada -> {
+        "ada" -> {
             result: pkg_ada_bind(path, source, lib, cache)
             return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.ada-path", text: "{result.runtime_dir}\n", what: "the GNAT runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "Bound {jet_cli_foreign_count(result.bound.len(), "GNAT export")} from `{path}` → {out}\n"}
         }
-        .Java -> {
+        "java" -> {
             result: pkg_java_bind(path, source, lib, cache)
             return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.jvm-path", text: "{result.jvm_dir}\n", what: "the JVM runtime identity"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "Bound {jet_cli_foreign_count(result.bound.len(), "JVM member")} from `{path}` → {out}\n"}
         }
-        .Pascal -> {
+        "pascal" -> {
             result: pkg_pascal_bind(path, source, lib, cache)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "FreePascal export")} from `{path}` → {out}\n")
         }
-        .Fortran -> {
+        "fortran" -> {
             result: pkg_fortran_bind(path, source, lib, cache)
             stdout := "Bound {jet_cli_foreign_count(result.bound.len(), "ISO_C_BINDING routine")} from `{path}` → {out}\n"
             loop layout in result.layouts {
@@ -378,7 +377,7 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
             }
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, stdout)
         }
-        .Cobol -> {
+        "cobol" -> {
             copybook_path: request.companion ?? ""
             result: pkg_cobol_bind(path, source, copybook_path, copybook, lib, cache)
             stdout := "Bound GnuCOBOL program `{result.program}` and {result.layout.width}-byte copybook `{result.layout.name}` → {out}\n"
@@ -387,48 +386,48 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
             }
             return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}, JetCLIForeignFile{path: "{cache}/{lib}.cobol-path", text: "{result.runtime_dir}\n", what: "the libcob runtime identity"}}, stdout: stdout}
         }
-        .JS -> {
+        "js" -> {
             runtime: request.companion ?? ""
             result: pkg_javascript_bind(path, source, runtime, lib, cache)
             return JetCLIForeignBound{files: [JetCLIForeignFile]{JetCLIForeignFile{path: out, text: result.source, what: cache_file}, JetCLIForeignFile{path: "{cache}/{lib}.d.ts", text: source, what: "the typed declaration cache"}, JetCLIForeignFile{path: provenance, text: result.provenance, what: recorded}}, stdout: "Bound {jet_cli_foreign_count(result.bound.len(), "JavaScript export")} from `{path}` → {out}\n"}
         }
-        .Py -> {
+        "py" -> {
             result: pkg_python_bind(path, source, lib, cache)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "persistent Python function")} from `{path}` → {out}\n")
         }
-        .DotNet -> {
+        "cs" -> {
             result: pkg_dotnet_bind(path, source, lib, cache)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, "the provenance", "Bound {jet_cli_foreign_count(result.bound.len(), ".NET member")} from `{path}` → {out}\n")
         }
-        .Go -> {
+        "go" -> {
             result: pkg_go_bind(path, source, lib, cache)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "Go export")} from `{path}` → {out}\n")
         }
-        .PowerShell -> {
+        "pwsh" -> {
             result: pkg_powershell_bind(path, source, lib, cache)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "persistent PowerShell function")} from `{path}` → {out}\n")
         }
-        .Perl -> {
+        "perl" -> {
             result: pkg_perl_bind(path, source, lib, cache)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "persistent Perl function")} from `{path}` → {out}\n")
         }
-        .Ruby -> {
+        "ruby" -> {
             result: pkg_ruby_bind(path, source, lib, cache)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "persistent Ruby method")} from `{path}` → {out}\n")
         }
-        .Php -> {
+        "php" -> {
             result: pkg_php_bind(path, source, lib, cache)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "PHP function")} into a four-worker pool from `{path}` → {out}\n")
         }
-        .R -> {
+        "r" -> {
             result: pkg_r_bind(path, source, lib, cache)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "R function")} from `{path}` → {out}\n")
         }
-        .Octave -> {
+        "octave" -> {
             result: pkg_octave_bind(path, source, lib, cache)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, recorded, "Bound {jet_cli_foreign_count(result.bound.len(), "Octave matrix function")} from `{path}` → {out}\n")
         }
-        .Cpp -> {
+        "cpp" -> {
             include_dirs := [String]{}
             loop directory in request.include_dirs {
                 include_dirs.push(jet_cli_foreign_native_path(directory))
@@ -451,9 +450,9 @@ jet_cli_foreign_generate: fn(binder: JetCLIForeignBinder, request: JetCLIForeign
             result: pkg_cpp_bind(path, cache, options)
             return jet_cli_foreign_pair(out, result.source, provenance, result.provenance, "the provenance", "Bound {jet_cli_foreign_count(result.bound.len(), "C++ member")} from `{path}` → {out}\n")
         }
-        .Dart | .C | .Rust | .Swift | .Com | .Asm -> {}
+        else -> {}
     }
-    Err(ForeignBindError.Source("`inspect bind {binder.language.root()}` has no in-process binder"))
+    Err(ForeignBindError.Source("`inspect bind {binder.language}` has no in-process binder"))
 }
 
 // A binding that publishes only its cache and provenance.

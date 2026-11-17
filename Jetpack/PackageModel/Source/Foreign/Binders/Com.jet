@@ -5,7 +5,7 @@
 // bridge before the linker consumes it.
 use {
     jet_foundation.[JET_TYPE_NAMES]
-    jetpack_foundation.[JET_KEYWORD_LIST, TYPE_ERR]
+    jetpack_foundation.[COM_MODULE_ROOT, JET_KEYWORD_LIST, TYPE_ERR]
     files: core.files
     sys: core.sys
     time: core.time
@@ -186,7 +186,7 @@ pkg_com_bind: fn(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, E
     metadata_digest: pkg_sha256_hex(metadata)
     generated_digest: pkg_sha256_hex(source.bytes())
     archive_digest: pkg_bridge_sha_file(archive)
-    descriptor: pkg_binder_descriptor(ForeignLanguage.Com) ?? return Err(ForeignBindError.IO("COM binder descriptor is not registered"))
+    descriptor: pkg_binder_descriptor(COM_MODULE_ROOT) ?? return Err(ForeignBindError.IO("COM binder descriptor is not registered"))
     cc_identity: pkg_bridge_tool_identity("cc")
     ar_identity: pkg_bridge_tool_identity("ar")
     record: pkg_com_input_record(input, file_input)
@@ -236,7 +236,7 @@ pkg_com_validate_provenance: fn(provenance_path: String, generated_source: Strin
     if provenance.schema != FOREIGN_BRIDGE_PROVENANCE_SCHEMA {
         return Err(ForeignBindError.Source("unsupported COM binding provenance schema `{provenance.schema}`"))
     }
-    descriptor: pkg_binder_descriptor(ForeignLanguage.Com) ?? return Err(ForeignBindError.Source("COM binder descriptor is not registered"))
+    descriptor: pkg_binder_descriptor(COM_MODULE_ROOT) ?? return Err(ForeignBindError.Source("COM binder descriptor is not registered"))
     expected_descriptor: descriptor.stamp()
     abi: "jet_com_{lib}"
     if pkg_com_provenance_single(provenance, "language") != "com" || pkg_com_provenance_single(provenance, "abi") != abi || pkg_com_provenance_single(provenance, "transport") != COM_TRANSPORT || pkg_com_provenance_single(provenance, "binder-schema") != COM_BINDER_SCHEMA || pkg_com_provenance_single(provenance, "descriptor") != expected_descriptor {
@@ -710,6 +710,6 @@ pkg_com_run: fn(argv: [String], tool: String) -[Exec, Time.Wait]> ForeignBindErr
 }
 
 pkg_com_descriptor_stamp: fn() -> String Never! {
-    descriptor: pkg_binder_descriptor(ForeignLanguage.Com) ?? panic("COM binder descriptor is registered")
+    descriptor: pkg_binder_descriptor(COM_MODULE_ROOT) ?? panic("COM binder descriptor is registered")
     descriptor.stamp()
 }

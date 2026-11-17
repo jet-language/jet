@@ -3,14 +3,13 @@
 use jet_pkg_model.[
     FOREIGN_ABI_CONTRACT_VERSION,
     FOREIGN_DESCRIPTOR_SCHEMA,
-    ForeignLanguage,
     ForeignSafety,
     ForeignScalar,
     pkg_binder_descriptor,
 ]
 
 #Test("c rust python and javascript share the typed scalar contract") {
-    languages: [ForeignLanguage]{ForeignLanguage.C, ForeignLanguage.Rust, ForeignLanguage.Py, ForeignLanguage.JS}
+    languages: [String]{"c", "rust", "py", "js"}
     loop language in languages {
         descriptor: pkg_binder_descriptor(language) ?? panic("conformance language descriptor")
         contract: descriptor.contract

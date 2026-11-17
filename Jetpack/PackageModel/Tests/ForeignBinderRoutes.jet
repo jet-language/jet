@@ -1,0 +1,159 @@
+// The Rust route plan (`jet::Foreign::route_plan`) paired the descriptor with a
+// `ForeignHost` and the binding cache, type-stub and provenance paths. In Jet the
+// canonical descriptor table (pkg_foreign_binders) is the only routing record:
+// a language is the mount root its row owns, the runtime names the host, and
+// `cache_extension` and `type_stub_file` name the generated files under
+// `pkg_foreign_bindings_subdir(root)`. There is no separate host enum or path
+// planner, so the ports assert those descriptor fields.
+use jet_pkg_model.[
+    BinderRuntime,
+    BinderStatus,
+    BinderSurface,
+    BindingStubKind,
+    ForeignStubFile,
+    pkg_binder_descriptor,
+    pkg_foreign_bindings_subdir,
+    pkg_foreign_language,
+    pkg_foreign_language_name,
+    pkg_foreign_language_roots,
+]
+
+flr_route: fn(root: String, status: BinderStatus, runtime: BinderRuntime, stub_kind: BindingStubKind, type_stub: ForeignStubFile) {
+    assert(pkg_foreign_language(root) == Val((root)), "{root} is a registered foreign root")
+    descriptor: pkg_binder_descriptor(root) ?? panic("{root} has a registered binder")
+    assert_eq(descriptor.root, root)
+    assert(descriptor.surface == BinderSurface.Namespace, "{root} binds a namespace")
+    assert_eq(descriptor.status.debug_name(), status.debug_name())
+    assert_eq(descriptor.runtime.debug_name(), runtime.debug_name())
+    assert_eq(descriptor.stub_kind.debug_name(), stub_kind.debug_name())
+    assert_eq(descriptor.cache_extension, "jet")
+    assert_eq(descriptor.type_stub_file.debug_name(), type_stub.debug_name())
+    assert_eq(pkg_foreign_bindings_subdir(root), "bindings/{root}")
+}
+
+#Test("unified_foreign_binder_registry_routes_active_and_planned_languages") {
+    expected: [{root: String, status: BinderStatus}]{
+        {root: "c", status: BinderStatus.Active},
+        {root: "asm", status: BinderStatus.Planned},
+        {root: "rust", status: BinderStatus.Planned},
+        {root: "py", status: BinderStatus.Active},
+        {root: "js", status: BinderStatus.Active},
+        {root: "swift", status: BinderStatus.Planned},
+        {root: "fortran", status: BinderStatus.Active},
+        {root: "cobol", status: BinderStatus.Active},
+        {root: "java", status: BinderStatus.Active},
+        {root: "cs", status: BinderStatus.Active},
+        {root: "tcl", status: BinderStatus.Active},
+        {root: "ada", status: BinderStatus.Active},
+        {root: "pascal", status: BinderStatus.Active},
+        {root: "dart", status: BinderStatus.Active},
+        {root: "pwsh", status: BinderStatus.Active},
+        {root: "perl", status: BinderStatus.Active},
+        {root: "ruby", status: BinderStatus.Active},
+        {root: "php", status: BinderStatus.Active},
+        {root: "r", status: BinderStatus.Active},
+        {root: "octave", status: BinderStatus.Active},
+        {root: "com", status: BinderStatus.Active},
+    }
+    loop entry in expected {
+        assert(pkg_foreign_language(entry.root) == Val(entry.root), "{entry.root} is a registered root")
+        assert_eq(pkg_foreign_bindings_subdir(entry.root), "bindings/{entry.root}")
+        binder: pkg_binder_descriptor(entry.root) ?? panic("{entry.root} has a registered binder")
+        assert(binder.surface == BinderSurface.Namespace, "{entry.root} binds a namespace")
+        assert_eq(binder.status.debug_name(), entry.status.debug_name())
+    }
+}
+
+// Not ported: `ForeignNamespace::from_module_path` and its display round trip;
+// Jet has no dotted foreign-path model beside the root table, so the port
+// checks the root table and its declaration order, which is the FFI effect's
+// case order.
+#Test("unified_foreign_namespace_model_recognizes_every_registered_root") {
+    roots: [{root: String, name: String}]{
+        {root: "go", name: "Go"},
+        {root: "java", name: "Java"},
+        {root: "cs", name: "DotNet"},
+        {root: "fortran", name: "Fortran"},
+        {root: "cobol", name: "Cobol"},
+        {root: "tcl", name: "Tcl"},
+        {root: "lua", name: "Lua"},
+        {root: "ada", name: "Ada"},
+        {root: "pascal", name: "Pascal"},
+        {root: "dart", name: "Dart"},
+        {root: "pwsh", name: "PowerShell"},
+        {root: "perl", name: "Perl"},
+        {root: "ruby", name: "Ruby"},
+        {root: "php", name: "Php"},
+        {root: "r", name: "R"},
+        {root: "com", name: "Com"},
+        {root: "c", name: "C"},
+        {root: "cpp", name: "Cpp"},
+        {root: "asm", name: "Asm"},
+        {root: "py", name: "Py"},
+        {root: "octave", name: "Octave"},
+        {root: "rust", name: "Rust"},
+        {root: "js", name: "JS"},
+        {root: "swift", name: "Swift"},
+    }
+    all: pkg_foreign_language_roots()
+    assert_eq(all.len(), roots.len())
+    loop (index, entry) in roots {
+        assert_eq(all[index], entry.root)
+        assert_eq(pkg_foreign_language_name(entry.root), entry.name)
+        assert(pkg_foreign_language(entry.root) == Val(entry.root), "{entry.root} namespace")
+        assert(pkg_foreign_language("{entry.root}.lib") == None, "{entry.root}.lib is not a root")
+    }
+    assert(pkg_foreign_language("unknown") == None, "unknown is not a foreign root")
+}
+
+// Every registered root, planned ones included, through the shared
+// selective-import check of ForeignSelectiveImport.jet.
+#Test("foreign_namespace_selective_imports_reuse_ordinary_parser_path") {
+    loop root in pkg_foreign_language_roots() -> pkg_test_selective_import(root)
+}
+
+// Not ported: ForeignHost NativeJsWasmComponent/BrowserJsEngine per
+// ForeignTarget (no host enum in Jet; TargetDispatchedJs is the route).
+#Test("foreign_interop_routes_js_with_target_dispatched_host_and_dts_stub") {
+    flr_route("js", BinderStatus.Active, BinderRuntime.TargetDispatchedJS, BindingStubKind.TypeScriptDeclarations, ForeignStubFile.Suffix("d.ts"))
+}
+
+#Test("foreign_interop_routes_swift_as_planned_c_abi_bridge") {
+    flr_route("swift", BinderStatus.Planned, BinderRuntime.SwiftCABIBridge, BindingStubKind.SwiftModule, ForeignStubFile.NoStub)
+}
+
+#Test("foreign_interop_routes_dart_as_active_api_dl_host") {
+    flr_route("dart", BinderStatus.Active, BinderRuntime.DartAPIDl, BindingStubKind.DartContract, ForeignStubFile.StemSuffix("_host.dart"))
+}
+
+#Test("foreign_interop_routes_powershell_as_active_supervised_worker") {
+    flr_route("pwsh", BinderStatus.Active, BinderRuntime.SupervisedPowerShell, BindingStubKind.PowerShellScript, ForeignStubFile.NoStub)
+}
+
+#Test("foreign_interop_routes_perl_as_active_supervised_worker") {
+    flr_route("perl", BinderStatus.Active, BinderRuntime.SupervisedPerl, BindingStubKind.PerlScript, ForeignStubFile.NoStub)
+}
+
+#Test("foreign_interop_routes_ruby_as_active_supervised_worker") {
+    flr_route("ruby", BinderStatus.Active, BinderRuntime.SupervisedRuby, BindingStubKind.RubyScript, ForeignStubFile.NoStub)
+}
+
+#Test("foreign_interop_routes_php_as_active_supervised_pool") {
+    flr_route("php", BinderStatus.Active, BinderRuntime.SupervisedPhpPool, BindingStubKind.PhpScript, ForeignStubFile.NoStub)
+}
+
+#Test("foreign_interop_routes_r_as_active_supervised_worker") {
+    flr_route("r", BinderStatus.Active, BinderRuntime.SupervisedR, BindingStubKind.RScript, ForeignStubFile.NoStub)
+}
+
+#Test("foreign_interop_routes_python_as_active_supervised_sidecar") {
+    flr_route("py", BinderStatus.Active, BinderRuntime.SupervisedPythonSidecar, BindingStubKind.PythonIntrospection, ForeignStubFile.NoStub)
+}
+
+#Test("foreign_interop_routes_octave_as_active_supervised_worker") {
+    flr_route("octave", BinderStatus.Active, BinderRuntime.SupervisedOctave, BindingStubKind.OctaveScript, ForeignStubFile.NoStub)
+}
+
+#Test("foreign_interop_routes_com_as_active_windows_automation") {
+    flr_route("com", BinderStatus.Active, BinderRuntime.WindowsComAutomation, BindingStubKind.ComTypeLibrary, ForeignStubFile.NoStub)
+}
