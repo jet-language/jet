@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 111954,
+    "rev": 111963,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -66341,11 +66341,11 @@
         {
           "n": 3,
           "text": "A counter actor and a supervised worker are a Core library over tasks and channels with no new syntax (D-ACTOR1=A), and run the same on every tier. Proof: `jet test Compiler --profile golden --filter Concurrency/Actors` on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T03:42:19.156Z"
+          "evidence": "Holds on dev 112b577445 (batch compiler p277): `jet test Compiler --profile golden --filter Concurrency/Actors` passes 3 of 3 (o0, o1, o2). Core library landed in 6b5f37bc9a; the envelope layout fix landed in 556f347859.",
+          "at": "2026-11-17T21:30:17.865Z"
         },
         {
           "n": 4,
@@ -66365,7 +66365,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-17T17:40:24.285Z",
+      "updated": "2026-11-17T21:30:17.865Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -68886,6 +68886,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "D-ARRAY-ROWMAJOR1 is withdrawn as a duplicate. The ratified D-ARRAY-MATOPS1=A already settles layout as an optional parameter, Matrix<R,C,T=Float,Layout=.ColumnMajor>, with views and conversions, which answers the owner's q2ihn3ot. A fresh adversarial review (BallotReview, 2026-11-17) found the open ballot only re-voted settled law. Its repaired build contract (no universal zero-copy or shader-layout promise; ownership, stride and ABI limits on layout-changing transposes) is kept as build guidance for the MATOPS1 work."
+        },
+        {
           "at": "2026-10-29",
           "by": "Main",
           "text": "Array ballots on Tower: D-ARRAY-CORENAMES1, MATRIX1, KEYED1, LAYOUT1. Drafted by KitSpeed-2; adversarial reader Ballots-4. Ratified conflicts fixed (card #1437 matrix family INDEX1=E, MUL1=F, LIT1=E, BCAST1=E, SOLVE1=B, HOME1=D; D-LANES1=A; D-SPACE-GEOMETRY1=A; ..= is E0318). Readings for the owner to confirm: MATRIX1 treats Matrix*Vec as the transform product, with BCAST1 limited to repeating operators; LAYOUT1 says push through a window is refused where visible and stops otherwise. Main replaced alias declarations in MATRIX1 with the #6176 form."
@@ -69027,6 +69032,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-17T11:19:36.549Z"
+        },
+        {
+          "n": 17,
+          "text": "D-ARRAY-ZIPCOLUMNS1 (Tower draft, repaired by the 2026-11-17 adversarial review) is posted with evidence: a scratch prototype of Columns<T> join/split (owning from_columns/into_columns, borrowed view_columns) is measured against the automatic-column D-ACCEL1 path on the D-SOA-SITE1 paired cell (correctness, wall time, peak memory), and the ballot cites the numbers.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T21:36:33.828Z"
         }
       ],
       "refs": [],
@@ -69034,9 +69048,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-29T13:58:56.482Z",
-      "updated": "2026-11-17T20:05:28.931Z",
-      "updatedBy": "owner",
-      "criteriaLastN": 16
+      "updated": "2026-11-17T21:36:33.828Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 17
     },
     {
       "id": "c05l3kpi",
@@ -102833,6 +102847,11 @@
         {
           "at": "2026-11-17",
           "by": "Main",
+          "text": "D-RUNTIME-HANDLE1 is withdrawn as a duplicate. The ratified D-CORE-LAYOUT1=A already sets the rule: ordinary carriers with private typed handles, Close/Shared ownership, refusals, and delivery gated row by row. A package type follows the same rule. c5 (IR runtime-handle layout without <corelib>/ key-prefix tests) is no longer ballot-blocked: build it to D-CORE-LAYOUT1. From the review: privacy is module-scoped, and a cleanup demo does not prove foreign-resource ABI, so production porting meets the existing per-object/tier gate."
+        },
+        {
+          "at": "2026-11-17",
+          "by": "Main",
           "text": "D-HOST-CALLBACK1=A and D-COMPTIME-HOST1=A ratified: checked managed-provider imports (#Import(jet.runtime, symbol:) through the extended checked foreign-provider carrier) and phase-checked provider declarations (#Import(jet.compiler, symbol:) and jet.build), where provider policy decides phases. This unblocks c7 (host-leaf declarations) and c10 (core.build on the public compiler library)."
         },
         {
@@ -102982,7 +103001,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:25:08.392Z",
-      "updated": "2026-11-17T17:23:32.918Z",
+      "updated": "2026-11-17T21:36:00.814Z",
       "updatedBy": "Main",
       "criteriaLastN": 11
     },
@@ -117954,7 +117973,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-17",
+          "by": "Main",
+          "text": "c2 decision (Main): Compiler/JetTestKit/Source/EnvironmentNames.jet is generated by Tools/Agent/EnvironmentRows.jet as a full copy of the environment registry. JET_SCHEDULER_THREADS stays a real user setting, so its row stays. The workaround that c2 removes is Kit.jet's default-pool setting. c2's proof excludes the generated copy: git grep -n JET_SCHEDULER_THREADS -- Compiler/JetTestKit Tools/testkit ':!Compiler/JetTestKit/Source/EnvironmentNames.jet' prints nothing."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -117988,7 +118013,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:29:07.249Z",
-      "updated": "2026-11-17T01:52:37.077Z",
+      "updated": "2026-11-17T21:16:35.023Z",
       "updatedBy": "Main"
     },
     {
@@ -210017,190 +210042,6 @@
       "created": "2026-11-17T02:38:57.879Z"
     },
     {
-      "id": "D-ARRAY-ROWMAJOR1",
-      "cardId": "c05gn07n",
-      "group": "syntax",
-      "title": "Make matrix layout optional, with column-major as the default",
-      "situation": "Jet's existing small matrices store columns, but row input and row-oriented external buffers are legitimate needs. The previous recommendation offered only row-friendly construction and understated a layout parameter's benefits. We recommend one Matrix family with an optional storage-layout parameter and a column-major default. Indexing and algebra keep their meaning across layouts, while callers can avoid unnecessary boundary reordering.",
-      "gist": "Default to column-major matrices and allow an explicit row-major storage parameter.",
-      "lesson": "Input order, logical coordinates and physical storage are different. Choosing row storage must not transpose the matrix or change multiplication.",
-      "explainer": "Beginner: keep Mat3 and Matrix<3,3> without extra type arguments; use from_rows when entering rows. Expert: choose Matrix<3,3,Float,.RowMajor> for a row-oriented buffer or traversal. Converting layouts uses the same brace From mechanism as all matrix conversions and preserves logical cells.",
-      "story": "Nina enters a transform by rows and exchanges it with a row-oriented renderer. She can choose matching storage without rewriting the transform's algebra.",
-      "inWild": "Eigen::Matrix<float, 3, 3, Eigen::RowMajor> m;",
-      "detail": "gate-p260 probes/matrices.jet prints Mat3.to_array() as 1 through 9 and transpose().to_array() as 1,4,7,2,5,8,3,6,9. Core/Math/Math.jet:39544-39637 defines Mat3 using nine Float cells; multiplication at 39584 indexes column*3+row. Mat4 uses the same column representation at 39639-39742. probes/missing.jet rejects from_rows with E0311 and row with E0102. A generic layout parameter is proposed, not current.\n\nD-ARRAY-MAT21 ratifies eventual Matrix<N,N> aliases for the small names. This proposal supplies one generic family's representation parameter, not parallel row and column math APIs. Existing bracket places keep their ratified logical-axis behavior. The CONVERT1 and MATRESIZE1 proposals use this exact parameter order and default.\n\nEigen's storage-order documentation explicitly supports row and column storage in one matrix template, mixed-order assignment, and workload-dependent traversal locality. Its aliasing documentation shows why overlapping operations sometimes require a temporary. These sources do not establish a universal fastest layout or authorize unsafe noalias promises. Row layout does not establish shader compatibility: scalar width, padding, alignment, matrix stride and external ABI remain separate requirements.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Optional stored-layout parameter",
-          "detail": "Use Matrix<R,C,T=Float,Layout=.ColumnMajor>. Keep small aliases and existing column defaults; allow .RowMajor explicitly.",
-          "technical": "One shared logical implementation indexes through a compile-time layout parameter; specialize address arithmetic and loop order, not duplicated handwritten formulas. Add row-friendly from_rows independently of storage selection. The physical offset is c*R+r for column-major and r*C+c for row-major. Bracket coordinates, shape and multiplication remain logical row/column coordinates. Matrix<3,3> and Mat3 mean the same default Float column layout.\n\nMixed-layout algebra reads each operand's coordinates directly without an implicit full-layout conversion; its owned result keeps the left matrix's layout. Cross-layout assignment requires an explicit destination brace conversion and preserves coordinates, not transpose. transpose() returns Matrix<C,R,T,L> in the same chosen layout and changes logical coordinates. Existing from_array/to_array retain physical stored-order meaning for each layout; explicit ReshapeInput order controls logical traversal independently, so reshaping never inherits a different meaning from the storage parameter.\n\nA borrowed row/column or submatrix carries its real strides and lifetime; it is contiguous only when those strides prove it. Do not erase that distinction at an FFI boundary. Pack external representations through one checked ABI description, validating scalar width, alignment, padding and stride. Owned layout conversion may touch every cell; specialize direct writes and avoid repeat conversions. Only used shape/type/layout combinations generate code. Keep identical semantic checks in every execution mode; optimization must not relax aliasing or numerical rules.",
-          "code": "usual: Matrix<3,3>.from_rows(r0, r1, r2)\nrows: Matrix<3,3,Float,.RowMajor>{usual}\ncolumns: Matrix<3,3>{rows}\nproduct: rows * columns"
-        },
-        {
-          "key": "B",
-          "name": "One stored layout, explicit row packing",
-          "detail": "Keep column storage only, but add row construction and explicit row-buffer packing adapters.",
-          "technical": "This is strong for tiny transforms where boundary conversion is infrequent and representation simplicity matters. Row input is not row storage; row-oriented buffers must reorder on import/export. Keep all width and stride validation from A. Do not claim the packing cost disappears because the constructor looks row-friendly.",
-          "code": "usual: Mat3.from_rows(r0, r1, r2)\nrow_buffer: usual.to_row_array()"
-        },
-        {
-          "key": "C",
-          "name": "Require every layout argument",
-          "detail": "Offer both stored layouts but remove the default from the generic family.",
-          "technical": "This makes layout visible in every generic matrix type and catches accidental boundary assumptions earlier. It shares A's algebra and implementation. Small aliases also hide layout, so this option removes them at cutover. That is more explicit than ordinary application code needs.",
-          "code": "usual: Matrix<3,3,Float,.ColumnMajor>.from_rows(r0, r1, r2)\nrows: Matrix<3,3,Float,.RowMajor>{usual}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Eigen",
-          "note": "An optional template parameter selects storage; column-major is the default. Traversal locality depends on the workload.",
-          "code": "Eigen::Matrix<float, 3, 3, Eigen::RowMajor> m;",
-          "source": "https://libeigen.gitlab.io/eigen/docs-nightly/group__TopicStorageOrders.html"
-        },
-        {
-          "lang": "NumPy",
-          "note": "Logical reshape order is distinct from physical storage order.",
-          "code": "np.reshape(a, (2, 8), order='F')",
-          "source": "https://numpy.org/doc/stable/reference/generated/numpy.reshape.html"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "It combines the owner's sensible default with explicit control where storage matters. One generic implementation serves both layouts.",
-        "gains": [
-          "Simple defaults and matching external storage.",
-          "No duplicate algebra or silent transpose."
-        ],
-        "losses": [
-          {
-            "loss": "More type combinations can increase generated code.",
-            "mitigation": "Instantiate only used combinations and share layout-independent scalar algorithms."
-          },
-          {
-            "loss": "An owned layout conversion may move every cell.",
-            "mitigation": "Choose layout at the data boundary and keep mixed-layout kernels from repeatedly materializing conversions."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "It helps row input but cannot retain row-oriented storage without repacking."
-          },
-          {
-            "key": "C",
-            "reason": "It makes common application types verbose without improving the underlying representation choices."
-          }
-        ],
-        "tradeoff": "Keep layout optional in ordinary code, explicit at storage boundaries, and honest about actual data movement."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: OpenAI GPT. Fresh agent: BallotRework. Replaced the false default-versus-control choice with the owner's optional layout parameter, checked against current storage and executable transpose behavior. A specifies mixed layouts, strides, result layout and ABI limits without universal speed or GPU-readiness claims."
-      },
-      "checkInstructions": "Replay matrices.jet and missing.jet on gate-p260. Implementation acceptance: both layouts, mixed-layout products, non-square transpose, physical array order, layout-preserving coordinate conversion, row views and strides, FFI packing rejection, overlap correctness and unused-specialization pruning. Proposed types do not compile today.",
-      "surface": {
-        "gist": "Should matrix storage layout be optional, with column-major as the default?",
-        "lesson": "Row input is not row storage. Logical coordinates and algebra stay identical across layouts. External buffers still need width, alignment and stride checks.",
-        "trio": {
-          "current": {
-            "note": "Small matrices currently store columns; transpose changes their logical coordinates.",
-            "code": "cells: m.to_array()\ntransposed: m.transpose().to_array()"
-          },
-          "wild": {
-            "lang": "Eigen",
-            "note": "A type parameter selects row storage; column storage is the default.",
-            "code": "Eigen::Matrix<float, 3, 3, Eigen::RowMajor> m;"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Optional layout parameter",
-            "gist": "Keep simple defaults and allow explicit row storage.",
-            "gains": [
-              "One matrix family and shared algebra.",
-              "Avoid unnecessary boundary repacking."
-            ],
-            "losses": [
-              "More used type combinations.",
-              "Owned layout conversion can move every cell."
-            ],
-            "proposed": {
-              "code": "rows: Matrix<3,3,Float,.RowMajor>{usual}\ncolumns: Matrix<3,3>{rows}"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Column storage, row adapters",
-            "gist": "Make row input and packing convenient without row storage.",
-            "gains": [
-              "One physical representation."
-            ],
-            "losses": [
-              "Row-oriented boundaries still require reordering."
-            ],
-            "proposed": {
-              "code": "usual: Mat3.from_rows(r0, r1, r2)\nrow_buffer: usual.to_row_array()"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Always specify layout",
-            "gist": "Support both layouts but require every type to name one.",
-            "gains": [
-              "Representation is always visible."
-            ],
-            "losses": [
-              "Ordinary matrix types become longer."
-            ],
-            "proposed": {
-              "code": "usual: Matrix<3,3,Float,.ColumnMajor>{source}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "It gives the requested best of both: ordinary defaults and precise storage control.",
-          "gains": [
-            "No duplicate matrix algebra."
-          ],
-          "losses": [
-            {
-              "loss": "Used layouts increase generated variants.",
-              "mitigation": "Generate only used combinations and share layout-independent work."
-            },
-            {
-              "loss": "Reordering owned data has a real cost.",
-              "mitigation": "Choose layout at boundaries and operate directly on mixed layouts."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Input helpers cannot replace row storage."
-            },
-            {
-              "key": "C",
-              "reason": "Mandatory spelling adds noise to ordinary code."
-            }
-          ],
-          "tradeoff": "Optional detail, explicit boundary costs."
-        }
-      },
-      "designAway": [
-        "Combined row input and stored-layout selection rather than treating them as competing meanings.",
-        "Used one parameter order across all matrix ballots.",
-        "Made mixed-layout kernels direct and kept ABI promises separate from storage order."
-      ],
-      "draft": false,
-      "status": "open",
-      "created": "2026-11-17T02:38:58.887Z"
-    },
-    {
       "id": "D-ARRAY-SHUFFLE1",
       "cardId": "c05gn07n",
       "group": "syntax",
@@ -210426,185 +210267,6 @@
       "created": "2026-11-17T02:38:59.861Z",
       "outcome": "B",
       "ratifiedAt": "2026-11-17"
-    },
-    {
-      "id": "D-ARRAY-ZIPCOLUMNS1",
-      "cardId": "c05gn07n",
-      "group": "syntax",
-      "title": "Join columns without copying, with transactional ownership and borrowed views",
-      "situation": "Applications often already own one list per field and should not rebuild rows just to obtain columnar storage. The previous draft offered taking or borrowing as competing capabilities and destroyed inputs on a length mismatch. We recommend both ownership modes within the approved Columns family, with buffer adoption as the owning default. Errors return all transferred inputs, while borrowed windows and explicit copies remain clear.",
-      "gist": "Adopt owned field buffers without copying; borrow when ownership should stay put.",
-      "lesson": "Joining owned buffers, borrowing windows and copying elements are different operations. None should silently stand in for another.",
-      "explainer": "Beginner: from_columns takes whole field lists and checks their lengths once. over_columns borrows them for a temporary read view. Expert: into_columns consumes the owner and returns the same field allocations plus row length; an error from joining returns every original input for recovery. Copy only when independently owned duplicates are actually needed.",
-      "story": "Rae receives independent position and velocity buffers. She wants the fastest owning join without losing either buffer if their lengths disagree, then later extracts them again.",
-      "inWild": "view := soa_zip(x=xs[:], v=vs[:])\nx, v := soa_unzip(view)",
-      "detail": "gate-p260 probes/arrays.jet executes .copy() on an array. probes/missing.jet reports E0102 for an unqualified zip_columns name; that only proves that name is absent from the probe's scope, not that every proposed Columns API was searched or executed. All Columns snippets below are proposed extensions to the ratified family, not current compiler demonstrations.\n\nD-SOA-SITE1 ratifies compiler-provided Columns<T> with field-separated storage; the join should extend that family, not resurrect a layout marker or add another container. D-ARRAY-COLUMNS1 distinguishes read and write windows. Its old copy examples must use the owner's current .copy() direction, never an obsolete copy sigil. Field-generated constructor labels are compiler work already associated with this family, not an ordinary untyped variadic helper.\n\nOdin's documented soa_zip and soa_unzip join and recover slices. They demonstrate zero-element-copy borrowed access, not ownership transfer of independent allocations. The original draft's mismatch-drop policy was avoidable: a typed error can own the inputs. Borrowing is also not a reason to give up owning adoption; they serve different lifetime requirements and should share view rules. Maximum performance is a specified no-copy/no-element-allocation contract, not a benchmark claim.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Transactional adoption plus borrowed join",
-          "detail": "Provide taking from_columns, borrowed over_columns and consuming into_columns, using one Columns storage/view family.",
-          "technical": "The compiler derives one named &&[FieldType] input per stored field. Unknown, missing or duplicate labels fail at compile time. from_columns returns Columns<T> ColumnJoinError<T>!, validating all lengths before exposing a value. Length mismatch returns every input buffer, its allocator and the observed lengths in the error; it neither drops nor partly adopts them. The caller can recover, correct and retry without an element copy. Normal error destruction drops those buffers exactly once if deliberately ignored.\n\nSuccess transfers buffer descriptors only, allocating no element buffers and copying no elements. Preserve independent capacities, allocators, move-only elements and destructors. Reserve/growth first obtains all required capacity, then commits the shared length; allocation failure never exposes unequal field lengths or loses initialized values. This follows ordinary allocation failure semantics, not a special panic-suppression mechanism.\n\ninto_columns takes the owner and returns a generated named record with all lists and row_count. The explicit count preserves zero-field row counts; from_columns accepts row_count only for a zero-field T and otherwise derives it. A live borrowed field window blocks extraction or incompatible mutation through normal lifetime rules. Empty, nested, zero-sized and method-name-colliding fields use the family's existing field-access resolution.\n\nover_columns accepts ordinary read windows from independent owners, checks equal lengths without consuming them, and returns a read-only Columns window with their common lifetime and actual strides. It cannot resize or outlive an input. It is not a second owning container. To request a duplicate, call .copy() explicitly on the inputs or the borrowed view, then use ordinary ownership transfer. Do not add zip/unzip aliases for the same operations. A default single-slab representation must not force independent adopted buffers to be repacked.",
-          "code": "ps: Columns<P>.from_columns(x: xs.move(), v: vs.move())?\nprint(ps.x[0])\nowned: ps.into_columns()\nview: Columns<P>.over_columns(x: owned.x, v: owned.v)?\nprint(view.x[0])"
-        },
-        {
-          "key": "B",
-          "name": "Borrowed join only",
-          "detail": "Join read windows without copies; obtaining an owner requires an explicit copy of the view.",
-          "technical": "This matches the strongest borrowed-slice use case and keeps the original owners available after a mismatch. It cannot adopt move-only elements into a new owner without adding a separate ownership operation. Forcing all owning joins through a copy loses both performance and domain coverage. Lifetime checks and zero-field row_count remain the same as A.",
-          "code": "view: Columns<P>.over_columns(x: xs, v: vs)?\nps: view.copy()"
-        },
-        {
-          "key": "C",
-          "name": "Explicit copying constructor",
-          "detail": "from_columns reads input windows and copies into owned column storage; borrowed join remains available.",
-          "technical": "This gives caller-preserving ownership with simple recovery and can choose a single allocation. It must require copyable elements and make copying explicit in the name, from_columns_copy, rather than silently changing A's taking spelling. It is useful when duplicates are needed but cannot be the maximum-performance default for independently owned movable buffers.",
-          "code": "ps: Columns<P>.from_columns_copy(x: xs, v: vs)?\nprint(xs[0])"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Odin",
-          "note": "soa_zip and soa_unzip join and recover slices, preserving borrowed access rather than adopting independent allocations.",
-          "code": "view := soa_zip(x=xs[:], v=vs[:])\nx, v := soa_unzip(view)",
-          "source": "https://odin-lang.org/docs/overview/#soa_zip-and-soa_unzip"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "It makes the fast owning path clear without sacrificing borrowing, recovery or move-only elements. A mismatch no longer destroys useful inputs.",
-        "gains": [
-          "Descriptor-only adoption and extraction.",
-          "Borrowing, copying and ownership are explicit."
-        ],
-        "losses": [
-          {
-            "loss": "Independent adopted buffers do not become one contiguous allocation.",
-            "mitigation": "Keep each allocator intact and reserve per column; copy explicitly only when a consumer actually requires one slab."
-          },
-          {
-            "loss": "Taking inputs makes recovery values arrive through an error.",
-            "mitigation": "Return a named typed input bundle with lengths, and show recovery in the diagnostic and documentation."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "Excellent for temporary views, but copying to obtain ownership excludes move-only fields and wastes work."
-          },
-          {
-            "key": "C",
-            "reason": "Useful for deliberate duplication, but copying is the wrong default for buffers already owned by the caller."
-          }
-        ],
-        "tradeoff": "Ownership transfer stays explicit; independent allocation topology and typed error recovery stay visible."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: OpenAI GPT. Fresh agent: BallotRework. Replaced mismatch-drop behavior and the false borrowing-versus-adoption choice with transactional recovery in one Columns family. A preserves allocators, destructors and zero-field counts, corrects copying and probe scope, and states a no-element-copy contract rather than a measured speed claim."
-      },
-      "checkInstructions": "Replay arrays.jet and missing.jet on gate-p260 for the limited current claims. Implementation acceptance: unequal lengths with full recovery, move-only fields, destructor counts, unequal capacities/allocators, allocation failure during growth, zero-field nonzero count, borrowing lifetimes, collisions, extraction and no element-copy/allocation evidence. All Columns examples are proposed.",
-      "surface": {
-        "gist": "Should Columns adopt buffers transactionally and also offer borrowed joins?",
-        "lesson": "Ownership transfer, borrowing and duplication are different. A fast default should not destroy inputs on mismatch or hide a copy.",
-        "trio": {
-          "current": {
-            "note": "Explicit .copy() already works; the proposed join is not established by today's probe.",
-            "code": "duplicate: counts.copy()"
-          },
-          "wild": {
-            "lang": "Odin",
-            "note": "Slice joins are borrowed, not transfers of independent allocations.",
-            "code": "view := soa_zip(x=xs[:], v=vs[:])\nx, v := soa_unzip(view)"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Adopt or borrow explicitly",
-            "gist": "Take whole buffers transactionally; offer borrowed windows without another container.",
-            "gains": [
-              "No element copies for adoption or extraction.",
-              "Mismatch returns every input intact."
-            ],
-            "losses": [
-              "Independent buffers remain independent allocations.",
-              "Recovery inputs arrive through the typed error."
-            ],
-            "proposed": {
-              "code": "ps: Columns<P>.from_columns(x: xs.move(), v: vs.move())?\nowned: ps.into_columns()"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Borrow only",
-            "gist": "Join windows and copy explicitly when an owner is needed.",
-            "gains": [
-              "Original ownership never moves."
-            ],
-            "losses": [
-              "Owning joins require copies and copyable fields."
-            ],
-            "proposed": {
-              "code": "view: Columns<P>.over_columns(x: xs, v: vs)?\nps: view.copy()"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Copying constructor",
-            "gist": "Build an independent owner from borrowed inputs.",
-            "gains": [
-              "Inputs remain available; single-slab storage is possible."
-            ],
-            "losses": [
-              "Copies elements and excludes move-only fields."
-            ],
-            "proposed": {
-              "code": "ps: Columns<P>.from_columns_copy(x: xs, v: vs)?"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "It combines readable ownership with the no-copy path and complete mismatch recovery.",
-          "gains": [
-            "One storage/view family; explicit copies."
-          ],
-          "losses": [
-            {
-              "loss": "Adopted buffers remain separate allocations.",
-              "mitigation": "Preserve allocators; copy only for a consumer requiring one slab."
-            },
-            {
-              "loss": "Recovery is carried by the error.",
-              "mitigation": "Return a named bundle containing every original input and its length."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Borrowing alone cannot replace move-only adoption."
-            },
-            {
-              "key": "C",
-              "reason": "Duplication should be requested, not imposed."
-            }
-          ],
-          "tradeoff": "Fast ownership transfer with honest allocation topology."
-        }
-      },
-      "designAway": [
-        "Returned mismatched inputs instead of dropping them.",
-        "Combined borrowed and owning paths without a second container.",
-        "Preserved zero-field row counts and allocator/destructor invariants.",
-        "Removed every obsolete copy sigil and unsupported current API claim."
-      ],
-      "draft": false,
-      "status": "open",
-      "created": "2026-11-17T02:39:00.851Z"
     },
     {
       "id": "D-ARRAY-MATOPS1",
@@ -210949,150 +210611,6 @@
       "draft": false,
       "status": "open",
       "created": "2026-11-17T12:30:29.445Z"
-    },
-    {
-      "id": "D-RUNTIME-HANDLE1",
-      "cardId": "c0sdz4q0",
-      "group": "language",
-      "title": "Declare provider-backed type representation at the type",
-      "situation": "Some library types are carried by runtime handles instead of their apparent field layout. Today the compiler identifies many such representations through a private list of library identities. Packages need a checked declaration that obtains the same representation without pretending to be the standard library. We recommend binding the type to an exported provider contract through the same import mechanism used for host functions.",
-      "gist": "How should a package declare that a provider carries its type?",
-      "lesson": "Choosing a runtime representation also chooses destruction, copying and field access. A string naming a host type is not enough to prove those rules.",
-      "explainer": "Beginner: import the provider's type contract at the declaration. Expert: the compiler checks its schema, ownership and supported operations once, then lowers by declaration identity rather than source path. This does not let a package forge a pointer or claim arbitrary copyability.",
-      "story": "Mara wraps a provider's request handle in a package. Moving the package must not change its representation or accidentally make the handle copyable.",
-      "inWild": "resource request;\nread: func(value: borrow<request>) -> string;",
-      "detail": "Card #6852 c5 asks for declaration-owned runtime representation. Compiler/JetFoundation/Source/Registry/RuntimeHandles.jet:67-92 describes native representations and capability flags keyed by Core identities. This is source evidence of private routing, not a measured wrapper cost. On gate-p261, probes2/provider-type.jet rejects the proposed #Import(jet.runtime,...) form; no managed imported type support is claimed today.\n\nAn existing solution was missing: Core/Time/Time.jet:12-15 imports jet.runtime.time. Compiler/JetDriver/Source/Driver/RuntimeInterface.jet:1-12 explains generated #Import(c) declarations; :38-72 currently limits exported signature shapes. probes2/runtime-interface.jet calls an existing public leaf and prints runtime interface called. Generalizing that generated interface is a real alternative to handwritten bindings, not a new capability registry.\n\nCompiler/JetSema/Source/Sema/Registration/Checked.jet:490-568 already carries foreign providers, owned handles and boundary evidence. Its :581-635 distinguishes proved/enforced/contained from trusted/unknown evidence and requires artifact coverage and ownership/callback/effect obligations. Extend this carrier; a second descriptor that merely asserts matching booleans would violate the single-authority rule. WIT supplies owned/borrowed resources, but not generic user-defined records or Jet logical-field semantics.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Declaration-bound imported representation",
-          "detail": "Extend the existing import family to bind a local type's representation to a checked provider export.",
-          "technical": "The #Import(provider,symbol:) form shown below is proposed, not implemented. Bind the declaration identity to the existing checked foreign-provider boundary carrier, extended for managed runtime types. Generated interface modules and handwritten imports consume exactly the same facts; jet.runtime remains the existing module family, not another symbol registry. No independent RuntimeHandle marker or source-path exception is permitted.\n\nThe provider's artifact-bound evidence supplies representation, ownership, cleanup, clone capability and logical projections. Validate matching fields/cases and declared constructor exports. Request{} cannot construct an imported handle, even if the declaration has no logical fields. Reject pattern reconstruction, mutable projection, invented clone grants and unavailable targets unless their specific operations are in the checked contract. Use ordinary declared traits for display/equality, not magical capability booleans.\n\nLocal imported declarations retain distinct nominal identities unless ordinary aliases equate them. Define runtime type identity by checked provider/export and generic argument identities, without allowing casts between distinct local Jet types. Used generic instantiations require checked layout/drop descriptors; intern immutable descriptors rather than allocate them at each call. Exported schema changes are versioned and invalidated across dependency/build caches.\n\nA descriptor is evidence, not proof that arbitrary native code is safe. Retain exact artifact, target, generator, assumptions, coverage and trust classification from the existing boundary carrier; reject unsupported obligations for a claimed safe operation. Generate diagnostics, layout inspection and bindings from that authority. Migrate every affected identity row and backend route together, preserving construction/drop/borrowing semantics.",
-          "code": "// Proposed imported-type binding, not current support.\n#Import(jet.runtime, symbol: \"http.Request\")\nRequest: struct {}\n// Only checked provider constructors can create Request."
-        },
-        {
-          "key": "B",
-          "name": "Provider resource or ordinary wrapper",
-          "detail": "Use a generated opaque provider type directly, or put it in an ordinary local struct when a distinct nominal type is needed.",
-          "technical": "Extend the existing generated interface to export checked resource types with the same artifact, ownership and destruction evidence as A. Callers needing no new local identity use the resource directly, with no wrapper boilerplate. A local nominal wrapper has one private resource field and ordinary methods/projections. Transparent wrappers need not impose runtime overhead; do not invent a mandatory allocation or dispatch cost.\n\nThis is simpler for truly opaque resources and keeps physical versus logical layout explicit. Preserving an existing field/case-shaped API needs generated accessors or a deliberate source migration; it cannot silently replace field syntax with methods. Generic resources and callback lifetimes remain the same work as A. No Core-only exception, independent descriptor or duplicate foreign authority is allowed.",
-          "code": "use provider: jet.runtime.http\nRequest: struct {\n    priv handle: provider.Request,\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "WIT",
-          "note": "Resources distinguish owned and borrowed handles; destruction belongs to ownership.",
-          "code": "resource request;\nread: func(value: borrow<request>) -> string;",
-          "source": "https://component-model.bytecodealliance.org/design/wit.html#resources"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "It preserves declaration-shaped logical APIs while removing private identity routing. Generated modules remain an authoring route over the same provider evidence, not a competing mechanism.",
-        "gains": [
-          "Core and packages use declaration-bound facts.",
-          "One artifact-bound authority for representation and ownership."
-        ],
-        "losses": [
-          {
-            "loss": "Logical fields, construction restrictions and generic identity need substantial compiler support.",
-            "mitigation": "Generate bindings/inspection from the existing boundary carrier and require projection, constructor, drop and cross-instantiation cases."
-          },
-          {
-            "loss": "Native safety remains conditional on checked evidence and explicit assumptions.",
-            "mitigation": "Retain artifact coverage and trust classifications; never label self-asserted provider metadata as verified behavior."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "The strongest choice for opaque resources and direct users, but preserving existing logical fields/cases requires accessors or source migration."
-          }
-        ],
-        "tradeoff": "Preserve logical APIs at a real representation-checking cost."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: OpenAI GPT. Adversarial model family: OpenAI GPT. Fresh agent: BallotReview2. Added the working generated runtime-interface alternative and unified proposed bindings with existing foreign-boundary evidence rather than a second descriptor authority. Named trust, generic identity, construction/projection and migration costs, and strengthened the direct-resource alternative."
-      },
-      "checkInstructions": "Reviewed representation rows, generated runtime imports and the existing checked foreign-boundary carrier. Gate-p261 probes reject the proposed type import and execute an existing generated leaf. Implementation acceptance requires matching Core/package imports, moves, schema/artifact mismatch, forged grants, invalid construction, logical projection, generics, destructor counts, unsupported targets and cache invalidation.",
-      "surface": {
-        "gist": "Should local provider-backed types bind their representation at the declaration, or wrap explicit resources?",
-        "lesson": "A descriptor is not automatic proof of native safety. Reuse existing provider evidence for layout, ownership, cleanup and assumptions.",
-        "trio": {
-          "current": {
-            "note": "An existing generated runtime module is callable; managed type binding remains proposed.",
-            "code": "use rt: jet.runtime.time\n_: rt.embedded_zone_bytes(\"Not/A/Zone\")"
-          },
-          "wild": {
-            "lang": "WIT",
-            "note": "Resources distinguish borrowed and owned handles, not Jet generic field semantics.",
-            "code": "resource request;\nread: func(value: borrow<request>) -> string;"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Imported local representation",
-            "gist": "Bind a local type through the existing checked provider authority.",
-            "gains": [
-              "Preserves logical declaration APIs without Core-name routing."
-            ],
-            "losses": [
-              "New construction, projection and generic-identity checking."
-            ],
-            "proposed": {
-              "code": "#Import(jet.runtime, symbol: \"http.Request\")\nRequest: struct {}\n// Only provider constructors may create values."
-            }
-          },
-          {
-            "key": "B",
-            "name": "Explicit provider resource",
-            "gist": "Use generated opaque types directly, wrapping only when local identity is needed.",
-            "gains": [
-              "No wrapper cost for direct users; explicit representation."
-            ],
-            "losses": [
-              "Existing field/case APIs need migration or accessors."
-            ],
-            "proposed": {
-              "code": "use provider: jet.runtime.http\nRequest: struct { priv handle: provider.Request }"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Preserve logical type APIs while replacing private routing with the existing provider evidence mechanism.",
-          "gains": [
-            "One authority, not another descriptor registry."
-          ],
-          "losses": [
-            {
-              "loss": "Representation checking is substantial work.",
-              "mitigation": "Generate bindings and inspection; require constructor, projection, generic and drop cases."
-            },
-            {
-              "loss": "Native trust assumptions remain.",
-              "mitigation": "Keep artifact coverage and explicit evidence classification; reject unsupported safe-operation claims."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Excellent for opaque resources; logical field APIs need additional migration."
-            }
-          ],
-          "tradeoff": "Logical API continuity, not free or unconditional native safety."
-        }
-      },
-      "draftedBy": "Main",
-      "reviewedBy": "BallotReview2",
-      "draft": false,
-      "status": "open",
-      "created": "2026-11-17T12:30:38.647Z"
     },
     {
       "id": "D-ITERATOR-FAIL1",
@@ -212507,6 +212025,145 @@
       "created": "2026-11-17T12:32:12.417Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-17"
+    },
+    {
+      "id": "D-ARRAY-ZIPCOLUMNS1",
+      "cardId": "c05gn07n",
+      "group": "syntax",
+      "title": "Join and split Columns without element copying; performance evidence still required",
+      "situation": "The owner wants a readable column join with maximum performance by default, not a choice between borrowing and efficient ownership. Columns<T> is already ratified, but the tested compiler does not recognize that type. Joining existing field buffers can avoid rebuilding rows, provided length checks, sharing and failure recovery are defined. This draft repairs that design but cannot establish the required performance advantage on the available compiler.",
+      "gist": "Should Columns join owned buffers and borrowed windows without rebuilding elements?",
+      "lesson": "A join groups equally long field buffers into one logical row collection. Owning adopts buffer owners; borrowing retains checked loans. Splitting returns the current buffers and row count, not necessarily the original allocations after growth or copy-on-write.",
+      "explainer": "Answer to q4f453bp: A includes both owning and borrowed joins, transactional validation and explicit .copy(). It does not pretend that shared inputs are unique or that independent buffers become one allocation.",
+      "story": "A parser already owns positions and velocities as separate lists. It wants row indexing without copying those elements, and must recover every input if lengths differ.",
+      "inWild": "Odin's documented soa_zip/soa_unzip borrow slices into a structure-of-arrays view and recover those slices. A plain struct owning Vec fields is also a strong safe design; adopting separate vectors does not inherently require raw-parts tricks.",
+      "detail": "A is retained, B is a real borrowed-view alternative, and r1 C's separately named copying constructor is removed: explicit duplication is .copy() under D-COPY-WORD1, not a second named copy mechanism. r1 used Columns in its 'current' example and said rows could be rebuilt that way today. Replayed probes/review-columns.jet on gate-p275: E0119, no type called Columns. All new API examples below are proposed.\n\nD-SOA-SITE1=A selects compiler-provided Columns<T> and specifically retains correctness/performance gates, including comparison with the automatic-column path authorized by D-ACCEL1. D-ARRAY-COLUMNS1 supplies field views and coordinated length changes; later D-COPY-WORD1 replaces its old ~ copy spelling. D-COLUMNS1 selects add-only Rows handles separately; it does not make Columns add-only. D-RECORD-BRACE1 supplies record spelling. D-ALLOC-FAIL1 requires unchanged logical collection contents on failed growth and bounded nonallocating error/cleanup paths.\n\nr1's zero-field split discarded row count, and telling the caller to inspect len first was not a fix. A now returns count in every split result. r1 also blurred a borrowed join's error with an owning error, promised validation before ownership transfer, and implied rollback of capacities after failed growth. Transfers happen at the call boundary; validation precedes committing a joined table. Rollback preserves lengths and values, not necessarily capacity or address.\n\nPosting remains BLOCKED: no candidate implementing Columns/adoption is available in the allowed published compiler, so no paired throughput, allocation or footprint evidence can establish the owner's maximum-performance claim or the inherited D-SOA-SITE1 gate. The single-file availability probe was run; no repository build or suite was attempted. The design below removes unsupported speed claims instead of treating no-element-copy as proof of fastest execution. The Odin overview's soa_zip/soa_unzip section was read; it supports borrowed grouping, not Jet ownership or mismatch behavior.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One collection, owning and borrowed joins",
+          "detail": "from_columns consumes a record of field lists; view_columns borrows field windows. Both validate lengths without copying elements. into_columns consumes the owner and returns count plus all current field buffers.",
+          "technical": "Each struct field has one labelled column, matching its declared field type and order. from_columns accepts a consuming record of owning lists. Omitted, duplicate or mistyped fields are compile-time errors. Evaluate arguments once in source order, transfer their owners at the call boundary, inspect all lengths before committing the Columns value, and never truncate to the shortest. With no fields require an explicit count; with fields infer count from their common length, rejecting an inconsistent explicitly supplied count. Negative or unrepresentable counts fail before constructing a table.\n\nOn length mismatch return a typed owning join error containing the entire transferred record and inline fixed-per-field length information, allowing recovery without element copying or allocating error storage. No partial adoption and no loss of move-only elements. Shared lists follow ordinary copy-on-first-write semantics: adoption transfers descriptors without eagerly copying elements; later writes may detach, and are not advertised as zero-copy. Unshared last-use inputs are the unique-owner fast path. .copy() explicitly requests independent duplication; no hidden deep copy merely to make the join succeed. Multiple fields referring to shared backing storage remain ordinary shared owners, with the same write isolation as lists.\n\nview_columns takes read-only windows, not ownership. It returns the ordinary borrowed-view form with loans to every source; mismatch returns only bounded length metadata, never owning buffers or escaping references. The view cannot grow or mutate. Source growth/mutation obeys the existing loan rules. Moving-only elements can be viewed and iterated without copying. Requesting an owned copy requires ordinary element copyability and .copy(); a borrowed-only design is not incapable of reading move-only data.\n\ninto_columns returns a record with count and a nested field-record containing every owning list, including count when the field-record is empty. It consumes the collection. With no intervening detachment/growth the allocations are the adopted ones; otherwise they are the current allocations. This does not promise the historical originals. Borrowed field windows already provide extraction without consuming the owner.\n\nGrowth checks size overflow and reserves needed capacities before committing lengths or inserting values. A later reservation failure preserves all previous logical values/lengths, but earlier successful reservations may change capacities and addresses. Existing loans forbid invalidating growth. Argument ownership follows the normal fallible push contract; clean uncommitted values once. Never publish a row length until every field is initialized. Owning/splitting moves buffer descriptors; it need not allocate or copy element buffers, though ordinary control metadata and growth must still follow AllocError law. No reflection-based user implementation or new layout marker: extend the already ratified compiler-provided collection.",
+          "code": "// PROPOSED; positions and velocities transfer ownership.\nps: Columns<Particle>.from_columns(x: positions, v: velocities)\nparts: ps.into_columns()\nprint(parts.count)\nxs: parts.fields.x\nvs: parts.fields.v"
+        },
+        {
+          "key": "B",
+          "name": "Borrow existing columns only",
+          "detail": "Only create read-only joined windows. Owners stay separate; code that wants an owned Columns builds it explicitly.",
+          "technical": "Same field/length/count validation and checked loans as A. Strongest benefit: no new owning recovery payload, split operation or ownership-adoption API; a plain owning record of lists can often serve the application. Borrowed traversal supports move-only elements. Limitation: the joined collection cannot itself grow or outlive its inputs; converting it to owned storage requires copyable elements or a separate explicit ownership transfer design. Do not claim Rust's safe struct-of-Vec alternative needs unsafe reconstruction.",
+          "code": "// PROPOSED borrowed join\nview: Columns<Particle>.view_columns(x: positions, v: velocities)\nprint(view.len())"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Odin",
+          "note": "soa_zip groups slices and soa_unzip recovers them; this is a borrowed-view precedent, not an owning transactional guarantee.",
+          "source": "https://odin-lang.org/docs/overview/#soa_zip-and-soa_unzip"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The design supports readable borrowing and efficient ownership in the same ratified collection, but performance readiness has not been established.",
+        "gains": [
+          "Unique-owner adoption avoids rebuilding elements.",
+          "Mismatch recovers all moved buffers; zero-field splitting preserves count."
+        ],
+        "losses": [
+          {
+            "loss": "Shared inputs can detach on later mutation and separately adopted buffers stay separate allocations.",
+            "mitigation": "Use ordinary copy-on-write, expose that cost, and preserve the unique-owner fast path. Compare against ordinary owning records and the automatic-column path before claiming superiority."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Smaller and sufficient for read-only work, but cannot by itself provide an independently owned growable joined collection."
+          }
+        ],
+        "tradeoff": "Agree with A's ownership contract, not an unmeasured fastest-default claim. Posting is blocked on inherited performance evidence."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview.\nFixed: nonexistent current Columns example; zero-field count loss; borrowed/owning error confusion; transfer timing; sharing/COW assumptions; original-allocation and capacity-rollback overclaims; unfair move-only/Rust alternatives; second copy API. Added owning-record baseline. Read decisions/Odin; published compiler's availability probe fails E0119. Agree with repaired A's ownership design, not unmeasured performance readiness. Verdict: blocked pending the inherited paired performance/correctness gate on an implementation."
+      },
+      "checkInstructions": "Do not post a fastest-default recommendation yet. Required delivery evidence: paired owned-record/manual-row/automatic-column comparisons; unique/shared adoption allocations; mismatch recovery with move-only elements; zero-field count; loans; split after growth/detach; injected growth failure preserving logical contents and cleanup. No build or suite was run.",
+      "surface": {
+        "gist": "Should Columns join owned buffers and borrowed windows without rebuilding elements?",
+        "lesson": "Owning transfers buffers; borrowing retains loans. Splitting must preserve row count, even for a struct with no fields.",
+        "trio": {
+          "current": {
+            "note": "Executed: Columns<Particle> is E0119 on gate-p275; no current join success is claimed.",
+            "code": "// probes/review-columns.jet"
+          },
+          "wild": {
+            "lang": "Odin",
+            "note": "soa_zip/soa_unzip group and recover slices. An owning record of lists is another strong baseline.",
+            "code": ""
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Owning and borrowed joins",
+            "gist": "One Columns family, transactional validation, .copy() for duplication.",
+            "gains": [
+              "No element rebuilding for unique-owner adoption.",
+              "Failed join recovers all moved buffers; split includes count."
+            ],
+            "losses": [
+              "Shared inputs can detach on writes; separate allocations remain separate."
+            ],
+            "proposed": {
+              "code": "// PROPOSED\nps: Columns<Particle>.from_columns(x: xs, v: vs)\nparts: ps.into_columns()"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Borrowed views only",
+            "gist": "Keep owners separate and group read windows.",
+            "gains": [
+              "Smaller ownership contract; reads move-only elements."
+            ],
+            "losses": [
+              "View cannot grow or outlive its inputs."
+            ],
+            "proposed": {
+              "code": "// PROPOSED\nview: Columns<Particle>.view_columns(x: xs, v: vs)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Coherent ownership design, but not ready to post as fastest default.",
+          "gains": [
+            "One existing collection, no second copy API."
+          ],
+          "losses": [
+            "Performance and allocation claims need the inherited paired gate."
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Strong for read-only work, not independently growable ownership."
+            }
+          ],
+          "tradeoff": "BLOCKED: available compiler cannot run the candidate or establish the required performance evidence."
+        }
+      },
+      "designAway": [
+        "Keep count in split results, including empty field records.",
+        "Return transferred inputs on owning mismatch; borrowed errors do not own inputs.",
+        "Use ordinary sharing and .copy(), not hidden eager copies or a second copying constructor.",
+        "Preserve logical growth atomicity, not a false capacity/address rollback promise."
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-17T21:36:27.090Z"
     }
   ],
   "questions": [
@@ -215852,6 +215509,76 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T21:36:33.828Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c05gn07n",
+      "note": "15 criteria, soft limit 6: ballot evidence for an existing ballot on this card; no new stream"
+    },
+    {
+      "at": "2026-11-17T21:36:33.828Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c05gn07n",
+      "note": "#17 D-ARRAY-ZIPCOLUMNS1 (Tower draft, repaired by the 2026-11-17"
+    },
+    {
+      "at": "2026-11-17T21:36:27.091Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-ARRAY-ZIPCOLUMNS1",
+      "note": "Join and split Columns without element copying; performance evidence still required (draft)"
+    },
+    {
+      "at": "2026-11-17T21:36:25.838Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-ARRAY-ZIPCOLUMNS1",
+      "note": "Join columns without copying, with transactional ownership and borrowed views"
+    },
+    {
+      "at": "2026-11-17T21:36:00.814Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-RUNTIME-HANDLE1",
+      "note": "Declare provider-backed type representation at the type"
+    },
+    {
+      "at": "2026-11-17T21:35:59.764Z",
+      "by": "Main",
+      "action": "decision.delete",
+      "ref": "D-ARRAY-ROWMAJOR1",
+      "note": "Make matrix layout optional, with column-major as the default"
+    },
+    {
+      "at": "2026-11-17T21:35:58.684Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0sdz4q0",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T21:35:57.725Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c05gn07n",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-17T21:30:17.865Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mhdm27",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T21:16:35.023Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ywczn1",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-17T21:06:00.906Z",
       "by": "Main",
