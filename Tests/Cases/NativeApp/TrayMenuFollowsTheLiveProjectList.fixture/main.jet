@@ -1,6 +1,7 @@
 // Crewboard's tray on a Linux desktop: its menu lists the person's projects
 // from a live binding, so it follows the list when a project is added, and
-// choosing a project opens it.
+// choosing a project opens it. The tray runs a chosen item before it reads
+// the next choice, so the project shows as opened before Quit ends the app.
 use {
     app
     files: core.files
@@ -15,10 +16,9 @@ BoardError: enum {
 
 Board: struct {
     projects: [String],
-    opened: String,
 }
 
-BOARD: Shared{Board{projects: [String]{"Gate repair", "Spring fair"}, opened: ""}}
+BOARD: Shared{Board{projects: [String]{"Gate repair", "Spring fair"}}}
 
 my_projects: fn() -[DB.Read]> [String] BoardError! {
     held: BOARD.guard_read()
@@ -46,8 +46,7 @@ tray_menu: fn(projects: app.Live<[String], BoardError>) -> [app.MenuItem] app.No
 }
 
 open_project: fn(name: String) app.Notice! {
-    held := BOARD.guard_edit()
-    held.value.opened = name.copy()
+    print("opened: {name}")
     Ok()
 }
 
@@ -56,14 +55,10 @@ add_project: fn(name: String) {
     held.value.projects.push(name.copy())
 }
 
-opened: fn() -> String Never! {
-    held: BOARD.guard_read()
-    held.value.opened.copy()
-}
-
 run: fn() {
-    // The desktop says it has read the first menu by writing first.read.
-    _: files.remove("first.read")
+    // The desktop says it has read the first menu by writing first.read. A
+    // later run starts without the one an earlier run's desktop wrote.
+    if files.exists("first.read") -> files.remove("first.read") ?? panic("remove first.read: {err}")
     projects: app.live(my_projects)
     graph: app.new("Crewboard").tray(icon: "crewboard", menu: fn() -> [app.MenuItem] app.Notice! { tray_menu(projects) })
     if !graph.launch() {
@@ -76,12 +71,7 @@ run: fn() {
     if app.notices().len() == 0 {
         add_project("Launch")
         app.invalidate(my_projects)
-        loop _ in 0..<6000 {
-            if opened() != "" -> break
-            tasks.sleep(10)
-        }
-        print("opened: {opened()}")
-        // The desktop chooses Quit next, which ends the app.
+        // The desktop chooses the new project, then Quit, which ends the app.
         loop _ in 0..<6000 -> tasks.sleep(10)
     }
     loop notice in app.notices() -> print("notice: {notice.text}")
