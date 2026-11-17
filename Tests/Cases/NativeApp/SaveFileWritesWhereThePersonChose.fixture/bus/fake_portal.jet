@@ -1,0 +1,223 @@
+// The session bus for the app in ../main.jet, with the desktop portal's
+// file chooser on it. It is its own package, so the app's package does not
+// hold it. It listens at bus.sock in the directory it runs in and writes
+// bus.ready once it listens. It answers Hello, AddMatch and SaveFile; for
+// SaveFile, the person chooses `saved board.csv` in that directory, so the
+// Response names it as the file:// URI `saved%20board.csv`. Once the app
+// has closed the connection it writes heard.txt: a line with the members
+// the app called, in order, and a line with the texts of the SaveFile call.
+use {
+    files: core.files
+    net: core.net
+}
+
+// The request object the portal makes for the save dialog.
+REQUEST: "/org/freedesktop/portal/desktop/request/1_48/jet3"
+
+run: fn() -[Env, FS, Net, Time]> {
+    listener: net.unix_listen("bus.sock") ?? panic("listen on bus.sock: {err}")
+    files.write("bus.ready", "") ?? panic("write bus.ready: {err}")
+    here: files.cwd() ?? panic("cwd: {err}")
+    chosen: "file://{here}/saved%20board.csv"
+    stream := net.unix_accept(listener) ?? panic("accept on bus.sock: {err}")
+    members := [String]{}
+    asked := ""
+    said := [U8]{}
+    authenticated := false
+    serial := 0
+    loop {
+        got: net.unix_receive(stream, 4096) ?? break
+        if got.bytes.len() == 0 -> break
+        loop b in got.bytes -> said.push(b)
+        if !authenticated {
+            // The credentials byte and the AUTH line come first, then
+            // BEGIN and the calls.
+            line_end: crlf_at(said, 0)
+            if line_end < 0 -> next
+            net.unix_write_all_bytes(stream, "OK 0123456789abcdef0123456789abcdef\r\n".bytes()) ?? panic("answer AUTH: {err}")
+            said = said[line_end..<said.len()].copy()
+            authenticated = true
+        }
+        if said.len() >= 7 && String.from_bytes_lossy(said[0..<7].copy()) == "BEGIN\r\n" {
+            said = said[7..<said.len()].copy()
+        }
+        loop said.len() >= 16 && said.len() >= message_length(said) {
+            n: message_length(said)
+            message: said[0..<n].copy()
+            member: member_of(message)
+            members.push(member.copy())
+            said = said[n..<said.len()].copy()
+            call: word(message, 8)
+            answer := [U8]{}
+            serial += 1
+            if member == "Hello" -> answer = returned(serial, call, "s", text_value(":1.48")) else if member == "SaveFile" {
+                asked = texts_of(message[(16 + aligned(word(message, 12), 8))..<n].copy()).join(" | ")
+                answer = returned(serial, call, "o", text_value(REQUEST))
+                serial += 1
+                append(answer, response(serial, chosen))
+            } else { answer = returned(serial, call, "", [U8]{}) }
+            net.unix_write_all_bytes(stream, answer) ?? panic("answer the app: {err}")
+        }
+    }
+    files.write("heard.txt", "{members.join(" ")}\n{asked}\n") ?? panic("write heard.txt: {err}")
+}
+
+// A method return for the call `call`, with a body of `signature`.
+returned: fn(serial: Int, call: Int, signature: String, body: [U8]) -> [U8] {
+    fields := [U8]{}
+    number_field(fields, 5, call)
+    text_field(fields, 7, 115, "org.freedesktop.DBus")
+    if signature != "" -> signature_field(fields, signature)
+    framed(2, serial, fields, body)
+}
+
+// The request's Response signal: the person chose the file at `uri`.
+response: fn(serial: Int, uri: String) -> [U8] {
+    fields := [U8]{}
+    text_field(fields, 1, 111, REQUEST)
+    text_field(fields, 2, 115, "org.freedesktop.portal.Request")
+    text_field(fields, 3, 115, "Response")
+    text_field(fields, 7, 115, "org.freedesktop.DBus")
+    signature_field(fields, "ua{{sv}}")
+    // The code 0, then the results: { "uris": <["uri"]> }.
+    body := [U8]{}
+    put_word(body, 0)
+    entry := [U8]{}
+    put_text(entry, "uris")
+    entry.push(U8{2})
+    append(entry, "as".bytes())
+    entry.push(U8{0})
+    pad(entry, 4)
+    uris := [U8]{}
+    put_text(uris, uri)
+    put_word(entry, uris.len())
+    append(entry, uris)
+    put_word(body, entry.len())
+    pad(body, 8)
+    append(body, entry)
+    framed(4, serial, fields, body)
+}
+
+// A whole message: the fixed header, the header fields padded to 8 bytes,
+// and the body.
+framed: fn(kind: Int, serial: Int, fields: [U8], body: [U8]) -> [U8] {
+    out := [U8]{U8{108}, U8{kind}, U8{1}, U8{1}}
+    put_word(out, body.len())
+    put_word(out, serial)
+    put_word(out, fields.len())
+    append(out, fields)
+    pad(out, 8)
+    append(out, body)
+    out
+}
+
+// A header field holding a string (type `kind` 115) or an object path (111).
+text_field: fn(out: &[U8], code: Int, kind: Int, text: String) {
+    pad(out, 8)
+    append(out, [U8]{U8{code}, U8{1}, U8{kind}, U8{0}})
+    put_text(out, text)
+}
+
+number_field: fn(out: &[U8], code: Int, n: Int) {
+    pad(out, 8)
+    append(out, [U8]{U8{code}, U8{1}, U8{117}, U8{0}})
+    put_word(out, n)
+}
+
+signature_field: fn(out: &[U8], signature: String) {
+    pad(out, 8)
+    append(out, [U8]{U8{8}, U8{1}, U8{103}, U8{0}})
+    out.push(U8{signature.bytes().len()})
+    append(out, signature.bytes())
+    out.push(U8{0})
+}
+
+// A body of one string or object path.
+text_value: fn(text: String) -> [U8] {
+    out := [U8]{}
+    put_text(out, text)
+    out
+}
+
+// A string at a 4-byte boundary: its length, its bytes and a NUL.
+put_text: fn(out: &[U8], text: String) {
+    pad(out, 4)
+    put_word(out, text.bytes().len())
+    append(out, text.bytes())
+    out.push(U8{0})
+}
+
+// A little-endian 32-bit word at a 4-byte boundary.
+put_word: fn(out: &[U8], n: Int) {
+    pad(out, 4)
+    loop shift in ([Int]{0, 8, 16, 24}) -> out.push(U8{(n >> shift) & 255})
+}
+
+pad: fn(out: &[U8], to: Int) {
+    loop out.len() % to != 0 -> out.push(U8{0})
+}
+
+append: fn(out: &[U8], bytes: [U8]) {
+    loop b in bytes -> out.push(b)
+}
+
+// The runs of two or more printable ASCII bytes in `body`: the texts of a
+// message body whose numbers are not printable.
+texts_of: fn(body: [U8]) -> [String] {
+    found := [String]{}
+    run := [U8]{}
+    loop b in body {
+        n: Int{b}
+        if n >= 32 && n < 127 {
+            run.push(b)
+            next
+        }
+        if run.len() >= 2 -> found.push(String.from_bytes_lossy(run.copy()))
+        run = [U8]{}
+    }
+    if run.len() >= 2 -> found.push(String.from_bytes_lossy(run.copy()))
+    found
+}
+
+// Where the CR LF that ends the first line of `bytes` after `from` ends, or
+// -1.
+crlf_at: fn(bytes: [U8], from: Int) -> Int {
+    loop i in from..<(bytes.len() - 1) {
+        if (Int{bytes[i]}) == 13 && (Int{bytes[i + 1]}) == 10 -> return i + 2
+    }
+    -1
+}
+
+// The length of the message `m` starts with: its fixed header, its header
+// fields padded to 8 bytes, and its body.
+message_length: fn(m: [U8]) -> Int { 16 + aligned(word(m, 12), 8) + word(m, 4) }
+
+// The member the header of the message `m` names (field 3), or "".
+member_of: fn(m: [U8]) -> String {
+    end: 16 + word(m, 12)
+    at := 16
+    loop at < end {
+        code: Int{m[at]}
+        kind: Int{m[at + 2]}
+        at += 4
+        if kind == 103 {
+            // A signature: a length byte, the text and a NUL.
+            at += Int{m[at]} + 2
+        } else if kind == 117 { at = aligned(at, 4) + 4 } else {
+            // A string or an object path: a length word, the text and a NUL.
+            at = aligned(at, 4)
+            n: word(m, at)
+            if code == 3 -> return String.from_bytes_lossy(m[(at + 4)..<(at + 4 + n)].copy())
+            at += 4 + n + 1
+        }
+        at = aligned(at, 8)
+    }
+    ""
+}
+
+aligned: fn(at: Int, to: Int) -> Int { (at + to - 1) /% to * to }
+
+// The little-endian 32-bit word at `at` of `bytes`.
+word: fn(bytes: [U8], at: Int) -> Int {
+    Int{bytes[at]} + (Int{bytes[at + 1]}) * 256 + (Int{bytes[at + 2]}) * 65536 + (Int{bytes[at + 3]}) * 16777216
+}

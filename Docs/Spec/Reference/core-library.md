@@ -5644,6 +5644,7 @@ tasks never read or change the process registry. The module source is
 | `ask(permission: Permission) -[Env, Net, Time]> Grant` | grant | Ask the person for the device permission `permission` and give their answer, once per process. The package's `purposes:` says why the app wants it. See below. |
 | `open_settings() -[Env, Exec]> Bool` | opened | Open the system's settings page for the app, where the person changes the permissions `ask` got; true when one opened. See below. |
 | `take_photo() -[Env, Exec, FS, Net, Time]> PickedFile?` | photo | Take a photo with the device's camera once the person allows it; `None` when they do not, or no photo came. See below. |
+| `save_file(suggested: String, bytes: [U8], types: [FileType]) -[Env, FS.Write, Net, Time]> Bool` | saved | Ask the person where to save a file and write `bytes` there; false when they cancel or it can't be saved. See below. |
 | `location() -[Env, Net, Time]> Place?` | place | Where the device is, once the person allows the location; `None` when they do not, or no location came. See below. |
 | `location_updates() -[Env, Net, Time]> Stream<Place>` | places | Where the device is each time it moves, once the person allows the location, until the loop reading it ends. See below. |
 | `orientation_updates() -[Env, Net, Time]> Stream<Orientation>` | orientations | How the device is held each time that changes, until the loop reading it ends. See below. |
@@ -6265,6 +6266,18 @@ and each sensor stream gives its sensor back to the sensor proxy
 (iio-sensor-proxy, on the system bus), then each closes its bus
 connection. A device with no such sensor, or no bus to ask, gives an empty
 stream, as the other native targets do.
+
+`app.save_file(suggested:, bytes:, types:)` asks the person where to save a
+file and writes `bytes` there in one step, so a failed write leaves any file
+that was there whole. It is true once the file is written. The dialog
+suggests the name `suggested` and offers the kinds of file in `types`, each
+a `FileType` (`.CSV`, `.JSON` or `.Image`), with the first one chosen. The
+person cancelling is false with no notice. A file that can't be written,
+or no dialog to ask with, is false, and a notice in the app's notice list
+names the file and why. On Linux the desktop portal's save dialog
+(org.freedesktop.portal.FileChooser) asks, and the path of the file:// URI
+it answers with is written. The other targets keep that notice: their save
+dialogs are not built yet.
 
 A browser asks for a device permission itself, when a page first uses the
 device, and keeps no settings page of the app's, so `app.ask`,
