@@ -1601,6 +1601,28 @@ sema_call_app_device: fn(module_name: String, member: String, alias: String, spa
     }
 }
 
+// The `app` member a bare call names through a member import (`use
+// app.[draggable]` then `draggable(…)`), so the call gets the device checks
+// (sema_call_app_device) its qualified spelling gets; None for a name no
+// member import of `app` binds.
+sema_app_imported_member: fn(name: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? Never! {
+    // Read in place through the pattern: a `??` binding copies the graph.
+    if program.registration_graph == .Val(graph) {
+        module_index: sema_scope_caller_index(environment, graph) ?? return None
+        loop registration in graph.modules[module_index].imports {
+            loop binding in registration.bindings {
+                if binding.local != name || (binding.declaration_position == None && binding.symbol.kind == SymbolKind.Import) {
+                    next
+                }
+                target_index: binding.target_module_index ?? next
+                if graph.modules[target_index].module_name != SEMA_APP_MARKER_MODULE -> next
+                return Val(binding.original)
+            }
+        }
+    }
+    None
+}
+
 // A browser shows a page's notification only while the page is open, and
 // the page runtime carries no drag of the app's. So such a device call on
 // an app whose resolved target is the web output is refused, never dropped

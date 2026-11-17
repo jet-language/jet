@@ -6739,7 +6739,8 @@ app's window (`graph.window`) carries every move; the other native targets
 keep a notice saying their drag and drop is not built yet and give `body`
 back as it is. The page runtime can't carry the app's values in a
 browser's drag yet, so either call in code whose target is the web output
-is a compile error, E-APP-TARGET-FEATURE.
+is a compile error, E-APP-TARGET-FEATURE, whether it is spelled
+`app.draggable(…)` or `draggable(…)` through `use { app.[draggable] }`.
 
 `app.save_file(suggested:, bytes:, types:)` asks the person where to save a
 file and writes `bytes` there in one step, so a failed write leaves any file
