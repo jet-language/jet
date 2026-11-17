@@ -5220,9 +5220,9 @@ sema_ownership_collect_lvalue_access: fn(state: &SemaOwnershipState, target: LVa
 // writes become the lambda's construction requirements. A cloned capture is
 // read whole; an owned non-copy capture the lambda moves (its body moves it,
 // or it escapes without a clone) moves the captured place; a non-escaping
-// lambda borrows what it only reads, so its captures stay reads; a capture
-// the closure retains (a view, or a write of a non-escaping FnMut closure)
-// stays lent through the call.
+// lambda borrows what it reads or writes, so every other capture (and a
+// view) stays lent through the call that receives the lambda, where the
+// callee may run it: a write beside a read capture in that call conflicts.
 sema_ownership_collect_lambda_requirement_events: fn(state: &SemaOwnershipState, lambda: Lambda, scopes: SemaScopeTable, events: &[SemaOwnershipEvaluatedAccess]) {
     params: loop param in lambda.params -> param.name
     captured := [SemaOwnershipEvaluatedAccess]{}
@@ -5243,11 +5243,7 @@ sema_ownership_collect_lambda_requirement_events: fn(state: &SemaOwnershipState,
     taken: loop capture in lambda.take_names -> capture.name
     // A lambda this check did not record keeps plain capture reads.
     if state.lambda_facts.get(sema_ownership_span_key(lambda.span)) == .Val(facts) {
-        has_write := false
-        loop event in captured {
-            if event.access == AccessConvention.Write -> has_write = true
-        }
-        retains: !facts.escapes && has_write
+        retains: !facts.escapes
         loop index in 0..<captured.len() {
             name: captured[index].capture_place.root
             if facts.cloned.contains(name) {
@@ -5966,8 +5962,8 @@ sema_ownership_check_argument_evaluation: fn(state: &SemaOwnershipState, accesse
 }
 
 // Rust `check_call_argument_captures`: constructing the argument's lambdas
-// evaluates their captures now. A capture a non-escaping FnMut closure (or
-// a view) retains stays lent through the call; an owned move capture moves.
+// evaluates their captures now. A capture a non-escaping closure (or a
+// view) retains stays lent through the call; an owned move capture moves.
 sema_ownership_check_argument_captures: fn(state: &SemaOwnershipState, accesses: &[SemaOwnershipCallAccess], arg: CallArg, scopes: SemaScopeTable, known: Int, diagnostics: &[Diagnostic]) -> Bool {
     events := [SemaOwnershipEvaluatedAccess]{}
     checks := [SemaOwnershipNestedCheck]{}
