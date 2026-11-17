@@ -37,7 +37,7 @@ use jet_foundation.[
     VariantField,
     VariantPayload,
     type_identity_equal,
-    type_name,
+    type_union_sort,
     sema_casing_acronym_name,
     sema_casing_pascal_words,
     module_text,
@@ -390,57 +390,15 @@ sema_failure_union_flatten: fn(ty: Type, flat: &[Type]) Never! {
     flat.push(ty.copy())
 }
 
-// Flatten nested unions, drop exact duplicates, sort by the
-// canonical spelling read without module qualifiers (Rust
-// `union_member_order_key`); one surviving member is that member.
+// Flatten nested unions, drop exact duplicates and put the rest in the
+// canonical order (type_union_sort); one surviving member is that member.
 sema_failure_union_canonical: fn(members: [Type]) -> Type Never! {
     flat := [Type]{}
     loop member in members -> sema_failure_union_flatten(member, flat)
-    index := 1
-    loop index < flat.len() {
-        current := flat[index]
-        insertion := index - 1
-        loop insertion >= 0 && sema_failure_union_member_after(flat[insertion], current) {
-            flat[insertion + 1] = flat[insertion]
-            insertion -= 1
-        }
-        flat[insertion + 1] = current
-        index += 1
-    }
+    type_union_sort(flat)
     if flat.len() == 0 -> return Type.Named{name: "Unit"}
     if flat.len() == 1 -> return flat[0]
     Type.Union{members: flat}
-}
-
-// Resolving a member to its declaration key (`<corelib>/core.http::HTTPError`)
-// never reorders the union: the order reads each nominal head unqualified and
-// the full spelling only breaks ties.
-sema_failure_union_member_after: fn(left: Type, right: Type) -> Bool Never! {
-    left_key: sema_failure_union_order_key(left)
-    right_key: sema_failure_union_order_key(right)
-    if left_key != right_key -> return left_key > right_key
-    type_name(left) > type_name(right)
-}
-
-sema_failure_union_order_key: fn(ty: Type) -> String Never! {
-    if ty == {
-        .Named(name) -> return sema_failure_union_unqualified(name)
-        .Apply(name, _) -> {
-            full: type_name(ty)
-            if full.starts_with(name) {
-                return "{sema_failure_union_unqualified(name)}{full.slice(name.len(), full.len())}"
-            }
-            return full
-        }
-        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
-    }
-    type_name(ty)
-}
-
-sema_failure_union_unqualified: fn(name: String) -> String Never! {
-    leaf := name
-    loop part in name.split("::") -> leaf = part
-    leaf
 }
 
 // The success side of an unwritten contract.

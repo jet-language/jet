@@ -1363,6 +1363,55 @@ type_union_member_payload: fn(ty: Type) -> Type Never! {
     ty.copy()
 }
 
+// Puts a union's members in the canonical order every union carries (Rust
+// `canonicalize_union`): the parser writes each union so, and a union a
+// binding rebuilds is put back in it (jet_sema sema_failure_union_canonical),
+// so two spellings of one union are one Type. Members sort by their spelling
+// read without module qualifiers, the full spelling breaking ties: resolving
+// a member to its declaration key (`<corelib>/core.http::HTTPError`) never
+// reorders the union.
+type_union_sort: fn(members: &[Type]) -[]> {
+    index := 1
+    loop index < members.len() {
+        current := members[index]
+        insertion := index - 1
+        loop insertion >= 0 && type_union_member_after(members[insertion], current) {
+            members[insertion + 1] = members[insertion]
+            insertion -= 1
+        }
+        members[insertion + 1] = current
+        index += 1
+    }
+}
+
+type_union_member_after: fn(left: Type, right: Type) -[]> Bool {
+    left_key: type_union_order_key(left)
+    right_key: type_union_order_key(right)
+    if left_key != right_key -> return left_key > right_key
+    type_name(left) > type_name(right)
+}
+
+type_union_order_key: fn(ty: Type) -[]> String {
+    if ty == {
+        .Named(name) -> return type_union_unqualified(name)
+        .Apply(name, _) -> {
+            full: type_name(ty)
+            if full.starts_with(name) {
+                return "{type_union_unqualified(name)}{full.slice(name.len(), full.len())}"
+            }
+            return full
+        }
+        .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
+    }
+    type_name(ty)
+}
+
+type_union_unqualified: fn(name: String) -[]> String {
+    leaf := name
+    loop part in name.split("::") -> leaf = part
+    leaf
+}
+
 // Rust `union_member_tag`'s sanitizer over one written spelling.
 type_union_member_tag_name: fn(raw: String) -> String Never! {
     safe := true
