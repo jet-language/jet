@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111025,
+    "rev": 111050,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47233,8 +47233,8 @@
       "title": "Binary encoding: bounded sign_extend and exact max_bytes accounting (D-BINARY-CANONICAL1)",
       "body": "Implement the single checked pack and unpack contract in core.encoding.binary, as ratified in D-BINARY-CANONICAL1. Errors use the source BinaryError form. Acceptance: pack then unpack is the identity on every fixed-width type, and invalid widths are rejected.\n\nEarlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired):\n\nFound 2026-10-03 by the runtime port (RtW11-BINARY-CRC, probe ~/.cache/jet-test-scratch/RtW11-BINARY-CRC/RUNTIME-BINARY-CRC-1/probe/unit.jet). Today the Jet source Core and the native (frozen Rust EncodingBase.rs:239-520) tiers give different meanings for the same program (I9 split):\n- pack_u8(300): source returns Err(BinaryError.Range); native wraps to [44].\n- pack with \"@H\": source Err(Format); native treats @/= as little-endian, giving [1,0].\n- fixed pack: native infallible; source signatures are BinaryError! (E2402 at callers).\n- generic errors: native String mapped to canonical Err.message; source typed BinaryError.\n- unpack: native accepts trailing bytes; source does not. u64 to I64: native preserves bits.\nOptions (same programs distinguish them: overflow 300, \"@H\", trailing bytes, sign bits):\nA. Adopt the frozen native policy as canonical: fixed I64 wrapping, infallible fixed packs, generic APIs Err!, trailing bytes accepted; migrate public source callers/errors; settle whether exact-Int arguments narrow.\nB. Keep the checked source behavior (typed BinaryError, range and format errors, no trailing bytes) as canonical and repair the native/JIT consumers to match.\nRecommendation: B (checked by default per philosophy; wrapping hides data loss). Until ruled, the port keeps its kernel private and changes no public behavior.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e3",
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -47389,7 +47389,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-03T11:17:39.038Z",
-      "updated": "2026-11-17T01:37:56.749Z",
+      "updated": "2026-11-17T01:39:55.327Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -47498,8 +47498,8 @@
       "title": "Implement live links @T in the Jet compiler (D-MEMREF1)",
       "body": "Implement ratified live links (@T) in the Jet parser, sema, and lowering, per D-MEMREF1, D-MEMREF-LIFE1, and D-MEMREF-EXCL1 (all A). The Rust parser is not a target. Acceptance: each live-link example in the spec parses, type-checks, and runs with the documented lifetime and exclusivity behavior.\n\nEarlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired):\n\nD-MEMREF1, D-MEMREF-LIFE1 and D-MEMREF-EXCL1 were ratified as option A on 2026-09-28: `@T` is a checked live-link type, `@place` forms one, a proven owner lifetime uses the view representation and anything else uses counted storage, read access is transitive, and `a.same(b)` compares identity. Neither compiler implements it yet. The Rust parser has no `@` type constructor, and the Jet parser (Compiler/JetParser Types ~295-330) reports E-TYPE-PREFIX for `?@T`.\n\nThe Jet port needs it now: the codegen AOT port (CompW22) must spell Rust's `Option<&FfiLink>` config field as `ffi: ?@FfiLink`.\n\nScope:\n- grammar, AST and Type carriers;\n- sema link checks: transitive read, and write access only through `:=`, writable paths or `&`;\n- lifetime proof versus counted storage;\n- lowering and runtime representation;\n- identity versus value equality;\n- task crossings (D-MEMREF-TASK1);\n- diagnostics with UI snapshots (I4);\n- examples and goldens on every tier (I5/I9);\n- the D-ONCE-AT1 prefix move.\n\nIt has to be implemented in the Rust reference and the Jet compiler as one cutover.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e3",
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -47614,7 +47614,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-04T00:21:42.477Z",
-      "updated": "2026-11-16T12:54:53.687Z",
+      "updated": "2026-11-17T01:39:59.381Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -47627,8 +47627,8 @@
       "title": "SQL statement classes: infer and enforce Query/Mutation/Schema/Dynamic on SQL values (D-SQL-CLASS1=A)",
       "body": "D-SQL-CLASS1=A (ratified 2026-10-04, ballot card #4501). First of the SQL-safety cards: D-SQL-AUTHORITY1, D-SQL-GUARD1 and D-SQL-RAW1 build on the class carried here; D-SQL-SAFETY (schema map) is independent.\n\nScope (core.db, sema, both compilers, Web transport):\n- Infer the travelling statement class for ordinary SQL{...} literals and enforce it at every receiving method (query/execute/etc.), with the complete record, constructor, method and error rules in the decision detail.\n- Beginners keep SQL{...}; experts get checked head/from constructors and an audited Dynamic route. No schema authority or raw permission is added here.\n- Class tags and bindings survive return, storage and Web decode; forged known tags, altered bindings, stale identities and intent through untrusted decode are refused.\n- Keep existing fallible row extraction and runtime migration restrictions.\n\nAcceptance: decision checkInstructions (returned/stored Query/Mutation/Schema/Dynamic, Rows/Count, DELETE...RETURNING optional cardinality, forgery attacks, CLASS-only mode engine authorizer/prepare facts, fail-closed unsupported enforcement, version1 fields across adapters, original DB/typed-text/row-policy tests).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e3",
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -47713,7 +47713,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-04T14:14:21.092Z",
-      "updated": "2026-11-16T12:54:59.333Z",
+      "updated": "2026-11-17T01:40:03.566Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -47726,8 +47726,8 @@
       "title": "Unsafe as an inferred effect discharged at audited boundaries (D-UNSAFE-EFFECT)",
       "body": "Make Unsafe an inferred effect in Compiler/JetSema, discharged at audited #Unsafe boundaries, per ratified D-UNSAFE-EFFECT (A). Safe callers do not change. Acceptance: an unaudited unsafe call is rejected at its effect boundary, and audited boundaries pass.\n\nEarlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired):\n\nD-UNSAFE-EFFECT=A (ratified 2026-10-04). Upstream of D-RT-NATIVE-CAP1 (every core.mem.native declaration adopts this rule) and of D-SQL-RAW1.\n\nScope (Rust sema and Compiler/JetSema, one solver):\n- Add Unsafe to the existing effect solver. Locally executed raw operations and calls to #Unsafe-marked APIs introduce Unsafe; their reviewed #Unsafe(reason) boundary discharges only that known component; other effects remain.\n- Open rows: unknown callback row E stays E; when known Unsafe is added beside E locally, remove only the added component; never subtract a possibly inherited Unsafe from unknown E.\n- An #Unsafe-marked function publishes its body row plus Unsafe and keeps its unsafe-call bit: entering it needs caller review; a wrapper calling it inside its own gate discharges the known entry component; an ungated call is refused.\n- Audit/report: audit version, identity, dedup, recursive and unknown policy; keep unsafe_sentries, tir_unsafe_and_runtime, authority_manifest and inspect fixtures green.\n\nAcceptance: decision checkInstructions: direct/higher-order/recursive/open-row E and E|Unsafe programs across all levels; prove unknown E never subtracted; store/return/spawn callback rows and owning/borrowed raw handles; caller permission stays distinct. Exit obligations are a separate card (D-UNSAFE-EXIT-OBLIGATIONS).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e12",
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -47894,7 +47894,7 @@
       "parentId": "c02lvwje",
       "needsAcceptance": false,
       "created": "2026-10-04T14:14:26.629Z",
-      "updated": "2026-11-16T12:55:06.899Z",
+      "updated": "2026-11-17T01:40:07.771Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -48288,8 +48288,8 @@
       "title": "Compiler scaling gate: every phase provably linear on any codebase shape (generated corpora, work counters, superlinear detection)",
       "body": "Owner 2026-10-05: the compiler itself must handle hundreds of thousands of lines per second on ANY codebase, not only on Jet sources tuned for compile speed; and there must be profiling/checks that catch superlinear phases or other compile-time regressions so high performance is maintained consistently. Scope: (1) a generator family (extending Tools/perf/throughput, bench30k/bench300k) producing corpora that stress each dimension independently: many modules, many small functions, few huge functions, deep nesting, wide enums and big match/arm tables, many impls and traits, heavy generics and monomorphization, many comptime items, long string/data tables, many imports, deep call chains, error-heavy code (diagnostics); each at sizes N, 2N, 4N, 8N. (2) deterministic work counters per phase inside the compiler (both halves): items visited, scope lookups, impl/trait scans, copies of whole-program structures, allocations, so complexity is measured without timing noise. (3) a gate (CI-runnable, under the performance manifest) that fails when any phase's counter or time grows faster than k*N log N across the size ladder for any corpus, naming the phase and the dominating counter; plus absolute lines/s floors per phase. (4) a static audit kept current (StaticHotAudit) for loops over whole-program tables inside per-item work. Done when the gate runs on every landing, passes on the current compiler or names each superlinear phase on a card, and its report is part of the speed briefing.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e11",
+      "track": "epoch",
+      "epoch": "e24",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -48353,7 +48353,7 @@
       "parentId": "c031o59x",
       "needsAcceptance": false,
       "created": "2026-10-05T11:05:54.255Z",
-      "updated": "2026-11-16T12:55:08.758Z",
+      "updated": "2026-11-17T01:40:12.019Z",
       "updatedBy": "Main",
       "goals": [
         "G11"
@@ -48425,8 +48425,8 @@
       "title": "Repository PascalCase paths and host-independent word-key module resolution",
       "body": "Adopted D-PATH-CASE2=A. PascalCase is Jet repository house style enforced by repository tooling, not a compiler restriction on user packages. package.jet and run.jet keep exact lowercase spellings everywhere. Imports resolve by word keys and reject ambiguity, never host lookup order. D-WIRE-CASE1=A and D-WIRE-ACRONYM1=A have a distinct projection implementation child card. D-CASE-LAW3 remains OPEN: no source camelCase migration is authorized.\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-PATH-CASE2=A\nOne word-key resolver across roots, module declarations and file aliases; reject ambiguity before package read on every host; E0603/E0606/reserved-file fixes exact; user paths unrestricted except reserved names; repository gate and scaffolds enforce PascalCase with package.jet/run.jet exceptions; module/member resolution and all migrated source manifests remain correct.\nPaths: Compiler/JetDriver/Source/Driver/Loader.jet; Jetpack/Foundation/Source/Syntax.jet naming lexicon; Compiler/JetCli/Source/Cli/Host.jet scaffolds; Tools/agent repository naming gate and source generators; Core/, Compiler/, Jetpack/, Examples/, tests/ source path cutover\nRegistry/spec/UI/goldens: Legacy Syntax.rs + Syntax/acronyms.rs module_source_path and Syntax/package_files.rs DEFAULT_ENTRY_FILE / jetpack_config.rs PACKAGE_FILE; Jet Syntax counterpart records D-PATH-CASE2=A, keeps package.jet/run.jet exact lowercase; Docs/spec/spec.md module/file resolution; Docs/spec/syntax-decisions.md D-PATH-CASE1 amendment; Docs/proposals/casing-2026-10-05.md distinguish dated proposal from adopted scope; E0603 no-match examples; E0606 all candidates and longer-name fix; same-folder word/case twins; wrong-case reserved files with rename fixes; Fixtures for http_client/HTTPClient/HttpClient/http-client/httpClient, HTTP_APIClient/UTF8, dotted Core/dependency roots, run.jet directory entry, module declarations and member fallback; file alias from stem words; scaffold and repo gate goldens\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW for resolver/tools; broad repository rename lands only after current landing waves/seed consumers are coordinated. No new Rust-half loader; last Rust bootstrap need is an exception only if Main establishes it today. Do not merge stale rename train wholesale. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: #4613 body still applies PascalCase to user packages and demands no lowercase paths; parked aggregate branch contains Package.jet renames (OrphanAudit compare2). D-CASE-LAW3 remains OPEN: do not rename value identifiers to camelCase. Gate-2/RuntimeJet/Jetpack source manifests are in flight.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e11",
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -48496,7 +48496,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-05T15:48:47.717Z",
-      "updated": "2026-11-16T12:55:10.666Z",
+      "updated": "2026-11-17T01:40:15.034Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -48565,8 +48565,8 @@
       "title": "Memory model: Rust-or-better safety, easier than Rust, never copy where Rust borrows or moves, Polonius-level acceptance, stored references solved",
       "body": "Owner goal (2026-10-05): Jet must be at least as memory safe as Rust, ideally more, and far easier to reason about (no fighting the borrow checker, no lifetime annotations). Once Rust leaves the toolchain Jet must beat Rust's performance, so it may never copy, retain, lock or refcount where Rust would borrow or move. Every program shape Rust and Polonius accept as safe must be expressible in Jet without hassle. Stored references (struct fields, parent links, self-reference, lending iterators) need a real answer; check whether @ links (D-MEMREF1) replace View<T> and suffice, else design what works.\n\nCriteria:\n1. Research-backed proposal Docs/proposals/memory-model-*.md (agent MemModelLead) with the Rust/Polonius shape matrix, current Jet verdicts, recommended design, beginner and expert paths; owner choices as ballots.\n2. Acceptance corpus mirroring rustc NLL/Polonius cases with zero false accepts and every false reject either fixed or justified (agent MemEvidence).\n3. Copy audit: every implicit copy/retain/lock/refcount where Rust would borrow or move is removed or justified; paired perf cells prove no loss versus Rust.\n4. MIR Lint (#4619) re-proves the final rules independently.\nRelated: #4392, #4617, #4619.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e11",
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -48813,7 +48813,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-05T19:57:15.407Z",
-      "updated": "2026-11-16T12:55:16.575Z",
+      "updated": "2026-11-17T01:40:18.184Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -76568,40 +76568,40 @@
           "n": 24,
           "text": "(was #2414) [#3135] `node Tools/gauntlet/harness/run.mjs --entry enum-union-bridge --runs 11` gives equal checksums for every cell and peer. It records tags, copies, spills, ownership transfers, allocation/copy counts and medians for direct named-enum, structural-union and explicit-conversion dispatch.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6973 c2: benchmark kernel cell",
-          "at": "2026-11-15T05:42:25.296Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:53.278Z",
+          "closure": "duplicate"
         },
         {
           "n": 25,
           "text": "(was #2414) [#2778] The 256² and 512² tensor-map repros finish within the resource cap on a fresh release binary, and 4K does not regress into a timeout. The paired tensor-map cell gives Jet/peer < 1.00 for every peer, Rust included. A golden shows identical results on every level.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6973 c3: benchmark kernel cell",
-          "at": "2026-11-15T05:42:26.287Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:54.436Z",
+          "closure": "duplicate"
         },
         {
           "n": 29,
           "text": "(was #6205) nbody, spectral-norm, mandelbrot, fannkuch, binary-trees and a string/text workload each beat C with identical output",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6973 c1: benchmark kernel cell",
-          "at": "2026-11-15T05:42:27.249Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:39:56.313Z",
+          "closure": "duplicate"
         },
         {
           "n": 30,
           "text": "(was #6205) An inspect corpus of hot kernels shows code at least as tight as clang -O2 (no spills in register-resident loops, no redundant copies or checks), with tests that fail on regression",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "Merged into #6414 c15: c15 pins every hot kernel with machine-code goldens against a hand-written reference",
-          "at": "2026-11-15T05:42:08.662Z",
+          "evidence": "Merged into #6414 c15: c15 pins every hot kernel with machine-code goldens against a hand-written reference (folded into another criterion of this card, whose proof covers it)",
+          "at": "2026-11-17T01:39:57.403Z",
           "closure": "obsolete"
         },
         {
@@ -76647,7 +76647,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6461 c13, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:57:58.298Z",
+          "at": "2026-11-17T01:39:58.465Z",
           "closure": "duplicate"
         },
         {
@@ -76672,131 +76672,131 @@
           "n": 38,
           "text": "(was #2886 c1) One post-lowering IR optimization pass canonicalizes literal and immutable Boolean loops plus proven literal integer ranges before every execution tier, preserves source markers and carries counted-loop vector proof metadata, with tier goldens, shape tests and a performance cell.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6971 c2: optimizer pipeline",
-          "at": "2026-11-15T05:42:28.279Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:00.330Z",
+          "closure": "duplicate"
         },
         {
           "n": 39,
           "text": "(was #2893 c2) Transient column-copy source is limited by checked nested-reuse/single-pass facts and fixed cache-block storage; the shared measured gate and retained-sample paths consume the first chunk exactly once [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6972 c1: automatic acceleration",
-          "at": "2026-11-15T05:42:29.222Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:01.492Z",
+          "closure": "duplicate"
         },
         {
           "n": 40,
           "text": "(was #2893 c3) The original scalar fallback and shared canonical kernel semantics stay available on O0, O1 and O2, with gravity timing and transform-on/off output goldens.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6972 c2: automatic acceleration",
-          "at": "2026-11-15T05:42:30.270Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:02.656Z",
+          "closure": "duplicate"
         },
         {
           "n": 41,
           "text": "(was #2894 c2) The source release lowering consumes typed acceleration facts and the shared sampled gate, schedules through the existing bounded pool, preserves sampled work, and publishes actual decisions to typed inspect receipts [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6972 c3: automatic acceleration",
-          "at": "2026-11-15T05:42:31.251Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:04.511Z",
+          "closure": "duplicate"
         },
         {
           "n": 42,
           "text": "(was #2894 c3) Automatic parallel code keeps the original serial fallback and the canonical independent kernel meaning on O0, O1 and O2, with output goldens and a performance cell.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6972 c4: automatic acceleration",
-          "at": "2026-11-15T05:42:32.183Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:05.678Z",
+          "closure": "duplicate"
         },
         {
           "n": 43,
           "text": "(was #2905 c1) The ratified surface/plain performance contract, paired-program manifest and strict loss/missing-evidence gate are implemented, with a test that fails on a missing or losing pair.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6953 c17: gauntlet scoring policy",
-          "at": "2026-11-15T05:42:33.108Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:06.870Z",
+          "closure": "duplicate"
         },
         {
           "n": 44,
           "text": "(was #2912 c1) One target-neutral ordered IR legality and optimization pipeline produces deterministic canonical bytes and stores bounds, fusion, loop, copy-cost, failure-edge and data-plan facts once; every execution adapter rejects non-canonical input instead of deriving tier-local optimization policy.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6971 c3: optimizer pipeline",
-          "at": "2026-11-15T05:42:34.023Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:08.747Z",
+          "closure": "duplicate"
         },
         {
           "n": 45,
           "text": "(was #2951 c1) All five bounded optimization experiment families have paired executable source, falsifying controls, exact machine, premise and observation contracts, and a real checker, inspect, run and Gauntlet collection driver, without adopting unproved transforms.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6971 c4: optimizer pipeline",
-          "at": "2026-11-15T05:42:34.931Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:09.952Z",
+          "closure": "duplicate"
         },
         {
           "n": 46,
           "text": "(was #3038 c1) An eligible-to-ineligible transition caused by a supported IR rewrite or reduction rejection no longer leaves stale positive eligibility; a regression fails before the repair and passes afterward.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6971 c5: optimizer pipeline",
-          "at": "2026-11-15T05:42:35.829Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:11.116Z",
+          "closure": "duplicate"
         },
         {
           "n": 47,
           "text": "(was #3038 c2) Fresh optimization, unchanged re-optimization and changed-input validation agree on facts and canonical identity; no-op optimization is stable and malformed/stale evidence fails closed [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6971 c6: optimizer pipeline",
-          "at": "2026-11-15T05:42:36.761Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:13.003Z",
+          "closure": "duplicate"
         },
         {
           "n": 48,
           "text": "(was #3038 c3) The affected source program keeps its values, effects, first error, cleanup and reduction bits on O0, O1, O2 and web; unsupported optimization takes the safe path.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6971 c7: optimizer pipeline",
-          "at": "2026-11-15T05:42:37.694Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:14.158Z",
+          "closure": "duplicate"
         },
         {
           "n": 49,
           "text": "(was #3736 c1) Harness and baselines committed under Tools/perf (or the gauntlet) with a manifest entry, if the owner makes this a cell [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Merged into #6973 c4: the gradient and sprite cells and their gate are one criterion",
-          "at": "2026-11-15T05:42:38.614Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:16.087Z",
+          "closure": "duplicate"
         },
         {
           "n": 50,
           "text": "(was #3736 c2) Jet/Rust < 1.00 on both gradient cells and the sprite cell, measured in the same run with byte-identical outputs [precut audit: no dev test, golden, case or snapshot proves this today]",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6973 c4: benchmark kernel cell",
-          "at": "2026-11-15T05:42:39.878Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:17.270Z",
+          "closure": "duplicate"
         },
         {
           "n": 53,
@@ -76857,7 +76857,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-17T01:39:51.733Z",
+      "updated": "2026-11-17T01:40:17.270Z",
       "updatedBy": "Main",
       "criteriaLastN": 57
     },
@@ -217863,6 +217863,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:40:18.185Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00rqc09",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:17.270Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#50"
+    },
+    {
+      "at": "2026-11-17T01:40:16.087Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#49"
+    },
+    {
+      "at": "2026-11-17T01:40:15.035Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0itvqcw",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:14.158Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#48"
+    },
+    {
+      "at": "2026-11-17T01:40:13.003Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#47"
+    },
+    {
+      "at": "2026-11-17T01:40:12.019Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c00sxc6r",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:11.116Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#46"
+    },
+    {
+      "at": "2026-11-17T01:40:09.952Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#45"
+    },
+    {
+      "at": "2026-11-17T01:40:08.748Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#44"
+    },
+    {
+      "at": "2026-11-17T01:40:07.771Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08rdp62",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:06.870Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#43"
+    },
+    {
+      "at": "2026-11-17T01:40:05.678Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#42"
+    },
+    {
+      "at": "2026-11-17T01:40:04.511Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#41"
+    },
+    {
+      "at": "2026-11-17T01:40:03.566Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0p6h37r",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:02.656Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#40"
+    },
+    {
+      "at": "2026-11-17T01:40:01.492Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#39"
+    },
+    {
+      "at": "2026-11-17T01:40:00.330Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#38"
+    },
+    {
+      "at": "2026-11-17T01:39:59.382Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0s8gang",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:58.465Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#35"
+    },
+    {
+      "at": "2026-11-17T01:39:57.404Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-17T01:39:56.313Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#29"
+    },
+    {
+      "at": "2026-11-17T01:39:55.328Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0jd9jl3",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:39:54.436Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#25"
+    },
+    {
+      "at": "2026-11-17T01:39:53.279Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#24"
+    },
     {
       "at": "2026-11-17T01:39:51.733Z",
       "by": "Main",
