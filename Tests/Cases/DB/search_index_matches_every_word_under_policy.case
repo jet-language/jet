@@ -1,0 +1,18 @@
+# A typed table made with a search function keeps a search index, and
+# Table.search(words) gives the rows whose search text holds every word,
+# whole and caseless, that the table's row policy lets the caller read. A
+# put replaces a row's words and a delete removes them. The same lines
+# print at O0, O1 and O2.
+fixture: SearchIndexMatchesEveryWordUnderPolicy.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = search_index_matches_every_word_under_policy.stdout.expected
+step: jet build main.jet
+exit: 0
+step debug: built
+exit: 0
+stdout: == default
+step release: jet run --release main.jet
+exit: 0
+stdout: == default

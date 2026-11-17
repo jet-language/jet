@@ -1,0 +1,99 @@
+// A task table with a search index and a row policy: an account reads the
+// tasks of the projects it is in. Each search prints the titles it finds,
+// as the account it runs for.
+use {
+    app
+    auth: core.auth
+    db: core.db
+}
+
+#Codable
+Task: struct {
+    id: Int,
+    project: Int,
+    title: String,
+    notes: String,
+}
+
+mia: fn() -> auth.AccountID { auth.AccountID.from_string("mia") }
+
+ben: fn() -> auth.AccountID { auth.AccountID.from_string("ben") }
+
+// mia is in projects 1 and 2, ben only in project 2.
+member: fn(account: auth.AccountID, project: Int) -> Bool {
+    if account == mia() -> return true
+    account == ben() && project == 2
+}
+
+// What a search looks in: the title and the notes.
+task_text: fn(row: Task) -[]> String { "{row.title} {row.notes}" }
+
+task_policy: fn(row: Task, _op: db.Op, who: db.Who, _store: db.Store) -[DB.Read]> Bool db.DBError! {
+    if who == {
+        .Account(account) -> Ok(member(account, row.project))
+        .System -> Ok(true)
+        .Anonymous -> Ok(false)
+    }
+}
+
+// The store each step opens the guarded table from. A lambda owns what it
+// captures, so a step opens the table rather than capturing it.
+Stores: struct {
+    store: db.Store?,
+}
+
+STORE: Shared{Stores{store: None}}
+
+tasks: fn() -> db.Table<Int, Task> {
+    stores: STORE.guard_read()
+    store: stores.value.store ?? panic("the store is open")
+    store.table("tasks", key: fn(row: Task) { row.id }, search: Val(task_text)).guard(task_policy)
+}
+
+wrote: fn(result: Task db.DBError!) -> String {
+    if result == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+found: fn(words: String) -[DB.Read]> String {
+    rows: (tasks().search(words) ?? return "unsearchable").collect() ?? return "uncollected"
+    titles := [String]{}
+    loop row in rows -> titles.push(row.title)
+    "[{titles.join(", ")}]"
+}
+
+deleted: fn(id: Int) -[DB.Read, DB.Write]> String {
+    if tasks().delete(id) == {
+        .Ok(_) -> "ok"
+        .Err(failure) -> failure.message()
+    }
+}
+
+open_store: fn(store: db.Store) {
+    stores := STORE.guard_edit()
+    stores.value.store = Val(store.copy())
+}
+
+run: fn() {
+    open_store(db.open_memory())
+
+    print("add 1: {app.as_system(fn() { wrote(tasks().add(Task{id: 1, project: 1, title: "Ship it", notes: "the release build"})) })}")
+    print("add 2: {app.as_system(fn() { wrote(tasks().add(Task{id: 2, project: 2, title: "Ship the docs", notes: "release notes"})) })}")
+    print("add 3: {app.as_system(fn() { wrote(tasks().add(Task{id: 3, project: 2, title: "Fix the build", notes: ""})) })}")
+
+    print("mia searches ship: {app.as_caller(mia(), fn() { found("ship") })}")
+    print("mia searches SHIP, release: {app.as_caller(mia(), fn() { found("SHIP, release") })}")
+    print("mia searches ship notes: {app.as_caller(mia(), fn() { found("ship notes") })}")
+    print("mia searches shi: {app.as_caller(mia(), fn() { found("shi") })}")
+    print("ben searches ship: {app.as_caller(ben(), fn() { found("ship") })}")
+    print("ben searches build: {app.as_caller(ben(), fn() { found("build") })}")
+
+    print("put 2: {app.as_system(fn() { wrote(tasks().put(Task{id: 2, project: 2, title: "Write the docs", notes: "release notes"})) })}")
+    print("delete 3: {app.as_system(fn() { deleted(3) })}")
+    print("ben searches ship: {app.as_caller(ben(), fn() { found("ship") })}")
+    print("ben searches docs: {app.as_caller(ben(), fn() { found("docs") })}")
+    print("ben searches build: {app.as_caller(ben(), fn() { found("build") })}")
+    print("mia searches build: {app.as_caller(mia(), fn() { found("build") })}")
+}
