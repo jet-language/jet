@@ -47,7 +47,7 @@ assumption needs to be revisited. Raise them; do not silently absorb them.
   and design priorities. It never holds schedules, feature inventories,
   progress notes, or release scope. Do not start a separate roadmap without
   owner direction.
-- **One planning system.** Tower holds goals, plans, milestones, dependencies,
+- **One planning system.** Tower holds epochs, plans, milestones, dependencies,
   decisions, acceptance criteria, status, blockers, and handoffs. Move live work
   into Tower before deleting a document copy. Discard superseded plans instead
   of keeping a second queue.
@@ -256,17 +256,17 @@ manifest and keep any loss on a card.
 ## Biggest wins first
 
 This is a standing owner order, repeated many times, and it binds every plan,
-dispatch and landing inside a goal. Work on a goal is done in order of its
-expected gain on the goal's metric, largest first, and the largest steps start
+dispatch and landing inside an epoch. Work on an epoch is done in order of its
+expected gain on the epoch's metric, largest first, and the largest steps start
 first even when they are architectural, long or hard. It ranks the work inside
-a goal; it never reorders the goals, which only the owner orders (see Owner
+an epoch; it never reorders the epochs, which only the owner orders (see Owner
 gates and work state).
 
-- **Rank before work.** Before any agent starts on a goal, its plan on the card
+- **Rank before work.** Before any agent starts on an epoch, its plan on the card
   lists every candidate step with its estimated share of the gap, measured from
   a profile wherever one can be taken (for compile speed: CPU microseconds per
   line and wall seconds), sorted largest first. A step whose combined ceiling
-  cannot reach the goal's target is named as such; it never stands in for one
+  cannot reach the epoch's target is named as such; it never stands in for one
   that can.
 - **Staff the top.** The steps that carry most of the gap get the agents first.
   An architectural step is never deferred behind tactical work because it is
@@ -301,14 +301,14 @@ owner-only choice goes on a ballot and the work moves to independent criteria
 meanwhile. Workers send their questions to the orchestrator, and it answers them
 the same way.
 
-The orchestrator works the open goals in the owner's goal order, which Tower
-records on the goals, until every criterion is met. This is a standing owner
-order: three of the four agents always work the first unfinished goal in that
-order and the fourth works the goal after it, and when a goal is done the
-staffing moves one goal along. Work the owner puts ahead of the goal order
-takes the agents the owner gives it until it is done. Implementers write the
-code, land it on LaneCheck and report the commit; the orchestrator tests it in
-batches and sends every failure back to its implementer to fix.
+The orchestrator works the open epochs in the owner's epoch order, which Tower
+records as each epoch's `order`, until every criterion is met. This is a
+standing owner order: three of the four agents always work the first unfinished
+epoch in that order and the fourth works the epoch after it, and when an epoch
+is done the staffing moves one epoch along. Work the owner puts ahead of the
+epoch order takes the agents the owner gives it until it is done. Implementers
+write the code, land it on LaneCheck and report the commit; the orchestrator
+tests it in batches and sends every failure back to its implementer to fix.
 
 Tower is the only work ledger. Every incomplete stream has exactly one card
 recording its phase, plan, dependencies, criteria, and handoff state. Workers
@@ -319,8 +319,8 @@ before claiming or briefing more work. A milestone then gets one commit-bound
 composed sweep and one fresh-context review; individual cards do not wait for
 that gate.
 
-A new card is earned only by a new stream of work: a ballot, a feature, or a
-goal's plan. A regression, follow-up, or gap is a criterion on the card whose
+A new card is earned only by a new stream of work: a ballot, a feature, or an
+epoch's plan. A regression, follow-up, or gap is a criterion on the card whose
 work caused it or already owns the area, never a card of its own; findings of
 one sweep share one card. This is a standing owner order (2026-11-14).
 

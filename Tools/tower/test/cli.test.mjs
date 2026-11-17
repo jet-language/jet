@@ -410,8 +410,8 @@ test('an unrecognized flag is a usage error, never a silently dropped value', ()
   run(cwd, ['epoch', 'update', 'e1', '--name', 'E1']);
   run(cwd, ['epoch', 'current', 'e1']);
 
-  // The reported papercut: `--text` belongs to `papercut add`, not `card add`.
-  // It used to be dropped, leaving an empty card behind.
+  // A reported snag: `--text` belongs to other verbs, not `card add`. It used
+  // to be dropped, leaving an empty card behind.
   const bad = run(cwd, ['card', 'add', '--title', 'T', '--text', 'body?', '--by', 'tester'], false);
   assert.equal(bad.code, 1);
   assert.match(bad.out, /unknown flag for `tower card`: --text/);

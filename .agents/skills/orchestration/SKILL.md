@@ -68,13 +68,13 @@ suspended near a deadline, after a crash, or for a release:
 - Never call an unrun runtime, tier, diagnostic, snapshot, or golden criterion
   green.
 
-## Standing work order: close a goal in one sweep
+## Standing work order: close an epoch in one sweep
 
-This is the owner's required process for closing a goal or milestone. Follow
+This is the owner's required process for closing an epoch or milestone. Follow
 it every time; never drift into one-blocker-at-a-time work:
 
 1. **Collect every closure blocker at once.** List every open criterion on
-   every open card of the goal, and run each one's census in collect-all mode
+   every open card of the epoch, and run each one's census in collect-all mode
    in the same pass: `JET_KEEP_GOING=1` checks of every package it names (and
    of every sibling the same rule covers), an inventory of every file it
    names, and the suite or fresh-clone run it names. The complete list exists
@@ -88,7 +88,7 @@ it every time; never drift into one-blocker-at-a-time work:
    touched-file checks. Nothing ready waits in a pending list, fix pass or
    stack for a later build. Every landed commit goes on the batch queue with
    the proof its criterion names, and the orchestrator moves to the next
-   goal's work without waiting.
+   epoch's work without waiting.
 4. **Close from the batch.** When the batch reports, record each proven
    criterion as evidence and close its card. Every failure goes back to its
    owner as one focused prompt, and the orchestrator moves on again.

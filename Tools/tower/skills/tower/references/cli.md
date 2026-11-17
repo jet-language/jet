@@ -61,15 +61,15 @@ criteria, proof, and handoff changes on the board.
 
 Cards compute to one lane: `decide` is owner-only; `plan`, `implement`,
 `building`, and `verify` are agent work; `blocked`, `frozen`, and `done` are
-inert. Epochs group work. Milestones group goals inside an epoch and derive
-progress from linked cards.
-
-Goals are long-term aims, not cards. They carry no phase, criteria, or gate and
-never block a card. Link work with `tower card update '#N' --goals G1,G2 --by
-<agent>` (`--goals ''` clears). `tower goal show G1` lists the linked live and
-archived cards with their phases; `tower goal list --all` includes achieved
-and dropped goals. Record progress with `tower goal log G1 --text "…" --by
-<agent>`.
+inert. Epochs are the board's one planning axis: `tower epoch list` shows them
+in `order` (then by id number) with their exit criteria, labelled `E18 <name>`.
+Set the order and the exit criteria with `tower epoch add|update e18 --order N
+--exit-criteria "…" --by <agent>`; repeat `--exit-criteria` for each row, or
+pass `{"order": N, "exitCriteria": ["…"]}` through `--file`/`--stdin`. An empty
+list clears them. `tower epoch remove e18 --by <agent>` is refused while any
+live or archived card, or any milestone, still points at the epoch; the refusal
+names the counts. Milestones group targets inside an epoch and derive progress
+from linked cards.
 
 A card needs a non-empty criteria checklist. Each row moves from `open` to
 `met` to `verified`. Integrated focused proof supplies `met`; a different
@@ -83,6 +83,25 @@ Change a checklist with `tower card criteria '#N' --add "…"`, `--edit n --text
 takes the same flags). Rewording a met or verified row reopens it, because its
 evidence proved the old wording. Removed numbers are never reused, and the event
 log keeps the old text and the reason.
+
+`--move n --to '#M' [--reason "…"]` moves an open row to card #M: the text
+becomes a new open row there, and the old row is met as kind `duplicate` with
+evidence `Moved to #M cK`. Both rows keep the link, shown by `--list`. A row
+meets only on durable evidence (a commit on `dev` or `master`, or a `--kind`
+with its evidence); a refused meet changes nothing. A refused close lists every
+failing row with its reason, one per line.
+
+`--proof "jet test Compiler --profile P --filter F"` on `--add` or `--edit n`
+sets the row's proof (`P` is `cases`, `ui`, `golden`, `core` or `packages`; any
+other `jet test …` command is kept as given); `--proof ""` clears it. A row text
+ending in ``Proof: `jet test …`.`` has that sentence moved into the field on load.
+`tower prove --card '#N'` or `--epoch E` prints which runs cover which open rows.
+With `--yes --jet PATH --tree DIR --commit SHA --by <agent>` it runs them (one run
+per corpus profile, with the filters combined into a `--cases` list) and meets
+each passing row with evidence `<commit>: <proof command> PASS n/n`. The commit
+must be on `dev` or `master`, and a git `--tree` must be a clean checkout of it;
+`--dry-run` runs and reports without meeting. `tower lint --proofs --tree DIR`
+lists proofs whose filter matches no file under `Tests` or `Examples`.
 
 Only the owner starts `tower serve`. Agents use the non-serve CLI. Use HTTP
 only when the owner has already started the server and the task explicitly

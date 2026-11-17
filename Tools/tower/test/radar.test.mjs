@@ -46,9 +46,20 @@ function fixture() {
   };
 }
 
-test('radar: excludes arrived/done epochs, active epoch sorts first', () => {
+test('radar: excludes arrived/done epochs and follows epoch order, not which epoch is active', () => {
   const r = radarData(fixture());
-  assert.deepEqual(r.map(x => x.id), ['e2', 'e1']); // e2 is the active epoch, bumped ahead of e1 despite order 1 < 2; e3 (arrived) dropped
+  assert.deepEqual(r.map(x => x.id), ['e1', 'e2']); // order 1 before order 2 though e2 is active; e3 (arrived) dropped
+});
+
+test('radar: epochs without an order follow the ordered ones, by id number', () => {
+  const s = fixture();
+  s.epochs = [
+    { id: 'e25', name: 'Last', status: 'planned' },
+    { id: 'e18', name: 'First unordered', status: 'active' },
+    { id: 'e19', name: 'Ordered', status: 'planned', order: 1 },
+    ...s.epochs,
+  ];
+  assert.deepEqual(radarData(s).map(x => x.id), ['e1', 'e19', 'e2', 'e18', 'e25']);
 });
 
 test('radar: epoch grouping excludes sidequests and progress counts milestones', () => {

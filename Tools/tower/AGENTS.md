@@ -53,13 +53,15 @@ tower docs list|show|add|update|archive|delete   # durable Docs/*.md + scratchpa
                               # (archive → Docs/archive/, hidden from Docs UI)
 tower lint [--json]          # durability sweeper over the live board; exit 1
                               # on any finding, 0 clean
+tower lint --proofs --tree DIR  # proofs whose filter matches no Tests/Examples file
+tower prove --card '#N'|--epoch E [--yes --jet PATH --tree DIR --commit SHA --by X] [--dry-run]
+                              # run row proofs; meet the passing rows (see Proofs)
 jet Tools/tower/Board.jet lint --docs [--docs-root DIR] [--json]
                               # Docs/Spec/** reference scan, read-only; exit 1
                               # on any finding, 0 clean
 tower question list --open   # owner questions — block only affected slices
 tower message list [--all]   # open card messages, or every one with --all
-tower papercut list [--open] # logged tooling friction, newest first (--open filters)
-tower goal list [--all]      # long-term aims; goal show G1 lists linked cards + phases
+tower epoch list [--json]    # epochs in `order`, labelled E18 <name>, with exit criteria
 tower card show '#12'        # one card, with computed lane + decisions
 tower card list --tag needs-triage --json   # triage / wayfinder tag filter
 tower card list --parent '#12' --json       # wayfinder map children
@@ -112,12 +114,11 @@ in tracked `config.json`; existing ignored `secrets.json` files are not read.
 Each card has a computed `lane`: `decide` (owner), `plan`/`implement`/
 `building`/`verify` (displayed as Review; agent), `blocked`/`frozen`/`done` (inert).
 `tower next` sorts by review > building > implement > plan, then by ascending
-`workOrder` inside each lane. **Epochs** group the work; **milestones** are
-goals inside an epoch — link cards with `--milestone <id>` and progress computes itself.
-**Goals** are long-term aims (`G1`, `G2`, …), not cards: no phase, criteria,
-or gate, and they never block or rank work. Link a card with
-`--goals G1,G2`; an unknown goal id is rejected and `tower lint` reports
-`unknown-goal` for a stale link.
+`workOrder` inside each lane. **Epochs** are the board's one planning axis,
+worked in `order`; each carries `exitCriteria` that say what finishing it
+means. Show an epoch as `E18` or `E18 <name>` (the stored id stays `e18`).
+**Milestones** are targets inside an epoch — link cards with `--milestone <id>`
+and progress computes itself.
 Every card lives in an epoch or is a sidequest — frozen cards included
 (frozen is a phase, not a home; the store refuses an epoch-track card with no
 epoch). The board shows frozen cards in their epoch or sidequest section with a
@@ -135,13 +136,9 @@ tower card update '#12' --refs "Docs/Spec/foo.md,Examples/bar.jet"  # explicit d
 tower question answer <qid> --text "..." --by me
 tower message add '#12' --text "..." --by me
 tower message done <id> --by owner
-tower papercut add --by me --text "jet-env swallowed stderr" [--card '#12']  # recurring tooling friction only (hit twice, or deterministic for everyone); never blocked by a card lane
-tower papercut resolve <id> --by owner        # owner clears a handled papercut
-tower goal add --title "Self-compile in about 50 ms" [--body "…"] --by me
-tower goal update G1 --status achieved|dropped|active [--title …] [--body …] --by me
-tower goal log G1 --text "measured 410 ms" --by me
-tower goal remap --merge G7=G1 --renumber G3=G2 --by me  # merge goals; renumber the rest
-tower card update '#12' --goals G1,G2 --by me  # link goals; --goals '' clears them
+tower epoch add e19 --name "…" --order 2 --exit-criteria "…" --exit-criteria "…" --by me
+tower epoch update e19 --order 3 --by me     # or --file plan.json with {"order":3,"exitCriteria":[…]}
+tower epoch remove e19 --by me                # refused while any card or milestone still points at it
 tower decision add --file ballot.json --by me # or --file - for stdin, --draft if unfinished
 tower decision list --open --drafts          # agent review: include drafts, hidden from owner views
 tower card update '#12' --phase done --log "criteria met" --by orchestrator
@@ -163,15 +160,18 @@ uses `open` → `met` → `verified`.
 Add and progress it:
 
 ```
-tower card criteria '#12' --add "matrix vs full spec, per feature" --by planner
+tower card criteria '#12' --add "matrix vs full spec, per feature" --proof "jet test Compiler --profile cases --filter matrix/" --by planner
 tower card criteria '#12' --meet 1 --evidence "landed 3f2a9c1e: matrix 9/9" --by orchestrator
 tower card criteria '#12' --verify 1 --evidence "milestone review of 3f2a9c1e confirmed it" --by reviewer
 tower card criteria '#12' --meet 2 --kind decision --evidence "D-CACHE1 ratified A: no code change" --by orchestrator
+tower card criteria '#12' --move 3 --to '#40' --reason "belongs with the parser work" --by planner
 tower card criteria '#12' --list
 ```
 
-`--phase done` by a non-owner is refused (`E_CRITERIA`) when the card has no
-criteria or any row is not `met` or `verified`. The orchestrator marks rows
+`--phase done` by a non-owner is refused when the card has no criteria, when
+any row is not `met` or `verified` (`E_CRITERIA`), or when a settled row's
+evidence no longer passes the rule below (`E_EVIDENCE`). One refusal lists
+every failing row, one per line, as `cN: reason`. The orchestrator marks rows
 `met` only from integrated focused proof. When the last row settles on an
 actively claimed card, `E_CLOSE_READY` blocks every further claim and brief
 until that card closes, reopens, or gains a real gate. A milestone reviewer may
@@ -186,9 +186,16 @@ the row declares a non-code closure with `--kind`: `decision` (names the
 ratified `D-…` that settles it), `duplicate` (names the `#N` it duplicates or
 merged into) or `obsolete` (the evidence is the reason). Evidence that cites
 only scratch output (`$JET_SCRATCH_ROOT`, `$JET_STATE_ROOT`, `$JET_RUN_ROOT`,
-`~/.cache`, `/tmp`) is refused, and `--phase done` re-checks every row
-(`E_EVIDENCE`). The guard applies when the project root is a git work tree
-holding one of those branches.
+`~/.cache`, `/tmp`) is refused. `--meet` and `--verify` apply this rule when the
+row settles, so a refused meet changes nothing, and `--phase done` re-checks
+every row (`E_EVIDENCE`). The guard applies when the project root is a git work
+tree holding one of those branches.
+
+A row that belongs on another card moves with `--move n --to '#M'`. Its text
+becomes a new open row on #M, and the old row is met as kind `duplicate` with
+evidence `Moved to #M cK`. Both rows keep the link (`movedTo` on the old row,
+`movedFrom` on the new one), shown by `--list`, the briefing and the card view.
+Only an open row moves, and never onto a done card.
 
 No board text names this machine's home, user, host, email, mounts or dev tool
 roots (#6564 c5). Every write is checked against the rule table in
@@ -232,6 +239,39 @@ interaction session and same-origin provenance. The server binds each click to
 that session and a short-lived, single-use challenge for that exact ballot and
 outcome. CLI ratify, `clearance`, batch clearance, `--quote`, and caller-supplied
 `by: owner` are rejected and audited.
+
+### Proofs
+
+A row's `proof` names the `jet test` run that settles it. `--proof "jet test
+Compiler --profile P --filter F"` on `--add` or `--edit n` stores
+`{profile, filter}` for the Compiler profiles `cases`, `ui`, `golden`, `core`
+and `packages`; any other `jet test …` command is stored as `{profile: 'cmd',
+args}`. `--proof ""` clears it, and a proof change keeps the row's status. A row
+whose text ends in ``Proof: `jet test …`.`` has that sentence moved into the
+field when the board loads.
+
+```
+tower prove --card '#12'                     # the plan: runs and the rows each covers
+tower prove --epoch e18 --yes --jet PATH --tree DIR --commit SHA --by orchestrator
+tower prove --card '#12' --yes --dry-run --jet PATH --tree DIR --commit SHA
+tower lint --proofs --tree DIR               # proofs whose filter matches no test file
+```
+
+`tower prove` takes the open rows with a proof on the card, or on every unfinished
+card of the epoch. Without `--yes` it prints the plan and runs nothing. With
+`--yes`, it runs `jet test` once per corpus profile (`cases`, `ui`, `golden`):
+it lists the profile's cases, keeps the ids that contain any row's filter, and runs
+them all in one `--cases FILE` run. `core`, `packages` and `cmd` rows run once per
+distinct command. A row passes when every result row for its filter passes; a
+filter that selects no case fails. Each passing row is met with evidence
+`<commit>: <proof command> PASS n/n`, all in one board write; `--dry-run` runs and
+reports but meets nothing. `--commit` must be on `dev` or `master`, and `--tree`,
+when it is a git work tree, must be a clean checkout of that commit. The exit
+code is 1 when any row failed.
+
+`tower lint --proofs --tree DIR` lists every open row on an unfinished card
+whose proof filter is not a case-insensitive substring of any file path under
+`DIR/Tests` or `DIR/Examples` (rule `proof-unmatched`); exit 1 on a finding.
 
 ### Milestone review
 
@@ -494,7 +534,7 @@ GET  /api/gauntlet/standings        the one run shown: newest full or merged
                                      results file, else the planned grid
 GET  /api/messages?card=&open=0|1   durable card messages; open=1 filters
 POST /api/card/add|update|claim|release|delete   (release: {handoff})
-POST /api/card/criteria-add|criteria-edit|criteria-remove|criteria-meet|criteria-verify|criteria-reopen
+POST /api/card/criteria-add|criteria-edit|criteria-remove|criteria-move|criteria-meet|criteria-verify|criteria-reopen   (add/edit: {proof}; move: {n, to, reason})
 POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
 POST /api/clearance {decisionId,outcome,comment,quote}  (generic ballots only; quote = on-behalf-of)
 POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, same-origin session-bound, short TTL)
@@ -503,11 +543,9 @@ POST /api/verdict {id,outcome,title,supersedes}         (owner-only; superseded 
 POST /api/question/add|answer|delete
 POST /api/message/add {cardId,text}
 POST /api/message/done {id}                    (owner-only)
-POST /api/papercut/add {text,cardId?}          (one-line tooling friction; no lane guard)
-POST /api/papercut/resolve {id}                (owner-only)
 POST /api/done/clear                           (owner-only; clears completed cards, not messages)
 POST /api/idea/add|update|delete|promote
-POST /api/epoch/add|update|current
+POST /api/epoch/add|update|current|remove      (add/update: {order, exitCriteria})
 POST /api/milestone/add|update|criteria-add|criteria-edit|criteria-remove|criteria-meet|criteria-verify|criteria-reopen|verify|delete
 ```
 

@@ -27,7 +27,7 @@ test('done-gate: refuses close while a criterion is not met or verified (E_CRITE
   // criterion 2 is still open; criterion 1 is already met.
   assert.throws(
     () => st.mutate((s, cfg) => db.updateCard(s, '#1', { phase: 'done', by: 'builder' }, cfg)),
-    (e) => e instanceof TowerError && e.code === 'E_CRITERIA' && /1 of 2 criteria not met or verified \(2\)/.test(e.message));
+    (e) => e instanceof TowerError && e.code === 'E_CRITERIA' && /card #1 cannot close: 1 of 2 criteria fail\n  c2: not met — /.test(e.message));
   assert.equal(st.load().cards[0].phase, 'planning', 'refused write must not change phase');
 });
 

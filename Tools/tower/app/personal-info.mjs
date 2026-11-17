@@ -254,7 +254,7 @@ export function personalInfoAdded(matcher, before, after, limit = 3) {
 }
 
 // `tower redact`: rewrite every matched span in the live board and the
-// archive, ratified decisions, briefings and papercuts included, and count the
+// archive, ratified decisions and briefings included, and count the
 // spans per file, per store section and per rule. Only matched spans change.
 export function redactBoard(state, history, matcher) {
   const files = {};

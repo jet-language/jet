@@ -19,7 +19,7 @@ that stage only the writer's own paths. The repository has exactly two
 branches, `master` and `dev`, and one dev worktree; never create another
 branch, worktree, or ref (see `AGENTS.md`).
 
-`master` advances only when a goal or milestone is accomplished and its proof
+`master` advances only when an epoch or milestone is accomplished and its proof
 gate passes. Use the commit-bound sweep and fresh review below; individual
 patches do not substitute for milestone evidence.
 

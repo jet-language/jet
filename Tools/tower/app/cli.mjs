@@ -15,6 +15,7 @@ import { SHARD_BYTES, historyFiles, planShards } from './history-shards.mjs';
 import { ConfigError } from './config.mjs';
 import { migrate } from './migrate.mjs';
 import { lint } from './lint.mjs';
+import { executeRuns, proveEvidence, proveRuns, proveTargets, unmatchedProofs } from './proof.mjs';
 import { findDuplicateCandidates } from './card-matching.mjs';
 import { hasHardeningPayload } from './hardening.mjs';
 import * as docs from './docs.mjs';
@@ -22,21 +23,29 @@ import { applyRepairManifest } from './repair.mjs';
 import { machinePersonalInfo } from './personal-info.mjs';
 import { readGauntletStandings } from './gauntlet-standings.mjs';
 import { gauntletStandingsText, projectGauntletStandings } from './ui/gauntlet.js';
+import { epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
 
+// A repeatable flag collects every value in order (`--exit-criteria a
+// --exit-criteria b`); any other flag keeps its last value.
+const REPEATABLE_FLAGS = new Set(['exitCriteria']);
+
 function parseArgs(argv) {
   const pos = []; const flags = {};
+  const set = (key, value) => {
+    flags[key] = REPEATABLE_FLAGS.has(key) && Object.hasOwn(flags, key) ? [flags[key], value].flat() : value;
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--')) {
       const raw = a.slice(2);
       const eq = raw.indexOf('=');
       const key = (eq < 0 ? raw : raw.slice(0, eq)).replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-      if (eq >= 0) { flags[key] = raw.slice(eq + 1); continue; }
+      if (eq >= 0) { set(key, raw.slice(eq + 1)); continue; }
       const next = argv[i + 1];
-      if (next === undefined || next.startsWith('--')) flags[key] = true;
-      else { flags[key] = next; i++; }
+      if (next === undefined || next.startsWith('--')) set(key, true);
+      else { set(key, next); i++; }
     } else pos.push(a);
   }
   return { pos, flags };
@@ -72,17 +81,17 @@ const COMMAND_FLAGS = {
     list: ['lane', 'phase', 'epoch', 'track', 'kind', 'milestone', 'tag', 'untagged', 'parent', 'hardeningDedupKey'],
     show: ['hardeningDedupKey'],
     add: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'checkSteps', 'probe', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'goals', 'parent', 'force',
+      'checkSteps', 'probe', 'workOrder', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'parent', 'force',
       'hardeningDedupKey', 'hardeningSeam', 'hardeningRelation', 'hardeningWrongTierMask',
       'hardeningInputPartition', 'hardeningFindingId', 'hardeningFixture'),
     update: payload('title', 'body', 'kind', 'track', 'epoch', 'milestone', 'phase', 'priority', 'plan',
-      'checkSteps', 'probe', 'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'goals', 'parent', 'expectRev',
+      'checkSteps', 'probe', 'workOrder', 'log', 'needsAcceptance', 'blockedBy', 'refs', 'tags', 'addTag', 'removeTag', 'parent', 'expectRev',
       'hardeningDedupKey', 'hardeningSeam', 'hardeningRelation', 'hardeningWrongTierMask',
       'hardeningInputPartition', 'hardeningFindingId', 'hardeningFixture'),
     claim: by(),
     release: by('handoff'),
     delete: by(),
-    criteria: by('add', 'edit', 'text', 'remove', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
+    criteria: by('add', 'edit', 'text', 'proof', 'remove', 'move', 'to', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
     log: by('text'),
   }},
   decision: { verbs: {
@@ -109,19 +118,6 @@ const COMMAND_FLAGS = {
     add: by('text'),
     done: by(),
   }},
-  papercut: { verbs: {
-    list: ['open'],
-    add: by('card', 'text'),
-    resolve: by(),
-  }},
-  goal: { verbs: {
-    list: ['all'],
-    show: [],
-    add: by('title', 'body'),
-    update: by('title', 'body', 'status'),
-    log: by('text'),
-    remap: by('merge', 'renumber'),
-  }},
   idea: { verbs: {
     list: ['all'],
     add: by('title', 'body', 'text', 'kind', 'track', 'priority', 'tags', 'note'),
@@ -130,9 +126,10 @@ const COMMAND_FLAGS = {
   }},
   epoch: { verbs: {
     list: [],
-    add: by('name', 'goal', 'status'),
-    update: ['name', 'goal', 'status'],
+    add: payload('name', 'goal', 'status', 'order', 'exitCriteria'),
+    update: payload('name', 'goal', 'status', 'order', 'exitCriteria'),
     current: [],
+    remove: by(),
   }},
   milestone: { verbs: {
     list: ['epoch', 'archived'],
@@ -145,7 +142,8 @@ const COMMAND_FLAGS = {
   }},
   next: { flags: ['agent', 'epoch', 'track', 'limit', 'burndown', 'parallel', 'readyAcrossEpochs'] },
   brief: { flags: ['agent', 'noClaim', 'color'] },
-  lint: { flags: [] },
+  lint: { flags: ['proofs', 'tree'] },
+  prove: { flags: by('card', 'epoch', 'jet', 'tree', 'commit', 'dryRun', 'yes') },
   docs: { verbs: {
     list: [],
     show: ['path', 'scratch'],
@@ -195,15 +193,16 @@ function checkFlags(cmd, verb, flags) {
 }
 
 const FLAG_VALUE = {
-  add: '"text"', edit: 'n', remove: 'n', meet: 'n', verify: 'n', reopen: 'n', reason: '"…"', evidence: '"…"',
+  add: '"text"', edit: 'n', remove: 'n', move: 'n', to: 'REF', meet: 'n', verify: 'n', reopen: 'n', reason: '"…"', evidence: '"…"',
+  proof: '"jet test …"', proofs: null, jet: 'PATH', tree: 'DIR', yes: null,
   by: 'X', file: 'FILE', stdin: null, color: '=auto|always|never',
   sections: 'FILE',
   title: '"…"', body: '"…"', text: '"…"', path: 'PATH', section: 'SECTION',
   id: 'ID', card: 'REF', decision: 'ID', epoch: 'E', milestone: 'M',
   phase: 'P', track: 'T', kind: 'K', priority: 'P', plan: '"…"', checkSteps: '"…"', probe: '"jet run …"', lane: 'L',
-  tag: 'T', tags: 'a,b', addTag: 'T', removeTag: 'T', goals: 'G1,G2', parent: 'REF', blockedBy: 'REF',
+  tag: 'T', tags: 'a,b', addTag: 'T', removeTag: 'T', parent: 'REF', blockedBy: 'REF',
   refs: 'a,b', workOrder: 'N', needsAcceptance: 'true|false', log: '"…"', handoff: '"…"',
-  expectRev: 'N', name: 'X', dir: 'PATH', port: 'N', days: 'N', window: 'N', goal: '"…"',
+  expectRev: 'N', name: 'X', dir: 'PATH', port: 'N', days: 'N', window: 'N', goal: '"…"', order: 'N', exitCriteria: '"…"',
   status: 'S', open: null, all: null, untagged: null, force: null, archive: null,
   unarchive: null, archived: null, draft: null, drafts: null, ready: null, comment: '"…"', quote: '"…"',
   outcome: 'K', agent: 'A', noClaim: null, limit: 'N', burndown: null, parallel: null,
@@ -211,7 +210,6 @@ const FLAG_VALUE = {
   manifest: 'FILE', dryRun: null, apply: null, commit: 'OID', hardeningDedupKey: 'KEY', hardeningSeam: 'SEAM',
   hardeningRelation: 'RELATION', hardeningWrongTierMask: 'TIERS', hardeningInputPartition: 'PARTITION',
   hardeningFindingId: 'ID', hardeningFixture: 'PATH', out: 'FILE', results: 'PATH',
-  merge: 'G1=G14,G7=G14', renumber: 'G14=G1,G15=G2',
 };
 
 const flagToken = (key) => {
@@ -276,8 +274,18 @@ function Theme(flags) {
 }
 
 const displayLane = (lane) => lane === 'verify' ? 'review' : lane;
+// `epoch` is the label to show for the card's epoch, when the line has one.
 const cardLine = (c, { epoch } = {}) =>
-  `#${String(c.num).padEnd(4)}${epoch ? ` ${(c.epoch || '—').padEnd(3)} ` : ' '}${(c.priority || '').padEnd(3)} ${displayLane(c.lane.lane).padEnd(9)} ${c.title.slice(0, epoch ? 52 : 60)}`;
+  `#${String(c.num).padEnd(4)}${epoch ? ` ${epoch.padEnd(4)} ` : ' '}${(c.priority || '').padEnd(3)} ${displayLane(c.lane.lane).padEnd(9)} ${c.title.slice(0, epoch ? 52 : 60)}`;
+// The short `E18` tag for an epoch id on this board; `—` when there is none.
+const epochTag = (s, id) => id ? epochLabel(s.epochs.find(e => e.id === id) || { id }, { name: false }) : '—';
+// One criterion row of `card criteria --list`, with its proof and move links.
+const criterionLine = (it) => `#${it.n} [${it.status}] ${it.text}`
+  + (it.proof ? `  proof: ${proofCommand(it.proof)}` : '')
+  + (it.movedFrom ? `  ← from #${it.movedFrom.card} c${it.movedFrom.n}` : '')
+  + (it.movedTo ? `  → moved to #${it.movedTo.card} c${it.movedTo.n}` : '')
+  + (it.metBy ? `  met:${it.metBy}` : '') + (it.verifiedBy ? `  verified:${it.verifiedBy}` : '')
+  + (it.evidence && !it.movedTo ? `  — ${it.evidence}` : '');
 const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
 const zeroWidth = /[\p{Mark}\p{Default_Ignorable_Code_Point}\p{Control}]/u;
 const glyphWidth = (glyph) => {
@@ -350,7 +358,9 @@ function cmdStatus(store, { flags }) {
   const t = Theme(flags);
   const bar = (n) => t.success('█'.repeat(Math.min(12, n))) + t.border('░'.repeat(Math.max(0, 12 - n)));
   const phase = (id, text) => ({ done: t.success, verify: t.warn, deciding: t.error }[id] || t.accent)(text);
-  console.log(`\n  ${t.invert('TOWER')} ${t.border('·')} ${t.accent(s.meta.project)} ${t.border('·')} ${t.dim(`${store.config.terms.epoch.toLowerCase()} ${db.activeEpoch(s) || '—'} · rev ${s.meta.rev}`)}\n`);
+  const current = s.epochs.find(e => e.id === db.activeEpoch(s));
+  const epochText = current ? epochLabel(current) : `${store.config.terms.epoch.toLowerCase()} —`;
+  console.log(`\n  ${t.invert('TOWER')} ${t.border('·')} ${t.accent(s.meta.project)} ${t.border('·')} ${t.dim(`${epochText} · rev ${s.meta.rev}`)}\n`);
   for (const ph of db.PHASES) {
     const n = s.counts.byPhase[ph.id];
     if (n) console.log(`  ${phase(ph.id, ph.label.padEnd(9))} ${bar(n)} ${t.dim(String(n))}`);
@@ -515,7 +525,6 @@ function cmdCard(store, { pos, flags }) {
         criteria: p.criteria,
         refs: flags.refs ? String(flags.refs).split(',').map(x => x.trim()).filter(Boolean) : p.refs,
         tags,
-        goals: flags.goals !== undefined ? String(flags.goals).split(',') : p.goals,
         parent: flags.parent ?? p.parentId ?? p.parent,
         workOrder: flags.workOrder ?? p.workOrder, by,
         needsAcceptance: flags.needsAcceptance ?? p.needsAcceptance,
@@ -538,7 +547,6 @@ function cmdCard(store, { pos, flags }) {
       if (flags.blockedBy !== undefined) patch.blockedBy = flags.blockedBy === '' ? [] : String(flags.blockedBy).split(',');
       if (flags.refs !== undefined) patch.refs = flags.refs === '' ? [] : String(flags.refs).split(',').map(x => x.trim()).filter(Boolean);
       if (flags.tags !== undefined) patch.tags = flags.tags === '' ? [] : String(flags.tags).split(',');
-      if (flags.goals !== undefined) patch.goals = flags.goals === '' ? [] : String(flags.goals).split(',');
       if (flags.addTag !== undefined) patch.addTags = String(flags.addTag).split(',');
       if (flags.removeTag !== undefined) patch.removeTags = String(flags.removeTag).split(',');
       if (flags.parent !== undefined) patch.parent = flags.parent;
@@ -558,9 +566,11 @@ function cmdCard(store, { pos, flags }) {
         const { result } = store.mutate((s) => db.reopenCriterion(s, ref, flags.reopen, { reason: flags.reason, by }));
         return out(flags, 'criterion #' + result.n + ' reopened on card #' + result.cardNum, result);
       }
+      if (flags.proof === true) throw new TowerError('E_USAGE', '--proof takes a jet test command, or "" to clear it');
       if (flags.edit !== undefined) {
-        if (typeof flags.text !== 'string') throw new TowerError('E_USAGE', 'card criteria --edit n needs --text "new text" and --reason "…"');
-        const { result } = store.mutate((s) => db.editCriterion(s, ref, flags.edit, { text: flags.text, reason: flags.reason, by }));
+        if (typeof flags.text !== 'string' && flags.proof === undefined)
+          throw new TowerError('E_USAGE', 'card criteria --edit n needs --text "new text" --reason "…", or --proof "jet test …"');
+        const { result } = store.mutate((s) => db.editCriterion(s, ref, flags.edit, { text: flags.text, proof: flags.proof, reason: flags.reason, by }));
         return out(flags, `criterion #${result.n} edited on card #${result.cardNum}${result.reopened ? ' (reopened: its evidence proved the old wording)' : ''}`, result);
       }
       if (flags.remove !== undefined) {
@@ -568,8 +578,15 @@ function cmdCard(store, { pos, flags }) {
         return out(flags, `criterion #${result.n} removed from card #${result.cardNum}`, result);
       }
       if (flags.text !== undefined) throw new TowerError('E_USAGE', 'card criteria --text goes with --edit n');
+      if (flags.proof !== undefined && flags.add === undefined) throw new TowerError('E_USAGE', 'card criteria --proof goes with --add or --edit n');
+      if (flags.to !== undefined && flags.move === undefined) throw new TowerError('E_USAGE', 'card criteria --to goes with --move n');
+      if (flags.move !== undefined) {
+        if (flags.to === undefined) throw new TowerError('E_USAGE', 'card criteria --move n needs --to <card>');
+        const { result } = store.mutate((s) => db.moveCriterion(s, ref, flags.move, { to: flags.to, reason: flags.reason, by }));
+        return out(flags, `criterion #${result.from.n} moved from card #${result.from.cardNum} to card #${result.to.cardNum} as c${result.to.n}`, result);
+      }
       if (flags.add !== undefined) {
-        const { result } = store.mutate((s) => db.addCriterion(s, ref, flags.add, by));
+        const { result } = store.mutate((s) => db.addCriterion(s, ref, flags.add, by, { proof: flags.proof }));
         return out(flags, `added criterion #${result.n} to card #${result.cardNum}`, result);
       }
       if (flags.kind !== undefined && flags.meet === undefined && flags.verify === undefined)
@@ -585,7 +602,7 @@ function cmdCard(store, { pos, flags }) {
       const s = store.load();
       const found = db.findCard(s, ref) || (() => { throw new TowerError('E_NOT_FOUND', `no card ${ref}`); })();
       if (flags.json) return out(flags, null, found.criteria || []);
-      for (const it of found.criteria || []) console.log(`#${it.n} [${it.status}] ${it.text}${it.metBy ? `  met:${it.metBy}` : ''}${it.verifiedBy ? `  verified:${it.verifiedBy}` : ''}${it.evidence ? `  — ${it.evidence}` : ''}`);
+      for (const it of found.criteria || []) console.log(criterionLine(it));
       if (!(found.criteria || []).length) console.log('(no criteria — an agent cannot close this card)');
       return;
     }
@@ -837,100 +854,6 @@ function cmdMessage(store, { pos, flags }) {
   }
 }
 
-function cmdPapercut(store, { pos, flags }) {
-  const [verb, id] = pos;
-  switch (verb) {
-    case 'list': {
-      const papercuts = db.listPapercuts(store.load(), { status: flags.open ? 'open' : null });
-      if (flags.json) return out(flags, null, papercuts);
-      for (const pc of papercuts)
-        console.log(`${pc.id.padEnd(14)} ${(pc.status || '').padEnd(9)} [${pc.by}] ${pc.text.slice(0, 70)}`);
-      if (!papercuts.length) console.log('(no papercuts match)');
-      return;
-    }
-    case 'add': {
-      const { result } = store.mutate((s) => db.addPapercut(s, {
-        text: flags.text,
-        cardId: flags.card,
-        by: flags.by,
-      }));
-      return out(flags, `logged papercut ${result.id}${result.cardNum ? ` on card #${result.cardNum}` : ''}`, result);
-    }
-    case 'resolve': {
-      const { result } = store.mutate((s) => db.resolvePapercut(s, id, flags.by));
-      return out(flags, `resolved papercut ${result.id}`, result);
-    }
-    default: throw new TowerError('E_USAGE', `unknown papercut verb "${verb}" — list/add/resolve`);
-  }
-}
-
-// Goals are long-term aims, not work: no phase, criteria, or gate. Cards link
-// to them with `card add|update --goals G1,G2`; `goal show` derives the cards.
-function cmdGoal(store, { pos, flags }) {
-  const [verb, ref] = pos;
-  switch (verb) {
-    case 'list': {
-      const s = store.load();
-      const historyCards = store.loadHistory().cards;
-      const goals = db.listGoals(s, { all: !!flags.all }).map(g => ({ ...g, cards: db.goalCards(g, s.cards, historyCards) }));
-      if (flags.json) return out(flags, null, goals);
-      for (const g of goals) {
-        const done = g.cards.filter(c => c.phase === 'done').length;
-        console.log(`${g.id.padEnd(5)} ${g.status.padEnd(9)} ${`${done}/${g.cards.length} cards done`.padEnd(17)} ${g.title}`);
-      }
-      if (!goals.length) console.log(flags.all ? '(no goals)' : '(no active goals; --all includes achieved and dropped)');
-      return;
-    }
-    case 'show': {
-      const s = store.load();
-      const goal = db.findGoal(s, ref);
-      if (!goal) throw new TowerError('E_NOT_FOUND', `no goal ${ref}`);
-      const cards = db.goalCards(goal, s.cards, store.loadHistory().cards);
-      if (flags.json) return out(flags, null, { ...goal, cards });
-      console.log(`${goal.id} [${goal.status}] ${goal.title}`);
-      if (goal.body) console.log(`\n${goal.body}`);
-      console.log(`\ncards (${cards.length}):`);
-      for (const c of cards) console.log(`  #${String(c.num).padEnd(5)} ${String(c.phase).padEnd(10)} ${c.title}${c.archived ? ' (archived)' : ''}`);
-      if (!cards.length) console.log('  (none linked — use `tower card update \'#N\' --goals ' + goal.id + ' --by <you>`)');
-      if (goal.log.length) {
-        console.log('\nlog:');
-        for (const e of goal.log) console.log(`  ${e.at} [${e.by}] ${e.text}`);
-      }
-      return;
-    }
-    case 'add': {
-      const { result } = store.mutate((s) => db.addGoal(s, { title: flags.title, body: flags.body, by: flags.by }));
-      return out(flags, `added goal ${result.id}`, result);
-    }
-    case 'update': {
-      const patch = { by: flags.by };
-      for (const k of ['title', 'body', 'status']) if (flags[k] !== undefined) patch[k] = flags[k];
-      if (Object.keys(patch).length === 1) throw new TowerError('E_USAGE', 'goal update needs --title, --body, or --status');
-      const { result } = store.mutate((s) => db.updateGoal(s, ref, patch));
-      return out(flags, `updated goal ${result.id}`, result);
-    }
-    case 'log': {
-      const { result } = store.mutate((s) => db.updateGoal(s, ref, { logEntry: flags.text ?? pos.slice(2).join(' '), by: flags.by }));
-      return out(flags, `logged on goal ${result.id}`, result);
-    }
-    case 'remap': {
-      const pairs = (raw, flag) => Object.fromEntries(String(raw ?? '').split(',').map(x => x.trim()).filter(Boolean).map((pair) => {
-        const [from, to, extra] = pair.split('=').map(x => x.trim());
-        if (!from || !to || extra !== undefined) throw new TowerError('E_USAGE', `--${flag} takes FROM=TO pairs, got "${pair}"`);
-        return [from, to];
-      }));
-      const merge = pairs(flags.merge, 'merge');
-      const renumber = pairs(flags.renumber, 'renumber');
-      if (!Object.keys(merge).length && !Object.keys(renumber).length) throw new TowerError('E_USAGE', 'goal remap needs --merge or --renumber');
-      const { result } = store.mutate((s, _config, history) => db.remapGoals(s, history, { merge, renumber, by: flags.by }));
-      if (flags.json) return out(flags, null, result);
-      for (const g of result.goals) console.log(`${g.id.padEnd(5)} ${g.status.padEnd(9)} ${g.title}`);
-      return;
-    }
-    default: throw new TowerError('E_USAGE', `unknown goal verb "${verb}" — list/show/add/update/log/remap`);
-  }
-}
-
 function cmdIdea(store, { pos, flags }) {
   const [verb, id] = pos;
   switch (verb) {
@@ -963,26 +886,38 @@ function cmdEpoch(store, { pos, flags }) {
   switch (verb) {
     case 'list': {
       const s = store.load();
-      if (flags.json) return out(flags, null, s.epochs);
-      for (const e of s.epochs) console.log(`${e.id.padEnd(6)} ${(e.status || 'open').padEnd(9)} ${e.name}${e.status === 'active' ? '  ← current' : ''}`);
-      if (!s.epochs.length) console.log('(no epochs — tower epoch add e1 --name "...")');
+      const epochs = sortEpochs(s.epochs);
+      if (flags.json) return out(flags, null, epochs);
+      for (const e of epochs) {
+        console.log(`${(e.status || 'open').padEnd(9)} ${String(e.order ?? '—').padStart(3)}  ${epochLabel(e)}${e.status === 'active' ? '  ← current' : ''}`);
+        for (const criterion of e.exitCriteria || []) console.log(`               exit: ${criterion}`);
+      }
+      if (!epochs.length) console.log('(no epochs — tower epoch add e1 --name "..." --order 1)');
       return;
     }
     case 'add': {
-      const { result } = store.mutate((s) => db.addEpoch(s, { id, name: flags.name, goal: flags.goal, status: flags.status, by: flags.by }));
-      return out(flags, `added epoch ${result.id} — ${result.name}`, result);
+      const p = readPayload(flags) || {};
+      const { result } = store.mutate((s) => db.addEpoch(s, {
+        ...p, id: id ?? p.id, name: flags.name ?? p.name, goal: flags.goal ?? p.goal, status: flags.status ?? p.status,
+        order: flags.order ?? p.order, exitCriteria: flags.exitCriteria ?? p.exitCriteria, by: flags.by,
+      }));
+      return out(flags, `added epoch ${epochLabel(result)}`, result);
     }
     case 'update': {
-      const patch = {};
-      for (const f of ['name', 'goal', 'status']) if (flags[f] !== undefined) patch[f] = flags[f];
+      const patch = { ...(readPayload(flags) || {}) };
+      for (const f of ['name', 'goal', 'status', 'order', 'exitCriteria']) if (flags[f] !== undefined) patch[f] = flags[f];
       const { result } = store.mutate((s) => db.updateEpoch(s, id, patch));
-      return out(flags, `updated epoch ${result.id}`, result);
+      return out(flags, `updated epoch ${epochLabel(result)}`, result);
+    }
+    case 'remove': {
+      const { result } = store.mutate((s, _config, history) => db.removeEpoch(s, history, id, flags.by));
+      return out(flags, `removed epoch ${result.removed}`, result);
     }
     case 'current': {
       const { result } = store.mutate((s) => db.setCurrentEpoch(s, id === 'none' ? null : id));
       return out(flags, `current ${store.config.terms.epoch.toLowerCase()}: ${result.active || '—'}`, result);
     }
-    default: throw new TowerError('E_USAGE', `unknown epoch verb "${verb}" — list/add/update/current`);
+    default: throw new TowerError('E_USAGE', `unknown epoch verb "${verb}" — list/add/update/remove/current`);
   }
 }
 
@@ -995,7 +930,7 @@ function cmdMilestone(store, { pos, flags }) {
       if (flags.epoch) ms = ms.filter(m => m.epochId === flags.epoch);
       if (!flags.archived) ms = ms.filter(m => !m.archived);
       if (flags.json) return out(flags, null, ms);
-      for (const m of ms) console.log(`${m.id.padEnd(12)} ${m.epochId.padEnd(6)} ${(m.status || 'open').padEnd(12)} ${m.progress.done}/${m.progress.total}  ${m.title.slice(0, 50)}${m.archived ? '  [archived]' : ''}`);
+      for (const m of ms) console.log(`${m.id.padEnd(12)} ${epochTag(s, m.epochId).padEnd(4)} ${(m.status || 'open').padEnd(12)} ${m.progress.done}/${m.progress.total}  ${m.title.slice(0, 50)}${m.archived ? '  [archived]' : ''}`);
       if (!ms.length) console.log('(no milestones)');
       return;
     }
@@ -1079,16 +1014,18 @@ function cmdNext(store, { flags }) {
     : scope === 'burndown' ? 'next up — burndown scope (current epoch + sidequests):'
     : 'next up (review > building > implement > plan → workOrder):';
   console.log(header);
-  for (const c of rich) console.log(` · ${cardLine(c, { epoch: scope === 'ready-across' })}`);
+  for (const c of rich) console.log(` · ${cardLine(c, { epoch: scope === 'ready-across' ? epochTag(s, c.epoch) : undefined })}`);
 }
 
 // #457 — durability sweeper: rule-based lint over the live board, optionally
 // extended with a Docs/Spec/** reference scan (--docs). Read-only; exit 1 on
-// any finding so it is CI/pre-flight friendly, 0 clean.
+// any finding so it is CI/pre-flight friendly, 0 clean. `--proofs --tree DIR`
+// checks only that every proof filter matches a test file in that checkout.
 function cmdLint(store, { flags }) {
   const s = store.load();
-  const history = store.loadHistory();
-  const findings = lint(s, history);
+  if (flags.tree !== undefined && !flags.proofs) throw new TowerError('E_USAGE', 'lint --tree goes with --proofs');
+  if (flags.proofs && typeof flags.tree !== 'string') throw new TowerError('E_USAGE', 'lint --proofs needs --tree DIR, a checkout holding Tests and Examples');
+  const findings = flags.proofs ? unmatchedProofs(s, resolve(flags.tree)) : lint(s, store.loadHistory());
   if (flags.json) {
     console.log(JSON.stringify(findings, null, 2));
     process.exitCode = findings.length ? 1 : 0;
@@ -1097,6 +1034,56 @@ function cmdLint(store, { flags }) {
   for (const f of findings) console.log(`${f.rule}  ${f.ref}  ${f.msg}`);
   if (!findings.length) console.log('(clean)');
   process.exitCode = findings.length ? 1 : 0;
+}
+
+// Run the proofs of a card's or an epoch's open criteria and meet the ones
+// that pass. Without --yes it prints the plan; with --dry-run it runs the tests
+// and reports, but meets nothing.
+function cmdProve(store, { flags }) {
+  const s = store.load();
+  if ((flags.card === undefined) === (flags.epoch === undefined)) throw new TowerError('E_USAGE', 'prove needs one of --card REF or --epoch E');
+  const card = flags.card === undefined ? null : db.findCard(s, flags.card) || (() => { throw new TowerError('E_NOT_FOUND', `no card ${flags.card}`); })();
+  const epoch = flags.epoch === undefined ? null
+    : (s.epochs.find(e => e.id.toLowerCase() === String(flags.epoch).toLowerCase()) || (() => { throw new TowerError('E_NOT_FOUND', `no epoch ${flags.epoch}`); })()).id;
+  const runs = proveRuns(proveTargets(s, { card, epoch }));
+  const scope = card ? `card #${card.num}` : epochTag(s, epoch);
+  const planned = runs.map(run => ({ command: run.command, criteria: run.targets.map(({ card: c, item }) => ({ card: c.num, n: item.n, proof: proofCommand(item.proof) })) }));
+  if (!flags.yes) {
+    if (flags.json) return out(flags, null, { scope, runs: planned });
+    console.log(`plan for ${scope}: ${runs.length} run${runs.length === 1 ? '' : 's'} for ${planned.reduce((sum, run) => sum + run.criteria.length, 0)} open criteria with a proof; pass --yes to run them`);
+    for (const run of planned) {
+      console.log(run.command);
+      for (const row of run.criteria) console.log(`  #${row.card} c${row.n}  ${row.proof}`);
+    }
+    return;
+  }
+  for (const key of ['jet', 'tree', 'commit']) if (typeof flags[key] !== 'string' || !flags[key]) throw new TowerError('E_USAGE', `prove --yes needs --${key}`);
+  if (!flags.dryRun && (typeof flags.by !== 'string' || !flags.by)) throw new TowerError('E_USAGE', 'prove --yes needs --by <agent> to meet the passing criteria');
+  const resolver = store.config.durability;
+  if (!resolver.active()) throw new TowerError('E_EVIDENCE', 'prove needs a project git work tree with a dev or master branch to check --commit against');
+  const [found] = resolver.commits(flags.commit);
+  if (!found) throw new TowerError('E_EVIDENCE', `--commit ${flags.commit} names no commit in this repository`);
+  if (!found.ref) throw new TowerError('E_EVIDENCE', `commit ${flags.commit} is not on ${resolver.refs().join(' or ')}; land it, then prove the landed commit`);
+  const tree = resolve(flags.tree);
+  const head = spawnSync('git', ['-C', tree, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
+  if (head.status === 0) {
+    if (head.stdout.trim() !== found.sha) throw new TowerError('E_EVIDENCE', `--tree ${flags.tree} is at ${head.stdout.trim().slice(0, 10)}, not ${found.sha.slice(0, 10)}; check out the commit you prove`);
+    const dirty = spawnSync('git', ['-C', tree, 'status', '--porcelain', '--untracked-files=no'], { encoding: 'utf8' });
+    if (dirty.stdout.trim()) throw new TowerError('E_EVIDENCE', `--tree ${flags.tree} has uncommitted changes; prove a clean checkout of ${found.sha.slice(0, 10)}`);
+  }
+  const sha = found.sha.slice(0, 10);
+  const verdicts = executeRuns(runs, { jet: resolve(flags.jet), tree });
+  const passing = verdicts.filter(v => v.pass);
+  if (passing.length && !flags.dryRun) {
+    store.mutate((st, cfg, history) => {
+      for (const v of passing) db.meetCriterion(st, v.target.card.id, v.target.item.n, { evidence: proveEvidence(sha, v), by: flags.by }, cfg, history);
+    });
+  }
+  const report = verdicts.map(v => ({ card: v.target.card.num, n: v.target.item.n, pass: v.pass, passed: v.passed, total: v.total, detail: v.detail, evidence: v.pass ? proveEvidence(sha, v) : null }));
+  process.exitCode = verdicts.length === passing.length ? 0 : 1;
+  if (flags.json) return console.log(JSON.stringify({ scope, commit: found.sha, met: flags.dryRun ? 0 : passing.length, results: report }, null, 2));
+  for (const row of report) console.log(`${row.pass ? 'PASS' : 'FAIL'} #${row.card} c${row.n}  ${row.pass ? row.evidence : row.detail}`);
+  console.log(flags.dryRun ? `dry run: ${passing.length} of ${report.length} would be met` : `met ${passing.length} of ${report.length} criteria at ${sha}`);
 }
 
 function cmdDocs(store, { pos, flags }) {
@@ -1190,7 +1177,7 @@ function renderBrief(p, t) {
   const heading = (text) => t.accent(text);
   L.push(`${t.invert(`#${c.num}`)} ${t.accent(c.title)}`);
   L.push(`  ${t.warn(c.phase)}${c.priority ? ` ${t.border('·')} ${t.warn(c.priority)}` : ''}${c.track ? ` ${t.border('·')} ${t.dim(c.track)}` : ''}${c.workOrder != null ? ` ${t.border('·')} ${t.dim(`workOrder ${c.workOrder}`)}` : ''}`);
-  if (c.epoch) L.push(`  ${t.dim(`epoch ${c.epoch.id}${c.epoch.name ? ` — ${c.epoch.name}` : ''}${c.epoch.goal ? `: ${c.epoch.goal}` : ''}`)}`);
+  if (c.epoch) L.push(`  ${t.dim(`${c.epoch.label}${c.epoch.goal ? `: ${c.epoch.goal}` : ''}`)}`);
   if (c.milestone) L.push(`  ${t.dim(`milestone ${c.milestone.title}${c.milestone.goal ? ` — ${c.milestone.goal}` : ''} [${c.milestone.status || 'open'}]`)}`);
   if (c.body) { L.push('', heading('BODY'), c.body); }
   if (c.plan) { L.push('', heading('PLAN'), c.plan); }
@@ -1207,7 +1194,8 @@ function renderBrief(p, t) {
     L.push(`  ${t.dim('Workers return a receipt. After integrated proof, the orchestrator marks rows met and closes the card.')}`);
     for (const it of items) {
       const state = (it.status === 'verified' ? t.success : it.status === 'met' ? t.warn : t.dim)(`[${it.status}]`);
-      L.push(`  ${t.border(`#${it.n}`)} ${state} ${it.text}${it.metBy ? `  ${t.dim(`met:${it.metBy}`)}` : ''}${it.verifiedBy ? `  ${t.dim(`verified:${it.verifiedBy}`)}` : ''}${it.evidence ? `  ${t.border('—')} ${it.evidence}` : ''}`);
+      const moved = `${it.proof ? `  ${t.dim(`proof: ${proofCommand(it.proof)}`)}` : ''}${it.movedFrom ? `  ${t.dim(`← from #${it.movedFrom.card} c${it.movedFrom.n}`)}` : ''}${it.movedTo ? `  ${t.dim(`→ moved to #${it.movedTo.card} c${it.movedTo.n}`)}` : ''}`;
+      L.push(`  ${t.border(`#${it.n}`)} ${state} ${it.text}${moved}${it.metBy ? `  ${t.dim(`met:${it.metBy}`)}` : ''}${it.verifiedBy ? `  ${t.dim(`verified:${it.verifiedBy}`)}` : ''}${it.evidence ? `  ${t.border('—')} ${it.evidence}` : ''}`);
     }
   } else {
     L.push('', heading(`CRITERIA  (none — an agent cannot close this card${p.criteria.needsAcceptance ? '; owner visual review still applies' : ''})`));
@@ -1614,14 +1602,13 @@ export async function run(argv) {
       case 'decision':  return cmdDecision(store, sub);
       case 'question':  return cmdQuestion(store, sub);
       case 'message':   return cmdMessage(store, sub);
-      case 'papercut':  return cmdPapercut(store, sub);
-      case 'goal':      return cmdGoal(store, sub);
       case 'idea':      return cmdIdea(store, sub);
       case 'epoch':     return cmdEpoch(store, sub);
       case 'milestone': return cmdMilestone(store, sub);
       case 'next':      return cmdNext(store, sub);
       case 'brief':     return cmdBrief(store, sub);
       case 'lint':      return cmdLint(store, sub);
+      case 'prove':     return cmdProve(store, sub);
       case 'docs':      return cmdDocs(store, sub);
       case 'verdict':   return cmdVerdict(store, sub);
       case 'archive':   return cmdArchive(store, sub);

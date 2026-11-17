@@ -1,6 +1,6 @@
 import {
   boardEpochs, cardMatches, cardNumberQuery, sortCards, ownerVerifyQueue, openAcceptanceBallot, ownerDecisions,
-  evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload,
+  evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, proofCommand,
 } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
 import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
@@ -152,7 +152,7 @@ function maybeReload() {
 
 // Board-driven views redraw on every change; Docs, AGENTS.md, and Gauntlet
 // hold their own drafts and data, so only the chrome updates under them.
-const LIVE_VIEWS = new Set(['now', 'board', 'papercuts', 'goals']);
+const LIVE_VIEWS = new Set(['now', 'board']);
 function liveRender({ own = false } = {}) {
   renderBeacon();
   renderChrome();
@@ -385,7 +385,7 @@ const cardById = (id) => allCards().find(c => c.id === id);
 const ticket = (c) => '#' + esc(c.num ?? '');
 const CFG = () => S.config || {};
 const TERM = (k, fb) => ((CFG().terms || {})[k] || fb);
-const epochTag = (e) => e ? (e.num != null ? `${TERM('epoch', 'Epoch')} ${e.num}` : e.id) : '';
+const epochTag = (e) => epochLabel(e, { name: false });
 const openDecisions = () => S.decisions.filter(d => d.status !== 'ratified' && !d.draft);
 const openGenericDecisions = () => openDecisions().filter(d => d.group !== 'acceptance');
 const ballotCount = () => openGenericDecisions().length + verifyQueue().length;
@@ -467,8 +467,6 @@ const VIEWS = [
   { id: 'now', name: 'Now', count: () => ballotCount(), alert: true },
   { id: 'board', name: 'Board', count: () => S.cards.filter(c => c.phase !== 'done' && c.phase !== 'frozen').length },
   { id: 'docs', name: 'Docs', count: () => docsFileCount() },
-  { id: 'papercuts', name: 'Papercuts', count: () => (S.papercuts || []).filter(p => p.status === 'open').length },
-  { id: 'goals', name: 'Goals', count: () => (S.goals || []).filter(g => g.status === 'active').length },
   { id: 'guidance', name: 'AGENTS.md' },
   { id: 'gauntlet', name: 'Gauntlet' },
 ];
@@ -1386,6 +1384,8 @@ async function showDetail(ref) {
   else showDetailMessage(summary ? `Loading #${summary.num} ${summary.title}…` : 'Loading card…');
   await loadDetail(id);
 }
+// A card named by its number, as move links and text references cite it.
+const showCardNum = (num) => showDetail(allCards().find(c => c.num === num)?.id || `#${num}`);
 
 function showDetailMessage(text, retry = null) {
   detailShown = null;
@@ -1462,7 +1462,7 @@ function renderDetail(c) {
       <div class="fields">
         <div class="fld"><div class="fld__k">Stage</div><select data-fld="phase">${S.phases.map(p => `<option value="${esc(p.id)}" ${p.id === phase ? 'selected' : ''}>${esc(p.label)}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">Track</div>${sel('track', CFG().tracks || ['epoch', 'sidequest'], c.track)}</div>
-        <div class="fld"><div class="fld__k">${esc(TERM('epoch', 'Epoch'))}</div><select data-fld="epoch"><option value="">—</option>${S.epochs.map(e => `<option value="${esc(e.id)}" ${e.id === c.epoch ? 'selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>
+        <div class="fld"><div class="fld__k">${esc(TERM('epoch', 'Epoch'))}</div><select data-fld="epoch"><option value="">—</option>${S.epochs.map(e => `<option value="${esc(e.id)}" ${e.id === c.epoch ? 'selected' : ''}>${esc(epochLabel(e))}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">${esc(TERM('milestone', 'Milestone'))}</div><select data-fld="milestoneId"><option value="">—</option>${S.milestones.filter(x => (!c.epoch || x.epochId === c.epoch) && (!x.archived || x.id === c.milestoneId)).map(x => `<option value="${esc(x.id)}" ${x.id === c.milestoneId ? 'selected' : ''}>${esc(x.title)}</option>`).join('')}</select></div>
         <div class="fld"><div class="fld__k">Priority</div>${sel('priority', CFG().priorities || ['P0', 'P1', 'P2', 'P3'], c.priority)}</div>
         <div class="fld"><div class="fld__k">Kind</div>${sel('kind', CFG().kinds || ['task', 'feature', 'idea', 'bug'], c.kind)}</div>
@@ -1510,9 +1510,13 @@ function renderDetail(c) {
           <span style="margin-left:auto"><button class="btn btn--ghost btn--sm" data-crit-edit>Edit</button>
           <button class="btn btn--ghost btn--sm" data-crit-remove>Remove</button></span></div>
         <div class="critrow__text">${esc(it.text)}</div>
-        ${it.evidence ? `<div class="critrow__ev">${esc(it.evidence)}</div>` : ''}
+        ${it.proof ? `<div class="critrow__proof"><code>${esc(proofCommand(it.proof))}</code></div>` : ''}
+        ${it.movedFrom ? `<div class="critrow__moved">← moved from <button class="linkbtn" data-card-num="${esc(it.movedFrom.card)}">#${esc(it.movedFrom.card)} c${esc(it.movedFrom.n)}</button></div>` : ''}
+        ${it.movedTo ? `<div class="critrow__moved">→ moved to <button class="linkbtn" data-card-num="${esc(it.movedTo.card)}">#${esc(it.movedTo.card)} c${esc(it.movedTo.n)}</button></div>` : ''}
+        ${it.evidence && !it.movedTo ? `<div class="critrow__ev">${esc(it.evidence)}</div>` : ''}
         ${it.metBy || it.verifiedBy ? `<div class="critrow__by">${it.metBy ? `met: ${esc(it.metBy)}` : ''}${it.verifiedBy ? `  verified: ${esc(it.verifiedBy)}` : ''}</div>` : ''}
       </div>`);
+    row.querySelectorAll('[data-card-num]').forEach(b => b.addEventListener('click', () => showCardNum(Number(b.dataset.cardNum))));
     // Editing a met row reopens it on the server: its evidence proved the old wording.
     const text = $('.critrow__text', row);
     const editBtn = $('[data-crit-edit]', row);
@@ -2622,137 +2626,7 @@ async function viewGauntlet() {
   }, 20_000);
 }
 
-
-
-// ---- PAPERCUTS: append-only friction log, grouped by day --------------------
-let papercutFilter = 'open';   // 'open' | 'all'
-function viewPapercuts() {
-  const v = $('#view');
-  const all = [...(S.papercuts || [])].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
-  const open = all.filter(p => p.status === 'open');
-  const list = papercutFilter === 'open' ? open : all;
-  v.innerHTML = `<div class="viewhead"><h1 class="h1">Papercuts</h1>
-      <span class="viewhead__sub">one-line tooling friction agents hit — <b>${open.length}</b> open</span>
-      <div class="viewhead__actions">
-        <button class="btn btn--ghost" id="pc-filter">${papercutFilter === 'open' ? 'Show all' : 'Open only'}</button>
-      </div></div>
-    <div id="pc-list"></div>`;
-  $('#pc-filter').addEventListener('click', () => { papercutFilter = papercutFilter === 'open' ? 'all' : 'open'; viewPapercuts(); });
-  const body = $('#pc-list');
-  if (!list.length) {
-    body.appendChild(el(`<div class="empty"><div class="empty__glyph">✓</div><div>${papercutFilter === 'open'
-      ? 'No open papercuts — nothing snagging the agents.' : 'No papercuts logged yet.'}</div></div>`));
-    return;
-  }
-  let day = null;
-  for (const pc of list) {
-    const d = new Date(pc.created);
-    const key = d.toDateString();
-    if (key !== day) {
-      day = key;
-      body.appendChild(el(`<div class="docs__label">${esc(d.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' }))}</div>`));
-    }
-    const c = pc.cardId ? cardById(pc.cardId) : null;
-    const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const resolved = pc.status === 'resolved';
-    const row = el(`<div class="idea"${resolved ? ' style="opacity:.5"' : ''}>
-        <span class="num">${esc(time)}</span>
-        <span class="chip">${esc(pc.by)}</span>
-        <span class="idea__t">${esc(pc.text)}${c ? ` <button class="chip" data-card title="open card">${ticket(c)}</button>` : ''}</span>
-        ${resolved
-          ? '<span class="critrow__badge critrow__badge--verified">resolved</span>'
-          : '<button class="btn btn--ghost btn--sm" data-resolve>Resolve</button>'}
-      </div>`);
-    if (c) $('[data-card]', row).addEventListener('click', () => showDetail(c.id));
-    $('[data-resolve]', row)?.addEventListener('click', () => api('papercut/resolve', { id: pc.id, by: 'owner' }));
-    body.appendChild(row);
-  }
-}
-
-// ---- GOALS: long-term aims that cards point at ------------------------------
-// A goal has no phase and never blocks work. The tab shows each goal's title
-// and description with add, edit, achieve and remove; a goal's linked cards
-// show only on request. Agents link cards with `tower card update --goals`.
-let goalFilter = 'active';   // 'active' | 'all'
-let goalEditing = null;      // goal id whose edit form is open, or 'new'
-const goalCardsOpen = new Set();  // goal ids whose linked cards are shown
-function goalForm(g) {
-  const form = el(`<div class="goal__form">
-      <input class="goal__in" data-keep="goal-title:${esc(g?.id || 'new')}" placeholder="Goal title" value="${esc(g?.title || '')}">
-      <textarea class="goal__in" rows="3" data-keep="goal-body:${esc(g?.id || 'new')}" placeholder="What success means">${esc(g?.body || '')}</textarea>
-      <div class="goal__acts"><button class="btn btn--red btn--sm" data-save>${g ? 'Save' : 'Add goal'}</button>
-        <button class="btn btn--ghost btn--sm" data-cancel>Cancel</button></div>
-    </div>`);
-  $('[data-save]', form).addEventListener('click', async () => {
-    const title = $('input', form).value.trim(), body = $('textarea', form).value;
-    if (!title) return toast('a goal needs a title', true);
-    const saved = g ? await api('goal/update', { id: g.id, title, body, by: 'owner' })
-      : await api('goal/add', { title, body, by: 'owner' });
-    if (saved) { goalEditing = null; viewGoals(); }
-  });
-  $('[data-cancel]', form).addEventListener('click', () => { goalEditing = null; viewGoals(); });
-  return form;
-}
-function viewGoals() {
-  const v = $('#view');
-  const all = S.goals || [];
-  const active = all.filter(g => g.status === 'active');
-  const list = goalFilter === 'active' ? active : all;
-  v.innerHTML = `<div class="viewhead"><h1 class="h1">Goals</h1>
-      <span class="viewhead__sub">long-term aims cards work toward — <b>${active.length}</b> active, ${all.length - active.length} achieved or dropped</span>
-      <div class="viewhead__actions">
-        <button class="btn btn--red" id="goal-new">New goal</button>
-        <button class="btn btn--ghost" id="goal-filter">${goalFilter === 'active' ? 'Show all' : 'Active only'}</button>
-      </div></div>
-    <div id="goal-list"></div>`;
-  $('#goal-filter').addEventListener('click', () => { goalFilter = goalFilter === 'active' ? 'all' : 'active'; viewGoals(); });
-  $('#goal-new').addEventListener('click', () => { goalEditing = 'new'; viewGoals(); });
-  const body = $('#goal-list');
-  if (goalEditing === 'new') body.appendChild(goalForm(null));
-  if (!list.length && goalEditing !== 'new') {
-    body.appendChild(el(`<div class="empty"><div class="empty__glyph">◎</div><div>${goalFilter === 'active'
-      ? 'No active goals.' : 'No goals recorded yet.'}</div></div>`));
-    return;
-  }
-  for (const g of list) {
-    const cards = g.cards || [];
-    const section = el(`<section class="goal">
-        <div class="goal__head">
-          <span class="num">${esc(g.id)}</span>
-          <span class="goal__t">${esc(g.title)}</span>
-          ${g.status === 'active' ? '' : `<span class="chip">${esc(g.status)}</span>`}
-          <span class="goal__acts">
-            <button class="btn btn--ghost btn--sm" data-edit>Edit</button>
-            ${g.status === 'active'
-              ? '<button class="btn btn--ghost btn--sm" data-status="achieved">Achieved</button><button class="btn btn--ghost btn--sm" data-status="dropped">Remove</button>'
-              : '<button class="btn btn--ghost btn--sm" data-status="active">Reactivate</button>'}
-          </span>
-        </div>
-      </section>`);
-    $('[data-edit]', section).addEventListener('click', () => { goalEditing = goalEditing === g.id ? null : g.id; viewGoals(); });
-    section.querySelectorAll('[data-status]').forEach(b => b.addEventListener('click', () =>
-      api('goal/update', { id: g.id, status: b.dataset.status, by: 'owner' })));
-    if (goalEditing === g.id) section.appendChild(goalForm(g));
-    else if (g.body) section.appendChild(el(`<div class="goal__body">${esc(g.body)}</div>`));
-    if (cards.length) {
-      const toggle = el(`<button class="btn btn--ghost btn--sm goal__cards">${goalCardsOpen.has(g.id) ? 'Hide' : 'Show'} ${cards.length} linked cards</button>`);
-      toggle.addEventListener('click', () => { goalCardsOpen.has(g.id) ? goalCardsOpen.delete(g.id) : goalCardsOpen.add(g.id); viewGoals(); });
-      section.appendChild(toggle);
-    }
-    if (goalCardsOpen.has(g.id)) for (const c of cards) {
-      const row = el(`<div class="idea" title="open card">
-          <span class="num">${ticket(c)}</span>
-          <span class="idea__t">${esc(c.title)}</span>
-          <span class="chip">${esc(c.phase)}</span>
-        </div>`);
-      row.addEventListener('click', () => showDetail(c.id));
-      section.appendChild(row);
-    }
-    body.appendChild(section);
-  }
-}
-
-const RENDER = { now: viewNow, board: viewBoard, papercuts: viewPapercuts, goals: viewGoals, guidance: viewGuidance, gauntlet: viewGauntlet, docs: viewDocs };
+const RENDER = { now: viewNow, board: viewBoard, guidance: viewGuidance, gauntlet: viewGauntlet, docs: viewDocs };
 function renderView() {
   try { (RENDER[VIEW] || viewNow)(); }
   catch (err) {

@@ -101,9 +101,41 @@ export function sortCards(cards, { col = 'workflow', dir = 'asc' } = {}, priorit
   });
 }
 
+// An epoch's number: its stored `num`, else the digits of an `e18`-style id.
+export function epochNumber(epoch) {
+  if (Number.isInteger(epoch?.num)) return epoch.num;
+  const match = /^e(\d+)$/i.exec(String(epoch?.id ?? ''));
+  return match ? Number(match[1]) : null;
+}
+
+// The one way an epoch is named on screen: `E18`, or `E18 Declarations as
+// types` where a name is shown. An id without a number shows as itself.
+export function epochLabel(epoch, { name = true } = {}) {
+  if (!epoch) return '';
+  const num = epochNumber(epoch);
+  const tag = num == null ? String(epoch.id ?? '') : `E${num}`;
+  return name && epoch.name && epoch.name !== epoch.id ? `${tag} ${epoch.name}` : tag;
+}
+
+// Epochs are worked in `order`; epochs without one follow, by number, then id.
+export function compareEpochs(a, b) {
+  return (a.order ?? Infinity) - (b.order ?? Infinity)
+    || (epochNumber(a) ?? Infinity) - (epochNumber(b) ?? Infinity)
+    || String(a.id).localeCompare(String(b.id));
+}
+
+export const sortEpochs = (epochs = []) => [...epochs].sort(compareEpochs);
+
+// The `jet test` command a criterion's proof runs (app/proof.mjs): a Compiler
+// profile with a filter, or the arguments of another `jet test` run.
+export const proofCommand = (proof) => proof.profile === 'cmd'
+  ? `jet test ${proof.args.join(' ')}`
+  : `jet test Compiler --profile ${proof.profile} --filter ${proof.filter}`;
+
 // The radar lists active epochs. A finished epoch still gets a section when
 // it holds frozen cards (always shown, like every card) or, with Show closed
-// on, done cards — a card is never left without its epoch section.
+// on, done cards — a card is never left without its epoch section. Sections
+// follow epoch order.
 export function boardEpochs(radar, epochs, cards, milestones, showClosed) {
   const shown = new Set(radar.map(e => e.id));
   const extras = epochs.flatMap(epoch => {
@@ -136,7 +168,9 @@ export function boardEpochs(radar, epochs, cards, milestones, showClosed) {
       })),
     }];
   });
-  return extras.length ? [...radar, ...extras] : radar;
+  if (!extras.length) return radar;
+  const rank = new Map(sortEpochs(epochs).map((epoch, index) => [epoch.id, index]));
+  return [...radar, ...extras].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
 }
 
 // Card delete confirmation (owner 2026-10-04): every ballot on the card is
