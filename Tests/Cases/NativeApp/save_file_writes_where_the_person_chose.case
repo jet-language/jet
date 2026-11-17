@@ -5,7 +5,9 @@
 # file:// URI, decoded to the path the file is written to. A page hands the
 # bytes to the browser as a download under the suggested name, typed by the
 # kind the name matches. With no dialog to ask, or no page to download in,
-# nothing is saved and a notice that names the file says so.
+# nothing is saved and a notice that names the file says so. The notice
+# list outlasts a run in the device store, so the Linux runs and the node
+# runs keep theirs under data directories of their own.
 fixture: SaveFileWritesWhereThePersonChose.fixture
 requires: os-name:linux
 env: NO_COLOR=1
@@ -15,6 +17,7 @@ stderr: file bus.stderr
 await: file bus.ready timeout 120s every 10ms # the fake bus listens
 step: jet run main.jet
 env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/bus.sock
+env: XDG_DATA_HOME={work}/linux
 exit: 0
 stdout: = "saved: true\ntitle,status\nFix the gate,done\n"
 wait: bus timeout 60s
@@ -22,6 +25,7 @@ exit: 0
 file: heard.txt = "Hello AddMatch SaveFile\nSave File | handle_token | jet3 | current_name | board.csv | filters | a(sa(us)) | CSV | *.csv | text/csv | current_filter | (sa(us)) | CSV | *.csv | text/csv\n"
 step: jet run main.jet
 env: DBUS_SESSION_BUS_ADDRESS=unix:path={work}/no-bus.sock
+env: XDG_DATA_HOME={work}/linux
 exit: 0
 stdout: ~ "saved: false" # no dialog to ask, so nothing is written
 stdout: ~ "notice: Couldn't save board.csv:" # the notice names the file
@@ -31,10 +35,12 @@ exit: 0
 copy: download.mjs .jet/build/download.mjs
 step: node download.mjs
 cwd: .jet/build
+env: XDG_DATA_HOME={work}/web
 exit: 0
 stdout: = "saved: true\ndownloaded: board.csv text/csv\ntitle,status\nFix the gate,done\n"
 step: node app.js
 cwd: .jet/build
+env: XDG_DATA_HOME={work}/web
 exit: 0
 stdout: ~ "saved: false" # node has no page, so nothing is downloaded
 stdout: ~ "notice: Couldn't save board.csv: there is no page to download it in" # the notice names the file and why
