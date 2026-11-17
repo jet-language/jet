@@ -152,6 +152,14 @@ sema_event_handler_type: fn(owner: String, args: [Type]) -> Type Never! {
     Type.Fn{params: [Type]{args[0].copy()}, ret: Val(ret), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
+// The provider route a checked method lowers through (JetIR BuildEvents.jet
+// ir_event_method): the family's runtime type and the method, whose
+// `is_active` the Subscription provider spells `active`.
+sema_event_route_symbol: fn(owner: String, method: String) -> String Never! {
+    member: if owner == "Subscription" && method == "is_active" -> "active" else -> method
+    "jet_std::Jet{owner}::{member}"
+}
+
 sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     receiver_type: sema_call_resolved_type(receiver_value.ty, environment, program)
     owner: sema_event_handle_owner(receiver_type, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
@@ -186,7 +194,7 @@ sema_call_try_event_handle_method: fn(receiver: Expr, receiver_value: TExpr, met
         handler: sema_expression_lambda_host_callback_stored(args[args.len() - 1].expr, Val(sema_event_handler_type(owner, type_args)), false, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         values.push(handler)
     }
-    value := sema_tree_node(shape.result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.EventMethod{method: method}, args: values}, span)
+    value := sema_tree_node(shape.result, TExprKind.HandleMethod{receiver: receiver_value, operation: THandleOp.EventMethod{symbol: sema_event_route_symbol(owner, method)}, args: values}, span)
     checked: sema_expression_call_expected(value, expected, environment, program, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
