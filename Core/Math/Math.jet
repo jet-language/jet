@@ -38207,7 +38207,7 @@ Rounding: enum {
     TowardPositive,
     TowardZero,
     TiesToAway,
-    TiesToEven
+    TiesToEven,
 }
 
 /// The integral value nearest `n`, ties to the even one, of `n`'s own type
@@ -38250,7 +38250,7 @@ priv round_in_mode: fn(n: Float, mode: Rounding) -> Float Never! {
 /// sign of zero is kept. An integer type is already integral and returns
 /// itself. `impl MyNumber.Roundable` makes a user type round the same way.
 Roundable: trait {
-    rounded: fn(self, mode: Rounding) -> Self Never!
+    rounded: fn(self, mode: Rounding) -> Self Never!,
 }
 
 impl Float.Roundable {
@@ -40668,7 +40668,7 @@ ReduceOp: enum {
     Mul,
     Min,
     Max,
-    Avg
+    Avg,
 }
 
 F64x4: struct {
@@ -43296,12 +43296,12 @@ priv coordinate_frame: fn(left: Int, right: Int) -> Int TransformError! {
 // Not exported from Core's public type table: payload extraction for the
 // existing geometry call contracts checked by sema, not a new coordinate API.
 GeometryPoint: trait {
-    __coordinates: fn(self) -> {x: Float, y: Float, frame_id: Int} Never!
+    __coordinates: fn(self) -> {x: Float, y: Float, frame_id: Int} Never!,
 }
 
 Ray2: struct<T, From, To> {
     origin: Point2<T, To>,
-    direction: Delta2<T, To>
+    direction: Delta2<T, To>,
 }
 
 Transform: struct<From, To> {

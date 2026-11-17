@@ -18,11 +18,11 @@ use {
 
 #Error
 Reject: enum {
-    Odd
+    Odd,
 }
 
 Worker: struct {
-    step: fn(Int) -> Int
+    step: fn(Int) -> Int,
 }
 
 // Grows more than this (kB) over the measured rounds: a leak.
@@ -279,13 +279,13 @@ listened: fn(from: Int, to: Int) -> Int {
 // A struct whose only field is a recursive edge: its wrapper box is a
 // capture's own and is freed with the closure box.
 CycleOnly: struct {
-    ty: CycleShape
+    ty: CycleShape,
 }
 
 CycleShape: enum {
     Int,
     Named(name: String),
-    Other(items: [CycleOnly])
+    Other(items: [CycleOnly]),
 }
 
 cycle_weight: fn(shape: CycleShape) -> Int {

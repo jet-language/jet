@@ -107,7 +107,9 @@ brace_layout1_closed: fn(text: String) -[]> LambdaShapeQuoted? {
     carrier: brace_layout1_carrier_end(bytes)
     edits := [LambdaShapeEdit]{}
     loop end in brace_layout1_trailing(bytes, formatted.text.bytes()) {
-        if end >= carrier && brace_layout1_breaks(bytes, end) -> edits.push(LambdaShapeEdit{start: end, end: end, text: ","})
+        if end >= carrier && brace_layout1_breaks(bytes, end) {
+            edits.push(LambdaShapeEdit{start: end, end: end, text: ","})
+        }
     }
     if edits.len() == 0 -> return None
     closed: lambda_shape1_apply(bytes, edits) ?? return None
@@ -175,7 +177,9 @@ brace_layout1_trailing: fn(old_bytes: [U8], new_bytes: [U8]) -[]> [Int] {
 brace_layout1_tokens: fn(bytes: [U8]) -[]> [Token] {
     out := [Token]{}
     loop token in lex_generated(bytes).tokens {
-        if token.kind == TOKEN_SEMI || token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT -> next
+        if token.kind == TOKEN_SEMI || token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT {
+            next
+        }
         out.push(token)
     }
     out

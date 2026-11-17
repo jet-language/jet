@@ -102,6 +102,7 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(kit_ui_invocation("// @run_deny FS\n", "Tests/UI/e.jet", false).argv, ["run", "--deny=FS", "Tests/UI/e.jet"])
     assert_eq(kit_ui_invocation("// @run_json\n", "Tests/UI/e.jet", false).argv, ["run", "--json", "Tests/UI/e.jet"])
     assert_eq(kit_ui_invocation("// @deep_checks tree.run\n", "Tests/UI/e.jet", false).argv, ["run", "--deep-checks=tree.run", "Tests/UI/e.jet"])
+    assert_eq(kit_ui_invocation("// @build_option --bounds=off\n", "Tests/UI/e.jet", false).argv, ["build", "Tests/UI/e.jet", "--bounds=off"])
     // The hangar row runs jetpack, with the tampered object's digest appended.
     hangar: kit_ui_invocation("// @jetpack_hangar_digest_mismatch\n", "Tests/UI/d.jet", false)
     assert(hangar.hangar_tamper)

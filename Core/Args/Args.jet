@@ -336,7 +336,7 @@ ArgDef: struct {
     help: String,
     flag: Bool,
     required: Bool,
-    default_text: String
+    default_text: String,
 }
 
 define: fn(name: String, help: String, flag: Bool) -> ArgDef Never! {
@@ -497,7 +497,7 @@ CLIInput: struct {
     default: String?,
     env: String?,
     required: Bool,
-    positional: Bool
+    positional: Bool,
 }
 
 // One command word: a method or bound function of the program struct. `help`
@@ -505,7 +505,7 @@ CLIInput: struct {
 CLICommand: struct {
     name: String,
     help: String,
-    inputs: [CLIInput]
+    inputs: [CLIInput],
 }
 
 // `help` is the root help text after the program name.
@@ -513,7 +513,7 @@ CLISpec: struct {
     help: String,
     version: String?,
     inputs: [CLIInput],
-    commands: [CLICommand]
+    commands: [CLICommand],
 }
 
 // One parse level: the root spec, or one command with the root inputs
@@ -524,14 +524,14 @@ CLILevel: struct {
     accepts_version: Bool,
     inherited: [CLIInput],
     local: [CLIInput],
-    commands: [CLICommand]
+    commands: [CLICommand],
 }
 
 // Text values by input name. A spec has a handful of inputs, so a list
 // lookup replaces a hash map.
 CLIValues: struct {
     names: [String],
-    values: [String]
+    values: [String],
 }
 
 // `status` -1 runs the entry; 0 prints `message` to stdout and returns; any
@@ -545,13 +545,13 @@ CLIParsed: struct {
     positionals: [String],
     command: String,
     status: Int,
-    message: String
+    message: String,
 }
 
 CLITableCursor: struct {
     table: String,
     raw: [U8],
-    at: Int
+    at: Int,
 }
 
 // The table field at the cursor: its decimal byte length, `:`, its bytes.
@@ -1182,7 +1182,7 @@ ArgEntry: struct {
     repeat: Bool,
     value: Int,
     choices: [String],
-    nested: Int
+    nested: Int,
 }
 
 // One spec. `inherited` holds the parent inputs a command parses but keeps
@@ -1192,11 +1192,11 @@ ArgsLevel: struct {
     inherited: [ArgEntry],
     description: String?,
     version: String?,
-    inherited_version: Bool
+    inherited_version: Bool,
 }
 
 ArgsSpec: struct {
-    levels: [ArgsLevel]
+    levels: [ArgsLevel],
 }
 
 ParsedArgs: struct {
@@ -1205,7 +1205,7 @@ ParsedArgs: struct {
     positionals: [String],
     subcommand: String?,
     explicit_flags: [String:Bool],
-    explicit_options: [String:Bool]
+    explicit_options: [String:Bool],
 }
 
 spec: fn() -> ArgsSpec Never! {

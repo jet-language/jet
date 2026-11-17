@@ -12,12 +12,12 @@ package: {
 use files: core.files
 
 Context: struct {
-    id: Int
+    id: Int,
 }
 
 Sink: trait {
     finish: fn(&&self) -[]> Int,
-    peek: fn(self) -[]> Int
+    peek: fn(self) -[]> Int,
 }
 
 Worker: struct {
@@ -32,7 +32,7 @@ Worker: struct {
 }
 
 Holder: struct {
-    sink: Sink
+    sink: Sink,
 }
 
 make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{context: s.copy(), n: n} }

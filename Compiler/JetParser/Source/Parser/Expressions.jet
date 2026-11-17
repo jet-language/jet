@@ -2430,7 +2430,9 @@ parser_parse_expression_fields: fn(state: &JetParserState, depth: Int) -> Parsed
             }
             fields.push(ExprField{name: parser_value(state, name_token), name_span: name_token.span, value: value.move()})
             parser_finish_data_member(state, "record entry")
-            if parser_current_kind(state) == TOKEN_RBRACE || parser_current_kind(state) == TOKEN_EOF || parser_aborting(state) || state.position == entry_start -> break
+            if parser_current_kind(state) == TOKEN_RBRACE || parser_current_kind(state) == TOKEN_EOF || parser_aborting(state) || state.position == entry_start {
+                break
+            }
         }
     }
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after record fields")

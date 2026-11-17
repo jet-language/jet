@@ -37,7 +37,7 @@ JetSQLAggregate: enum {
     Sum,
     Avg,
     Min,
-    Max
+    Max,
 }
 
 // Rust JetSqlSelectItem:30–74. Public projection carrier for SQL consumers.
@@ -209,7 +209,7 @@ identifier: fn(value: String?, role: String) -> String Err! {
 #Equatable
 JetSQLGroupKey: enum {
     Field(String),
-    Ordinal(U64)
+    Ordinal(U64),
 }
 
 #Equatable
@@ -219,7 +219,7 @@ JetSQLQuery: struct {
     group_by: [JetSQLGroupKey],
     filter: {field: String, operator: String, value: String}?,
     order: {field: String, descending: Bool}?,
-    limit: U64?
+    limit: U64?,
 }
 
 // Rust parse_sql_query:526–699. One final terminator is removed, not all.
@@ -362,7 +362,7 @@ JetSQLValue: enum {
 #Equatable
 JetSQLResultRow: struct {
     fields: [{field: String, value: JetSQLValue}],
-    source_indices: [U64]
+    source_indices: [U64],
 }
 
 compare_sql_cell: fn(left: String, operator: String, right: String) -> Bool Never! {
@@ -1008,7 +1008,7 @@ priv internal: module {
 
     SQLOrderedRow: struct {
         row: JetSQLResultRow,
-        order: JetSQLValue?
+        order: JetSQLValue?,
     }
 
     source_indices_compare: fn(left: [U64], right: [U64]) -> Ordering Never! {

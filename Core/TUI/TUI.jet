@@ -31,14 +31,14 @@ TUIEvent: enum {
     IO(channel: String, payload: [U8]),
     Focus(focused: Bool),
     Interrupt,
-    Close
+    Close,
 }
 
 TUIColorProfile: enum {
     ANSI16,
     ANSI256,
     TrueColor,
-    ASCII
+    ASCII,
 }
 
 // A terminal color. `RGB` holds a core.color `Color`; the terminal has no
@@ -47,12 +47,12 @@ TUIColorProfile: enum {
 TUIColor: enum {
     ANSI16(Int),
     ANSI256(Int),
-    RGB(Color)
+    RGB(Color),
 }
 
 TUIDirection: enum {
     Horizontal,
-    Vertical
+    Vertical,
 }
 
 TUIConstraint: enum {
@@ -60,7 +60,7 @@ TUIConstraint: enum {
     Min(Float),
     Max(Float),
     Percent(Float),
-    Fill(Float)
+    Fill(Float),
 }
 
 TUICapabilities: struct {
@@ -71,7 +71,7 @@ TUICapabilities: struct {
     resize: Bool,
     clipboard: Bool,
     width: Int,
-    height: Int
+    height: Int,
 }
 
 TUIStyle: struct {
@@ -79,12 +79,12 @@ TUIStyle: struct {
     background: TUIColor?,
     bold: Bool,
     dim: Bool,
-    underline: Bool
+    underline: Bool,
 }
 
 TUIListState: struct {
     selected: Int,
-    offset: Int
+    offset: Int,
 }
 
 capabilities: fn() -> TUICapabilities Never! { capabilities_from_inputs(capability_inputs()) }
@@ -100,7 +100,7 @@ TUICapabilityInputs: struct {
     forced: Bool,
     no_color: Bool,
     terminal: Bool,
-    usize_max: U64
+    usize_max: U64,
 }
 
 capability_env_bytes: fn(name: String) -> [U8]? Never! {
@@ -424,13 +424,13 @@ close_event: fn() -> TUIEvent Never! { TUIEvent.Close }
 
 ColorWords: struct {
     kind: Int,
-    word: Int
+    word: Int,
 }
 
 StyleWords: struct {
     foreground: ColorWords,
     background: ColorWords,
-    flags: Int
+    flags: Int,
 }
 
 color_words: fn(color: TUIColor?) -> ColorWords Never! {

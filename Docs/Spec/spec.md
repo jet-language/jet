@@ -5805,7 +5805,8 @@ the built package's own code; dependencies and Core keep their fatal checks.
 gate (see One audited-gate law): the command prints a `note:` naming it
 (`--quiet` drops it), `jet inspect gates FILE --bounds=off` lists it, and a
 package or organization `policy: { check_removal: .Forbid }` refuses it with
-E3415 before the native program is built. Jai's `null` and `casts` checks have no row: a
+E3415 before the native program is built; a single file's inline `package:`
+block is that package's policy too. Jai's `null` and `casts` checks have no row: a
 reference is never null and a raw pointer's validity is the `#Unsafe` author's
 obligation (I1), and a conversion is total or returns an Optional
 (D-SHAPE-CONVERT1), so there is no check to switch. A profile field, flag or
@@ -7436,8 +7437,16 @@ under `.jetos/proof/`.
 
 These are intentional boundaries, not implied promises:
 
-- Jet does not provide a general `Any` top type. Use a precise type, a generic,
-  a trait, or a closed data carrier.
+- Jet does not provide a general `Any` top type or a dynamically typed `any`
+  value: no type exists that every value fits. Asking such a value for its type
+  is answered only when the program runs, and anything could be stored in it.
+  Values of different types share a list through a union
+  (`[Int | String | Duration]`) or a trait the stored types opt into
+  (`impl Duration.Field {}`). A type arm takes one type back and is checked
+  when compiling: `if f == { .Duration(d) -> … else -> print(f) }` may name
+  only a member of the union or a type that implements the trait.
+  `reflect.of(x)` reads a value's type name and fields. A precise type, a
+  generic, or a closed data carrier covers the rest.
 - Stored-borrow reference fields and their `refs` expansion lens are absent.
   Borrowed views may still be used where their checked callable contract allows.
 - Nested `#CLI` structs and implicit grouped flag prefixes are not part of the

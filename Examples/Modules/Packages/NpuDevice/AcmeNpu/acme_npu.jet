@@ -1,0 +1,54 @@
+use compute: core.compute
+
+// The NPU: it runs the add, mul and matmul kernels of the kernel IR. This
+// test device computes them in Jet; a real one would hand the buffers to
+// its hardware.
+Npu: struct {
+    impl compute.Accelerator {
+        name: fn(self) -> String Never! { "NPU" }
+
+        kind: fn(self) -> String Never! { "npu" }
+
+        caps: fn(self) -> [String] Never! { [String]{compute.KERNEL_IR, "add", "mul", "matmul"} }
+
+        launch: fn(self, kernel: String, buffers: [[Float]], shapes: [[Int]]) -[GPU]> [Float] compute.ComputeError! {
+            left: buffers[0]
+            right: buffers[1]
+            if kernel == {
+                "add" -> Ok(loop (index, x) in left -> x + right[index])
+                "mul" -> Ok(loop (index, x) in left -> x * right[index])
+                "matmul" -> Ok(matmul(left, right, shapes[0][0], shapes[0][1], shapes[1][1]))
+                else -> Err(compute.ComputeError.Unsupported)
+            }
+        }
+    }
+}
+
+// An NPU whose add drops the second operand. The CPU reference suite
+// catches it, so it never becomes a device.
+FaultyNpu: struct {
+    impl compute.Accelerator {
+        name: fn(self) -> String Never! { "FaultyNPU" }
+
+        kind: fn(self) -> String Never! { "npu" }
+
+        caps: fn(self) -> [String] Never! { [String]{compute.KERNEL_IR, "add"} }
+
+        launch: fn(self, kernel: String, buffers: [[Float]], shapes: [[Int]]) -[GPU]> [Float] compute.ComputeError! {
+            Ok(loop x in buffers[0] -> x)
+        }
+    }
+}
+
+// The row-major product of a `rows` x `inner` and an `inner` x `cols` matrix.
+matmul: fn(left: [Float], right: [Float], rows: Int, inner: Int, cols: Int) -> [Float] {
+    out := [Float]{}
+    loop i in 0..<rows {
+        loop j in 0..<cols {
+            sum := 0.0
+            loop t in 0..<inner -> sum += left[i * inner + t] * right[t * cols + j]
+            out.push(sum)
+        }
+    }
+    out
+}

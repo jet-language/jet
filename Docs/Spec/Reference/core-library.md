@@ -7417,10 +7417,28 @@ Tensor bracket write windows retain the checked range's inclusive/exclusive
 end and borrow the owner's first-axis storage. Their native call receives
 those bounds and the enclosing source location, rather than a copied slice.
 
+A package adds a compute device by implementing the `Accelerator` trait
+(D-ACCEL-LIB1): `name` and `kind` give the device's name and the hardware
+kind it runs on, `caps` lists `KERNEL_IR` (`"jet.kernel/1"`) and each kernel
+of that IR the device runs, and `launch` runs one kernel over row-major F64
+buffers and their shapes. Version 1 of the kernel IR names each kernel by the
+Core operation it computes: `add`, `sub`, `mul`, `div`, `maximum` and
+`minimum` of two same-shape operands, `negate`, `abs`, `exp`, `log` and
+`sqrt` of one, and `matmul` of two matrices. `accelerator(provider)` admits
+the device only when every kernel it lists gives the CPU oracle's answer on
+the reference operands, so no device name is fixed in Core or the compiler.
+`launch(provider, kernel, operands)` runs a kernel on the device and checks
+its answer against the CPU oracle again; the result sits on the device, and
+the other operations refuse it rather than compute it on the CPU.
+Example: [`Examples/Modules/Packages/NpuDevice`](../../../Examples/Modules/Packages/NpuDevice/run.jet).
+
 | Signature | Result | Description |
 |---|---|---|
 | `device_cpu() -> ComputeDevice`, `device_auto() -> ComputeDevice` | device | Select CPU or automatic placement. |
 | `device_cuda() -> ComputeDevice`, `device_metal() -> ComputeDevice`, `device_vulkan() -> ComputeDevice`, `device_webgpu() -> ComputeDevice` | device | Request an explicit provider device. |
+| `Accelerator: trait { name, kind, caps, launch }`, `KERNEL_IR: String` | trait | The device interface a package implements, and the kernel IR version it names. |
+| `accelerator<A: Accelerator>(provider: A) -[GPU]> ComputeDevice ComputeError!` | device | Admit a package's device after the CPU reference suite: `Unsupported` without `KERNEL_IR` or for a kernel outside it, `Device` for a wrong answer. |
+| `launch<A: Accelerator>(provider: A, kernel: String, operands: [Tensor]) -[GPU]> Tensor ComputeError!` | tensor | Run one listed kernel on the device, checked against the CPU oracle; operands are F64 tensors on the CPU or that device. |
 | `device(tensor: Tensor) -> String` | text | Read the tensor's device name. |
 | `zeros(shape: [Int]) -> Tensor ComputeError!`, `ones(shape)`, `full(shape, value)` | tensor | Construct checked dense tensors. |
 | `eye(n: Int) -> Tensor ComputeError!` | tensor | Construct a square identity tensor. |

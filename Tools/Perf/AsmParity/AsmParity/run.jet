@@ -152,21 +152,21 @@ Options: struct {
     candidate: String?,
     older: String?,
     best: Int,
-    gains: String?
+    gains: String?,
 }
 
 #Codable(only: .Decode)
 Fixture: struct {
     script: String,
     out: String,
-    fresh: Bool{false}
+    fresh: Bool{false},
 }
 
 #Codable(only: .Decode)
 Server: struct {
     script: String,
     port: Int,
-    delay_ms: Int
+    delay_ms: Int,
 }
 
 // The cell fields this tool reads; `what` and `gauntlet` are for its readers.
@@ -181,24 +181,24 @@ Bench: struct {
     fixture: Fixture?,
     server: Server?,
     service: Bool{false},
-    scriptbench: [String]{[String]{}}
+    scriptbench: [String]{[String]{}},
 }
 
 #Codable(only: .Decode)
 Served: struct {
     port: Int,
-    delay_ms: Int
+    delay_ms: Int,
 }
 
 #Codable(only: .Decode)
 Workload: struct {
     id: String,
-    servers: [Served]{[Served]{}}
+    servers: [Served]{[Served]{}},
 }
 
 #Codable(only: .Decode)
 Manifest: struct {
-    workloads: [Workload]
+    workloads: [Workload],
 }
 
 // A cell's directories, run plan (one argument list per step), input and
@@ -209,12 +209,12 @@ Setup: struct {
     plan: [[String]],
     steps: Bool,
     fixture: Fixture?,
-    expect: String?
+    expect: String?,
 }
 
 Variant: struct {
     label: String,
-    exe: String
+    exe: String,
 }
 
 // One run's stdout; `ok` when every step exited 0, else the failing step's
@@ -223,19 +223,19 @@ Output: struct {
     stdout: String,
     ok: Bool,
     status: Int,
-    signal: Int?
+    signal: Int?,
 }
 
 Counts: struct {
     cycles: Int,
-    instructions: Int
+    instructions: Int,
 }
 
 Pace: struct {
     cycles: Float,
     instructions: Float,
     cycles_min: Float,
-    cycles_max: Float
+    cycles_max: Float,
 }
 
 // A table row, written to results.json with the original's keys in its order.
@@ -254,13 +254,13 @@ Row: struct {
     cycles_x: Float,
     instructions_x: Float,
     size_gate: String,
-    cycles_gate: String
+    cycles_gate: String,
 }
 
 #Codable(only: .Encode)
 Gates: struct {
     size: Float,
-    cycles: Float
+    cycles: Float,
 }
 
 #Codable(only: .Encode)
@@ -270,14 +270,14 @@ Results: struct {
     statistic: String,
     cpu: String,
     gates: Gates,
-    rows: [Row]
+    rows: [Row],
 }
 
 #Codable(only: .Encode)
 Timed: struct {
     ns: Int,
     rss: Int,
-    code: Int
+    code: Int,
 }
 
 // A variant's gains: the best wall time, the largest peak RSS, the stripped
@@ -287,7 +287,7 @@ Measured: struct {
     ns: Int,
     rss: Int,
     bytes: Int,
-    runs: [Timed]
+    runs: [Timed],
 }
 
 // gains.json: the run's settings, each compiler's path under its label, and
@@ -298,12 +298,12 @@ Gains: struct {
     interleaved: Bool,
     cpu: String,
     compilers: Dyn,
-    rows: [Dyn]
+    rows: [Dyn],
 }
 
 Compiler: struct {
     label: String,
-    path: String
+    path: String,
 }
 
 // One cell in one mode; `variants` in the order they were built.
@@ -312,7 +312,7 @@ GainRow: struct {
     cell: String,
     args: String,
     wrong: [String],
-    variants: [{label: String, gains: Measured}]
+    variants: [{label: String, gains: Measured}],
 }
 
 // A malformed header ends the run with its own message.

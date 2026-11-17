@@ -1,0 +1,36 @@
+use {
+    acme_npu
+    compute: core.compute
+}
+
+run: fn() {
+    npu: acme_npu.Npu{}
+    device: compute.accelerator(npu) ?? panic("the NPU passes the CPU reference suite")
+    print("device: {device}")
+
+    a: compute.from_list([1.0, 2.0, 3.0]) ?? panic("a")
+    b: compute.from_list([4.0, 5.0, 6.0]) ?? panic("b")
+    sum: compute.launch(npu, "add", [a, b]) ?? panic("add")
+    print("add: {compute.to_list(sum)} on {compute.device(sum)}")
+    // An operand already on the NPU stays there.
+    c: compute.from_list([2.0, 2.0, 2.0]) ?? panic("c")
+    product: compute.launch(npu, "mul", [sum, c]) ?? panic("mul")
+    print("mul: {compute.to_list(product)} on {compute.device(product)}")
+
+    left: compute.reshape(compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("left"), [2, 2]) ?? panic("left shape")
+    right: compute.reshape(compute.from_list([5.0, 6.0, 7.0, 8.0]) ?? panic("right"), [2, 2]) ?? panic("right shape")
+    matrix: compute.launch(npu, "matmul", [left, right]) ?? panic("matmul")
+    print("matmul: {compute.to_list(matrix)} shape {compute.shape(matrix)}")
+
+    // A kernel the NPU does not list is refused, not run on the CPU.
+    x: compute.from_list([4.0]) ?? panic("x")
+    if compute.launch(npu, "sqrt", [x]) == {
+        .Ok(_) -> { print("sqrt: ran") }
+        .Err(error) -> { print("sqrt: refused ({error})") }
+    }
+    // A device that gives another answer than the CPU is never admitted.
+    if compute.accelerator(acme_npu.FaultyNpu{}) == {
+        .Ok(_) -> { print("faulty: admitted") }
+        .Err(error) -> { print("faulty: refused ({error})") }
+    }
+}

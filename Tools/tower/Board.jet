@@ -784,7 +784,9 @@ normalize_milestone: fn(milestone: Dyn) -> Dyn Never! {
         if !has(out, "exitCriteria") -> out = with(out, "exitCriteria", field(out, "criteria"))
         out = without(out, "criteria")
     }
-    if !(field(out, "exitCriteria") == .Array(_)) -> out = with(out, "exitCriteria", Dyn.Array([Dyn]{}))
+    if !(field(out, "exitCriteria") == .Array(_)) {
+        out = with(out, "exitCriteria", Dyn.Array([Dyn]{}))
+    }
     closeout: field(out, "closeout")
     if !is_null(closeout) {
         if !(closeout == .Object(_)) || !hex_commit(text(field(closeout, "sourceCommit"))) || !truthy(field(closeout, "by")) || !truthy(field(closeout, "at")) {
@@ -1081,7 +1083,9 @@ answer_request: fn(request: Request, place: Place) -[FS]> String Failure! {
         loop milestone in live.milestones {
             linked: index.get(text(field(milestone, "id"))) ?? [Linked]{}
             synced: sync_milestone(milestone, linked)
-            if !request.flags.has_key("retired") && is_text(field(synced, "status"), "retired") -> next
+            if !request.flags.has_key("retired") && is_text(field(synced, "status"), "retired") {
+                next
+            }
             if request.flags.get("epoch") == .Val(epoch) {
                 if !is_text(field(synced, "epochId"), epoch) -> next
             }

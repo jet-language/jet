@@ -1,0 +1,37 @@
+// The projects screen: the caller's projects, each with its open tasks. It
+// is a live query, so a write to a project shows here without a reload.
+use {
+    app
+    core.reactive.loadable.[Loadable]
+    logic
+}
+
+projects: fn(crew: app.Remote<logic.Crew>, view: logic.ProjectsView) -> String Never! {
+    if app.state(app.live(fn() { crew.my_projects() })) == {
+        .Idle | .Loading -> "Loading your projects…"
+        .Failed(error) -> failed(error)
+        .Loaded(cards) -> project_list(cards)
+    }
+}
+
+project_list: fn(cards: [logic.ProjectCard]) -> String Never! {
+    if cards.len() == 0 -> return "No projects yet. Make one, or accept an invitation."
+    lines := [String]{"Your projects"}
+    loop card in cards -> lines.push("  {card.name}: {open_tasks(card.open_tasks)}")
+    lines.join("\n")
+}
+
+open_tasks: fn(count: Int) -> String Never! {
+    if count == 1 -> "1 open task" else -> "{count} open tasks"
+}
+
+// The one place a screen turns a TaskError into words for a whole screen.
+failed: fn(error: logic.TaskError) -> String Never! {
+    if error == {
+        .SignedOut -> "Sign in to see your projects."
+        .NotFound -> "That item no longer exists."
+        .NotAllowed -> "You don't have access to this."
+        .UpdateRequired -> "This version of Crewboard is too old. Update it to continue."
+        .Unreachable(_) -> "Can't reach Crewboard. Retrying."
+    }
+}

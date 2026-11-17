@@ -59,7 +59,7 @@ DeliveryState: enum {
     Delivering,
     Delivered,
     DeadLettered,
-    Cancelled
+    Cancelled,
 }
 
 delivery_state_show: fn(state: DeliveryState) -> String Never! {
@@ -101,7 +101,7 @@ delivery_receipt_show: fn(receipt: DeliveryReceipt) -> String Never! {
 TaskStatus: enum {
     Running,
     Paused,
-    CancelRequested
+    CancelRequested,
 }
 
 // How a workflow run or one of its activities ended: it finished, or it
@@ -603,21 +603,21 @@ observe: fn(tree: ServiceTree) -> String Never! {
 ServiceRestart: enum {
     OneForOne,
     OneForAll,
-    RestForOne
+    RestForOne,
 }
 
 ServiceDelivery: enum {
     AtMostOnce,
-    DurableAtLeastOnce
+    DurableAtLeastOnce,
 }
 
 ServiceRuntime: struct {
     store: String,
-    retention_ms: Int
+    retention_ms: Int,
 }
 
 ServiceStateStore: struct {
-    path: String
+    path: String,
 }
 
 ServiceTree: struct {
@@ -643,7 +643,7 @@ ServiceTree: struct {
     priv workflows: [TreeWorkflowState],
     priv chaos_fails: Int,
     priv previous_generation: Int,
-    priv last_upgrade: ServiceUpgradeReceipt?
+    priv last_upgrade: ServiceUpgradeReceipt?,
 }
 
 // Identity only: equality compares tree, worker, generation and authority.
@@ -652,7 +652,7 @@ ServiceEndpoint: struct {
     priv tree: String,
     priv worker: String,
     priv generation: Int,
-    priv authority: String
+    priv authority: String,
 }
 
 // A worker never runs a handler task in-process; the handler identity is
@@ -664,7 +664,7 @@ priv TreeWorker: struct {
     capacity: Int,
     channel: Shared<ServiceChannel>,
     restarts: [Int],
-    running: Bool
+    running: Bool,
 }
 
 priv TreeGroup: struct {
@@ -672,13 +672,13 @@ priv TreeGroup: struct {
     restart: ServiceRestart,
     budget_max: Int,
     budget_per_ms: Int,
-    workers: [String]
+    workers: [String],
 }
 
 priv TreeStateAdapter: enum {
     Empty,
     Snapshot,
-    EventLog
+    EventLog,
 }
 
 priv TreeStateAuthority: struct {
@@ -686,19 +686,19 @@ priv TreeStateAuthority: struct {
     schema: String,
     version: Int,
     migration: String,
-    adapter: TreeStateAdapter
+    adapter: TreeStateAdapter,
 }
 
 priv IdempotencyRecord: struct {
     key: String,
     endpoint: ServiceEndpoint,
-    message: String
+    message: String,
 }
 
 priv DirectoryRecord: struct {
     name: String,
     endpoint: ServiceEndpoint,
-    proof: String
+    proof: String,
 }
 
 ServiceUpgradeReceipt: struct {
@@ -762,19 +762,19 @@ priv ServiceChannel: struct {
     capacity: Int,
     values: [String],
     head: Int,
-    closed: Bool
+    closed: Bool,
 }
 
 priv ChannelSend: enum {
     Sent,
     Full,
-    Closed
+    Closed,
 }
 
 priv ChannelReceive: enum {
     Value(String),
     Empty,
-    Closed
+    Closed,
 }
 
 channel_new: fn(capacity: Int, values: [String]) -> Shared<ServiceChannel>? Never! {
@@ -1088,17 +1088,17 @@ priv EndpointState: struct {
     partitioned: Bool,
     store: String?,
     store_generation: Int,
-    channel: Shared<ServiceChannel>?
+    channel: Shared<ServiceChannel>?,
 }
 
 priv ServiceRegistry: struct {
-    endpoints: [EndpointState]
+    endpoints: [EndpointState],
 }
 
 priv PendingEntry: struct {
     id: String,
     message: String,
-    store: String
+    store: String,
 }
 
 priv PendingQueue: struct {
@@ -1106,17 +1106,17 @@ priv PendingQueue: struct {
     authority: String,
     worker: String,
     generation: Int,
-    entries: [PendingEntry]
+    entries: [PendingEntry],
 }
 
 priv PendingRegistry: struct {
-    queues: [PendingQueue]
+    queues: [PendingQueue],
 }
 
 // In-process serialization of durable authority store work; the file locks
 // serialize the same work across processes.
 priv AuthorityGate: struct {
-    entered: Int
+    entered: Int,
 }
 
 init_service_registry: fn() -> Shared<ServiceRegistry> Never! {
@@ -1277,7 +1277,7 @@ __authority_validate: fn(endpoint: ServiceEndpoint) ServiceError! {
 priv EndpointRoute: struct {
     started: Bool,
     draining: Bool,
-    channel: Shared<ServiceChannel>
+    channel: Shared<ServiceChannel>,
 }
 
 authority_channel: fn(endpoint: ServiceEndpoint) -> EndpointRoute ServiceError! {
@@ -1712,7 +1712,7 @@ StatePathPlatform: struct {
 StatePathPrefix: struct {
     length: Int,
     verbatim: Bool,
-    implicit_root: Bool
+    implicit_root: Bool,
 }
 
 // Match Path::components().next_back()/as_path(): retain lexical `..` and
@@ -1878,7 +1878,7 @@ state_encode: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, recor
 
 priv StateCursor: struct {
     bytes: [U8],
-    offset: Int
+    offset: Int,
 }
 
 // Rust usize parsing: optional `+`, decimal digits only.
@@ -2021,7 +2021,7 @@ state_load: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter) -> [Str
 }
 
 priv StateSequence: struct {
-    next: Int
+    next: Int,
 }
 
 init_state_sequence: fn() -> Shared<StateSequence> Never! { Shared{StateSequence{next: 0}} }
@@ -2105,13 +2105,13 @@ state_append: fn(authority: TreeStateAuthority, record: String) ServiceError! {
 // restarted controller resumes the same rollout instead of guessing.
 priv RolloutWorker: struct {
     name: String,
-    generation: Int
+    generation: Int,
 }
 
 priv RolloutDirectory: struct {
     name: String,
     worker: String,
-    generation: Int
+    generation: Int,
 }
 
 priv RolloutState: struct {
@@ -2121,7 +2121,7 @@ priv RolloutState: struct {
     workers: [RolloutWorker],
     draining: [String],
     partitioned: [String],
-    directory: [RolloutDirectory]
+    directory: [RolloutDirectory],
 }
 
 rollout_snapshot: fn(tree: ServiceTree) -> RolloutState Never! {
@@ -2190,7 +2190,7 @@ rollout_encode: fn(tree_name: String, state: RolloutState) -> [U8] ServiceError!
 // Text lines as Rust `str::lines` yields them: a trailing `\r` is dropped.
 priv RolloutLines: struct {
     lines: [String],
-    next: Int
+    next: Int,
 }
 
 rollout_read_line: fn(lines: &RolloutLines, label: String) -> String ServiceError! {
@@ -2539,7 +2539,7 @@ restore_rollout_state: fn(tree: &ServiceTree) ServiceError! {
 // truth; the tree's copy carries only a runtime replay cursor on top.
 priv ActivityOutcome: struct {
     key: String,
-    outcome: TaskOutcome
+    outcome: TaskOutcome,
 }
 
 priv TreeWorkflowState: struct {
@@ -2551,7 +2551,7 @@ priv TreeWorkflowState: struct {
     replay_cursor: Int,
     status: TaskStatus,
     activity_outcomes: [ActivityOutcome],
-    outcome: TaskOutcome?
+    outcome: TaskOutcome?,
 }
 
 // A handle detached from its tree: wait points append through the same
@@ -2648,7 +2648,7 @@ workflow_field: fn(input: String, label: String) -> String ServiceError! {
 
 priv WorkflowField: struct {
     value: String,
-    rest: String
+    rest: String,
 }
 
 // `{length}:{value}{rest}`; the length is in bytes and must end on a
@@ -3274,7 +3274,7 @@ WorkflowActivityDefinition: struct {
     activity: String,
     key: String,
     attempt: Int,
-    max_attempts: Int
+    max_attempts: Int,
 }
 
 // `activity:{activity}:{key}:{attempt}:{max_attempts}`
@@ -3703,7 +3703,7 @@ full_tree_mailbox: fn(worker: String, capacity: Int) -> ServiceError Never! {
 // `|{byte length}:{hex}` per field; entries are a pure replay of the log.
 priv DeliveryRecord: struct {
     op: String,
-    fields: [String]
+    fields: [String],
 }
 
 priv DeliveryEntry: struct {
@@ -3722,7 +3722,7 @@ priv DeliveryEntry: struct {
     event_sequence: Int,
     delivered_to_worker: Bool,
     delivered: Bool,
-    dead: Bool
+    dead: Bool,
 }
 
 DeliveryEvent: struct {
@@ -3730,7 +3730,7 @@ DeliveryEvent: struct {
     state: DeliveryState,
     attempts: Int,
     timestamp: Int,
-    signature: String
+    signature: String,
 }
 
 authority_error: fn(message: String) -> ServiceError Never! { ServiceError.Unavailable(message) }
@@ -4117,7 +4117,7 @@ priv RouteCandidate: struct {
     tree: String,
     worker: String,
     generation: Int,
-    store: String?
+    store: String?,
 }
 
 priv RouteScan: struct {
@@ -4125,7 +4125,7 @@ priv RouteScan: struct {
     newer_exact: RouteCandidate?,
     candidates: [RouteCandidate],
     exact_stopped: Bool,
-    newer_generation: Bool
+    newer_generation: Bool,
 }
 
 // Registry rows that can carry a receipt for `entry`'s tree and worker.
@@ -4356,7 +4356,7 @@ authority_mark_delivered: fn(store: String, id: String) ServiceError! {
 
 priv DeliveryRead: struct {
     entry: DeliveryEntry,
-    records: [DeliveryRecord]
+    records: [DeliveryRecord],
 }
 
 // The receipt behind a delivery handle, checked against the handle.
@@ -5543,7 +5543,7 @@ reconcile_worker: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError
 priv RollbackPlan: struct {
     store: String,
     available: Bool,
-    migration: String
+    migration: String,
 }
 
 prepare_rollback: fn(tree: ServiceTree) -> RollbackPlan ServiceError! {

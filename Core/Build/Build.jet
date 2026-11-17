@@ -29,7 +29,7 @@ BuildGraphTarget: struct {
     deps: [Int],
     actions: [Int],
     files: [String],
-    plugin: Int?
+    plugin: Int?,
 }
 
 BuildGraphAction: struct {
@@ -44,19 +44,19 @@ BuildGraphAction: struct {
     plugin: Int?,
     compiler_owned: Bool,
     key: String,
-    cache_hit: Bool?
+    cache_hit: Bool?,
 }
 
 BuildGraphActionKey: struct {
     action: String,
-    key: String
+    key: String,
 }
 
 BuildGraphFile: struct {
     path: String,
     owner: Int?,
     consumers: [Int],
-    targets: [Int]
+    targets: [Int],
 }
 
 BuildGraphNode: struct {
@@ -64,37 +64,37 @@ BuildGraphNode: struct {
     key: String,
     subject: String,
     inputs: [String],
-    input_digests: [BuildGraphInputDigest]
+    input_digests: [BuildGraphInputDigest],
 }
 
 BuildGraphInputDigest: struct {
     name: String,
-    digest: String
+    digest: String,
 }
 
 BuildGraphFileDelta: struct {
     path: String,
     before: BuildGraphFile?,
-    after: BuildGraphFile?
+    after: BuildGraphFile?,
 }
 
 BuildGraphKeyDelta: struct {
     action: String,
     before: String?,
-    after: String?
+    after: String?,
 }
 
 BuildGraphCacheDelta: struct {
     action: String,
     before: Bool?,
-    after: Bool?
+    after: Bool?,
 }
 
 BuildGraphDiff: struct {
     file_deltas: [BuildGraphFileDelta],
     affected_files: [String],
     key_deltas: [BuildGraphKeyDelta],
-    cache_deltas: [BuildGraphCacheDelta]
+    cache_deltas: [BuildGraphCacheDelta],
 }
 
 BuildGraph: struct {
@@ -104,7 +104,7 @@ BuildGraph: struct {
     cache_hits: [BuildGraphAction],
     files: [BuildGraphFile],
     affected_files: [BuildGraphFile],
-    nodes: [BuildGraphNode]
+    nodes: [BuildGraphNode],
 }
 
 /// One target or step a `jet build` ran: its name, its kind (`step`, `image`
@@ -116,14 +116,14 @@ BuildTime: struct {
     name: String,
     kind: String,
     wall_ms: Int,
-    reused: Bool
+    reused: Bool,
 }
 
 /// The times of one `jet build`, in the order its targets and steps finished,
 /// as `.jet/build/times.json` records them. They stay out of BuildGraph, so
 /// receipt_diff finds two equal graphs equal however long each build took.
 BuildTimes: struct {
-    rows: [BuildTime]
+    rows: [BuildTime],
 }
 
 /// `graph` is a compiler-owned query.  Runtime code cannot manufacture a

@@ -46,7 +46,7 @@ server: module
 HTTPOperation: enum {
     ClientConnect,
     ServerBind,
-    ServeListener
+    ServeListener,
 }
 
 #Error
@@ -71,7 +71,7 @@ HTTPError: enum {
     Policy(reason: String),
     ResourceUnavailable(resource: String),
     Internal(incident_id: String),
-    UnsupportedTarget(operation: HTTPOperation)
+    UnsupportedTarget(operation: HTTPOperation),
 }
 
 Method: enum {
@@ -137,11 +137,11 @@ Status: struct {
 
 Header: struct {
     name: String,
-    value: String
+    value: String,
 }
 
 Headers: struct {
-    fields: [Header]
+    fields: [Header],
 }
 
 /// A checked field name: one RFC 9110 token (`HeaderName.new`).
@@ -183,7 +183,7 @@ HeaderValue: struct {
 priv body_carrier: module {
     BodyStream: struct {
         held: [U8],
-        live: Shared<provider.LiveBody>?
+        live: Shared<provider.LiveBody>?,
     }
 }
 
@@ -232,7 +232,7 @@ C_BODY_CHUNK_BYTES: 65536
 // A message body is read once, shared by every copy of its message: the
 // first `text`/`json` read takes it and later reads fail with BodyConsumed.
 priv HTTPBodyCell: struct {
-    taken: Bool
+    taken: Bool,
 }
 
 // A server request carries its connection's plain TCP socket (-1 over TLS),
@@ -240,7 +240,7 @@ priv HTTPBodyCell: struct {
 // An upgraded connection gets no HTTP response from the server.
 priv HTTPUpgradeCell: struct {
     fd: Int,
-    upgraded: Bool
+    upgraded: Bool,
 }
 
 /// One HTTP request: what a client builds and sends, and what a server
@@ -762,11 +762,11 @@ HTTPRouter: struct {
 // A router's handlers, in registration order: the `index`th is the handler
 // of the table's `index`th route.
 priv HTTPRouterState: struct {
-    handlers: [HTTPRouterHandler]
+    handlers: [HTTPRouterHandler],
 }
 
 priv HTTPRouterHandler: struct {
-    call: fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!
+    call: fn(HTTPRequest) -[Net]> HTTPResponse HTTPError!,
 }
 
 priv router_handler_count: fn(state: Shared<HTTPRouterState>) -> Int Never! {
@@ -862,7 +862,7 @@ version_parse: fn(token: String) -> Version Never! {
 // Why a custom route method token was refused.
 #Error
 __MethodTokenError: struct {
-    reason: String
+    reason: String,
 }
 
 // The one check of a custom route method token (`mux.custom(token, …)`,
@@ -1424,7 +1424,7 @@ parse_request: fn(raw: [U8]) -> HTTPRequest HTTPError! {
 
 StatusLine: struct {
     version: Version,
-    status: Status
+    status: Status,
 }
 
 parse_status_line: fn(line: String) -> StatusLine? {
@@ -1525,16 +1525,16 @@ Cookie: struct {
     secure: Bool,
     http_only: Bool,
     same_site: String,
-    max_age: Int
+    max_age: Int,
 }
 
 Query: struct {
-    pairs: [QueryPair]
+    pairs: [QueryPair],
 }
 
 QueryPair: struct {
     key: String,
-    value: String
+    value: String,
 }
 
 query: fn() -> Query Never! { Query{pairs: [QueryPair]{}} }
@@ -1596,7 +1596,7 @@ query_encode: fn(q: Query) -> String Never! {
 // identity uses it, since %FF and %FE both read as U+FFFD when tolerant.
 FormPolicy: enum {
     Tolerant,
-    Strict
+    Strict,
 }
 
 // Why a strict form or query decode refused its input.
@@ -1604,7 +1604,7 @@ FormPolicy: enum {
 FormDecodeError: enum {
     Escape,
     UTF8,
-    TooLarge
+    TooLarge,
 }
 
 // A % not followed by two hex digits.
@@ -2209,7 +2209,7 @@ starts: fn(text: String, prefix: String) -> Bool {
 
 FragmentSplit: struct {
     url: String,
-    fragment: String
+    fragment: String,
 }
 
 split_fragment: fn(text: String) -> FragmentSplit {

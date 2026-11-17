@@ -1,0 +1,23 @@
+// core-conformance: core.compute.launch
+use compute: core.compute
+
+Adder: struct {
+    impl compute.Accelerator {
+        name: fn(self) -> String Never! { "Adder" }
+
+        kind: fn(self) -> String Never! { "test" }
+
+        caps: fn(self) -> [String] Never! { [String]{compute.KERNEL_IR, "add"} }
+
+        launch: fn(self, kernel: String, buffers: [[Float]], shapes: [[Int]]) -[GPU]> [Float] compute.ComputeError! {
+            Ok(loop (index, x) in buffers[0] -> x + buffers[1][index])
+        }
+    }
+}
+
+run: fn() {
+    a: compute.from_list([1.0, 2.0]) ?? panic("a")
+    b: compute.from_list([3.0, 4.0]) ?? panic("b")
+    result: compute.launch(Adder{}, "add", [a, b]) ?? panic("launch")
+    print(compute.to_list(result))
+}

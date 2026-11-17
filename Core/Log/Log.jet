@@ -41,7 +41,7 @@ LogField: struct {
     key: String,
     value: String,
     kind: String,
-    redacted: Bool
+    redacted: Bool,
 }
 
 // Readable but not constructible outside this module.
@@ -61,7 +61,7 @@ LogLevel: enum {
     Warn,
     Error,
     Critical,
-    Fatal
+    Fatal,
 }
 
 debug: fn(message: String, at: SourceLocation{#caller}) -[Log]> Never! {
@@ -264,7 +264,7 @@ normalize_fields: fn(fields: [LogField]) -> [LogField] {
 // One pair of a level filter: `path` "" is every module.
 FilterPair: struct {
     path: String,
-    rank: Int
+    rank: Int,
 }
 
 // The level cell caches the resolution: 0 is unresolved, 1-6 is the one
@@ -582,19 +582,19 @@ split_csv: fn(text: String) -> [String] {
 LogRecord: struct {
     level: LogLevel,
     message: String,
-    fields: [LogField]
+    fields: [LogField],
 }
 
 /// A deterministic formatter. `text` is human-readable; every other mode is
 /// the canonical JSON line used by `emit`.
 Formatter: struct {
-    mode: String
+    mode: String,
 }
 
 /// A level-filtered sink. `handle` applies the threshold before formatting.
 Handler: struct {
     minimum: LogLevel,
-    mode: String
+    mode: String,
 }
 
 record: fn(level: LogLevel, message: String, fields: [LogField]) -> LogRecord Never! {
@@ -655,7 +655,7 @@ render_json: fn(event: LogRecord) -> String {
 
 Pair: struct {
     left: String,
-    right: String
+    right: String,
 }
 
 split_once: fn(text: String, sep: String) -> Pair {
@@ -736,14 +736,14 @@ SpanKind: enum {
     Server,
     Client,
     Producer,
-    Consumer
+    Consumer,
 }
 
 /// How a traced span ended: not said, ok, or failed with a message.
 SpanStatus: enum {
     Unset,
     Ok,
-    Error(String)
+    Error(String),
 }
 
 /// One finished span of a trace, in the shape OTLP exports. `trace_id` is
@@ -759,7 +759,7 @@ TraceSpan: struct {
     start_ns: Int,
     end_ns: Int,
     attributes: [LogField],
-    status: SpanStatus
+    status: SpanStatus,
 }
 
 /// The OTLP/HTTP JSON export request (`ExportTraceServiceRequest`) that

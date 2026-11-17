@@ -1,0 +1,12 @@
+// The client-safe graph and the one route set. Every target runs this graph,
+// so it holds no store and no secret. `.api<logic.Crew>` declares the service
+// and its address, and the graph passes an `app.Remote<logic.Crew>` to every
+// screen that takes one. Only a server entry mounts a real Crew.
+use {
+    app
+    logic
+}
+
+crewboard: fn() -> app.App Never! {
+    app.new("Crewboard").api<logic.Crew>("/api").screen("/", projects)
+}

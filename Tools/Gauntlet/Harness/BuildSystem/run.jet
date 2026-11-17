@@ -46,7 +46,7 @@ Options: struct {
     work_dir: String?,
     receipt: String?,
     samples: Int?,
-    warmups: Int?
+    warmups: Int?,
 }
 
 #Codable
@@ -55,13 +55,13 @@ Machine: struct {
     threads: Int,
     memory_bytes: Int,
     kernel: String,
-    nix: String
+    nix: String,
 }
 
 #Codable
 JetBinary: struct {
     path: String,
-    version: String
+    version: String,
 }
 
 #Codable
@@ -69,7 +69,7 @@ Summary: struct {
     samples_ns: [Int],
     median_ns: Int,
     min_ns: Int,
-    max_ns: Int
+    max_ns: Int,
 }
 
 // A cell as the receipt holds it; a peer without samples has no summary,
@@ -82,7 +82,7 @@ CellReceipt: struct {
     jet: Summary?,
     nix: Summary?,
     ratio: Float?,
-    verdict: String
+    verdict: String,
 }
 
 #Codable
@@ -96,7 +96,7 @@ Receipt: struct {
     cells: [CellReceipt],
     failures: [String],
     passed: Bool,
-    finished_at: String
+    finished_at: String,
 }
 
 // One finished step: its exit code (None when it could not start, overran
@@ -105,7 +105,7 @@ Step: struct {
     code: Int?,
     output: String,
     errors: String,
-    wall_ns: Int
+    wall_ns: Int,
 }
 
 // A cell's samples per peer, the warmups left out.
@@ -113,7 +113,7 @@ Row: struct {
     id: String,
     target: Dyn,
     jet: [Int],
-    nix: [Int]
+    nix: [Int],
 }
 
 fail: fn(message: String) -> Never { process.fail(1, "build-system: {message}") }
