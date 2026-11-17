@@ -98,7 +98,7 @@ test('every shape problem in a plan is reported before anything runs', () => {
     { op: 'edit', card: '#1', n: 1 },
   ] }), '--by', 'planner', '--json');
   assert.equal(refused.status, 1);
-  assert.equal(JSON.parse(refused.stdout).error, 'E_USAGE');
+  assert.equal(JSON.parse(refused.stdout).error.code, 'E_USAGE');
   assert.equal(refused.stderr, [
     'tower: plan refused, nothing applied:',
     '  op 1 (meet): needs evidence',
@@ -192,6 +192,6 @@ test('publish exits non-zero when origin does not end up holding the board commi
   git(other, 'push', '-q', remote, 'master');
   const rejected = cli(data, 'publish', '--title', 'Day two', '--file', join(root, 'briefing.md'), '--by', 'closer', '--json');
   assert.equal(rejected.status, 1);
-  assert.equal(JSON.parse(rejected.stdout).error, 'E_PUBLISH');
+  assert.equal(JSON.parse(rejected.stdout).error.code, 'E_PUBLISH');
   assert.match(rejected.stderr, /git push origin master failed: /);
 });

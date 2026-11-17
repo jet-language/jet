@@ -6,12 +6,15 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { openStore, empty, TowerError } from '../app/store.mjs';
 import { writeJSON } from '../app/paths.mjs';
 import * as db from '../app/store.mjs';
 
-const TOWER = fileURLToPath(new URL('../tower.mjs', import.meta.url));
+// Run this checkout's CLI; tower.mjs deliberately loads the main checkout's.
+const cliModule = new URL('../app/cli.mjs', import.meta.url).href;
+const local = (data, ...args) => spawnSync(process.execPath, ['--input-type=module', '--eval',
+  `const { run } = await import(${JSON.stringify(cliModule)}); await run(process.argv.slice(1));`, '--', '--data', data, ...args],
+{ encoding: 'utf8', env: { ...process.env, TOWER_DATA: '' } });
 const gitEnv = { ...process.env, GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' };
 delete gitEnv.GIT_INDEX_FILE;
 delete gitEnv.GIT_DIR;
@@ -141,10 +144,10 @@ test('a board outside git has no commits to name, so code rows pass', () => {
 
 test('cli: criteria --meet refuses with E_EVIDENCE and passes with a landed commit or --kind', () => {
   const { data, onDev } = project();
-  const cli = (...args) => spawnSync(process.execPath, [TOWER, '--data', data, ...args], { encoding: 'utf8', env: { ...process.env, TOWER_DATA: '' } });
+  const cli = (...args) => local(data, ...args);
   const bad = cli('card', 'criteria', '#1', '--meet', '1', '--evidence', 'ran it', '--by', 'builder', '--json');
   assert.equal(bad.status, 1);
-  assert.equal(JSON.parse(bad.stdout).error, 'E_EVIDENCE');
+  assert.equal(JSON.parse(bad.stdout).error.code, 'E_EVIDENCE');
   assert.match(bad.stderr, /criterion #1: evidence names no commit on dev or master/);
   const good = cli('card', 'criteria', '#1', '--meet', '1', '--evidence', `landed ${onDev.slice(0, 9)}`, '--by', 'builder');
   assert.equal(good.status, 0, good.stderr);
@@ -154,12 +157,6 @@ test('cli: criteria --meet refuses with E_EVIDENCE and passes with a landed comm
   assert.notEqual(stray.status, 0);
   assert.match(stray.stderr + stray.stdout, /--kind goes with --meet or --verify/);
 });
-
-// Run this checkout's CLI; tower.mjs deliberately loads the main checkout's.
-const cliModule = new URL('../app/cli.mjs', import.meta.url).href;
-const local = (data, ...args) => spawnSync(process.execPath, ['--input-type=module', '--eval',
-  `const { run } = await import(${JSON.stringify(cliModule)}); await run(process.argv.slice(1));`, '--', '--data', data, ...args],
-{ encoding: 'utf8', env: { ...process.env, TOWER_DATA: '' } });
 
 test('a refused close lists every failing criterion with its reason, in one refusal', () => {
   const { st, onDev, unlanded } = project();

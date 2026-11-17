@@ -2582,8 +2582,9 @@ tower_record: fn(result: ProcessReceipt IOError!, what: String) -> Dyn LedgerErr
         .Ok(receipt) -> {
             answer: json.parse(receipt.output) ?? return Err(fail("tower {what} answered no JSON (exit {receipt.code}): {receipt.errors.trim()}"))
             if receipt.code == 0 && !receipt.timed_out -> return Ok(answer)
-            if text_is(answer, "error", "E_NOT_FOUND") -> return Ok(Dyn.Null)
-            Err(fail("tower {what} failed (exit {receipt.code}): {text_field(answer, "message")}"))
+            refusal: field(answer, "error")
+            if text_is(refusal, "code", "E_NOT_FOUND") -> return Ok(Dyn.Null)
+            Err(fail("tower {what} failed (exit {receipt.code}): {text_field(refusal, "message")}"))
         }
         .Err(failure) -> Err(fail("tower {what} could not start: {failure}"))
     }

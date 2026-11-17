@@ -2,14 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
-const TOWER = join(dirname(fileURLToPath(import.meta.url)), '..', 'tower.mjs');
+// Run this checkout's CLI; tower.mjs deliberately loads the main checkout's.
+const cliModule = new URL('../app/cli.mjs', import.meta.url).href;
+const LOCAL = ['--input-type=module', '--eval', `const { run } = await import(${JSON.stringify(cliModule)}); await run(process.argv.slice(1));`, '--'];
 const run = (cwd, args, ok = true) => {
   try {
-    return { out: execFileSync(process.execPath, [TOWER, ...args], { cwd, encoding: 'utf8', env: { ...process.env, TOWER_DATA: '' } }), code: 0 };
+    return { out: execFileSync(process.execPath, [...LOCAL, ...args], { cwd, encoding: 'utf8', env: { ...process.env, TOWER_DATA: '' } }), code: 0 };
   } catch (e) {
     if (ok) throw e;
     return { out: (e.stdout || '') + (e.stderr || ''), code: e.status };
@@ -195,8 +196,8 @@ test('card add probes duplicates, allows separate work, and --force bypasses', (
   ], false);
   assert.equal(blocked.code, 1);
   const duplicate = JSON.parse(blocked.out);
-  assert.equal(duplicate.error, 'E_DUPLICATE');
-  assert.deepEqual(duplicate.candidates[0], {
+  assert.equal(duplicate.error.code, 'E_DUPLICATE');
+  assert.deepEqual(duplicate.error.candidates[0], {
     id: first.id, num: first.num, title: first.title, phase: first.phase,
     matches: ['strong title overlap', 'shared tests/parser_linux.rs', 'shared some_test_name_linux'],
   });
@@ -414,12 +415,12 @@ test('an unrecognized flag is a usage error, never a silently dropped value', ()
   // to be dropped, leaving an empty card behind.
   const bad = run(cwd, ['card', 'add', '--title', 'T', '--text', 'body?', '--by', 'tester'], false);
   assert.equal(bad.code, 1);
-  assert.match(bad.out, /unknown flag for `tower card`: --text/);
+  assert.match(bad.out, /unknown flag for `tower card add`: --text — run `tower help`/);
   assert.equal(JSON.parse(run(cwd, ['card', 'list', '--json']).out).length, 0, 'no card was created');
 
   // Kebab-case is reported the way it was typed, and several are listed at once.
   const two = run(cwd, ['card', 'update', '#1', '--work-oder', '1', '--phse', 'done'], false);
-  assert.match(two.out, /unknown flags for `tower card`: --work-oder, --phse/);
+  assert.match(two.out, /unknown flags for `tower card update`: --work-oder \(did you mean --work-order\?\), --phse \(did you mean --phase\?\)/);
 
   // Globals stay valid everywhere, and real flags still work.
   const ok = JSON.parse(run(cwd, ['card', 'add', '--title', 'Real', '--json', '--by', 'tester']).out);

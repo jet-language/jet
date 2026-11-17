@@ -51,6 +51,29 @@ export function cardNumberQuery(text) {
   return nums;
 }
 
+// Text references as links, over HTML that is already escaped: `#N` and
+// `#N cM` become buttons that open that card (and criterion); with a commit
+// URL configured (`{sha}` is replaced), a commit SHA links to that commit.
+// Tags, and text inside <code>, <pre>, <a> and <button>, are left alone.
+const REF_RE = /(?<![\w&/#])#(\d+)(?: c(\d+))?\b|(?<![\w/.-])((?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40})\b/g;
+const attr = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+export function refLinks(html, { commitUrl = '' } = {}) {
+  let inside = 0;
+  return String(html ?? '').split(/(<[^>]*>)/).map((part) => {
+    if (part.startsWith('<')) {
+      const tag = /^<(\/?)(?:code|pre|a|button)\b/i.exec(part);
+      if (tag) inside = Math.max(0, inside + (tag[1] ? -1 : 1));
+      return part;
+    }
+    if (inside) return part;
+    return part.replace(REF_RE, (all, num, crit, sha) => {
+      if (num) return `<button class="linkbtn" data-card-num="${num}"${crit ? ` data-crit="${crit}"` : ''}>${all}</button>`;
+      if (!commitUrl) return all;
+      return `<a class="sha" href="${attr(commitUrl.replaceAll('{sha}', sha))}" target="_blank" rel="noopener">${sha}</a>`;
+    });
+  }).join('');
+}
+
 // Frozen cards sit in their epoch or sidequest section like any other card
 // (owner 2026-10-04); the `frozen` workflow filter narrows the board to them.
 export function cardMatches(card, { text = '', workflow = 'all', priority = 'all', kind = 'all', showClosed = false, milestone = null } = {}) {

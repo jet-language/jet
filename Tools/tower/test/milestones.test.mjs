@@ -125,7 +125,7 @@ test('cli: a milestone criterion meet passes the evidence gate', () => {
   const { data, st, onDev } = gitBoard();
   const bad = cli(data, 'milestone', 'criteria', 'm-1', '--meet', '1', '--evidence', 'ran it', '--by', 'builder', '--json');
   assert.equal(bad.status, 1);
-  assert.equal(JSON.parse(bad.stdout).error, 'E_EVIDENCE');
+  assert.equal(JSON.parse(bad.stdout).error.code, 'E_EVIDENCE');
   assert.match(bad.stderr, /milestone m-1 criterion #1: evidence names no commit on dev/);
   assert.equal(st.load().milestones[0].exitCriteria[0].status, 'open');
   const good = cli(data, 'milestone', 'criteria', 'm-1', '--meet', '1', '--evidence', `landed ${onDev.slice(0, 10)}`, '--by', 'builder');

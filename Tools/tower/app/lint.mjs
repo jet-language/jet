@@ -4,6 +4,7 @@
 // Docs/Spec reference scan lives in Tools/tower/Board.jet (`lint --docs`).
 import { ballotGaps, decisionStage, findCard } from './store.mjs';
 import { isOpenCard, referenceLabel, referenceTokens } from './card-matching.mjs';
+import { SCRATCH_PATH_RE } from './durable.mjs';
 
 // `updated`/`ratifiedAt` are 'YYYY-MM-DD' (today()); `created` on decisions
 // and `at` on events are full ISO timestamps (now()) — handle both.
@@ -222,4 +223,33 @@ export function ruleUnhomedCard(s) {
 
 export function lint(s, history) {
   return CORE_RULES.flatMap(fn => fn(s)).concat(ruleOrphanBlockers(s, history));
+}
+
+// ---- tower lint --evidence ---------------------------------------------------
+// A settled row's evidence should outlive the run that produced it. Evidence
+// that cites a scratch path, a wave tree or a Rust-era command is a warning,
+// unless the same evidence also names a commit on a durable branch.
+const WAVE_TREE_RE = /\bwave[\s/-]*\d+[a-z]?[\s/]+tree\b/i;
+const RUST_ERA_RE = /\b(?:cargo\s+(?:test|build|run|check|clippy|nextest|bench)|rustc|rustup)\b/;
+const TRANSIENT_SOURCES = [
+  ['a scratch path', SCRATCH_PATH_RE],
+  ['a wave tree', WAVE_TREE_RE],
+  ['a Rust-era command', RUST_ERA_RE],
+];
+
+export function evidenceProvenance(s, resolver) {
+  const branches = resolver?.active() ? resolver.refs() : [];
+  const findings = [];
+  const check = (ref, label, item) => {
+    if (!['met', 'verified'].includes(item.status)) return;
+    const evidence = String(item.evidence || '');
+    const cites = TRANSIENT_SOURCES.filter(([, re]) => re.test(evidence)).map(([what]) => what);
+    if (!cites.length) return;
+    if (branches.length && resolver.commits(evidence).some(found => found.ref)) return;
+    findings.push({ rule: 'evidence-provenance', ref,
+      msg: `${label} criterion #${item.n} cites ${cites.join(', ')} and no commit on ${branches.join(' or ') || 'a durable branch'}: ${evidence.slice(0, 160)}` });
+  };
+  for (const c of s.cards || []) for (const item of c.criteria || []) check(`#${c.num}`, `#${c.num} "${c.title}"`, item);
+  for (const m of s.milestones || []) for (const item of m.exitCriteria || []) check(m.id, `milestone ${m.id}`, item);
+  return findings;
 }

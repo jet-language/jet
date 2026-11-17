@@ -174,8 +174,8 @@ test('CLI posts persist with history/list/show, rev guards, help and live HTTP/S
   const status = JSON.parse(cli(['status', 'post', '--file', 'status.json', '--by', 'Pip', '--json']));
   writeFileSync(join(cwd, 'removed-field.json'), JSON.stringify({ ...sample, ownerActions: [] }));
   const rejectedCli = JSON.parse(cli(['status', 'post', '--file', 'removed-field.json', '--by', 'Pip', '--json'], false));
-  assert.equal(rejectedCli.error, 'E_INVALID');
-  assert.match(rejectedCli.message, /status\.ownerActions.*removed/);
+  assert.equal(rejectedCli.error.code, 'E_INVALID');
+  assert.match(rejectedCli.error.message, /status\.ownerActions.*removed/);
   assert.equal(JSON.parse(cli(['status', 'show', '--json'])).id, status.id);
   cli(['status', 'show', '--days', '7'], false);
   const server = serve(db.openStore(join(cwd, '.tower')), 0, false);

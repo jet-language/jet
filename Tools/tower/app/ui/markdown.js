@@ -1,6 +1,8 @@
-// Small GFM-ish markdown → HTML renderer. Zero deps. Source is always truth.
+// Small GFM-ish markdown → HTML renderer. Source is always truth.
 // Live updates redraw whole views many times a minute while most text is
 // unchanged, so rendered HTML is kept per source string (bounded, oldest out).
+import { refLinks } from './board-state.js';
+
 const CACHE_LIMIT = 600;
 const cache = new Map();
 export function renderMarkdown(src) {
@@ -118,7 +120,7 @@ function inline(s) {
   t = t.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   t = t.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>');
   t = t.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<a class="md__a" href="$2" target="_blank" rel="noopener">$1</a>');
-  return t;
+  return refLinks(t);
 }
 
 function esc(s) {

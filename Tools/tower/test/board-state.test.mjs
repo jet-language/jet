@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardEpochs, cardMatches, sortCards, workflowRank, ownerVerifyQueue, openAcceptanceBallot, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, epochNumber, sortEpochs } from '../app/ui/board-state.js';
+import { boardEpochs, cardMatches, sortCards, workflowRank, ownerVerifyQueue, openAcceptanceBallot, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, epochNumber, sortEpochs, refLinks } from '../app/ui/board-state.js';
 
 const card = (num, lane, phase = lane, extra = {}) => ({
   num, title: `Card ${num}`, phase, priority: 'P1', lane: { lane, label: lane }, ...extra,
@@ -224,4 +224,18 @@ test('sort by created uses created timestamps', () => {
   const newer = card(2, 'building', 'building', { created: '2026-08-01T00:00:00.000Z' });
   assert.deepEqual(sortCards([newer, older], { col: 'created', dir: 'asc' }).map(c => c.num), [1, 2]);
   assert.deepEqual(sortCards([older, newer], { col: 'created', dir: 'desc' }).map(c => c.num), [2, 1]);
+});
+
+test('refLinks turns #N and #N cM into card buttons and, with a commit URL, SHAs into commit links', () => {
+  assert.equal(refLinks('see #12 and #3 c4.'),
+    'see <button class="linkbtn" data-card-num="12">#12</button> and <button class="linkbtn" data-card-num="3" data-crit="4">#3 c4</button>.');
+  // Without a commit URL a SHA stays text; with one it links, `{sha}` replaced.
+  assert.equal(refLinks('landed 4f9c2ab1'), 'landed 4f9c2ab1');
+  assert.equal(refLinks('landed 4f9c2ab1', { commitUrl: 'https://git.example/c/{sha}?a=1&b=2' }),
+    'landed <a class="sha" href="https://git.example/c/4f9c2ab1?a=1&amp;b=2" target="_blank" rel="noopener">4f9c2ab1</a>');
+  // Code, existing links and buttons, tags, entities, words, paths and
+  // all-digit or all-letter runs are left alone.
+  const untouched = '<code>#5</code> <a href="/x#7">#7</a> <button>#8</button> &#39; a#9 /p/#10 1234567 deadbeef src/4f9c2ab1 x.4f9c2ab1';
+  assert.equal(refLinks(untouched, { commitUrl: 'u/{sha}' }), untouched);
+  assert.equal(refLinks('<p>#6</p>'), '<p><button class="linkbtn" data-card-num="6">#6</button></p>');
 });

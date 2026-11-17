@@ -44,6 +44,10 @@ export const DEFAULTS = {
   // committed board to within one batch of the working copy. 0 turns it off.
   boardBranch: 'master',
   boardBatch: 25,
+  // The UI links a commit SHA in evidence to this URL, `{sha}` replaced by the
+  // full or short hash (for example
+  // "https://github.com/OWNER/REPO/commit/{sha}"). Empty: SHAs stay text.
+  commitUrl: '',
 };
 
 // Persist a partial update into the user's config.json (creates it if absent).

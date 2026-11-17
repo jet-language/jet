@@ -7,12 +7,13 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { openStore, empty, emptyHistory } from '../app/store.mjs';
 import { configFile, historyFile, writeJSON } from '../app/paths.mjs';
 import * as db from '../app/store.mjs';
 
-const TOWER = fileURLToPath(new URL('../tower.mjs', import.meta.url));
+// Run this checkout's CLI; tower.mjs deliberately loads the main checkout's.
+const cliModule = new URL('../app/cli.mjs', import.meta.url).href;
+const LOCAL = ['--input-type=module', '--eval', `const { run } = await import(${JSON.stringify(cliModule)}); await run(process.argv.slice(1));`, '--'];
 const gitEnv = { ...process.env };
 for (const key of ['GIT_INDEX_FILE', 'GIT_DIR', 'GIT_WORK_TREE']) delete gitEnv[key];
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', env: gitEnv }).trim();
@@ -96,7 +97,7 @@ test('a board git does not track, or a checkout on another branch, is left alone
 
 test('cli: board commit and board check', () => {
   const { root, data, st } = project();
-  const cli = (...args) => spawnSync(process.execPath, [TOWER, '--data', data, ...args], { encoding: 'utf8', env: { ...gitEnv, TOWER_DATA: '' } });
+  const cli = (...args) => spawnSync(process.execPath, [...LOCAL, '--data', data, ...args], { encoding: 'utf8', env: { ...gitEnv, TOWER_DATA: '' } });
   addCard(st, 'one');
   const ok = cli('board', 'check');
   assert.equal(ok.status, 0, ok.stderr);
@@ -111,7 +112,7 @@ test('cli: board commit and board check', () => {
   git(root, 'checkout', '-q', 'master');
   const stale = cli('board', 'check', '--json');
   assert.equal(stale.status, 1);
-  assert.equal(JSON.parse(stale.stdout).error, 'E_BOARD_STALE');
+  assert.equal(JSON.parse(stale.stdout).error.code, 'E_BOARD_STALE');
   assert.match(stale.stderr, /4 writes behind \(batch 3\) — run `tower board commit --by <agent>`/);
 });
 
