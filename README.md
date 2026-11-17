@@ -171,7 +171,7 @@ tools list and audit; nothing outside one can corrupt memory or leak it.
 ## Where it's headed
 
 Jet is built in the open, and its plan lives on
-[Tower](Tools/tower/skills/tower/SKILL.md), the project board. The work in
+[Tower](Tools/Tower/skills/tower/SKILL.md), the project board. The work in
 flight:
 
 - **A clean hand-off.** Anyone can clone Jet, fetch the latest release, and

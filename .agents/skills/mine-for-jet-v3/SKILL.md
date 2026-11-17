@@ -92,7 +92,7 @@ supported CLI publication and readback. A recommendation does not authorize codi
 ## Establish Jet state before extraction
 
 Read it in the exact checkout, read-only: Tower's read commands
-(`node Tools/tower/tower.mjs`) for decisions, ballots, cards and phases;
+(`node Tools/Tower/tower.mjs`) for decisions, ballots, cards and phases;
 `git log` and `git diff` of dev against master and of named worktrees;
 `Docs/Research/` and `Docs/Proposals/`; and the registry spellings in
 `Compiler/JetFoundation/Data/Syntax/Spellings.jet`. Read the latest owner

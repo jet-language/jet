@@ -3227,7 +3227,7 @@ async function readLiveTowerCards() {
   if (process.env.JET_GAUNTLET_DISABLE_TOWER_IO === "1") {
     return { status: "unavailable", reason: "Tower I/O disabled by caller" };
   }
-  const towerPath = path.join(repoDir, "Tools/tower/.tower/tower.json");
+  const towerPath = path.join(repoDir, "Tools/Tower/.tower/tower.json");
   try {
     const store = JSON.parse(await fs.readFile(towerPath, "utf8"));
     if (!Array.isArray(store.cards)) return { status: "unavailable", reason: "Tower store has no cards array" };

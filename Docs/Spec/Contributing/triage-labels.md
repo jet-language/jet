@@ -3,7 +3,7 @@
 Triage labels answer one question: who must act before delivery work can
 proceed? This mapping is the repository contract used by
 [the triage skill](../../../.agents/skills/triage/SKILL.md),
-[Tower's CLI](../../../Tools/tower/skills/tower/SKILL.md), and
+[Tower's CLI](../../../Tools/Tower/skills/tower/SKILL.md), and
 [`issue-tracker.md`](issue-tracker.md). Triage labels are tags; they are not
 work phases.
 

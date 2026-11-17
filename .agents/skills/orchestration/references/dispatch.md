@@ -7,7 +7,7 @@ or one small criterion set, with one named implementer and one close owner.
 ## Briefs come from the board
 
 A brief quotes each criterion's exact text, read from the card at the moment
-of dispatch (`node Tools/tower/tower.mjs card criteria '#N' --list`). Never
+of dispatch (`node Tools/Tower/tower.mjs card criteria '#N' --list`). Never
 brief from memory or by criterion number alone: numbers shift when rows move,
 and a row may already be met. Give each worker a queue of five to ten open
 criteria, cheapest first, each with the files it touches and the exact proof

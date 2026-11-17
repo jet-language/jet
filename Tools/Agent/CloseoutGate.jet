@@ -11,7 +11,7 @@
 // that head, and prints
 // `CLOSEOUT TOKEN OK <milestone> <head>`. The orchestrator records the token
 // with `tower milestone closeout MILESTONE --commit HEAD --by AGENT`; this
-// gate only reads the board, through Tools/tower/Board.jet. Any refusal prints
+// gate only reads the board, through Tools/Tower/Board.jet. Any refusal prints
 // `closeout gate: <reason>` and exits 2.
 use {
     files: core.files
@@ -20,7 +20,7 @@ use {
     sys: core.sys
 }
 
-TOWER_STATE_PREFIX: "Tools/tower/.tower/"
+TOWER_STATE_PREFIX: "Tools/Tower/.tower/"
 
 run: fn() {
     args: process.args()
@@ -60,7 +60,7 @@ output: fn(repo: String, argv: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> 
 
 // Tower reads go through the Jet board reader.
 board: fn(repo: String, args: [String]) -[Env, Exec, FS, IO, Time, Time.Wait]> String Never! {
-    argv := [String]{process.env_nonempty("JET") ?? "jet", "{repo}/Tools/tower/Board.jet"}
+    argv := [String]{process.env_nonempty("JET") ?? "jet", "{repo}/Tools/Tower/Board.jet"}
     loop arg in args -> argv.push(arg.copy())
     output(repo, argv)
 }
@@ -162,7 +162,7 @@ fixture_milestone: fn(id: String, commit: String) -> Dyn Never! {
 }
 
 #Test("the closeout gate ignores only Tower state writes") {
-    status: " M Tools/tower/.tower/tower.json\n?? Tools/tower/.tower/.tower.json.tmp-1\n M Source/Main.rs\n?? tests/new_case.rs\n"
+    status: " M Tools/Tower/.tower/tower.json\n?? Tools/Tower/.tower/.tower.json.tmp-1\n M Source/Main.rs\n?? tests/new_case.rs\n"
     assert_eq(non_tower_changes(status), [String]{" M Source/Main.rs", "?? tests/new_case.rs"})
 }
 

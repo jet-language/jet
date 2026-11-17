@@ -173,7 +173,7 @@ test("findings retain exact classification and the Tower dedup command path", as
   assert.equal(receipt.occurrences[0].classification, "wrong-output");
   assert.equal(receipt.occurrences[0].correctness_finding, true);
   assert.equal(receipt.occurrences[0].performance_exclusion, false);
-  assert.deepEqual(receipt.tower_tracking.command, ["node", "Tools/tower/tower.mjs", "card", "add", "--file", "-"]);
+  assert.deepEqual(receipt.tower_tracking.command, ["node", "Tools/Tower/tower.mjs", "card", "add", "--file", "-"]);
   assert.equal(receipt.tower_tracking.status, "pending");
   assert.equal(receipt.tower_tracking.transport, "tower-cli");
   assert.equal(receipt.tower_tracking.dedup_key, receipt.tower_tracking.payload.hardeningDedupKey);

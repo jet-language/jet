@@ -14,7 +14,7 @@ use {
 // Tower card, a ratified decision, or a concrete no-action reason. The
 // program prints every report and row without one; the case compares that
 // list with its golden, so a new report without dispositions changes it.
-// The live cards and decisions come from Tools/tower/Board.jet, run by the
+// The live cards and decisions come from Tools/Tower/Board.jet, run by the
 // jet under test (JET, which the case sets).
 disp_slice: fn(text: String, start: Int, end: Int) -> String {
     if start == end -> return ""
@@ -88,7 +88,7 @@ disp_dashes: fn(cell: String) -> Bool {
     true
 }
 
-// The board under test is the tree's own Tools/tower/.tower: TOWER_DATA pins
+// The board under test is the tree's own Tools/Tower/.tower: TOWER_DATA pins
 // the board reader to it, and the parses choose their own input budget
 // because the board is past `json.parse`'s 16 MiB safe bound.
 disp_board_limits: fn() -> disp_encoding.EncodingLimits {
@@ -96,9 +96,9 @@ disp_board_limits: fn() -> disp_encoding.EncodingLimits {
 }
 
 disp_tower_json: fn(root: String, words: [String]) -> Dyn {
-    board: disp_files.join(root, "Tools/tower/.tower")
-    jet: disp_sys.get("JET") ?? panic("JET names the jet that runs Tools/tower/Board.jet")
-    command := [String]{jet, "Tools/tower/Board.jet"}
+    board: disp_files.join(root, "Tools/Tower/.tower")
+    jet: disp_sys.get("JET") ?? panic("JET names the jet that runs Tools/Tower/Board.jet")
+    command := [String]{jet, "Tools/Tower/Board.jet"}
     loop word in words -> command.push(word.copy())
     live: disp_process.cmd(command).cwd(root).env("TOWER_DATA", disp_files.join(board, "tower.json")).stdout(.Capture).stderr(.Capture).run() ?? panic("run Tower projection")
     assert(live.success, "Tower projection failed: {live.errors}")
@@ -158,7 +158,7 @@ disp_tower: fn(root: String) -> DispBoard {
             }
         }
     }
-    board: disp_files.join(root, "Tools/tower/.tower")
+    board: disp_files.join(root, "Tools/Tower/.tower")
     if disp_files.read(disp_files.join(board, "history.json")) == .Ok(raw) {
         history: disp_json.parse_with_limits(raw, disp_board_limits()) ?? panic("parse Tower history: {err.reason}")
         disp_ingest(history, cards, decisions)
@@ -269,7 +269,7 @@ disp_report: fn(relative: String, text: String, board: DispBoard, problems: &[St
 }
 
 // Arguments: the checkout whose Docs/Audits is read in place, then the copy
-// whose Tools/tower the Tower CLI reads.
+// whose Tools/Tower the Tower CLI reads.
 run: fn() {
     root: disp_process.args()[0]
     board: disp_tower(disp_process.args()[1])

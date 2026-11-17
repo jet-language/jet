@@ -338,7 +338,7 @@ function recordFinding(receipts, finding, runner, process, corpus, summary, expe
       tower_tracking: {
         status: "pending",
         transport: "tower-cli",
-        command: ["node", "Tools/tower/tower.mjs", "card", "add", "--file", "-"],
+        command: ["node", "Tools/Tower/tower.mjs", "card", "add", "--file", "-"],
         dedup_key: towerPayload.hardeningDedupKey,
         payload: towerPayload,
       },

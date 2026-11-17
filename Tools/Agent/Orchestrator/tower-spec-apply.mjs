@@ -6,7 +6,7 @@
 //
 // The original of gauntlet tool entry tower-spec-apply; TowerSpecApply.jet beside
 // it is its Jet twin and the program in use, and this file stays as the entry's
-// reference. Cards are read with `node Tools/tower/tower.mjs` in
+// reference. Cards are read with `node Tools/Tower/tower.mjs` in
 // $TOWER_SPEC_REPO (this checkout unless set) and written through Main's Tower
 // writer, $TOWER_SPEC_WRITER ($JET_STATE_ROOT/scratch/Main/tower-dev.mjs unless
 // set), which takes the card patches from $TOWER_SPEC_PATCHES
@@ -23,7 +23,7 @@ const REPO = path.resolve(process.env.TOWER_SPEC_REPO || fileURLToPath(new URL("
 const WRITER = path.resolve(process.env.TOWER_SPEC_WRITER || path.join(stateRoot(), "scratch/Main/tower-dev.mjs"));
 const PATCHES = path.resolve(process.env.TOWER_SPEC_PATCHES || path.join(scratchRoot(), "lanes/Main"));
 const env = { ...process.env }; delete env.GIT_INDEX_FILE;
-const towerRead = (...a) => execFileSync("node", ["Tools/tower/tower.mjs", ...a], { cwd: REPO, env, maxBuffer: 1 << 26 }).toString();
+const towerRead = (...a) => execFileSync("node", ["Tools/Tower/tower.mjs", ...a], { cwd: REPO, env, maxBuffer: 1 << 26 }).toString();
 const towerWrite = (...a) => execFileSync("node", [WRITER, ...a, "--by", "Main"], { cwd: REPO, env, maxBuffer: 1 << 26 }).toString().trim();
 const sub = (t, from, to, where) => {
   if (!t.includes(from)) throw new Error(`${where}: text not found: ${from.slice(0, 80)}`);
