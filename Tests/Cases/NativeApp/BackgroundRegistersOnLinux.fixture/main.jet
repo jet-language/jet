@@ -1,0 +1,42 @@
+// Background work on a Linux desktop: a timer while the app runs, from its
+// launch on, and a login item while the app asks to run at login. The third
+// refresh fails, and its notice joins the app's notice list.
+use {
+    app
+    process: core.process
+    tasks: core.tasks
+}
+
+Runs: struct {
+    count: Int
+}
+
+RUNS: Shared{Runs{count: 0}}
+
+// One background refresh; the third finds the network down.
+refresh: fn() app.Notice! {
+    held := RUNS.guard_edit()
+    held.value.count += 1
+    if held.value.count == 3 -> return Err(app.Notice{text: "Couldn't refresh the board: offline."})
+    Ok()
+}
+
+runs: fn() -> Int Never! {
+    held: RUNS.guard_read()
+    held.value.count
+}
+
+run: fn() {
+    at_login: !process.args().contains("--not-at-login")
+    graph: app.new("Crewboard").background(every: 20ms, run: refresh, at_login: at_login)
+    print("before launch: {runs()} runs")
+    if !graph.launch() {
+        return
+    }
+    loop _ in 0..<1000 {
+        if runs() >= 4 -> break
+        tasks.sleep(10)
+    }
+    print("while running: four runs or more: {runs() >= 4}")
+    loop notice in app.notices() -> print("notice: {notice.text}")
+}

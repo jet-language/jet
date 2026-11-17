@@ -1,0 +1,36 @@
+// The desktop app runs once. The first launch runs the app; a second
+// launch, given a task's link, hands the link and its activation token to
+// the running app and exits, and the running app opens the task and comes
+// to the front with that token.
+use {
+    app
+    process: core.process
+    time: core.time
+}
+
+TaskView: struct {
+    id: String
+}
+
+task: fn(view: TaskView) -> String Never! { "task {view.id}" }
+
+// The state open now.
+open_now: fn() -> String Never! {
+    if app.current<TaskView>() == .Val(view) -> return "TaskView{{id: {view.id}}}"
+    "none"
+}
+
+run: fn() {
+    graph: app.new("Crewboard").screen("/tasks/:id", task).url_scheme("crewboard")
+    if !graph.launch() {
+        print("handed {process.args().join(" ")} to the running app")
+        return
+    }
+    print("running: {open_now()}")
+    // The running app waits up to a minute for a later launch.
+    loop _ in 0..<6000 {
+        if graph.activations().len() > 0 -> break
+        time.sleep(10ms)
+    }
+    print("opened {open_now()} and focused with {graph.activations().join(",")}")
+}

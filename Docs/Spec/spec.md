@@ -1039,6 +1039,24 @@ E2711 is retired. No `derive` or `derives` declaration word remains, and the
 old `derive T.X { … }` declaration is not Jet syntax (D-SERDE2, D-SERDE16,
 D-META-CODE1, D-META-BODY1, D-MARKER-LAW1, D-DECL-TYPES1).
 
+A value's codec is chosen in one place, strongest first. A hand-written
+`impl Encode` or `impl Decode` wins over `#Codable`, either sign of a trait
+marker, and the package default, and a marker beside it derives only the
+direction it lacks. A field's marker wins over its type's
+(`#Rename("amount_due")` over `#Rename(.Kebab)`), and the type's marker wins
+over the derived field names. A typed decode collects every failure into
+one `[FieldError]` list. Each `path` names the wire key that failed: the
+field's key after renames, `[index]` for a list item, and in an enum the
+variant's key and then its payload field (`shapes[1].Circle.radius`, or
+`value` beside an internal tag). A variant the wire names reports its
+payload's errors, not "no matching enum variant". `FieldError.under(segment,
+result)` is the one framing step. Generated codecs frame each field with it,
+and a hand-written codec frames each child it decodes. It consumes the
+child's `Result`, so the decode it wraps does not propagate. Decoding from
+text and from a parsed tree report the same list
+(`Examples/Data/Serde/CodecOverridePrecedence.jet`,
+`Examples/Data/Serde/CodecFieldErrors.jet`).
+
 A struct's `validate { … }` block declares checks in the exact form
 `check(condition, at: field, "message")`. `field` names a sibling field. Every
 failed check accumulates a `FieldError` with its `path` and `reason` in
