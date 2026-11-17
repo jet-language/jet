@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 111050,
+    "rev": 111075,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -48826,8 +48826,8 @@
       "title": "Names in every script, one stored form, look-alike names are tidy errors (D-IDENT-CHARS1)",
       "body": "Job: a learner names things in their own language, and a reviewer sees exactly the names that compile.\n\nToday (exercised with release jet dev-05ea86f65; probes in $JET_SCRATCH_ROOT/mine/legwork/languages-b/probes/):\n- Probe A: `café` typed with a one-piece é works; the same-looking `café` typed as e + U+0301 fails with E0001 'The character U+0301 doesn't mean anything here (yet)'. Probe C: Devanagari `नमस्ते` fails on U+094D. Combining marks are never allowed, so mark-based scripts cannot be used for names.\n- Probe D: Latin `a` and Cyrillic `а` bind two silent, different names.\n- Source reading: both lexers accept 'alphabetic or numeric' scalars only (Scan.jet:47-55; Scan.rs:772), with no normal form and no look-alike check. The self-hosted lexer uses Core's approximate classifier (#4426), so the two compilers can disagree.\n\nNot in this card: invisible bidirectional controls in source (Trojan Source, CVE-2021-42574) are already owned without an owner gate as #3881 criterion [#4204] (merged from #4204). This card depends on that work and on #4426's pinned UCD data.\n\nSource witnesses: CURSED (youtube BiFt4vw1-uM 13:29-24:08): an agent 'added emoji names' by editing only identifier start/continue tables; the generated JavaScript could not run and the compiler copy segfaulted (name rules are end-to-end law, not a lexer table). DreamBerd reaction (_oiBWfuf0Oo 03:52-04:31). Rule 9: Rust RFC 2457 (UAX #31 + NFC + confusable_idents warning), Python PEP 3131 (NFKC), C++ P1949 (UAX #31, no emoji).\n\nThe ballot decides the character law. After ratification: one generated XID/NFC/confusable data home shared by both lexers, formatter NFC rewrite, UTS #39 skeleton warning per package, spec.md:47-48 rewrite, syntax registry and editor grammars regenerated, UI goldens.\n\nDistilled 2026-10-05 by DistillLang from the six mining batches; Tower snapshot rev 74843 (jet-state digest INCONSISTENT during collection: rerun before posting).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e17",
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -48985,7 +48985,7 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.274Z",
-      "updated": "2026-11-16T21:53:04.281Z",
+      "updated": "2026-11-17T01:40:22.755Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -48998,8 +48998,8 @@
       "title": "Unused fields and enum cases are tidy errors: fields never read and cases never built (D-MEMBER-LIVE1=A)",
       "body": "New card hosting owner ballot D-MEMBER-LIVE1. Extends D-STRUCT-LIVE1=A (four name-level liveness verdicts, card #2052/#2132) to members; reuses its `_name` repair (D-NAME-SIGIL1) and D-LINTPOLICY1 (warnings never block). Library `pub` stays exempt exactly as in D-STRUCT-LIVE1. No new spelling, suppression marker or tool.\n\nJob: an application grows; fields and cases from old experiments stay in types, mislead newcomers, and cost bytes and fetches.\n\nToday (exercised 2026-10-05 with release jet dev-05ea86f65, probe $JET_SCRATCH_ROOT/mine/legwork/languages-b/probes/F-member-liveness.*): `jet check` warns L0104 on a private `unused_helper`, but says nothing about `User.nickname` (written once, never read) or `Plan.Legacy` (matched, never built). D-STRUCT-LIVE1 covers imports, bindings, private functions and unreachable exports only (Docs/spec/syntax-decisions.md:7596-7601).\n\nSource witness: ReScript reanalyze (Gabriel Nordeborn, yKl2fSdnw7w 52:39-60:06): whole-program detection of never-read record fields and never-constructed variant cases; teams 'switch it on, get thousands of errors' and delete old experiments; ReScript-Relay uses the same facts to drop unused GraphQL selections in CI. Rule-9 research (legwork resources 11-15): reanalyze README (case dead if never constructed, matching does not count; field dead if never read, creating does not count; needs @live for FFI); Rust dead_code ('field is never read', 'variant is never constructed'; 1.57 PR 85200 stopped derived Clone/Debug from counting as reads, which broke deny(dead_code) builds); Periphery (external indexer: synthesized Codable/Equatable code invisible, false positives need retain flags); staticcheck U1000 (field accesses use fields; anonymous structs assumed fully used).\n\nThe ballot decides whether these become compiler warnings. Implementation after ratification: member facts in the existing liveness pass (closed package/application graph), use rules from the ballot technical text, machine fix (delete or `_` rename), UI goldens, `jet explain` rows.\n\nNoise evidence for the loss mitigation: Jon Blow (youtube DaJWWePhRsM) disables unused-variable warnings globally because macro-only uses make them noisy, and calls Go's unused-is-error annoying; Jet keeps every liveness warning advisory (D-LINTPOLICY1) and counts encode/decode, derive, reflection and FFI as uses.\n\nDistilled 2026-10-05 by DistillLang from the six mining batches; Tower snapshot rev 74843 (jet-state digest INCONSISTENT during collection: rerun before posting).",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e14",
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -49088,8 +49088,8 @@
       "parentId": "c018gdah",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:47.924Z",
-      "updated": "2026-11-15T04:25:14.657Z",
-      "updatedBy": "TowerKeeper-1",
+      "updated": "2026-11-17T01:40:27.016Z",
+      "updatedBy": "Main",
       "goals": [
         "G5"
       ]
@@ -49737,8 +49737,8 @@
       "title": "Show the compiled representation of every type in inspect and hover",
       "body": "Today `T.$layout` and `jet inspect shapes` show bytes only for C and columnar layouts: Examples/features/comptime/layout_facts.jet prints null for default layout, the shapes plane projects kind and alignment only, and #Layout(c) rejects growable fields, so most real types never reveal their size. Learners and experts cannot see why an enum with one large case costs as much as that case, or what padding costs. Sources: Rust memory-layout explainer 7_o-YRxf_cc (padding 14:40-15:40, enum = tag + largest variant 22:00-24:40, niche 25:20-26:21, closure captures), voxel optimiser 40JzyaOYJeY (a 28-byte vertex made the world 24 MB). Also repair spec prose drift: the current spelling is `T.$layout` (syntax-decisions.md:35, D-COMPILER-NS1=A) but stale `@layout` text remains at syntax-decisions.md:2016, 2924, 2980, 3207 and reference/metaprogramming.md:188. Gate: D-LAYOUT-SHOW1.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e14",
+      "track": "epoch",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P3",
@@ -49831,7 +49831,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:54.070Z",
-      "updated": "2026-11-16T12:55:22.170Z",
+      "updated": "2026-11-17T01:40:31.243Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -50250,8 +50250,8 @@
       "title": "Jet web image assets: build/dev variants, gated Jet WebP, original fallback",
       "body": "D-WEB-IMAGE1=A plus D-IMAGE-ENCODE1=A are ratified. One Jet-written build/dev image pipeline with VP8L then VP8 WebP, per-source-type default only after size/equal-SSIM/encode-time gates. Original asset fallback remains. AVIF is later, via a separate ballot with demand evidence, not a current implementation promise.\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-WEB-IMAGE1=A\nweb.image registers real asset graph nodes; build variants cached by all five chosen identity inputs; picture markup includes original fallback; hashed immutable responses; dev on-demand uses same encoder and gives identical bytes to build; images formats/widths/quality/enabled settings work; measured build time; source-type default flips only after D-IMAGE-ENCODE1 gate.\nPaths: Core/web/web.jet web.image; Core/build/build.jet asset graph/b.add_asset_bundle; Compiler/JetDriver build planned/asset graph and dev server path; Jet-host CLI build/dev; source-owned image codec module [new Core image home]\nRegistry/spec/UI/goldens: Legacy Syntax.rs web/build Core route references only; Jet Core records/calls/build image settings rows cite D-WEB-IMAGE1=A; no syntax keyword; encoder version part of cache key; Docs/spec/reference/core-library.md web.image/images settings/picture; spec.md asset graph; syntax-decisions D-WEB-IMAGE1; #4695 current policy; images settings validation and source-type unsupported/default-gate report; build graph cycle/provenance diagnostics; picture markup goldens; Source hash/width/format/quality/version cache key; immutable hashed Cache-Control; picture fallback original; identical bytes build/dev every admitted tier; encode only changed variants; measured build-time cell\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW policy/implementation permitted; waits for real core.image codec, build asset seam and encoder gate, NOT Rust exit. Do not fake passthrough success or enable encoder defaults before gate. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: No current core.image implementation reported by ballot. Companion D-IMAGE-ENCODE1=A says AVIF later/separate ballot, not shipped AVIF opt-in today: retire #4695 title promise; preserve AVIF as future vote, no backend stub. Build API remains partial.\n\nD-IMAGE-ENCODE1=A\nImplement Jet-only memory-safe VP8L lossless encode/decode with fuzz coverage then VP8 lossy encode; reuse shared inflater where applicable; canonical manifest documents fixed corpus, stated size margin at equal SSIM and encode-time comparator; receipt passes before each source type enables automatic WebP; production encoder depends on neither Rust nor C; AVIF remains a separate later ballot with demand evidence.\nPaths: Core image/WebP codec [new Jet source home] VP8L encode/decode then VP8 lossy; Core/archive shared inflater reuse; web variant cache encoder version; Tools/gauntlet/measurement-manifest.json corpus/gates; fuzz codec inputs\nRegistry/spec/UI/goldens: Jet image module/type/function rows cite D-IMAGE-ENCODE1=A; legacy Syntax.rs Core image names reference only; no Rust/C library dependency or libwebp production bridge; libwebp comparison oracle allowed; Docs/spec/reference/core-library.md core.image WebP scope/budgets; syntax-decisions D-IMAGE-ENCODE1, D-CORE-IMAGE1/D-CORE-ARCHIVE-BOUND1; image safety/performance gate; Codec malformed/truncated/resource-limit failure snapshots; default-enabled gate explanation; unsupported AVIF must not masquerade as encoder; VP8L round-trip/fuzz/truncation and VP8 fixed corpus; libwebp equal-SSIM size comparator with STATED margin and encode-time cell; enable per source type only on pass; deterministic build/dev bytes\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW under #19/#27; missing codec and exact measured margin/corpus gate are implementation prerequisites (ratification states no numeric margin). No new Rust-half work or C bridge. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: D-WEB-IMAGE1/#4695 old wording AVIF opt-in must not override later encoder scope AVIF later. Numeric margin/encode comparator not supplied by chosen option: implementer must state and measure them before default, no fabricated receipt.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e15",
+      "track": "epoch",
+      "epoch": "e19",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -50350,7 +50350,7 @@
       "parentId": "c0u5tm84",
       "needsAcceptance": false,
       "created": "2026-10-06T01:21:52.615Z",
-      "updated": "2026-11-16T12:55:24.952Z",
+      "updated": "2026-11-17T01:40:32.793Z",
       "updatedBy": "Main",
       "goals": [
         "G9"
@@ -50416,7 +50416,7 @@
       "body": "Destination: `jet repl` runs every input through the build-and-execute path (D-EXEC1=A, D-EXEC2=A: one runtime, O0 serves run, dev and compile-time code). Bindings survive across inputs and echo with their types. Inputs needing authority ask once. Packages work with the same pins and permissions as a script (D-REPL-PKG1=A). A run-time failure keeps what ran, and a trap restarts and lists the lost bindings (D-REPL-FAIL1=A). Input is classified by the parser.\n\nThe tests/cases/repl rows in tests/known-failing.tsv are on #6418 (unbuilt `jet repl`, E2104).\n\nOut of scope: the Learn evaluator (owner #4752 removes it; #4630 is frozen at e10). Dev canvas and debug moved off the evaluator under #5931, #6618 and #6730.\n\nSource: #4891 (native REPL bindings), #4719 and #3122 c9.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -50551,7 +50551,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-07T09:50:33.240Z",
-      "updated": "2026-11-16T12:55:31.572Z",
+      "updated": "2026-11-17T01:40:34.354Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -50606,8 +50606,8 @@
       "title": "Public-by-default visibility and local imports with declaration re-exports",
       "body": "Owner directive, 2026-10-07, clarified in chat (Odin/GingerBill model adapted to Jet; a Jet module plays the role of an Odin package). Supersedes D-MOD3, D-VISDEFAULT2, D-PUBPKG1 and the #PubFile / priv-subtree rules.\n\nRules:\n(1) Everything is public by default. Declarations (fn, struct, enum, trait, const, type alias, and so on) never carry a visibility marker.\n(2) The only keyword is `priv`; `pub` is removed from the language.\n(3) A module may be marked private: `priv module name { ... }` (and the equivalent marker for a file module). Plain `priv` means its contents are usable only by its enclosing module and that module's other children. `priv(package)` means usable by any module of the same package and invisible to other packages.\n(4) Field exception: a struct or record field may be `priv`; it is readable and writable only by code in the type's own module (and its children). This keeps invariants for types like Secret, native handles and validated values.\n(5) Removed: `pub`, `pub(package)`, `#PubFile`, and `priv` on non-module declarations. They are no longer Jet syntax and get no teaching diagnostic (owner order: no teaching errors for old syntax).\n(6) Packages: no package-level privacy in this cutover (later, through the manifest).\n(7) D-VIS-REEXPORT1=A: imports stay local; bare paths to declarations re-export through name: path (D-DECL-COLON1=A); pub use retires. Aliases are written Rows: [[String]] (D-DECL-COLON1=A) and generic aliases Grid<T>: [[T]] (D-ALIAS-GENERIC1=A); the alias keyword of D-ALIAS-BIND2=B is superseded.\n\nCutover: parser and sema in both compiler halves, Syntax.rs registration and decision IDs, diagnostics with UI snapshots, the spec (Docs/spec/syntax-decisions.md S18 and the reference), and every in-repo Jet file (Compiler/, Core/, Jetpack/, Examples/, tests/) migrated in one commit by a re-runnable rewrite script, so in-flight branches can apply it too. Helpers that were private declarations move into `priv module`s or stay public; invariant-carrying fields become `priv` fields.\n\nAcceptance: no `pub` and no declaration-level `priv` anywhere in the repo; `priv module` and `priv(package) module` access rules and the `priv` field rule each have UI snapshots for the allowed and rejected cases; goldens and the compiler fixed point unchanged in behavior.\n\n\nCurrent application amendment (2026-10-07, #27 clarified by #29/#31; Sol writes / Opus reviews #28):\nD-VIS-REEXPORT1=A\nEvery original module/field privacy criterion retained; all pub use forms migrate to bare-path alias declarations, use stays local; final pub keyword removed; kind-resolved target casing and canonical identity preserve original home/privacy/generics/defaults/named args/effects/borrow/move/constructors/patterns/methods/traits; forward chains resolve and rootless cycles diagnose; pub-use/duplicate/parenthesized/private-module fixes exact; doc/API record lists target signatures and publication diffs; no pub/priv use remains in live source.\nPaths: Compiler/JetSema/Source/Sema/{Registration/Items,Scopes,Calls/Resolution}.jet declaration aliases, chains/cycles/target identity/case; parser removed pub use fix; Jet API/doc/semindex; Tools/agent/vis-cutover.mjs migration; Core/prelude/prelude.jet; Examples/features/modules/module_reexport; tests/ui/view_write_reexport\nRegistry/spec/UI/goldens: Legacy Syntax.rs KW_PUB/visibility row reference; Jet alias binding/visibility rows cite D-VIS-REEXPORT1=A; retire final pub keyword, preserve use local; no priv use introduced; update generated editor grammar; Docs/spec/syntax-decisions.md S18/D-MOD4 and module reference; public API record/Jetpack/Publication/Source/Diff.jet alias target signature; #4723 rule7 now settled; pub use -> per-name alias fixes; rootless chain cycle diagnostic; parenthesized path E0622 drop-parens note; duplicate use+alias fix removes use member; private module alias refusal lists members; private field through alias still errors; Prelude fourteen names from seven historical pub use lines; shapes.Path == core.files.Path nominal identity; defaults/named/effects/generics/move/traits/constructors preserved; chains any order; doc/API publication records correct; generic recipe NAME bare path alias\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW, completing #4723 reexport slice. Existing VisCut5 pre-verifying Rust+Jet visibility cutover lands as written under #27(c); new generalized alias implementation Jet-only after that baseline, no new Rust mirror. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: Supersedes directive21 recorded lean priv use and #4723 undecided rule7, NOT public-default privacy law. Bare paths alias types WITHOUT alias even though D-ALIAS-BIND2=B. Existing vis branch deliberately retained pub use; add Jet-only slice, preserve prior pre-verifying proofs. #29 does not automatically authorize generalized reexport feature in both halves; minimal resolution seam only if needed to port a current consumer. Existing VisCut5 pre-verification preserved.\n\nD-ALIAS-BIND2=B\nKeep alias keyword and admit every type expression/type-valued recipe call, not only generic alias declarations; bare paths under VIS=A remain keyword-free; bare non-path type expression gets add-alias fix; aliases preserve identity/home/privacy and distinct protection; source name plus single expansion shown in hover/errors; forward chains cycle-diagnose rather than crash; alias constructor Type{...} works; generic spellings migrate to prep fn recipes and plain-refusal UI/fuzz cases become acceptance.\nPaths: Compiler/JetSema/Source/Sema/Registration/Items.jet remove E0324 generic-only restriction; type resolver aliases/cycle guard and constructor head; parser alias generic-to-recipe cutover; formatter alias roundtrip; Core numeric family aliases after generic recipes\nRegistry/spec/UI/goldens: KEEP alias in legacy Syntax.rs/Syntax/core_surface.rs and active Jetpack/Foundation/Source/Syntax.jet keyword projection, cite D-ALIAS-BIND2=B; E0324 generic-only admission retired/redefined with exact history; bare type-expression E0357/E0622 fix ADD alias. Do not use ballot checkInstructions for A.; Docs/spec/Core grammar and syntax-decisions D-TYPEALIAS1/D-ALIAS-OP1 amendments; alias identity/one expansion hover; D-GENERIC-TYPEFN1 recipes; #4723 coupled reexport law; alias Rows :: [[String]] accepted replacing type_alias_no_params stderr/fuzz twin; bare Rows :: [[String]] errors with alias insertion fix; unknown type E0107; cycles list chain not stack overflow; alias Type{...} accepted; distinct alias protection; Five historical generic alias sites become prep fn recipes; type_alias feature/UI/optional_lift_nested/parallel_function_worker/fuzz valid migrate; simple aliases retain identity/methods/traits/constructors/patterns/home; Core U8 :: Unsigned(8) must become alias U8 :: Unsigned(8)\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW as #4723 alias slice; no Rust mirror. Generic recipe and constructor/cycle substrate admission required. Existing formatter #4746 fix remains Jet-half-only unless landing exception. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOpen prerequisite/conflict: OBSERVED current Items.jet:1617-1619 still rejects alias without parameters; DiagnosticRows:3757 generic-only rule stale. B retains keyword despite older owner scratch proposal remove alias. CheckInstructions incorrectly describes A only: NOT B acceptance. VIS=A bare-path exception intentional. Fix reported cycle crash and constructor bug as acceptance, no rerun to confirm.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e3",
+      "track": "epoch",
+      "epoch": "e18",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -50743,7 +50743,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-07T11:23:08.090Z",
-      "updated": "2026-11-16T21:53:10.753Z",
+      "updated": "2026-11-17T01:40:35.895Z",
       "updatedBy": "Main",
       "goals": [
         "G6"
@@ -50822,8 +50822,8 @@
       "title": "Quaternion in core.math (reserved j/k literals), usable F16, and Decimal-with-Complex literals",
       "body": "Owner note: 'include primitive types that Odin does: quaternions, endian types, complex numbers' (OwnerNotes1 digest section 6). Complex is built (D-NUMTYPE1, 3i literals). D-LITCARRIER1=D reserves i, j, k and shows `q: 1 + 2i + 3j + 4k -> Quaternion`, but no Quaternion type exists anywhere in Core, Compiler or crates. Probes on dev-595e0dca3: `F16{1.5}` is E0108 ('needs F16, value is Decimal') and `print` of an F16 is E0112, although D-LOWFLOAT1 ratified F16; and `2.0 + 3.0i` is E0109 ('Decimal and Complex') because a bare 2.0 is Decimal.\n\nScope: (1) Quaternion beside Complex in core.math as an ordinary Core struct of four Floats, built from the reserved j/k component literals, with `*` as the Hamilton product, `+`, `-`, scalar `*`, conj, norm, normalize, inverse, from_axis_angle, rotate(Vec3) and slerp, all through the existing operator hooks (D-OPMIX1). (2) F16/BF16 literals and printing per D-LOWFLOAT1. (3) A decimal literal next to a Complex or Quaternion adopts Float the way an expected Float parameter does (D-LITCARRIER1 inference), so `2.0 + 3.0i` works. Item (1) follows the ratified reservation; if review finds any method name needs owner choice, raise a short ballot for it. Endian types are ballot D-ENDIAN-TYPES1.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e3",
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -50911,7 +50911,7 @@
       "parentId": "c0spgl2u",
       "needsAcceptance": false,
       "created": "2026-10-07T13:09:23.321Z",
-      "updated": "2026-11-16T12:55:38.024Z",
+      "updated": "2026-11-17T01:40:37.488Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -50991,8 +50991,8 @@
       "title": "Stored sibling links: inferred ties, Within disambiguation, frozen-source lifetime",
       "body": "D-LINK-SIBLING1=A\nEligibility, decided on the declaration. A link field of type @T or [@T] has as candidates the sibling fields of type T or [T]. For @String, a String field also qualifies, since @String reaches a string or part of one (memory-model proposal 5.5). A field whose type is a type parameter counts as a candidate, so a generic record's tie never changes with its instantiation. One candidate: the tie is inferred. Two or more: #Within(field) is required. None: no tie.\n\nWhen a record is tied. A record is tied when a construction in its own module stores links taken from the candidate. From then on every construction and every later assignment to the link field, anywhere, must take links from that field; an empty list is fine. A construction that stores outside links, or might on some path, is an error naming the constructor. If no construction in the module takes links from the candidate, the record is untied and its links follow today's stored-link rules.\n\nAdding a second candidate field later turns an inferred tie into the two-candidate error until #Within names one; writing #Within up front locks the tie against that. The tie is published like inferred link sources (D-MEMPROVENANCE2=A), so any change shows as an API change.\n\nFreeze and lifetime. The source is frozen in shape and value while any link into it lives, not only while the record lives. Links inside the record are plain pointers. A link that leaves the record, such as a returned key, is a kept link holding a count on the source (memory-model proposal 5.4). So the source outlives it and stays frozen until it is gone.\n\nTaking a record apart by move hands back both fields. The text stays frozen while the keys or any link from them lives, and is an ordinary string afterwards.\n\nCopies. Copying a tied record shares its frozen source with one count and copies the other fields by their usual rules (D-COPY-DEFAULT1=A). Nothing can write the source, so the first-write copy never happens and both copies' links stay correct. Allowing item writes in a tied list would need copies to detach and retarget every link; that was rejected as costlier and harder to explain.\n\nDecoders. A derived decoder (#Decode, #Codable) builds each field from saved data on its own, so it cannot know that keys point into text; it is rejected with an error naming the tie. #Encode still saves the fields. The durable form is the text: a loader decodes the text and reruns the parser, so keys are rebuilt, not loaded.\n\nImplementation areas: Compiler/JetSema/Source/Sema/{Registration/Items,Ownership/Checks,Ownership/WindowFacts}.jet tie inference/constructor analysis/freeze; Compiler/JetFoundation/Source/{AST,TIR,MIR}/ tie facts; Compiler/JetBackend/Source/Lower/ ownership/drop and kept links; Compiler/JetOptimizer/Source/Verification/Lint.jet; runtime link/source lifetime; derived codecs; hover/inspect types\nSpec/registry: Docs/proposals/memory-model-2026-10-05.md 5.4/5.5 and C30; Docs/spec/{safety,mir-lint}.md; syntax-decisions D-LINK-ITEM1 exception and D-LINK-SIBLING1 inference, NOT from field grammar; Legacy Syntax/markers.rs + Policy::APPLIED_RULES reference; Jet Prelude Markers.jet + AppliedRules metadata add #Within(field) citing D-LINK-SIBLING1=A; no new from clause; registry ceiling approval traced\nDiagnostics/UI: Two candidates/generic ambiguity needs Within; outside-link constructor error; frozen value/shape/item write errors; #Decode/#Codable tie refusal; hover/inspect tie facts\nExamples/goldens: C30 parser golden; inferred/explicit tie, empty links and untied record, alias lifetime beyond record, copies, move-apart until final link dies, tied frozen [Node] exception; MIR Lint mutations; parser cost cell vs copies/positions\nTiming: UNDER #27 Jet-half-only implementation was permitted; latest #29 schedules NEW FEATURE delivery after port/Rust-exit feature resumption. Record docs/contracts/tests plan NOW; an independently justified MINIMAL seam required to port an existing row/layer/harness is PORT NOW and may mirror both halves with dies-at-cutover ledger. Do not let this feature block current port merely because its contract is ratified. Earlier #27 assessment: JET NOW design/implementation allowed, but admission waits on #3645 real link substrate/runtime and standing safety coverage. Not required to wait for Rust removal; prohibit new Rust mirror. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOwner: unowned (RatifyMemory parked STREAMS:224; SafetyNet8 owns independent MIR safety gate, not this feature)\nUnblocks: #4620 C30 stored self-reference design; #3645 tied frozen list exception; no lifetime/from annotation ballot remains\nConflicts/prerequisites: Dated memory proposal recommends keys from text and lifetime of record only; chosen vote replaces both with inferred/Within and escaped-link lifetime. No generic owner parameter. Do not equate ratification with implemented @ links or close #4620/#3645.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e11",
+      "track": "epoch",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P0",
@@ -51065,7 +51065,7 @@
       "parentId": "c0tgtjtu",
       "needsAcceptance": false,
       "created": "2026-10-07T21:06:44.439Z",
-      "updated": "2026-11-16T12:55:41.941Z",
+      "updated": "2026-11-17T01:40:39.072Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -51078,8 +51078,8 @@
       "title": "Pinned shared Jet globals and isolated Core state providers",
       "body": "D-CORE-GLOBAL-STATE1=A\nProposed compiler law: sema admits a shared initializer for #Persist, checks T under existing Shared crossing rules, and records stable binding identity and type/layout facts. The new branch requires a `name: value` declaration (not `:=`) so the module handle cannot be reassigned, moved out, or transiently absent.\n\nThe initializer must be a closed, non-suspending, infallible state-construction expression: literal data and checked pure construction, no task/world capture, external effects, or access to other lazy globals. Cyclic global initialization is rejected, not allowed to hang. The example creates only an empty typed map inside Storage. Allocation remains subject to existing allocation behavior; no new retry policy is introduced.\n\nAll execution modes implement identical once-only publication. State is inaccessible until initialization finishes. Ordinary statements use the existing Shared lock/cleanup law, not scalar persist take/set. Transactions and guards remain unchanged; this ballot adds no new atomicity mechanism. A failed or cancelled ordinary update releases locks under existing Shared rules; this ballot does not promise rollback outside #Transact.\n\nReload never runs the initializer again for a retained cell. Layout/migration checks complete at the existing reload boundary before new code uses old storage. The process default and each test-world provider are implemented in Jet. Vetted #Unsafe FFI/syscalls may supply host synchronization, but no Rust implementation is retained.\n\nImplementation areas: Compiler/JetSema/Source/Sema/Registration/Items.jet E0622 admission, stable Global binding facts; Compiler/JetBackend/Source/Lower/Statics.jet once/Shared global path; Jet runtime once+lock/reload/world provider; Core/math/random.jet, Core/sys/sys.jet env overlay, Core/testing/testing.jet fault switches, Core/auth/auth.jet and Core/web/storage*.jet; no scalar take/set gap\nSpec/registry: Docs/spec/syntax-decisions.md Persist writable/global/reload amendments, D-CONC-SHARE1 ordinary shared expr and migration precedence; core-library RNG/env/fault/auth/storage scope; CLOSURE 3.11 and existing leaf removal rows; Legacy Syntax.rs #Persist/KW_SHARED reference; Jet Persist registration/init constraints cite D-CORE-GLOBAL-STATE1=A; shared keyword remains D-CONC-SHARE1; NO new marker; DiagnosticRows E0622 and new cycle/initializer/handle refusal registered\nDiagnostics/UI: Equivalent unmarked mutable table rejected; immutable handle assignment/move; cyclic/effectful/suspending/world-capture initializer refusal; initializer-only retained-cell reload report; fresh identity and layout restart/migration reports\nExamples/goldens: Contended first access exactly once/no partial publication; indexed Shared map update #4751 mandatory; counter atomic statement; two-key Transact invariant + cancellation/panic guard release; compatible body/init reload retains; rename fresh/process restart empty; parallel worlds/children local-session separation; browser scope unchanged\nTiming: JET PORT NOW; minimal Persist/Shared/global admission seam essential for existing Core state rows may be mirrored under #29 with dies-at-cutover ledger. Broader unrelated feature work remains frozen. Runtime policy, once/lock/world/reload implementations are Jet-owned; scalar Alloc root does not prove shared-cell semantics. CURRENT #29/#31: a MINIMAL seam necessary to port an existing Core row/runtime layer/test harness may also change the Rust half, registered as dies at cutover; all actual layer policy/carriers must still be ported to Jet. This exception does not permit duplicating new features. #28 Sol authors, Opus reviews. Features outside required port work resume after port/Rust exit; contract/docs/tests planning may be prepared now.\nOwner: unowned compiler admission/Core-global feature owner; RuntimeJet2 + NativeTasks3 Global lowering; RtAsm1 L8a design (RuntimeJet2 confirmed); CorelibInteg11 integration; CoreNumerics3 RNG peer-confirmed parked; CoreSystem2 env/fault parked\nUnblocks: CLOSURE 3.11; CoreNumerics RNG __rng_state/__rng_try_update/seed rows; CoreSystem sys get/set/unset/vars/decode logical overlay and atexit; files fault-switch rows incl #4750; auth byte store/local-session native storage; callbacks/resources STILL separate blockers\nConflicts/prerequisites: SharedWrite1 #4751 is parked pre-verification P0 prerequisite, do not ignore silently lost indexed writes. LATEST #29 reopens previous caller-owned RNG/precise/vault/PRESENTATION port-seam deferrals; this vote settles shared-state law ONLY and does not itself supply all carrier/substrate implementations. Runtime alloc_root I64/init_array not new permission for arbitrary mutable globals; task/world scoping not automatic from Persist.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e11",
+      "track": "epoch",
+      "epoch": "e21",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -51169,7 +51169,7 @@
       "parentId": "c0rqi33c",
       "needsAcceptance": false,
       "created": "2026-10-07T21:06:58.270Z",
-      "updated": "2026-11-16T12:55:44.810Z",
+      "updated": "2026-11-17T01:40:40.625Z",
       "updatedBy": "Main",
       "goals": [
         "G3"
@@ -51351,7 +51351,7 @@
       "body": "Decided: D-CORE-PRIVATE-SEAM1=A (ratified 2026-11-01), a toolchain-private module, as c1 states. The ballot text below is history. Jetpack (the Jet package manager) needs two capabilities that exist only as raw Core kernels: run a child process with a held Directory as its cwd (#4895: kernel core.process.__with_directory_raw, CoreSystem2 d13edcfff) and the held link (compiler_link_held). Today they're reached through reserved __ names that the parser now rejects (E0067), so the Jet CLI's assembled source doesn't parse. Renaming them to legal names (files.compiler_process_directory, compiler_link_held) makes them ORDINARY PUBLIC Core functions: CoreReview5-2-2 traced Sema core_call 2607-2653: there is NO caller-privacy fence; the only gate (compiler_api_allowed, CompilerServices.jet:98-111) is a compile-time-only gate for core.compiler, not privacy; #Unsafe and names don't restrict callers. Visibility law today (D-VIS-MODULE1): public by default, priv only on modules and fields. Options (same program: Jetpack's TreeHash runs git with a held directory): A) Make them public, documented Core functions (e.g. process.spawn_in(spec, dir: Directory)). Beginner: one more safe capability (held handle, no path races). Expert: same. Cost: permanent public API to maintain. B) Add ONE toolchain-private visibility: a module-level marker so a Core module is importable only by the compiler and Jetpack (checked by sema, registered in Syntax.rs with a decision ID). Beginner: never sees it. Expert: can't call it. Cost: a new visibility mechanism (I8 allows it with this ratification). C) Jetpack calls the raw runtime route directly (#Import / ABI binding of the existing route symbol) with no Core wrapper. Beginner: unaffected. Cost: Jetpack carries unsafe ABI glue; violates the one-mechanism preference for Core access. Main recommends B if more toolchain-only seams are expected (they are: link, process dir, build receipts), else A for process.spawn_in only. Blocks: CLIParity1 / CLIParity2 composition (goal 4).",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e5",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -51466,7 +51466,7 @@
       "parentId": "c03pc5la",
       "needsAcceptance": false,
       "created": "2026-10-08T11:29:02.821Z",
-      "updated": "2026-11-16T12:55:47.746Z",
+      "updated": "2026-11-17T01:40:42.165Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -51657,7 +51657,7 @@
       "body": "Owner rule 2026-10-09 (OWNER-DIRECTIVES #51): every CLI flag/option must also be writable declaratively in the build configuration (package.jet Build profiles / fn build), and vice versa, from ONE option definition (I8). Audit 2026-10-09: $JET_STATE_ROOT/scratch/Main/CLI-CONFIG-PARITY.md. Today there are four independent surfaces: Jet CLI registry rows (Compiler/JetFoundation/Source/Registry/CLICommands.jet), frozen Rust command and flag tables (crates/jet-foundation CLICommands.rs, crates/jet-cli CLI.rs), the Rust host argv/profile handling (Source/main.rs, Source/CmdCompile.rs), and the declarative package/build model (crates/jet-pkg-model Package/Blocks.rs, jet-foundation Syntax/package_files.rs, comptime BuildContext). check-command-table.mjs compares only Jet vs Rust CLI rows. Work (Jet side only; the Rust is frozen): one Jet option table whose rows carry both the CLI spelling and the build-config field, consumed by the Jet CLI parser and the Jet package/build model; a --check that fails on any CLI-only or config-only option; migrate every existing option and list the current gaps from the audit. Priority after Rust out of the compiler (owner #48).",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -51942,7 +51942,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T15:49:16.817Z",
-      "updated": "2026-11-16T12:56:07.418Z",
+      "updated": "2026-11-17T01:40:43.682Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -51956,7 +51956,7 @@
       "body": "Owner 2026-10-09: the compiler must not stop at the first error; by default it reports ALL errors so a user or agent can fix them in one pass. Today (dev 2026-10-09): within a phase the Jet compiler already collects many diagnostics, but between phases it stops once errors exist (e.g. JetDriver Pipeline.jet:2220 'if jet_driver_has_errors(diagnostics) && !keep_going -> return None', BodyComptime.jet:221). A full all-phases mode exists only as the compiler-internal JET_KEEP_GOING=1 env var (Compiler/Bootstrap/Host/Entry.jet:10-128; JetDriverKeepGoing in JetDriver Identity.jet:524; sema keep-going traps CheckProgram.jet:2243+; comptime drops failed items; the optimizer traps rejected functions and reruns; the emitter keeps every failure), documented as never shipped. Work (Jet side only): make all-phases collection the default for check/build/run/test, with failed items replaced by typed traps so later phases still run without cascade noise (dedupe and suppress errors caused by an already-reported failure); no artifact is produced when any error exists; one canonical option to stop at the first error, available both as a CLI flag and as a build-config setting (owner rule #51: CLI and declarative config never diverge); registered diagnostics/snapshots for the summary line; docs. Keep the internal skip list (JET_KEEP_GOING_SKIP) as a compiler-developer tool only if still needed.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e14",
+      "epoch": "e20",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -52133,7 +52133,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-09T18:05:19.437Z",
-      "updated": "2026-11-16T12:56:12.018Z",
+      "updated": "2026-11-17T01:40:45.223Z",
       "updatedBy": "Main",
       "goals": [
         "G5"
@@ -52798,7 +52798,7 @@
       "body": "Found 2026-10-09 while fixing Core: Core CSV (streaming rows, ~791 self.fields) and crypto (~99 hash.pending.bytes) want to move a value out of a field below a read/write borrow and immediately reinitialize it. The current rules make that E0201 by design (spec.md:1077-1082, 1e1825f4e); there is no general take/replace/swap API (only Cell.replace, spec 1313-1316). Interim: crypto restructured to consume at finish; CSV uses a restructure or an explicit .copy() then reset (an extra allocation per row). Decided: D-TAKE-REPLACE1=A and D-WRITE-TAKE1=A (ratified) add the canonical take and replace; this card builds them.",
       "kind": "idea",
       "track": "epoch",
-      "epoch": "e3",
+      "epoch": "e22",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P2",
@@ -52889,7 +52889,7 @@
       "parentId": "c0w9o2sz",
       "needsAcceptance": false,
       "created": "2026-10-09T22:48:33.171Z",
-      "updated": "2026-11-16T12:56:14.765Z",
+      "updated": "2026-11-17T01:40:46.757Z",
       "updatedBy": "Main",
       "goals": [
         "G10"
@@ -53334,8 +53334,8 @@
       "title": "Close Jai's build-option families in the one option table",
       "body": "## Outcome\n\nEvery Jai build-option family that fits Jet's laws has one typed home in the one option table that #4913 creates, so it can be set from a `package.jet` profile, from `fn build` and from the CLI. A family that conflicts with I1 or I2 is recorded as refused, with the law that refuses it.\n\n## Evidence\n\n- Jai's `Build_Options` has about 45 fields. Sources: The Way to Jai @19cb4b7 `examples/30/30.4_build_options.jai:50-123`; focus-editor `first.jai` @c6b3ead lines 23-90; tsoding `infinite-pong-jai-wasm64/first.jai` @d3319ec lines 7-33.\n- Jet's build profile has eight fields: optimize, debug_info, small, panic, inspect, game_development_stripping, game_cook_mode and settings (`crates/jet-pkg-model/src/Package/Blocks.rs:1339-1457`; `Compiler/JetFoundation/Source/Registry/CoreRecordRows.jet:141-144`). The backend is chosen by profile, not separately (`Compiler/JetCli/Source/Cli/Front.jet:342-346`).\n- Families Jet lacks:\n  - output kind: static library, dynamic library, object file, check-only;\n  - output and intermediate paths;\n  - entry-point name and linker arguments (`append_linker_arguments`, `/SUBSYSTEM`);\n  - per-build target CPU features and OS target;\n  - backend choice;\n  - codegen knobs (split modules, frame pointers, red zone, debug-info format);\n  - runtime check policy (array, cast, math, null and overflow checks);\n  - dead-code elimination policy;\n  - runtime type-info retention;\n  - scratch-allocator size;\n  - generic instantiation depth cap;\n  - diagnostic output format (colour, MSVC format, short paths).\n- Full table: `Docs/research/mine-for-jet-2026-10-15-jai.md`, section \"Build options\".\n\n## Ballot\n\nWhich families become public options and how they are spelled is on Main's ballot list (2026-11-15). Relaxing a check is an I1 question: an option may add checks, or relax one only inside an audited `#Unsafe` scope. It is never a silent global switch, unlike Jai's `array_bounds_check = .OFF`.",
       "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e4",
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "planning",
       "priority": "P1",
@@ -53544,7 +53544,7 @@
       "parentId": "c02y3vkg",
       "needsAcceptance": false,
       "created": "2026-10-16T00:48:22.419Z",
-      "updated": "2026-11-16T12:56:28.373Z",
+      "updated": "2026-11-17T01:40:49.403Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -76802,41 +76802,41 @@
           "n": 53,
           "text": "On the Doom renderer kernels (R_DrawColumn, R_DrawSpan, FixedMul/FixedDiv, recursive BSP walk) with matching checksums, jet build --release is measurably faster than --optimize=none and reaches the peer floor against gcc -O2 and clang -O2. Measured on 2026-11-05: Jet O2 is 8.6x, 7.1x, 8.3x and 2.5x slower than gcc -O2; O0 and O2 run at nearly the same speed; #Inline(Always) and wrapping arithmetic make no measurable difference; --bounds=off only halves the column kernel. Found by the 2026-11-05 Doom port investigation (dev 0ccdff27ea).",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6973 c5: benchmark kernel cell",
-          "at": "2026-11-15T05:42:40.820Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:19.500Z",
+          "closure": "duplicate"
         },
         {
           "n": 54,
           "text": "(was #4571) Adaptive specialization: rebuild with a run record (D-ADAPTIVE-TIER1) (moved from #2514 c17)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6971 c8: optimizer pipeline",
-          "at": "2026-11-15T05:42:41.730Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:20.667Z",
+          "closure": "duplicate"
         },
         {
           "n": 55,
           "text": "Default build: a loop's stop poll costs at most 2 hot instructions per iteration, with the poll call out of line (objdump of the asm-parity hot loops). (moved from #6472 c1)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6970 c5: hot code shape",
-          "at": "2026-11-15T05:42:42.628Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:21.834Z",
+          "closure": "duplicate"
         },
         {
           "n": 56,
           "text": "Default build: the crc16 fast loop, the regex DFA step loop and find_paired have zero [rbp-*] (frame) accesses inside the loop body when at most 9 general values are live (objdump of the asm-parity images). (moved from #6478 c1)",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6970 c6: hot code shape",
-          "at": "2026-11-15T05:42:43.550Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:40:23.726Z",
+          "closure": "duplicate"
         },
         {
           "n": 57,
@@ -76845,7 +76845,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6533 c3, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:58:02.677Z",
+          "at": "2026-11-17T01:40:24.924Z",
           "closure": "duplicate"
         }
       ],
@@ -76857,7 +76857,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-31T00:36:48.109Z",
-      "updated": "2026-11-17T01:40:17.270Z",
+      "updated": "2026-11-17T01:40:24.924Z",
       "updatedBy": "Main",
       "criteriaLastN": 57
     },
@@ -85376,7 +85376,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6898 c16, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:01:12.894Z",
+          "at": "2026-11-17T01:40:26.109Z",
           "closure": "duplicate"
         },
         {
@@ -85386,7 +85386,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6898 c17, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:01:16.272Z",
+          "at": "2026-11-17T01:40:27.984Z",
           "closure": "duplicate"
         },
         {
@@ -85414,7 +85414,8 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "D-COMMENT-SIGIL1 ratified A as amended by the owner (2026-11-04, 'keep // no warn on python'): // stays and there is no Python // warning, so this criterion has no work.",
-          "at": "2026-11-05T00:02:50.338Z"
+          "at": "2026-11-17T01:40:29.168Z",
+          "closure": "decision"
         },
         {
           "n": 7,
@@ -85432,7 +85433,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6898 c18, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T01:01:19.477Z",
+          "at": "2026-11-17T01:40:30.326Z",
           "closure": "duplicate"
         },
         {
@@ -85456,7 +85457,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-04T21:02:54.914Z",
-      "updated": "2026-11-16T01:01:19.477Z",
+      "updated": "2026-11-17T01:40:30.326Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -98178,12 +98179,12 @@
       "criteria": [
         {
           "n": 1,
-          "text": "After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place: on Linux through the camera portal (PipeWire) and GeoClue, in the browser through a capture input or getUserMedia and the Geolocation API. Proof: `jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant` on Linux and the web.",
+          "text": "After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place on Linux, through the camera portal (PipeWire) and GeoClue; on a web build they are an E-APP-TARGET-FEATURE compile error until #6556. Proof: `jet test Compiler --profile cases --filter NativeApp/camera_and_location_give_typed_values_after_a_grant` on Linux.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T21:53:18.009Z"
+          "at": "2026-11-17T01:40:48.614Z"
         },
         {
           "n": 2,
@@ -98203,7 +98204,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:45.126Z",
-      "updated": "2026-11-16T21:53:25.215Z",
+      "updated": "2026-11-17T01:40:48.614Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -98364,12 +98365,12 @@
         },
         {
           "n": 2,
-          "text": "native.ask gives Granted, Denied or Restricted on Linux (through the desktop portals) and the web (the Permissions API), and prompts only at first use. native.open_settings opens the app's settings page where the platform has one. Proof: `jet test Compiler --profile cases --filter NativeApp/ask_gives_a_typed_grant_on_every_target` on Linux and the web.",
+          "text": "native.ask gives Granted, Denied or Restricted on Linux (through the desktop portals) and prompts only at first use; native.open_settings opens the app's settings page. On a web build, both calls are an E-APP-TARGET-FEATURE compile error, not a silent no-op, until the page runtime of #6556 brings the Permissions API. Proof: `jet test Compiler --profile cases --filter NativeApp/ask_gives_a_typed_grant_on_every_target` on Linux, and the web build refusal case.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T21:54:16.780Z"
+          "at": "2026-11-17T01:40:47.662Z"
         }
       ],
       "refs": [],
@@ -98380,7 +98381,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:13:49.075Z",
-      "updated": "2026-11-16T21:54:20.786Z",
+      "updated": "2026-11-17T01:40:47.662Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     },
@@ -217863,6 +217864,181 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:40:49.403Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0acg7c2",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:48.614Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c097myt8",
+      "note": "#1: The web half needs a page runtime that can wait on a browser promise (the resumed-handler runtime of D-RESUME1); a Jet call in the page runs synchronously today, so it moves to #6556.; was: After native.ask grants access, native.take_photo gives a PickedFile photo (no path string) and native.location gives a Place: on Linux through the camera portal (PipeWire) and GeoClue, in the browser"
+    },
+    {
+      "at": "2026-11-17T01:40:47.662Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c02inyar",
+      "note": "#2: The web half needs a page runtime that can wait on a browser promise (the resumed-handler runtime of D-RESUME1); a Jet call in the page runs synchronously today, so it moves to #6556.; was: native.ask gives Granted, Denied or Restricted on Linux (through the desktop portals) and the web (the Permissions API), and prompts only at first use. native.open_settings opens the app's settings pa"
+    },
+    {
+      "at": "2026-11-17T01:40:46.757Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c01sunrb",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:45.223Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08i9ox6",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:43.682Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0dp5efn",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:42.165Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0r8y1nt",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:40.625Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0tr523z",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:39.073Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0h063eg",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:37.488Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0x9xmde",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:35.895Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06m6abh",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:34.354Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0bk3yid",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:32.793Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0q6gm05",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:31.243Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c08idy63",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:30.326Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gelll3",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-17T01:40:29.168Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gelll3",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-17T01:40:27.984Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gelll3",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T01:40:27.016Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0eve9h3",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:26.109Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gelll3",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T01:40:24.924Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#57"
+    },
+    {
+      "at": "2026-11-17T01:40:23.727Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#56"
+    },
+    {
+      "at": "2026-11-17T01:40:22.755Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0441rvj",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:40:21.834Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#55"
+    },
+    {
+      "at": "2026-11-17T01:40:20.667Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#54"
+    },
+    {
+      "at": "2026-11-17T01:40:19.500Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0i891tv",
+      "note": "#53"
+    },
     {
       "at": "2026-11-17T01:40:18.185Z",
       "by": "Main",
