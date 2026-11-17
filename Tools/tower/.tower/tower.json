@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6994,
-    "rev": 110950,
+    "rev": 110975,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -23,7 +23,6 @@
         "radar:e10",
         "radar:e13",
         "radar:e9",
-        "radar:e15",
         "radar:e16",
         "radar:e17",
         "radar:e14",
@@ -34,7 +33,11 @@
         "radar:e18",
         "radar:e7",
         "radar:e6",
-        "radar:e5"
+        "radar:e5",
+        "radar:e15",
+        "radar:e19",
+        "radar:e20",
+        "radar:e21"
       ]
     },
     "completionCursor": "2026-11-17T01:37:39.804Z"
@@ -3465,7 +3468,7 @@
           "at": "2026-09-12T16:54:28.262Z"
         }
       ],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-09-12T16:54:28.262Z"
     },
     {
@@ -3520,7 +3523,7 @@
           "at": "2026-09-12T16:54:29.413Z"
         }
       ],
-      "status": "open",
+      "status": "review-ready",
       "created": "2026-09-12T16:54:29.413Z"
     },
     {
@@ -29486,8 +29489,8 @@
       "body": "Destination: core.text handles all of Unicode the same on every tier: full case mapping and folding, normalization, distinct byte, scalar and grapheme positions, display widths, honest producers, text built from whole UTF-8 runs, one name per case operation, and regex accessors and literals that teach the working form.\n\nWhy it matters: Latin-1-only case folding and byte-at-a-time text are silent wrong answers for most of the world's text.\n\nState (dev 168e1e9e92): Core/Text/Runtime/KernelUnicodeString.jet holds lower, upper and casefold; Core/Text/String.jet has both lower and to_lower; Core/Regex/Regex.jet is a bounded backtracking NFA over UTF-8 bytes.\n\nDecisions: D-UNICODE-CASE1=A, D-TEXT-CONTROL1=A, D-CHAR-SCALAR1=A, D-CORE-ONE-NAME1=A.\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (finding core-f038).\n\nMoved out 2026-11-15: number formatting, templates, locales and diffs to the text formatting card; message catalogs to the i18n card; the build-time regex literal to #6476; checked text sinks to #6852.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": "e3-m22-encoding-validation",
+      "epoch": "e21",
+      "milestoneId": null,
       "phase": "ready",
       "priority": "P2",
       "plan": "**Goal**\nClose the core.text/core.regex/codec contract on scalar boundaries, case and normalization, regex complexity and invalid encoding, with exercised witnesses. Fix the one real gap: case folding beyond Latin-1.\n\n**Current state**\n- Core/text/text.jet:14-19: UTF-8 decode, Hangul NFD/NFC, UAX #29 graphemes and words, and width are Jet. Case mapping is Latin-1 only, and full case-fold tables map to identity. :73-78 `lower`/`upper`/`casefold` → `map_case` (:467). `casefold` is just `lower`, so `casefold(\"Straße\")` stays `straße`.\n- :82-88 `nfc`/`nfd`/`nfkc`/`nfkd`/`graphemes`/`words` exist.\n- Core/regex/regex.jet:15-18 is a bounded backtracking NFA over UTF-8 bytes with ASCII-only `ignore_case`. :488-498 `budget_limit` is (nodes+1)×(min(bytes,4096)+1)×32, clamped to [4096, 1,000,000]. :458-461 caps quantifiers at 4096.\n- Examples/features/text/unicode_text.jet, unicode_17.jet and regex.jet have goldens. Related open cards: #1471 (regex gaps, building), #3370 (producers), #3107 (index boundaries).\n\n**Changes**\n1. Core/text/text.jet: generate full Unicode simple and full case mapping plus C+F folding tables into Jet data, the same way the existing normalization tables are generated. Route `map_case` and `casefold` through them. Casefold is locale-neutral; Turkish dotted I is not special-cased. Update the header comment at :14-19.\n2. Regex: keep the byte NFA and budget. Document in regex.jet that budget exhaustion is a typed failure, and add a witness that proves it. `ignore_case` stays ASCII, stated explicitly; Unicode case-insensitive regex belongs to #1471.\n3. Invalid encoding: `String.from_bytes` → None and codec `EncodingError` are the policy. Add a witness for lossy vs strict where core.text exposes it.\n4. Add Examples/features/text/unicode_contracts.jet plus its golden. Record unsupported cells as printed lines.\n5. Owned vs view costs: measure only the rows exercised above, through the existing text perf cell. Make no claim without a receipt.\n\n**Proof**\n- `jet test Compiler --profile golden text/unicode_contracts`: passes.\n- `jet test Compiler --profile golden text/unicode_text` and `JET_GOLDEN_FILTER=text/regex …`: still pass. Existing goldens change only where casefold output was wrong.\n- `jet test Compiler --profile golden text/unicode_contracts` passes on O0, O1 and O2.\n\n**Batch**\nbatch-core-text: Core/text and Core/regex Jet only, proved by text goldens.\n\n**Dependencies**\nNone. New parser or control APIs (for example, a Unicode regex mode) need their own ballot (criterion 3).",
@@ -29802,7 +29805,7 @@
       "parentId": "c0gibkuw",
       "needsAcceptance": false,
       "created": "2026-09-12T14:30:46.432Z",
-      "updated": "2026-11-17T01:29:55.689Z",
+      "updated": "2026-11-17T01:38:37.199Z",
       "updatedBy": "Main",
       "workOrder": 218,
       "goals": [
@@ -29817,8 +29820,8 @@
       "body": "Destination: Core's JSON goes past parse and decode with strict, bounded, typed operations: standard JMESPath queries, RFC 7386 merge patch, diff and update, an explicit JSONC dialect, and runtime field selection and exclusion that never weaken validation or emit hidden fields.\n\nWhy it matters: these are the everyday JSON jobs of config tools and services; each done ad hoc loses validation or data.\n\nDecisions: D-CORE-JMESPATH1=A (bounded standard JMESPath at core.data.jmespath), D-ENC-DYN1=A (typed decode stays strict).\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (findings core-f055, core-f058).\n\nMoved out 2026-11-15: other formats to the data formats card; MIME to #6874; HTTP client to #3665; routes to #6864; WebSocket to #6878; Codable to #3236; reactive UI examples to #6552.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": "e3-m22-encoding-validation",
+      "epoch": "e21",
+      "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
       "plan": "## Goal\nRecord what full versus selective JSON decoding actually does: validation scope, failure timing, and repeated scans and allocations. Ordinary decode must never silently weaken validation, and any lazy expert API goes to a ballot.\n\n## Current state\n- Core/encoding/json.jet:93-95: `reader(text)` is a pull parser whose first call validates and materializes the whole value, after which it walks events. There is no demanded-prefix extraction.\n- The shipped bounded event reader is the host `jet_enc_json_reader(input: FileReader, limits)` (crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingStream.rs:534; dispatcher crates/jet-codegen/src/Prelude/Core.jet:749), with a golden at Examples/features/serde/encoding_json_stream.jet.\n- Typed `json.decode<T>` is compiler lowering through `jet_std_json_decode_lenient` (Core.jet:731).\n- Examples/features/serde/shape_projection.jet depends on argv, the environment and a DB (:6, :30-31, :35), so it cannot be a golden. It is a Shape-projection witness, not a selective-decoding one.\n\n## Changes\n1. New Examples/features/serde/json_selective.jet with its .out. It runs one document through three paths: (a) `json.parse` in full, (b) `json.decode<Small>` projecting 1 of 20 fields, and (c) `json.reader(^file)` events, stopping after the first key. The inputs are: valid; malformed inside a skipped subtree; trailing garbage after the root; a duplicate key in a skipped subtree; and an invalid UTF-8 escape in a skipped string. It prints, for each path, whether and where it fails.\n2. Expected law: (a) and (b) validate the whole document and fail identically. (c) fails when it reaches the bad bytes, or at `finish`, and the failure timing is printed. If (b) accepts malformed skipped data or trailing garbage, fix the lenient typed decoder at its owner so that typed decode stays strict (D-ENC-DYN1).\n3. Measurement: `Tools/agent/jet-env jet perf run` on a scratch program over a 1 MB document records wall time and allocations for (a), (b) and (c), plus repeated `parse` calls, and the numbers go on the card.\n4. Record the cell `demanded-prefix or lazy extraction: unsupported`. Any expert lazy or borrowed API is a ballot (criterion 4), not a change to ordinary decode.\n\n## Proof\n- `JET_GOLDEN_FILTER=serde/json_selective cargo test --test golden examples_compile_and_run` passes.\n- `Tools/agent/jet-env jet run --interpret Examples/features/serde/json_selective.jet | diff - Examples/features/expected/serde/json_selective.out` prints nothing.\n- `JET_GOLDEN_FILTER=serde/encoding_json_stream cargo test --test golden examples_compile_and_run` still passes.\n\n## Batch\nbatch-core-encoding: a JSON witness plus at most one decoder fix.\n\n## Dependencies\nNone.",
@@ -30407,7 +30410,7 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-09-12T14:31:10.267Z",
-      "updated": "2026-11-17T01:31:30.896Z",
+      "updated": "2026-11-17T01:38:41.492Z",
       "updatedBy": "Main",
       "workOrder": 79,
       "goals": [
@@ -30517,8 +30520,8 @@
       "body": "Destination: Iterable and its adapters carry verified capability facts (exact or bounded size, fused end, borrowed driving, lookahead, back reads, unread remainder, copyable position) through adaptation and type erasure, without a public iterator hierarchy or mandatory dynamic allocation. An upper bound is never labelled exact.\n\nWhy it matters: generic code needs these facts to be fast and correct; a helper name alone proves nothing.\n\nDecisions: D-ITER-SIZE1=A, D-ITER-FUSED1=A, D-ITER-BORROW1=A, D-ITER-BACK1=A, D-ITER-LOOKAHEAD1=A, D-ITER-FAILCONSUME1=A, D-ITER-INTEROP1=A, D-ITER-EXACTGROUP1=A, D-ITER-REMAINDER1=A, D-ITER-COPY1=A, D-ITER-ENDLESS1=A.\n\nEvidence: Docs/research/mine-for-jet-2026-09-12.md (finding iter-f005).\n\nMoved out 2026-11-15: borrowed views (c25-c35) to #6871; lazy demand, flatten, intersperse, replay and cycle (c18, c36-c44, c46, c47) to the lazy adapters card.",
       "kind": "feature",
       "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": "e3-m21-iterator-stdlib",
+      "epoch": "e21",
+      "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
       "plan": "## Goal\nCarry verified iterator capability facts through the existing Iterable/Iterator protocol, adapters and storage representations, without a public iterator hierarchy or mandatory dynamic allocation. Build the three ratified slices now:\n- **D-ITER-SIZE1=A:** one runtime `size_hint()` pair; equal bounds convey exactness. There is no ExactRemaining hierarchy, no `remaining_len()` sibling and no runtime `@remaining`.\n- **D-ITER-FUSED1=A:** a checked `fused` capability fact plus `fuse()`, which latches the first true end.\n- **D-ITER-BORROW1=A:** `by_ref()` borrowed driving that reuses View/ViewMut provenance and sema overlap checks.\n\nThe open ballots D-ITER-BACK1 (reverse and mixed-end reads) and D-ITER-REPLAY1 each gate only their own slice.\n\n## Current state\n- The public `Iter` has no `size_hint`, `fuse` or `by_ref`: there are no rows in `Compiler/JetFoundation/Source/Collections.jet`.\n- The host uses `size_hint` only internally (`crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs:453`).\n- `JetIter` boxes a forward iterator. `ViewIter` and the user `Iterator` hooks (`Examples/features/collections/iter_hook.jet`) exist.\n- Merged from #3336: a fused iterator never yields after its first end. Type erasure, `map` and driver loops never tag a source as fused. Async not-ready and channel `Empty` stay distinct from end (coordinate #3343), and nothing fuses silently.\n- Canonical handoff (#3398): use #3325's checked operation facts, and keep the exact-size, double-ended, fused and remainder guarantees separate.\n\n## Changes\n1. Jet compiler:\n   - `Collections.jet`: add `size_hint() -> (lower: Int, upper: Int?)` (non-advancing), `fuse() -> Iter<T>` and `by_ref()`. Adapters propagate conservative bounds (`map` keeps them; `filter` sets lower to 0; `take(n)` clamps; overflow sets upper to `None`) and the `fused` fact.\n   - `Compiler/JetSema/Source/Sema/Ownership`: `by_ref` creates a loan on the source owner. Overlapping mutation is rejected with the existing overlap code, and the remainder stays usable after the loan ends.\n   - Add ops in `TIR.jet`, with routes in `BuiltinMethods.jet`.\n2. Host mirror:\n   - `crates/jet-foundation/src/Collections.rs` and the TIR lowering.\n   - Prelude `JetIter` exposes `size_hint`, a `JetFuse` wrapper (one wrapper for non-fused sources) and `by_ref` over `&mut`.\n   - The JIT rows and the MIREval arms.\n3. Docs: `Docs/spec/reference/core-library.md` and a disposition row per stable Rust inventory entry (criterion 1). BACK1 and REPLAY1 rows follow the ratified D-ITER-BACK1=A and D-ITER-REPLAY1=A.\n\n## Proof\n- New `Examples/features/collections/iter_capabilities.jet` covers exact, bounded and unknown hints; a non-advancing query; a dishonest user hint that stays safe; overflow; a `fuse()` over a source that resumes after an empty poll; and `by_ref().take(2)` followed by reading the remainder.\n  - `JET_GOLDEN_FILTER=collections/iter_capabilities.jet Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes.\n  - `JET_1216_STEM=collections/iter_capabilities Tools/agent/jet-env cargo test --test dev_tier_parity collections_memory_and_streams_match_interpreter_jit_and_aot` passes.\n- `JET_UI_FILTER=tests/ui/iter_by_ref_overlap.jet Tools/agent/jet-env cargo test --test diagnostic_snapshots ui_snapshots` shows the mutation-while-borrowed rejection.\n\n## Batch\n`batch-host-runtime` (iter cluster, with sema loan checks).\n\n## Dependencies\nNone for the three ratified slices. The reverse/mixed-end slice waits on D-ITER-BACK1 (recommended A) and replay on D-ITER-REPLAY1. No speed claim.",
@@ -31061,7 +31064,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:12.936Z",
-      "updated": "2026-11-17T01:33:18.389Z",
+      "updated": "2026-11-17T01:38:47.356Z",
       "updatedBy": "Main",
       "workOrder": 37,
       "goals": [
@@ -31076,8 +31079,8 @@
       "body": "Publish one authoritative operation contract for collection readers.\n\nNames do not reveal eager versus lazy work, source ownership, callback order, error handling or buffering. Rust and Jet use some identical names for different contracts.\n\nDocument each existing public operation from its authoritative contract; feed existing generated API/docs and explain surfaces from the same semantic facts. Include corrected all/any teaching and link READ-F02/READ-F12, not another mutation-repair mechanism.\n\nEvidence and the complete original finding: docs/research/mine-for-jet-2026-09-12.md#finding-iter-f013. The retained report keeps source versions, exact locators, witness inputs, observed outputs and uncertainty. Source inspection is not execution. Frozen binary receipts do not prove the changing source tree. This card does not ratify a new API, default, dependency or distribution choice.\n\nThe exact final per-row contract is retained in target-mine-playlist-20260911/analyses/iterators/stable-capability-map.json. This card owns its named delta only. Current-source runtime is NOT RUN; frozen e841 receipts remain historical.",
       "kind": "task",
       "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": "e3-m21-iterator-stdlib",
+      "epoch": "e21",
+      "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
       "plan": "## Goal\nImplement D-ONE-OPERATIONS1=A (ratified 2026-09-13) in the self-hosted compiler. Author one checked operation-contract row per collection/Iter operation and derive every repeated view from it: arity and access, callback types, result types, TBuiltinOp/TClosureOp selection, docs, completion and explain. Remove the replaced tables in one cutover. Keep D-CORE-EAGER1/2=A and the LAST ties from #2298.\n\n## Current state\n- The operation facts are split across four parallel `if method == …` tables in `Compiler/JetFoundation/Source/Collections.jet`:\n  - arity and access in `sema_collection_method_contract` (`:136-282`);\n  - callback and argument types in `sema_collection_method_argument_type` (`:301-420`);\n  - result types in `sema_collection_method_result_type` (`:423-667`);\n  - operation selection in `sema_collection_method_operation` (`:669-924`).\n- Each new Iter method (#3315, #3333, #3334, #3371 and others) must currently touch all four.\n- Core call facts also live in `Compiler/JetFoundation/Source/Registry/CoreCalls.jet` (565 lines) and `CoreCallRows.jet` (2011 lines). Their consumers are `Compiler/JetSema/Source/Sema/Calls/Collections.jet`, `Compiler/JetCodegen/Source/Codegen/BuiltinMethods.jet` and `ClosureMethods.jet`, and `Compiler/JetEval/Source/Routes`.\n- The host kernels (`crates/jet-codegen/src/Prelude/Core/Collections.rs`, `Prelude/Core.jet`) are retained runtime. The rows reference them without re-describing them.\n- The archived `crates/jet-foundation/src/Collections.rs` and `Syntax/core_calls.rs` are reference only, and this card does not edit them.\n- The finding is at Docs/research/mine-for-jet-2026-09-12.md#finding-iter-f013 (READ-F02/READ-F12).\n\n## Changes\n1. `Compiler/JetFoundation/Source/Collections.jet`:\n   - Define one `CollectionOperationRow`: receiver kinds, access, arity, callback shape, result projection, TIR op, eager/lazy timing, callback count/order, stop-item consumption, failure channel, empty result, buffering, and a status of current, proposed or source-only.\n   - Author every existing operation as a row.\n   - Rewrite the four functions as lookups over the rows, then delete the `if` chains.\n2. Cut every consumer over in the same pass: JetSema `Calls/Collections.jet`, JetCodegen `BuiltinMethods.jet`/`ClosureMethods.jet` (route rows keyed from the operation row), JetEval `Routes`, and the Web/JIT route inventories in Compiler/. Remove the replaced Path, owned-adapter and inclusion inventories.\n3. Generate the Core reference operation table and the explain/completion text from the rows, through the existing `Tools/agent/gen-core-tables.mjs` pipeline.\n   - Correct the all/any teaching: empty `all` is true and empty `any` is false.\n   - Rewrite `Docs/spec/reference/core-library.md:289-320` from the generated table.\n4. Add `Examples/features/collections/operation_contract.jet` with the criteria cells. The remainder-continuation cell uses the #3315 `next`.\n5. Criteria 1-6 and 7-12 duplicate each other (the pre-retarget and retargeted wording). Closing 7-12 closes 1-6.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `node Tools/agent/gen-core-tables.mjs --check` passes.\n- `jet test Compiler --profile golden collections/operation_contract` passes on O0, O1 and O2.\n- `jet test Compiler --profile golden collections/` passes, as a regression check that every existing collections golden is unchanged.\n\n## Batch\n`batch-jetc-sema`: JetFoundation tables consumed by JetSema first, then codegen and eval.\n\n## Dependencies\n#3315 is needed only for the remainder-continuation cell and can land in the same batch. Land this row refactor first within the batch: the new-method cards (#3315, #3333, #3334, #3371, #3329, #3354) then add rows, not four table edits.",
@@ -31297,7 +31300,7 @@
       "parentId": "c0pi33zu",
       "needsAcceptance": false,
       "created": "2026-09-12T14:48:23.748Z",
-      "updated": "2026-11-17T01:33:39.272Z",
+      "updated": "2026-11-17T01:38:50.464Z",
       "updatedBy": "Main",
       "workOrder": 44,
       "goals": [
@@ -31889,8 +31892,8 @@
       "title": "Translate Nixpkgs into native Jet packages managed only by Hangar",
       "body": "Owner requirement: ingest Nixpkgs through an adapter that translates definitions into the canonical native Jet package/build model. Jetpack owns resolution, builds, installation, updates and removal; Hangar is the only store. No separately installed or bundled Nix package manager, Nix daemon, Nix profile, or Nix store is permitted, including hidden or mounted compatibility stores. Native Jet packages bypass the adapter. Existing Nixpkgs packages use the adapter until converted to full native Jet packages. Out-of-the-box support ships with normal Jet/Jetpack installation. This fixes product ownership, not the adapter implementation; no code implementation is authorized in this stream.\n\nOwner licensing choice: Jet/Jetpack code is MIT. Compatible permissive dependencies may retain their licenses and notices. Managed package payloads may use other licenses and retain their original terms. This is not permission to relicense third-party code. Independently, the Nixpkgs adapter must not depend on Nix implementation executables, libraries, daemons, services or storage.\n\nD-NIX-UPSTREAM1 is superseded unratified. Its old A required an upstream Nix provider; its old B retained a bounded subset. Neither matches the owner’s settled native Nixpkgs-to-Jet-package translation requirement. Do not count this as ratification of either old option. Owner direction and licensing answers are recorded in this card; no replacement choice is needed for that settled boundary.",
       "kind": "task",
-      "track": "sidequest",
-      "epoch": "e5",
+      "track": "epoch",
+      "epoch": "e23",
       "milestoneId": null,
       "phase": "ready",
       "priority": "P1",
@@ -32100,7 +32103,7 @@
       "parentId": "c06osxzz",
       "needsAcceptance": false,
       "created": "2026-09-13T11:40:48.925Z",
-      "updated": "2026-11-16T12:53:40.836Z",
+      "updated": "2026-11-17T01:38:53.521Z",
       "updatedBy": "Main",
       "goals": [
         "G7"
@@ -72856,31 +72859,31 @@
           "n": 12,
           "text": "(was #2468 c4) TTY, accessible, NO_COLOR, CI, and non-TTY modes produce labeled deterministic prompts, do not require an alternate screen, and return a stable status for invalid input, proven by a tests/cases row.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6891 c5: guided input from #CLI gets its own card",
-          "at": "2026-11-15T03:36:39.576Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:36.299Z",
+          "closure": "duplicate"
         },
         {
           "n": 13,
           "text": "(was #2468 c5) A small prompt operation composes in a shell pipeline, keeps machine output separate from human prompts, and does not require a full-screen application, proven by a tests/cases row.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6891 c6: guided input from #CLI gets its own card",
-          "at": "2026-11-15T03:36:40.516Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:38.183Z",
+          "closure": "duplicate"
         },
         {
           "n": 14,
           "text": "(was #2469 c1) Canonical human output is implemented across the CLI, compiler, Prelude, runtime and every Jet-owned status callsite, proven by tests and goldens on every applicable tier.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6875 c6: human output modes sit with progress output (#6875)",
-          "at": "2026-11-15T03:36:41.519Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:39.392Z",
+          "closure": "duplicate"
         }
       ],
       "refs": [],
@@ -72891,7 +72894,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T13:32:29.864Z",
-      "updated": "2026-11-17T01:38:34.783Z",
+      "updated": "2026-11-17T01:38:39.392Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -74282,7 +74285,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c4, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:30.162Z",
+          "at": "2026-11-17T01:38:40.569Z",
           "closure": "duplicate"
         },
         {
@@ -74292,7 +74295,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c5, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:33.163Z",
+          "at": "2026-11-17T01:38:42.470Z",
           "closure": "duplicate"
         },
         {
@@ -74311,7 +74314,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c6, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:36.593Z",
+          "at": "2026-11-17T01:38:44.049Z",
           "closure": "duplicate"
         },
         {
@@ -74321,48 +74324,48 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c7, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:40.201Z",
+          "at": "2026-11-17T01:38:45.231Z",
           "closure": "duplicate"
         },
         {
           "n": 7,
           "text": "The fuzz-found small valid programs that made `jet run` abort with 'jet-compiler has overflowed its stack' (while `jet check` and emit passed) compile and run on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter fuzz/compiler_stack_overflow_repros`.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6968 c1: compiler and runtime stacks are their own stream (Main-approved split)",
-          "at": "2026-11-15T05:39:19.909Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:46.425Z",
+          "closure": "duplicate"
         },
         {
           "n": 8,
           "text": "The Jet linker links dynamically for the D-OS-FLOOR1 glibc path (PT_INTERP and DT_NEEDED plus bundled glibc stubs) for the hosted CLI. Proof: `jet test Compiler --profile cases --filter linker/dynamic_glibc_hosted_cli`.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6968 c2: compiler and runtime stacks are their own stream (Main-approved split)",
-          "at": "2026-11-15T05:39:20.936Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:48.357Z",
+          "closure": "duplicate"
         },
         {
           "n": 9,
           "text": "Native jet runs the compiler on a stack sized for deep recursion, so deep programs compile without raising `ulimit -s` above the 8 MiB default. Proof: `jet test Compiler --profile cases --filter compiler/deep_recursion_default_ulimit`.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6968 c3: compiler and runtime stacks are their own stream (Main-approved split)",
-          "at": "2026-11-15T05:39:21.884Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:49.536Z",
+          "closure": "duplicate"
         },
         {
           "n": 10,
           "text": "The default stack reservation of runtime threads is set from measurement (the deepest stack in the corpus plus a recorded margin) instead of a fixed 192 MiB, and a deep-recursion program still reports a clean stack overflow on O0, O1 and O2. Proof: `jet test Compiler --profile cases --filter runtime/thread_stack_default`.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6968 c4: compiler and runtime stacks are their own stream (Main-approved split)",
-          "at": "2026-11-15T05:39:22.854Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:51.456Z",
+          "closure": "duplicate"
         },
         {
           "n": 12,
@@ -74398,7 +74401,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c8, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:43.576Z",
+          "at": "2026-11-17T01:38:52.622Z",
           "closure": "duplicate"
         },
         {
@@ -74408,7 +74411,7 @@
           "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6501 c9, the card that owns this work (board cleanup).",
-          "at": "2026-11-16T00:56:47.797Z",
+          "at": "2026-11-17T01:38:54.959Z",
           "closure": "duplicate"
         },
         {
@@ -74424,21 +74427,21 @@
           "n": 18,
           "text": "With no kept program, cache or incremental state, `jet run hello.jet` (a fresh process, nothing reused from an earlier run) shows a lower mean than `luajit hello.lua` under `hyperfine -N --warmup 3 --runs 30` on the same host (Jet/LuaJIT < 1.00); the final target is at or below one exec plus a compile of the user code only (the hand-written ELF hello is 0.155 ms on the reference host). Baselines 2026-11-08 (a0_037): cold 17.8 ms, luajit 0.58 ms, lua 0.75 ms, Jet AOT binary 0.175 ms. Proof: a committed hyperfine receipt.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6639 c11: script startup against Lua and Python belongs with scripting speed",
-          "at": "2026-11-15T05:39:23.858Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:56.526Z",
+          "closure": "duplicate"
         },
         {
           "n": 19,
           "text": "Peak RSS of `jet run hello.jet` with no kept program or cache (GNU time %M, median of 10) is below `lua hello.lua` on the same host. Proof: a committed GNU time receipt.",
           "status": "met",
-          "metBy": "TowerKeeper-1",
+          "metBy": "Main",
           "verifiedBy": null,
           "evidence": "Moved to #6639 c12: script startup against Lua and Python belongs with scripting speed",
-          "at": "2026-11-15T05:39:24.855Z",
-          "closure": "obsolete"
+          "at": "2026-11-17T01:38:58.086Z",
+          "closure": "duplicate"
         },
         {
           "n": 20,
@@ -74671,7 +74674,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T16:05:34.496Z",
-      "updated": "2026-11-16T00:57:13.030Z",
+      "updated": "2026-11-17T01:38:58.086Z",
       "updatedBy": "Main",
       "criteriaLastN": 42
     },
@@ -217860,6 +217863,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T01:38:58.086Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#19"
+    },
+    {
+      "at": "2026-11-17T01:38:56.526Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#18"
+    },
+    {
+      "at": "2026-11-17T01:38:54.960Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#16"
+    },
+    {
+      "at": "2026-11-17T01:38:53.521Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0svneex",
+      "note": "track,epoch"
+    },
+    {
+      "at": "2026-11-17T01:38:52.622Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#15"
+    },
+    {
+      "at": "2026-11-17T01:38:51.457Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-17T01:38:50.464Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0l0ygs4",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:38:49.536Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-17T01:38:48.357Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-17T01:38:47.356Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0m83e3n",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:38:46.425Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-17T01:38:45.231Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#6"
+    },
+    {
+      "at": "2026-11-17T01:38:44.049Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-17T01:38:42.471Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-17T01:38:41.492Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0t54oz7",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:38:40.570Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08r6ogl",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-17T01:38:39.392Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#14"
+    },
+    {
+      "at": "2026-11-17T01:38:38.183Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-17T01:38:37.199Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0uyfbge",
+      "note": "track,epoch,milestoneId"
+    },
+    {
+      "at": "2026-11-17T01:38:36.299Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0vqsfl8",
+      "note": "#12"
+    },
     {
       "at": "2026-11-17T01:38:34.783Z",
       "by": "Main",
