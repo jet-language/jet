@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 111973,
+    "rev": 111975,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -66355,6 +66355,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-17T17:40:24.285Z"
+        },
+        {
+          "n": 5,
+          "text": "A task that calls a function value whose captures it mutates, while the creating code also calls that function, is refused at compile time (or the shared state is made data-race-free) on every tier. Today it compiles and runs, a data race in safe Jet (I1). Found by the D-FNVAL-COPY1 ballot probes on gate-p277: make_counter returns fn(value: Int) { seen.push(value); seen.len() * 100 + value } over a := [Int]{}; run does counter: make_counter(); worker: task counter(1); print(counter(2)); print(worker.join() ?? 0), and it prints 102 then 201. Proof: a Tests/Cases/Concurrency case with this program reports the registered refusal (UI snapshot) on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-17T21:53:55.989Z"
         }
       ],
       "refs": [],
@@ -66365,9 +66374,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-17T21:30:17.865Z",
+      "updated": "2026-11-17T21:53:55.989Z",
       "updatedBy": "Main",
-      "criteriaLastN": 4
+      "criteriaLastN": 5
     },
     {
       "id": "c0fvnyiq",
@@ -105423,11 +105432,12 @@
         {
           "n": 1,
           "text": "A ballot presents 2-3 worked one-lookup upsert spellings with peer-language evidence and a one-mechanism argument (I8), ready for the owner. Proof: `timeout 120 node Tools/tower/tower.mjs decision list` shows the upsert ballot with its worked spellings.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T05:47:02.826Z"
+          "evidence": "Superseded by ratified law: D-MAP-SLOT1=A (ratified 2026-10-05, before this card) already chose the one-lookup spelling, a defaulted slot: counts[w, or: 0] += 1 and &groups[w, or: [String]{}].push(w), with insert-or-replace spelled add (D-ONCE-VERB1, D-API-STORE1). The ballot drafter (BallotRework-2, 2026-11-17) confirmed there is no open owner choice. A probe on gate-p277 (dev 112b577445) shows the spelling is not built: counts[w, or: 0] += 1 fails to parse with E0003. That build is c2.",
+          "at": "2026-11-17T21:54:29.759Z",
+          "closure": "decision"
         },
         {
           "n": 2,
@@ -105451,7 +105461,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:07.715Z",
-      "updated": "2026-11-17T01:48:43.162Z",
+      "updated": "2026-11-17T21:54:29.759Z",
       "updatedBy": "Main"
     },
     {
@@ -215544,6 +215554,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-17T21:54:29.759Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w8b7vb",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-17T21:53:55.989Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mhdm27",
+      "note": "#5 A task that calls a function value whose captures it mutates"
+    },
     {
       "at": "2026-11-17T21:41:02.023Z",
       "by": "Main",
