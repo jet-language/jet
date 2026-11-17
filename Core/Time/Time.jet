@@ -70,7 +70,7 @@ unix_ns: fn() -[Time]> Int Never! {
 // their labeled state keeps the elapsed sample and millisecond offset distinct.
 priv ClockState: enum {
     Manual(Int),
-    System(started_ns: Int, offset_ms: Int)
+    System(started_ns: Int, offset_ms: Int),
 }
 
 Clock: struct {
@@ -1148,12 +1148,12 @@ Period: struct {
 
 ZoneInfo: struct {
     offset: Int,
-    is_dst: Bool
+    is_dst: Bool,
 }
 
 ZoneTransition: struct {
     at: Int,
-    info: Int
+    info: Int,
 }
 
 // The TZif footer's POSIX TZ rule (RFC 8536 section 3.3) governs every
@@ -1166,7 +1166,7 @@ ZoneTransition: struct {
 ZoneRuleForm: enum {
     Julian,
     Ordinal,
-    Weekday
+    Weekday,
 }
 
 ZoneRuleEdge: struct {
@@ -1174,31 +1174,31 @@ ZoneRuleEdge: struct {
     month: Int,
     week: Int,
     day: Int,
-    at: Int
+    at: Int,
 }
 
 ZoneSaving: struct {
     info: ZoneInfo,
     start: ZoneRuleEdge,
-    end: ZoneRuleEdge
+    end: ZoneRuleEdge,
 }
 
 ZoneRule: struct {
     standard: ZoneInfo,
-    saving: ZoneSaving?
+    saving: ZoneSaving?,
 }
 
 // One change of offset: the UTC second it happens and the offsets around it.
 ZoneShift: struct {
     at: Int,
     before: Int,
-    after: Int
+    after: Int,
 }
 
 ZoneData: struct {
     transitions: [ZoneTransition],
     infos: [ZoneInfo],
-    rule: ZoneRule?{None}
+    rule: ZoneRule?{None},
 }
 
 // Zone tables never change after construction; plain borrowed reads do not
@@ -1785,7 +1785,7 @@ CivilTimeParts: struct {
     hour: Int,
     minute: Int,
     second: Int,
-    nanos: Int
+    nanos: Int,
 }
 
 civil_time_parts: fn(value: String, fractions: Bool) -> CivilTimeParts TimeError! {

@@ -228,7 +228,7 @@ corpus: fn(glob: String) -[FS]> [String] Never! {
 /// name a test reports; `path` is the file to read.
 CorpusEntry: struct {
     id: String,
-    path: String
+    path: String,
 }
 
 /// The regular files below `root`, at any depth, whose names end in `suffix`,
@@ -466,15 +466,15 @@ __suite_run: fn(name: String, body: fn(TestRows)) -[FS, Env]> {
 // another wire format. Identities are logical numbers, never host
 // pointers.
 HandleID: struct {
-    value: Int
+    value: Int,
 }
 
 TaskID: struct {
-    value: Int
+    value: Int,
 }
 
 EventID: struct {
-    value: Int
+    value: Int,
 }
 
 // #6410: the deterministic history generator: SplitMix64 over one 64-bit
@@ -491,7 +491,7 @@ HistoryRNG: struct {
 }
 
 priv HistoryRNGState: struct {
-    word: U64
+    word: U64,
 }
 
 // A generator seeded by the low 64 bits of a non-negative seed.
@@ -534,7 +534,7 @@ HistoryValue: enum {
     Boolean(Bool),
     Text(String),
     Handle(HandleID),
-    Redacted(String)
+    Redacted(String),
 }
 
 // The four retained precondition kinds an operation can wait on: a live
@@ -543,7 +543,7 @@ HistoryPrecondition: enum {
     HandleLive(HandleID),
     HandleState(handle: HandleID, state: String),
     TaskCompleted(TaskID),
-    EventAvailable(EventID)
+    EventAvailable(EventID),
 }
 
 // One operation of a history case, with the handles it creates and consumes.
@@ -556,7 +556,7 @@ HistoryOperation: struct {
     preconditions: [HistoryPrecondition],
     depends_on: [Int],
     task: TaskID?,
-    event: EventID?
+    event: EventID?,
 }
 
 /// One scheduler choice attached to an operation.
@@ -564,7 +564,7 @@ HistoryScheduleChoice: struct {
     operation: Int,
     task: TaskID?,
     event: EventID?,
-    choice: String
+    choice: String,
 }
 
 // One history case: its id, its seed, its operations and its schedule.
@@ -572,13 +572,13 @@ HistoryCase: struct {
     case_id: String,
     seed: Int,
     operations: [HistoryOperation],
-    schedule: [HistoryScheduleChoice]
+    schedule: [HistoryScheduleChoice],
 }
 
 // A history case together with the commands it decodes to.
 TypedHistoryCase: struct<Command> {
     case: HistoryCase,
-    commands: [Command]
+    commands: [Command],
 }
 
 // The campaign bounds a strategy works within. The `cases` argument of
@@ -587,13 +587,13 @@ HistoryBounds: struct {
     max_steps: Int,
     max_resources: Int,
     max_shrink_attempts: Int,
-    max_discarded_cases: Int
+    max_discarded_cases: Int,
 }
 
 // The generation weight of one named operation.
 HistoryDistribution: struct {
     operation: String,
-    weight: Int
+    weight: Int,
 }
 
 // An explicit strategy: one immutable value with all five fields. `generate`
@@ -606,7 +606,7 @@ HistoryStrategy: struct<Command> {
     rebuild: fn(HistoryCase) -[]> TypedHistoryCase<Command>?,
     valid: fn(TypedHistoryCase<Command>) -[]> Bool,
     bounds: HistoryBounds,
-    distributions: [HistoryDistribution]
+    distributions: [HistoryDistribution],
 }
 
 // #6410: one campaign. A single HistoryRNG seeded by `seed` feeds every
@@ -678,7 +678,7 @@ TestingHistorySample: struct {
     reference: String,
     candidate: String,
     reference_replay: String,
-    candidate_replay: String
+    candidate_replay: String,
 }
 
 TestingHistoryObservation: struct {
@@ -687,7 +687,7 @@ TestingHistoryObservation: struct {
     sample: TestingHistorySample?,
     input: Dyn,
     reference: Dyn,
-    candidate: Dyn
+    candidate: Dyn,
 }
 
 testing_history_config_error: fn(cases: Int, bounds: HistoryBounds, distributions: [HistoryDistribution], command_type: String) -> String Never! {
@@ -867,7 +867,7 @@ testing_history_observe: fn<T>(case: HistoryCase, strategy: HistoryStrategy<T>, 
 
 TestingHistoryShrunk: struct {
     case: HistoryCase,
-    observation: TestingHistoryObservation
+    observation: TestingHistoryObservation,
 }
 
 // Shrink a failing case: first drop one operation (with everything that
@@ -1508,7 +1508,7 @@ testing_owned_text: fn(bytes: &&[U8]) -> String Never! {
 
 TestingDiffLines: struct {
     lines: [String],
-    truncated: Bool
+    truncated: Bool,
 }
 
 testing_diff_lines: fn(text: String) -> TestingDiffLines Never! {
@@ -1531,7 +1531,7 @@ testing_diff_lines: fn(text: String) -> TestingDiffLines Never! {
 
 TestingDiffOutput: struct {
     bytes: [U8],
-    truncated: Bool
+    truncated: Bool,
 }
 
 testing_append_bytes: fn(output: &[U8], text: String, end: Int) Never! {

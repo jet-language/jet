@@ -17,12 +17,12 @@ Token: struct {
     kind: String,
     text: String,
     line: Int,
-    column: Int
+    column: Int,
 }
 
 Pair: struct {
     left: String,
-    right: String
+    right: String,
 }
 
 /// One place library code runs inside the compiler: the code its author
@@ -31,7 +31,7 @@ Pair: struct {
 ExtensionPoint: struct {
     name: String,
     entry: String,
-    row: [String]
+    row: [String],
 }
 
 /// Every extension point and its row. A marker whose `expand` writes its own
@@ -90,7 +90,7 @@ CompilerStage: enum {
     Resolved,
     Typed,
     Prepared,
-    Emitted
+    Emitted,
 }
 
 /// A compiler-issued snapshot identity. Source names and casts can't make
@@ -116,7 +116,7 @@ MetadataFailure: enum {
     Stale(requested: SnapshotID, current: SnapshotID),
     Invalid(diagnostics: [CompilerDiagnostic]),
     Denied(scope: ScopeID, reason: String),
-    Truncated(limit: Int, observed: Int)
+    Truncated(limit: Int, observed: Int),
 }
 
 /// A failed metadata query: the failure, the query's spelling and, when the
@@ -164,7 +164,7 @@ FactKind: enum {
     Claim,
     Section,
     Consumed,
-    Produced
+    Produced,
 }
 
 /// One row of the toolchain's executable schema.
@@ -173,7 +173,7 @@ SchemaFact: struct {
     /// The row's canonical name: the marker or the read it declares.
     name: String,
     /// Where the row applies: a marker rule's sites, a fact read's planes.
-    scope: [String]
+    scope: [String],
 }
 
 /// The running toolchain's executable schema, as `compiler.schema()` issues
@@ -190,7 +190,7 @@ SchemaSnapshot: struct {
 FactScope: struct {
     package: String,
     module: String,
-    item: String
+    item: String,
 }
 
 /// One fact of a checked program: a marker a declaration carries, one
@@ -208,7 +208,7 @@ ProgramFact: struct {
     identity: String,
     scope: FactScope,
     /// The checked program's revision: the content hash of its sources.
-    source: SnapshotID
+    source: SnapshotID,
 }
 
 /// One record of a run's receipt: the claim the run answered (`name` is the
@@ -224,7 +224,7 @@ RunFact: struct {
     /// consumed or produced record's `record-kind/artifact-id`.
     identity: String,
     /// The receipt's digest.
-    source: SnapshotID
+    source: SnapshotID,
 }
 
 /// A recorded run, as `receipt(path)` reads it from its receipt file through
@@ -244,7 +244,7 @@ RunReceipt: struct {
     /// Each consumed record's kind (`left`) and artifact id (`right`).
     priv consumed: [Pair],
     /// Each produced record's kind (`left`) and artifact id (`right`).
-    priv produced: [Pair]
+    priv produced: [Pair],
 }
 
 /// The immutable snapshot a query reads: the running toolchain's schema, a
@@ -253,20 +253,20 @@ RunReceipt: struct {
 FactSource: enum {
     Schema(snapshot: SchemaSnapshot),
     Program(program: ProgramInfo),
-    Run(receipt: RunReceipt)
+    Run(receipt: RunReceipt),
 }
 
 /// One fact a query returns, tagged by the store it comes from.
 Fact: enum {
     Schema(fact: SchemaFact),
     Program(fact: ProgramFact),
-    Run(fact: RunFact)
+    Run(fact: RunFact),
 }
 
 /// A point in a run's recorded timeline, in milliseconds from the run's
 /// start. A query without one reads the source's complete recorded view.
 QueryTime: struct {
-    elapsed_ms: Int
+    elapsed_ms: Int,
 }
 
 /// The facts of `kind` in `source`, in the source's canonical order: a

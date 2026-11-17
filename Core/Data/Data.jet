@@ -42,7 +42,7 @@ DataFormat: enum {
     JSON,
     JSONL,
     Parquet,
-    Arrow
+    Arrow,
 }
 
 #Equatable
@@ -168,7 +168,7 @@ DataLineOptions: struct {
     reference: Float?,
     style: String,
     color: String,
-    legend: String
+    legend: String,
 }
 
 #Comparable
@@ -178,7 +178,7 @@ DataFreshness: enum {
     Stale,
     Error,
     Offline,
-    Cancelled
+    Cancelled,
 }
 
 #[Comparable, Equatable]
@@ -190,7 +190,7 @@ DataInvalidationCause: enum {
     Parameters,
     Credential,
     Capability,
-    Manual
+    Manual,
 }
 
 #Equatable
@@ -201,7 +201,7 @@ DataStatus: struct {
     ownership: String,
     trust: String,
     fallback: String,
-    replacement: String
+    replacement: String,
 }
 
 #Equatable
@@ -226,7 +226,7 @@ DataLimits: struct {
 
 DataAuthority: struct {
     scope: String,
-    revision: String
+    revision: String,
 }
 
 // Where a loader reads from; the runtime's data provider takes it by
@@ -235,14 +235,14 @@ DataLoaderKind: enum {
     File,
     URL,
     Database,
-    Value
+    Value,
 }
 
 DataSourceIdentity: struct {
     kind: DataLoaderKind,
     locator: String,
     member: String,
-    parameters: [String]
+    parameters: [String],
 }
 
 DataSnapshotIdentity: struct {
@@ -250,27 +250,27 @@ DataSnapshotIdentity: struct {
     source: String,
     content: String,
     schema: String,
-    format: DataFormat
+    format: DataFormat,
 }
 
 DataProvenance: struct {
     source: DataSourceIdentity,
     format: DataFormat,
-    authority: DataAuthority
+    authority: DataAuthority,
 }
 
 DataColumn: struct {
     id: String,
     name: String,
     type_name: String,
-    nullable: Bool
+    nullable: Bool,
 }
 
 DataSchema: struct {
     identity: String,
     format: DataFormat,
     columns: [DataColumn],
-    projection: String?
+    projection: String?,
 }
 
 DataSnapshot: struct<T> {
@@ -279,7 +279,7 @@ DataSnapshot: struct<T> {
     provenance: DataProvenance,
     schema: DataSchema,
     status: DataLoaderStatus,
-    content: [U8]
+    content: [U8],
 }
 
 DataLoader: struct<T> {
@@ -291,7 +291,7 @@ DataLoader: struct<T> {
     last_good: [U8]?,
     cancelled: Bool,
     offline: Bool,
-    status: DataLoaderStatus
+    status: DataLoaderStatus,
 }
 
 #Comparable
@@ -303,7 +303,7 @@ DataLoaderStatus: struct {
     cleanup: String,
     buffered_bytes: Int,
     backpressure: Bool,
-    last_good: Bool
+    last_good: Bool,
 }
 
 #Equatable
@@ -340,7 +340,7 @@ DataStream: struct<T> {
     items: [T],
     index: Int,
     cancelled: Bool,
-    __source: Shared<StreamSource<T>>?
+    __source: Shared<StreamSource<T>>?,
 }
 
 // The pull side of a file-backed stream (Rust `DataStream` with its inner
@@ -353,7 +353,7 @@ priv StreamSource: struct<T> {
     ahead: [T],
     ahead_index: Int,
     terminal: DataError?,
-    done: Bool
+    done: Bool,
 }
 
 DataPivotCell: struct {
@@ -361,7 +361,7 @@ DataPivotCell: struct {
     column_key: String,
     count: Int,
     sum: Float,
-    mean: Float
+    mean: Float,
 }
 
 #Equatable
@@ -373,22 +373,22 @@ DataSummary: struct {
     max: Float,
     median: Float,
     variance: Float,
-    stddev: Float
+    stddev: Float,
 }
 
 DataJoin: struct<L, R> {
     left: L,
-    right: R
+    right: R,
 }
 
 JetDataPlot: struct<T> {
     rows: [T],
-    plan: JetDataPlotPlan
+    plan: JetDataPlotPlan,
 }
 
 Group: struct<K, V> {
     key: K,
-    value: V
+    value: V,
 }
 
 // Query<T> is the deferred operation carrier: `__steps` is the plan and the
@@ -407,11 +407,11 @@ Group: struct<K, V> {
 // only ever narrows what is read. Every other step reads every row of its
 // query and ignores the condition.
 priv QueryCell: struct<T> {
-    run: fn(String, [String]) -> [T] DataError!
+    run: fn(String, [String]) -> [T] DataError!,
 }
 
 priv QueryState: struct {
-    consumed: Bool
+    consumed: Bool,
 }
 
 // `__limits` bound the query's sorts, groups and output: a query over a
@@ -422,26 +422,26 @@ Query: struct<T> {
     __one_shot: Bool,
     __limits: DataLimits,
     __state: Shared<QueryState>,
-    __cell: Shared<QueryCell<T>>
+    __cell: Shared<QueryCell<T>>,
 }
 
 priv QueryKeyCell: struct<T, K> {
-    key: fn(T) -> K DataError!
+    key: fn(T) -> K DataError!,
 }
 
 // `query.group_by(key)`: the grouped carrier its count/sum/mean reducers read.
 DataGroupedQuery: struct<T, K> {
     __query: Query<T>,
-    __key: Shared<QueryKeyCell<T, K>>
+    __key: Shared<QueryKeyCell<T, K>>,
 }
 
 DataTracked: struct<T, K> {
-    snapshot: DataSnapshot<[T]>
+    snapshot: DataSnapshot<[T]>,
 }
 
 DataWatch: struct<T> {
     query: Query<T>,
-    status: DataWatchStatus
+    status: DataWatchStatus,
 }
 
 #Comparable
@@ -485,7 +485,7 @@ JetDataPlotAggregate: enum {
     Mean,
     Count,
     Min,
-    Max
+    Max,
 }
 
 #Comparable
@@ -512,13 +512,13 @@ JetDataPlotFilterOp: enum {
 JetDataPlotValue: enum {
     Number,
     Text,
-    Bool
+    Bool,
 }
 
 JetDataPlotTransform: enum {
     Identity,
     Filter,
-    Aggregate
+    Aggregate,
 }
 
 #Comparable
@@ -542,7 +542,7 @@ JetDataPlotScaleKind: enum {
 
 JetDataPlotDomain: enum {
     Auto,
-    Explicit
+    Explicit,
 }
 
 #Comparable
@@ -629,101 +629,101 @@ JetDataPlotSupport: enum {
 JetDataPlotErrorKind: enum {
     Schema,
     Encoding,
-    Render
+    Render,
 }
 
 JetDataPlotRenderFormat: enum {
     SVG,
     Text,
-    JSON
+    JSON,
 }
 
 JetDataPlotField: struct {
     name: String,
-    kind: JetDataPlotValue
+    kind: JetDataPlotValue,
 }
 
 JetDataPlotSchema: struct {
-    fields: [JetDataPlotField]
+    fields: [JetDataPlotField],
 }
 
 JetDataPlotSourceFacts: struct {
     rows: Int,
-    columns: Int
+    columns: Int,
 }
 
 JetDataPlotEncoding: struct {
     x: String,
     y: String,
-    mark: JetDataPlotMark
+    mark: JetDataPlotMark,
 }
 
 JetDataPlotScale: struct {
     kind: JetDataPlotScaleKind,
-    field: String
+    field: String,
 }
 
 JetDataPlotAxis: struct {
     field: String,
-    title: String
+    title: String,
 }
 
 JetDataPlotLegend: struct {
-    position: JetDataPlotLegendPosition
+    position: JetDataPlotLegendPosition,
 }
 
 JetDataPlotFacet: struct {
     kind: JetDataPlotFacetKind,
-    field: String
+    field: String,
 }
 
 JetDataPlotLayer: struct {
     mark: JetDataPlotMark,
-    encoding: JetDataPlotEncoding
+    encoding: JetDataPlotEncoding,
 }
 
 JetDataPlotAccessibility: struct {
     title: String,
-    summary: String
+    summary: String,
 }
 
 JetDataPlotLayout: struct {
     width: Int,
-    height: Int
+    height: Int,
 }
 
 JetDataPlotCapability: struct {
     backend: JetDataPlotBackend,
-    support: JetDataPlotSupport
+    support: JetDataPlotSupport,
 }
 
 #Error
 JetDataPlotError: struct {
     kind: JetDataPlotErrorKind,
-    message: String
+    message: String,
 }
 
 JetDataPlotColumn: struct {
     name: String,
-    values: [String]
+    values: [String],
 }
 
 JetDataPlotSelectedRow: struct {
-    index: Int
+    index: Int,
 }
 
 JetDataPlotInspection: struct {
-    text: String
+    text: String,
 }
 
 JetDataPlotRender: struct {
     format: JetDataPlotRenderFormat,
-    body: String
+    body: String,
 }
 
 JetDataPlotProjection: struct {
     start: Int,
-    end: Int
+    end: Int,
 }
 
 JetDataPlotPlan: struct {
@@ -732,7 +732,7 @@ JetDataPlotPlan: struct {
     values: [Float],
     layout: JetDataPlotLayout,
     encoding: JetDataPlotEncoding,
-    schema: JetDataPlotSchema
+    schema: JetDataPlotSchema,
 }
 
 track: fn<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
@@ -940,38 +940,38 @@ __stream_remaining: fn<T>(stream: DataStream<T>) -> Int Never! {
 
 #Equatable
 LateEventDisposition: enum {
-    Drop
+    Drop,
 }
 
 StreamEvent: struct<T> {
     value: T,
-    event_time: DateTime
+    event_time: DateTime,
 }
 
 StreamEventTime: struct<T> {
-    events: Stream<StreamEvent<T>>
+    events: Stream<StreamEvent<T>>,
 }
 
 KeyedStream: struct<K, T> {
-    events: Stream<KeyedEvent<K, T>>
+    events: Stream<KeyedEvent<K, T>>,
 }
 
 Window: struct<K, T> {
     key: K,
     start: DateTime,
     end: DateTime,
-    events: [StreamEvent<T>]
+    events: [StreamEvent<T>],
 }
 
 priv KeyedEvent: struct<K, T> {
     key: K,
-    event: StreamEvent<T>
+    event: StreamEvent<T>,
 }
 
 priv PendingWindow: struct<T> {
     key_index: Int,
     start_ns: Int,
-    events: [StreamEvent<T>]
+    events: [StreamEvent<T>],
 }
 
 // `stream.with_event_time(f)` with an `Int` result: Unix seconds.
@@ -1474,7 +1474,7 @@ priv column_identity: fn(name: String, type_name: String) -> String Never! {
 #Codable
 priv QueryTestSale: struct {
     item: String,
-    cents: Int
+    cents: Int,
 }
 
 __query_test_sales: fn() -> [QueryTestSale] Never! {
@@ -2018,7 +2018,7 @@ left_join: fn<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key:
 // join then visits only a left row's matches, not every right row.
 priv DataJoinIndex: struct {
     positions: [String:Int],
-    rows: [[Int]]
+    rows: [[Int]],
 }
 
 join_index: fn(keys: [String]) -> DataJoinIndex Never! {
@@ -3569,7 +3569,7 @@ data_format_text: fn(format: DataFormat) -> String Never! {
 #Codable(only: .Encode)
 DataLoaderPortRecord: struct {
     z: Float,
-    a: String
+    a: String,
 }
 
 #Test("value loader preserves canonical payload and user-record return type") {

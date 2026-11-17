@@ -51,7 +51,7 @@ use {
 // Why a checked Path literal was rejected.
 #Error
 PathLiteralError: struct {
-    reason: String
+    reason: String,
 }
 
 // The checked `Path{…}` literal: each hole's display text is one percent-
@@ -97,7 +97,7 @@ path_component_encode: fn(component: String) -> String Never! {
 DirEntry: struct {
     name: String,
     path: String,
-    is_dir: Bool
+    is_dir: Bool,
 }
 
 /// One entry of `Directory.list`. `raw_name` is the exact
@@ -109,7 +109,7 @@ DirectoryEntry: struct {
     path: String,
     is_dir: Bool,
     raw_name: [U8],
-    name_is_unicode: Bool
+    name_is_unicode: Bool,
 }
 
 /// The shown form of a name that is not valid UTF-8: ASCII bytes stay, every
@@ -142,14 +142,14 @@ raw_name_order: fn(left: [U8], right: [U8]) -> Ordering Never! {
 /// `Refuse` creates exclusively and reports `IOError.AlreadyExists`.
 CreateIfExists: enum {
     Replace,
-    Refuse
+    Refuse,
 }
 
 /// Whether a call follows a final symbolic link. `Refuse`
 /// reports `IOError.InvalidInput` when the path ends in a link.
 LinkPolicy: enum {
     Follow,
-    Refuse
+    Refuse,
 }
 
 /// What `rename` does when the target name exists.
@@ -158,7 +158,7 @@ LinkPolicy: enum {
 RenameIfExists: enum {
     Replace,
     Refuse,
-    Swap
+    Swap,
 }
 
 /// How a program will read an open or mapped file, so the system can plan
@@ -172,7 +172,7 @@ Advice: enum {
     Random,
     WillNeed,
     DontNeed,
-    NoReuse
+    NoReuse,
 }
 
 /// How a `MappedFile` keeps its bytes fixed while another process writes or
@@ -187,14 +187,14 @@ Advice: enum {
 MapKind: enum {
     Clone = 1,
     Held = 2,
-    Copy = 3
+    Copy = 3,
 }
 
 /// A file's identity, its device plus its file number.
 /// Two paths name the same file exactly when their ids are equal.
 FileID: struct {
     device: Int,
-    inode: Int
+    inode: Int,
 }
 
 /// What `stat` reports about one directory entry. A final link is described
@@ -217,7 +217,7 @@ Stat: struct {
     size_on_disk: Int,
     modified: DateTime,
     changed: DateTime,
-    created: DateTime?
+    created: DateTime?,
 }
 
 /// The room on the file system holding a path, in bytes (`space`). `free`
@@ -247,7 +247,7 @@ WalkEntry: struct {
     path: String,
     relative: String,
     is_dir: Bool,
-    depth: Int
+    depth: Int,
 }
 
 FileScope: struct {
@@ -290,21 +290,21 @@ TempDir: struct {
     priv stored_path: String,
     path: String -> stored_path,
     is_dir: Bool,
-    priv handle: Int
+    priv handle: Int,
 }
 
 #[!Equatable, !Comparable]
 TempFile: struct {
     priv stored_path: String,
     path: String -> stored_path,
-    priv handle: Int
+    priv handle: Int,
 }
 
 #[!Equatable, !Comparable]
 FileLock: struct {
     priv stored_path: String,
     path: String -> stored_path,
-    priv handle: Int
+    priv handle: Int,
 }
 
 // The fd is guarded before it becomes the native FileLock carrier. Failed
@@ -2018,7 +2018,7 @@ priv walk_batch: fn(context: Int, directory: Int, depth: Int, root: String, igno
 priv WalkFrame: struct {
     entries: [WalkEntry],
     children: [{key: String, directory: Int}],
-    depth: Int
+    depth: Int,
 }
 
 /// The entries below a directory, read as the walk goes: a loop over it
@@ -2844,7 +2844,7 @@ scope_relative: fn(path: host_path.OSPath, requested: String) -> String IOError!
 // so a bare `FS.Read` never becomes an ambient file-system handle.
 ScopeRoot: struct {
     encoded: [U8],
-    absolute: Bool
+    absolute: Bool,
 }
 
 // The read roots and the held, no-follow read behind a file scope: not part

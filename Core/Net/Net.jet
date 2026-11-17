@@ -35,7 +35,7 @@ ip: module
 
 SocketAddr: struct {
     host: String,
-    port: Int
+    port: Int,
 }
 
 // Provider sockets retain their native carriers and complete method/trait
@@ -43,21 +43,21 @@ SocketAddr: struct {
 
 NetReady: struct {
     readable: Bool,
-    writable: Bool
+    writable: Bool,
 }
 
 // Which direction of a stream `shutdown` closes.
 NetShutdown: enum {
     Read,
     Write,
-    Both
+    Both,
 }
 
 // The readiness a socket `ready` wait asks for.
 NetReadyInterest: enum {
     Read,
     Write,
-    ReadWrite
+    ReadWrite,
 }
 
 // JetNetErrorDetail: public construction is already supported.
@@ -66,12 +66,12 @@ NetErrorDetail: struct {
     address: String?,
     name: String?,
     message: String,
-    os_code: Int?
+    os_code: Int?,
 }
 
 NetDNSError: enum {
     NotFound(String),
-    Failure(String)
+    Failure(String),
 }
 
 // Preserve checked surface ordinals (jet_net_error_surface_parts), not Rust
@@ -129,14 +129,14 @@ UDPPacket: struct {
     host: String,
     port: Int,
     original_len: Int,
-    truncated: Bool
+    truncated: Bool,
 }
 
 SRVRecord: struct {
     target: String,
     port: Int,
     priority: Int,
-    weight: Int
+    weight: Int,
 }
 
 gethostname: fn() -[Env, FS.Read]> String Never! {
@@ -149,7 +149,7 @@ gethostname: fn() -[Env, FS.Read]> String Never! {
 /// One network interface: its name and kernel index.
 NetInterface: struct {
     name: String,
-    index: Int
+    index: Int,
 }
 
 /// The host's network interfaces in index order (if_nameindex), read from
@@ -531,7 +531,7 @@ unix_write_all_bytes: fn(stream: &UnixStream, bytes: [U8]) -[Net, Time.Wait]> Ne
 // and no descriptors mean the peer closed the stream.
 UnixMessage: struct {
     bytes: [U8],
-    fds: [sys.Fd]
+    fds: [sys.Fd],
 }
 
 // Sends every byte with `fds` attached (SCM_RIGHTS) to the first byte the

@@ -26,7 +26,7 @@ use {
 // publication explicitly opted in.
 
 JobQueueDeliveryPolicy: enum {
-    AtLeastOnce
+    AtLeastOnce,
 }
 
 JobQueueState: enum {
@@ -36,25 +36,25 @@ JobQueueState: enum {
     Completed,
     Failed,
     DeadLettered,
-    Cancelled
+    Cancelled,
 }
 
 JobPayload: struct {
     type_id: String,
     bytes: [U8],
-    publish: Bool
+    publish: Bool,
 }
 
 JobResult: struct {
     type_id: String,
     bytes: [U8],
-    publish: Bool
+    publish: Bool,
 }
 
 JobError: struct {
     type_id: String,
     reason: String,
-    detail: String?
+    detail: String?,
 }
 
 JobQueueReceipt: struct {
@@ -74,7 +74,7 @@ JobQueueReceipt: struct {
     error_reason: String?,
     delivery: JobQueueDeliveryPolicy,
     duplicate: Bool,
-    signature: String
+    signature: String,
 }
 
 JobQueueClaim: struct {
@@ -82,7 +82,7 @@ JobQueueClaim: struct {
     payload: JobPayload,
     worker: String,
     lease_token: String,
-    lease_until_ms: Int
+    lease_until_ms: Int,
 }
 
 JobQueueEvent: struct {
@@ -92,7 +92,7 @@ JobQueueEvent: struct {
     timestamp_ms: Int,
     reason: String?,
     duration_ms: Int?,
-    worker: String?
+    worker: String?,
 }
 
 JobQueueRecord: struct {
@@ -101,7 +101,7 @@ JobQueueRecord: struct {
     result: JobResult?,
     error: JobError?,
     started_at_ms: Int?,
-    finished_at_ms: Int?
+    finished_at_ms: Int?,
 }
 
 JobQueueStatus: struct {
@@ -119,7 +119,7 @@ JobQueueStatus: struct {
     throughput: Int,
     capacity: Int,
     paused: Bool,
-    freshness_ms: Int
+    freshness_ms: Int,
 }
 
 // Opening validates the package authority and selected provider. The handle's
@@ -164,7 +164,7 @@ queue: fn() -[DB, Env, FS, Rand, Time]> JobQueue ServiceError! {
 }
 
 QueueData: struct {
-    driver: db.DBDriver
+    driver: db.DBDriver,
 }
 
 JobQueue: struct {
@@ -691,7 +691,7 @@ StoredJob: struct {
     retry_at_ms: Int?,
     updated_at_ms: Int,
     signature: String,
-    event_sequence: Int
+    event_sequence: Int,
 }
 
 queue_unavailable: fn(message: String) -> ServiceError Never! { ServiceError.Unavailable(message) }
@@ -1241,7 +1241,7 @@ EnqueueRequest: struct {
     payload: JobPayload,
     idempotency_key: String?,
     request_id: String?,
-    delay_ms: Int
+    delay_ms: Int,
 }
 
 QueueTransition: struct {
@@ -1257,7 +1257,7 @@ QueueTransition: struct {
     reason: String?,
     duration_ms: Int?,
     worker: String?,
-    request_id: String?
+    request_id: String?,
 }
 
 queue_transition: fn(record: StoredJob, state: JobQueueState, attempts: Int, now: Int, reason: String?, duration: Int?, worker: String?) -> QueueTransition Never! {

@@ -42,7 +42,7 @@ AuthError: enum {
     WrongIssuer(expected: String, actual: String?),
     TokenExpired,
     DecodeError(String),
-    TokenNotYetValid
+    TokenNotYetValid,
 }
 
 /// Verified token claims. `audience` is the expected audience the token named.
@@ -52,7 +52,7 @@ Claims: struct {
     issuer: String?,
     expires_at: Int,
     not_before: Int?,
-    issued_at: Int?
+    issued_at: Int?,
 }
 
 /// An account, by the id its account store gave it. Every account in Core is
@@ -88,7 +88,7 @@ AUTH_MAX_PROVIDERS: 64
 /// An app's auth configuration: its users table and OAuth providers.
 Auth: struct {
     users_table: String,
-    providers: [String]
+    providers: [String],
 }
 
 /// Password and magic-link auth over `users_table`, with no OAuth provider.
@@ -449,7 +449,7 @@ b64url_value: fn(b: U8) -> Int Never! {
 // World's own cell instead, starting empty, so a world and its tasks never
 // read or change the process store.
 AuthStoreCell: struct {
-    bytes: [U8]
+    bytes: [U8],
 }
 
 AUTH_STORE: Shared{AuthStoreCell{bytes: [U8]{}}}
@@ -640,13 +640,13 @@ AuthRecord: struct {
     a: String,
     b: String,
     c: String,
-    n: Int
+    n: Int,
 }
 
 OAuthConfig: struct {
     secret: [U8],
     issuer: String,
-    audience: String
+    audience: String,
 }
 
 /// A fresh session: opaque `sess-<64 hex>` id and the one cookie shape.
@@ -918,12 +918,12 @@ OAuthClaims: struct {
     aud: String?,
     sub: String?,
     exp: Int?,
-    iat: Int?
+    iat: Int?,
 }
 
 JSONText: struct {
     text: String,
-    next: Int
+    next: Int,
 }
 
 oauth_claims: fn(text: String) -> OAuthClaims {

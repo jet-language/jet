@@ -53,7 +53,7 @@ CryptoError: enum {
     VerifyFailed,
     KeyRejected,
     Length,
-    Unavailable
+    Unavailable,
 }
 
 #Error
@@ -62,7 +62,7 @@ FileCryptoError: enum {
     SealFailed,
     SourceIO,
     DestinationExists,
-    DestinationIO
+    DestinationIO,
 }
 
 Digest256: struct {
@@ -253,13 +253,13 @@ Signature: struct {
 }
 
 Sealed: struct {
-    bytes: [U8]
+    bytes: [U8],
 }
 
 sealed_bytes: fn(value: Sealed) -> [U8] Never! { value.bytes }
 
 WrappedKey: struct {
-    bytes: [U8]
+    bytes: [U8],
 }
 
 // Vault key-wrap carriers have one canonical source owner in core.crypto.vault.
@@ -289,12 +289,12 @@ __vault_unlock_passphrase: fn(passphrase: Secret) -> KeyUnlock Never! {
 }
 
 PasswordHash: struct {
-    text: String
+    text: String,
 }
 
 #Error
 KeyWrapError: struct {
-    reason: String
+    reason: String,
 }
 
 /// SHA-256 (FIPS 180-4). Allocates a 32-byte digest. Text hashes its UTF-8
@@ -1258,7 +1258,7 @@ ed25519_verify_raw: fn(pk: [U8], msg: [U8], sig: [U8]) -> Bool Never! {
 // Existing public coordinate carrier. Secret arithmetic uses private fixed limbs.
 EdPoint: struct {
     x: Int,
-    y: Int
+    y: Int,
 }
 
 C_BLAKE3_IV: [U32]{U32{0x6A09E667}, U32{0xBB67AE85}, U32{0x3C6EF372}, U32{0xA54FF53A}, U32{0x510E527F}, U32{0x9B05688C}, U32{0x1F83D9AB}, U32{0x5BE0CD19}}

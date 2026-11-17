@@ -34,24 +34,24 @@ host: module
 UIPreviewDevice: enum {
     Phone,
     Tablet,
-    Desktop
+    Desktop,
 }
 
 UIPreviewKind: enum {
     Preview,
-    Playground
+    Playground,
 }
 
 UIIMEMode: enum {
     Native,
-    Disabled
+    Disabled,
 }
 
 UIAriaRole: enum {
     Button,
     Container,
     Label,
-    TextInput
+    TextInput,
 }
 
 UINodeKind: enum {
@@ -59,31 +59,31 @@ UINodeKind: enum {
     Text,
     Box,
     Button,
-    TextInput
+    TextInput,
 }
 
 Point: struct {
     x: Float,
-    y: Float
+    y: Float,
 }
 
 Size: struct {
     width: Float,
-    height: Float
+    height: Float,
 }
 
 Rect: struct {
     x: Float,
     y: Float,
     width: Float,
-    height: Float
+    height: Float,
 }
 
 SizeConstraint: struct {
     min_width: Float,
     min_height: Float,
     max_width: Float,
-    max_height: Float
+    max_height: Float,
 }
 
 // The size a preview or playground renders at and the device class it
@@ -92,7 +92,7 @@ UIPreviewViewport: struct {
     device: UIPreviewDevice,
     width: Int,
     height: Int,
-    scale: Int
+    scale: Int,
 }
 
 // A named preview or playground. Its registry keeps `body` and calls it each
@@ -101,7 +101,7 @@ UIPreview: struct {
     kind: UIPreviewKind,
     name: String,
     viewport: UIPreviewViewport,
-    body: fn() -> UINode
+    body: fn() -> UINode,
 }
 
 // One program's previews or playgrounds: at most 64, each with its own name.
@@ -122,12 +122,12 @@ UIPreviewError: enum {
     EmptyName,
     TooManyPreviews,
     DuplicatePreview(String),
-    UnknownPreview(String)
+    UnknownPreview(String),
 }
 
 InputEvent: enum {
     Key(code: String),
-    Resize(size: Size)
+    Resize(size: Size),
 }
 
 // One node of the portable tree: its label, its size in cells, and what
@@ -158,7 +158,7 @@ UINode: struct {
 // Whether a backend used an input event.
 EventResult: enum {
     Handled,
-    Ignored
+    Ignored,
 }
 
 point: fn(x: Float, y: Float) -> Point Never! { Point{x: x, y: y} }
@@ -322,7 +322,7 @@ node_shortcut: fn(n: UINode, shortcut: UIShortcut) -> UINode Never! {
 // `Screens/brand/logo.svg`. The compiler checks a written path while the
 // program builds, and a path that names no file there is an error (E2822).
 UIAsset: struct {
-    path: String
+    path: String,
 }
 
 asset: fn(path: String) -> UIAsset Never! { UIAsset{path: path} }
@@ -363,7 +363,7 @@ UIBackendState: struct {
     priv cols: Int,
     priv rows: Int,
     priv cells: [Int],
-    priv renders: Int
+    priv renders: Int,
 }
 
 NullBackend: struct {
@@ -739,7 +739,7 @@ UIError: enum {
     Protocol(String),
     Unsupported(String),
     Size(String),
-    Invalid(String)
+    Invalid(String),
 }
 
 // The environment names no display server.
@@ -753,7 +753,7 @@ UIPointerButton: enum {
     Left,
     Right,
     Middle,
-    Other(Int)
+    Other(Int),
 }
 
 // How the pointer looks over a window: CSS's cursor keywords, in the
@@ -793,7 +793,7 @@ UICursor: enum {
     AllScroll,
     ZoomIn,
     ZoomOut,
-    Hidden
+    Hidden,
 }
 
 // A window icon: the name of a desktop theme icon ("" for none), used
@@ -801,14 +801,14 @@ UICursor: enum {
 // for when it has not.
 UIIcon: struct {
     name: String,
-    images: [UIIconImage]
+    images: [UIIconImage],
 }
 
 // A square icon image `side` pixels across: `side` rows of `side` RGBA
 // pixels, 4 bytes each, alpha straight (not premultiplied), as a frame's.
 UIIconImage: struct {
     side: Int,
-    pixels: [U8]
+    pixels: [U8],
 }
 
 // What happened since the previous frame. Positions are window pixels
@@ -829,7 +829,7 @@ UIEvent: enum {
     Scroll(dx: Float, dy: Float),
     Resize(width: Int, height: Int),
     Focus(Bool),
-    Close
+    Close,
 }
 
 // A rectangle of window pixels: `x`, `y` from the top-left.
@@ -837,7 +837,7 @@ UIRect: struct {
     x: Int,
     y: Int,
     width: Int,
-    height: Int
+    height: Int,
 }
 
 WindowState: struct {
@@ -868,7 +868,7 @@ WindowState: struct {
     // A headless window's clipboard, and its states as last set.
     priv clipboard: String,
     priv maximized: Bool,
-    priv fullscreen: Bool
+    priv fullscreen: Bool,
 }
 
 // A window and its frames. Copies share the one window, which closes when
@@ -1178,7 +1178,7 @@ FrameStats: struct {
     input_p99_ns: Int,
     // Present-to-present intervals by refreshes spanned: [0] one
     // refresh (every vblank), [1] two, [2] three, [3] four or more.
-    spans: [Int]
+    spans: [Int],
 }
 
 Frames: struct {

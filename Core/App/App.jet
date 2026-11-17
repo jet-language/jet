@@ -56,7 +56,7 @@ SYNC_MAX_INT: 9223372036854775807
 #Error
 AppError: enum {
     Invalid,
-    Unsupported
+    Unsupported,
 }
 
 // Endpoint markers. A method of a mounted service is an endpoint only when
@@ -73,7 +73,7 @@ SignedIn: struct {
     per: Duration{1min},
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -82,7 +82,7 @@ Public: struct {
     per: Duration{1min},
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -101,7 +101,7 @@ Webhook: struct {
     key: String,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -110,7 +110,7 @@ Webhook: struct {
 // which answers 401. It is server-only.
 SigningKey: struct {
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -127,7 +127,7 @@ UploadCheck: struct {
     method: String,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -142,7 +142,7 @@ Job: struct {
     retries: Int{5},
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -162,7 +162,7 @@ Every: struct {
     cron: String,
 
     impl Marker {
-        sites: [.Method]
+        sites: [.Method],
     }
 }
 
@@ -170,7 +170,7 @@ Every: struct {
 // under the webhook's key.
 Signature: enum {
     GitHub,
-    Stripe
+    Stripe,
 }
 
 // GitHub: `X-Hub-Signature-256: sha256=<mac>`, the MAC of the body.
@@ -413,7 +413,7 @@ new_id: fn() -[Rand, Time]> String Never! {
 #Error
 Notice: struct {
     text: String,
-    retry: Bool{false}
+    retry: Bool{false},
 }
 
 // The app's notice list holds the notices that have no control to sit
@@ -427,7 +427,7 @@ Notice: struct {
 // It is kept as length-prefixed fields: each notice's text, then "1" or "0"
 // for its retry.
 NoticeCell: struct {
-    bytes: [U8]
+    bytes: [U8],
 }
 
 NOTICE_CELL: Shared{NoticeCell{bytes: [U8]{}}}
@@ -644,7 +644,7 @@ priv QueuedWrite: struct {
     local: Bool,
     method: String,
     body: String,
-    key: String
+    key: String,
 }
 
 // The queue lives where the notice list does (NoticeCell): in the device
@@ -972,7 +972,7 @@ priv remote_invalid: fn(text: String) -> [FieldError] Never! {
 Live: struct<T, E> {
     id: Int,
     run: fn() -[DB.Read, Net, Time]> T E!,
-    priv acting: Acting?
+    priv acting: Acting?,
 }
 
 // One registry binding, named by its source's wire name, its encoded
@@ -998,14 +998,14 @@ LiveRecord: struct {
     every_ns: Int,
     ran_ns: Int,
     reads: [String],
-    caller: String
+    caller: String,
 }
 
 // What `state` reads before it runs a binding: the stored result when it is
 // current, held, or capped (live_current), and the binding's generation then.
 LiveCurrent: struct {
     value: String?,
-    generation: Int
+    generation: Int,
 }
 
 // `capped` counts the re-runs the per-second cap turned into holds;
@@ -1020,7 +1020,7 @@ LiveRegistry: struct {
     capped: Int,
     window_ns: Int,
     window_runs: Int,
-    records: [LiveRecord]
+    records: [LiveRecord],
 }
 
 // The live registry lives in a process-wide runtime byte cell; every update
@@ -1234,11 +1234,11 @@ live_read_record: fn(source: String, entry: String) {
 LiveRun: struct {
     task: TaskID,
     id: Int,
-    asked: [String]
+    asked: [String],
 }
 
 LiveRunning: struct {
-    runs: [LiveRun]
+    runs: [LiveRun],
 }
 
 LIVE_RUNNING: Shared{LiveRunning{runs: [LiveRun]{}}}
@@ -1285,7 +1285,7 @@ live_presence_ask: fn(task: TaskID, address: String) -> Bool {
 AppPresent: struct {
     binding: Int,
     account: String,
-    address: String
+    address: String,
 }
 
 APP_PRESENT: Shared{[AppPresent]{}}
@@ -1434,14 +1434,14 @@ priv RESUME_OPEN: "<script type=\"application/json\" id=\"jet-resume\">"
 priv AppResumed: struct {
     source: String,
     key: String,
-    value: String
+    value: String,
 }
 
 // The bindings a task rendering a page or opening a screen (`App.__go`)
 // read, in first-read order.
 priv AppResumeReads: struct {
     task: TaskID,
-    ids: [Int]
+    ids: [Int],
 }
 
 priv APP_RESUME_READS: Shared{[AppResumeReads]{}}
@@ -1516,7 +1516,7 @@ priv resume_script: fn(ids: [Int]) -> String Never! {
 // runs as the caller that made it.
 Acting: enum {
     Account(auth.AccountID),
-    System
+    System,
 }
 
 // The runs of `as_caller`, `as_system` and binding sources, each with its
@@ -1524,11 +1524,11 @@ Acting: enum {
 // names its caller.
 ActingRun: struct {
     task: TaskID,
-    acting: Acting?
+    acting: Acting?,
 }
 
 ActingRuns: struct {
-    runs: [ActingRun]
+    runs: [ActingRun],
 }
 
 ACTING: Shared{ActingRuns{runs: [ActingRun]{}}}
@@ -1684,7 +1684,7 @@ priv CallJoin: struct {
     // Commits (true) or rolls back (false) one store's transaction; false
     // when it couldn't do as asked.
     end: fn(Bool) -[]> Bool Never!,
-    outbox: CallOutbox
+    outbox: CallOutbox,
 }
 
 // One store's outbox: the jobs committed calls queued there that haven't
@@ -1722,7 +1722,7 @@ priv CallOutbox: struct {
     // Keeps the reply of request `request`, in the transaction of call
     // `call`, or on its own for call 0 (after the call rolled back); false
     // when the store couldn't.
-    answered: fn(Int, CallRequest, String) -[]> Bool Never!
+    answered: fn(Int, CallRequest, String) -[]> Bool Never!,
 }
 
 // A row a server took from a store's outbox: its job's key, name and
@@ -1731,13 +1731,13 @@ priv CallQueued: struct {
     key: String,
     name: String,
     args: String,
-    runs: Int
+    runs: Int,
 }
 
 // The function that decodes a job's arguments and runs it, which replies
 // `{"err":...}` when the job failed. Copies share the one function.
 priv CallJobCall: struct {
-    call: fn(RemoteArgs) -> String [FieldError]!
+    call: fn(RemoteArgs) -> String [FieldError]!,
 }
 
 // A job a call queued: its name (`<service module>.<Service>.<method>`), its
@@ -1747,7 +1747,7 @@ priv CallJob: struct {
     name: String,
     args: String,
     retries: Int,
-    run: Shared<CallJobCall>
+    run: Shared<CallJobCall>,
 }
 
 // A webhook delivery a call runs: the ID its sender gives it, the same each
@@ -1756,7 +1756,7 @@ priv CallJob: struct {
 #Equatable
 priv CallDelivery: struct {
     id: String,
-    at: Int
+    at: Int,
 }
 
 // A schedule's run a call is: the schedule's name (`<service
@@ -1765,7 +1765,7 @@ priv CallDelivery: struct {
 #Equatable
 priv CallTick: struct {
     schedule: String,
-    due: Int
+    due: Int,
 }
 
 // The request key of a remote call: the account the call acts for ("" for
@@ -1776,7 +1776,7 @@ priv CallTick: struct {
 priv CallRequest: struct {
     account: String,
     key: String,
-    at: Int
+    at: Int,
 }
 
 priv CallRun: struct {
@@ -1789,12 +1789,12 @@ priv CallRun: struct {
     request: CallRequest?,
     reply: String?,
     repeated: Bool,
-    jobs: [CallJob]
+    jobs: [CallJob],
 }
 
 priv CallRuns: struct {
     runs: [CallRun],
-    made: Int
+    made: Int,
 }
 
 priv CALLS: Shared{CallRuns{runs: [CallRun]{}, made: 0}}
@@ -2049,7 +2049,7 @@ priv PushDevice: struct {
     service: String,
     token: String,
     key: String,
-    auth: String
+    auth: String,
 }
 
 // One store's push devices, which core.db keeps in the table
@@ -2066,11 +2066,11 @@ priv PushDevices: struct {
     of: fn(String) -[]> [PushDevice]? Never!,
     // Forgets the device of a service and a token; false when the store
     // couldn't.
-    forget: fn(String, String) -[]> Bool Never!
+    forget: fn(String, String) -[]> Bool Never!,
 }
 
 priv PushRegistry: struct {
-    stores: [Shared<PushDevices>]
+    stores: [Shared<PushDevices>],
 }
 
 priv PUSH_REGISTRY: Shared{PushRegistry{stores: [Shared<PushDevices>]{}}}
@@ -2143,7 +2143,7 @@ priv(package) push: module {
 priv PushNotes: struct {
     skipped: Int,
     failed: Int,
-    last: [String]
+    last: [String],
 }
 
 priv PUSH_NOTES: Shared{PushNotes{skipped: 0, failed: 0, last: [String]{}}}
@@ -2682,7 +2682,7 @@ App: struct {
 // the `:name` segment of its screen's path that has its name.
 Query: struct {
     impl Marker {
-        sites: [.Field]
+        sites: [.Field],
     }
 }
 
@@ -2701,7 +2701,7 @@ new: fn(title: String) -> App Never! {
 #Equatable
 Offline: enum {
     Off,
-    Queue
+    Queue,
 }
 
 // One screen of the route set: the path its state's fields fill, the state's
@@ -2712,13 +2712,13 @@ AppScreen: struct {
     state: String,
     query: [String],
     signed_in: Bool,
-    open: Shared<AppOpen>
+    open: Shared<AppOpen>,
 }
 
 // How a screen opens at an address: from its fields' texts, the text of
 // what its view shows, or None when they make no state.
 AppOpen: struct {
-    run: fn(App, [String:String]) -[Net, FS.Read]> String? Never!
+    run: fn(App, [String:String]) -[Net, FS.Read]> String? Never!,
 }
 
 // How the replies of one type may be kept, as `.cache<V>(policy)` sets it.
@@ -2730,7 +2730,7 @@ AppOpen: struct {
 // reply's ETag is answered 304 with no body.
 CachePolicy: enum {
     Private,
-    Public(max_age: Duration)
+    Public(max_age: Duration),
 }
 
 // The cache policy of each reply type, by the name `__cache` was given.
@@ -2746,14 +2746,14 @@ Head: struct {
     description: String?{None},
     image: String?{None},
     canonical: Bool{true},
-    index: Bool{true}
+    index: Bool{true},
 }
 
 // A reply a store keeps for a `.Public` policy, as it finds it: the encoded
 // reply and the milliseconds since it was kept, by the store's clock.
 priv KeptReply: struct {
     reply: String,
-    age_ms: Int
+    age_ms: Int,
 }
 
 // One store's kept replies, which core.db keeps in the table
@@ -2773,7 +2773,7 @@ priv KeptReplies: struct {
     // began, the last milliseconds given ago, no later than a write the file
     // took is not kept, as it may hold what the write changed. False when
     // the store couldn't keep or judge it.
-    keep: fn(String, String, Int, Int) -[]> Bool Never!
+    keep: fn(String, String, Int, Int) -[]> Bool Never!,
 }
 
 // The stores named for kept replies, in the order they opened.
@@ -2858,7 +2858,7 @@ priv kept_store_name: fn(replies: Shared<KeptReplies>) -> String Never! {
 // and the address of each state the list gives when asked.
 priv AppSitemap: struct {
     state: String,
-    addresses: fn() -[]> [String] Never!
+    addresses: fn() -[]> [String] Never!,
 }
 
 // The sitemaps the graph gave, in the order it gave them.
@@ -2927,7 +2927,7 @@ priv app_screen_public: fn(state: String) -> Bool Never! {
 // state whose address has the field texts it is given, None when the texts
 // make no such state.
 priv AppHead: struct {
-    run: fn(App, [String:String]) -[]> Head? Never!
+    run: fn(App, [String:String]) -[]> Head? Never!,
 }
 
 // The head of each screen's state, by the state's name.
@@ -2964,11 +2964,11 @@ priv app_head: fn(state: String) -> Shared<AppHead>? Never! {
 
 // The states of a sitemap test's public guide screen and signed-in inbox.
 priv SitemapTestGuide: struct {
-    slug: String
+    slug: String,
 }
 
 priv SitemapTestInbox: struct {
-    box: String
+    box: String,
 }
 
 #Test("a sitemap lists each state its list gives whose screen opens without signing in, and robots leave each signed-in screen") {
@@ -3001,11 +3001,11 @@ priv SitemapTestInbox: struct {
 
 // The states of the head test's public guide screen and signed-in inbox.
 priv HeadTestGuide: struct {
-    slug: String
+    slug: String,
 }
 
 priv HeadTestInbox: struct {
-    box: String
+    box: String,
 }
 
 // The guide and the inbox at an address, as the compiler lowers their
@@ -3088,7 +3088,7 @@ priv head_test_inbox: fn(_: App, fields: [String:String]) -> HeadTestInbox? Neve
 
 // How many times the resume test's source ran.
 priv ResumeTestRuns: struct {
-    runs: Int
+    runs: Int,
 }
 
 priv RESUME_TEST_RUNS: Shared{ResumeTestRuns{runs: 0}}
@@ -3146,18 +3146,18 @@ priv resume_test_view: fn() -> String Never! {
 // and the most bytes one call's body holds.
 priv AppAPI: struct {
     path: String,
-    max_upload: Int
+    max_upload: Int,
 }
 
 // An endpoint method of a service the graph mounts: how it answers a call
 // from its decoded arguments, or None for a method only a signed-in caller
 // calls.
 priv AppEndpoint: struct {
-    answer: Shared<AppAnswer>?
+    answer: Shared<AppAnswer>?,
 }
 
 priv AppAnswer: struct {
-    run: fn(RemoteArgs) -> String [FieldError]!
+    run: fn(RemoteArgs) -> String [FieldError]!,
 }
 
 // The screen open now (`App.__go`): its state's name and its address's
@@ -3165,7 +3165,7 @@ priv AppAnswer: struct {
 // state name and keeps the link it shows under C_APP_LOST_LINK.
 priv AppCurrent: struct {
     state: String,
-    fields: [String:String]
+    fields: [String:String],
 }
 
 // How a browser installs the app (`App.installable`): the name an installed
@@ -3174,7 +3174,7 @@ priv AppCurrent: struct {
 AppInstall: struct {
     name: String,
     icon: String,
-    color: Int
+    color: Int,
 }
 
 // The process's app graph: its title, its services by the name of each
@@ -3197,7 +3197,7 @@ priv AppGraph: struct {
     schemes: [String],
     link_domains: [String],
     activations: [String],
-    backgrounds: [AppBackground]
+    backgrounds: [AppBackground],
 }
 
 priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [String:AppEndpoint]{}, screens: [AppScreen]{}, offline: .Off, install: None, current: None, route_data: [Int]{}, schemes: [String]{}, link_domains: [String]{}, activations: [String]{}, backgrounds: [AppBackground]{}}}
@@ -3207,11 +3207,11 @@ priv APP_GRAPH: Shared{AppGraph{title: "", apis: [String:AppAPI]{}, endpoints: [
 priv AppBackground: struct {
     every_ns: Int,
     at_login: Bool,
-    run: Shared<AppBackgroundRun>
+    run: Shared<AppBackgroundRun>,
 }
 
 priv AppBackgroundRun: struct {
-    run: fn() Notice!
+    run: fn() Notice!,
 }
 
 // The most bytes one call's body to the service `service` (its key) may
@@ -4184,7 +4184,7 @@ priv graph_answered: fn(replied: String [FieldError]!) -> String CallError! {
 // filter the query.
 priv RouteTestBoard: struct {
     project: String,
-    q: String
+    q: String,
 }
 
 // The service the graph test's board calls.
@@ -4426,7 +4426,7 @@ priv push_device_listed: fn(found: [PushDevice], device: PushDevice) -> Bool Nev
 #Codable
 Upload: struct {
     name: String,
-    bytes: Int
+    bytes: Int,
 }
 
 // What a blob's bytes are, as their first bytes show: an image (PNG, JPEG,
@@ -4435,7 +4435,7 @@ Upload: struct {
 Media: enum {
     Image,
     PDF,
-    Text
+    Text,
 }
 
 // The id of a kept blob. A row stores it to hold the blob, and it names the
@@ -4448,7 +4448,7 @@ BlobID: distinct String
 Blob: struct {
     id: BlobID,
     media: Media,
-    bytes: Int
+    bytes: Int,
 }
 
 // Why `Blobs.keep` kept no blob: the file's bytes are none of the media the
@@ -4457,7 +4457,7 @@ Blob: struct {
 #Error
 BlobError: enum {
     WrongType,
-    Storage(String)
+    Storage(String),
 }
 
 // A store of blobs: the directory `name`, under the working directory, which
@@ -4507,7 +4507,7 @@ priv StagedUpload: struct {
     bytes: Int,
     head: [U8],
     kept: [KeptBlob],
-    refused: Bool
+    refused: Bool,
 }
 
 // A blob a call kept: its file, the call, and whether the call committed.
@@ -4515,13 +4515,13 @@ priv StagedUpload: struct {
 priv KeptBlob: struct {
     path: String,
     call: Int,
-    committed: Bool
+    committed: Bool,
 }
 
 // How a table's blob reader (`__blob_reader`) answers whether the caller
 // may read a blob.
 priv BlobReader: struct {
-    read: fn(String) -[DB.Read]> Int Never!
+    read: fn(String) -[DB.Read]> Int Never!,
 }
 
 // The process's blob stores by name; the uploads staged now; whether the
@@ -4533,7 +4533,7 @@ priv BlobState: struct {
     staged: [StagedUpload],
     cleaned: Bool,
     readers: [String:Shared<BlobReader>],
-    guarded: [String:Bool]
+    guarded: [String:Bool],
 }
 
 priv BLOBS: Shared{BlobState{stores: [String]{}, staged: [StagedUpload]{}, cleaned: false, readers: [String:Shared<BlobReader>]{}, guarded: [String:Bool]{}}}
@@ -4973,7 +4973,7 @@ priv JOB_NEVER: 9223372036854775807
 priv CallJobRunner: struct {
     name: String,
     retries: Int,
-    run: Shared<CallJobCall>
+    run: Shared<CallJobCall>,
 }
 
 // A store whose outbox the process runs jobs from: the keys of the jobs it
@@ -4986,7 +4986,7 @@ priv JobStore: struct {
     outbox: Shared<CallOutbox>,
     running: [String],
     left: [String],
-    named: Bool
+    named: Bool,
 }
 
 // The process's jobs: the jobs mounted services declare, the stores it runs
@@ -4997,7 +4997,7 @@ priv JobRuntime: struct {
     runners: [CallJobRunner],
     stores: [JobStore],
     serving: Int,
-    tended: Bool
+    tended: Bool,
 }
 
 priv JOBS: Shared{JobRuntime{runners: [CallJobRunner]{}, stores: [JobStore]{}, serving: 0, tended: false}}
@@ -5119,7 +5119,7 @@ priv JobTick: struct {
     store: String,
     outbox: Shared<CallOutbox>,
     running: [String],
-    names: [String]
+    names: [String],
 }
 
 // What the next tick does on each store; None when it has nothing to do, as
@@ -5396,7 +5396,7 @@ priv CronLine: struct {
     months: [Bool],
     weekdays: [Bool],
     any_day: Bool,
-    any_weekday: Bool
+    any_weekday: Bool,
 }
 
 // The days, back or ahead, a due minute is looked for in: eight years,
@@ -5486,7 +5486,7 @@ priv cron_day_allowed: fn(line: CronLine, day: Int) -> Bool {
 // A day's month (1-12) and day of the month (1-31).
 priv CronDate: struct {
     month: Int,
-    day: Int
+    day: Int,
 }
 
 // The date of day `day` since the Unix epoch, in the proleptic Gregorian
@@ -5794,7 +5794,7 @@ LIVE_SYNC_SOURCE: "app.sync"
 // the registry is the World's own cell instead, starting empty, so a world and
 // its tasks never read or change the process registry.
 LiveCell: struct {
-    bytes: [U8]
+    bytes: [U8],
 }
 
 LIVE_CELL: Shared{LiveCell{bytes: [U8]{}}}
@@ -6210,7 +6210,7 @@ sync: fn(doc_show: String, over: String) -> String Never! {
 
 SyncSession: struct {
     generation: Int,
-    document: String
+    document: String,
 }
 
 sync_session_decode: fn(value: String) -> SyncSession? {
@@ -6279,12 +6279,12 @@ sync_document_merge: fn(left: String, right: String) -> String? {
 
 SyncPair: struct {
     first: String,
-    second: String
+    second: String,
 }
 
 SyncCount: struct {
     positive: Int,
-    negative: Int
+    negative: Int,
 }
 
 sync_map_entries: fn(value: String) -> [String:String]? {

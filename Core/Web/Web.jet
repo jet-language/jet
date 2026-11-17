@@ -76,7 +76,7 @@ virtual: module
 /// A rendered page: its document title and its body markup.
 WebPage: struct {
     title: String,
-    body: String
+    body: String,
 }
 
 page: fn(title: String, body: String) -> WebPage Never! { WebPage{title: title, body: body} }
@@ -124,11 +124,11 @@ __AppReply: enum {
     Page(WebPage),
     JSON(String),
     Rejected(String),
-    Failed(String)
+    Failed(String),
 }
 
 priv AppHandlerCell: struct {
-    call: fn(__AppCall) -[Net, FS.Read]> __AppReply Err!
+    call: fn(__AppCall) -[Net, FS.Read]> __AppReply Err!,
 }
 
 // A registered adapter. Copies share the one handler.
@@ -164,7 +164,7 @@ priv AppRoute: struct {
     pending_identity: String,
     error: AppHandler?,
     error_identity: String,
-    form: String
+    form: String,
 }
 
 // A server function (`handler` set) or the loader dependency row a loader
@@ -173,14 +173,14 @@ priv AppAction: struct {
     name: String,
     kind: String,
     handler: AppHandler?,
-    preload: Bool
+    preload: Bool,
 }
 
 priv AppMount: struct {
     prefix: String,
     handler: AppHandler,
     effects: [String],
-    security: [String]
+    security: [String],
 }
 
 // An endpoint, webhook or mount that `app.mount` registered, whose rows the
@@ -195,7 +195,7 @@ priv AppService: struct {
     signed_in: Bool,
     hook: AppWebhook?,
     mounted: AppHandler?,
-    upload: AppUpload?
+    upload: AppUpload?,
 }
 
 // What an upload endpoint (`__remote_upload`) adds to its call: the request's
@@ -208,13 +208,13 @@ priv AppUpload: struct {
     at: Int,
     signed_in: Bool,
     check: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!,
-    files: fn(calls.FileJob) -[Net, FS.Read]> builtin.FileDone [FieldError]!
+    files: fn(calls.FileJob) -[Net, FS.Read]> builtin.FileDone [FieldError]!,
 }
 
 // An upload endpoint as its rows answer it (`app_upload_routes`).
 priv AppUploadEndpoint: struct {
     remote: AppRemote,
-    upload: AppUpload
+    upload: AppUpload,
 }
 
 // The client's navigation over the app's page rows and the app graph's
@@ -231,7 +231,7 @@ priv AppNavigation: struct {
     screen: calls.AppScreen?,
     loaded: __AppReply?,
     shown: String,
-    settled: String
+    settled: String,
 }
 
 priv AppState: struct {
@@ -271,7 +271,7 @@ priv AppState: struct {
     // handlers can't be copied.
     services: Shared<[AppService]>,
     // The client's navigation over the page rows (`App.navigate`).
-    navigation: AppNavigation
+    navigation: AppNavigation,
 }
 
 // The compiler's web rules key on this marker, not on this module's name: the
@@ -279,7 +279,7 @@ priv AppState: struct {
 // routes, browser features and OpenAPI rows are checked.
 RouteTable: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
@@ -287,7 +287,7 @@ RouteTable: struct {
 // derives its fields only from a model struct a program marks `#Web.Form`.
 Form: struct {
     impl Marker {
-        sites: [.Type]
+        sites: [.Type],
     }
 }
 
@@ -915,7 +915,7 @@ priv app_service_routes: fn(app: App) -> [Shared<AppUploadEndpoint>] Never! {
 // The port a served app listens on and what chose it.
 priv AppPort: struct {
     port: Int,
-    source: String
+    source: String,
 }
 
 C_APP_DEFAULT_PORT: 8080
@@ -1383,7 +1383,7 @@ priv C_APP_WORKER: "/sw.js"
 priv InstallIcon: struct {
     size: Int,
     fill: Int?,
-    path: String
+    path: String,
 }
 
 // Registers GET `/manifest.webmanifest` (app_manifest_response), GET
@@ -1726,11 +1726,11 @@ priv app_icon_response: fn(app: App, request: HTTPRequest) -[Net, FS.Read]> HTTP
 
 // The states of a crawl test's public guide screen and signed-in inbox.
 priv CrawlTestGuide: struct {
-    slug: String
+    slug: String,
 }
 
 priv CrawlTestInbox: struct {
-    box: String
+    box: String,
 }
 
 // A crawl test screen's opener: the crawl opens no screen.
@@ -1771,12 +1771,12 @@ priv crawl_test_open: fn(_graph: calls.App, _fields: [String:String]) -> String?
 #Codable
 priv ScreenTestBoard: struct {
     board: String,
-    tab: String
+    tab: String,
 }
 
 #Codable
 priv ScreenTestInbox: struct {
-    box: String
+    box: String,
 }
 
 // The board screen's opener, as the compiler lowers `.screen`: its view
@@ -1869,7 +1869,7 @@ priv AppPushDevice: struct {
     service: String,
     token: String,
     key: String?,
-    auth: String?
+    auth: String?,
 }
 
 // The longest token a registration holds, in bytes: a Web Push endpoint
@@ -1954,7 +1954,7 @@ priv ImageSettings: struct {
     formats: [ImageFormat],
     widths: [Int],
     quality: Int,
-    enabled: Bool
+    enabled: Bool,
 }
 
 // One resized, re-encoded copy of a source, and the URL path naming it.
@@ -1965,7 +1965,7 @@ priv ImageVariant: struct {
     // The JPEG quality; 0 for a format without one.
     quality: Int,
     key: String,
-    path: String
+    path: String,
 }
 
 // One image source: its digest and size, the URL path of the original, and
@@ -1977,13 +1977,13 @@ priv ImageNode: struct {
     height: Int,
     format: ImageFormat,
     path: String,
-    variants: [ImageVariant]
+    variants: [ImageVariant],
 }
 
 // A page body with its images placed, or why one could not be.
 priv ImagePage: struct {
     body: String,
-    failure: String
+    failure: String,
 }
 
 priv default_image_settings: fn() -> ImageSettings Never! {
@@ -2360,7 +2360,7 @@ priv AppRemote: struct {
     answer: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!,
     limit: AppRemoteLimit,
     reply: String,
-    kept: Shared<[String:AppKeptReply]>
+    kept: Shared<[String:AppKeptReply]>,
 }
 
 // A reply the server keeps for a `.Public` policy's `max_age`: the encoded
@@ -2372,7 +2372,7 @@ priv AppKeptReply: struct {
     reply: String,
     kept_ns: Int,
     fresh_ns: Int,
-    writes: Int
+    writes: Int,
 }
 
 // The most replies one endpoint keeps; past it, the stale ones are dropped
@@ -2417,13 +2417,13 @@ priv app_keep_reply: fn(kept: Shared<[String:AppKeptReply]>, args: String, reply
 priv AppRemoteLimit: struct {
     calls: Int,
     window_ns: Int,
-    windows: Shared<[String:AppRemoteWindow]>
+    windows: Shared<[String:AppRemoteWindow]>,
 }
 
 // One caller's window: when it began, and the calls counted in it.
 priv AppRemoteWindow: struct {
     start_ns: Int,
-    calls: Int
+    calls: Int,
 }
 
 // The most callers a limit keeps a window for; past it, the windows that
@@ -3104,7 +3104,7 @@ priv AppWebhook: struct {
     signature: Signature,
     params: [String],
     key: fn(RemoteArgs) -[Net, FS.Read]> String? [FieldError]!,
-    answer: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!
+    answer: fn(RemoteArgs) -[Net, FS.Read]> String [FieldError]!,
 }
 
 // A delivery of a webhook. Its path parameters, as a JSON array of strings,
@@ -3178,7 +3178,7 @@ priv app_webhook_delivery: fn(signature: Signature, github: String?, event: Dyn)
 // a webhook).
 priv AppTraced: struct {
     pattern: String,
-    method: String
+    method: String,
 }
 
 priv app_traced: fn(app: App, pattern: String, method: String) Never! {
@@ -3192,7 +3192,7 @@ priv app_traced: fn(app: App, pattern: String, method: String) Never! {
 priv AppSchedule: struct {
     name: String,
     cron: String,
-    run: fn(RemoteArgs) -> String [FieldError]!
+    run: fn(RemoteArgs) -> String [FieldError]!,
 }
 
 // Starts the schedules `waiting` holds (`calls.schedules`), each once, in
@@ -3230,7 +3230,7 @@ priv AppTraceSettings: struct {
     service: String,
     delay_ms: Int,
     max_queue: Int,
-    batch: Int
+    batch: Int,
 }
 
 // The OpenTelemetry SDK's batch span processor defaults.
@@ -3303,14 +3303,14 @@ priv AppTraceExport: struct {
     settings: AppTraceSettings,
     rows: [AppTraceRow],
     epoch_ns: Int,
-    queue: Shared<AppTraceQueue>
+    queue: Shared<AppTraceQueue>,
 }
 
 // A traced row as the table matches it.
 priv AppTraceRow: struct {
     segments: [http_server.HTTPSegment],
     pattern: String,
-    method: String
+    method: String,
 }
 
 // The spans waiting for export: a ring of at most `max_queue`, `first` the
@@ -3322,7 +3322,7 @@ priv AppTraceQueue: struct {
     first: Int,
     count: Int,
     dropped: Int,
-    ids: Int
+    ids: Int,
 }
 
 // Reads the export variables and, when they name a collector, puts the
@@ -3419,7 +3419,7 @@ priv app_trace_span: fn(export: AppTraceExport, row: AppTraceRow, request: HTTPR
 // the header is absent or not valid.
 priv AppTraceParent: struct {
     trace_id: String,
-    span_id: String
+    span_id: String,
 }
 
 priv app_traceparent: fn(header: String) -> AppTraceParent Never! {
@@ -3705,12 +3705,12 @@ priv app_facts_json: fn(app: App) -> String Never! {
 Context: struct {
     path: String,
     method: String,
-    session: String
+    session: String,
 }
 
 Mount: struct {
     path: String,
-    page: String
+    page: String,
 }
 
 // Web.form(Model, action: handler) is elaborated by sema.
@@ -3765,14 +3765,14 @@ priv OpenAPIParameter: struct {
     schema: String,
     schema_errors: [String],
     required: Bool,
-    catch_all: Bool
+    catch_all: Bool,
 }
 
 priv OpenAPIBody: struct {
     required: Bool,
     content_type: String,
     schema: String,
-    schema_errors: [String]
+    schema_errors: [String],
 }
 
 priv OpenAPIResponse: struct {
@@ -3780,12 +3780,12 @@ priv OpenAPIResponse: struct {
     description: String,
     schema: String?,
     schema_errors: [String],
-    content_type: String?
+    content_type: String?,
 }
 
 priv OpenAPISecurity: struct {
     scheme: String,
-    scopes: [String]
+    scopes: [String],
 }
 
 priv OpenAPIPattern: struct {
@@ -3793,7 +3793,7 @@ priv OpenAPIPattern: struct {
     // The parsed segments, kind and name: equal keys are equal patterns.
     key: String,
     names: [String],
-    catch_alls: [String]
+    catch_alls: [String],
 }
 
 priv OpenAPIRoute: struct {
@@ -3809,7 +3809,7 @@ priv OpenAPIRoute: struct {
     parameters: [OpenAPIParameter],
     body: OpenAPIBody?,
     responses: [OpenAPIResponse],
-    security: [OpenAPISecurity]
+    security: [OpenAPISecurity],
 }
 
 // The eight OpenAPI 3.1 Path Item operation fields, then `connect`: 3.1 has no

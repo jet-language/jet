@@ -30,13 +30,13 @@ use {
 EnvError: enum {
     InvalidName,
     InvalidValue,
-    NonUnicode
+    NonUnicode,
 }
 
 // Reused from Foundation CLISchema/TargetWidth (a736ba79d). This pointer
 // record measures the selected build target, never the compiler host.
 #Layout(c) SysTargetPointer: struct {
-    pointer: *Int
+    pointer: *Int,
 }
 
 // Layout facts must be evaluated inside the selected-target comptime boundary,
@@ -578,7 +578,7 @@ env_text: fn(text: String, vars: [String:String], source: String{"env text"}) ->
 /// An env file line being read: its bytes and the index of the next one.
 EnvLine: struct {
     raw: [U8],
-    at: Int
+    at: Int,
 }
 
 /// What an env file is read against: the values from outside it (`vars`),
@@ -586,7 +586,7 @@ EnvLine: struct {
 EnvScope: struct {
     vars: [String:String],
     assigned: [String:String],
-    readonly: [String]
+    readonly: [String],
 }
 
 /// Reads one line's commands into `scope`: None when the line is blank, a
@@ -998,7 +998,7 @@ cpu_count: fn() -[Env]> Int Never! {
 // refuses to start there.
 TimingHost: enum {
     Confirmed,
-    Unconfirmed
+    Unconfirmed,
 }
 
 timing_host: fn() -[Env]> TimingHost Never! {
@@ -1070,7 +1070,7 @@ times: fn() -[Env]> [Float] Never! {
 /// waited for.
 UsageOf: enum {
     Program,
-    Children
+    Children,
 }
 
 /// CPU time in user code and in the kernel, and the peak resident memory in
@@ -1078,7 +1078,7 @@ UsageOf: enum {
 ResourceUsage: struct {
     user: Duration,
     system: Duration,
-    peak_memory: Int
+    peak_memory: Int,
 }
 
 // Linux RLIMIT_* numbers of the five limits core.sys reads and sets.
@@ -1189,7 +1189,7 @@ Scheduling: enum {
     Batch,
     Idle,
     Fifo(priority: Int),
-    RoundRobin(priority: Int)
+    RoundRobin(priority: Int),
 }
 
 /// The scheduling of process `pid`, this program when 0. A process under
@@ -1587,7 +1587,7 @@ open_socket_pair: fn() -[Env]> [Fd] IOError! {
 PseudoTerminal: struct {
     primary: Fd,
     secondary: Fd,
-    path: String
+    path: String,
 }
 
 // A new pseudoterminal, unlocked and with its secondary already open
@@ -1764,7 +1764,7 @@ priv fd_words: module {
 // is R, G, B, X.
 PixelFormat: enum {
     XRGB8888,
-    XBGR8888
+    XBGR8888,
 }
 
 atexit: fn(handler: fn()) -[Env]> Never! { core.sys.__atexit_os(handler) }
@@ -1787,7 +1787,7 @@ mkfifo: fn(path: String, mode: Int) -[FS, Env]> IOError! {
 /// writes whole blocks (a disk).
 DeviceKind: enum {
     Character,
-    Block
+    Block,
 }
 
 /// Make the device file `path` for device `major`:`minor` with permission
@@ -1847,7 +1847,7 @@ setgid: fn(gid: Int) -[Env]> IOError! { call_unit(core.sys.__setgid(gid), "setgi
 Ids: struct {
     real: Int,
     effective: Int,
-    saved: Int
+    saved: Int,
 }
 
 /// This program's real, effective and saved user IDs (getresuid).
@@ -1882,7 +1882,7 @@ User: struct {
     gid: Int,
     gecos: String,
     home: String,
-    shell: String
+    shell: String,
 }
 
 /// One group of the group database, a line of /etc/group. `members` lists
@@ -1890,7 +1890,7 @@ User: struct {
 Group: struct {
     name: String,
     gid: Int,
-    members: [String]
+    members: [String],
 }
 
 /// Every account in /etc/passwd, in file order. Core reads the file itself,
@@ -2508,18 +2508,18 @@ config_error: fn(reason: String) -> [FieldError] Never! {
 ConfigEntry: struct {
     name: String,
     value: String,
-    segments: [String]
+    segments: [String],
 }
 
 ConfigValue: struct {
     folded: String,
     name: String,
-    value: String
+    value: String,
 }
 
 ConfigTree: enum {
     Text(String),
-    Object([{key: String, value: ConfigTree}])
+    Object([{key: String, value: ConfigTree}]),
 }
 
 ascii_upper: fn(value: String) -> String Never! {

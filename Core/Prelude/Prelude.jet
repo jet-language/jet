@@ -112,13 +112,13 @@ SourceLocation: struct {
 // calls it on the stopped program's own value. It can't fail, so the
 // debugger calls it as the program calls an infallible method.
 DebugView: trait {
-    debug_view: fn(self) -> [DebugItem] Never!
+    debug_view: fn(self) -> [DebugItem] Never!,
 }
 
 // One row of a DebugView: the text before the colon, and the text after it.
 DebugItem: struct {
     label: String,
-    value: String
+    value: String,
 }
 
 // A type as a value. Where a `Type` is expected a type name is one
@@ -144,7 +144,7 @@ Type: struct {
 // passes it up as the default `Err` like any Core error.
 #Error
 SendError: struct<T> {
-    value: T
+    value: T,
 }
 
 // How a task's join fails: the task was cancelled, ran past its deadline, or
@@ -157,7 +157,7 @@ SendError: struct<T> {
 TaskFailure: enum {
     Cancelled,
     DeadlineBlown,
-    Panicked(String)
+    Panicked(String),
 }
 
 // The phase of the compiled copy an expression runs in: `#phase` is
@@ -168,7 +168,7 @@ TaskFailure: enum {
 Phase: enum {
     Preparation,
     Build,
-    Runtime
+    Runtime,
 }
 
 // A reflected enum case's payload: none, one unnamed value of a type, or its
@@ -178,7 +178,7 @@ Phase: enum {
 CasePayload: enum {
     Unit,
     Single(TypeId),
-    Named([FieldInfo])
+    Named([FieldInfo]),
 }
 
 // A finding the compiler or a package reports, and the only carrier of one.
@@ -222,7 +222,7 @@ Diagnostic: trait {
     expert_path: String?{None},
     what: fn(self) -> String,
     why: fn(self) -> String,
-    fix: fn(self) -> String
+    fix: fn(self) -> String,
 }
 
 // Which commands a finding fails. An `.Error` fails every command. A `.Tidy`
@@ -232,7 +232,7 @@ Diagnostic: trait {
 DiagnosticTier: enum {
     Error,
     Tidy,
-    Report
+    Report,
 }
 
 // How a diagnostic stops the build. `.Warning` and `.Lint` reports don't, and
@@ -240,7 +240,7 @@ DiagnosticTier: enum {
 Severity: enum {
     Error,
     Warning,
-    Lint
+    Lint,
 }
 
 // A part of the toolchain that reports a diagnostic. A row lists every part
@@ -258,7 +258,7 @@ DiagnosticStage: enum {
     Repl,
     Runtime,
     Sema,
-    Tooling
+    Tooling,
 }
 
 // When a diagnostic can fire.
@@ -266,7 +266,7 @@ DiagnosticMoment: enum {
     Compile,
     Run,
     Test,
-    Tool
+    Tool,
 }
 
 // A retired code no longer fires; it stays so old logs remain explainable.
@@ -274,7 +274,7 @@ DiagnosticMoment: enum {
 DiagnosticStatus: enum {
     Active,
     Reserved,
-    Retired
+    Retired,
 }
 
 // Why an error refuses a program. `.Soundness`: accepting it could cause a
@@ -282,7 +282,7 @@ DiagnosticStatus: enum {
 // and Jet refuses it for clarity or style.
 DiagnosticSafetyClass: enum {
     Soundness,
-    Opinion
+    Opinion,
 }
 
 // The machine edit `jet fix` applies for a diagnostic. `.Replace` writes `to`
@@ -301,7 +301,7 @@ DiagnosticEdit: enum {
     GeneratedMarkerGroup,
     GeneratedMissingArms,
     GeneratedScriptRun,
-    GeneratedRedundantTailReturn
+    GeneratedRedundantTailReturn,
 }
 
 // Why a diagnostic has no machine edit: the fix is a design choice, it would
@@ -309,7 +309,7 @@ DiagnosticEdit: enum {
 DiagnosticNoFix: enum {
     Design,
     Behavior,
-    Ambiguous
+    Ambiguous,
 }
 
 // How safe a machine edit is to apply without review.
@@ -318,13 +318,13 @@ DiagnosticFixSafety: enum {
     BehaviorPreserving,
     APIChanging,
     NeedsReview,
-    TargetChanging
+    TargetChanging,
 }
 
 // What a build's `meta.events(watch: …, handler)` handler hears: a
 // declaration or a call of the build's program that passed its checks.
 CompilerEvent: enum {
-    Checked(CheckedItem)
+    Checked(CheckedItem),
 }
 
 // The checked part a `CompilerEvent` names: a function a
@@ -332,7 +332,7 @@ CompilerEvent: enum {
 // hears.
 CheckedItem: enum {
     Function(FunctionInfo),
-    Call(CompilerCall)
+    Call(CompilerCall),
 }
 
 // A marker is a struct that implements Marker: its fields are what a use
@@ -358,7 +358,7 @@ Marker: trait {
     // How an inner setting meets an inherited one.
     resolution: MarkerResolution{.SiteBound},
     // The scopes an inheriting setting may be written on.
-    scopes: [MarkerScope]{[]}
+    scopes: [MarkerScope]{[]},
 }
 
 // A place a marker is written. `TypeUse` is a type where it is used, which a
@@ -384,7 +384,7 @@ Site: enum {
     Operation,
     Text,
     Arm,
-    TypeUse
+    TypeUse,
 }
 
 // A match arm, after its body (`1 -> { a() } #Through`).
@@ -395,7 +395,7 @@ MarkerResolution: enum {
     SiteBound,
     Override,
     Merge,
-    Tighten
+    Tighten,
 }
 
 // A scope an inheriting marker setting is written on.
@@ -404,7 +404,7 @@ MarkerScope: enum {
     Package,
     Module,
     Function,
-    Block
+    Block,
 }
 
 // A compiler fact plane is a field-less struct that implements Fact: the
@@ -424,14 +424,14 @@ Fact: trait {
     // Whether the plane contributes to carrier identity.
     identity: Bool{false},
     // The prover that publishes the plane read-only. None: the checker.
-    proved_by: String?{None}
+    proved_by: String?{None},
 }
 
 // What a fact attaches to: a value, a scope, or the build.
 FactTarget: enum {
     Value,
     Scope,
-    Build
+    Build,
 }
 
 // The way a fact may move without a gate: it may only be gained, only
@@ -440,7 +440,7 @@ FactDirection: enum {
     Gain,
     Shrink,
     Discharge,
-    ReadOnly
+    ReadOnly,
 }
 
 // An escape that moves a fact away from its safe direction: one case per
@@ -463,7 +463,7 @@ Gate: enum {
     ManifestRuleEdit,
     Grant,
     Force,
-    Marker(Type)
+    Marker(Type),
 }
 
 // Compiler-supplied #Receipt facts are not a user-constructible handle.

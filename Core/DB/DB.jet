@@ -97,7 +97,7 @@ DBValue: enum {
 priv PoolLifecycle: enum {
     Open,
     Draining,
-    Drained
+    Drained,
 }
 
 // Receipts have always been opaque public values: the pool produces them;
@@ -361,7 +361,7 @@ priv sql_raw: fn(text: String) -> SQL Never! { SQL{text: text.copy(), values: [D
 #Equatable
 RowPolicy: struct {
     table: String,
-    owner: Bool
+    owner: Bool,
 }
 
 priv policy_expression: fn(policy: RowPolicy) -> String Never! {
@@ -420,7 +420,7 @@ priv sql_identifier: fn(raw: [U8]) -> Bool Never! {
 priv SQLToken: struct {
     start: Int,
     end: Int,
-    word: String
+    word: String,
 }
 
 priv sql_word_byte: fn(byte: Int) -> Bool Never! {
@@ -630,7 +630,7 @@ priv sql_split_trimmed: fn(raw: [U8], start: Int, end: Int) -> [String] Never! {
 
 priv SQLInsertShape: struct {
     columns: Int,
-    owner: Int
+    owner: Int,
 }
 
 priv sql_insert_shape: fn(raw: [U8], tokens: [SQLToken]) -> SQLInsertShape? Never! {
@@ -858,7 +858,7 @@ priv DBState: struct {
 // write did not name them, as a SQL statement does not.
 priv DBWritten: struct {
     table: String,
-    rows: [String]?
+    rows: [String]?,
 }
 
 // The live bindings to re-run after a write to `table` (DBState.wrote): every
@@ -1011,7 +1011,7 @@ Op: enum {
     Read,
     Insert,
     Update,
-    Delete
+    Delete,
 }
 
 // Whom a row policy is asked as: the account a task acts for
@@ -1023,7 +1023,7 @@ Op: enum {
 Who: enum {
     Account(auth.AccountID),
     System,
-    Anonymous
+    Anonymous,
 }
 
 // A typed table, from `store.table(name, key:)`. Each field of the key is a
@@ -1976,7 +1976,7 @@ priv db_kept_written: fn(held: &DBState) Never! {
 #Codable
 priv CallCount: struct {
     id: Int,
-    count: Int
+    count: Int,
 }
 
 // The table of the test below, and its row 1's count.
@@ -2372,7 +2372,7 @@ priv LIVE_POLL_MS: 1000
 priv LiveWatched: struct {
     table: String,
     version: Int,
-    own: Int
+    own: Int,
 }
 
 // A database file whose version map this process polls, through `state`,
@@ -2380,7 +2380,7 @@ priv LiveWatched: struct {
 priv LiveWatch: struct {
     path: String,
     state: Shared<DBState>,
-    tables: [LiveWatched]
+    tables: [LiveWatched],
 }
 
 priv LIVE_WATCH: Shared{[LiveWatch]{}}
@@ -2505,7 +2505,7 @@ priv db_live_polled: fn(path: String) -> [String]? Never! {
 #Codable
 priv LiveTestChore: struct {
     id: Int,
-    team: String
+    team: String,
 }
 
 // The ids of `binding`'s rows, and how many times its source ran.
@@ -2693,7 +2693,7 @@ priv LedgerRow: struct {
     to_version: Int,
     step_count: Int,
     step_ids: Int,
-    checksum: String
+    checksum: String,
 }
 
 priv ledger_value: fn(row: [String:DBValue], key: String) -> DBValue DBError! {
@@ -3013,7 +3013,7 @@ priv PoolState: struct {
     open_failures: Int,
     unhealthy: Int,
     replacements: Int,
-    replacement_failures: Int
+    replacement_failures: Int,
 }
 
 DBPool: struct {
@@ -3198,7 +3198,7 @@ priv PoolClaim: struct {
     drivers: [DBDriver],
     failure: DBError?,
     ticket: Int,
-    retry: Bool
+    retry: Bool,
 }
 
 // One admission attempt under the pool lock: lease a healthy idle driver,
@@ -3368,7 +3368,7 @@ decode: fn<T: Decode>(row: [String:DBValue], names: [{db_name: String, key: Stri
 // prepared no statement, as for empty SQL) and the trimmed SQL it caches.
 CachedStatement: struct {
     stmt: Int,
-    sql: String
+    sql: String,
 }
 
 // rusqlite 0.31.0: cache16,
