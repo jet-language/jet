@@ -30135,6 +30135,691 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-06",
       "retiredAt": "2026-11-17T01:32:55.555Z"
+    },
+    {
+      "id": "D-MEMBER-NAMESPACE1",
+      "cardId": "c00hgc5h",
+      "group": "syntax",
+      "title": "A field and a method with the same name",
+      "situation": "An error object can store its cause in a field and offer a method that returns that cause. Jet currently rejects the shared name in its own encoding library, which prevents the compiler's JSON reader from loading before a user's program runs. The choice is whether fields and methods may share a name, or whether the error must lose its public field or its method. We recommend keeping both operations and letting field access and method calls select the requested operation.",
+      "gist": "Can a field and a method share a name, or must the error API choose one?",
+      "lesson": "The choice is member declaration and resolution, not error propagation or read-only storage. Shared cause data remains handle-free and typed.",
+      "explainer": "Choose whether fields and methods have separate namespaces or share one member namespace. Separate namespaces keep the same name for both operations; access syntax chooses the operation.",
+      "story": "Mira checks an encoding error's stored cause and sometimes asks its accessor for an owned cause. Core declares both, so loading the compiler's JSON reader currently rejects Core itself. She needs an ordinary rule, not a special-case exemption for this error.",
+      "inWild": "Physically read https://doc.rust-lang.org/book/ch05-03-method-syntax.html: its Rectangle.width example declares a field and method with the same name. The text says parentheses mean the method; without parentheses Rust means the field. Supplementary exact sources: https://doc.rust-lang.org/reference/expressions/method-call-expr.html and https://doc.rust-lang.org/reference/expressions/field-expr.html. No external executable was run.",
+      "detail": "No D-MEMBER-NAMESPACE1 decision existed in canonical live Tower revision75711 or its history. STREAMS431/446 records an undecided question;450 shows this collision already existed on497. Main has now created card4905, c00hgc5h. Current Core/encoding/encoding.jet145 and160 declare public cause storage and a pure cause() accessor. Registration.rs1747-1756 emits E0105 with the message shown here; this implementation is not ratified law.\n\nD-CALLVALUE1=B governs callable values and literal call-member shadowing. Source method_calls.rs7951-7978 currently tries callable fields before resolve_method_sig7989. Choosing A requires paired method-primary resolution, not just deleting a diagnostic. An inaccessible or ill-typed method must report its normal error, never fall through to a field. Existing computed, inherited, trait, generic and operator resolution remains.\n\nOfficial Rust Book https://doc.rust-lang.org/book/ch05-03-method-syntax.html was physically read. Its same-named Rectangle.width field/method example distinguishes calls with parentheses from field access. Exact Reference URLs are https://doc.rust-lang.org/reference/expressions/field-expr.html and https://doc.rust-lang.org/reference/expressions/method-call-expr.html. No Rust example or proposed Jet program was executed. This short choice changes no Syntax.rs keyword or sigil, invariant, error propagation, read-only-field rule or private Core permission.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Separate fields and methods",
+          "detail": "Reject duplicates within fields or within methods, not a field-versus-method pair. A value-position field read keeps its meaning. An ordinary member call chooses the existing method; only absence of a method permits the existing callable-field route. An inaccessible method or wrong arguments report the normal method error, never fall through to a field.\n\nInvoke a callable field explicitly through value.field.call(args). Preserve existing member references, computed fields, inherited and trait methods, operator hooks, visibility, receiver access, effects and provenance. Preserve literal call-member shadowing. EncodingError keeps its public cause field and pure Never accessor. Both compiler paths must migrate their current callable-field-first lookup.\n\nThe separate Worker example stores a function that adds one and defines a method that adds ten. Input two produces twelve through the method, or three through step.call. EncodingError.cause is not callable. This example is authored, not executed; its function field and lambda spelling come from existing tests/closures.rs255-259. Same-name coexistence is proposed A.",
+          "code": "struct Worker { step: fn(Int) -> Int }\nimpl Worker { fn step(self, n: Int) -> Int Never! { n + 10 } }\nfn run() { w :: Worker{step: (n: Int) -> n + 1}\n print(w.step(2)) // 12 under A\n print(w.step.call(2)) // 3 under A\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep the field only",
+          "detail": "One namespace keeps duplicate field/method declarations illegal. Remove EncodingError.cause() and migrate every method caller to its public cause field. The method currently returns a copied value that its caller owns separately. A field read can borrow the stored value instead; use ~err.cause when that separate copy is needed. Preserve cause field name/order/type, constructor literals and handle-free data. No replacement getter or hidden allocation is introduced.",
+          "code": "print(err.cause == None)\nowned_cause :: ~err.cause\n// use field access, not err.cause()"
+        },
+        {
+          "key": "C",
+          "name": "Keep the method only",
+          "detail": "One namespace remains. Move cause storage to a private differently named field and retain cause()/new()/with_cause(). A public field lets callers read err.cause and construct EncodingError{..., cause: None}. Those operations must change to cause() and the existing constructors when storage becomes private. Compiler records that describe and carry the stored fields must change together, not keep a stale cause field. Migrate every public field read/write/literal constructor and every checked native/Source carrier projection. No alias or field-name-based reporting inference is allowed.",
+          "code": "print(err.cause() == None)\n// Use new()/with_cause(), not EncodingError{..., cause: None}."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Official Book, physically read: https://doc.rust-lang.org/book/ch05-03-method-syntax.html; its same-named width field/method example explains parentheses. Exact Reference URLs: https://doc.rust-lang.org/reference/expressions/field-expr.html and https://doc.rust-lang.org/reference/expressions/method-call-expr.html.",
+          "code": "let field = e.cause;\nlet owned = e.cause();"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Preserve both existing operations with ordinary resolution rather than changing public error data.",
+        "gains": [
+          "Existing cause access remains",
+          "No public field/constructor migration"
+        ],
+        "losses": [
+          {
+            "loss": "Callable field overlaps a method name",
+            "mitigation": "Use value.field.call(args) for the field explicitly."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Retires the existing method and changes owned-reader callers."
+          },
+          {
+            "key": "C",
+            "reason": "Changes public data construction and all stored-shape projections."
+          }
+        ],
+        "tradeoff": "Explicit callable-field invocation makes the overlap teachable without removing data."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: NamespaceBeginner. Skill: rli5. The beginner pass tested the complete D095 ballot through explain, predict, modify, derive and friction tasks; afterward, repairs taught notation, callable-field selection and migration costs without execution claims.",
+        "adversarial": "Author model family: Sol. Adversarial model family: Sol. Fresh agent: NamespaceAdversary. The adversarial review attacked the recommendation and incorporated actual beginner findings; afterward, all three teaching gaps were repaired without changing the proposed law or claiming execution."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Can a field and a method share a name, or must the error API choose one?",
+        "lesson": "An encoding error stores an optional cause and offers a method to read it. Jet rejects that pair before your program runs. Separate namespaces let both operations keep the same name. One shared namespace retires either field access or the method. Every option still needs checked compiler behavior and matching tests.",
+        "trio": {
+          "current": {
+            "note": "Current E0105 rejects the shared name. Authored example, not executed: new creates an error with no cause. None means absent; == compares; print displays the answer. Field access and cause() both return that absent cause.",
+            "code": "use core.encoding.[EncodingError]\nfn run() {\n err :: EncodingError.new(.JSON,.Syntax,0,None,None,\"\",\"bad JSON\")\n print(err.cause == None)\n print(err.cause() == None)\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Rust's official Book permits the same field and method name. Parentheses choose the method.",
+            "code": "struct Error { cause: Option<()> }\nimpl Error { fn cause(&self) -> Option<()> { self.cause } }\nfn main() {\n let e = Error { cause: None };\n assert!(e.cause.is_none() && e.cause().is_none());\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Separate fields and methods",
+            "gist": "Keep both public operations; access syntax chooses the operation.",
+            "gains": [
+              "Existing error field and method callers keep their spelling",
+              "No error data or constructor field is renamed"
+            ],
+            "losses": [
+              "A same-named callable field needs explicit .call when a method also exists"
+            ],
+            "proposed": {
+              "code": "err :: EncodingError.new(.JSON,.Syntax,0,None,None,\"\",\"bad JSON\")\nprint(err.cause == None)   // true\nprint(err.cause() == None) // true"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep the field only",
+            "gist": "Keep one member namespace and remove the cause method.",
+            "gains": [
+              "Existing public data and literal constructors remain",
+              "One spelling reads the cause"
+            ],
+            "losses": [
+              "Method callers must change to field reads",
+              "A separate owned value may need ~err.cause"
+            ],
+            "proposed": {
+              "code": "err :: EncodingError.new(.JSON,.Syntax,0,None,None,\"\",\"bad JSON\")\nprint(err.cause == None) // true\n// err.cause() is rejected; read err.cause instead"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep the method only",
+            "gist": "Keep one member namespace and make the stored cause private.",
+            "gains": [
+              "The error controls how its cause is returned",
+              "Existing method callers keep their spelling"
+            ],
+            "losses": [
+              "Public cause-field and literal-constructor callers must migrate",
+              "Stored-shape projections need a coordinated migration"
+            ],
+            "proposed": {
+              "code": "err :: EncodingError.new(.JSON,.Syntax,0,None,None,\"\",\"bad JSON\")\nprint(err.cause() == None) // true\n// err.cause == None is not a data-field read; use err.cause()"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Keep existing data and methods without inventing a replacement API. The different access syntax already tells readers which operation they requested.",
+          "gains": [
+            "No encoding-error API removal",
+            "No backing-field or wire-shape rename"
+          ],
+          "losses": [
+            {
+              "loss": "Callable field and method calls can share a spelling",
+              "mitigation": "Use value.field.call(args) to call the field explicitly when a same-named method exists."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It removes a public method instead of resolving the declaration rule."
+            },
+            {
+              "key": "C",
+              "reason": "It changes public data construction and stored-shape projections for a naming collision."
+            }
+          ],
+          "tradeoff": "One explicit callable-field spelling resolves the overlap without changing error data."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-08T16:35:09.712Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-08",
+      "comment": "Owner selected A through the ask UI after receiving the trade-offs and explanation of the existing Core collision. Record this explicit owner choice; no unrelated privacy, runtime-pack or error-payload approval.",
+      "retiredAt": "2026-11-17T03:23:06.734Z"
+    },
+    {
+      "id": "D-JAI-DEFER1",
+      "cardId": "c0th2wgp",
+      "group": "syntax",
+      "title": "General defer: run any statement when a block ends",
+      "situation": "Defer schedules work to run when the current block ends, so cleanup sits next to setup, such as logging the time right after a timer starts. Jai lets you defer any statement or block. Jet's rules allow only a deferred resource close, plus a library call, scope.guard, that runs a function at block end; the owner asked for defer when ratifying those rules. The vote decides whether `defer` takes any statement and replaces scope.guard; we recommend yes, keeping close as the one closing word.",
+      "gist": "Should Jet's `defer` run any statement at block end, replacing scope.guard, like Jai's defer?",
+      "lesson": "A block is code between braces. Defer runs a statement when its block ends, however it ends: normally, by return, by break, or by an error. Today only `defer close(^file)` works, `^` meaning the value is handed over; `scope.guard(() -> ...)` runs a function at block end. A and B reverse the rule against general defer.",
+      "explainer": "",
+      "story": "Dev ports a Jai job system. Every worker marks a counter, logs its timing and restores a debug flag at the end of the block with defer. In Jet each of those needs a scope.guard value with a throwaway name and a closure.",
+      "inWild": "work :: () {\n    start := current_time();\n    defer print(\"took %\\n\", current_time() - start);\n    update(world);\n}",
+      "detail": "Audit rows refer to Docs/audits/jai-parity-2026-10-16.md. Words used here. Jai is a systems programming language by Jonathan Blow, built for games, with no guardrails by default. `prep { }` runs Jet code while compiling. A `$` word such as `T.$fields` reads a fact the compiler knows. A `#Name` marker attaches a rule to the code below it. `package.jet` is a package's settings file. The main package is the one you build directly.\n\nSEMANTICS UNDER A. `defer stmt` or `defer { block }` registers at that point and runs at every exit of its block: normal end, return, break or next, error exits and stops.\n\nORDER. Each block keeps one reverse-order list: a binding's automatic cleanup is registered at its declaration, and each defer where it is written. So `f := open(p); defer print(f.name)` prints before f closes.\n\nVALUES. A return value is computed before deferred code runs: `n := 1; defer { n = 2 }; return n` returns 1. Deferred code sees variables as they are at exit.\n\nSAFETY. Ownership is checked in run order: a deferred action may not use a value that an earlier-running action consumed. So `defer f.flush()` written before `defer close(^f)` is an error, because close runs first. A deferred body may not return, break, next or use `?`. A failing call inside must be handled there, so an exit never carries two errors. Each rule has a registered code (I4).\n\nDeferred code's effects join the enclosing function's row, and unsafe operations inside still need `#Unsafe(\"reason\")`.\n\nTIERS AND STOPS. Defers run exactly where automatic cleanup runs, on every profile. Under `--small` (abort on panic), neither runs on a panic, as today, so defer adds no tier difference (I9). During cancellation, deferred code runs like cleanup, with wait points inside shielded. An explicit process stop runs active defers. A host kill does not.\n\nPLACES. Defer is legal in any block, including expression and prep blocks, but not at module scope. Inside a macro (D-JAI-CODE1), a defer in the pasted code runs when that pasted block ends. Attaching work to the caller's block is not proposed.\n\nRESOURCES. `defer close(^x)` stays the one closing word (S63). A lint flags `defer x.release()` on a resource and suggests `close(^x)`, so A does not revive the per-type closing verbs of D-SHAPE-RESOURCE2's rejected option C.\n\nAMENDS. S63's rule 'There is no general deferred statement or block' (E0003) is reversed. scope.guard (`core.mem.scope`) retires in one cutover, with its examples moved to defer. The owner's comment when ratifying D-SHAPE-RESOURCE1 was 'But I want to support defer and have one consistent word for closing any type'.\n\nWORK. A general Defer node replaces the close-only one through the AST, TIR and code generators, and about thirty sema walkers learn it.\n\nEVIDENCE. Jai defer (The Way to Jai. Blow QX46eLqq1ps 00:23:40-00:28:30 and jjCfAg_gtDw 01:32:24, from the mining notes). Blow replaced destructors with defer and macros. Zig and Swift use block-scoped defer. Go's function-scoped defer is a known trap in loops.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Defer anything, retire scope.guard",
+          "detail": "Any statement or block may be deferred and runs in reverse order on every exit from its block. `defer close(^x)` stays the one way to close a resource early. scope.guard retires in the same change.",
+          "technical": "`defer stmt` and `defer { block }`. One reverse-order list per block holds automatic resource cleanup, `defer close` and general defers. Control transfer and unhandled failure inside a defer are registered errors. E0003's defer case retires. `scope.guard` and its examples migrate to `defer`.",
+          "code": "fn work() {\n    start :: time.now()\n    defer print(\"took {time.since(start)}\")\n    defer { metrics.count(\"update\"); debug_flag = old }\n    update(world)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Defer one call, retire scope.guard",
+          "detail": "Only a single call may follow defer, with A's ordering and rules. Scope.guard retires.",
+          "technical": "`defer call(...)` only. Other rules as A.",
+          "code": "fn work() {\n    start :: time.now()\n    defer print(\"took {time.since(start)}\")\n    defer restore_flags(old)\n    update(world)\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep scope.guard",
+          "detail": "The ratified resource rules and scope.guard stay. Jai defer ports to scope.guard.",
+          "technical": "No change.",
+          "code": "fn work() {\n    start :: time.now()\n    _g :: scope.guard(() -> print(\"took {time.since(start)}\"))\n    update(world)\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "Block-scoped defer; `try` and returns inside a defer are compile errors.",
+          "code": "mutex.lock();\ndefer mutex.unlock();"
+        },
+        {
+          "lang": "Swift",
+          "note": "Block-scoped defer; control transfer out of a defer is forbidden.",
+          "code": "defer { log(\"done\") }"
+        },
+        {
+          "lang": "Go",
+          "note": "Function-scoped defer surprises users inside loops; block scope avoids that.",
+          "code": "mu.Lock()\ndefer mu.Unlock()"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A plain `defer` is clearer than a named guard holding a closure, and replacing scope.guard keeps one mechanism.",
+        "gains": [
+          "Full Jai defer.",
+          "Resources keep `close` as their one closing word."
+        ],
+        "losses": [
+          {
+            "loss": "Deferred code runs away from where it is written.",
+            "mitigation": "Defers run in one reverse order, and a new `exits` lens of `jet inspect expand` lists them."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B covers most cases but forces helper functions for multi-step cleanup, which Jai code often writes inline."
+          },
+          {
+            "key": "C",
+            "reason": "C works today but needs a throwaway name and closure for every deferred action."
+          }
+        ],
+        "tradeoff": "One statement replaces a library call, giving Jai's everyday cleanup tool."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: BegDefer. Skill: rli5. The beginner pass tested the complete ballot. The reader saw no block in the snippets, so each option now shows a whole function with its block.",
+        "adversarial": "Author model family: claude-opus. Adversarial model family: claude-haiku. Fresh agent: AdvDefer. The adversarial review attacked the recommendation. It found that scope.guard already ships and that order, return values and cancellation were open; A now retires scope.guard and states each rule."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should Jet's `defer` run any statement at block end, replacing scope.guard, like Jai's defer?",
+        "lesson": "A block is code between braces. Defer runs a statement when its block ends, however it ends: normally, by return, by break, or by an error. Today only `defer close(^file)` works, `^` meaning the value is handed over; `scope.guard(() -> ...)` runs a function at block end. A and B reverse the rule against general defer.",
+        "trio": {
+          "current": {
+            "note": "Today only a resource close can follow defer; other end-of-block work uses scope.guard.",
+            "code": "fn work() {\n    start :: time.now()\n    _g :: scope.guard(() -> print(\"took {time.since(start)}\"))\n    defer print(\"done\")   // error E0003: `defer` only schedules a consuming resource close\n    update(world)\n}"
+          },
+          "wild": {
+            "lang": "Jai",
+            "note": "defer runs any statement at scope exit (The Way to Jai).",
+            "code": "work :: () {\n    start := current_time();\n    defer print(\"took %\\n\", current_time() - start);\n    update(world);\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Defer anything, retire scope.guard",
+            "gist": "`defer` takes any statement or block; scope.guard retires so one mechanism remains.",
+            "gains": [
+              "Cleanup sits next to setup, without closures.",
+              "One end-of-block mechanism instead of two.",
+              "Jai defer ports directly."
+            ],
+            "losses": [
+              "Deferred code runs away from where it is written."
+            ],
+            "proposed": {
+              "code": "fn work() {\n    start :: time.now()\n    defer print(\"took {time.since(start)}\")\n    defer { metrics.count(\"update\"); debug_flag = old }\n    update(world)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Defer one call, retire scope.guard",
+            "gist": "`defer` takes one call, not blocks; scope.guard retires.",
+            "gains": [
+              "Short, predictable deferred code.",
+              "One end-of-block mechanism."
+            ],
+            "losses": [
+              "Multi-step cleanup needs a helper function."
+            ],
+            "proposed": {
+              "code": "fn work() {\n    start :: time.now()\n    defer print(\"took {time.since(start)}\")\n    defer restore_flags(old)\n    update(world)\n}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep scope.guard",
+            "gist": "Keep `defer close(^x)` for resources and scope.guard for everything else.",
+            "gains": [
+              "No change.",
+              "No new statement form."
+            ],
+            "losses": [
+              "End-of-block work needs a named guard and a closure."
+            ],
+            "proposed": {
+              "code": "fn work() {\n    start :: time.now()\n    _g :: scope.guard(() -> print(\"took {time.since(start)}\"))\n    update(world)\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "why": "A plain `defer` is clearer than a named guard holding a closure, and replacing scope.guard keeps one mechanism.",
+          "gains": [
+            "Full Jai defer.",
+            "Resources keep `close` as their one closing word."
+          ],
+          "losses": [
+            {
+              "loss": "Deferred code runs away from where it is written.",
+              "mitigation": "Defers run in one reverse order, and a new `exits` lens of `jet inspect expand` lists them."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B covers most cases but forces helper functions for multi-step cleanup, which Jai code often writes inline."
+            },
+            {
+              "key": "C",
+              "reason": "C works today but needs a throwaway name and closure for every deferred action."
+            }
+          ],
+          "tradeoff": "One statement replaces a library call, giving Jai's everyday cleanup tool.",
+          "rec": "A"
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-16T11:39:58.558Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-17",
+      "retiredAt": "2026-11-17T03:23:06.735Z"
+    },
+    {
+      "id": "D-HOST-FACTS-VIEW1",
+      "cardId": "c0qbikgx",
+      "group": "portable",
+      "title": "A sandboxed app sees its machine's shared class, never the machine itself, with no limit on what it asks",
+      "situation": "A portable Jet app is compiled on the machine that runs it, so it can use that machine's matrix units, wide vector instructions or GPU. To pick a fast path, its code reads facts about the hardware, and each fact helps a tracker tell machines apart. The approved rule shows a sandboxed app rounded facts about every device, and each hardware package writes its own rounding. We recommend that a portable app see the facts of a machine class that many machines share, with no limit on what it asks.",
+      "gist": "What may a sandboxed app learn about the machine it runs on?",
+      "lesson": "A fingerprint is a set of facts that together pick out one machine, so a site can follow a user without cookies. Facts are safe to share when many machines give exactly the same ones. A machine class is such a set: a named bundle of hardware facts that a large crowd of machines all meet. Native programs are trusted and keep full hardware facts under every option.",
+      "explainer": "",
+      "story": "Dana ships a photo app as one portable file. It asks whether the GPU has matrix units, whether there is 16 GiB of memory, and reads the vector width. On her friend's machine the app takes the fast path. Every answer came from the class her friend's machine belongs to, which thousands of other machines share.",
+      "inWild": "// WebGPU specification, section 2.2 Privacy Considerations\n// \"A user agent must not reveal more than 32 distinguishable\n//  configurations or buckets.\"\nconst adapter = await navigator.gpu.requestAdapter();\nadapter.limits.maxComputeWorkgroupSizeX   // binned, not the real chip value",
+      "detail": "Today. `$build.os` and `$build.profile` print Linux and dev on o0, o1 and o2 (probe h6b). Reading `$build.cpu`, `$build.hardware` or `$build.arch` is E0107, \"Nothing named `$build` exists here\" (probes h1, h2, h6). `jet build --target=portable` and every wasm target are E2104, not built yet. No program reads hardware facts today, so no running program changes under any option.\n\nRatified law. D-HOST-CAPS1=A gives typed hardware descriptions read through `$build.hardware`, and `requires:` and `uses:` on outputs. Packages add hardware kinds with `satisfies` and `coarse` methods. Its explainer says the host grants which facts a bundle sees, by default only coarse classes, and a coarse projection never overstates.\n\nMore ratified law. D-PORTABLE1=A compiles the app on the host from checked portable code. D-PORTABLE2=A says facts never grant powers. D-CORE-BOUNDARY1=A and D-CORE-FEATURE-FLOW1=A give every chip path a plain Jet meaning tested equal, so a chip changes speed, not answers.\n\nThe gap. The package that defines a hardware kind also writes its `coarse` method. A kind package can return its input unchanged, so a value as precise as a serial number can reach the app. The default also shows every device, and no rule bounds how many facts add up.\n\nPeer evidence. WebGPU says a user agent \"must not reveal more than 32 distinguishable configurations or buckets\" (W3C WebGPU draft of 27 October 2026, section 2.2). It lets browsers bin hardware limits into buckets (section 2.2.1). Adapter identifiers should be as broad as possible, with details only after user consent (section 2.2.6). A takes the buckets and the consent, but not the fixed count.\n\nJava's Vector API exposes `FloatVector.SPECIES_PREFERRED`, the best vector shape for the current CPU (JEP 529). .NET exposes `Vector.IsHardwareAccelerated` (learn.microsoft.com). Both serve trusted code; neither bounds what untrusted code learns. WebAssembly's relaxed SIMD lets one instruction return different results on different engines, which itself reveals the machine (relaxed-simd Overview, Consistency).\n\nWhat A means. Jet hosts ship a list of machine classes. A class is a named set of hardware facts, such as a vector width, matrix units and a memory floor. A class enters the list only when a large crowd of machines meets it. In a portable bundle, the host picks the most capable class this machine fully meets. Every `$build.hardware` answer and value the app reads is that class's.\n\nMore of A. An app may ask any number of questions and read any value, because all of them together reveal one class and nothing more. No count is fixed: a new class joins the list when enough machines meet it. A fact no class describes answers no, which changes speed only, because every chip path has the same meaning. The user may grant exact facts to one app, such as a benchmark, in the trust store.\n\nWhat B means. Today's approved rule: a portable app sees the coarse description of every granted device, rounded by each kind's own `coarse` method. What C means. Portable code reads no hardware facts. `requires:` still admits or refuses the app, and Core's automatic chip copies still run, without the app's code seeing which.\n\nLimits under every option. An app can time a loop and guess the chip, as WebGPU section 2.2.3 notes. Classes bound what facts reveal, not what timing reveals. Separate processes, the side-channel hardening D-PORTABLE2 requires for shared processes, and coarse timers are host policy outside this vote. Native outputs are trusted and keep every fact under every option.\n\nAmends. A narrows D-HOST-CAPS1's portable view from each kind's coarse projection to the host's class list. `coarse` stays for descriptions, refusal messages and native code. B amends nothing. C removes hardware facts from portable code. The approved examples spell the branch `prep if`, which is retired; this ballot uses `comptime if`.\n\nResearch. Docs/research/2026-10-30-portable-target-capabilities.md. Review: author Claude (MemDesign-2 lane); no fresh adversarial pass has run on this draft yet.\n\nWhy no fixed count. A fixed count bounds how many machines a page can tell apart, but it also caps how many hardware facts any app may use. What protects a user is that the crowd sharing their answers is large. A class list keeps every crowd large and lets the list grow with new hardware, so neither the number of questions nor the number of classes needs a cap.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Shared machine classes, no limit",
+          "detail": "A portable app reads hardware facts as usual, but every answer and value comes from the machine's class. A class is a named set of facts that a large crowd of machines meets, from a list Jet hosts ship. The host picks the most capable class the machine fully meets.\n\nAn app may ask as many questions as it likes, since together they reveal only the class. A fact no class describes answers no, which changes only speed. The user can grant exact facts to one app. Native programs keep every fact.",
+          "technical": "In `form: .Portable` outputs, `$build.hardware` is evaluated against the selected class description, not host observations or a kind's `coarse`. Class selection: the most capable list entry whose every fact the host observed and granted. The class name joins the cache key. The list is host data versioned with the host; an entry needs a published crowd size. A trust-store grant per app hash switches that app to exact facts. `coarse` keeps its role in descriptions, refusals and native builds. Diagnostic code and spelling land under I7.",
+          "code": "// A: answers come from the machine's shared class\nSHIP :: Output.Bundle{name: \"photos\", of: APP, form: .Portable,\n    uses: [GPU.feature(.TensorCores), Memory.at_least(16GiB)]}\ncomptime if $build.hardware.has(GPU.feature(.TensorCores)) -> fast_matmul()\nelse -> plain_matmul()\nprint($build.hardware.class)   // e.g. desktop-2025-gpu: shared by a large crowd\n// ask anything: every answer is the class's, never this machine's"
+        },
+        {
+          "key": "B",
+          "name": "Coarse descriptions of every device",
+          "detail": "A portable app sees the coarse description of every granted device, as the approved rule says. Each hardware kind rounds its own values with its own `coarse` method.\n\nNo rule bounds how many facts an app sees in total.",
+          "technical": "No change to D-HOST-CAPS1. `$build.hardware` in portable code exposes the coarse projection of each granted entry, written by each kind's package.",
+          "code": "// B: coarse descriptions of every device\nSHIP :: Output.Bundle{name: \"photos\", of: APP, form: .Portable}\ncomptime if $build.hardware.has(GPU.feature(.TensorCores)) -> fast_matmul()\nelse -> plain_matmul()\nprint($build.hardware)   // every device, rounded by its kind's own rule"
+        },
+        {
+          "key": "C",
+          "name": "No hardware facts in portable apps",
+          "detail": "Portable code cannot read hardware facts. `requires:` still admits or refuses the app at install and launch.\n\nCore's own automatic chip copies still run, chosen by the host without the app's code seeing which one.",
+          "technical": "Amends D-HOST-CAPS1: `$build.hardware` reads are a build error in `form: .Portable` outputs. Requirements and Core multiversioning are unchanged.",
+          "code": "// C: no hardware facts in portable apps\nSHIP :: Output.Bundle{name: \"photos\", of: APP, form: .Portable}\ncomptime if $build.hardware.has(GPU.feature(.TensorCores)) -> fast_matmul()\nelse -> plain_matmul()\n// error: a portable app cannot read hardware facts"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "WebGPU",
+          "note": "Limits and adapter details are binned; at most 32 distinguishable configurations. Source: W3C WebGPU sections 2.2, 2.2.1, 2.2.6",
+          "code": "adapter.limits.maxStorageBufferBindingSize   // binned"
+        },
+        {
+          "lang": "Java",
+          "note": "The Vector API gives any code the preferred vector shape for the CPU. Source: openjdk.org/jeps/529",
+          "code": "FloatVector.SPECIES_PREFERRED"
+        },
+        {
+          "lang": ".NET",
+          "note": "Any code can ask whether vector hardware is present. Source: learn.microsoft.com, System.Numerics.Vector.IsHardwareAccelerated",
+          "code": "if (Vector.IsHardwareAccelerated) { ... }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A keeps every fast path an app can name while each user stays in a large crowd, whatever a hardware package's own rounding says. Nothing is capped: apps ask what they need and the class list grows with new hardware. Because every chip path has one meaning, a fact no class describes costs only speed.",
+        "gains": [
+          "No limit on questions or on kinds of machine.",
+          "Every user stays inside a large crowd.",
+          "Apps may read values, not only yes or no.",
+          "A hardware package cannot leak precise values into apps."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B trusts every hardware package to round its own values, and nothing keeps the facts an app adds up shared by a crowd."
+          },
+          {
+            "key": "C",
+            "reason": "C stops an app from choosing its own algorithm for the hardware, which A allows without a limit."
+          }
+        ],
+        "tradeoff": "Brand-new hardware gets its nearest listed class until enough machines share its facts. That costs speed, never answers, and a user can grant one app exact facts."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Run the probes from $JET_SCRATCH_ROOT/lanes/MemDesign-2/probes. `./tiers.sh g/h6b_build_os.jet g/h2_build_hardware.jet` prints the Today results on o0, o1 and o2. The WebGPU text is in sections 2.2 to 2.2.6 of https://gpuweb.github.io/gpuweb/; section 2.2.1 describes binning limits into buckets.",
+      "surface": {
+        "gist": "What may a sandboxed app learn about the machine it runs on?",
+        "lesson": "A fingerprint is a set of facts that together pick out one machine. Facts are safe to share when a large crowd of machines gives the same ones. A machine class is such a shared set. Native programs keep full hardware facts under every option.",
+        "trio": {
+          "current": {
+            "note": "No program can read hardware facts yet; the portable target is not built.",
+            "code": "// Today: no app can read hardware facts yet\nfn run() {\n    print($build.os)         // Linux, on o0, o1 and o2\n    print($build.hardware)   // error E0107: nothing named $build here\n}\n// jet build --target=portable: error E2104, not built yet"
+          },
+          "wild": {
+            "lang": "WebGPU",
+            "note": "Browsers bin hardware details into buckets that many machines share.",
+            "code": "const adapter = await navigator.gpu.requestAdapter();\nadapter.limits   // binned values"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Shared machine classes, no limit",
+            "gist": "The app asks anything; every answer is its machine class's.",
+            "gains": [
+              "No limit on questions or kinds of machine.",
+              "Every user stays inside a large crowd.",
+              "A hardware package cannot leak precise values."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "comptime if $build.hardware.has(GPU.feature(.TensorCores)) -> fast_matmul()\nelse -> plain_matmul()\n// answered from the machine's shared class"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Coarse descriptions of every device",
+            "gist": "Today's approved default: rounded facts about everything.",
+            "gains": [
+              "An app can read any coarse value, such as a memory bucket."
+            ],
+            "losses": [
+              "A kind package can pass precise values to every app.",
+              "Many small facts can add up to a fingerprint."
+            ],
+            "proposed": {
+              "code": "print($build.hardware)   // every device, coarse"
+            }
+          },
+          {
+            "key": "C",
+            "name": "No hardware facts in portable apps",
+            "gist": "Portable apps learn nothing; only the host chooses.",
+            "gains": [
+              "The app's code learns nothing about the hardware."
+            ],
+            "losses": [
+              "An app cannot choose its own fast path, such as a different algorithm."
+            ],
+            "proposed": {
+              "code": "// $build.hardware: error in a portable app"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A lets apps ask anything while each user stays inside a large crowd, whatever a hardware package's rounding says.",
+          "gains": [
+            "No limit on questions or kinds of machine.",
+            "Every user stays inside a large crowd."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Trusts each package's rounding, and facts add up."
+            },
+            {
+              "key": "C",
+              "reason": "Stops an app from choosing its own algorithm."
+            }
+          ],
+          "tradeoff": "Brand-new hardware gets its nearest listed class until a crowd shares it."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A fixed answer budget limits how many hardware facts an app may use.",
+          "attempts": [
+            "Keep a five-answer budget with user grants: rejected, it caps apps for a number, not for privacy.",
+            "Let each app ask freely with no grouping: rejected, many facts add up to one machine."
+          ],
+          "result": "Answers come from a shared class, so any number of questions reveals only the class. The class list grows when a crowd of machines meets a new class."
+        },
+        {
+          "loss": "New hardware is underused until its class is listed.",
+          "attempts": [
+            "Answer from the machine's own facts until a class exists: rejected, a rare machine is exactly the one a tracker can pick out."
+          ],
+          "result": "The machine gets its nearest listed class, which costs speed only because every chip path has one meaning. A user can grant one app exact facts, and the list updates with the host."
+        },
+        {
+          "loss": "Timing can still reveal the chip.",
+          "attempts": [
+            "Hide timing inside the language: rejected, no language rule can stop an app timing its own loop."
+          ],
+          "result": "The vote bounds facts only; process separation and coarse timers stay host policy, as WebGPU section 2.2.3 also concludes."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T18:09:51.652Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-31",
+      "retiredAt": "2026-11-17T03:23:06.735Z"
+    },
+    {
+      "id": "D-PORTABLE-WEB1",
+      "cardId": "c0qbikgx",
+      "group": "portable",
+      "title": "The same portable app file also runs in a web browser, translated in the page",
+      "situation": "Jet's portable app file holds checked Jet code that each machine compiles for itself, which is meant to beat WebAssembly. Browsers run only JavaScript and WebAssembly, so today's approved plan gives the web its own separate build. Then one program ships as two artifacts with two checking paths. We recommend that the same app file also run in a browser, checked and turned into WebAssembly inside the page.",
+      "gist": "Should one portable Jet app file run both on a computer and in a browser tab?",
+      "lesson": "WebAssembly is the portable code format every browser runs. A host is the program that checks an app file and runs it. Under A, a small Jet host compiled to WebAssembly loads the app file in the page and translates it. In the browser the app runs at WebAssembly speed; outside it, at native speed.",
+      "explainer": "",
+      "story": "Lee ships a notes app as one file. Colleagues run it from the terminal at native speed. A client opens a link and the same file runs in the browser tab, refused only for the file access a browser page cannot grant.",
+      "inWild": "// Pyodide runs CPython, compiled to WebAssembly, inside the page\n// https://pyodide.org\nconst pyodide = await loadPyodide();\npyodide.runPython(\"print(1 + 2)\");",
+      "detail": "Today. No portable or web output builds. `jet build --target=portable`, `--target=web`, `--target=wasm32-wasip2` and `--target=wasm32-unknown-unknown` all stop with E2104, \"is not built yet\" (probe w/hello.jet). There is no `.jetapp` code in Compiler/ or Core/. So no shipped program changes under either option.\n\nRatified law. D-PORTABLE1=A makes the app file versioned, content-hashed portable code that the host verifies and compiles locally. Its text says running in a browser needs a separate adapter. D-PORTABLE2=A adds a machine-code checker for native hosts. D-WASISRV1=A keeps WebAssembly as an export for WASI hosts. D-LEARN-WEB1=A already puts Jet's checker in the page as WebAssembly.\n\nWork in flight. Card #5201 builds a JetIR to JavaScript and WebAssembly back end. Card #5487 (done) runs plugin WebAssembly through JetIR and Jet's own back end, the opposite direction. D-EFFTYPE-TARGET1=A turns a profile's missing facts into denied effects, so a browser profile with no file system denies file access.\n\nMeasured cell. The same F32 multiply-add loop, one million values for 400 passes, written in C. Native gcc -O2 took 0.059 s, and 0.044 s with -march=native. Zig's wasm32-wasi build under Wasmtime 48 took 0.122 s with SIMD and 0.324 s without, cold compile included. The machine had load near 90, so treat these as indicative.\n\nThe same loop in Jet took 1.72 s at o2 and 2.50 s at o1, minimum of five runs. That native gap is a separate performance finding. So inside a browser the app is bounded by WebAssembly speed. Outside one, local native compilation is what beats WebAssembly.\n\nPeer evidence. Pyodide runs CPython compiled to WebAssembly in the page. Roc's in-browser REPL ships its whole compiler as about 6 MB of WebAssembly (D-LEARN-WEB1 detail). WebAssembly SIMD is fixed at 128 bits, and relaxed SIMD allows engine-dependent results (relaxed-simd Overview, Consistency).\n\nWhat A means. A Jet host written in Jet, compiled to WebAssembly, loads the app file in the page. It runs the same verifier, compares powers with the page's grants, and translates the checked code to WebAssembly with the same back end as the web export. The browser's engine provides the walls, so the native machine-code checker is not needed there.\n\nMore of A. GPU work uses the WebGPU device library. Native-width vector lanes are four F32 values wide in the page. A build may also write a ready-made WebAssembly copy beside the app file, made by the same translator; the page uses it when its hash matches, to skip the in-page translation.\n\nWhat B means. Today's approved plan. The app file runs only where a Jet host is installed. The web gets a separate `jet build --target=web` from source, with its own artifact.\n\nAmends. A amends D-PORTABLE1's sentence that a browser needs a separate adapter: the adapter becomes the in-page host for the same file. `--target=web` stays as the ready-made copy. B amends nothing.\n\nResearch. Docs/research/2026-10-30-portable-target-capabilities.md. Review: author Claude (MemDesign-2 lane); no fresh adversarial pass has run on this draft yet.",
+      "options": [
+        {
+          "key": "A",
+          "name": "One app file, also in the browser",
+          "detail": "A small Jet host, compiled to WebAssembly, loads the app file in the page. It checks the file with the same verifier, asks for the page's grants and turns the code into WebAssembly with the same translator as the web build.\n\nA build may also write a ready-made WebAssembly copy beside the app file, which the page uses when its hash matches. Behavior change: an app that needs a power a page cannot grant, such as files, is refused in the browser with the missing fact named.",
+          "technical": "The host is Jet source built for the browser profile (D-FREESTAND-WASM1), reusing the #5201 back end and the D-PORTABLE1 verifier. Walls come from the WebAssembly engine; D-PORTABLE2's checker applies to native hosts only.\n\nGrants map to page permissions; absent facts deny effects per D-EFFTYPE-TARGET1. `Lanes<F32>` is four wide on SIMD128. Ready-made copies are keyed by app hash and translator version. The loader spelling is illustrative.",
+          "code": "SHIP :: Output.Bundle{name: \"notes\", of: APP, form: .Portable}\n// $ jet run notes.jetapp      laptop: checked, compiled to native code here\n// browser: <script src=\"jet-host.js\" data-app=\"notes.jetapp\"></script>\n//   the same file, checked and turned into WebAssembly in the page\n// optional: the build also writes a ready-made WebAssembly copy of it"
+        },
+        {
+          "key": "B",
+          "name": "A separate web build",
+          "detail": "The app file runs only where a Jet host is installed. Browsers get a separate build from source with `jet build --target=web`.\n\nThe two artifacts are checked by different paths: the host verifier for the app file, and the compiler for the web build.",
+          "technical": "No change. D-PORTABLE1's separate browser adapter stays a source build through the #5201 back end.",
+          "code": "SHIP :: Output.Bundle{name: \"notes\", of: APP, form: .Portable}\n// $ jet run notes.jetapp      laptop: checked, compiled to native code here\n// $ jet build --target=web notes.jet   a second, separate browser build\n// the browser cannot open notes.jetapp"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Python (Pyodide)",
+          "note": "CPython itself is compiled to WebAssembly and runs ordinary Python in the page. Source: pyodide.org",
+          "code": "pyodide.runPython(\"print(1 + 2)\")"
+        },
+        {
+          "lang": "Java",
+          "note": "A JVM class file needs an installed JVM; browsers dropped applets, so the web needs a separate build. Source: openjdk.org/jeps/398",
+          "code": "java -jar notes.jar"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A makes the portable file the one thing Jet ships: native speed where a Jet host is installed, and WebAssembly speed in any browser. The ready-made copy keeps the web build's small first load.",
+        "gains": [
+          "One artifact runs on computers and in browsers.",
+          "One verifier and one translator for both.",
+          "A ready-made copy keeps the first page load small."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B ships every web program twice, checked two ways, and a browser cannot open the app file itself."
+          }
+        ],
+        "tradeoff": "The in-page host is a second build of the verifier and translator for the browser profile, which must stay small."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Run from $JET_SCRATCH_ROOT/lanes/MemDesign-2/probes/w: `jet build --target=<t> hello.jet` for portable, web, wasm32-wasip2 and wasm32-unknown-unknown prints E2104 each. The timing cell is in $JET_SCRATCH_ROOT/lanes/MemDesign-2/probes/perf (saxpy.c, saxpy.jet).",
+      "surface": {
+        "gist": "Should one portable Jet app file run both on a computer and in a browser tab?",
+        "lesson": "WebAssembly is the portable code format every browser runs. A host is the program that checks an app file and runs it. Under A, a small Jet host compiled to WebAssembly loads the app file in the page and translates it. In the browser the app runs at WebAssembly speed; outside it, at native speed.",
+        "trio": {
+          "current": {
+            "note": "Neither the app file nor the web build exists yet; the approved plan has two artifacts.",
+            "code": "// Today: neither form is built yet\nSHIP :: Output.Bundle{name: \"notes\", of: APP, form: .Portable}\n// $ jet build --target=portable notes.jet   error E2104, not built yet\n// $ jet build --target=web notes.jet        error E2104, not built yet\n// approved plan: the browser needs a separate build"
+          },
+          "wild": {
+            "lang": "Python (Pyodide)",
+            "note": "The language host is compiled to WebAssembly and runs ordinary programs in the page.",
+            "code": "const pyodide = await loadPyodide();\npyodide.runPython(\"print(1 + 2)\");"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "One app file, also in the browser",
+            "gist": "One file: native speed on computers, WebAssembly speed in browsers.",
+            "gains": [
+              "One artifact runs on computers and in browsers.",
+              "One verifier and one translator for both.",
+              "A ready-made copy keeps the first page load small."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "<script src=\"jet-host.js\" data-app=\"notes.jetapp\"></script>"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A separate web build",
+            "gist": "Two artifacts: the app file, and a web build.",
+            "gains": [
+              "No in-page host to build."
+            ],
+            "losses": [
+              "One program ships as two artifacts.",
+              "A browser cannot open the app file someone sent."
+            ],
+            "proposed": {
+              "code": "$ jet build --target=web notes.jet"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A makes the portable file the one thing Jet ships: native speed where a Jet host is installed, and WebAssembly speed in any browser. The ready-made copy keeps the web build's small first load.",
+          "gains": [
+            "One artifact runs on computers and in browsers.",
+            "One verifier and one translator for both.",
+            "A ready-made copy keeps the first page load small."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B ships every web program twice, checked two ways, and a browser cannot open the app file itself."
+            }
+          ],
+          "tradeoff": "The in-page host is a second build of the verifier and translator for the browser profile, which must stay small."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Translating in the page could make the first load slow.",
+          "attempts": [
+            "Always translate in the page: rejected, large apps would start slowly."
+          ],
+          "result": "The build may write a ready-made WebAssembly copy, keyed by the app's hash, that the page uses directly."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-30T18:09:53.155Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-30",
+      "retiredAt": "2026-11-17T03:23:06.735Z"
     }
   ]
 }

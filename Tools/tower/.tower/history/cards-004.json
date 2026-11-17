@@ -102800,6 +102800,267 @@
       "completedAt": "2026-11-14T02:24:15.889Z",
       "questions": [],
       "retiredAt": "2026-11-17T02:29:04.332Z"
+    },
+    {
+      "id": "c00hgc5h",
+      "num": 4905,
+      "title": "Choose field/method name resolution; unblock EncodingError and the frontend factory",
+      "body": "No ratified member-namespace rule was found. Core EncodingError declares both a cause field and cause method; the current checker rejects it with E0105. The compiler bootstrap imports core.encoding.json and selects this type, so a real native frontend candidate cannot be built until the owner chooses the rule. Decide ordinary field-versus-method resolution, not a Core-only diagnostic exemption. Existing callable-value syntax, visibility, ownership, effects, private Core access and error-report payload decisions remain unchanged.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "Full D-MEMBER-NAMESPACE1 ballot is ready after two actual fresh reader reviews and teaching repairs. Choose separate field/method namespaces preserving both same-named operations, or one namespace retaining only the field or only the method. Main owns Tower submission and closure. After owner choice, one implementation owner migrates both compiler paths and every affected caller, example, test and type projection in one cutover. Preserve visibility, ownership, effects and existing callable-value syntax. Only the affected member rule and selected frontend factory wait for this choice; independent frontend algorithms, runtime, Rust removal and gates continue.",
+      "checkSteps": null,
+      "probe": "jet check Core/encoding/encoding.jet",
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Every criterion met; the code is on dev 93380f43ef."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c2 stays open: in the 93380f43ef proof (Lander5), MemberNamespaceFixtures gives 38/1, and the one failure is callable_access_contracts at CallableAccessContracts.jet:82, a known dev red from the lambda cutover. Rerun MemberNamespaceFixtures after G3Core2-fold-step-block-r2 lands, and meet c2 then."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: re-phased (no building work logged since before 2026-10-20)."
+        },
+        {
+          "at": "2026-10-08",
+          "by": "Pip",
+          "text": "Owner confirmed A, allow same-named field and method. Owner-decision criterion is met; separate-verifier rule leaves its verified state pending. MemberNamespace owns coherent paired checker/lowerer implementation on isolated exact521 base. Keep public EncodingError storage and accessor unchanged; direct member calls method-primary, explicit field.call for callable field, no invalid/inaccessible method fallback. Core5 supplied exact source paths; NL/NR coordinate region review. No semantic or factory pass yet."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Owner ratifies D-MEMBER-NAMESPACE1 from a complete source-backed ballot; no Core-only diagnostic exemption or unrelated privacy/syntax exception.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-MEMBER-NAMESPACE1 is ratified with outcome A, which the owner selected explicitly. Built on dev 93380f43ef.",
+          "at": "2026-11-14T03:02:31.307Z",
+          "closure": "decision"
+        },
+        {
+          "n": 2,
+          "text": "The checker and lowering implement D-MEMBER-NAMESPACE1=A with same-name positive and rejection cases, duplicate-field/method negatives, callable-field disambiguation, visibility, generic receivers, ownership and effects; each diagnostic has a registered code and UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "MemberNamespaceFixtures 39/0 with the g6-fsb3 jet (dev ce8d130533 plus fold-step-block-r3, landed as e362a26399), which clears the earlier 38/1 that came from the CallableAccessContracts.jet:82 dev red.",
+          "at": "2026-11-13T15:37:43.853Z"
+        },
+        {
+          "n": 3,
+          "text": "EncodingError cause field/method and every affected repository caller, constructor, type projection, example and test migrate in one cutover; applicable-tier behavior agrees and the matched frontend factory passes its unchanged semantic inputs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander5 landed G6Meta-4905c2c4 as dev 93380f43ef. Proof: the case closures/encoding_error_cause_field_and_method_agree_on_every_tier passes on o0/o1/o2.",
+          "at": "2026-11-13T14:38:38.794Z"
+        },
+        {
+          "n": 4,
+          "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (the D-MEMBER-NAMESPACE1 member rule). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander5 landed G6Meta-4905c2c4 as dev 93380f43ef. It adds the spec.md and syntax-decisions.md entries and the METHOD_CALL row doc. Proof: jet self devtools grammars leaves Tools/editors clean, and the guards pass.",
+          "at": "2026-11-13T14:38:40.034Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "owner-gate",
+        "frontend",
+        "sema",
+        "core",
+        "syntax",
+        "wayfinder:decision"
+      ],
+      "parentId": "c0w9o2sz",
+      "needsAcceptance": false,
+      "created": "2026-10-08T16:24:44.155Z",
+      "updated": "2026-11-14T03:03:10.223Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 7,
+      "completedAt": "2026-11-14T03:03:10.223Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T03:23:06.734Z"
+    },
+    {
+      "id": "c0th2wgp",
+      "num": 5026,
+      "title": "General defer for any statement or block (Jai defer)",
+      "body": "## Outcome\n\nDecision D-JAI-DEFER1. Jai's `defer` schedules any statement or block at scope exit, and macros use it heavily. Jet allows only `defer close(x)` (D-SHAPE-RESOURCE2); `defer action()` and `defer { }` are E0003. The owner asked for defer when ratifying D-SHAPE-RESOURCE1. Audit row: G33.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Every criterion met. It holds on dev 980e02feb4 (the KW_DEFER rows and ui defer_*), proved on the batch-16 jet."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (general `defer` statement and block, D-JAI-DEFER1=A). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 980e02feb4, proved by G6Meta-4 on the batch-16 jet (gate-p21): the KW_DEFER row in Compiler/JetFoundation/Data/Syntax/CoreSurface.jet and the D-JAI-DEFER1=A entry in Docs/spec/syntax-decisions.md are on dev. jet self devtools grammars leaves git status --short Tools/editors empty, and jet test tests/guards --filter grammar gives 9/0. --filter syntax_reconciliation selects 0 tests on this runner, so jet test tests/guards/syntax_reconciliation.jet was run instead, and none of its tests failed.",
+          "at": "2026-11-14T01:34:40.669Z"
+        },
+        {
+          "n": 5,
+          "text": "`return`, `break`, `next` and `?` inside a defer body each report their registered code from D-JAI-DEFER1=A, with one problem per file. Today r03b_defer_return.jet gets E0003 \"Expected a value, found `return`\" plus a follow-on E0003 at the closing `}`. UI snapshots registered. (From #6376: C's defer TS 25755 bans return/break/goto out of a defer block, and Python 3.14's PEP 765 warns on return/break/continue leaving `finally`. D-JAI-DEFER1=A ratified the same ban, but #5026's criteria cover only grammar and snapshots. Probe $JET_SCRATCH_ROOT/lanes/MemDesign-4/probes/rel/r03b_defer_return.jet.)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 980e02feb4, proved by G6Meta-4 on the batch-16 jet (gate-p21): ui defer_return, defer_break, defer_next and defer_try 1/0 each, with one diagnostic per snapshot (E0509 for return, break and next; E0512 for ?).",
+          "at": "2026-11-14T01:34:38.460Z"
+        }
+      ],
+      "refs": [
+        "Docs/audits/jai-parity-2026-10-16.md",
+        "#5021"
+      ],
+      "tags": [
+        "mining-2026-10-16",
+        "jai-vs-jet",
+        "jai-parity",
+        "syntax",
+        "needs-owner",
+        "wayfinder:decision"
+      ],
+      "parentId": "c02y3vkg",
+      "needsAcceptance": false,
+      "created": "2026-10-16T10:54:44.139Z",
+      "updated": "2026-11-14T03:02:03.520Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-14T03:02:03.520Z",
+      "questions": [],
+      "retiredAt": "2026-11-17T03:23:06.734Z"
+    },
+    {
+      "id": "c0qbikgx",
+      "num": 6345,
+      "title": "A portable target better than WASM: a Jet bytecode or IR plus a hardware-capability API so sandboxed code can use tensor cores, SIMD and GPUs",
+      "body": "Owner, 2026-10-30: \"Mojo has a bytecode/VM effectively which supports portability. One of Jet's goals is to effectively replace WASM as a portable target, so we need to investigate deeply. One issue with WASM is that it doesn't expose the hardware, like tensor cores, so it is a lowest-common-denominator system. We need to improve on that: some kind of metadata API that lets portable code leverage the hardware capabilities exposed by the host running the Jet sandbox.\" Related ratified decisions: D-PORTABLE1, D-PORTABLE2, D-CPU-DISPATCH1. Owner: MemDesign (design only).",
+      "kind": "task",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Every criterion met; the text is on dev 5eaaaf6b71 and the decisions are ratified."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A dated Docs/research note answers the owner's questions on a portable Jet target: WASM (and its SIMD, relaxed-SIMD and threads proposals, WASI), Mojo/MLIR, SPIR-V, JVM/.NET tiered compilation, eBPF and Java/.NET capability APIs; what form Jet ships (IR, bytecode or ahead-of-time per host), how the sandbox host exposes hardware capabilities (SIMD widths, tensor cores, GPUs, memory sizes) as typed facts portable code can query and specialize on, and how that keeps D-PORTABLE1/2 confinement and I9, with every claim about Jet probed on o0, o1 and o2 or cited to file:line, and every peer claim cited.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Docs/research/2026-10-30-portable-target-capabilities.md on dev 5eaaaf6b71 (see the earlier evidence for the sections), also cited in f6eb2f2e08.",
+          "at": "2026-11-14T03:02:35.489Z"
+        },
+        {
+          "n": 2,
+          "text": "Every owner choice the note raises is a Tower-ready ballot (readycheck READY, plaincheck PLAIN OK, recommendation.losses = []), with same-program alternatives and beginner and expert paths; implementation-only findings become criteria or cards, not ballots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The note`s owner choices are the Tower ballots D-PORTABLE1, D-PORTABLE2, D-HOST-FACTS-VIEW1 and D-PORTABLE-WEB1, all ratified with outcome A.",
+          "at": "2026-11-14T03:03:05.392Z",
+          "closure": "decision"
+        },
+        {
+          "n": 3,
+          "text": "The note states the security boundary of the capability API (what a sandboxed program can learn about the host, and fingerprinting limits) and the paired perf cells against native and WASM.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Docs/research/2026-10-30-portable-target-capabilities.md on dev 5eaaaf6b71 (see the earlier evidence for the sections), also cited in f6eb2f2e08.",
+          "at": "2026-11-14T03:02:38.658Z"
+        },
+        {
+          "n": 4,
+          "text": "The host-facts design resolves the name clash with the existing core.hardware (embedded Target.Hardware, TargetMachine.jet:714 and :827) so one name has one meaning.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Design text on dev 5eaaaf6b71: Docs/research/2026-10-30-portable-target-capabilities.md:71, section \"One naming clash, and how this design resolves it\", renames the embedded profile Target.Hardware to Target.Board and core.hardware to core.board, so hardware keeps one meaning (found by G3Core-2).",
+          "at": "2026-11-14T00:39:05.552Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-30T17:30:22.698Z",
+      "updated": "2026-11-14T03:03:14.109Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-14T03:03:14.109Z",
+      "questions": [
+        {
+          "id": "qebrwzad",
+          "cardId": "c0qbikgx",
+          "decisionId": "D-HOST-FACTS-VIEW1",
+          "by": "owner",
+          "kind": "question",
+          "text": "why limit of 32 types of machines?? seems like a limitation not a pro",
+          "status": "answered",
+          "answer": "You're right: the cap limited apps without protecting anyone better. The 32 came from WebGPU, which lets a page tell apart at most 32 hardware configurations. But a fixed count caps how many hardware facts any app may use, and what actually protects a user is that many other machines give exactly the same answers. The revised option A has no count. Jet hosts ship a list of machine classes. Each class is a named set of hardware facts, such as a vector width, matrix units and a memory floor, and a class is listed only when a large crowd of machines meets it. A portable app asks any number of questions and may read values, not only yes or no. Every answer comes from the most capable class its machine fully meets, so together the answers reveal one class, which thousands of machines share, and never the machine itself. The list grows as new hardware becomes common. Until a brand-new machine's class is listed, that machine gets the nearest class below it. That costs speed only, because every chip path has one meaning, and a user can grant one app the exact facts, for a benchmark for example. Native programs keep every fact.",
+          "created": "2026-10-30T18:16:35.039Z",
+          "answeredAt": "2026-10-31",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-17T03:23:06.735Z"
     }
   ]
 }
