@@ -618,6 +618,24 @@ function shareLink(url) {
   );
 }
 
+// A remote call's POST through the browser's fetch, for app.remote_at in a
+// page. `request` is the address, then a line `name: value` for each
+// header, an empty line and the body; an address with no origin (`/api/add`)
+// is on the page's own. A promise of the record of the reply's status, its
+// `retry-after` ("" for none) and its body's text, or of why no reply came.
+function postRequest(request) {
+  const blank = request.indexOf("\n\n");
+  const [address, ...lines] = request.slice(0, blank).split("\n");
+  const headers = lines.map((line) => [line.slice(0, line.indexOf(": ")), line.slice(line.indexOf(": ") + 2)]);
+  const page = globalThis.location?.href;
+  return Promise.resolve()
+    .then(() => fetch(page === undefined ? address : new URL(address, page).href, { method: "POST", headers, body: request.slice(blank + 2) }))
+    .then((reply) =>
+      reply.text().then((text) => providerRecord([String(reply.status), reply.headers.get("retry-after") ?? "", text])),
+    )
+    .catch((error) => providerRecord([String(error?.message ?? error)]));
+}
+
 // The provider's answer to the app's device request `request` of kind
 // `kind` (UIHostProvider.jet jet_ui_provider_device): 0 app.ask's grant, 1
 // the location's record, 2 the photo's record (its grant and, when taken,
@@ -636,9 +654,10 @@ function shareLink(url) {
 // for later visits (keepFolder), 15 the record of the folder kept for
 // them under the key `request` (keptFolder), 16 the app following the
 // page's lifecycle through the hook whose click slot `request` names,
-// its first moment the document's visibility, and 17 the oldest moment
+// its first moment the document's visibility, 17 the oldest moment
 // of the page's lifecycle the app hasn't taken (Host followLifecycle),
-// null for none. An answer may be a promise.
+// and 18 a remote call's POST (postRequest), null for none. An answer
+// may be a promise.
 function deviceRequest(doc, kept, watches, drops, lifecycle, kind, request) {
   if (kind === 0) return askPermission(request);
   if (kind === 1) return findPlace().then(providerRecord);
@@ -681,6 +700,7 @@ function deviceRequest(doc, kept, watches, drops, lifecycle, kind, request) {
     return "following";
   }
   if (kind === 17) return lifecycle.moments.shift() ?? null;
+  if (kind === 18) return postRequest(request);
   return null;
 }
 

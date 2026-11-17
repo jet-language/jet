@@ -5896,7 +5896,11 @@ Remote, which no code outside `app` reads. A call through the Remote that
 `remote(service)` makes runs the method on that service directly.
 
 A call through the Remote that `remote_at(address)` makes is a POST of the
-arguments, encoded as one JSON array, to `{address}/{method}`. A Public
+arguments, encoded as one JSON array, to `{address}/{method}`. In a page the
+browser's `fetch` sends it, so the browser's rules for a page's requests
+apply (another origin's server must allow the page through CORS), and an
+address with no origin (`/api`) is on the page's own; every other target
+sends it through core.http. A Public
 method answers `{"ok": value}` or `{"err": error}`, which the call returns as
 the method's value or error. `web.app().mount(prefix, service)` registers
 each marked method of the service as that POST route `{prefix}/{method}`.

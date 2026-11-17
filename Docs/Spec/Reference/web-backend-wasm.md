@@ -69,10 +69,12 @@ drop and each change of the page's lifecycle a launched app hears
 while another is suspended runs once that one has ended. A device
 request the browser answers later (`app.ask`, `app.take_photo`,
 `app.location`, `app.open_file`, `app.open_folder`, `app.kept_folder`, the
-reads of a file the page keeps, a folder's listing and writes, and each
+reads of a file the page keeps, a folder's listing and writes, each
 reading `app.location_updates`, `app.orientation_updates` and
-`app.heading_updates` give, through the page's UI provider) suspends the
-program the same way until the browser's promise settles.
+`app.heading_updates` give, and each call through a `remote_at` Remote,
+which the browser's `fetch` sends, through the page's UI provider)
+suspends the program the same way until the browser's promise settles.
+The program's output so far shows before the page acts on the request.
 
 Tasks run as they do natively, with the same scheduler: its threads and
 its tasks' fibers are coroutines on the page's one JavaScript thread, each

@@ -545,7 +545,8 @@ remote: fn<S>(service: &&S, client: String{""}) -> Remote<S> Never! {
 
 // The Remote of a service a server mounts at `address`, its mount prefix
 // (`http://127.0.0.1:8080/api`): each call posts its JSON arguments to
-// `{address}/{method}`. `client` is as for `remote`.
+// `{address}/{method}`. In a page an address with no origin (`/api`) is on
+// the page's own. `client` is as for `remote`.
 remote_at: fn<S>(address: String, client: String{""}) -> Remote<S> Never! {
     Remote<S>{service: None, address: address, client: client, local: false}
 }
@@ -933,29 +934,80 @@ priv remote_send: fn(address: String, local: Bool, method: String, body: String,
 priv remote_send_as: fn(address: String, method: String, body: String, key: String, bearer: String) -[Net, Time]> String CallError! {
     seed: "{rt.clock_mono_ns()}:{trace_next()}:{key}"
     trace: make_trace_id("trace:{seed}", 16)
+    headers := [http.Header]{
+        http.Header{name: "traceparent", value: "00-{trace}-{make_trace_id("span:{seed}", 8)}-01"},
+        http.Header{name: "x-request-id", value: trace},
+        http.Header{name: "idempotency-key", value: key},
+    }
+    if bearer != "" -> headers.push(http.Header{name: "authorization", value: "Bearer {bearer}"})
     lost := ""
     loop sends in 0..<REMOTE_SENDS {
         if sends > 0 -> tasks.sleep(REMOTE_RESEND_MS * sends)
-        sent := http.__request("POST", "{address}/{method}").__with_header("traceparent", "00-{trace}-{make_trace_id("span:{seed}", 8)}-01").__with_header("x-request-id", trace).__with_header("idempotency-key", key).__with_body(body)
-        if bearer != "" -> sent = sent.__with_header("authorization", "Bearer {bearer}")
-        response: sent.send() ?? {
-            lost = "{err}"
-            next
-        }
-        text: response.body.text(REMOTE_MAX_REPLY) ?? {
-            lost = "{err}"
+        reply: remote_send_once("{address}/{method}", headers, body)
+        if reply.status == 0 {
+            lost = reply.text
             next
         }
         return if {
-            response.status == 200 -> Ok(text)
-            response.status == 401 -> Err(.SignedOut)
-            response.status == 422 -> Err(.Invalid(remote_invalid(text)))
-            response.status == 426 -> Err(.UpdateRequired)
-            response.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {response.header("retry-after") ?? "?"} s"))
-            else -> Err(.Unreachable("{address}/{method} answered {response.status}"))
+            reply.status == 200 -> Ok(reply.text)
+            reply.status == 401 -> Err(.SignedOut)
+            reply.status == 422 -> Err(.Invalid(remote_invalid(reply.text)))
+            reply.status == 426 -> Err(.UpdateRequired)
+            reply.status == 429 -> Err(.Unreachable("{address}/{method} is limited: retry after {reply.retry_after ?? "?"} s"))
+            else -> Err(.Unreachable("{address}/{method} answered {reply.status}"))
         }
     }
     Err(.Unreachable("{address}/{method}: {lost}"))
+}
+
+// One reply to a send of a remote call: its status, its `retry-after`, and
+// its body's text; status 0 when no reply came, and then `text` says why.
+priv RemoteReply: struct {
+    status: Int,
+    retry_after: String?,
+    text: String,
+}
+
+// One send of a remote call: POST `body` to `url` with `headers`. A page
+// sends it through the browser's fetch (`remote_send_page`), every other
+// target through core.http (`remote_send_http`).
+priv remote_send_once: fn(url: String, headers: [http.Header], body: String) -[Net, Time]> RemoteReply Never! {
+    #if #build.target.os == {
+        .Linux -> { return remote_send_http(url, headers, body) }
+        .MacOS -> { return remote_send_http(url, headers, body) }
+        .Windows -> { return remote_send_http(url, headers, body) }
+        .Web -> { return remote_send_page(url, headers, body) }
+        .Wasm -> { return remote_send_http(url, headers, body) }
+        .Freestanding -> { return remote_send_http(url, headers, body) }
+    }
+}
+
+priv remote_send_http: fn(url: String, headers: [http.Header], body: String) -[Net, Time]> RemoteReply Never! {
+    sent := http.__request("POST", url).__with_body(body)
+    loop header in headers -> sent = sent.__with_header(header.name, header.value)
+    response: sent.send() ?? return RemoteReply{status: 0, retry_after: None, text: "{err}"}
+    text: response.body.text(REMOTE_MAX_REPLY) ?? return RemoteReply{status: 0, retry_after: None, text: "{err}"}
+    RemoteReply{status: response.status, retry_after: response.header("retry-after"), text: text}
+}
+
+// `remote_send_once` in a page: the browser's fetch posts `body` to `url`
+// with `headers` (device request 18), and the page answers the reply's
+// status, its `retry-after` ("" for none) and its body's text, or why no
+// reply came. A reply over `REMOTE_MAX_REPLY` bytes is lost, as core.http
+// loses it.
+priv remote_send_page: fn(url: String, headers: [http.Header], body: String) -> RemoteReply Never! {
+    lines := [String]{url}
+    loop header in headers -> lines.push("{header.name}: {header.value}")
+    fields: app_page_answer(WEB_DEVICE_POST, "{lines.join("\n")}\n\n{body}")
+    if fields.len() < 3 {
+        why: if fields.len() == 1 -> fields[0] else -> "There is no page to send it from"
+        return RemoteReply{status: 0, retry_after: None, text: why}
+    }
+    status: Int.parse(fields[0]) ?? return RemoteReply{status: 0, retry_after: None, text: "The page answered no status"}
+    if fields[2].len() > REMOTE_MAX_REPLY {
+        return RemoteReply{status: 0, retry_after: None, text: "The reply is over {REMOTE_MAX_REPLY} bytes"}
+    }
+    RemoteReply{status: status, retry_after: if fields[1] == "" -> None else -> Val(fields[1]), text: fields[2]}
 }
 
 // ---- native sessions
@@ -5001,6 +5053,8 @@ priv WEB_DEVICE_KEPT: 15
 priv WEB_DEVICE_LIFECYCLE: 16
 
 priv WEB_DEVICE_MOMENT: 17
+
+priv WEB_DEVICE_POST: 18
 
 // The `size` bytes of the file a page holds under `number` for the app.
 priv app_page_whole: fn(number: Int, name: String, size: Int) -> [U8] IOError! {
