@@ -426,6 +426,12 @@ IRChecks: struct {
     // `debug_view` is built as a root next to the entry (ir_build_program),
     // so a debugger can call it on a stopped program's value.
     debug_views: Bool{false},
+    // The program's `#Export(c)` definitions of the runtime's provider hooks
+    // (JetFoundation RUNTIME_PROVIDER_HOOKS), a scheduler provider's run
+    // queue: each is built as a root beside the entry (ir_build_program) and
+    // is a global symbol of the program's object (IRModule.hooks), so the
+    // link binds the runtime's calls of the hook to it.
+    hooks: [IRLibraryExportRow]{[IRLibraryExportRow]{}},
 }
 
 // An argv-selectable job: the checked function `key` that the program word
@@ -1585,7 +1591,9 @@ ir_symbol_name: fn(function: FnBody) -> String Never! {
 // non-generic function of checks.modules is a root too, so the image carries
 // the package's unreached functions; with checks.debug_views each
 // non-generic DebugView implementation's `debug_view` is one, so a debugger
-// can call it. With `trace_sink` the build's steps are
+// can call it; each runtime provider hook the program defines
+// (checks.hooks) is one, which the object exports (IRModule.hooks). With
+// `trace_sink` the build's steps are
 // spans inside the host's `ir.build`: `ir.build.program` (the checked
 // program's tables), the steps of ir_build_waves_parted, and
 // `ir.build.core_cells`.
@@ -1618,6 +1626,10 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
             if kept != row && !taken -> kept_rows.push(kept)
         }
     }
+    loop hook in p.checks.hooks {
+        hook_row: ir_function_row(p, hook.key) ?? next
+        if hook_row != row && !kept_rows.contains(hook_row) -> kept_rows.push(hook_row)
+    }
     kept_keys := [String]{}
     loop kept in kept_rows {
         function: p.functions[kept]
@@ -1633,6 +1645,10 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
     loop key in kept_keys {
         at: name_rows_get_text(built.program.function_rows, key) ?? next
         built.program.kept.push(at)
+    }
+    loop hook in waves.program.checks.hooks.move() {
+        at: name_rows_get_text(built.program.function_rows, hook.key) ?? next
+        built.program.hooks.push(IRLibraryExport{function: at, symbol: hook.symbol, init_priority: -1, fini_priority: -1, guards: [Int]{}})
     }
     if trace_sink == .Val(sink) -> sink.begin("ir.build.core_cells", "", -1, -1)
     if waves.program.checks.core == .Val(image) -> ir_core_cells_bind(built.program, image)

@@ -1,0 +1,29 @@
+// The program's own run queue: a FIFO of the runtime's task handles, which
+// the runtime hands it one call at a time.
+RunQueue: struct {
+    held: [I64],
+    pushes: Int,
+}
+
+QUEUE: Shared{RunQueue{held: [I64]{}, pushes: 0}}
+
+#Export(c) jet_rt_scheduler_queue_push: fn(task: I64) {
+    QUEUE.held.push(task)
+    QUEUE.pushes += 1
+}
+
+#Export(c) jet_rt_scheduler_queue_pop: fn() -> I64 { QUEUE.held.remove(0) ?? I64{0} }
+
+double: fn(value: Int) -> Int { value * 2 }
+
+run: fn() {
+    total := 0
+    task.group work {
+        a: task double(1)
+        b: task double(2)
+        c: task double(3)
+        total = (a.join() ?? 0) + (b.join() ?? 0) + (c.join() ?? 0)
+    }
+    print("sum {total}")
+    print("the program's queue took every spawn: {QUEUE.pushes >= 3}")
+}
