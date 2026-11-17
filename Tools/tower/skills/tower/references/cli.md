@@ -91,6 +91,18 @@ meets only on durable evidence (a commit on `dev` or `master`, or a `--kind`
 with its evidence); a refused meet changes nothing. A refused close lists every
 failing row with its reason, one per line.
 
+`--proof "jet test Compiler --profile P --filter F"` on `--add` or `--edit n`
+sets the row's proof (`P` is `cases`, `ui`, `golden`, `core` or `packages`; any
+other `jet test …` command is kept as given); `--proof ""` clears it. A row text
+ending in ``Proof: `jet test …`.`` has that sentence moved into the field on load.
+`tower prove --card '#N'` or `--epoch E` prints which runs cover which open rows.
+With `--yes --jet PATH --tree DIR --commit SHA --by <agent>` it runs them (one run
+per corpus profile, with the filters combined into a `--cases` list) and meets
+each passing row with evidence `<commit>: <proof command> PASS n/n`. The commit
+must be on `dev` or `master`, and a git `--tree` must be a clean checkout of it;
+`--dry-run` runs and reports without meeting. `tower lint --proofs --tree DIR`
+lists proofs whose filter matches no file under `Tests` or `Examples`.
+
 Only the owner starts `tower serve`. Agents use the non-serve CLI. Use HTTP
 only when the owner has already started the server and the task explicitly
 requires it; never start a server or open a browser for the owner.

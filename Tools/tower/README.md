@@ -91,6 +91,10 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   `--kind decision|duplicate|obsolete` with its evidence. A refused close lists
   every failing row with its reason. `card criteria --move n --to '#M'` moves
   an open row to another card and links both rows (`movedTo`/`movedFrom`).
+  A row's `proof` (`--proof "jet test …"` on `--add`/`--edit`) names the test
+  run that settles it; `tower prove --card|--epoch` runs the proofs at a landed
+  commit and meets the passing rows, and `tower lint --proofs --tree DIR`
+  lists proofs whose filter matches no test file.
   Acceptance is owner-UI-only: generic ratify, batch clearance, CLI
   `--by owner`, and agent quotes cannot resolve `D-ACCEPT-*`; rejected
   attempts remain in the audit log.

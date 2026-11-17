@@ -126,6 +126,12 @@ export function compareEpochs(a, b) {
 
 export const sortEpochs = (epochs = []) => [...epochs].sort(compareEpochs);
 
+// The `jet test` command a criterion's proof runs (app/proof.mjs): a Compiler
+// profile with a filter, or the arguments of another `jet test` run.
+export const proofCommand = (proof) => proof.profile === 'cmd'
+  ? `jet test ${proof.args.join(' ')}`
+  : `jet test Compiler --profile ${proof.profile} --filter ${proof.filter}`;
+
 // The radar lists active epochs. A finished epoch still gets a section when
 // it holds frozen cards (always shown, like every card) or, with Show closed
 // on, done cards — a card is never left without its epoch section. Sections

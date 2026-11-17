@@ -29,7 +29,8 @@ import { loadConfig, publicConfig } from './config.mjs';
 import { CLOSURE_KINDS, SCRATCH_PATH_RE, createCommitResolver } from './durable.mjs';
 import { checkBoard, commitBoard } from './board-git.mjs';
 import { migrateRecommendationLosses, migrateRetiredPlanning, migrateReviewPasses } from './migrate.mjs';
-import { epochLabel, sortEpochs } from './ui/board-state.js';
+import { checkProof, migrateCriterionProof, proofInput } from './proof.mjs';
+import { epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
 import { machinePersonalInfo, personalInfoAdded, redactBoard, tallyValue } from './personal-info.mjs';
 import {
   HardeningInputError, hardeningFixtureIssue, hasHardeningPayload,
@@ -548,6 +549,7 @@ function validateStoredCriterion(item, index, source) {
     validateStoredNumber(item[key].card, `${label}.${key}.card`, { integer: true, min: 1 });
     validateStoredNumber(item[key].n, `${label}.${key}.n`, { integer: true, min: 1 });
   }
+  if (item.proof !== undefined) checkProof(item.proof, `${label}.proof`);
 }
 
 function validateStoredCriteria(criteria, source) {
@@ -884,6 +886,7 @@ export function normalize(s, historyCards = null, sync = true) {
     c.blockedBy ||= [];
     c.log ||= [];
     c.criteria ||= [];
+    for (const item of c.criteria) migrateCriterionProof(item);
     c.refs ||= [];
     c.tags ||= [];
     if (c.hardeningDedupAliases != null && !Array.isArray(c.hardeningDedupAliases)) c.hardeningDedupAliases = [];
@@ -1509,7 +1512,7 @@ function normalizeCriterion(it, i) {
   const status = source.status ?? 'open';
   validateStoredNumber(n, `criterion ${i + 1}.n`, { integer: true, min: 1 });
   if (!CRITERION_STATUSES.has(status)) fail('E_INVALID', `criterion ${i + 1}.status must be open, met, or verified`);
-  return {
+  const item = {
     n,
     text: String(source.text || '').trim(),
     status,
@@ -1518,6 +1521,8 @@ function normalizeCriterion(it, i) {
     evidence: source.evidence || '',
     at: source.at || now(),
   };
+  if (source.proof != null) item.proof = proofInput(source.proof);
+  return item;
 }
 
 function assertCriterionText(raw) {
@@ -2019,12 +2024,14 @@ export function updateCard(s, ref, patch, config) {
 
 // ---- mutations: exit criteria ----------------------------------------------
 
-export function addCriterion(s, ref, text, by) {
+export function addCriterion(s, ref, text, by, { proof } = {}) {
   const c = mustCard(s, ref);
   if (!text || !String(text).trim()) fail('E_INVALID', 'criterion needs text');
+  const checked = proof === undefined ? null : proofInput(proof);
   c.criteria ||= [];
   const n = nextCriterionNumber(c);
   const item = { n, text: String(text).trim(), status: 'open', metBy: null, verifiedBy: null, evidence: '', at: now() };
+  if (checked) item.proof = checked;
   c.criteria.push(item);
   invalidateCardMilestone(s, c);
   touchCard(c, by);
@@ -2066,15 +2073,25 @@ function rewordCriterion(item, text) {
   return { before, reopened };
 }
 
-export function editCriterion(s, ref, n, { text, reason, by } = {}) {
+// Text and proof change separately. A new proof says how the row is checked,
+// not what it asks for, so it keeps the row's status and needs no reason.
+export function editCriterion(s, ref, n, { text, proof, reason, by } = {}) {
   const c = mustCard(s, ref);
   const item = mustCriterion(c, n);
   if (!by) fail('E_INVALID', 'edit needs --by <agent>');
-  const why = needsReason('edit', reason);
-  const { before, reopened } = rewordCriterion(item, text);
+  if (text === undefined && proof === undefined) fail('E_INVALID', 'edit needs --text "…" or --proof "jet test …"');
+  const why = text === undefined ? (reason == null ? '' : String(reason).trim()) : needsReason('edit', reason);
+  const nextProof = proof === undefined ? undefined : proofInput(proof);
+  const { before, reopened } = text === undefined ? { before: item.text, reopened: false } : rewordCriterion(item, text);
+  if (nextProof === null) delete item.proof;
+  else if (nextProof) item.proof = nextProof;
   invalidateCardMilestone(s, c);
   touchCard(c, by);
-  logEvent(s, { by, action: 'card.criteria-edit', ref: c.id, note: `#${item.n}: ${why}${reopened ? ' (reopened)' : ''}; was: ${before.slice(0, 200)}` });
+  const changes = [
+    text === undefined ? null : `was: ${before.slice(0, 200)}`,
+    proof === undefined ? null : `proof: ${nextProof ? proofCommand(nextProof) : 'none'}`,
+  ].filter(Boolean).join('; ');
+  logEvent(s, { by, action: 'card.criteria-edit', ref: c.id, note: `#${item.n}: ${why ? `${why}${reopened ? ' (reopened)' : ''}; ` : ''}${changes}` });
   return { ...item, reopened, cardId: c.id, cardNum: c.num };
 }
 
@@ -2112,6 +2129,7 @@ export function moveCriterion(s, ref, n, { to, reason, by } = {}) {
     n: k, text: item.text, status: 'open', metBy: null, verifiedBy: null, evidence: '', at: now(),
     movedFrom: { card: c.num, n: item.n },
   };
+  if (item.proof) moved.proof = checkProof(item.proof);
   target.criteria.push(moved);
   item.status = 'met';
   item.metBy = by;

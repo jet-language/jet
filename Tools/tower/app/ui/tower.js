@@ -1,6 +1,6 @@
 import {
   boardEpochs, cardMatches, cardNumberQuery, sortCards, ownerVerifyQueue, openAcceptanceBallot, ownerDecisions,
-  evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel,
+  evidenceMedia, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, proofCommand,
 } from './board-state.js';
 import { renderMarkdown, splitBlocks } from './markdown.js';
 import { buildDoneMessageQueue, renderDoneMessageQueue } from './done-messages.js';
@@ -1510,6 +1510,7 @@ function renderDetail(c) {
           <span style="margin-left:auto"><button class="btn btn--ghost btn--sm" data-crit-edit>Edit</button>
           <button class="btn btn--ghost btn--sm" data-crit-remove>Remove</button></span></div>
         <div class="critrow__text">${esc(it.text)}</div>
+        ${it.proof ? `<div class="critrow__proof"><code>${esc(proofCommand(it.proof))}</code></div>` : ''}
         ${it.movedFrom ? `<div class="critrow__moved">← moved from <button class="linkbtn" data-card-num="${esc(it.movedFrom.card)}">#${esc(it.movedFrom.card)} c${esc(it.movedFrom.n)}</button></div>` : ''}
         ${it.movedTo ? `<div class="critrow__moved">→ moved to <button class="linkbtn" data-card-num="${esc(it.movedTo.card)}">#${esc(it.movedTo.card)} c${esc(it.movedTo.n)}</button></div>` : ''}
         ${it.evidence && !it.movedTo ? `<div class="critrow__ev">${esc(it.evidence)}</div>` : ''}

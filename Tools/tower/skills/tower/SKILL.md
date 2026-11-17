@@ -71,6 +71,10 @@ approved contract is not a ballot.
   no code to land declares `--kind decision|duplicate|obsolete` and names the
   ratified decision, the surviving card, or the reason. A row that belongs on
   another card moves with `--move n --to '#M'`, which keeps both rows linked.
+- A row's proof is a field, not a sentence: `--proof "jet test Compiler
+  --profile cases --filter F"` on `--add` or `--edit n`. `tower prove --card
+  '#N'` prints the plan; add `--yes --jet PATH --tree DIR --commit SHA --by X`
+  to run it at a landed commit and meet the passing rows.
 - Board text never names this machine's home, user, host, email or mounts
   (#6564 c5). Write `~`, `$JET_SCRATCH_ROOT`, `user` or `devhost` instead; a
   write that adds one is refused (`E_PERSONAL_INFO`) with the text to use.

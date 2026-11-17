@@ -53,6 +53,9 @@ tower docs list|show|add|update|archive|delete   # durable Docs/*.md + scratchpa
                               # (archive → Docs/archive/, hidden from Docs UI)
 tower lint [--json]          # durability sweeper over the live board; exit 1
                               # on any finding, 0 clean
+tower lint --proofs --tree DIR  # proofs whose filter matches no Tests/Examples file
+tower prove --card '#N'|--epoch E [--yes --jet PATH --tree DIR --commit SHA --by X] [--dry-run]
+                              # run row proofs; meet the passing rows (see Proofs)
 jet Tools/tower/Board.jet lint --docs [--docs-root DIR] [--json]
                               # Docs/Spec/** reference scan, read-only; exit 1
                               # on any finding, 0 clean
@@ -157,7 +160,7 @@ uses `open` → `met` → `verified`.
 Add and progress it:
 
 ```
-tower card criteria '#12' --add "matrix vs full spec, per feature" --by planner
+tower card criteria '#12' --add "matrix vs full spec, per feature" --proof "jet test Compiler --profile cases --filter matrix/" --by planner
 tower card criteria '#12' --meet 1 --evidence "landed 3f2a9c1e: matrix 9/9" --by orchestrator
 tower card criteria '#12' --verify 1 --evidence "milestone review of 3f2a9c1e confirmed it" --by reviewer
 tower card criteria '#12' --meet 2 --kind decision --evidence "D-CACHE1 ratified A: no code change" --by orchestrator
@@ -236,6 +239,39 @@ interaction session and same-origin provenance. The server binds each click to
 that session and a short-lived, single-use challenge for that exact ballot and
 outcome. CLI ratify, `clearance`, batch clearance, `--quote`, and caller-supplied
 `by: owner` are rejected and audited.
+
+### Proofs
+
+A row's `proof` names the `jet test` run that settles it. `--proof "jet test
+Compiler --profile P --filter F"` on `--add` or `--edit n` stores
+`{profile, filter}` for the Compiler profiles `cases`, `ui`, `golden`, `core`
+and `packages`; any other `jet test …` command is stored as `{profile: 'cmd',
+args}`. `--proof ""` clears it, and a proof change keeps the row's status. A row
+whose text ends in ``Proof: `jet test …`.`` has that sentence moved into the
+field when the board loads.
+
+```
+tower prove --card '#12'                     # the plan: runs and the rows each covers
+tower prove --epoch e18 --yes --jet PATH --tree DIR --commit SHA --by orchestrator
+tower prove --card '#12' --yes --dry-run --jet PATH --tree DIR --commit SHA
+tower lint --proofs --tree DIR               # proofs whose filter matches no test file
+```
+
+`tower prove` takes the open rows with a proof on the card, or on every unfinished
+card of the epoch. Without `--yes` it prints the plan and runs nothing. With
+`--yes`, it runs `jet test` once per corpus profile (`cases`, `ui`, `golden`):
+it lists the profile's cases, keeps the ids that contain any row's filter, and runs
+them all in one `--cases FILE` run. `core`, `packages` and `cmd` rows run once per
+distinct command. A row passes when every result row for its filter passes; a
+filter that selects no case fails. Each passing row is met with evidence
+`<commit>: <proof command> PASS n/n`, all in one board write; `--dry-run` runs and
+reports but meets nothing. `--commit` must be on `dev` or `master`, and `--tree`,
+when it is a git work tree, must be a clean checkout of that commit. The exit
+code is 1 when any row failed.
+
+`tower lint --proofs --tree DIR` lists every open row on an unfinished card
+whose proof filter is not a case-insensitive substring of any file path under
+`DIR/Tests` or `DIR/Examples` (rule `proof-unmatched`); exit 1 on a finding.
 
 ### Milestone review
 
@@ -498,7 +534,7 @@ GET  /api/gauntlet/standings        the one run shown: newest full or merged
                                      results file, else the planned grid
 GET  /api/messages?card=&open=0|1   durable card messages; open=1 filters
 POST /api/card/add|update|claim|release|delete   (release: {handoff})
-POST /api/card/criteria-add|criteria-edit|criteria-remove|criteria-move|criteria-meet|criteria-verify|criteria-reopen   (move: {n, to, reason})
+POST /api/card/criteria-add|criteria-edit|criteria-remove|criteria-move|criteria-meet|criteria-verify|criteria-reopen   (add/edit: {proof}; move: {n, to, reason})
 POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
 POST /api/clearance {decisionId,outcome,comment,quote}  (generic ballots only; quote = on-behalf-of)
 POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, same-origin session-bound, short TTL)
