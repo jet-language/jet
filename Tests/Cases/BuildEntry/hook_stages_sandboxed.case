@@ -5,7 +5,7 @@
 # with the registered E3410 of that refusal, and the tool keeps what it had.
 # The step a build hook returns runs in the build sandbox: its Jet link reads
 # only paths inside the project (E3506), and its command gets only the
-# effects the build grants (E3504).
+# effects the build grants (E3503).
 fixture: HookStagesSandboxed.fixture
 requires: tool:sh
 requires: tool:bwrap
@@ -33,7 +33,8 @@ file: link/.jet/build/app absent
 step: jet build --link=tools.dial --allow=Exec,FS app.jet
 cwd: link
 exit: nonzero
-stderr: ~ "jet-lang.dev/e/E3504" # the step asks for Net, which the build doesn't grant
+stderr: ~ "Build action `relink` needs `Net`, which this build does not grant" # the step asks for Net
+stderr: ~ "jet-lang.dev/e/E3503" # which the build doesn't grant
 file: link/.jet/build/app absent
 step: jet build --post-link=tools.stamp --allow=Exec,FS app.jet
 cwd: link

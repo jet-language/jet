@@ -5,7 +5,10 @@ use {
 
 // A post-link step that signs the executable: its command copies the linked
 // file to the path it writes next and appends a signature line naming the
-// output, past the end of the image, where the loader never reads.
+// output, on a line of its own past the end of the image, where the loader
+// never reads. The build sandbox shows a step none of the host's programs,
+// so the `cat` and `chmod` it runs are the package's own, inputs as the
+// linked file is.
 #On(build.before_write) sign: fn(artifact: compiler.Artifact) -> build.BuildAction {
-    build.action("sign", run: ["sh", "-c", "cat \"$0\" > \"$1\" && printf 'JETSIG %s\\n' \"$2\" >> \"$1\" && chmod +x \"$1\"", artifact.path, artifact.next, artifact.output], inputs: [artifact.path], outputs: [artifact.next], allow: [.Exec, .FS])
+    build.action("sign", run: ["sh", "-c", "./bin/cat \"$0\" > \"$1\" && printf '\\nJETSIG %s\\n' \"$2\" >> \"$1\" && ./bin/chmod +x \"$1\"", artifact.path, artifact.next, artifact.output], inputs: [artifact.path, "bin/cat", "bin/chmod"], outputs: [artifact.next], allow: [.Exec, .FS])
 }
