@@ -1,0 +1,22 @@
+// A lambda bound to a local reads its own copy of each name it only reads,
+// made when the lambda is made. A call before the name changes, and a lambda
+// made after the change, read the current value; a name the lambda writes it
+// borrows, so a change made between its calls is seen.
+run: fn() {
+    v := [1]
+    early: fn() -> Int { v.len() }
+    print(early())
+    v.push(2)
+    late: fn() -> Int { v.len() }
+    print(late())
+    count := 0
+    seen := 0
+    step: fn() -> Int {
+        count += 1
+        count
+    }
+    seen = step()
+    count += 10
+    seen = step()
+    print(seen)
+}

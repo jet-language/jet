@@ -39,8 +39,9 @@ Box: struct {
 }
 
 // `next` writes `count`, so it borrows it and every call changes it. `read`
-// was built while `boxed.value` was 11 and still answers 11 after the owner
-// writes 22 through its own `:=` binding.
+// only reads `boxed`, so it copies it when it is built, while `boxed.value`
+// is 11: a call after the owner writes 22 would read that old copy, so the
+// checker refuses it (E0204) and `read` is called before the write.
 closure_capture_snapshot_lesson: fn() {
     count := 10
     next: fn() -> Int {
@@ -53,8 +54,8 @@ closure_capture_snapshot_lesson: fn() {
 
     boxed := Box{value: 11}
     read: fn() -> Int { boxed.value }
-    boxed.value = 22
     print(read())
+    boxed.value = 22
     print(boxed.value)
 
     x := 2
