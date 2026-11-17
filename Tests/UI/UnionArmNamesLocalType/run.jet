@@ -1,0 +1,20 @@
+// E0305: a bare `.Point` arm names the type `Point` names in type position.
+// Here that is the module's own `Point`, which `Int | geo.Point` doesn't
+// hold, so the arm names no member; the fix names geo's member by its arm.
+use geo
+
+Point: struct {
+    z: Int,
+}
+
+show: fn(item: Int | geo.Point) {
+    if item == {
+        .Int(n) -> print("int {n}")
+        .Point(_) -> print("a point")
+    }
+}
+
+run: fn() {
+    show(geo.Point{x: 7})
+    print(Point{z: 1})
+}

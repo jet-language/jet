@@ -250,6 +250,17 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names]
     )
 }
 
+// An arm on a later line that names a type through its module starts a new
+// arm, not a chain on the arm above.
+#Test("module_arms_on_later_lines_start_new_arms") {
+    source: "\nrun: fn(item: Point | geo.Point) {{\n    if item == {{\n        .Point(p) -> print(p)\n        .geo.Point(q) -> print(q)\n    }}\n}}\n"
+    result: parser_test_result(source)
+    assert(result.diagnostics.is_empty(), "a module arm on a later line should start an arm: {result.diagnostics:Debug}")
+    result.program.items[0] == .Func(function) ?? panic("function")
+    function.body[0] == .Switch(_, arms, _, _) ?? panic("arm table")
+    assert(arms.len() == 2, "{arms.len()} arms")
+}
+
 // #6281: the retired result-only `value ? ok -> … ! err -> …` spelling is
 // an ordinary parse error, with no teaching of its own.
 #Test("retired_result_handler_spelling_does_not_parse") {

@@ -20,6 +20,7 @@ use jet_foundation.[
     StrMatchPart,
     StructPatField,
     SymbolID,
+    SymbolKind,
     TBinaryPatternPart,
     TPatternBindingFact,
     TPatternPosition,
@@ -39,7 +40,10 @@ use jet_foundation.[
     type_union_member_payload,
     type_union_member_tag,
     type_union_member_tag_in,
+    type_unqualified_name,
+    type_unqualified_nominals,
     expr_span,
+    module_is_core,
 ]
 
 SemaCheckedPattern: struct {
@@ -64,6 +68,9 @@ SemaPatternPayload: struct {
     known: Bool,
     group: Bool,
     range_forbidden: Bool,
+    // The tag of the union member a union arm names, which the checked tree
+    // carries in place of the arm's written name.
+    tag: String?,
 }
 
 SemaPatternValidation: struct {
@@ -145,23 +152,135 @@ sema_pattern_union_tag: fn(members: [Type], ty: Type) -> String Never! {
     type_union_member_tag_in(members, sema_pattern_unwrap_tags(ty))
 }
 
-// The index of the member of union `members` (`subject` unwrapped) an arm
-// names as `variant`: the member whose tag it is. A short name two members
-// share (`.Point` over `geo.Point | map.Point`) names neither; it and a name
-// that is no member are E0305.
-sema_pattern_union_member: fn(subject: Type, members: [Type], variant: String, span: Span, diagnostics: &[Diagnostic]) -> Int? {
-    loop (index, member) in members {
-        if sema_pattern_union_tag(members, member) == variant -> return Val(index)
+// What a union arm's name names among the union's members: the members it
+// names (one, or several when members of one type or members whose types
+// share the arm's leaf name match), or else a type in scope that is no
+// member, by its canonical name. Neither means the name names nothing.
+SemaUnionArm: struct {
+    indexes: [Int],
+    outside: String?,
+}
+
+// The canonical name of the source type `variant` names in type position in
+// the caller's module (`Point`, `geo.Point`), when it names one.
+sema_pattern_arm_type_name: fn(graph: SemaRegistrationGraph, caller: Int, variant: String) -> String? {
+    resolved: sema_type_graph_lookup_symbol_at(graph, caller, variant) ?? return None
+    if sema_resolved_kind(graph, resolved) != SymbolKind.Type || module_is_core(resolved.source_module_identity) {
+        return None
     }
-    cases := [String]{}
-    loop member in members {
-        plain: sema_pattern_unwrap_tags(member)
-        if type_union_member_tag(plain) == variant {
-            cases.push("{variant}{cases.len() + 1}({type_name(plain)})")
+    if sema_type_graph_resolved_nominal_row(graph, resolved) == None -> return None
+    if sema_type_graph_resolve_named(graph, variant, caller) == .Named(name) -> return Val(name)
+    None
+}
+
+// The member of union `members` an arm names as `variant`. A named case is
+// named by its case name. Otherwise the arm names the type its name names in
+// type position: `.Point` is the module's own `Point` wherever one is in
+// scope, and `.geo.Point` is geo's. Only a name that names no type in scope
+// falls back to the member whose type has that leaf name, so `.Point` over
+// `Int | geo.Point` names `geo.Point` when no `Point` is in scope. A builtin
+// or compound member is named by its tag (`.Int`, `.M__String_`).
+sema_pattern_union_arm: fn(members: [Type], variant: String, env: SemaScopeEnvironment, program: SemaProgramTables) -> SemaUnionArm {
+    loop (index, member) in members {
+        if sema_pattern_unwrap_tags(member) == .Case(name, _) {
+            if name == variant -> return SemaUnionArm{indexes: [Int]{index}, outside: None}
         }
     }
-    if cases.len() > 1 {
-        diagnostics.push(sema_error("E0305", span, "pattern `{variant}` names more than one member of `{type_name(subject)}`", "the union holds {cases.len()} types named `{variant}`, and an arm names a member by its type's name alone", "make each a named case of the union, as in `{cases.join(" | ")}`, and match the case: `.{variant}1(p) -> …`"))
+    if program.registration_graph == .Val(graph) {
+        if sema_pattern_arm_type_name(graph, sema_scope_caller_row(env, graph), variant) == .Val(named) {
+            matches := [Int]{}
+            loop (index, member) in members {
+                if sema_pattern_base_name(sema_pattern_unwrap_tags(member)) == .Val(base) {
+                    if base == named -> matches.push(index)
+                }
+            }
+            if matches.len() > 0 -> return SemaUnionArm{indexes: matches, outside: None}
+            return SemaUnionArm{indexes: [Int]{}, outside: Val(named)}
+        }
+    }
+    leaves := [Int]{}
+    loop (index, member) in members {
+        if sema_pattern_base_name(sema_pattern_unwrap_tags(member)) == .Val(base) {
+            if type_unqualified_name(base) == variant -> leaves.push(index)
+        }
+    }
+    if leaves.len() > 0 -> return SemaUnionArm{indexes: leaves, outside: None}
+    loop (index, member) in members {
+        if sema_pattern_union_tag(members, member) == variant {
+            return SemaUnionArm{indexes: [Int]{index}, outside: None}
+        }
+    }
+    SemaUnionArm{indexes: [Int]{}, outside: None}
+}
+
+// The arm that names member `index` of union `members` from the caller's
+// module: its bare name when that names it (`.Point`, `.Int`), else the name
+// type position gives its type, through the module the caller imports it by
+// (`.geo.Point`), with a generic member's arguments (`.boxes.Box<Int>`). None
+// when no name in the caller's scope reaches it.
+sema_pattern_member_arm: fn(members: [Type], index: Int, env: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
+    member: sema_pattern_unwrap_tags(members[index])
+    if member == .Case(name, _) -> return Val(".{name}")
+    base: sema_pattern_base_name(member) ?? return Val(".{sema_pattern_union_tag(members, member)}")
+    leaf: type_unqualified_name(base)
+    found: sema_pattern_union_arm(members, leaf, env, program).indexes
+    if found.len() == 1 && found[0] == index -> return Val(".{leaf}")
+    graph: program.registration_graph ?? return None
+    caller: sema_scope_caller_index(env, graph) ?? return None
+    arguments := ""
+    if member == .Apply(_, args) {
+        shown: loop arg in args -> type_name(type_unqualified_nominals(arg))
+        arguments = "<{shown.join(", ")}>"
+    }
+    if sema_pattern_arm_type_name(graph, caller, leaf) == .Val(named) {
+        if named == base -> return Val(".{leaf}{arguments}")
+    }
+    loop import in graph.modules[caller].imports {
+        alias: import.declaration.alias
+        if alias == "" -> next
+        if sema_pattern_arm_type_name(graph, caller, "{alias}.{leaf}") == .Val(named) {
+            if named == base -> return Val(".{alias}.{leaf}{arguments}")
+        }
+    }
+    None
+}
+
+// The arms that name members `indexes`, joined for a fix, as `.geo.Point`
+// or `.kit.Box`; members with no arm are left out.
+sema_pattern_member_arms_text: fn(members: [Type], indexes: [Int], env: SemaScopeEnvironment, program: SemaProgramTables) -> String {
+    arms := [String]{}
+    loop index in indexes {
+        if sema_pattern_member_arm(members, index, env, program) == .Val(arm) {
+            arms.push("`{arm}`")
+        }
+    }
+    arms.join(" or ")
+}
+
+// The index of the member of union `members` (`subject` unwrapped) an arm
+// names as `variant` (sema_pattern_union_arm). A name that names several
+// members, a type in scope that is no member, and a name that is no member
+// are E0305, each fix naming the arms that name the members.
+sema_pattern_union_member: fn(subject: Type, members: [Type], variant: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) -> Int? {
+    arm: sema_pattern_union_arm(members, variant, env, program)
+    if arm.indexes.len() == 1 -> return Val(arm.indexes[0])
+    if arm.indexes.len() > 1 {
+        arms: sema_pattern_member_arms_text(members, arm.indexes, env, program)
+        fix: if arms == "" -> "name the member through the module that declares its type" else -> "name the member by its arm: {arms}"
+        diagnostics.push(sema_error("E0305", span, "pattern `{variant}` names more than one member of `{type_name(subject)}`", "the union holds {arm.indexes.len()} members whose type is named `{variant}`, and an arm names one member", fix))
+        return None
+    }
+    if arm.outside == .Val(name) {
+        leaf: type_unqualified_name(name)
+        same_leaf := [Int]{}
+        loop (index, member) in members {
+            if sema_pattern_base_name(sema_pattern_unwrap_tags(member)) == .Val(base) {
+                if type_unqualified_name(base) == leaf -> same_leaf.push(index)
+            }
+        }
+        arms: sema_pattern_member_arms_text(members, same_leaf, env, program)
+        fix: if arms == "" -> "use one of the subject union member types" else -> "name the member by its arm: {arms}"
+        diagnostics.push(sema_error("E0305", span, "pattern `{variant}` names `{type_name(Type.Named{name: name})}`, which isn't a member of `{type_name(subject)}`", "an arm names the type its name names in type position", fix))
         return None
     }
     diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't belong to `{type_name(subject)}`", "union pattern arms name one member type of the subject union", "use one of the subject union member types"))
@@ -191,7 +310,7 @@ sema_pattern_dyn_payload: fn(variant: String) -> [Type]? {
 // does not load (a bare `Key`). The variant's payload comes from the Core
 // enum rows.
 sema_pattern_core_enum_payload: fn(owner_name: String, variant: String, span: Span, diagnostics: &[Diagnostic]) -> SemaPatternPayload {
-    result := SemaPatternPayload{types: [Type]{}, owner: None, payload: None, known: false, group: false, range_forbidden: false}
+    result := SemaPatternPayload{types: [Type]{}, owner: None, payload: None, known: false, group: false, range_forbidden: false, tag: None}
     if core_enum_payload_variants(owner_name) == None && core_enum_cases(owner_name) == None {
         diagnostics.push(sema_error("E0305", span, "pattern `{variant}` doesn't match `{owner_name}`", "pattern tests must name a variant on the value's enum type", "check the variant spelling"))
         return result
@@ -207,16 +326,15 @@ sema_pattern_core_enum_payload: fn(owner_name: String, variant: String, span: Sp
 }
 
 // The one union member whose enum declares the case
-// `variant`, when `variant` is not itself a member tag. `None` for an
+// `variant`, when `variant` names no member itself. `None` for an
 // unknown or ambiguous case, which reaches the ordinary E0305 member check.
 sema_pattern_flat_union_owner: fn(carrier: Type, variant: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> Type? {
     members: if carrier == {
         .Union(values) -> values
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> [Type]{}
     }
-    loop member in members {
-        if sema_pattern_union_tag(members, member) == variant -> return None
-    }
+    if members.len() == 0 -> return None
+    if sema_pattern_union_arm(members, variant, env, program).indexes.len() > 0 -> return None
     owners := [Type]{}
     loop member in members {
         probe := [Diagnostic]{}
@@ -237,11 +355,12 @@ sema_pattern_flat_union_owner_name: fn(carrier: Type, variant: String, env: Sema
 
 sema_pattern_payload: fn(subject_ty: Type, variant: String, env: SemaScopeEnvironment, program: SemaProgramTables, span: Span, diagnostics: &[Diagnostic]) -> SemaPatternPayload {
     normalized: sema_pattern_unwrap_tags(subject_ty)
-    result := SemaPatternPayload{types: [Type]{}, owner: None, payload: None, known: false, group: false, range_forbidden: false}
+    result := SemaPatternPayload{types: [Type]{}, owner: None, payload: None, known: false, group: false, range_forbidden: false, tag: None}
     if normalized == {
         .Union(members) -> {
-            index: sema_pattern_union_member(normalized, members, variant, span, diagnostics) ?? return result
+            index: sema_pattern_union_member(normalized, members, variant, env, program, span, diagnostics) ?? return result
             result.types.push(type_union_member_payload(members[index]))
+            result.tag = Val(sema_pattern_union_tag(members, members[index]))
             result.known = true
             return result
         }
@@ -702,6 +821,8 @@ sema_pattern_validate_variant: fn(subject_ty: Type, variant: String, written_slo
     if !payload.known {
         return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
     }
+    // A union arm's tree names the member's tag, whatever name the arm wrote.
+    shape_variant: payload.tag ?? variant
     slots := written_slots
     // A union arm may name its member without binding it
     // (`.Int -> …`); it tests the member exactly as `.Int(_)` does.
@@ -717,13 +838,13 @@ sema_pattern_validate_variant: fn(subject_ty: Type, variant: String, written_slo
                     }
                     .Unit | .Single(_, _) -> {
                         diagnostics.push(sema_pattern_unnamed_payload_error(variant, written_slots, payload.types.len(), span))
-                        return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
+                        return SemaPatternValidation{shape: TPatternShape.Variant{variant: shape_variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
                     }
                 }
             }
             .None -> {
                 diagnostics.push(sema_pattern_unnamed_payload_error(variant, written_slots, payload.types.len(), span))
-                return SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
+                return SemaPatternValidation{shape: TPatternShape.Variant{variant: shape_variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: false}
             }
         }
     }
@@ -740,7 +861,7 @@ sema_pattern_validate_variant: fn(subject_ty: Type, variant: String, written_slo
             }
         }
     }
-    SemaPatternValidation{shape: TPatternShape.Variant{variant: variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: complete}
+    SemaPatternValidation{shape: TPatternShape.Variant{variant: shape_variant, bindings: tree_bindings, leading_dot: leading_dot, span: span}, enum_type: payload.owner, bindings: facts, complete: complete}
 }
 
 sema_pattern_invalid_value: fn(span: Span, context: &SemaCheckContext) -> TExpr Never! {

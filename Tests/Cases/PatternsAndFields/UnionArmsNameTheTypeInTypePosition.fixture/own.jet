@@ -1,0 +1,22 @@
+// The module's own `Point` and geo2's are both members, and each has an
+// arm: `.Point` names the type `Point` names here, and `.geo2.Point` names
+// geo2's through its module.
+use geo2
+
+Point: struct {
+    z: Int,
+}
+
+describe: fn(item: Point | geo2.Point | Int) -> String {
+    if item == {
+        .Point(p) -> "own point z {p.z}"
+        .geo2.Point(q) -> "geo2 point {q.x}, {q.y}"
+        .Int(n) -> "int {n}"
+    }
+}
+
+run: fn() {
+    print(describe(Point{z: 1}))
+    print(describe(geo2.Point{x: 2, y: 3}))
+    print(describe(4))
+}

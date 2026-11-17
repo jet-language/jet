@@ -1,0 +1,18 @@
+// E0641: the qualified arm `.geo2.Point(q)` names geo2's member, and the
+// `else` left stands for the module's own `Point`, which `.Point` names.
+use geo2
+
+Point: struct {
+    z: Int,
+}
+
+zed: fn(item: Point | geo2.Point) -> Int {
+    if item == {
+        .geo2.Point(q) -> q.x
+        else -> 0
+    }
+}
+
+run: fn() {
+    print(zed(Point{z: 5}))
+}

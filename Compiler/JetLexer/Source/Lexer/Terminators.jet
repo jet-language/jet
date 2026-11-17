@@ -387,8 +387,8 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
         cursor = skip_comment_tokens(facts, cursor)
         return arrow(kind_at(facts, cursor))
     }
-    if !leading_dot_variant(facts, cursor) -> return false
-    cursor += 1
+    cursor = arm_name_end(facts, cursor)
+    if cursor < 0 -> return false
     // Each structural or-pattern alternative has the same
     // leading-dot variant/path/payload shape. Keep consuming alternatives
     // before looking for a guard or arrow; otherwise a following arm's
@@ -424,9 +424,8 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
         cursor += 1
         cursor = skip_comment_tokens(facts, cursor)
         if kind_at(facts, cursor) != K_DOT -> return false
-        cursor = skip_comment_tokens(facts, cursor + 1)
-        if !leading_dot_variant(facts, cursor) -> return false
-        cursor += 1
+        cursor = arm_name_end(facts, skip_comment_tokens(facts, cursor + 1))
+        if cursor < 0 -> return false
     }
     cursor = skip_comment_tokens(facts, cursor)
     // A braceless arm may add a Boolean guard after its complete
@@ -472,6 +471,30 @@ dispatch_arm_starts_at: fn(source: [U8], facts: [Int], index: Int) -> Bool Never
         return false
     }
     return arrow(kind_at(facts, cursor))
+}
+
+// The end of an arm's name after its leading `.`: the modules that lead to a
+// type (`geo.`), the variant or type name, and the type arguments that name
+// one instance (`Box<Int, String>`); -1 when no arm name starts at `index`.
+arm_name_end: fn(facts: [Int], index: Int) -> Int Never! {
+    cursor := index
+    loop kind_at(facts, cursor) == K_IDENT && facts[cursor * 4 + 3] != 1 && kind_at(facts, cursor + 1) == K_DOT {
+        cursor += 2
+    }
+    if !leading_dot_variant(facts, cursor) -> return -1
+    cursor += 1
+    if kind_at(facts, cursor) != K_LT -> return cursor
+    depth := 0
+    loop cursor * 4 < facts.len() {
+        kind: kind_at(facts, cursor)
+        if kind == K_EOF || kind == K_LBRACE || kind == K_RBRACE || arrow(kind) -> return -1
+        if kind == K_LT -> depth += 1
+        if kind == K_GT -> depth -= 1
+        if kind == K_SHR -> depth -= 2
+        if depth <= 0 -> return cursor + 1
+        cursor += 1
+    }
+    -1
 }
 
 // `&name` / `&&name` / `name.move()` written together at line start marks

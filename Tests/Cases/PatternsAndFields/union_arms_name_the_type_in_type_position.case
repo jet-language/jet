@@ -1,0 +1,32 @@
+# A bare arm over a union names the type its name names in type position
+# (D-PRIM-ANY1=C). own.jet: the module's own `Point` beside geo2's, each with
+# its arm (`.Point`, `.geo2.Point`). fallback.jet: `Point` names geo's through
+# the one module that has it. per_union.jet: `Point` names no type, so each
+# union's arm names that union's one member with the leaf. generic.jet and
+# local_generic.jet: the bare `.Box` names a generic's one instance, imported
+# or the module's own.
+fixture: UnionArmsNameTheTypeInTypePosition.fixture
+step own: jet run own.jet
+exit: 0
+stdout: = "own point z 1\ngeo2 point 2, 3\nint 4\n"
+step own_o0: jet run -O0 own.jet
+exit: 0
+stdout: == own
+step own_o2: jet run -O2 own.jet
+exit: 0
+stdout: == own
+step fallback: jet run fallback.jet
+exit: 0
+stdout: = "7\ngeo.Point\n2\n"
+step per_union: jet run per_union.jet
+exit: 0
+stdout: = "first arm binds Point { x: 1 }\nsecond arm binds Point { x: 2, y: 3 }\n"
+step generic: jet run generic.jet
+exit: 0
+stdout: = "box 5\nint 2\n"
+step generic_o2: jet run -O2 generic.jet
+exit: 0
+stdout: == generic
+step local_generic: jet run local_generic.jet
+exit: 0
+stdout: = "box 6\nint 3\n"
