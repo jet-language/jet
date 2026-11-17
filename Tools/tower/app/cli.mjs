@@ -23,7 +23,7 @@ import { applyRepairManifest } from './repair.mjs';
 import { machinePersonalInfo } from './personal-info.mjs';
 import { readGauntletStandings } from './gauntlet-standings.mjs';
 import { gauntletStandingsText, projectGauntletStandings } from './ui/gauntlet.js';
-import { epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
+import { closestCards, epochChain, epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
 
 // ---- arg parsing (zero-dep) ------------------------------------------------
 
@@ -91,7 +91,7 @@ const COMMAND_FLAGS = {
     claim: by(),
     release: by('handoff'),
     delete: by(),
-    criteria: by('add', 'edit', 'text', 'proof', 'remove', 'move', 'to', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
+    criteria: by('add', 'edit', 'text', 'proof', 'blockedBy', 'unblock', 'remove', 'move', 'to', 'meet', 'verify', 'kind', 'reopen', 'reason', 'evidence', 'list'),
     log: by('text'),
   }},
   decision: { verbs: {
@@ -141,6 +141,8 @@ const COMMAND_FLAGS = {
     delete: by(),
   }},
   next: { flags: ['agent', 'epoch', 'track', 'limit', 'burndown', 'parallel', 'readyAcrossEpochs'] },
+  chain: { flags: [] },
+  closest: { flags: ['epoch', 'limit'] },
   brief: { flags: ['agent', 'noClaim', 'color'] },
   lint: { flags: ['proofs', 'tree'] },
   prove: { flags: by('card', 'epoch', 'jet', 'tree', 'commit', 'dryRun', 'yes') },
@@ -193,7 +195,7 @@ function checkFlags(cmd, verb, flags) {
 }
 
 const FLAG_VALUE = {
-  add: '"text"', edit: 'n', remove: 'n', move: 'n', to: 'REF', meet: 'n', verify: 'n', reopen: 'n', reason: '"…"', evidence: '"…"',
+  add: '"text"', edit: 'n', remove: 'n', move: 'n', to: 'REF', meet: 'n', verify: 'n', reopen: 'n', unblock: 'n', reason: '"…"', evidence: '"…"',
   proof: '"jet test …"', proofs: null, jet: 'PATH', tree: 'DIR', yes: null,
   by: 'X', file: 'FILE', stdin: null, color: '=auto|always|never',
   sections: 'FILE',
@@ -279,9 +281,12 @@ const cardLine = (c, { epoch } = {}) =>
   `#${String(c.num).padEnd(4)}${epoch ? ` ${epoch.padEnd(4)} ` : ' '}${(c.priority || '').padEnd(3)} ${displayLane(c.lane.lane).padEnd(9)} ${c.title.slice(0, epoch ? 52 : 60)}`;
 // The short `E18` tag for an epoch id on this board; `—` when there is none.
 const epochTag = (s, id) => id ? epochLabel(s.epochs.find(e => e.id === id) || { id }, { name: false }) : '—';
-// One criterion row of `card criteria --list`, with its proof and move links.
+// One criterion row of `card criteria --list`, with its proof, blocker and
+// move links.
 const criterionLine = (it) => `#${it.n} [${it.status}] ${it.text}`
   + (it.proof ? `  proof: ${proofCommand(it.proof)}` : '')
+  + (it.blockedBy ? `  blocked by ${it.blockedBy}` : '')
+  + (it.unblockedFrom ? `  unblocked: ${it.unblockedFrom} resolved` : '')
   + (it.movedFrom ? `  ← from #${it.movedFrom.card} c${it.movedFrom.n}` : '')
   + (it.movedTo ? `  → moved to #${it.movedTo.card} c${it.movedTo.n}` : '')
   + (it.metBy ? `  met:${it.metBy}` : '') + (it.verifiedBy ? `  verified:${it.verifiedBy}` : '')
@@ -567,10 +572,15 @@ function cmdCard(store, { pos, flags }) {
         return out(flags, 'criterion #' + result.n + ' reopened on card #' + result.cardNum, result);
       }
       if (flags.proof === true) throw new TowerError('E_USAGE', '--proof takes a jet test command, or "" to clear it');
+      if (flags.blockedBy === true) throw new TowerError('E_USAGE', "--blocked-by takes '#M', '#M cK' or a decision id");
+      if (flags.unblock !== undefined) {
+        const { result } = store.mutate((s) => db.unblockCriterion(s, ref, flags.unblock, { reason: flags.reason, by }));
+        return out(flags, `criterion #${result.n} on card #${result.cardNum} no longer waits on ${result.unblockedFrom}`, result);
+      }
       if (flags.edit !== undefined) {
-        if (typeof flags.text !== 'string' && flags.proof === undefined)
-          throw new TowerError('E_USAGE', 'card criteria --edit n needs --text "new text" --reason "…", or --proof "jet test …"');
-        const { result } = store.mutate((s) => db.editCriterion(s, ref, flags.edit, { text: flags.text, proof: flags.proof, reason: flags.reason, by }));
+        if (typeof flags.text !== 'string' && flags.proof === undefined && flags.blockedBy === undefined)
+          throw new TowerError('E_USAGE', 'card criteria --edit n needs --text "new text" --reason "…", --proof "jet test …" or --blocked-by REF');
+        const { result } = store.mutate((s) => db.editCriterion(s, ref, flags.edit, { text: flags.text, proof: flags.proof, blockedBy: flags.blockedBy, reason: flags.reason, by }));
         return out(flags, `criterion #${result.n} edited on card #${result.cardNum}${result.reopened ? ' (reopened: its evidence proved the old wording)' : ''}`, result);
       }
       if (flags.remove !== undefined) {
@@ -579,6 +589,7 @@ function cmdCard(store, { pos, flags }) {
       }
       if (flags.text !== undefined) throw new TowerError('E_USAGE', 'card criteria --text goes with --edit n');
       if (flags.proof !== undefined && flags.add === undefined) throw new TowerError('E_USAGE', 'card criteria --proof goes with --add or --edit n');
+      if (flags.blockedBy !== undefined && flags.add === undefined) throw new TowerError('E_USAGE', 'card criteria --blocked-by goes with --add or --edit n');
       if (flags.to !== undefined && flags.move === undefined) throw new TowerError('E_USAGE', 'card criteria --to goes with --move n');
       if (flags.move !== undefined) {
         if (flags.to === undefined) throw new TowerError('E_USAGE', 'card criteria --move n needs --to <card>');
@@ -586,8 +597,8 @@ function cmdCard(store, { pos, flags }) {
         return out(flags, `criterion #${result.from.n} moved from card #${result.from.cardNum} to card #${result.to.cardNum} as c${result.to.n}`, result);
       }
       if (flags.add !== undefined) {
-        const { result } = store.mutate((s) => db.addCriterion(s, ref, flags.add, by, { proof: flags.proof }));
-        return out(flags, `added criterion #${result.n} to card #${result.cardNum}`, result);
+        const { result } = store.mutate((s) => db.addCriterion(s, ref, flags.add, by, { proof: flags.proof, blockedBy: flags.blockedBy }));
+        return out(flags, `added criterion #${result.n} to card #${result.cardNum}${result.blockedBy ? `, waiting on ${result.blockedBy}` : ''}`, result);
       }
       if (flags.kind !== undefined && flags.meet === undefined && flags.verify === undefined)
         throw new TowerError('E_USAGE', 'card criteria --kind goes with --meet or --verify');
@@ -1005,16 +1016,60 @@ function cmdNext(store, { flags }) {
   const readyAcross = flags.readyAcrossEpochs || flags.parallel;
   const scope = readyAcross ? 'ready-across' : flags.burndown ? 'burndown' : undefined;
   const defaultLimit = readyAcross ? 50 : 5;   // the parallel view is a survey, not a single pick
-  const picks = db.nextCards(s, { epoch: flags.epoch, track: flags.track, agent: flags.agent, limit: Number(flags.limit || defaultLimit), scope });
+  const epoch = flags.epoch === undefined ? undefined : epochArg(s, flags.epoch);
+  const picks = db.nextCards(s, { epoch, track: flags.track, agent: flags.agent, limit: Number(flags.limit || defaultLimit), scope });
   const proj = db.project(s);
   const rich = picks.map(p => proj.cards.find(c => c.id === p.id));
   if (flags.json) return out(flags, null, rich);
   if (!rich.length) return console.log('(nothing agent-workable — board is either empty, blocked on the owner, or done)');
+  const chain = epochChain(s.epochs);
+  const [active, following] = ['active', 'next'].map(role => chain.find(e => e.role === role));
+  const order = active ? ` — ${active.label} first (${active.staff} agents)${following ? `, then ${following.label} (${following.staff} agent)` : ''}` : '';
   const header = scope === 'ready-across' ? 'ready across all epochs — every card with no unfinished blocker (the parallel-safe set):'
-    : scope === 'burndown' ? 'next up — burndown scope (current epoch + sidequests):'
-    : 'next up (review > building > implement > plan → workOrder):';
+    : scope === 'burndown' ? `next up — burndown scope (${active ? active.label : 'active epoch'} + sidequests):`
+    : `next up${order}; review > building > implement > plan → workOrder:`;
   console.log(header);
-  for (const c of rich) console.log(` · ${cardLine(c, { epoch: scope === 'ready-across' ? epochTag(s, c.epoch) : undefined })}`);
+  for (const c of rich) console.log(` · ${cardLine(c, { epoch: epochTag(s, c.epoch) })}`);
+}
+
+// An --epoch value names an epoch by id, case-insensitively (`E18` or `e18`).
+function epochArg(s, raw) {
+  const found = s.epochs.find(e => e.id.toLowerCase() === String(raw).toLowerCase());
+  if (!found) throw new TowerError('E_NOT_FOUND', `no epoch ${raw}`);
+  return found.id;
+}
+
+// The epoch chain: every epoch in order with its role, staffing, open cards
+// and open criteria, headed by the active epoch and the next one.
+function cmdChain(store, { flags }) {
+  const proj = db.project(store.load());
+  const chain = epochChain(proj.epochs, proj.cards);
+  if (flags.json) return out(flags, null, chain);
+  const [active, following] = ['active', 'next'].map(role => chain.find(e => e.role === role));
+  console.log(active
+    ? `active ${active.label}: ${active.openCriteria} open criteria${active.blockedCriteria ? ` (+${active.blockedCriteria} blocked)` : ''} on ${active.openCards} cards · next ${following ? following.label : '—'}`
+    : '(no unfinished epoch)');
+  for (const e of chain) {
+    const role = e.role === 'finished' ? `finished (${e.status})` : e.staff ? `${e.role} · ${e.staff} agent${e.staff === 1 ? '' : 's'}` : e.role;
+    console.log(` ${e.label.padEnd(5)} ${role.padEnd(18)} ${String(e.openCards).padStart(4)} cards ${String(e.openCriteria).padStart(5)} open${e.blockedCriteria ? ` ${e.blockedCriteria} blocked` : ''}  ${e.name}`);
+  }
+}
+
+// Open cards nearest to done: fewest workable open criteria first; blocked
+// criteria are counted apart and do not count as progress.
+function cmdClosest(store, { flags }) {
+  const proj = db.project(store.load());
+  const limit = flags.limit === undefined ? 20 : Number(flags.limit);
+  if (!Number.isInteger(limit) || limit < 1) throw new TowerError('E_USAGE', '--limit must be a positive whole number');
+  const epoch = flags.epoch === undefined ? null : epochArg(proj, flags.epoch);
+  const rows = closestCards(proj.cards, proj.epochs, { epoch, limit }).map(({ card, crit }) => ({
+    num: card.num, id: card.id, title: card.title, epoch: card.epoch, phase: card.phase,
+    open: crit.open, blocked: crit.blocked, settled: crit.settled, total: crit.total,
+  }));
+  if (flags.json) return out(flags, null, rows);
+  if (!rows.length) return console.log('(no open cards with criteria)');
+  for (const r of rows)
+    console.log(` #${String(r.num).padEnd(5)} ${epochTag(proj, r.epoch).padEnd(4)} ${(r.open ? `${r.open} open` : 'ready').padEnd(8)} ${(r.blocked ? `${r.blocked} blocked` : '').padEnd(10)} ${r.title}`);
 }
 
 // #457 — durability sweeper: rule-based lint over the live board, optionally
@@ -1043,8 +1098,7 @@ function cmdProve(store, { flags }) {
   const s = store.load();
   if ((flags.card === undefined) === (flags.epoch === undefined)) throw new TowerError('E_USAGE', 'prove needs one of --card REF or --epoch E');
   const card = flags.card === undefined ? null : db.findCard(s, flags.card) || (() => { throw new TowerError('E_NOT_FOUND', `no card ${flags.card}`); })();
-  const epoch = flags.epoch === undefined ? null
-    : (s.epochs.find(e => e.id.toLowerCase() === String(flags.epoch).toLowerCase()) || (() => { throw new TowerError('E_NOT_FOUND', `no epoch ${flags.epoch}`); })()).id;
+  const epoch = flags.epoch === undefined ? null : epochArg(s, flags.epoch);
   const runs = proveRuns(proveTargets(s, { card, epoch }));
   const scope = card ? `card #${card.num}` : epochTag(s, epoch);
   const planned = runs.map(run => ({ command: run.command, criteria: run.targets.map(({ card: c, item }) => ({ card: c.num, n: item.n, proof: proofCommand(item.proof) })) }));
@@ -1177,7 +1231,7 @@ function renderBrief(p, t) {
   const heading = (text) => t.accent(text);
   L.push(`${t.invert(`#${c.num}`)} ${t.accent(c.title)}`);
   L.push(`  ${t.warn(c.phase)}${c.priority ? ` ${t.border('·')} ${t.warn(c.priority)}` : ''}${c.track ? ` ${t.border('·')} ${t.dim(c.track)}` : ''}${c.workOrder != null ? ` ${t.border('·')} ${t.dim(`workOrder ${c.workOrder}`)}` : ''}`);
-  if (c.epoch) L.push(`  ${t.dim(`${c.epoch.label}${c.epoch.goal ? `: ${c.epoch.goal}` : ''}`)}`);
+  if (c.epoch) L.push(`  ${t.dim(`${c.epoch.label}${c.epoch.role ? ` (${c.epoch.role} in the chain)` : ''}${c.epoch.goal ? `: ${c.epoch.goal}` : ''}`)}`);
   if (c.milestone) L.push(`  ${t.dim(`milestone ${c.milestone.title}${c.milestone.goal ? ` — ${c.milestone.goal}` : ''} [${c.milestone.status || 'open'}]`)}`);
   if (c.body) { L.push('', heading('BODY'), c.body); }
   if (c.plan) { L.push('', heading('PLAN'), c.plan); }
@@ -1194,7 +1248,7 @@ function renderBrief(p, t) {
     L.push(`  ${t.dim('Workers return a receipt. After integrated proof, the orchestrator marks rows met and closes the card.')}`);
     for (const it of items) {
       const state = (it.status === 'verified' ? t.success : it.status === 'met' ? t.warn : t.dim)(`[${it.status}]`);
-      const moved = `${it.proof ? `  ${t.dim(`proof: ${proofCommand(it.proof)}`)}` : ''}${it.movedFrom ? `  ${t.dim(`← from #${it.movedFrom.card} c${it.movedFrom.n}`)}` : ''}${it.movedTo ? `  ${t.dim(`→ moved to #${it.movedTo.card} c${it.movedTo.n}`)}` : ''}`;
+      const moved = `${it.proof ? `  ${t.dim(`proof: ${proofCommand(it.proof)}`)}` : ''}${it.blockedBy ? `  ${t.warn(`blocked by ${it.blockedBy}`)}` : ''}${it.unblockedFrom ? `  ${t.dim(`unblocked: ${it.unblockedFrom} resolved`)}` : ''}${it.movedFrom ? `  ${t.dim(`← from #${it.movedFrom.card} c${it.movedFrom.n}`)}` : ''}${it.movedTo ? `  ${t.dim(`→ moved to #${it.movedTo.card} c${it.movedTo.n}`)}` : ''}`;
       L.push(`  ${t.border(`#${it.n}`)} ${state} ${it.text}${moved}${it.metBy ? `  ${t.dim(`met:${it.metBy}`)}` : ''}${it.verifiedBy ? `  ${t.dim(`verified:${it.verifiedBy}`)}` : ''}${it.evidence ? `  ${t.border('—')} ${it.evidence}` : ''}`);
     }
   } else {
@@ -1606,6 +1660,8 @@ export async function run(argv) {
       case 'epoch':     return cmdEpoch(store, sub);
       case 'milestone': return cmdMilestone(store, sub);
       case 'next':      return cmdNext(store, sub);
+      case 'chain':     return cmdChain(store, sub);
+      case 'closest':   return cmdClosest(store, sub);
       case 'brief':     return cmdBrief(store, sub);
       case 'lint':      return cmdLint(store, sub);
       case 'prove':     return cmdProve(store, sub);

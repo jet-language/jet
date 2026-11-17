@@ -132,6 +132,72 @@ export const proofCommand = (proof) => proof.profile === 'cmd'
   ? `jet test ${proof.args.join(' ')}`
   : `jet test Compiler --profile ${proof.profile} --filter ${proof.filter}`;
 
+// A card's criteria by state: open rows split into workable and blocked (they
+// wait on a card, a criterion or a decision); settled rows are met or verified.
+export function criteriaCounts(card) {
+  const counts = { open: 0, blocked: 0, settled: 0, total: 0 };
+  for (const item of card?.criteria || []) {
+    counts.total++;
+    if (item.status !== 'open') counts.settled++;
+    else if (item.blockedBy) counts.blocked++;
+    else counts.open++;
+  }
+  return counts;
+}
+
+// The epoch chain: epochs in `order`. The first unfinished epoch is active and
+// the one after it is next; staffing puts three agents on the active epoch and
+// one on the next. Finished epochs (done or arrived) keep their place.
+export const CHAIN_STAFF = [3, 1];
+const FINISHED_EPOCHS = new Set(['done', 'arrived']);
+export const epochFinished = (epoch) => FINISHED_EPOCHS.has(epoch?.status);
+
+// Rank for ordering work by the chain: unfinished epochs in order, then
+// finished ones; a card without a known epoch sorts last.
+export function chainRank(epochs = []) {
+  const sorted = sortEpochs(epochs);
+  const ranked = [...sorted.filter(e => !epochFinished(e)), ...sorted.filter(epochFinished)];
+  const rank = new Map(ranked.map((e, index) => [e.id, index]));
+  return (id) => rank.get(id) ?? Infinity;
+}
+
+// One row per epoch in chain order with its role (active, next, later,
+// finished), staffing, open cards and open criteria. Done and frozen cards
+// and sidequests do not count. Counts read each card's `crit`
+// (criteriaCounts), the field the board projection carries.
+export function epochChain(epochs = [], cards = []) {
+  const tally = new Map();
+  for (const c of cards) {
+    if (c.phase === 'done' || c.phase === 'frozen' || c.track === 'sidequest' || !c.epoch) continue;
+    const row = tally.get(c.epoch) || { cards: 0, open: 0, blocked: 0 };
+    const crit = c.crit || criteriaCounts(c);
+    row.cards++; row.open += crit.open; row.blocked += crit.blocked;
+    tally.set(c.epoch, row);
+  }
+  let slot = 0;
+  return sortEpochs(epochs).map(e => {
+    const finished = epochFinished(e);
+    const role = finished ? 'finished' : ['active', 'next'][slot] || 'later';
+    const staff = finished ? 0 : CHAIN_STAFF[slot] ?? 0;
+    if (!finished) slot++;
+    const row = tally.get(e.id) || { cards: 0, open: 0, blocked: 0 };
+    return { id: e.id, label: epochLabel(e, { name: false }), name: e.name || '', status: e.status, role, staff,
+      openCards: row.cards, openCriteria: row.open, blockedCriteria: row.blocked };
+  });
+}
+
+// Cards nearest to done: unfinished, unfrozen cards with criteria, fewest
+// workable open criteria first, then fewest blocked, then chain order.
+export function closestCards(cards = [], epochs = [], { epoch = null, limit = Infinity } = {}) {
+  const rank = chainRank(epochs);
+  return cards
+    .map(c => ({ card: c, crit: c.crit || criteriaCounts(c) }))
+    .filter(({ card, crit }) => card.phase !== 'done' && card.phase !== 'frozen' && crit.total && (!epoch || card.epoch === epoch))
+    .sort((a, b) => a.crit.open - b.crit.open || a.crit.blocked - b.crit.blocked
+      || rank(a.card.epoch) - rank(b.card.epoch) || a.card.num - b.card.num)
+    .slice(0, limit);
+}
+
 // The radar lists active epochs. A finished epoch still gets a section when
 // it holds frozen cards (always shown, like every card) or, with Show closed
 // on, done cards — a card is never left without its epoch section. Sections
@@ -152,6 +218,10 @@ export function boardEpochs(radar, epochs, cards, milestones, showClosed) {
       id: epoch.id,
       name: epoch.name,
       goal: epoch.goal,
+      role: 'finished',
+      staff: 0,
+      openCriteria: linked.reduce((n, c) => n + (c.phase === 'done' ? 0 : (c.crit || criteriaCounts(c)).open), 0),
+      blockedCriteria: linked.reduce((n, c) => n + (c.phase === 'done' ? 0 : (c.crit || criteriaCounts(c)).blocked), 0),
       active,
       done,
       milestoneTotal,

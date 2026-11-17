@@ -40,8 +40,8 @@ Do not preload every sibling skill or spec.
 
 ## Select scope
 
-Default rank scope comes from `tower next --burndown --json`: current
-epoch-track cards plus all sidequests, agent lanes only. Use another epoch,
+Default rank scope comes from `tower next --burndown --json`: the epoch
+chain's active epoch-track cards plus all sidequests, agent lanes only. Use another epoch,
 track, or the whole non-frozen board only when the user requests it.
 
 Exclude `decide`, `frozen`, `done`, and externally blocked cards from the

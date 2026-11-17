@@ -30,7 +30,7 @@ import { CLOSURE_KINDS, SCRATCH_PATH_RE, createCommitResolver } from './durable.
 import { checkBoard, commitBoard } from './board-git.mjs';
 import { migrateRecommendationLosses, migrateRetiredPlanning, migrateReviewPasses } from './migrate.mjs';
 import { checkProof, migrateCriterionProof, proofInput } from './proof.mjs';
-import { epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
+import { chainRank, criteriaCounts, epochChain, epochLabel, proofCommand, sortEpochs } from './ui/board-state.js';
 import { machinePersonalInfo, personalInfoAdded, redactBoard, tallyValue } from './personal-info.mjs';
 import {
   HardeningInputError, hardeningFixtureIssue, hasHardeningPayload,
@@ -550,6 +550,9 @@ function validateStoredCriterion(item, index, source) {
     validateStoredNumber(item[key].n, `${label}.${key}.n`, { integer: true, min: 1 });
   }
   if (item.proof !== undefined) checkProof(item.proof, `${label}.proof`);
+  for (const key of ['blockedBy', 'unblockedFrom'])
+    if (item[key] !== undefined && !BLOCKER_REF.test(String(item[key])))
+      fail('E_INVALID', `${label}.${key} must be '#M', '#M cK' or a decision id`);
 }
 
 function validateStoredCriteria(criteria, source) {
@@ -926,6 +929,7 @@ export function normalize(s, historyCards = null, sync = true) {
     const replacement = legacySupersededBy[d.id];
     if (replacement && !d.supersededBy && decisionIds.has(replacement)) d.supersededBy = replacement;
   }
+  releaseResolvedBlockers(s);
   if (sync) syncMilestones(s, undefined, historyCards == null ? [] : historyCards);
   return s;
 }
@@ -1115,6 +1119,7 @@ function milestoneStallDays(m, cards, events) {
 export function radarData(s, historyCards = []) {
   const sorted = sortEpochs(s.epochs.filter(e => !['arrived', 'done'].includes(e.status)));
   const byMilestone = cardsByMilestone(s.cards, historyCards);
+  const chain = new Map(epochChain(s.epochs, s.cards).map(row => [row.id, row]));
   return sorted.map(e => {
     const all = s.cards.filter(c => c.epoch === e.id && c.track !== 'sidequest');
     const active = all.filter(c => !['done', 'frozen'].includes(c.phase));
@@ -1127,8 +1132,9 @@ export function radarData(s, historyCards = []) {
     const milestonesMet = milestones.filter(m => m.met).length;
     const milestoneTotal = milestones.length;
     const pct = milestoneTotal ? Math.round(milestonesMet / milestoneTotal * 100) : 0;
+    const { role, staff, openCriteria, blockedCriteria } = chain.get(e.id);
     return {
-      id: e.id, name: e.name, goal: e.goal,
+      id: e.id, name: e.name, goal: e.goal, role, staff, openCriteria, blockedCriteria,
       active: active.length, done: done.length, doneArchivedHint: null,
       milestoneTotal, milestonesMet, pct, burndown: burndown30(s, e.id), milestones,
     };
@@ -1168,14 +1174,15 @@ function projectMilestoneSummary(m, progress) {
 
 // One board row. Question threads live once in the index's top-level
 // `questions`; refs, probes, and blockers (already reflected in `lane`) load
-// with the full card.
+// with the full card. `crit` counts the criteria the summary leaves out, for
+// the epoch chain and the Closest view.
 function projectCardSummary(c) {
   const summary = {
     id: c.id, num: c.num, title: c.title, kind: c.kind, track: c.track,
     epoch: c.epoch, milestoneId: c.milestoneId, phase: c.phase,
     priority: c.priority, workOrder: c.workOrder, assignee: c.assignee,
     needsAcceptance: c.needsAcceptance, visualMedia: c.visualMedia || [], updated: c.updated, created: c.created,
-    completedAt: c.completedAt, lane: c.lane, openQ: c.openQ,
+    completedAt: c.completedAt, lane: c.lane, openQ: c.openQ, crit: criteriaCounts(c),
   };
   if (c.hardeningDedupKey) {
     summary.hardeningDedupKey = c.hardeningDedupKey;
@@ -2024,19 +2031,103 @@ export function updateCard(s, ref, patch, config) {
 
 // ---- mutations: exit criteria ----------------------------------------------
 
-export function addCriterion(s, ref, text, by, { proof } = {}) {
+export function addCriterion(s, ref, text, by, { proof, blockedBy } = {}) {
   const c = mustCard(s, ref);
   if (!text || !String(text).trim()) fail('E_INVALID', 'criterion needs text');
   const checked = proof === undefined ? null : proofInput(proof);
   c.criteria ||= [];
   const n = nextCriterionNumber(c);
+  const blocker = blockedBy === undefined ? null : criterionBlockerInput(s, c, n, blockedBy);
   const item = { n, text: String(text).trim(), status: 'open', metBy: null, verifiedBy: null, evidence: '', at: now() };
   if (checked) item.proof = checked;
+  if (blocker) item.blockedBy = blocker;
   c.criteria.push(item);
   invalidateCardMilestone(s, c);
   touchCard(c, by);
-  logEvent(s, { by, action: 'card.criteria-add', ref: c.id, note: `#${n} ${item.text.slice(0, 60)}` });
+  logEvent(s, { by, action: 'card.criteria-add', ref: c.id, note: `#${n} ${item.text.slice(0, 60)}${blocker ? ` (blocked by ${blocker})` : ''}` });
   return { ...item, cardId: c.id, cardNum: c.num };
+}
+
+// A criterion waits on a card (`#M`), another criterion (`#M cK`) or a
+// decision (`D-…`), stored in that form. The wait ends when the card is done,
+// the criterion settles or the decision is ratified; a blocker gone from the
+// live board (archived) has ended too.
+const BLOCKER_REF = /^(?:#(\d+)(?: c(\d+))?|(D-[A-Za-z0-9][\w.-]*))$/;
+
+function blockerResolved(ref, cardsByNum, decisionsById) {
+  const [, num, n, decision] = BLOCKER_REF.exec(ref);
+  if (decision) return decisionsById.get(decision)?.status !== 'open';
+  const card = cardsByNum.get(Number(num));
+  if (!card || card.phase === 'done') return true;
+  if (n === undefined) return false;
+  return (card.criteria || []).find(i => i.n === Number(n))?.status !== 'open';
+}
+
+// The load step that reports a resolved wait: the row keeps the ref it waited
+// on as `unblockedFrom`. A settled row has nothing left to wait for.
+function releaseResolvedBlockers(s) {
+  if (!s.cards.some(c => (c.criteria || []).some(i => i.blockedBy))) return;
+  const cardsByNum = new Map(s.cards.map(c => [c.num, c]));
+  const decisionsById = new Map(s.decisions.map(d => [d.id, d]));
+  for (const c of s.cards) {
+    for (const item of c.criteria || []) {
+      if (!item.blockedBy) continue;
+      if (item.status === 'open' && !blockerResolved(item.blockedBy, cardsByNum, decisionsById)) continue;
+      if (item.status === 'open') item.unblockedFrom = item.blockedBy;
+      delete item.blockedBy;
+    }
+  }
+}
+
+// The canonical blocker ref for criterion n of card c, refused when it names
+// nothing live to wait on or would close a waiting cycle.
+function criterionBlockerInput(s, c, n, raw) {
+  const text = String(raw ?? '').trim();
+  const numbered = /^#?(\d+)(?:\s*c(\d+))?$/i.exec(text);
+  const ref = numbered ? `#${Number(numbered[1])}${numbered[2] ? ` c${Number(numbered[2])}` : ''}`
+    : /^D-[A-Za-z0-9][\w.-]*$/.test(text) ? text
+    : fail('E_INVALID', `--blocked-by takes '#M', '#M cK' or a decision id (got "${text}")`);
+  const [, num, k, decision] = BLOCKER_REF.exec(ref);
+  if (decision) {
+    const d = s.decisions.find(x => x.id === decision) || fail('E_NOT_FOUND', `no decision ${decision}`);
+    if (d.status !== 'open') fail('E_INVALID', `decision ${decision} is already ${d.status}; nothing to wait on`);
+    return ref;
+  }
+  const target = s.cards.find(x => x.num === Number(num)) || fail('E_NOT_FOUND', `no live card #${num}`);
+  if (target.phase === 'done') fail('E_INVALID', `card #${target.num} is done; nothing to wait on`);
+  if (k === undefined) {
+    if (target === c) fail('E_INVALID', `criterion #${n} cannot wait on its own card #${c.num}`);
+    return ref;
+  }
+  let item = mustCriterion(target, k);
+  if (item.status !== 'open') fail('E_INVALID', `criterion #${target.num} c${item.n} is already ${item.status}; nothing to wait on`);
+  const seen = new Set();
+  for (let card = target; item; ) {
+    const at = `#${card.num} c${item.n}`;
+    if (card === c && item.n === Number(n)) fail('E_INVALID', `criterion #${c.num} c${n} would wait on itself through ${ref}`);
+    if (seen.has(at)) break;
+    seen.add(at);
+    const next = item.blockedBy && BLOCKER_REF.exec(item.blockedBy);
+    if (!next || next[2] === undefined) break;
+    card = s.cards.find(x => x.num === Number(next[1]));
+    item = card && (card.criteria || []).find(i => i.n === Number(next[2]));
+  }
+  return ref;
+}
+
+// End a criterion's wait by hand, for a blocker that no longer applies.
+export function unblockCriterion(s, ref, n, { reason, by } = {}) {
+  const c = mustCard(s, ref);
+  const item = mustCriterion(c, n);
+  if (!by) fail('E_INVALID', 'unblock needs --by <agent>');
+  if (!item.blockedBy) fail('E_INVALID', `criterion #${item.n} on card #${c.num} is not blocked`);
+  const was = item.blockedBy;
+  delete item.blockedBy;
+  delete item.unblockedFrom;
+  touchCard(c, by);
+  const why = reason == null ? '' : String(reason).trim();
+  logEvent(s, { by, action: 'card.criteria-unblock', ref: c.id, note: `#${item.n}: was blocked by ${was}${why ? `; ${why}` : ''}` });
+  return { ...item, unblockedFrom: was, cardId: c.id, cardNum: c.num };
 }
 
 // Criterion numbers are never reused: a removed row's number stays retired, so
@@ -2073,16 +2164,23 @@ function rewordCriterion(item, text) {
   return { before, reopened };
 }
 
-// Text and proof change separately. A new proof says how the row is checked,
-// not what it asks for, so it keeps the row's status and needs no reason.
-export function editCriterion(s, ref, n, { text, proof, reason, by } = {}) {
+// Text, proof and blocker change separately. A new proof says how the row is
+// checked and a blocker what it waits on, not what it asks for, so neither
+// changes the row's status or needs a reason.
+export function editCriterion(s, ref, n, { text, proof, blockedBy, reason, by } = {}) {
   const c = mustCard(s, ref);
   const item = mustCriterion(c, n);
   if (!by) fail('E_INVALID', 'edit needs --by <agent>');
-  if (text === undefined && proof === undefined) fail('E_INVALID', 'edit needs --text "…" or --proof "jet test …"');
+  if (text === undefined && proof === undefined && blockedBy === undefined)
+    fail('E_INVALID', 'edit needs --text "…", --proof "jet test …" or --blocked-by REF');
   const why = text === undefined ? (reason == null ? '' : String(reason).trim()) : needsReason('edit', reason);
   const nextProof = proof === undefined ? undefined : proofInput(proof);
   const { before, reopened } = text === undefined ? { before: item.text, reopened: false } : rewordCriterion(item, text);
+  if (blockedBy !== undefined) {
+    if (item.status !== 'open') fail('E_INVALID', `criterion #${item.n} on card #${c.num} is ${item.status}; only an open criterion waits on a blocker`);
+    item.blockedBy = criterionBlockerInput(s, c, item.n, blockedBy);
+    delete item.unblockedFrom;
+  }
   if (nextProof === null) delete item.proof;
   else if (nextProof) item.proof = nextProof;
   invalidateCardMilestone(s, c);
@@ -2090,6 +2188,7 @@ export function editCriterion(s, ref, n, { text, proof, reason, by } = {}) {
   const changes = [
     text === undefined ? null : `was: ${before.slice(0, 200)}`,
     proof === undefined ? null : `proof: ${nextProof ? proofCommand(nextProof) : 'none'}`,
+    blockedBy === undefined ? null : `blocked by ${item.blockedBy}`,
   ].filter(Boolean).join('; ');
   logEvent(s, { by, action: 'card.criteria-edit', ref: c.id, note: `#${item.n}: ${why ? `${why}${reopened ? ' (reopened)' : ''}; ` : ''}${changes}` });
   return { ...item, reopened, cardId: c.id, cardNum: c.num };
@@ -2130,6 +2229,7 @@ export function moveCriterion(s, ref, n, { to, reason, by } = {}) {
     movedFrom: { card: c.num, n: item.n },
   };
   if (item.proof) moved.proof = checkProof(item.proof);
+  if (item.blockedBy) moved.blockedBy = item.blockedBy;
   target.criteria.push(moved);
   item.status = 'met';
   item.metBy = by;
@@ -3536,39 +3636,44 @@ export function deleteMilestone(s, id, by) {
 
 const LANE_PREF = { verify: 0, building: 1, implement: 2, plan: 3 };
 
-// #457 — `scope: 'burndown'` narrows the pool to exactly the current
-// epoch's epoch-track cards plus all sidequests (agent lanes only) — the
-// tower skill's "burndown loop" scope, made a real filter instead of
-// something an agent has to hand-derive from the active epoch each time.
+// The epoch chain orders the pick: cards of the active epoch (the first
+// unfinished one in `order`) come first, then the next epoch's, and so on;
+// within an epoch, review > building > implement > plan, then workOrder.
+//
+// #457 — `scope: 'burndown'` narrows the pool to the active epoch's
+// epoch-track cards plus all sidequests (agent lanes only).
 //
 // D-TWR-OPS2=A — `scope: 'ready-across'` spans every epoch and returns every
-// card an agent could pick up right now. laneOf already drops a card while any
-// blockedBy prerequisite is unfinished, so this list IS the parallel-safe set:
-// once dependencies are recorded, work that must wait simply isn't in it.
+// card an agent could pick up right now, lane first. laneOf already drops a
+// card while any blockedBy prerequisite is unfinished, so this list IS the
+// parallel-safe set: once dependencies are recorded, work that must wait
+// simply isn't in it.
 export function nextCards(s, { epoch, track, agent, limit = 5, scope } = {}) {
   const proj = project(s);
+  const chainActive = epochChain(s.epochs).find(e => e.role === 'active')?.id ?? null;
   const pool = proj.cards.filter(c => {
     if (!(c.lane.lane in LANE_PREF)) return false;
     if (epoch && c.epoch !== epoch) return false;
     if (track && c.track !== track) return false;
     if (hasActiveClaim(c) && agent && c.assignee !== agent) return false;
     if (scope === 'burndown') {
-      const inEpoch = c.track === 'epoch' && c.epoch === activeEpoch(s);
+      const inEpoch = c.track === 'epoch' && c.epoch === chainActive;
       if (!inEpoch && c.track !== 'sidequest') return false;
     }
     return true;
   });
+  const rank = chainRank(s.epochs);
   if (scope === 'ready-across') {
-    const epochRank = new Map(sortEpochs(s.epochs).map((e, index) => [e.id, index]));
     pool.sort((a, b) =>
       LANE_PREF[a.lane.lane] - LANE_PREF[b.lane.lane]
-      || (epochRank.get(a.epoch) ?? Infinity) - (epochRank.get(b.epoch) ?? Infinity)
+      || rank(a.epoch) - rank(b.epoch)
       || (a.priority || '').localeCompare(b.priority || '')
       || (a.workOrder ?? Infinity) - (b.workOrder ?? Infinity)
       || a.num - b.num);
   } else {
     pool.sort((a, b) =>
-      LANE_PREF[a.lane.lane] - LANE_PREF[b.lane.lane]
+      rank(a.epoch) - rank(b.epoch)
+      || LANE_PREF[a.lane.lane] - LANE_PREF[b.lane.lane]
       || (a.workOrder ?? Infinity) - (b.workOrder ?? Infinity)
       || (a.priority || '').localeCompare(b.priority || '')
       || a.num - b.num);
@@ -3644,7 +3749,10 @@ export function buildBrief(s, ref) {
       visualMedia: card.visualMedia || [],
       phase: card.phase, priority: card.priority, workOrder: card.workOrder ?? null,
       assignee: card.assignee ?? null, track: card.track,
-      epoch: card.epoch ? { id: card.epoch, label: epochLabel(epoch || { id: card.epoch }), name: epoch?.name ?? null, goal: epoch?.goal ?? null } : null,
+      epoch: card.epoch ? {
+        id: card.epoch, label: epochLabel(epoch || { id: card.epoch }), name: epoch?.name ?? null, goal: epoch?.goal ?? null,
+        role: epochChain(s.epochs).find(e => e.id === card.epoch)?.role ?? null,
+      } : null,
       milestone: milestone ? { id: milestone.id, title: milestone.title, goal: milestone.goal, status: milestone.status, criteria: milestone.criteria, verification: milestone.verification || null } : null,
     },
     blockers: (card.blockedBy || []).map(id => blockerState(s, id)),

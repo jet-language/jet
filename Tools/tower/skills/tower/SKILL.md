@@ -75,6 +75,11 @@ approved contract is not a ballot.
   --profile cases --filter F"` on `--add` or `--edit n`. `tower prove --card
   '#N'` prints the plan; add `--yes --jet PATH --tree DIR --commit SHA --by X`
   to run it at a landed commit and meet the passing rows.
+- A row that waits on other work says so: `--blocked-by '#M'|'#M cK'|D-ID` on
+  `--add` or `--edit n`. The wait ends by itself when the blocker resolves;
+  `--unblock n` ends it by hand.
+- Work the epoch chain: `tower chain` names the active epoch (three agents) and
+  the next (one agent); `tower closest` lists the cards nearest to done.
 - Board text never names this machine's home, user, host, email or mounts
   (#6564 c5). Write `~`, `$JET_SCRATCH_ROOT`, `user` or `devhost` instead; a
   write that adds one is refused (`E_PERSONAL_INFO`) with the text to use.

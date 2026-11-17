@@ -94,10 +94,15 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
   A row's `proof` (`--proof "jet test …"` on `--add`/`--edit`) names the test
   run that settles it; `tower prove --card|--epoch` runs the proofs at a landed
   commit and meets the passing rows, and `tower lint --proofs --tree DIR`
-  lists proofs whose filter matches no test file.
+  lists proofs whose filter matches no test file. `--blocked-by '#M'|'#M
+  cK'|D-ID` makes a row wait on other work until it resolves.
   Acceptance is owner-UI-only: generic ratify, batch clearance, CLI
   `--by owner`, and agent quotes cannot resolve `D-ACCEPT-*`; rejected
   attempts remain in the audit log.
+- **Epoch chain** — epoch `order` is the plan: the first unfinished epoch is
+  active (three agents), the next gets one. `tower next` follows the chain,
+  `tower chain` lists it, and `tower closest` (and the UI's Closest view) ranks
+  open cards by open criteria, fewest first.
 - **Decisions** — ballot-ready choices attached to a card; only the owner
   ratifies. New full ballots contain a complete base draft followed by one
   fresh-agent adversarial review; model families may match. Historical

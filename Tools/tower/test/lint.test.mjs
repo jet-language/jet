@@ -312,9 +312,9 @@ test('lint(): combines the core rules over the board and history', () => {
 
 // ---- 10. burndown scope --------------------------------------------------------------
 
-test('nextCards burndown scope: current-epoch epoch-track + sidequests, other epochs excluded', () => {
+test('nextCards burndown scope: the chain\'s active epoch-track cards + sidequests, other epochs excluded', () => {
   const st = fresh();
-  st.mutate((s) => db.updateEpoch(s, 'e1', { status: 'planned' }));
+  st.mutate((s) => db.updateEpoch(s, 'e1', { status: 'done' }));
   st.mutate((s) => db.addEpoch(s, { id: 'e3', name: 'E3' }));
   st.mutate((s) => db.addEpoch(s, { id: 'e4', name: 'E4' }));
   st.mutate((s) => db.setCurrentEpoch(s, 'e3'));
