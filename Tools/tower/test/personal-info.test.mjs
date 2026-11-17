@@ -74,14 +74,13 @@ test('redactBoard rewrites every section, ratified decisions included, and count
     cards: [{ id: 'c1', body: 'built on zedbox', log: [{ text: 'log at /mnt/scr/a.log' }] }],
     decisions: [{ id: 'D-A', status: 'ratified', detail: 'Zed ruled from /home/zed' }, { id: 'D-B', status: 'open', detail: 'none' }],
     briefings: [{ body: 'zedbox' }],
-    papercuts: [{ text: '/home/zed/x' }],
   };
   const history = { decisions: [{ id: 'D-C', status: 'ratified', code: 'u zed' }], cards: [], events: [{ note: 'by ZedQ' }] };
   const report = redactBoard(state, history, matcher);
-  assert.equal(report.total, 8);
+  assert.equal(report.total, 7);
   assert.deepEqual(report.sections, {
     'tower.json cards': 2, 'tower.json decisions (ratified)': 2, 'tower.json briefings': 1,
-    'tower.json papercuts': 1, 'history.json decisions (ratified)': 1, 'history.json events': 1,
+    'history.json decisions (ratified)': 1, 'history.json events': 1,
   });
   assert.equal(state.decisions[0].detail, 'User ruled from ~');
   assert.equal(state.cards[0].log[0].text, 'log at $JET_SCRATCH_ROOT/a.log');

@@ -1,24 +1,8 @@
 # Tower maintenance operations
 
-Read this reference only when the task concerns recurring tooling friction,
-retirement, lint, or card creation. These operations do not replace the board
-policy in `Tools/tower/AGENTS.md`.
-
-## Papercuts
-
-A papercut is recurring agent-tooling friction. Log one only when the same snag
-happened at least twice or the dead end is deterministic for anyone using the
-same command and flags:
-
-```sh
-tower papercut add --by <agent> --text "<reproducible tooling snag>" [--card '#N']
-```
-
-Do not log one-off failures, self-inflicted dirty state or stale caches,
-session collisions, friction already fixed in passing, or a Jet compiler,
-stdlib, example, test, or golden defect. Those defects are cards. Logging a
-papercut must not block on a frozen or owner `decide` lane. The owner resolves
-one with `tower papercut resolve <id> --by owner`.
+Read this reference only when the task concerns retirement, lint, or card
+creation. These operations do not replace the board policy in
+`Tools/tower/AGENTS.md`.
 
 ## Archive
 

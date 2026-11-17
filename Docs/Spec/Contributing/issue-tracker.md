@@ -32,7 +32,7 @@ Before adding a card, look for the card that already owns the area. A
 regression, follow-up, or gap found while proving work becomes a criterion on
 the card whose change caused it, or on the card that owns the area; the
 findings of one sweep share one card. Only a new stream of work (a ballot, a
-feature, a goal's plan) earns a new card (AGENTS.md, Owner gates and work
+feature, an epoch's plan) earns a new card (AGENTS.md, Owner gates and work
 state).
 
 | Operation | Command |
@@ -46,8 +46,7 @@ state).
 | Add or remove a triage tag | `tower card update '#N' --add-tag <tag> --remove-tag <tag> --by <agent>` |
 | Ask a question | `tower question ask '#N' --text "..." --by <agent>` |
 | Add a message | `tower message add '#N' --text "..." --by <agent>` |
-| Record a tooling papercut | `tower papercut add --card '#N' --text "..." --by <agent>` |
-| Link a card to goals | `tower card update '#N' --goals G1,G2 --by <agent>` |
+| Move a card to an epoch | `tower card update '#N' --epoch e18 --by <agent>` |
 | Record blockers | `tower card update '#N' --blocked-by '#1,#2' --by <agent>` |
 | Claim a card | `tower brief '#N' --agent <agent>` |
 
@@ -69,26 +68,25 @@ Read the card back and confirm `done`. To decline work, the owner uses:
 tower card update '#N' --add-tag wontfix --phase frozen --by owner
 ```
 
-## Goals
+## Epochs
 
-A goal is a long-term aim, such as "self-compile in about 50 ms", "remove
-Rust", "port all scripts to Jet", "one typed IR", or "typed IR with a
-Core lint". A goal is not a card. It has no phase, criteria, or closure gate,
-and it never blocks the backlog. Cards point at goals; a goal never points at
-cards.
+Epochs are the one planning axis. Each epoch is one stretch of work, such as
+"declarations as types" or "remove Rust", worked in the board's epoch order.
+Its exit criteria say what finishing it means. Write an epoch as `E18` or
+`E18 <name>`; the stored id stays `e18`.
 
 | Operation | Command |
 |---|---|
-| List active goals | `tower goal list` (`--all` adds achieved and dropped) |
-| Read a goal and its linked cards | `tower goal show G1 --json` |
-| Add a goal | `tower goal add --title "..." --body "..." --by <agent>` |
-| Edit or retire a goal | `tower goal update G1 --status achieved --by <agent>` |
-| Log goal progress | `tower goal log G1 --text "..." --by <agent>` |
+| List epochs in order | `tower epoch list --json` |
+| Add an epoch | `tower epoch add e26 --name "..." --order 9 --exit-criteria "..." --by <agent>` |
+| Reorder or edit an epoch | `tower epoch update e26 --order 3 --exit-criteria "..." --by <agent>` |
+| Remove an unused epoch | `tower epoch remove e26 --by <agent>` |
 
-`tower goal show` prints each linked card with its phase, including archived
-cards. Tower rejects a card link to an unknown goal, and `tower lint` reports
-`unknown-goal` for a stale one. The served board lists goals on the **Goals**
-tab.
+`tower epoch list` shows epochs by `order`, then by id number, with their exit
+criteria. `--exit-criteria` repeats for each row; `--file` takes
+`{"order": N, "exitCriteria": ["..."]}`. Tower refuses `epoch remove` while any
+live or archived card, or any milestone, still points at the epoch, and names
+the counts.
 
 ## Messages and questions
 

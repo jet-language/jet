@@ -214,7 +214,7 @@ runs and one 39-minute full test pass. These rules bind every train:
     gate, census, build, tests, set-aside and land. A submission over 15
     minutes names the stage that cost it.
 18. **Sweep the cards daily.** Each lane spends 20 minutes a day on every
-    open criterion of its goal's cards. It sends the orchestrator `MEET
+    open criterion of its epoch's cards. It sends the orchestrator `MEET
     #card cN: evidence` for each one already met by the code or an existing
     test, and `DROP #card cN: reason` for each one that's obsolete or
     superseded (not for one that's merely unmet). The orchestrator records

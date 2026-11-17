@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boardEpochs, cardMatches, sortCards, workflowRank, ownerVerifyQueue, openAcceptanceBallot, acceptanceReadiness, cardDeletePlan, cardDeletePayload } from '../app/ui/board-state.js';
+import { boardEpochs, cardMatches, sortCards, workflowRank, ownerVerifyQueue, openAcceptanceBallot, acceptanceReadiness, cardDeletePlan, cardDeletePayload, epochLabel, epochNumber, sortEpochs } from '../app/ui/board-state.js';
 
 const card = (num, lane, phase = lane, extra = {}) => ({
   num, title: `Card ${num}`, phase, priority: 'P1', lane: { lane, label: lane }, ...extra,
@@ -97,7 +97,7 @@ test('frozen cards show by default and the Frozen filter shows only them', () =>
   for (const workflow of ['0', '1', '2', '3']) assert.equal(cardMatches(frozen, { workflow }), false);
 });
 
-test('an epoch the active radar omits still gets a section for its frozen cards', () => {
+test('an epoch the active radar omits still gets a section for its frozen cards, in epoch order', () => {
   const radar = [{ id: 'e9', name: 'jetos' }];
   const epochs = [{ id: 'e2', name: 'Arrived' }, { id: 'e9', name: 'jetos' }, { id: 'e3', name: 'Empty' }];
   const cards = [
@@ -105,10 +105,26 @@ test('an epoch the active radar omits still gets a section for its frozen cards'
     card(41, 'frozen', 'frozen', { epoch: 'e3', track: 'sidequest' }),
   ];
   const shown = boardEpochs(radar, epochs, cards, [], false);
-  assert.deepEqual(shown.map(e => e.id), ['e9', 'e2']);
-  assert.equal(shown[1].active, 0);
-  assert.equal(shown[1].done, 0);
+  assert.deepEqual(shown.map(e => e.id), ['e2', 'e9']);
+  assert.equal(shown[0].active, 0);
+  assert.equal(shown[0].done, 0);
   assert.equal(boardEpochs(radar, epochs, [cards[1]], [], false), radar, 'sidequest frozen cards stay in the sidequest section');
+});
+
+test('an epoch is labelled E plus its number, from num or else from the id', () => {
+  assert.equal(epochLabel({ id: 'e18', name: 'Declarations as types' }), 'E18 Declarations as types');
+  assert.equal(epochLabel({ id: 'e18', name: 'Declarations as types' }, { name: false }), 'E18');
+  assert.equal(epochLabel({ id: 'x', num: 4, name: 'Metaprogramming' }), 'E4 Metaprogramming');
+  assert.equal(epochLabel({ id: 'e7', name: 'e7' }), 'E7', 'a name equal to the id is not repeated');
+  assert.equal(epochLabel({ id: 'later', name: 'Someday' }), 'later Someday', 'an id with no number shows as itself');
+  assert.equal(epochNumber({ id: 'E21' }), 21);
+  assert.equal(epochNumber({ id: 'side' }), null);
+});
+
+test('epochs sort by order, then the unordered ones by number, then by id', () => {
+  const epochs = [{ id: 'e25' }, { id: 'e3', order: 9 }, { id: 'zeta' }, { id: 'e18' }, { id: 'e2', order: 1 }, { id: 'alpha' }];
+  assert.deepEqual(sortEpochs(epochs).map(e => e.id), ['e2', 'e3', 'e18', 'e25', 'alpha', 'zeta']);
+  assert.deepEqual(epochs.map(e => e.id)[0], 'e25', 'sorting copies; the input keeps its order');
 });
 
 test('card delete payload lists every ballot and needs a tick per ratified one', () => {

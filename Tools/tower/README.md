@@ -56,17 +56,18 @@ Migrating from a v3-era board: `node <tower-dir>/tower.mjs import old-tower.json
 
 ## Model
 
-- **Epochs** — the major groupings of work (`epoch add/update/current`).
-- **Milestones** — goals within an epoch. Linked cards move a milestone to
+- **Epochs** — the board's one planning axis (`epoch list|add|update|remove|current`).
+  Each epoch has a `name`, a `goal` description, a `status`, an `order`, and
+  `exitCriteria` that say what finishing it means. Every listing — `epoch list`,
+  the radar, the Board view, briefings, and `next` — shows epochs by `order`,
+  then by id number. An epoch is labelled `E18` or `E18 <name>`; the stored id
+  stays `e18`. `epoch remove` is refused while any card (live in any phase, or
+  archived) or milestone still points at the epoch, and the refusal names the
+  counts.
+- **Milestones** — targets within an epoch. Linked cards move a milestone to
   `review-ready` when all are done. `milestone closeout` records the frozen
   source commit that authorizes broad proof. Only `milestone verify` can make
   the tokened milestone `met`.
-- **Goals** — long-term aims such as "self-compile in about 50 ms" or "remove
-  Rust" (`goal list|show|add|update|log`). A goal is not a card: it has no
-  phase, criteria, or gate, and it never blocks work. Cards point at goals with
-  `card add|update --goals G1,G2`; `goal show` lists the linked cards and their
-  phases. Status is `active`, `achieved`, or `dropped`. The **Goals** tab lists
-  each goal with its linked cards.
 - **Cards** — the work. Stages: deciding → planning → ready → building →
   review → done (+ frozen). A fresh card lands in `planning` — no owner
   greenlight step. Tower picks review, building, implement, then plan cards.
@@ -143,10 +144,8 @@ tower card      list|show|add|update|claim|release|delete
 tower decision  list|show|add|update|ratify|reopen|delete
 tower question  list|ask|answer|delete
 tower message   list|add|done
-tower papercut  list|add|resolve
-tower goal      list|show|add|update|log
 tower idea      list|add|promote|delete
-tower epoch     list|add|update|current
+tower epoch     list|add|update|remove|current
 tower milestone list|add|update|criteria|closeout|verify|delete
 tower archive   status | show <id> | restore <id>
 tower init | serve | import
@@ -158,16 +157,7 @@ message until the owner marks it done. `tower message list` shows open
 messages. `tower message done <id> --by owner` closes one message. Clearing
 completed cards in the Now page does not clear messages.
 
-Agents log one-line tooling friction (dead-end commands, broken helpers,
-misleading docs, stale caches) with `tower papercut add --by agent-name --text
-"…"` instead of silently pushing through. The bar is recurrence: the snag hit
-twice, or it is deterministic for anyone running the same command. One-offs,
-self-inflicted state, and session collisions are not papercuts, and a bug in Jet
-itself is a card. It never fails on a card lane, so logging never derails the
-task. The **Papercuts** tab groups them by day; the owner clears a handled one
-with `tower papercut resolve <id> --by owner`.
-
-The **AGENTS.md** tab sits to the right of **Papercuts**. It reads and edits
+The **AGENTS.md** tab sits to the right of **Docs**. It reads and edits
 the repository-root `AGENTS.md`, not a plugin policy file. Changing the editor
 does not rewrite policy content.
 

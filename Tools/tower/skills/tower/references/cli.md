@@ -61,15 +61,15 @@ criteria, proof, and handoff changes on the board.
 
 Cards compute to one lane: `decide` is owner-only; `plan`, `implement`,
 `building`, and `verify` are agent work; `blocked`, `frozen`, and `done` are
-inert. Epochs group work. Milestones group goals inside an epoch and derive
-progress from linked cards.
-
-Goals are long-term aims, not cards. They carry no phase, criteria, or gate and
-never block a card. Link work with `tower card update '#N' --goals G1,G2 --by
-<agent>` (`--goals ''` clears). `tower goal show G1` lists the linked live and
-archived cards with their phases; `tower goal list --all` includes achieved
-and dropped goals. Record progress with `tower goal log G1 --text "…" --by
-<agent>`.
+inert. Epochs are the board's one planning axis: `tower epoch list` shows them
+in `order` (then by id number) with their exit criteria, labelled `E18 <name>`.
+Set the order and the exit criteria with `tower epoch add|update e18 --order N
+--exit-criteria "…" --by <agent>`; repeat `--exit-criteria` for each row, or
+pass `{"order": N, "exitCriteria": ["…"]}` through `--file`/`--stdin`. An empty
+list clears them. `tower epoch remove e18 --by <agent>` is refused while any
+live or archived card, or any milestone, still points at the epoch; the refusal
+names the counts. Milestones group targets inside an epoch and derive progress
+from linked cards.
 
 A card needs a non-empty criteria checklist. Each row moves from `open` to
 `met` to `verified`. Integrated focused proof supplies `met`; a different

@@ -81,28 +81,20 @@ approved contract is not a ballot.
 Each card computes a lane and an actor. `decide` belongs to the owner;
 `plan`/`implement`/`building` normally belong to agents. `verify` can belong to
 an agent or the owner when an acceptance ballot is open. `blocked`/`frozen`/
-`done` are inert. Never infer ownership from the lane name alone. Epochs group work.
-Milestones are goals inside an epoch; linked cards determine their progress.
+`done` are inert. Never infer ownership from the lane name alone.
 The board's open questions and decisions stay attached to their cards.
 
-Goals are long-term aims, such as "self-compile in about 50 ms" or "remove
-Rust". A goal is not a card: it has no phase, criteria, or gate, and it never
-blocks, ranks, or closes work. Cards point at goals, so a goal shows which work
-serves it:
+Epochs are the board's one planning axis. They are worked in `order`; each
+epoch's `exitCriteria` say what finishing it means. Show an epoch as `E18` or
+`E18 <name>`; the stored id stays `e18`. Milestones are targets inside an
+epoch; linked cards determine their progress.
 
 ```sh
-tower goal list [--all]
-tower goal show G1 [--json]          # linked cards with their phases, then the log
-tower goal add --title "…" [--body "…"] --by <agent>
-tower goal update G1 [--title "…"] [--body "…"] [--status active|achieved|dropped] --by <agent>
-tower goal log G1 --text "…" --by <agent>
-tower goal remap --merge G7=G1 --renumber G3=G2 --by <agent>   # merge goals, then renumber the rest
-tower card update '#N' --goals G1,G2 --by <agent>   # --goals '' clears the links
+tower epoch list [--json]                 # in order, with exit criteria
+tower epoch add e19 --name "…" --order 2 --exit-criteria "…" --exit-criteria "…" --by <agent>
+tower epoch update e19 [--order N] [--exit-criteria "…" …] [--file plan.json] --by <agent>
+tower epoch remove e19 --by <agent>      # refused while any card or milestone points at it
 ```
-
-An unknown goal id is rejected on write; `tower lint` reports `unknown-goal`
-for a stale link. A **Current goals and progress** briefing on Now is a status
-report, not a goal record.
 
 The owner's decisions are the only allowed bottleneck. Raise a ballot for an
 unresolved owner gate, but do not wait for generic approval before working a
@@ -145,13 +137,13 @@ node ${CLAUDE_PLUGIN_ROOT}/tower.mjs help
 
 ## Now reports
 
-Post current goals as a **Current goals and progress** briefing on **Now**.
-Refresh it at proven checkpoints and remove finished goals. Derive progress
+Post the epoch chain as a **Current epochs and progress** briefing on **Now**.
+Refresh it at proven checkpoints and drop finished epochs. Derive progress
 from card evidence, not elapsed time; a briefing summarizes Tower state and
 never replaces cards or ballots. A JSON status snapshot can accompany it:
 
 ```sh
-node Tools/tower/tower.mjs briefing post --file report.md --title "Current goals and progress" --by Pip
+node Tools/tower/tower.mjs briefing post --file report.md --title "Current epochs and progress" --by Pip
 node Tools/tower/tower.mjs briefing list
 node Tools/tower/tower.mjs briefing show                 # latest; or supply its id
 node Tools/tower/tower.mjs status post --file status.json --by Pip
@@ -172,8 +164,8 @@ checks), so a snapshot never hides a new vote. Add `--json` for machine output.
 
 - [CLI, state, writes, and read-back](references/cli.md) when command or
   lifecycle detail is needed.
-- [Maintenance and card minting](references/maintenance.md) for papercuts,
-  archive, lint, or new-card work.
+- [Maintenance and card minting](references/maintenance.md) for archive, lint,
+  or new-card work.
 - [Project Tower policy](../../AGENTS.md) for complete guards and authority.
 - [Tower README](../../README.md) for product and installation context.
 - [Orchestration closeout cadence](../../../../.agents/skills/orchestration/references/closeout.md)

@@ -36,6 +36,26 @@ export function migrateReviewPasses(decision) {
   return true;
 }
 
+// Owner order (2026-11-16): epochs are the board's one planning axis, so the
+// separate goal and friction-log collections and every card's goal links are
+// retired. Runs on every load of the board and the archive; normal Tower
+// writes persist the board without them. Returns whether anything was dropped.
+export const RETIRED_COLLECTIONS = ['goals', 'papercuts'];
+export function migrateRetiredPlanning(store) {
+  let changed = false;
+  for (const key of RETIRED_COLLECTIONS) {
+    if (!Object.hasOwn(store, key)) continue;
+    delete store[key];
+    changed = true;
+  }
+  for (const card of Array.isArray(store.cards) ? store.cards : []) {
+    if (!card || typeof card !== 'object' || !Object.hasOwn(card, 'goals')) continue;
+    delete card.goals;
+    changed = true;
+  }
+  return changed;
+}
+
 export function migrate(old, { project = 'Project' } = {}) {
   const src = old && typeof old === 'object' ? old : {};
   const meta = src.meta || {};

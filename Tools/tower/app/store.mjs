@@ -2,7 +2,7 @@
 //
 // Model (v4):
 //   epochs      — major groupings of work
-//   milestones  — goals WITHIN an epoch; cards can point at one
+//   milestones  — measurable targets WITHIN an epoch; cards can point at one
 //   cards       — the work items; every card computes to exactly ONE lane
 //   decisions   — ballot-ready choices blocking a card, owner-only to ratify
 //   questions   — owner ⇄ agent notes/questions on a card
@@ -28,7 +28,8 @@ import { withLock, withLockAsync } from './lock.mjs';
 import { loadConfig, publicConfig } from './config.mjs';
 import { CLOSURE_KINDS, SCRATCH_PATH_RE, createCommitResolver } from './durable.mjs';
 import { checkBoard, commitBoard } from './board-git.mjs';
-import { migrateRecommendationLosses, migrateReviewPasses } from './migrate.mjs';
+import { migrateRecommendationLosses, migrateRetiredPlanning, migrateReviewPasses } from './migrate.mjs';
+import { epochLabel, sortEpochs } from './ui/board-state.js';
 import { machinePersonalInfo, personalInfoAdded, redactBoard, tallyValue } from './personal-info.mjs';
 import {
   HardeningInputError, hardeningFixtureIssue, hasHardeningPayload,
@@ -171,9 +172,9 @@ function withStorePairTransaction(dataDir, liveFile, config, work, prepare = nul
 // board would have nowhere to put epoch-track work.
 export const empty = (project = 'Project') => ({
   meta: { version: VERSION, project, currentEpoch: null, nextNum: 1, rev: 0, ui: { toggled: [] } },
-  epochs: [{ id: 'e1', name: 'Epoch 1', goal: '', status: 'active' }],
-  milestones: [], cards: [], decisions: [], questions: [], ideas: [], papercuts: [], events: [],
-  briefings: [], goals: [], statusSnapshot: null,
+  epochs: [{ id: 'e1', name: 'First epoch', goal: '', status: 'active' }],
+  milestones: [], cards: [], decisions: [], questions: [], ideas: [], events: [],
+  briefings: [], statusSnapshot: null,
 });
 
 // ---- store handle ---------------------------------------------------------
@@ -252,7 +253,7 @@ export function openStore(dataDir) {
     }
     validateStoredHistory(pair.history.value, 'history store');
     const history = { ...emptyHistory(), ...pair.history.value };
-    let historyMigrated = false;
+    let historyMigrated = migrateRetiredPlanning(history);
     for (const decision of history.decisions)
       historyMigrated = migrateRecommendationLosses(decision) || historyMigrated;
     return {
@@ -290,6 +291,7 @@ export function openStore(dataDir) {
       if (torn) continue;
       validateStoredState(first.live.value, 'live store');
       validateStoredHistory(first.history.value, 'history store');
+      migrateRetiredPlanning(first.history.value);
       for (const decision of first.history.value.decisions || [])
         migrateRecommendationLosses(decision);
       const state = normalize(first.live.value, first.history.value.cards);
@@ -468,7 +470,6 @@ const CRITERION_STATUSES = new Set(['open', 'met', 'verified']);
 const MILESTONE_STATUSES = new Set(['open', 'review-ready', 'met']);
 const EPOCH_STATUSES = new Set(['active', 'arrived', 'planned', 'done', 'open']);
 const DECISION_STATUSES = new Set(['open', 'ratified']);
-const GOAL_STATUSES = new Set(['active', 'achieved', 'dropped']);
 
 const plainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 
@@ -610,19 +611,6 @@ function validateStoredCard(card, index, source, seenNums, seenIds) {
   validateStoredString(card.probe, `${label}.probe`, { nullable: true, nonEmpty: true });
   normalizeVisualMedia(card.visualMedia, `${label}.visualMedia`);
   validateStoredCriteria(card.criteria, label);
-  if (card.goals !== undefined && (!Array.isArray(card.goals) || !card.goals.every(id => typeof id === 'string' && id)))
-    fail('E_INVALID', `${label}.goals must be an array of goal ids`);
-}
-
-function validateStoredGoal(goal, index, source) {
-  const label = `${source} goal ${index + 1}`;
-  if (!plainObject(goal)) fail('E_INVALID', `${label} must be an object`);
-  validateStoredString(goal.id, `${label}.id`, { nullable: false, nonEmpty: true });
-  validateStoredString(goal.title, `${label}.title`, { nullable: false, nonEmpty: true });
-  validateStoredString(goal.body, `${label}.body`);
-  if (goal.status !== undefined && !GOAL_STATUSES.has(goal.status))
-    fail('E_INVALID', `${label}.status is not a canonical goal status`);
-  if (goal.log !== undefined && !Array.isArray(goal.log)) fail('E_INVALID', `${label}.log must be an array`);
 }
 
 function validateStoredDecision(decision, index, source) {
@@ -662,7 +650,7 @@ export function validateStoredState(state, source = 'live store') {
     validateStoredNumber(state.meta.nextNum, `${source}.meta.nextNum`, { integer: true, min: 1 });
     validateStoredNumber(state.meta.rev, `${source}.meta.rev`, { integer: true, min: 0 });
   }
-  for (const key of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events', 'briefings', 'goals']) {
+  for (const key of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events', 'briefings']) {
     if (state[key] !== undefined && !Array.isArray(state[key])) fail('E_INVALID', `${source}.${key} must be an array`);
   }
   const seenNums = new Set();
@@ -671,7 +659,6 @@ export function validateStoredState(state, source = 'live store') {
   (state.milestones || []).forEach((milestone, index) => validateStoredMilestone(milestone, index, source));
   (state.cards || []).forEach((card, index) => validateStoredCard(card, index, source, seenNums, seenIds));
   (state.decisions || []).forEach((decision, index) => validateStoredDecision(decision, index, source));
-  (state.goals || []).forEach((goal, index) => validateStoredGoal(goal, index, source));
   (state.briefings || []).forEach(validateBriefing);
   // The owner-actions report was removed 2026-10-04; a board written before then still carries the key. Drop it on read; the next write persists the board without it.
   if (state.statusSnapshot != null) delete state.statusSnapshot.ownerActions;
@@ -712,6 +699,7 @@ export function loadHistoryRaw(dataDir) {
   const raw = readHistoryDoc(dataDir);
   if (raw == null) return emptyHistory();
   validateStoredHistory(raw);
+  migrateRetiredPlanning(raw);
   for (const decision of raw.decisions || []) migrateRecommendationLosses(decision);
   return { ...emptyHistory(), ...raw };
 }
@@ -873,7 +861,8 @@ export function normalize(s, historyCards = null, sync = true) {
   if (s.meta.completionCursor == null && s.meta.digestCursor != null)
     s.meta.completionCursor = s.meta.digestCursor;
   delete s.meta.digestCursor;
-  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'papercuts', 'events', 'briefings', 'goals']) s[k] ||= [];
+  migrateRetiredPlanning(s);
+  for (const k of ['epochs', 'milestones', 'cards', 'decisions', 'questions', 'ideas', 'events', 'briefings']) s[k] ||= [];
   s.statusSnapshot ??= null;
   delete s.messages;   // messaging was removed; drop the legacy key on next write
   // D-TWR-OPS1=A: active epoch is derived solely from epoch.status === 'active'.
@@ -891,18 +880,12 @@ export function normalize(s, historyCards = null, sync = true) {
     c.criteria ||= [];
     c.refs ||= [];
     c.tags ||= [];
-    c.goals ||= [];
     if (c.hardeningDedupAliases != null && !Array.isArray(c.hardeningDedupAliases)) c.hardeningDedupAliases = [];
     if (c.hardeningEvidence != null && !Array.isArray(c.hardeningEvidence)) c.hardeningEvidence = [];
     if (!('parentId' in c)) c.parentId = null;
     if (!('probe' in c)) c.probe = null;
     c.visualMedia = normalizeVisualMedia(c.visualMedia);
     c.needsAcceptance = !!c.needsAcceptance;
-  }
-  for (const g of s.goals) {
-    g.body ??= '';
-    g.status ||= 'active';
-    g.log ||= [];
   }
   if (historyCards != null) validateStoredHistory({ cards: historyCards }, 'history store');
   for (const m of s.milestones) {
@@ -1121,13 +1104,7 @@ function milestoneStallDays(m, cards, events) {
 }
 
 export function radarData(s, historyCards = []) {
-  const activeEpochs = s.epochs.filter(e => !['arrived', 'done'].includes(e.status));
-  const cur = activeEpoch(s);
-  const sorted = [...activeEpochs].sort((a, b) => {
-    const aCur = a.id === cur, bCur = b.id === cur;
-    if (aCur !== bCur) return aCur ? -1 : 1;
-    return (a.order ?? a.num ?? 999) - (b.order ?? b.num ?? 999);
-  });
+  const sorted = sortEpochs(s.epochs.filter(e => !['arrived', 'done'].includes(e.status)));
   const byMilestone = cardsByMilestone(s.cards, historyCards);
   return sorted.map(e => {
     const all = s.cards.filter(c => c.epoch === e.id && c.track !== 'sidequest');
@@ -1274,9 +1251,8 @@ export function project(s, config = null, history = null) {
     ideas: s.ideas.filter(b => b.status !== 'tagged').length,
     openQuestions: s.questions.filter(q => q.kind !== 'message' && q.status === 'open').length,
   };
-  return { meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones, phases: PHASES, lanes: LANES,
-    cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas, papercuts: s.papercuts,
-    goals: s.goals.map(g => ({ ...g, cards: goalCards(g, s.cards, historyCards) })),
+  return { meta: s.meta, config: publicConfig(config) || undefined, epochs: sortEpochs(s.epochs), milestones, phases: PHASES, lanes: LANES,
+    cards, decisions: s.decisions, questions: s.questions, ideas: s.ideas,
     events: s.events.slice(0, 300), counts, recentlyDecided, radar: radarData(s, historyCards) };
 }
 
@@ -1321,8 +1297,7 @@ export function projectBoard(s, config = null) {
     meta: s.meta, config: publicConfig(config) || undefined, epochs: s.epochs, milestones,
     phases: PHASES, lanes: LANES, cards, decisions: openDecisions,
     questions: s.questions.filter(q => activeIds.has(q.cardId) || (q.decisionId && openDecisions.some(d => d.id === q.decisionId))), ideas: s.ideas,
-    papercuts: s.papercuts, events: s.events.slice(0, 300), counts, recentlyDecided,
-    goals: s.goals.map(g => ({ ...g, cards: goalCards(g, s.cards) })),
+    events: s.events.slice(0, 300), counts, recentlyDecided,
     briefings: s.briefings || [], statusSnapshot: s.statusSnapshot || null,
     notices: { cards: noticeCards, messages: noticeMessages }, radar: radarData(s),
   };
@@ -1649,7 +1624,6 @@ export function addCard(s, p, config, history = emptyHistory()) {
     criteria: Array.isArray(p.criteria) ? p.criteria.map((it, i) => normalizeCriterion(it, i)) : [],
     refs: Array.isArray(p.refs) ? p.refs : [],
     tags: normalizeTags(p.tags),
-    goals: normalizeGoalRefs(s, p.goals),
     parentId,
     needsAcceptance: !!p.needsAcceptance,
     created: now(), updated: now(), updatedBy: p.by || 'agent',
@@ -1812,7 +1786,7 @@ export function updateHardeningCard(s, ref, p, config, history = emptyHistory())
   return addOrUpdateHardeningCard(s, { ...p, ref }, config, history);
 }
 
-const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'probe', 'visualMedia', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'goals', 'parentId', 'hardeningFixture', 'hardeningState'];
+const CARD_FIELDS = ['title', 'body', 'kind', 'track', 'epoch', 'milestoneId', 'phase', 'priority', 'plan', 'checkSteps', 'probe', 'visualMedia', 'blockedBy', 'workOrder', 'criteria', 'needsAcceptance', 'refs', 'tags', 'parentId', 'hardeningFixture', 'hardeningState'];
 
 // D-TWR-CRIT1=C / D-TWRGUARD1=C: gate --phase done. Agent closure needs a
 // nonempty checklist with every row met or verified. Owner writes keep the
@@ -1960,7 +1934,6 @@ export function updateCard(s, ref, patch, config) {
   if ('probe' in patch) validateStoredString(patch.probe, 'card.probe', { nullable: true, nonEmpty: true });
   if ('visualMedia' in patch) patch.visualMedia = normalizeVisualMedia(patch.visualMedia);
   if ('tags' in patch) patch.tags = normalizeTags(patch.tags);
-  if ('goals' in patch) patch.goals = normalizeGoalRefs(s, patch.goals);
   if ('workOrder' in patch) {
     const workOrder = patch.workOrder == null || patch.workOrder === '' ? undefined : Number(patch.workOrder);
     validateStoredNumber(workOrder, 'card.workOrder', { min: 0 });
@@ -3106,44 +3079,6 @@ export function doneMessage(s, id, by) {
   return message;
 }
 
-// ---- mutations: papercuts (append-only friction log) ----------------------
-// Steve Ruiz's "papercuts": agents log one line of tooling friction instead
-// of silently pushing through. Append-only, attributed, owner-resolved. Kept
-// OFF the questions machinery on purpose — high-volume, never blocks a card,
-// never gated by a card's owner lane. Logging friction must never fail.
-
-export function listPapercuts(s, { status } = {}) {
-  const list = status ? s.papercuts.filter(p => p.status === status) : s.papercuts;
-  return [...list].sort((a, b) => (b.created || '').localeCompare(a.created || ''));
-}
-
-export function addPapercut(s, p) {
-  if (!p.text || !String(p.text).trim()) fail('E_INVALID', 'papercut needs text');
-  if (!p.by || p.by === 'owner') fail('E_INVALID', 'papercut add needs --by <agent>');
-  const card = p.cardId == null ? null : mustCard(s, p.cardId);   // link only; no lane guard
-  const pc = {
-    id: newId('pc'),
-    by: p.by,
-    text: String(p.text).trim(),
-    cardId: card ? card.id : null,
-    created: now(),
-    status: 'open',
-  };
-  s.papercuts.push(pc);
-  logEvent(s, { by: p.by, action: 'papercut.add', ref: pc.id, note: card ? `#${card.num}` : '' });
-  return card ? { ...pc, cardNum: card.num } : pc;
-}
-
-export function resolvePapercut(s, id, by) {
-  if (by !== 'owner') fail('E_OWNER_ONLY', 'papercut resolve is owner-only');
-  const pc = s.papercuts.find(x => x.id === id) || fail('E_NOT_FOUND', `no papercut ${id}`);
-  pc.status = 'resolved';
-  pc.resolvedAt = now();
-  pc.resolvedBy = by;
-  logEvent(s, { by, action: 'papercut.resolve', ref: id });
-  return pc;
-}
-
 // ---- Now reports ----------------------------------------------------------
 // Reports describe progress; posting one never changes a card, milestone gate,
 // or ballot. Attribution/time are assigned here, not trusted from a file.
@@ -3250,127 +3185,6 @@ export function postStatus(s, p) {
   return record;
 }
 
-// ---- goals: long-term aims that cards point at ------------------------------
-// A goal names a durable direction, such as "self-compile in about 50 ms". It
-// is not work: it has no phase, criteria, lane, or closure gate, and it never
-// blocks a card. Cards link to goals through card.goals; the linked cards and
-// their phases are derived, never stored on the goal.
-const GOAL_ID_RE = /^G([1-9]\d*)$/;
-
-// Accept "G3", "g3", or "3".
-export function findGoal(s, ref) {
-  if (ref == null) return null;
-  const str = String(ref).trim().toUpperCase();
-  const id = /^\d+$/.test(str) ? `G${str}` : str;
-  return (s.goals || []).find(g => g.id === id) || null;
-}
-const mustGoal = (s, ref) => findGoal(s, ref) || fail('E_NOT_FOUND', `no goal ${ref}`);
-
-function normalizeGoalRefs(s, raw) {
-  if (raw == null) return [];
-  const ids = [];
-  for (const ref of (Array.isArray(raw) ? raw : String(raw).split(',')).map(x => String(x).trim()).filter(Boolean)) {
-    const { id } = mustGoal(s, ref);
-    if (!ids.includes(id)) ids.push(id);
-  }
-  return ids;
-}
-
-// Live cards first, then retired history cards, each in card-number order.
-export function goalCards(goal, cards, historyCards = []) {
-  const rows = (list, archived) => (list || [])
-    .filter(c => (c.goals || []).includes(goal.id))
-    .map(c => ({ id: c.id, num: c.num, title: c.title, phase: c.phase, ...(archived ? { archived: true } : {}) }))
-    .sort((a, b) => a.num - b.num);
-  return [...rows(cards, false), ...rows(historyCards, true)];
-}
-
-export function listGoals(s, { all = false } = {}) {
-  return all ? s.goals : s.goals.filter(g => g.status === 'active');
-}
-
-export function addGoal(s, p) {
-  if (!p.title || !String(p.title).trim()) fail('E_INVALID', 'goal needs a title');
-  if (!p.by) fail('E_INVALID', 'goal add needs --by <actor>');
-  const next = 1 + Math.max(0, ...s.goals.map(g => Number(GOAL_ID_RE.exec(g.id)?.[1] || 0)));
-  const goal = {
-    id: `G${next}`, title: String(p.title).trim(), body: p.body == null ? '' : String(p.body),
-    status: 'active', log: [], created: now(), updated: now(), updatedBy: p.by,
-  };
-  s.goals.push(goal);
-  logEvent(s, { by: p.by, action: 'goal.add', ref: goal.id, note: goal.title });
-  return goal;
-}
-
-// One mutation for edits and log entries; `logEntry` prepends to goal.log.
-export function updateGoal(s, ref, patch) {
-  const goal = mustGoal(s, ref);
-  if (!patch.by) fail('E_INVALID', 'goal update needs --by <actor>');
-  if ('title' in patch && (typeof patch.title !== 'string' || !patch.title.trim())) fail('E_INVALID', 'goal needs a title');
-  if ('status' in patch && !GOAL_STATUSES.has(patch.status))
-    fail('E_INVALID', `goal status must be one of: ${[...GOAL_STATUSES].join(', ')}`);
-  if ('logEntry' in patch && (typeof patch.logEntry !== 'string' || !patch.logEntry.trim())) fail('E_INVALID', 'goal log needs text');
-  if ('title' in patch) goal.title = patch.title.trim();
-  if ('body' in patch) goal.body = patch.body == null ? '' : String(patch.body);
-  if ('status' in patch) goal.status = patch.status;
-  if ('logEntry' in patch) goal.log.unshift({ at: today(), by: patch.by, text: patch.logEntry.trim() });
-  goal.updated = now();
-  goal.updatedBy = patch.by;
-  logEvent(s, { by: patch.by, action: 'logEntry' in patch ? 'goal.log' : 'goal.update', ref: goal.id,
-    note: 'logEntry' in patch ? patch.logEntry.trim().slice(0, 60) : Object.keys(patch).filter(k => k !== 'by').join(',') });
-  return goal;
-}
-
-// Merge goals and renumber the rest in one write. `merge` maps a goal to the
-// goal that absorbs it: its linked cards (live and archived) move over, its
-// body and log join the target's, and the merged goal is removed. `renumber`
-// then maps every remaining goal to its new id; the ids must stay distinct.
-export function remapGoals(s, history, { merge = {}, renumber = {}, by }) {
-  if (!by) fail('E_INVALID', 'goal remap needs --by <actor>');
-  const idOf = (ref) => mustGoal(s, ref).id;
-  const mergeIds = Object.fromEntries(Object.entries(merge).map(([from, into]) => [idOf(from), idOf(into)]));
-  for (const [from, into] of Object.entries(mergeIds)) {
-    if (from === into) fail('E_INVALID', `goal ${from} cannot merge into itself`);
-    if (into in mergeIds) fail('E_INVALID', `goal ${from} merges into ${into}, which is itself merged`);
-  }
-  const remaining = s.goals.filter(g => !(g.id in mergeIds));
-  const renumberIds = {};
-  for (const [from, to] of Object.entries(renumber)) {
-    const id = idOf(from);
-    if (id in mergeIds) fail('E_INVALID', `goal ${id} is merged, so it cannot be renumbered`);
-    const target = String(to).trim().toUpperCase();
-    if (!GOAL_ID_RE.test(target)) fail('E_INVALID', `goal id ${to} must look like G1`);
-    renumberIds[id] = target;
-  }
-  const finalId = (id) => renumberIds[mergeIds[id] ?? id] ?? (mergeIds[id] ?? id);
-  const finalIds = remaining.map(g => finalId(g.id));
-  const dup = finalIds.find((id, i) => finalIds.indexOf(id) !== i);
-  if (dup) fail('E_INVALID', `goal remap gives two goals the id ${dup}`);
-  for (const [from, into] of Object.entries(mergeIds)) {
-    const src = s.goals.find(g => g.id === from);
-    const dst = s.goals.find(g => g.id === into);
-    const note = `Merged from ${from} (${src.title})${src.body ? `: ${src.body}` : '.'}`;
-    dst.body = dst.body ? `${dst.body}\n\n${note}` : note;
-    dst.log = [...dst.log, ...src.log.map(e => ({ ...e, text: `[${from}] ${e.text}` }))];
-  }
-  const remapCard = (c) => {
-    if (!c.goals?.length) return;
-    const next = [...new Set(c.goals.map(finalId))];
-    if (JSON.stringify(next) !== JSON.stringify(c.goals)) c.goals = next;
-  };
-  s.cards.forEach(remapCard);
-  if ((history.cards || []).some(c => c.goals?.some(id => finalId(id) !== id))) history.cards.forEach(remapCard);
-  s.goals = remaining;
-  for (const g of s.goals) {
-    const id = finalId(g.id);
-    if (id !== g.id) { g.id = id; g.updated = now(); g.updatedBy = by; }
-  }
-  s.goals.sort((a, b) => Number(GOAL_ID_RE.exec(a.id)[1]) - Number(GOAL_ID_RE.exec(b.id)[1]));
-  const parts = [...Object.entries(mergeIds).map(([f, t]) => `${f}>${t}`), ...Object.entries(renumberIds).map(([f, t]) => `${f}=${t}`)];
-  logEvent(s, { by, action: 'goal.remap', ref: 'goals', note: parts.join(' ').slice(0, 200) });
-  return { merged: mergeIds, renumbered: renumberIds, goals: s.goals.map(g => ({ id: g.id, title: g.title, status: g.status })) };
-}
-
 // ---- mutations: ideas ------------------------------------------------------
 
 export function addIdea(s, p) {
@@ -3409,24 +3223,62 @@ export function promoteIdea(s, ideaId, extra = {}, config) {
 
 // ---- mutations: epochs + milestones ----------------------------------------
 
+// Epochs are the board's one planning axis, worked in `order`; an epoch's
+// `exitCriteria` say what finishing it means.
+function epochOrder(raw) {
+  const order = typeof raw === 'string' && raw.trim() ? Number(raw) : raw;
+  if (!Number.isSafeInteger(order) || order < 0)
+    fail('E_INVALID', `epoch order must be a whole number 0 or above (got ${JSON.stringify(raw)})`);
+  return order;
+}
+function epochExitCriteria(raw) {
+  const list = Array.isArray(raw) ? raw : [raw];
+  if (list.some(item => typeof item !== 'string' || !item.trim()))
+    fail('E_INVALID', 'an epoch exit criterion needs text');
+  return list.map(item => item.trim());
+}
+const mustEpoch = (s, id) => s.epochs.find(x => x.id === id) || fail('E_NOT_FOUND', `no epoch ${id}`);
+
 export function addEpoch(s, p) {
   if (!p.id || !String(p.id).trim()) fail('E_INVALID', 'epoch needs an id (e.g. e1)');
   if (s.epochs.find(e => e.id === p.id)) fail('E_INVALID', `epoch ${p.id} already exists`);
   const e = { id: p.id, name: p.name || p.id, goal: p.goal || '', status: p.status || 'open' };
+  if (p.order != null) e.order = epochOrder(p.order);
+  if (p.exitCriteria != null) e.exitCriteria = epochExitCriteria(p.exitCriteria);
   s.epochs.push(e);
   logEvent(s, { by: p.by, action: 'epoch.add', ref: e.id, note: e.name });
   return e;
 }
 export function updateEpoch(s, id, patch) {
-  const e = s.epochs.find(x => x.id === id) || fail('E_NOT_FOUND', `no epoch ${id}`);
+  const e = mustEpoch(s, id);
   // D-TWR-OPS1=A: at most one active epoch. Reject a second one honestly rather
   // than silently demoting the old epoch (which might not actually be finished).
   if (patch.status === 'active') {
     const other = s.epochs.find(x => x.id !== id && x.status === 'active');
     if (other) fail('E_INVALID', `${other.id} is already active — set it to arrived/planned before activating ${id}`);
   }
-  for (const k of ['name', 'goal', 'status']) if (k in patch) e[k] = patch[k];
+  const next = {};
+  if ('order' in patch) next.order = epochOrder(patch.order);
+  if ('exitCriteria' in patch) next.exitCriteria = epochExitCriteria(patch.exitCriteria);
+  for (const k of ['name', 'goal', 'status']) if (k in patch) next[k] = patch[k];
+  Object.assign(e, next);
   return e;
+}
+// Removing an epoch must never strand work: it is refused while any card
+// (live in any phase, or archived) or milestone still points at it.
+export function removeEpoch(s, history, id, by) {
+  const e = mustEpoch(s, id);
+  const live = s.cards.filter(c => c.epoch === id).length;
+  const archived = (history?.cards || []).filter(c => c.epoch === id).length;
+  const milestones = s.milestones.filter(m => m.epochId === id).length;
+  if (live || archived || milestones) {
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    fail('E_INVALID', `epoch ${id} is still referenced by ${plural(live, 'card')}, ${plural(archived, 'archived card')} `
+      + `and ${plural(milestones, 'milestone')}; move or delete them first`);
+  }
+  s.epochs = s.epochs.filter(x => x !== e);
+  logEvent(s, { by, action: 'epoch.remove', ref: id, note: e.name });
+  return { removed: id };
 }
 // D-TWR-OPS1=A: `epoch current <id>` is now sugar for activating that epoch;
 // `epoch current none` demotes the live epoch back to planned. The retired
@@ -3634,9 +3486,10 @@ export function nextCards(s, { epoch, track, agent, limit = 5, scope } = {}) {
     return true;
   });
   if (scope === 'ready-across') {
+    const epochRank = new Map(sortEpochs(s.epochs).map((e, index) => [e.id, index]));
     pool.sort((a, b) =>
       LANE_PREF[a.lane.lane] - LANE_PREF[b.lane.lane]
-      || (a.epoch || '').localeCompare(b.epoch || '')
+      || (epochRank.get(a.epoch) ?? Infinity) - (epochRank.get(b.epoch) ?? Infinity)
       || (a.priority || '').localeCompare(b.priority || '')
       || (a.workOrder ?? Infinity) - (b.workOrder ?? Infinity)
       || a.num - b.num);
@@ -3718,7 +3571,7 @@ export function buildBrief(s, ref) {
       visualMedia: card.visualMedia || [],
       phase: card.phase, priority: card.priority, workOrder: card.workOrder ?? null,
       assignee: card.assignee ?? null, track: card.track,
-      epoch: card.epoch ? { id: card.epoch, name: epoch?.name ?? null, goal: epoch?.goal ?? null } : null,
+      epoch: card.epoch ? { id: card.epoch, label: epochLabel(epoch || { id: card.epoch }), name: epoch?.name ?? null, goal: epoch?.goal ?? null } : null,
       milestone: milestone ? { id: milestone.id, title: milestone.title, goal: milestone.goal, status: milestone.status, criteria: milestone.criteria, verification: milestone.verification || null } : null,
     },
     blockers: (card.blockedBy || []).map(id => blockerState(s, id)),
