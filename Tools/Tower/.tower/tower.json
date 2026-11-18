@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112006,
+    "rev": 112009,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -45,37 +45,37 @@
     },
     "completionCursor": "2026-11-17T20:27:04.886Z",
     "dayStart": {
-      "date": "2026-11-17",
-      "openCards": 359,
-      "openCriteria": 2446,
+      "date": "2026-11-18",
+      "openCards": 330,
+      "openCriteria": 2362,
       "epochs": {
         "e18": {
-          "openCards": 15,
-          "openCriteria": 95
+          "openCards": 11,
+          "openCriteria": 71
         },
         "e19": {
-          "openCards": 31,
-          "openCriteria": 142
+          "openCards": 24,
+          "openCriteria": 123
         },
         "e20": {
-          "openCards": 59,
-          "openCriteria": 531
+          "openCards": 55,
+          "openCriteria": 520
         },
         "e21": {
-          "openCards": 58,
-          "openCriteria": 487
+          "openCards": 52,
+          "openCriteria": 474
         },
         "e22": {
-          "openCards": 38,
-          "openCriteria": 289
+          "openCards": 36,
+          "openCriteria": 284
         },
         "e23": {
-          "openCards": 57,
-          "openCriteria": 405
+          "openCards": 55,
+          "openCriteria": 398
         },
         "e24": {
-          "openCards": 78,
-          "openCriteria": 390
+          "openCards": 74,
+          "openCriteria": 385
         },
         "e25": {
           "openCards": 23,
@@ -48927,11 +48927,11 @@
         {
           "n": 1,
           "text": "Ruling (1) applies to every DataTree decoder: JSON, YAML and TOML each report a duplicate key as a parse error naming the key and both positions, and the explicit allow-duplicates option keeps the later value; one test per format.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-10-28T11:57:25.161Z"
+          "evidence": "Landed in 6479b79c49 (dev, p283). JSON, YAML and TOML each report a repeated key as a parse error at the repeat, naming the key and where it first appears (\"duplicate key `k` (first at line L, column C)\"). toml.parse_allow_duplicates and yaml.parse_allow_duplicates join json.parse_allow_duplicates in keeping the later value. On the p283 batch compiler: `jet test Core/Encoding/{JSON,TOML,YAML}.jet` pass, with one duplicate-key test per format. The goldens pass: Encoding/ 99/99 (TOMLDuplicateKeys and YAMLDuplicateKeys included), Data/JSON/ 45/45, and the WebBuild dyn_exact_int_and_strict_json case 1/1.",
+          "at": "2026-11-18T00:08:50.202Z"
         }
       ],
       "refs": [],
@@ -48944,8 +48944,8 @@
       "parentId": "c0iuv3zr",
       "needsAcceptance": false,
       "created": "2026-10-05T11:15:21.226Z",
-      "updated": "2026-10-28T20:01:42.690Z",
-      "updatedBy": "CardTrim"
+      "updated": "2026-11-18T00:08:50.202Z",
+      "updatedBy": "Main"
     },
     {
       "id": "c0itvqcw",
@@ -81664,11 +81664,11 @@
         {
           "n": 9,
           "text": "A library author retires an API with `#Deprecated(…)` carrying a replacement body, and `jet fix` inlines it at every call so users migrate in one run.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:25:19.560Z",
+          "evidence": "Landed in 8970803bb1 (dev, D-DEPRECATE-INLINE1=A). On the p282 batch compiler bd564de961, the full cases suite passes Tests/Cases/UIFixes/jet_fix_inlines_deprecated_replacement.case: `jet fix` inlines a #Deprecated(inline: true) function body at every call, and the result matches the .fixed file.",
+          "at": "2026-11-18T00:03:44.592Z",
           "proof": {
             "profile": "cases",
             "filter": "jet_fix_inlines_deprecated_replacement"
@@ -81683,7 +81683,7 @@
       "parentId": "c085f598",
       "needsAcceptance": false,
       "created": "2026-11-01T01:14:41.377Z",
-      "updated": "2026-11-17T21:06:00.906Z",
+      "updated": "2026-11-18T00:03:44.592Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -97668,6 +97668,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Main decision (c6/c7 interplay): a scoped query is refused only when it names a table outside the scope. A query that names no table (select 1, select now()) runs under any scope, as c6 requires, and one that names another table is refused with the registered diagnostic, as c7 requires. The table set comes from the parsed SQL, not from text matching. No ballot is needed; this applies the two criteria together."
+        },
+        {
           "at": "2026-11-17",
           "by": "Main",
           "text": "D-SQL-SCRIPT1=A ratified: keep the direct Store methods (query/query_one need DB.Read, execute needs DB.Write, through the all_rows Driver path) as trusted owning-code convenience. with_policy returns another scope and doesn't narrow the Store. DBScope is not a security boundary today; c7 tracks that gap. c6 is built to this outcome."
@@ -97778,7 +97783,7 @@
       "parentId": "c0snkbac",
       "needsAcceptance": false,
       "created": "2026-11-13T15:43:36.307Z",
-      "updated": "2026-11-17T17:33:55.950Z",
+      "updated": "2026-11-18T00:06:52.714Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -214778,6 +214783,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T00:08:50.202Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0hh2g28",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-18T00:06:52.714Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0429qak",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-18T00:03:44.593Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0fymc7l",
+      "note": "#9"
+    },
     {
       "at": "2026-11-17T23:46:47.074Z",
       "by": "Main",
