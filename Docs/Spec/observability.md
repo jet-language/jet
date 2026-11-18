@@ -38,8 +38,42 @@ Open it in Perfetto UI or `chrome://tracing`. Captured wall/CPU, allocation,
 browser, task-span, I/O, lock, and native rows become complete (`X`) events;
 process, domain, and task lanes use metadata (`M`) events. Unavailable states,
 async flows, counters, screenshots, and source-map events remain outside this
-projection. `--pprof` and `--otel` remain Jet JSON projections, not wire-format
-exports.
+projection.
+
+`jet perf view` shows every profile with jet alone. In the terminal it prints
+the flame graph, the timeline and, last, the per-line table: each function's
+CPU-time samples at each source line, hottest first, at most 24 lines
+(`  main.jet:11 spin_hot_loop samples=592`). `--html` prints one
+self-contained page of the same three, which a browser opens with no other
+program and nothing to fetch. Tests/Cases/Perf/view_shows_every_profile.case
+is the worked example.
+
+`jet perf export <trace.jettrace> --pprof` writes pprof's gzip-compressed
+`profile.proto` beside the trace (`<stem>.pb.gz`, or `--out <path>`). Each
+CPU-time profile row is one sample whose stack is one location, the row's
+function at its source line, valued by the row's own samples; the period is
+one millisecond of CPU. Inclusive samples, allocations, counter events and
+full stacks are not carried, and the profile's comment says so. `--otel`
+prints OTLP/JSON, one export request a line as a collector's file exporter
+writes them: an `ExportTraceServiceRequest` (core.log `otlp_traces_json`) of
+the trace's captured spans and browser rows, then an
+`ExportMetricsServiceRequest` of the per-line totals, the cumulative sum
+`jet.profile.samples` with a point for each row named by its
+`code.file.path`, `code.line.number` and `code.function.name`. Its trace id
+is the first 32 hex digits of the trace's id. A task span's parent is its
+parent task's span, and each span's kind, task, awaited task and spawn line
+are `jet.*` attributes. Span times count from the session's start, since a
+trace records no wall-clock origin. `--out <path>` writes any export to a
+file instead of stdout.
+
+Both exports are interop for other tools; jet reads them back itself.
+`jet perf view <profile.pb.gz>` (or `.pb`) and `jet perf view
+<export.json>` print `export pprof <path>` or `export otlp <path>`, what the
+export says of itself (a pprof comment, an OTLP span count), then the flame
+graph, the export's spans on the timeline and the per-line table, which
+matches the trace's own view line for line; `--html` works on them too, and
+`--json` stays the trace's own view. Tests/Cases/Perf/export_round_trip.case
+is the worked example.
 
 The canonical trace wrapper is `jet.trace` version 1, verified by
 `Compiler/JetFoundation/Source/Trace/JetTrace.jet`. A trace's identity, toolchain, and

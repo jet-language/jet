@@ -89,7 +89,9 @@ jet_cli_perf_read: fn(path: String) -[FS]> CanonicalJSON JetTraceError! {
     Ok(trace)
 }
 
-// `view`: text, `--json` or `--html`, with `--frames=jet|all`.
+// `view`: text, `--json` or `--html`, with `--frames=jet|all`, of a
+// `.jettrace`, or text or `--html` of a pprof or OTLP/JSON export of one
+// (PeerExport.jet jet_cli_perf_import).
 jet_cli_perf_view: fn(args: [String], color: Bool) -[FS]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
     path := String?{None}
@@ -129,7 +131,7 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS]> JetDriverVerbOutput Ne
             next
         }
         if arg.starts_with("-") {
-            return jet_cli_perf_error("unknown `jet perf view` flag `{arg}`", "run `jet perf view <path{extension}> [--json|--html] [--frames=jet|all]`", color)
+            return jet_cli_perf_error("unknown `jet perf view` flag `{arg}`", "run `jet perf view <path{extension}|path.pb.gz|path.json> [--json|--html] [--frames=jet|all]`", color)
         }
         if path != None {
             return jet_cli_perf_error("`jet perf view` takes one trace path", JET_CLI_PERF_FIX, color)
@@ -138,14 +140,29 @@ jet_cli_perf_view: fn(args: [String], color: Bool) -[FS]> JetDriverVerbOutput Ne
         path = Val(arg.copy())
     }
     shown: path ?? return jet_cli_perf_error("`jet perf view` needs a {extension} path", JET_CLI_PERF_FIX, color)
+    if !shown.ends_with(extension) {
+        if mode == "json" {
+            return jet_cli_perf_error("`--json` views a {extension} trace only", "view a pprof or OTLP export as text or with `--html`", color)
+        }
+        imported: jet_cli_perf_import(shown) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        flame: jet_cli_perf_flame_profile(jet_cli_perf_total_rows(imported.totals))
+        table: jet_cli_perf_line_table(imported.totals)
+        if mode == "html" {
+            return JetDriverVerbOutput{stdout: jet_cli_perf_view_html(shown, frames, flame, imported.timeline, table), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+        out := "{diagnostic_theme_paint(color, "1", "export")} {imported.format} {shown}\n"
+        loop note in imported.notes -> out = "{out}{note}\n"
+        return JetDriverVerbOutput{stdout: "{out}{jet_cli_perf_view_sections(flame, imported.timeline, table, color)}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
     trace: jet_cli_perf_read(shown) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     flame: jet_cli_perf_flame(trace)
     timeline: jet_cli_perf_timeline(trace)
+    table: jet_cli_perf_line_table(jet_cli_perf_line_totals(trace))
     if mode == "html" {
-        return JetDriverVerbOutput{stdout: jet_cli_perf_view_html(trace_id(trace) ?? "unknown", frames, flame, timeline), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        return JetDriverVerbOutput{stdout: jet_cli_perf_view_html(trace_id(trace) ?? "unknown", frames, flame, timeline, table), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     if mode == "text" {
-        return JetDriverVerbOutput{stdout: jet_cli_perf_view_text(trace, frames, flame, timeline, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        return JetDriverVerbOutput{stdout: jet_cli_perf_view_text(trace, frames, flame, timeline, table, color), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     view: CanonicalJSON.Object(
         [CanonicalJSONField]{
@@ -167,7 +184,7 @@ jet_cli_perf_strings: fn(lines: [String]) -> CanonicalJSON Never! {
 }
 
 // `render_view_text`.
-jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String], timeline: [String], color: Bool) -> String Never! {
+jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String], timeline: [String], table: [String], color: Bool) -> String Never! {
     out := "{diagnostic_theme_paint(color, "1", "schema")} {TRACE_SCHEMA} v{TRACE_VERSION}\n"
     out = "{out}{diagnostic_theme_paint(color, "1", "trace")} {trace_id(trace) ?? "unknown"}\n"
     out = "{out}{diagnostic_theme_paint(color, "1", "command")} {jet_cli_perf_content_text(trace, "command") ?? "unknown"}\n"
@@ -192,6 +209,13 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     if frames == "all" {
         out = "{out}generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)\n"
     }
+    "{out}{jet_cli_perf_view_sections(flame, timeline, table, color)}"
+}
+
+// The flame graph, the timeline and the per-line table, each under its
+// heading when it has a line.
+jet_cli_perf_view_sections: fn(flame: [String], timeline: [String], table: [String], color: Bool) -> String Never! {
+    out := ""
     if flame.len() > 0 {
         out = "{out}{diagnostic_theme_paint(color, "1", "flamegraph")}\n"
         loop line in flame -> out = "{out}{line}\n"
@@ -200,13 +224,19 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
         out = "{out}{diagnostic_theme_paint(color, "1", "timeline")}\n"
         loop line in timeline -> out = "{out}{line}\n"
     }
+    if table.len() > 0 {
+        out = "{out}{diagnostic_theme_paint(color, "1", "per-line")}\n"
+        loop line in table -> out = "{out}{line}\n"
+    }
     out
 }
 
-// `view_html`: one self-contained page.
-jet_cli_perf_view_html: fn(id: String, frames: String, flame: [String], timeline: [String]) -> String Never! {
+// `view_html`: one self-contained page, which a browser opens with no other
+// file or program.
+jet_cli_perf_view_html: fn(id: String, frames: String, flame: [String], timeline: [String], table: [String]) -> String Never! {
     flame_items: loop line in flame -> "<li>{jet_cli_perf_html_escape(line)}</li>"
     timeline_items: loop line in timeline -> "<li>{jet_cli_perf_html_escape(line)}</li>"
+    table_items: loop line in table -> "<li>{jet_cli_perf_html_escape(line)}</li>"
     lines: [String]{
         "<!doctype html>",
         "<html lang=\"en\"><head><meta charset=\"utf-8\"><title>jettrace {id}</title>",
@@ -220,6 +250,7 @@ jet_cli_perf_view_html: fn(id: String, frames: String, flame: [String], timeline
         "<p>schema {TRACE_SCHEMA} v{TRACE_VERSION} · frames={frames}</p>",
         "<section><h2>flamegraph</h2><ul id=\"flame\">{flame_items.join("")}</ul></section>",
         "<section><h2>timeline</h2><ul id=\"timeline\">{timeline_items.join("")}</ul></section>",
+        "<section><h2>per-line</h2><ul id=\"lines\">{table_items.join("")}</ul></section>",
         "<script>",
         "const flame=document.getElementById('flame');",
         "for (const li of flame.querySelectorAll('li')) {{",
@@ -703,12 +734,34 @@ jet_cli_perf_flame: fn(trace: CanonicalJSON) -> [String] Never! {
         rows.push("{sample.symbol} {sample.domain} {jet_cli_perf_bar(Int.parse(sample.ns) ?? 1)}")
     }
     if jet_cli_perf_profile_rows(trace) == .Ok(items) {
-        loop line in jet_cli_perf_flame_profile(items) -> rows.push(line)
+        profile := [JetCLIPerfProfileRow]{}
+        loop item in items {
+            if jet_cli_perf_profile_row(item) == .Val(row) -> profile.push(row)
+        }
+        loop line in jet_cli_perf_flame_profile(profile) -> rows.push(line)
     }
     if jet_cli_perf_browser_summary(trace) == .Val(browser) {
         rows.push("{browser.symbol} browser {jet_cli_perf_bar(browser.count)}")
     }
     rows
+}
+
+// One profile row as the flame graph reads it: its function's `path#name`,
+// its clock and samples, and, for a row that is one source line, the line
+// and its inclusive samples when it has them.
+JetCLIPerfProfileRow: struct {
+    symbol: String,
+    clock: String,
+    weight: Int,
+    line: Int?,
+    inclusive: Int?,
+}
+
+jet_cli_perf_profile_row: fn(item: CanonicalJSON) -> JetCLIPerfProfileRow? Never! {
+    symbol: jet_cli_perf_member_symbol(item) ?? return None
+    clock: jet_cli_perf_member_text(item, "clock") ?? return None
+    weight: jet_cli_perf_member_number(item, "sample_weight") ?? return None
+    Val(JetCLIPerfProfileRow{symbol: symbol, clock: clock, weight: weight, line: jet_cli_perf_row_line(item), inclusive: jet_cli_perf_member_number(item, "inclusive_count")})
 }
 
 // One function's profile rows on one clock: their samples, and those of
@@ -723,28 +776,25 @@ JetCLIPerfFlameFunction: struct {
 
 // The profile rows by function and clock, hottest first: each function's
 // samples and its share of its clock's, then its hottest lines, each with
-// its inclusive samples when the trace has them. At most 8 functions and 3
+// its inclusive samples when the row has them. At most 8 functions and 3
 // lines each.
-jet_cli_perf_flame_profile: fn(items: View<CanonicalJSON>) -> [String] Never! {
+jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow]) -> [String] Never! {
     functions := [JetCLIPerfFlameFunction]{}
-    loop item in items {
-        symbol: jet_cli_perf_member_symbol(item) ?? next
-        clock: jet_cli_perf_member_text(item, "clock") ?? next
-        weight: jet_cli_perf_member_number(item, "sample_weight") ?? next
+    loop row in rows.move() {
         found := -1
         loop (index, function) in functions {
-            if function.symbol == symbol && function.clock == clock {
+            if function.symbol == row.symbol && function.clock == row.clock {
                 found = index
                 break
             }
         }
         if found < 0 {
             found = functions.len()
-            functions.push(JetCLIPerfFlameFunction{symbol: symbol, clock: clock, weight: 0, lines: [{line: Int, weight: Int, inclusive: Int?}]{}})
+            functions.push(JetCLIPerfFlameFunction{symbol: row.symbol, clock: row.clock, weight: 0, lines: [{line: Int, weight: Int, inclusive: Int?}]{}})
         }
-        functions[found].weight += weight
-        if jet_cli_perf_row_line(item) == .Val(line) {
-            functions[found].lines.push({line: line, weight: weight, inclusive: jet_cli_perf_member_number(item, "inclusive_count")})
+        functions[found].weight += row.weight
+        if row.line == .Val(line) {
+            functions[found].lines.push({line: line, weight: row.weight, inclusive: row.inclusive})
         }
     }
     functions.sort_by(fn(left: JetCLIPerfFlameFunction, right: JetCLIPerfFlameFunction) { right.weight <=> left.weight })
@@ -777,6 +827,113 @@ jet_cli_perf_row_line: fn(row: CanonicalJSON) -> Int? Never! {
     end: jet_cli_perf_member_number(fields[at].value, "end_line") ?? return None
     if start != end -> return None
     Val(start)
+}
+
+// Per-line sample totals: each row one function's CPU-time samples at one
+// source line, its file and function as places in `names`, whose first is
+// "" as in pprof's string table (jet_cli_perf_pprof_string). A trace's come
+// from its profile (jet_cli_perf_line_totals), an export's from the export
+// (PeerExport.jet jet_cli_perf_import).
+JetCLIPerfLineTotals: struct {
+    names: [String],
+    rows: [JetCLIPerfLineTotal],
+}
+
+JetCLIPerfLineTotal: struct {
+    path: Int,
+    line: Int,
+    function: Int,
+    samples: Int,
+}
+
+// The most lines the per-line table shows.
+JET_CLI_PERF_LINE_ROWS: 24
+
+// The trace's `cpu` profile rows as per-line totals: each row's own samples
+// at its first line, in the rows' order, which the pprof and OTLP exports
+// carry as they are.
+jet_cli_perf_line_totals: fn(trace: CanonicalJSON) -> JetCLIPerfLineTotals Never! {
+    totals := JetCLIPerfLineTotals{names: [String]{""}, rows: [JetCLIPerfLineTotal]{}}
+    rows: jet_cli_perf_profile_rows(trace) ?? return totals
+    loop row in rows {
+        if (jet_cli_perf_member_text(row, "clock") ?? "") != "cpu" -> next
+        samples: jet_cli_perf_member_number(row, "sample_count") ?? next
+        fields: jettrace_object_view(row, "jettrace row") ?? next
+        symbol_at: jet_cli_perf_key(fields, "symbol") ?? next
+        symbol: jettrace_object_view(fields[symbol_at].value, "symbol") ?? next
+        source_at: jet_cli_perf_key(fields, "source") ?? next
+        line: jet_cli_perf_member_number(fields[source_at].value, "start_line") ?? next
+        path: jet_cli_perf_field_text(symbol, "path") ?? next
+        name: jet_cli_perf_field_text(symbol, "name") ?? next
+        path_at: jet_cli_perf_pprof_string(totals.names, path)
+        name_at: jet_cli_perf_pprof_string(totals.names, name)
+        totals.rows.push(JetCLIPerfLineTotal{path: path_at, line: line, function: name_at, samples: samples})
+    }
+    totals
+}
+
+// The per-line table: each function's samples at each source line, the
+// rows of one function and line summed, hottest first, then by file, line
+// and function, at most JET_CLI_PERF_LINE_ROWS of them
+// (`  main.jet:5 spin samples=812`). Empty when no line has a sample.
+jet_cli_perf_line_table: fn(totals: JetCLIPerfLineTotals) -> [String] Never! {
+    // Each distinct line's first row, and the samples of all of its rows.
+    firsts := [Int]{}
+    sums := [Int]{}
+    loop (index, row) in totals.rows {
+        found := -1
+        loop (place, first) in firsts {
+            known: totals.rows[first]
+            if known.line == row.line && known.path == row.path && known.function == row.function {
+                found = place
+                break
+            }
+        }
+        if found >= 0 {
+            sums[found] = sums[found] + row.samples
+            next
+        }
+        firsts.push(index)
+        sums.push(row.samples)
+    }
+    // The places in `firsts` with samples, in the table's order.
+    order := [Int]{}
+    loop place in 0..<firsts.len() {
+        if sums[place] <= 0 -> next
+        spot := order.len()
+        loop spot > 0 && jet_cli_perf_line_before(totals, firsts[place], sums[place], firsts[order[spot - 1]], sums[order[spot - 1]]) {
+            spot -= 1
+        }
+        order.insert(spot, place)
+    }
+    lines := [String]{}
+    loop (at, place) in order {
+        if at == JET_CLI_PERF_LINE_ROWS {
+            lines.push("  ({order.len() - at} more lines)")
+            break
+        }
+        row: totals.rows[firsts[place]]
+        lines.push("  {totals.names[row.path]}:{row.line} {totals.names[row.function]} samples={sums[place]}")
+    }
+    lines
+}
+
+// Whether the line of row `left`, with `left_samples`, comes before that of
+// row `right` in the per-line table.
+jet_cli_perf_line_before: fn(totals: JetCLIPerfLineTotals, left: Int, left_samples: Int, right: Int, right_samples: Int) -> Bool Never! {
+    if left_samples != right_samples -> return left_samples > right_samples
+    a: totals.rows[left]
+    b: totals.rows[right]
+    if totals.names[a.path] != totals.names[b.path] {
+        return totals.names[a.path] < totals.names[b.path]
+    }
+    if a.line != b.line -> return a.line < b.line
+    totals.names[a.function] < totals.names[b.function]
+}
+
+// Per-line totals as the flame graph's `cpu` rows.
+jet_cli_perf_total_rows: fn(totals: JetCLIPerfLineTotals) -> [JetCLIPerfProfileRow] Never! {
+    loop row in totals.rows -> JetCLIPerfProfileRow{symbol: "{totals.names[row.path]}#{totals.names[row.function]}", clock: "cpu", weight: row.samples, line: Val(row.line), inclusive: None}
 }
 
 // `ascii_timeline`.

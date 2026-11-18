@@ -1,0 +1,35 @@
+# `jet perf export --pprof` and `--otel` carry the profile's per-line totals:
+# `jet perf view` of either export prints the same per-line table as the
+# view of the trace itself, with jet alone on the way.
+requires: os-name:linux
+fixture: PerfView.fixture
+env: NO_COLOR=1
+step: jet perf run main.jet --out {work}/spin.jettrace
+exit: 0
+stdout: ~ "spun=" # the program ran to its end
+step: jet perf view {work}/spin.jettrace
+exit: 0
+stdout: ~ "per-line\n" # the per-line table
+capture: lines = text stdout.after_first("per-line\n")
+cap:lines: ~ " spin_hot_loop samples=" # the hot function's lines have samples
+step: jet perf export {work}/spin.jettrace --pprof
+exit: 0
+stdout: ~ "spin.pb.gz" # the profile lands beside the trace
+file: spin.pb.gz is-file
+step: jet perf view {work}/spin.pb.gz
+exit: 0
+stdout: ~ "export pprof " # the view names what it read
+stdout: ~ "comment jet perf " # the profile's comment says what it leaves out
+capture: pprof_lines = text stdout.after_first("per-line\n")
+cap:pprof_lines: = "{cap:lines}"
+step: jet perf export {work}/spin.jettrace --otel --out {work}/trace.otlp.json
+exit: 0
+stdout: ~ "trace.otlp.json" # the export names the file it wrote
+file: trace.otlp.json ~ "\"resourceSpans\":[" # the spans' export request
+file: trace.otlp.json ~ "\"name\":\"jet.profile.samples\"" # the per-line totals' export request
+step: jet perf view {work}/trace.otlp.json
+exit: 0
+stdout: ~ "export otlp " # the view names what it read
+stdout: ~ "] main.jet#spin\n" # the core.log span on the timeline
+capture: otlp_lines = text stdout.after_first("per-line\n")
+cap:otlp_lines: = "{cap:lines}"

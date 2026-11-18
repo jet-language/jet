@@ -41,11 +41,11 @@ stdout: ~ "--chrome" # original predicate
 stdout: !~ "no pprof/otel/chrome payloads" # original predicate
 step: jet perf export session.jettrace --pprof
 exit: 0
-stdout: ~ "\"kind\":\"jet.trace.pprof-projection\"" # original predicate
-stdout: ~ "\"loss\":" # original predicate
+stdout: ~ "Profile: session.pb.gz" # the gzip profile.proto lands beside the trace
+file: session.pb.gz is-file
 step: jet perf export session.jettrace --otel
 exit: 0
-stdout: ~ "otel-projection" # original predicate
+stdout: ~ "\"resourceSpans\":[" # an OTLP/JSON export request
 step: jet perf export session.jettrace --chrome
 exit: 0
 stdout: ~ "chrome-projection" # original predicate

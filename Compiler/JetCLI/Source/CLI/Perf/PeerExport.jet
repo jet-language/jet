@@ -1,0 +1,497 @@
+// `jet perf export --pprof` and `--otel`: a verified `.jettrace` in formats
+// other tools read, and `jet perf view` of either read back. `--pprof` is
+// pprof's gzip-compressed `profile.proto`. `--otel` is OTLP/JSON, one export
+// request a line as an OpenTelemetry collector's file exporter writes them:
+// the spans' `ExportTraceServiceRequest` (core.log otlp_traces_json), then
+// the per-line totals' `ExportMetricsServiceRequest`. Both carry the
+// profile's per-line totals (Command.jet jet_cli_perf_line_totals), which
+// `jet perf view` of the export shows as the trace's own view does.
+use {
+    perf_gzip: core.archive.gzip
+    perf_files: core.files
+    perf_json: core.encoding.json
+    perf_log: core.log
+    core.encoding.[Dyn]
+    jet_foundation.[CanonicalJSON, RecordCursor, artifact_extension, foundation_json_integer, record_put_str, record_put_uvarint, record_read_len, record_read_uvarint, trace_id]
+}
+
+// The CPU-time sampling period, one sample per millisecond of process CPU
+// (the runtime's PerfSamples.jet), in pprof's `period` units.
+JET_CLI_PERF_PPROF_PERIOD_NS: 1000000
+
+// A protobuf field's key: its number and wire type (0 varint, 2 bytes).
+jet_cli_perf_pb_key: fn(out: &[U8], field: Int, wire: Int) Never! {
+    record_put_uvarint(out, field * 8 + wire)
+}
+
+jet_cli_perf_pb_int: fn(out: &[U8], field: Int, value: Int) Never! {
+    jet_cli_perf_pb_key(out, field, 0)
+    record_put_uvarint(out, value)
+}
+
+jet_cli_perf_pb_message: fn(out: &[U8], field: Int, body: [U8]) Never! {
+    jet_cli_perf_pb_key(out, field, 2)
+    record_put_uvarint(out, body.len())
+    loop byte in body -> out.push(byte)
+}
+
+jet_cli_perf_pb_text: fn(out: &[U8], field: Int, text: String) Never! {
+    jet_cli_perf_pb_key(out, field, 2)
+    record_put_str(out, text)
+}
+
+// A packed repeated varint field.
+jet_cli_perf_pb_packed: fn(out: &[U8], field: Int, values: [Int]) Never! {
+    body := [U8]{}
+    loop value in values -> record_put_uvarint(body, value)
+    jet_cli_perf_pb_message(out, field, body)
+}
+
+// The index of `text` in pprof's string table `strings`, whose first entry
+// is "", adding it when it is new.
+jet_cli_perf_pprof_string: fn(strings: &[String], text: &&String) -> Int Never! {
+    loop (index, known) in strings {
+        if known == text -> return index
+    }
+    strings.push(text)
+    strings.len() - 1
+}
+
+// A pprof `ValueType`: its type and unit.
+jet_cli_perf_pprof_value_type: fn(strings: &[String], kind: &&String, unit: &&String) -> [U8] Never! {
+    body := [U8]{}
+    jet_cli_perf_pb_int(body, 1, jet_cli_perf_pprof_string(strings, kind))
+    jet_cli_perf_pb_int(body, 2, jet_cli_perf_pprof_string(strings, unit))
+    body
+}
+
+// The trace's CPU-time profile as pprof's `profile.proto`, uncompressed. Each
+// per-line total is a sample whose stack is one location, the total's
+// function at its line, valued by its samples. A row's inclusive samples,
+// allocations and counter events, and the stacks they came from, are not
+// carried, as the profile's comment says.
+jet_cli_perf_pprof_profile: fn(trace: CanonicalJSON) -> [U8] Never! {
+    totals: jet_cli_perf_line_totals(trace)
+    samples := [U8]{}
+    // Each total is its own location.
+    locations := [U8]{}
+    location := 0
+    functions := [U8]{}
+    // Each function's name and file, as places in the totals' names.
+    known := [{name: Int, path: Int}]{}
+    loop row in totals.rows {
+        function := 0
+        loop (index, seen) in known {
+            if seen.name == row.function && seen.path == row.path {
+                function = index + 1
+                break
+            }
+        }
+        if function == 0 {
+            body := [U8]{}
+            jet_cli_perf_pb_int(body, 1, known.len() + 1)
+            jet_cli_perf_pb_int(body, 2, row.function)
+            jet_cli_perf_pb_int(body, 3, row.function)
+            jet_cli_perf_pb_int(body, 4, row.path)
+            jet_cli_perf_pb_message(functions, 5, body)
+            known.push({name: row.function, path: row.path})
+            function = known.len()
+        }
+        location += 1
+        line_row := [U8]{}
+        jet_cli_perf_pb_int(line_row, 1, function)
+        jet_cli_perf_pb_int(line_row, 2, row.line)
+        place := [U8]{}
+        jet_cli_perf_pb_int(place, 1, location)
+        jet_cli_perf_pb_message(place, 4, line_row)
+        jet_cli_perf_pb_message(locations, 4, place)
+        sample := [U8]{}
+        jet_cli_perf_pb_packed(sample, 1, [Int]{location})
+        jet_cli_perf_pb_packed(sample, 2, [Int]{row.samples})
+        jet_cli_perf_pb_message(samples, 2, sample)
+    }
+    // The functions name places in the totals' names, which the string
+    // table starts with.
+    strings := totals.names.move()
+    out := [U8]{}
+    jet_cli_perf_pb_message(out, 1, jet_cli_perf_pprof_value_type(strings, "samples", "count"))
+    loop byte in samples -> out.push(byte)
+    loop byte in locations -> out.push(byte)
+    loop byte in functions -> out.push(byte)
+    period_type: jet_cli_perf_pprof_value_type(strings, "cpu", "nanoseconds")
+    comment: jet_cli_perf_pprof_string(strings, "jet perf {trace_id(trace) ?? "trace"}: one location per source line; inclusive samples, allocations and counter events are not carried")
+    loop text in strings -> jet_cli_perf_pb_text(out, 6, text)
+    jet_cli_perf_pb_message(out, 11, period_type)
+    jet_cli_perf_pb_int(out, 12, JET_CLI_PERF_PPROF_PERIOD_NS)
+    jet_cli_perf_pb_packed(out, 13, [Int]{comment})
+    out
+}
+
+// `value` as 16 lowercase hex digits, as OTLP spells a span id.
+jet_cli_perf_hex16: fn(value: Int) -> String Never! {
+    digits: "0123456789abcdef"
+    out := ""
+    loop place in 0..<16 {
+        nibble: (value >> ((15 - place) * 4)) & 15
+        out = "{out}{digits.slice(nibble..<nibble + 1)}"
+    }
+    out
+}
+
+// The trace's captured spans and browser rows as one OTLP/JSON export
+// request, then on the next line its per-line totals as another
+// (jet_cli_perf_otlp_metrics). Its trace id is the first 32 hex digits of
+// the trace's id. A span's id is its row's place among the rows, and a task
+// span's parent is the span of its parent task. The span's kind, task,
+// awaited task and spawn line are `jet.*` attributes. Times count from the
+// session's start, since a trace records no wall-clock origin.
+jet_cli_perf_otlp: fn(trace: CanonicalJSON) -> String Never! {
+    id: trace_id(trace) ?? ""
+    trace_hex: if id.count_bytes() >= 32 -> id.slice(0..<32) else -> "00000000000000000000000000000001"
+    spans := [perf_log.TraceSpan]{}
+    rows := 0
+    if jet_cli_perf_rows(trace, "spans") == .Ok(items) {
+        rows = items.len()
+        // Each task's span, so a child's parent resolves in any row order.
+        tasks := [Int:Int]{}
+        loop (index, item) in items {
+            if (jet_cli_perf_member_text(item, "kind") ?? "") != "task_observed" -> next
+            if jet_cli_perf_member_number(item, "task_id") == .Val(task) -> tasks[task] = index + 1
+        }
+        loop (index, item) in items {
+            if (jet_cli_perf_member_text(item, "status") ?? "") != "captured" -> next
+            start: jet_cli_perf_member_number(item, "start_ns") ?? next
+            end: jet_cli_perf_member_number(item, "end_ns") ?? next
+            kind: jet_cli_perf_member_text(item, "kind") ?? "span"
+            attributes := [perf_log.LogField]{perf_log.field("jet.kind", kind)}
+            loop key in ([String]{"task_id", "awaited_task_id", "spawn_line"}) {
+                if jet_cli_perf_member_integer(item, key) == .Val(digits) {
+                    attributes.push(perf_log.field("jet.{key}", digits))
+                }
+            }
+            parent := ""
+            if kind == "task_observed" && jet_cli_perf_member_number(item, "parent_task_id") == .Val(task) && tasks.has_key(task) {
+                parent = jet_cli_perf_hex16(tasks[task])
+            }
+            spans.push(perf_log.TraceSpan{trace_id: trace_hex, span_id: jet_cli_perf_hex16(index + 1), parent_span_id: parent, name: jet_cli_perf_member_symbol(item) ?? kind, kind: .Internal, start_ns: start, end_ns: end, attributes: attributes, status: .Unset})
+        }
+    }
+    if jet_cli_perf_rows(trace, "browser") == .Ok(items) {
+        loop (index, item) in items {
+            start: jet_cli_perf_member_number(item, "start_ns") ?? next
+            duration: jet_cli_perf_member_number(item, "duration_ns") ?? next
+            attributes: [perf_log.LogField]{perf_log.field("jet.kind", "browser")}
+            spans.push(perf_log.TraceSpan{trace_id: trace_hex, span_id: jet_cli_perf_hex16(rows + index + 1), parent_span_id: "", name: jet_cli_perf_member_symbol(item) ?? "browser", kind: .Internal, start_ns: start, end_ns: start + duration, attributes: attributes, status: .Unset})
+        }
+    }
+    "{perf_log.otlp_traces_json("jet perf", spans)}\n{jet_cli_perf_otlp_metrics(trace)}"
+}
+
+// The trace's per-line totals as one OTLP/JSON metrics export request: the
+// cumulative sum `jet.profile.samples`, a point for each total, whose
+// attributes name its file, line and function with OpenTelemetry's `code.*`
+// attributes.
+jet_cli_perf_otlp_metrics: fn(trace: CanonicalJSON) -> String Never! {
+    totals: jet_cli_perf_line_totals(trace)
+    points := [String]{}
+    loop row in totals.rows {
+        path: "{{\"key\":\"code.file.path\",\"value\":{{\"stringValue\":{jet_cli_json_string(totals.names[row.path])}}}}}"
+        line: "{{\"key\":\"code.line.number\",\"value\":{{\"intValue\":\"{row.line}\"}}}}"
+        function: "{{\"key\":\"code.function.name\",\"value\":{{\"stringValue\":{jet_cli_json_string(totals.names[row.function])}}}}}"
+        points.push("{{\"attributes\":[{path},{line},{function}],\"asInt\":\"{row.samples}\"}}")
+    }
+    resource: "{{\"attributes\":[{{\"key\":\"service.name\",\"value\":{{\"stringValue\":\"jet perf\"}}}}]}}"
+    metric: "{{\"name\":\"jet.profile.samples\",\"unit\":\"{{sample}}\",\"description\":\"CPU-time samples by function and source line\",\"sum\":{{\"aggregationTemporality\":2,\"isMonotonic\":true,\"dataPoints\":[{points.join(",")}]}}}}"
+    "{{\"resourceMetrics\":[{{\"resource\":{resource},\"scopeMetrics\":[{{\"scope\":{{\"name\":\"jet perf\"}},\"metrics\":[{metric}]}}]}}]}}"
+}
+
+// A pprof or OTLP/JSON export read back for `jet perf view`: its format, its
+// per-line totals, its timeline and what it says of itself (a pprof
+// profile's comments).
+JetCLIPerfImport: struct {
+    format: String,
+    totals: JetCLIPerfLineTotals,
+    timeline: [String],
+    notes: [String],
+}
+
+// The export at `path`: pprof's `profile.proto` (`.pb.gz` gzip-compressed,
+// `.pb` not) or OTLP/JSON (`.json`).
+jet_cli_perf_import: fn(path: String) -[FS]> JetCLIPerfImport JetCLIReadError! {
+    if !path.ends_with(".pb.gz") && !path.ends_with(".pb") && !path.ends_with(".json") {
+        return Err(jet_cli_read_error("`jet perf view` reads a {artifact_extension()} trace, a pprof `.pb.gz` or `.pb` profile, or an OTLP/JSON `.json` export"))
+    }
+    bytes: perf_files.read_bytes(path) ?? return Err(jet_cli_read_error("cannot read {path}: {jet_cli_io_error_text(err)}"))
+    if path.ends_with(".json") {
+        text: String.from_bytes(bytes) ?? return Err(jet_cli_read_error("`{path}` is not UTF-8"))
+        return jet_cli_perf_otlp_read(text)
+    }
+    if !perf_gzip.is_gzip(bytes) -> return jet_cli_perf_pprof_read(bytes)
+    raw: perf_gzip.decompress(bytes) ?? return Err(jet_cli_read_error("`{path}` is not a valid gzip file"))
+    jet_cli_perf_pprof_read(raw)
+}
+
+// A pprof `profile.proto`: each sample's first value at the innermost line
+// of its leaf location, and the profile's comments.
+jet_cli_perf_pprof_read: fn(bytes: [U8]) -> JetCLIPerfImport JetCLIReadError! {
+    strings := [String]{}
+    // Each sample's leaf location and first value.
+    sampled := [{location: Int, value: Int}]{}
+    // Each location's function and line, each function's name and file.
+    location_function := [Int:Int]{}
+    location_line := [Int:Int]{}
+    function_name := [Int:Int]{}
+    function_file := [Int:Int]{}
+    comments := [Int]{}
+    cursor := RecordCursor{at: 0, end: bytes.len(), problem: None}
+    loop cursor.at < cursor.end && cursor.problem == None {
+        key: record_read_uvarint(bytes, cursor)
+        field: key >> 3
+        wire: key & 7
+        if field == 13 {
+            loop at in jet_cli_perf_pb_ints(bytes, cursor, wire) -> comments.push(at)
+            next
+        }
+        if wire != 2 || (field != 2 && field != 4 && field != 5 && field != 6) {
+            jet_cli_perf_pb_skip(bytes, cursor, wire)
+            next
+        }
+        size: record_read_len(bytes, cursor)
+        outer: cursor.end
+        cursor.end = cursor.at + size
+        if field == {
+            2 -> sampled.push(jet_cli_perf_pprof_sample(bytes, cursor))
+            4 -> jet_cli_perf_pprof_location(bytes, cursor, location_function, location_line)
+            5 -> jet_cli_perf_pprof_function(bytes, cursor, function_name, function_file)
+            else -> {
+                strings.push(String.from_bytes(bytes.slice(cursor.at, cursor.end)) ?? return Err(jet_cli_read_error("a pprof string is not UTF-8")))
+                cursor.at = cursor.end
+            }
+        }
+        cursor.end = outer
+    }
+    if cursor.problem == .Val(problem) {
+        return Err(jet_cli_read_error("the pprof profile is malformed: {problem}"))
+    }
+    malformed: jet_cli_read_error("the pprof profile names a location, function or string it does not hold")
+    rows := [JetCLIPerfLineTotal]{}
+    loop sample in sampled {
+        if !location_function.has_key(sample.location) -> return Err(malformed)
+        function: location_function[sample.location]
+        if !function_name.has_key(function) -> return Err(malformed)
+        name: function_name[function]
+        file: function_file[function]
+        if name >= strings.len() || file >= strings.len() -> return Err(malformed)
+        rows.push(JetCLIPerfLineTotal{path: file, line: location_line[sample.location], function: name, samples: sample.value})
+    }
+    notes := [String]{}
+    loop at in comments {
+        if at >= strings.len() -> return Err(malformed)
+        notes.push("comment {strings[at]}")
+    }
+    Ok(JetCLIPerfImport{format: "pprof", totals: JetCLIPerfLineTotals{names: strings, rows: rows}, timeline: [String]{}, notes: notes})
+}
+
+// A pprof `Sample`: its leaf location (its first) and its first value.
+jet_cli_perf_pprof_sample: fn(bytes: [U8], cursor: &RecordCursor) -> {location: Int, value: Int} Never! {
+    location := -1
+    value := 0
+    valued := false
+    loop cursor.at < cursor.end && cursor.problem == None {
+        key: record_read_uvarint(bytes, cursor)
+        field: key >> 3
+        if field != 1 && field != 2 {
+            jet_cli_perf_pb_skip(bytes, cursor, key & 7)
+            next
+        }
+        values: jet_cli_perf_pb_ints(bytes, cursor, key & 7)
+        if field == 1 && location < 0 && values.len() > 0 -> location = values[0]
+        if field == 2 && !valued && values.len() > 0 {
+            value = values[0]
+            valued = true
+        }
+    }
+    {location: location, value: value}
+}
+
+// A pprof `Location`: its id, and the function and line of its first
+// `Line`, the innermost of the functions inlined there.
+jet_cli_perf_pprof_location: fn(bytes: [U8], cursor: &RecordCursor, functions: &[Int:Int], lines: &[Int:Int]) Never! {
+    id := 0
+    function := 0
+    line := 0
+    lined := false
+    loop cursor.at < cursor.end && cursor.problem == None {
+        key: record_read_uvarint(bytes, cursor)
+        if key == {
+            8 -> id = record_read_uvarint(bytes, cursor)
+            34 -> {
+                size: record_read_len(bytes, cursor)
+                outer: cursor.end
+                cursor.end = cursor.at + size
+                loop cursor.at < cursor.end && cursor.problem == None {
+                    inner: record_read_uvarint(bytes, cursor)
+                    value: if inner & 7 == 0 -> record_read_uvarint(bytes, cursor) else -> 0
+                    if inner & 7 != 0 -> jet_cli_perf_pb_skip(bytes, cursor, inner & 7)
+                    if !lined && inner == 8 -> function = value
+                    if !lined && inner == 16 -> line = value
+                }
+                cursor.end = outer
+                lined = true
+            }
+            else -> jet_cli_perf_pb_skip(bytes, cursor, key & 7)
+        }
+    }
+    if lined {
+        functions[id] = function
+        lines[id] = line
+    }
+}
+
+// A pprof `Function`: its id, name and file, as places in the string table.
+jet_cli_perf_pprof_function: fn(bytes: [U8], cursor: &RecordCursor, names: &[Int:Int], files: &[Int:Int]) Never! {
+    id := 0
+    name := 0
+    file := 0
+    loop cursor.at < cursor.end && cursor.problem == None {
+        key: record_read_uvarint(bytes, cursor)
+        if key == {
+            8 -> id = record_read_uvarint(bytes, cursor)
+            16 -> name = record_read_uvarint(bytes, cursor)
+            32 -> file = record_read_uvarint(bytes, cursor)
+            else -> jet_cli_perf_pb_skip(bytes, cursor, key & 7)
+        }
+    }
+    names[id] = name
+    files[id] = file
+}
+
+// A repeated varint field's values at `cursor`: packed (wire type 2) or
+// one (wire type 0).
+jet_cli_perf_pb_ints: fn(bytes: [U8], cursor: &RecordCursor, wire: Int) -> [Int] Never! {
+    values := [Int]{}
+    if wire == 0 {
+        values.push(record_read_uvarint(bytes, cursor))
+        return values
+    }
+    if wire != 2 {
+        jet_cli_perf_pb_skip(bytes, cursor, wire)
+        return values
+    }
+    size: record_read_len(bytes, cursor)
+    end: cursor.at + size
+    loop cursor.at < end && cursor.problem == None {
+        values.push(record_read_uvarint(bytes, cursor))
+    }
+    if cursor.at > end && cursor.problem == None {
+        cursor.problem = Val("a packed field overruns its length")
+    }
+    values
+}
+
+// Steps `cursor` past a field's value of wire type `wire`.
+jet_cli_perf_pb_skip: fn(bytes: [U8], cursor: &RecordCursor, wire: Int) Never! {
+    size: if wire == {
+        0 -> {
+            _: record_read_uvarint(bytes, cursor)
+            0
+        }
+        1 -> 8
+        2 -> record_read_len(bytes, cursor)
+        5 -> 4
+        else -> {
+            if cursor.problem == None {
+                cursor.problem = Val("wire type {wire} is not a protobuf one")
+            }
+            0
+        }
+    }
+    if size > cursor.end - cursor.at {
+        if cursor.problem == None -> cursor.problem = Val("a field overruns its message")
+        return
+    }
+    cursor.at += size
+}
+
+// OTLP/JSON, one export request a line: each span's
+// `[start..end] name` (`[start+duration] name` for a browser row's) on the
+// timeline, at most 16, and each `jet.profile.samples` point a per-line
+// total.
+jet_cli_perf_otlp_read: fn(text: String) -> JetCLIPerfImport JetCLIReadError! {
+    names := [String]{""}
+    rows := [JetCLIPerfLineTotal]{}
+    timeline := [String]{}
+    spans := 0
+    loop line in text.split("\n") {
+        if line.trim() == "" -> next
+        request: perf_json.parse(line) ?? return Err(jet_cli_read_error("an OTLP/JSON line is not JSON"))
+        if jet_cli_perf_optional(request, "resourceSpans") == .Val(resources) {
+            loop resource in jet_cli_perf_array(resources) {
+                loop scope in jet_cli_perf_array(jet_cli_perf_field(resource, "scopeSpans")) {
+                    loop span in jet_cli_perf_array(jet_cli_perf_field(scope, "spans")) {
+                        spans += 1
+                        if timeline.len() >= 16 -> next
+                        name: jet_cli_perf_text(jet_cli_perf_field(span, "name"))
+                        start: jet_cli_perf_otlp_int(jet_cli_perf_field(span, "startTimeUnixNano"))
+                        end: jet_cli_perf_otlp_int(jet_cli_perf_field(span, "endTimeUnixNano"))
+                        browser := false
+                        if jet_cli_perf_otlp_attribute(span, "jet.kind") == .Val(kind) {
+                            browser = jet_cli_perf_text(jet_cli_perf_field(kind, "stringValue")) == "browser"
+                        }
+                        timeline.push(if browser -> "[{start}+{end - start}] {name}" else -> "[{start}..{end}] {name}")
+                    }
+                }
+            }
+        }
+        if jet_cli_perf_optional(request, "resourceMetrics") == .Val(resources) {
+            loop resource in jet_cli_perf_array(resources) {
+                loop scope in jet_cli_perf_array(jet_cli_perf_field(resource, "scopeMetrics")) {
+                    loop metric in jet_cli_perf_array(jet_cli_perf_field(scope, "metrics")) {
+                        if jet_cli_perf_text(jet_cli_perf_field(metric, "name")) != "jet.profile.samples" {
+                            next
+                        }
+                        sum: jet_cli_perf_field(metric, "sum")
+                        loop point in jet_cli_perf_array(jet_cli_perf_field(sum, "dataPoints")) {
+                            path: jet_cli_perf_otlp_text(point, "code.file.path")
+                            function: jet_cli_perf_otlp_text(point, "code.function.name")
+                            at: jet_cli_perf_otlp_attribute(point, "code.line.number") ?? return Err(jet_cli_read_error("a jet.profile.samples point has no code.line.number"))
+                            number: jet_cli_perf_otlp_int(jet_cli_perf_field(at, "intValue"))
+                            samples: jet_cli_perf_otlp_int(jet_cli_perf_field(point, "asInt"))
+                            path_at: jet_cli_perf_pprof_string(names, path)
+                            function_at: jet_cli_perf_pprof_string(names, function)
+                            rows.push(JetCLIPerfLineTotal{path: path_at, line: number, function: function_at, samples: samples})
+                        }
+                    }
+                }
+            }
+        }
+    }
+    notes := [String]{"spans count={spans}"}
+    if spans > timeline.len() -> notes.push("timeline shows the first {timeline.len()} spans")
+    Ok(JetCLIPerfImport{format: "otlp", totals: JetCLIPerfLineTotals{names: names, rows: rows}, timeline: timeline, notes: notes})
+}
+
+// The value (an OTLP `AnyValue`) of the attribute `key` of `owner`.
+jet_cli_perf_otlp_attribute: fn(owner: Dyn, key: String) -> Dyn? JetCLIReadError! {
+    attributes: jet_cli_perf_optional(owner, "attributes") ?? return Ok(None)
+    loop attribute in jet_cli_perf_array(attributes) {
+        if jet_cli_perf_text(jet_cli_perf_field(attribute, "key")) == key {
+            return Ok(Val(jet_cli_perf_field(attribute, "value")))
+        }
+    }
+    Ok(None)
+}
+
+// The text of the string attribute `key` of `owner`.
+jet_cli_perf_otlp_text: fn(owner: Dyn, key: String) -> String JetCLIReadError! {
+    value: jet_cli_perf_otlp_attribute(owner, key) ?? return Err(jet_cli_read_error("a jet.profile.samples point has no {key}"))
+    jet_cli_perf_text(jet_cli_perf_field(value, "stringValue"))
+}
+
+// An OTLP integer, which OTLP/JSON writes as a decimal string.
+jet_cli_perf_otlp_int: fn(value: Dyn) -> Int JetCLIReadError! {
+    if value == .Text(digits) {
+        return Ok(Int.parse(digits) ?? return Err(jet_cli_read_error("an OTLP integer `{digits}` is not decimal")))
+    }
+    Ok(foundation_json_integer(value) ?? return Err(jet_cli_read_error("an OTLP integer is neither a string nor a number")))
+}
