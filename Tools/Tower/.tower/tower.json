@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112200,
+    "rev": 112202,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -82602,8 +82602,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T09:48:08.492Z",
-      "updated": "2026-11-18T08:03:01.490Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-18T08:39:28.746Z",
+      "updatedBy": "Main",
       "criteriaLastN": 4
     },
     {
@@ -174676,41 +174676,48 @@
       "id": "D-CALLBACK-ONCE1",
       "cardId": "c08zzpo5",
       "group": "language",
-      "title": "One one-shot function type, OneShot<fn(…)>, for helpers, fields, returns and tasks",
-      "situation": "A lambda that moves a capture may run at most once. Jet accepts some local calls but lacks a general consuming function type. A proposed OneShot type would cover helpers, fields, returns and tasks. Explicit-record models exercise ownership rules, while real conversions and scoped adaptation remain unbuilt and lowering defects need repair.",
-      "gist": "Should one OneShot function type carry run-once callbacks through helpers, fields, returns and tasks?",
-      "lesson": "A one-shot callback may run zero times or once. Its type says so, so a helper, a field or a task can hold it. Calling it uses it up, exactly as Jet already checks for a local one-shot lambda.",
-      "explainer": "An owned helper takes `done: &&OneShot<F>`; invocation consumes that permission. Forwarding and renaming must not reset it.\n\nThe proposed same contract covers fields, returns and tasks. An unused callback cleans up ordinary captures; SingleUse duties remain mandatory.\n\nA retained repeatable fn or Unique<fn> adapts through a temporary OneShot borrowing its invocation capability. The temporary is consumed, not the original owner; existing loan lifetime and exclusivity checks forbid escape or overlap. This conversion is proposed, not implemented; Shared is not required.",
-      "story": "Ravi's helper finishes a job and hands the job's Log to keep. Later he queues jobs with their completion callbacks and runs them on a task.",
-      "inWild": "Rust's FnOnce is one trait for one-shot closures in parameters, fields and threads: Option::map, Box<dyn FnOnce> and thread::spawn all use it. Kotlin's callsInPlace contract covers only the synchronous case.",
-      "detail": "Independent gate-p289 reruns of probes/once-r5: owner-pass and owner-branch return 8 but each closes its resource twice. places-field-return-task returns 9 with two closes. places-task-local fails E0121. These are explicit generic environment records with .call methods, not the proposed erased OneShot function type.\n\nowner-second-helper, owner-alias, owner-forward-twice, owner-loop and places-field-twice fail E0121; owner-borrowed fails E0201. zero-call closes once; zero-call-error exercises optional early return, not a failable error, panic or cancellation. SingleUse omission fails E0140; its invoked version prints 8.\n\nloan-repeatable-resource prints 8, 9, 2 and closes once through an ordinary borrowed fn helper. Store/task loan probes fail E0201/E0120 today. They neither implement a OneShot adapter nor rule out lifetime-checked scoped callable loans. Rust's borrowed repeatable FnOnce implementations are a strong comparison.\n\n#3645 c14-c16 track duplicate cleanup, generic missing-move checking and named task-local transfer. OneShot with copyable captures must remain noncopyable even if FNVAL makes ordinary function fields copyable; today's record model cannot establish that future type law.\n\nI1 requires exact cleanup and crossing proofs. I8 requires one consuming-call fact across all positions, not a second wrapper runtime. Preserve D-MOVE-SIGIL1, D-CALLSITE-MARK2, D-FNVAL-WRITE1, D-CONC-CROSS1 and D-SHARED-CYCLE2. Core Once is a synchronization cell, not this callable type.",
+      "title": "One #Once mark on function types, for helpers, fields, returns and tasks",
+      "situation": "A lambda that moves a capture may run at most once. Jet checks that locally (E0121) but cannot pass such a lambda on: no helper, field, return or task can say \"I call this at most once\". r3 (owner, 2026-11-18) drops the OneShot<F> wrapper type: the owner asked why a named marker cannot do the job, whether a type is the best carrier, and disliked the name. A marker can. The fact must belong to the function's type, as its effect row does, but it needs no wrapper type. Jet already writes a marker before a type (`#PII String`), and the p294 compiler parses `#PII fn(Int) -> Int` as a parameter, field, return, list element and type argument today. #Once uses that spelling at its own marker site for function types, so value tags keep their one meaning.",
+      "gist": "Should a #Once mark on a function type carry run-once callbacks through helpers, fields, returns and tasks?",
+      "lesson": "A function type marked #Once may run zero times or once. The mark travels with the value: helpers, fields, returns and tasks can hold it, and calling it uses it up, exactly as Jet already checks for a local one-shot lambda. Any function fits a #Once slot; only a #Once value is limited to one call.",
+      "explainer": "`done: #Once fn(Int) -> Int` is a function type with the compiler-known #Once mark. It is written where value tags are written, but registered at its own function-type site. It is part of the function's type, as the effect row is, not an erased dataflow tag, so #Scrub cannot remove it. The mark follows the value through parameters, fields, list elements, type arguments, returns and task captures; a lambda gets it by inference.\n\nCalling a #Once value moves it, so the second call, a call after forwarding, and a call in a loop are the existing use-after-move errors. Calling one needs ownership: a field is called by the holder's owner, and a list element by draining the list. An optional #Once field reached through edit access is fired with `.move()`, which leaves None.\n\nParameters keep Jet's ordinary modes. A plain `done: #Once fn(...)` parameter is call-scoped: the helper may call it once or pass it to another such parameter, but cannot store, return or send it (E0120). A lambda passed there captures as for any read parameter today: it borrows locals and moves only what it moves. A helper that keeps the callback takes it with `&&#Once fn(...)`, the ordinary take, and its lambda owns its captures like every escaping lambda.\n\nAny function value fits a #Once slot, since running at most once is a promise only the receiver makes. A repeatable function passed to a call-scoped parameter is lent, so the caller keeps it; into a taken slot it moves, as every function value does today. A #Once value passed anywhere is used up. No conversion object, adapter type or runtime flag exists. An unused #Once value drops its captures once; #SingleUse captures keep their must-consume duty.",
+      "story": "Ravi's helper finishes a job and hands the job's Log to keep. Later he queues jobs with their completion callbacks, builds callbacks in a factory function, and runs a job on a task. He writes #Once in the signatures that hold a callback, adds && only where a helper keeps one, and writes nothing at the call sites.",
+      "inWild": "Rust's FnOnce is one trait for one-shot closures in parameters, fields and threads (Option::map, Box<dyn FnOnce>, thread::spawn). Swift and Kotlin mark the call contract on parameters only (Kotlin's callsInPlace AT_MOST_ONCE), so stored callbacks cannot carry it. Jet's #Once is FnOnce's reach with Jet's marker spelling instead of a trait bound or wrapper type.",
+      "detail": "r3 answers the owner question of 2026-11-18 (\"Downside not engineered away. Why can't named markers work as the recommended option? Is a type really the best way? I don't like the proposed name for the type.\").\n\n1. Markers work. The run-once fact must travel with the value, so it is part of the function's type, as the effect row is, with no wrapper type. Probes on the p294 compiler (dev 3c593a7f16) parse `#PII fn(Int) -> Int` as a parameter, field, return, list element and nested return. They also parse it as a type argument (`Box<#PII fn(Int) -> Int>`) and after a take (`&&#PII fn(Int) -> Int`). An optional callback needs parentheses, `(#Once fn(Int) -> Int)?`, which parses and type-checks.\n\n2. Calls on a marked function type are refused today (E0803); that is the build work. Spec section \"Computed fields, tags, and applied rules\" defines a .TypeUse marker as an erased dataflow value tag with a required #FX row (E0734) that #Scrub removes. So Once gets its own function-type site rather than joining that site.\n\n3. The r2 downsides are engineered away. \"Helper signatures name &&OneShot<F>\": a helper that only calls the callback writes `#Once fn(...)`; only a helper that keeps it writes &&, the ordinary take. \"A temporary adapter cannot outlive its retained callback\": there is no adapter, and a call-scoped parameter lends a repeatable function. Probe readparam.jet passes a lambda over a kept function to a read parameter and keeps it (prints 12, 6, 13). Probe kept.jet shows the same lambda refused by a taken parameter (E0120, E0121).\n\n4. The name: OneShot is gone; A is #Once, B the same design spelled #RunOnce.\n\nStill true from r2 (gate-p289 probes once-r5): today's explicit-record models close a resource twice when the callback runs (owner-pass, owner-branch, places-field-return-task). That is defect #3645 c14-c16 (I1, function-value double close). It is a build prerequisite for every option here, not a cost of the spelling.",
       "options": [
         {
           "key": "A",
-          "name": "One OneShot function type",
-          "detail": "OneShot<F> has consuming invocation and uses the same callable contract in helpers, fields, returns and tasks. Repeatable functions convert by ownership transfer or scoped loan adaptation; no conversion resets a genuine one-shot allowance.",
-          "code": "// PROPOSED; Log and keep are the checked probe definitions.\nfinish: fn(code: Int, done: &&OneShot<fn(Int) -> Int>) -> Int {\n    done(code)\n}\nJob: struct { code: Int, done: OneShot<fn(Int) -> Int> }\nrun_job: fn(job: &&Job) -> Int { job.done(job.code) }\nrun: fn() {\n    log := Log{lines: [String]{\"start\"}}\n    print(finish(7, fn(code) { keep(log.move(), code) })) // 8\n    other := Log{lines: [String]{\"a\", \"b\"}}\n    job: Job{code: 7, done: fn(code) { keep(other.move(), code) }}\n    worker: task run_job(job)\n    print(worker.join() ?? 0) // 9\n}",
-          "technical": "Proposed owned core: OneShot<F> preserves F's input modes, effects and result, is noncopyable regardless of capture copyability, and has consuming invocation. Forwarding moves the same permission; aliases and helper boundaries never reset it. Branch-exclusive calls may pass; repeating calls fail.\n\nFor expected &&OneShot<F>, a retained repeatable fn or Unique<fn> may supply a temporary owned OneShot borrowing that callable. Consuming it consumes only its invocation permission, not the callback or capture. Infer the existing read/write loan from invocation access; preserve lifetime and exclusivity through forwarding, fields and returns. Reject escaping, overlapping mutable access and invalid task crossing. Genuine OneShot never gets this conversion. Ownership transfer instead moves the original callable. This proposed same-helper adaptation has no implementation receipt yet.\n\nThe explicit-record model exercises existing move checks but does not implement erased callable construction, inference, conversions or generic forwarding. #3645 c14-c16 duplicate cleanup, generic missing-move checking and named-local task refusal are compiler prerequisites.\n\nAn uncalled callback must clean up exactly once on every permitted exit. SingleUse obligations cannot silently disappear; forwarding or returning ownership can discharge a helper's duty without invoking it there. Crossing, lifetime and cycles remain separate checks. Unify local, Cell, Shared and task consuming-call facts; temporary borrowed adapters use the same fact and existing loans, not a second once mechanism."
+          "name": "#Once on function types",
+          "detail": "A compiler-known mark on a function type: parameters, fields, list elements, type arguments, returns and task captures. Calling a #Once value uses it up. A plain #Once parameter is call-scoped; `&&#Once` takes it for keeping. Any function fits a #Once slot; lambdas infer it.",
+          "technical": "Register Once in Compiler/Prelude/Markers.jet with sites [.FunctionType]. That new site accepts only a function type and makes the mark part of the type: assignability, type arguments and identity. Once is compiler-known like SingleUse. It is not a value tag: it has no #FX row, is not erased, and #Scrub(Once) is refused.\n\nSema: a marked function type is callable, and its call is a move of the callee place. So second-call, forward-then-call and loop errors are the existing E0121. A plain #Once parameter is call-scoped: one call or one pass to another plain #Once parameter. Storing, returning or sending it is E0120, and lambdas passed to it capture as for any read parameter. `&&#Once fn` is the ordinary take.\n\nAssignability adds the mark and never removes it; a type mismatch (E0113) names the one-call promise. A repeatable argument to a call-scoped parameter is passed as a lent handle whose drop does nothing. The callee drops an uncalled handle at exit. `.move()` on an optional #Once field through edit access leaves None. Closure layout and calling convention are unchanged. Prerequisite: #3645 c14-c16 exactly-once cleanup.",
+          "code": "// PROPOSED; Log and keep are the probe definitions.\nfinish: fn(code: Int, done: #Once fn(Int) -> Int) -> Int {\n    done(code)                         // uses done up; cannot store it\n}\nJob: struct { code: Int, done: #Once fn(Int) -> Int }\nenqueue: fn(jobs: &[Job], code: Int, done: &&#Once fn(Int) -> Int) {\n    jobs.push(Job{code: code, done: done})   // kept: the ordinary take\n}\nrun_job: fn(job: &&Job) -> Int { job.done(job.code) }\nlater: fn(log: &&Log) -> #Once fn(Int) -> Int {\n    fn(code) { keep(log, code) }       // returned, still once\n}\nrun: fn() {\n    log := Log{lines: [String]{\"start\"}}\n    print(finish(7, fn(code) { keep(log.move(), code) }))   // 8\n    other := Log{lines: [String]{\"a\", \"b\"}}\n    job: Job{code: 7, done: later(other.move())}\n    worker: task run_job(job.move())\n    print(worker.join())                                     // 9\n    n := 1\n    step: fn(code: Int) -> Int { code + n }\n    print(finish(1, step))       // 2: a repeatable function is lent\n    print(step(5))               // 6: run still has step\n}"
         },
         {
           "key": "B",
-          "name": "A #Once mark on synchronous parameters",
-          "detail": "Add #Once to a taken function parameter. The callee may call or forward it at most once, during this call only. Stored, returned and task callbacks stay unavailable.",
-          "code": "// PROPOSED; Log and keep are once-on1's definitions\nfinish: fn(code: Int, #Once done: &&fn(Int) -> Int) -> Int {\n    done(code)\n}\nrun: fn() {\n    log := Log{lines: [String]{\"start\"}}\n    print(finish(7, fn(code) { keep(log.move(), code) }))\n}",
-          "technical": "Reuse existing #Name parameter grammar. Register Once in Compiler/Prelude/Markers.jet for the Parameter site, then preserve its invocation fact through parser, AST, signatures and tooling. Syntax/Markers.jet owns only the # token, not marker names. An unregistered-marker diagnostic is not semantic support.\n\nThe callee takes ownership and may invoke or forward once synchronously. Its real limitation is no stored or asynchronous use. A consuming OneShot also needs ownership; neither option inherently preserves every retained caller. Scoped borrowing needs proof under either design. Adding a separate stored-only mechanism later would violate I8."
+          "name": "The same, spelled #RunOnce",
+          "detail": "Identical meaning to A; only the word differs. It says what is limited (running) where #Once leaves it implied.",
+          "technical": "As A, with the marker registered as RunOnce.",
+          "code": "// PROPOSED; Log and keep are the probe definitions.\nfinish: fn(code: Int, done: #RunOnce fn(Int) -> Int) -> Int {\n    done(code)                         // uses done up; cannot store it\n}\nJob: struct { code: Int, done: #RunOnce fn(Int) -> Int }\nenqueue: fn(jobs: &[Job], code: Int, done: &&#RunOnce fn(Int) -> Int) {\n    jobs.push(Job{code: code, done: done})   // kept: the ordinary take\n}\nrun_job: fn(job: &&Job) -> Int { job.done(job.code) }\nlater: fn(log: &&Log) -> #RunOnce fn(Int) -> Int {\n    fn(code) { keep(log, code) }       // returned, still once\n}\nrun: fn() {\n    log := Log{lines: [String]{\"start\"}}\n    print(finish(7, fn(code) { keep(log.move(), code) }))   // 8\n    other := Log{lines: [String]{\"a\", \"b\"}}\n    job: Job{code: 7, done: later(other.move())}\n    worker: task run_job(job.move())\n    print(worker.join())                                     // 9\n    n := 1\n    step: fn(code: Int) -> Int { code + n }\n    print(finish(1, step))       // 2: a repeatable function is lent\n    print(step(5))               // 6: run still has step\n}"
         },
         {
           "key": "C",
-          "name": "Keep explicit state or branching",
-          "detail": "Keep the current function contract. Pass Log as a taken argument to a reusable callback, or branch on the optional before moving Log.",
-          "code": "// WORKS TODAY; Log and keep are once-on1's definitions\nfinish: fn(code: Int, done: fn(Int, &&Log) -> Int, log: &&Log) -> Int {\n    done(code, log)\n}\nrun: fn() {\n    log := Log{lines: [String]{\"start\"}}\n    print(finish(7, fn(code, l: &&Log) { keep(l, code) }, log))\n}",
-          "technical": "once-on3b runs this explicit-state version and prints 8. once-on6 performs optional branching instead and prints 8. Both avoid copying and keep today's move checking. They are strong solutions when the caller owns the helper or branching stays small.\n\nThe cost is less composable callback APIs, explicit payload types and wider signatures. Heterogeneous stored callbacks and library-owned helpers can require substantial restructuring. Encapsulate a typed payload or move the branch beside its owner. Copying a Log buffer is another observed workaround, not a remedy for noncopyable resources. Existing special run-once positions remain non-general; choosing C must not market that limitation as a new safety guarantee."
+          "name": "#Once on parameters only",
+          "detail": "A parameter mark: the callee may call or forward it at most once, during this call only. Fields, returns and tasks cannot hold a run-once callback.",
+          "technical": "Marker site .Parameter. This is A's call-scoped parameter alone. Job, enqueue, later and the task in A's program have no spelling, so queued or deferred callbacks still need explicit state (D).",
+          "code": "// PROPOSED (parameter-only mark)\nfinish: fn(code: Int, #Once done: fn(Int) -> Int) -> Int {\n    done(code)\n}\nrun: fn() {\n    log := Log{lines: [String]{\"start\"}}\n    print(finish(7, fn(code) { keep(log.move(), code) }))   // 8\n}\n// Job's field, later's return and the task stay unavailable."
+        },
+        {
+          "key": "D",
+          "name": "Keep explicit state",
+          "detail": "No new surface. Pass the Log as a taken argument to a reusable callback, or branch on an optional before moving it.",
+          "technical": "Works today (once-on3b prints 8). Payload types spread through every callback API, and a queued job must carry its payload beside its callback.",
+          "code": "// WORKS TODAY; Log and keep are once-on1's definitions\nfinish: fn(code: Int, done: fn(Int, &&Log) -> Int, log: &&Log) -> Int {\n    done(code, log)\n}\nrun: fn() {\n    log := Log{lines: [String]{\"start\"}}\n    print(finish(7, fn(code, l: &&Log) { keep(l, code) }, log))\n}"
         }
       ],
       "comparisons": [
         {
           "lang": "Rust",
-          "note": "FnOnce is one trait for one-shot closures as parameters, boxed fields and thread bodies. Thread handoff separately needs Send.",
+          "note": "FnOnce is one trait for one-shot closures as parameters, boxed fields and thread bodies. A call-scoped `impl FnOnce` may hold borrows; a kept `Box<dyn FnOnce + 'static>` may not, which is A's plain versus && parameter. `&F` lends a repeatable closure, and Option::take fires a stored one from `&mut self`. Thread handoff separately needs Send.",
           "source": "https://doc.rust-lang.org/std/ops/trait.FnOnce.html"
         },
         {
@@ -174726,45 +174733,41 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Prefer one consuming callable contract, including temporary loan adaptation for retained repeatable callers; implementation and cleanup proofs remain explicit limits.",
+        "why": "The run-once fact has to follow the value, so it belongs to the function's type, as the effect row does. A mark carries it with no wrapper type, adapter or runtime flag, and parameters keep Jet's ordinary read and take modes.",
         "gains": [
-          "One invocation fact for helpers, fields, returns and tasks.",
-          "Proposed consuming calls reuse ownership checking; current lowering defects remain blockers.",
-          "No parameter marker, read-loan reset or runtime once flag."
+          "One mark for every position a callback can live in.",
+          "Second calls, forwarding twice and loop calls are existing use-after-move errors.",
+          "Helpers that only call a callback write no &&, and lambdas passed to them borrow as today.",
+          "No new type name, no adapter, no runtime cost; value tags keep their one meaning."
         ],
-        "losses": [
-          {
-            "loss": "A temporary adapter cannot outlive its retained callback or overlap an incompatible invocation.",
-            "mitigation": "Infer its ordinary loan and diagnose escapes; move the callback for longer storage. Same-helper adaptation remains unbuilt and needs its first build criterion."
-          },
-          {
-            "loss": "Helper signatures name &&OneShot<F>.",
-            "mitigation": "Infer lambda conversion and diagnose the missing owned callable type; diagnostic support is proposed, not observed."
-          }
-        ],
+        "losses": [],
         "whyNot": [
           {
             "key": "B",
-            "reason": "A synchronous parameter mark misses fields, returns and tasks, and still needs && ownership."
+            "reason": "Same design; #RunOnce is longer, and fields and returns read as nouns (\"done: #RunOnce fn\") less naturally than \"done: #Once fn\"."
           },
           {
             "key": "C",
-            "reason": "Works today without copies, but threads payload types through every callback API."
+            "reason": "It is A's call-scoped parameter alone, so fields, returns and tasks have no spelling and queued callbacks still need explicit state."
+          },
+          {
+            "key": "D",
+            "reason": "Works today, but threads payload types through every callback API."
           }
         ],
-        "tradeoff": "One new type name, against payload plumbing or a synchronous-only marker."
+        "tradeoff": "One compiler-known mark on function types, against a parameter-only mark or payload plumbing."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview2. Holds within stated limits: scoped adaptation and unified callable behavior need implementation receipts; duplicate cleanup and named-local task transfer remain compiler prerequisites."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Lens. A holds after repair: the implicit take broke r3's own loan claim (probed E0120, E0121), and sharing the value-tag site broke the erased-tag rule; both are fixed. Every probed position parses on gate-p294, the FnOnce gaps are closed (call-scoped versus kept, firing from an edited object, lending), and the losses are now empty."
       },
-      "checkInstructions": "The build card's first criterion proves every LIMIT and closes compiler PREREQs before claiming implementation support. Close #3645 c14-c16, then run real erased OneShot programs at O0, O1 and O2: owned helper, alias, branch, loop, double forwarding, field, return, generic forwarding and named-local task. Positive cases close exactly once; negative cases reject without resetting permission. Include capture-free and copyable captures; their OneShot values must still refuse copying under FNVAL.\n\nImplement retained-repeatable adaptation to the same helper with a unique resource, then call it directly. Reject escape, overlapping writes and genuine-one-shot allowance resets. Prove zero-call cleanup for failable error, panic and cancellation, not just optional early return. Preserve SingleUse duties and invocation modes/effects. Exercise local, Cell, Shared and task positions, creator/task aliases, captured loans and cycles through one fact.",
+      "checkInstructions": "Build card first criteria: #3645 c14-c16 closed. Then at O0, O1 and O2: the program of option A prints 8, 9, 2 and 6 and closes each Log once.\n\nPositive cases: a lambda over a loan passed to a plain #Once parameter, and a repeatable function lent and used after. An optional #Once field fired through edit access with `.move()` leaves None. A list of #Once callbacks is drained and each runs once.\n\nNegative cases each give their registered error with a UI snapshot. They are: second call, forward twice, loop call, and a #Once value into an unmarked slot (E0113). Also: a plain #Once parameter stored, returned or sent (E0120), a #Once value called through a read borrow, and #Scrub(Once). An uncalled #Once callback drops its captures once on return, error, panic and cancellation.",
       "surface": {
-        "gist": "Should one OneShot function type carry run-once callbacks through helpers, fields, returns and tasks?",
-        "lesson": "A one-shot callback runs at most once. Its owned type says so, so helpers, fields and tasks can hold it; calling it uses it up.",
+        "gist": "Should a #Once mark on a function type carry run-once callbacks through helpers, fields, returns and tasks?",
+        "lesson": "A #Once function runs at most once. The mark rides on its type, so helpers, fields, returns and tasks can hold it; calling it uses it up.",
         "trio": {
           "current": {
             "note": "Run today: a one-shot lambda works locally but cannot be passed on.",
@@ -174779,36 +174782,47 @@
         "options": [
           {
             "key": "A",
-            "name": "One OneShot function type",
-            "gist": "An owned function type whose call uses it up, usable anywhere.",
+            "name": "#Once on function types",
+            "gist": "One mark on the type, usable anywhere a callback lives.",
             "gains": [
               "Helpers, fields, returns and tasks.",
-              "Consuming-call intent is modeled; cleanup and transfer defects remain."
+              "No wrapper type, no adapter; lambdas borrow as today."
             ],
-            "losses": [
-              "Scoped adapters cannot escape their loan; owned storage needs ownership transfer."
-            ],
+            "losses": [],
             "proposed": {
-              "code": "// PROPOSED\nfinish: fn(code: Int, done: &&OneShot<fn(Int) -> Int>) -> Int {\n    done(code)\n}\nprint(finish(7, fn(code) { keep(log.move(), code) })) // 8"
+              "code": "// PROPOSED\nfinish: fn(code: Int, done: #Once fn(Int) -> Int) -> Int {\n    done(code)\n}\nJob: struct { code: Int, done: #Once fn(Int) -> Int }\nenqueue: fn(jobs: &[Job], code: Int, done: &&#Once fn(Int) -> Int) {\n    jobs.push(Job{code: code, done: done})\n}"
             }
           },
           {
             "key": "B",
-            "name": "#Once on synchronous parameters",
-            "gist": "A parameter mark for one call during the helper only.",
+            "name": "Spelled #RunOnce",
+            "gist": "Same as A, another word.",
             "gains": [
-              "Direct calls in synchronous helpers."
+              "Names what is limited."
             ],
             "losses": [
-              "No stored or task callbacks.",
-              "Still needs && ownership, as A does."
+              "Longer in every signature."
             ],
             "proposed": {
-              "code": "// PROPOSED\nfinish: fn(code: Int, #Once done: &&fn(Int) -> Int) -> Int {\n    done(code)\n}"
+              "code": "// PROPOSED\nfinish: fn(code: Int, done: #RunOnce fn(Int) -> Int) -> Int {\n    done(code)\n}"
             }
           },
           {
             "key": "C",
+            "name": "#Once on parameters only",
+            "gist": "A parameter mark for one call during the helper.",
+            "gains": [
+              "Smaller build."
+            ],
+            "losses": [
+              "No stored, returned or task callbacks."
+            ],
+            "proposed": {
+              "code": "// PROPOSED\nfinish: fn(code: Int, #Once done: fn(Int) -> Int) -> Int {\n    done(code)\n}"
+            }
+          },
+          {
+            "key": "D",
             "name": "Keep explicit state",
             "gist": "Pass the Log as an argument instead of capturing it.",
             "gains": [
@@ -174818,41 +174832,43 @@
               "Payload types spread through callback APIs."
             ],
             "proposed": {
-              "code": "// WORKS TODAY\nfinish: fn(code: Int, done: fn(Int, &&Log) -> Int, log: &&Log) -> Int {\n    done(code, log)\n}\nprint(finish(7, fn(code, l: &&Log) { keep(l, code) }, log))"
+              "code": "// WORKS TODAY\nfinish: fn(code: Int, done: fn(Int, &&Log) -> Int, log: &&Log) -> Int {\n    done(code, log)\n}"
             }
           }
         ],
         "recommendation": {
           "rec": "A",
-          "why": "One consuming callable fact covers owned callbacks and scoped repeatable adapters; lowering defects and unbuilt conversions remain explicit limits.",
+          "why": "The run-once fact has to follow the value, so it belongs to the function's type. A mark carries it with no wrapper type, adapter or runtime flag, and parameters keep their ordinary modes.",
           "gains": [
-            "One invocation fact, with no marker or runtime flag."
+            "One mark for every callback position, no wrapper type or adapter.",
+            "Helpers that only call a callback write no &&."
           ],
-          "losses": [
-            {
-              "loss": "A retained caller's temporary adapter cannot escape its ordinary loan.",
-              "mitigation": "Infer and check the loan; move the callback for longer storage. Prove same-helper adaptation in the first build criterion."
-            }
-          ],
+          "losses": [],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Synchronous only, and still needs && ownership."
+              "reason": "Same design, longer word."
             },
             {
               "key": "C",
+              "reason": "No stored, returned or task callbacks."
+            },
+            {
+              "key": "D",
               "reason": "Payload plumbing through every callback API."
             }
           ],
-          "tradeoff": "One new type name, against payload plumbing or a narrow marker."
+          "tradeoff": "One compiler-known marker on function types, against a parameter-only mark or payload plumbing."
         }
       },
       "designAway": [
-        "One owned callable type for every run-once position; no stored-only second mechanism.",
-        "One consuming-call fact is required across every run-once position, including copyable captures.",
-        "Temporary repeatable adapters borrow existing invocation capability; genuine one-shot permission never resets.",
-        "Exactly-once cleanup and SingleUse preservation are required, not established by the defective model.",
-        "Call count, lifetime, crossing safety and must-consume duties stay separate facts."
+        "No wrapper type: the fact is a mark that is part of the function type, as the effect row is.",
+        "No shared marker site: Once has its own function-type site, so type-use markers stay erased value tags and #Scrub(Once) is refused.",
+        "No implicit take: a plain #Once parameter is call-scoped (one call or one forward, never stored); a helper that keeps the callback writes the ordinary &&#Once.",
+        "No adapter or conversion object: any function fits a #Once slot, and a call-scoped parameter lends a repeatable function so the caller keeps it.",
+        "No runtime once flag: all checks are static moves; the callee drops an uncalled handle it was given, and a lent handle drops nothing.",
+        "Firing a stored callback from an object you edit: `.move()` on an optional #Once field leaves None, the shape of Rust's Option::take.",
+        "Exactly-once cleanup (#3645 c14-c16) is a build prerequisite, proven before the feature is claimed."
       ],
       "draftedBy": "Main",
       "reviewedBy": "BallotReview2",
@@ -176896,9 +176912,11 @@
       "by": "owner",
       "kind": "question",
       "text": "Downside not engineered away. Also why can’t we name markers work as the recommended option? Is a type really the best way to do it? I don’t like the proposed name for the type.",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-18T08:03:01.490Z"
+      "status": "answered",
+      "answer": "Revised to r3 (reposted) after an adversarial review by another agent. The OneShot type is gone. A, recommended: a #Once marker on function types, written where the callback lives: done: #Once fn(Int) -> Int on parameters, fields, returns, list elements and tasks. A plain #Once parameter is call-scoped: called or forwarded once, never stored. &&#Once is the ordinary take for keeping it. Any function fits a #Once slot, including a repeatable one the caller lends, so no adapter or conversion exists. #Once gets its own marker site and is part of the function type, separate from the erased value tags (I8). B: the same, spelled #RunOnce. C: parameters only. D: explicit state. The remaining prerequisite is the exactly-once cleanup defect #3645 c14-c16, which is a build criterion and not a cost of the spelling.",
+      "created": "2026-11-18T08:03:01.490Z",
+      "answeredAt": "2026-11-18",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -177731,6 +177749,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T08:39:28.746Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q77siog1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-18T08:39:17.795Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-CALLBACK-ONCE1",
+      "note": ""
+    },
     {
       "at": "2026-11-18T08:35:11.827Z",
       "by": "Main",
