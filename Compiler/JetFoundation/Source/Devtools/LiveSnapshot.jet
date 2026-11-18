@@ -449,12 +449,31 @@ jet_live_process_stat: fn(pid: Int) -[FS, Time.Wait]> String JetLiveSnapshotErro
 // is retained for the whole bounded read. An explicit path is the private
 // boundary filesystem witnesses use; command callers pass
 // `jet_live_snapshot_path(pid)`. The snapshot must belong to `pid`, be fresh,
-// and on Linux/Android carry the process start identity from /proc.
+// and on Linux/Android carry the process start identity from /proc. Where
+// /proc shows the process, one another user owns is refused before anything
+// is read, and one with no snapshot was not started with observe enabled.
+// Nothing is written: the target runs on as it was.
 jet_live_read: fn(pid: Int, path: String) -[FS, Env, Time]> JetLiveSnapshot JetLiveSnapshotError! {
     if pid <= 0 || pid > 4294967295 {
         return Err(jet_live_error("process id must be greater than zero and fit u32"))
     }
-    entry: live_files.stat(path) ?? return Err(jet_live_error("no live Jet runtime is observable at process {pid}"))
+    // /proc shows a running process and its owner.
+    running := false
+    if live_files.stat("/proc/{pid}") == {
+        .Ok(found) -> {
+            if live_sys.is_unix() && found.owner != Val(live_sys.getuid()) {
+                return Err(jet_live_error("process {pid} belongs to another user"))
+            }
+            running = true
+        }
+        .Err(_) -> {}
+    }
+    entry: live_files.stat(path) ?? {
+        if running {
+            return Err(jet_live_error("process {pid} was not started with observe enabled"))
+        }
+        return Err(jet_live_error("no live Jet runtime is observable at process {pid}"))
+    }
     if !entry.is_file || entry.is_symlink {
         return Err(jet_live_error("live runtime snapshot is not a regular file"))
     }
