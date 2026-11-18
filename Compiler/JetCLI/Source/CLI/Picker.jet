@@ -122,11 +122,10 @@ JetCLIPickerState: struct {
     ref_scroll: Int,
 }
 
-// One row of wrapped text, and whether the source broke the line after it
-// (the picker tests rebuild the text from it; the views need only rows).
+// One row of wrapped text, and whether the source broke the line after it.
 JetCLIPickerWrapped: struct {
     text: String,
-    _hard_break: Bool,
+    hard_break: Bool,
 }
 
 // One body row of the categorized list.
@@ -576,7 +575,7 @@ jet_cli_picker_wrap: fn(text: String, width: Int) -> [JetCLIPickerWrapped] Never
     bytes: text.bytes()
     loop byte in bytes {
         if byte == (U8{10}) {
-            rows.push(JetCLIPickerWrapped{text: String.from_bytes(row) ?? "", _hard_break: true})
+            rows.push(JetCLIPickerWrapped{text: String.from_bytes(row) ?? "", hard_break: true})
             row = [U8]{}
             visible = 0
             escaped = false
@@ -594,7 +593,7 @@ jet_cli_picker_wrap: fn(text: String, width: Int) -> [JetCLIPickerWrapped] Never
         }
         if jet_cli_picker_lead(byte) {
             if visible == limit {
-                rows.push(JetCLIPickerWrapped{text: String.from_bytes(row) ?? "", _hard_break: false})
+                rows.push(JetCLIPickerWrapped{text: String.from_bytes(row) ?? "", hard_break: false})
                 row = [U8]{}
                 visible = 0
             }
@@ -603,7 +602,7 @@ jet_cli_picker_wrap: fn(text: String, width: Int) -> [JetCLIPickerWrapped] Never
         row.push(byte)
     }
     if bytes.len() > 0 && bytes[bytes.len() - 1] != (U8{10}) {
-        rows.push(JetCLIPickerWrapped{text: String.from_bytes(row) ?? "", _hard_break: false})
+        rows.push(JetCLIPickerWrapped{text: String.from_bytes(row) ?? "", hard_break: false})
     }
     rows
 }

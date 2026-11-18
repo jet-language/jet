@@ -3677,60 +3677,6 @@ UnreachableExport: struct {
     }
 }
 
-UnreadField: struct {
-    type_name: String,
-    name: String,
-
-    impl Diagnostic {
-        code: "L0106",
-        severity: .Lint,
-        tier: .Tidy,
-        lint_name: "unread_field",
-        meaning: "A struct field that no code reads carries data nothing uses",
-        detail: true,
-        structured_fix: .SuggestedSourceEdit,
-        no_fix: None,
-        fix_safety: .NeedsReview,
-
-        what: fn(self) -> String { "Field `{self.type_name}.{self.name}` is never read." }
-
-        why: fn(self) -> String {
-            "Code may write this field, but nothing reads it, so it carries data no part of the program uses. Encoding, derived equality or ordering, reflection and foreign code count as reads; derived printing and cloning do not."
-        }
-
-        fix: fn(self) -> String {
-            "Remove the field, or rename `{self.name}` to `_{self.name}` when it is intentional."
-        }
-    }
-}
-
-UnbuiltCase: struct {
-    type_name: String,
-    name: String,
-
-    impl Diagnostic {
-        code: "L0107",
-        severity: .Lint,
-        tier: .Tidy,
-        lint_name: "unbuilt_case",
-        meaning: "An enum case that no code creates leaves its handling arms dead",
-        detail: true,
-        structured_fix: .SuggestedSourceEdit,
-        no_fix: None,
-        fix_safety: .NeedsReview,
-
-        what: fn(self) -> String { "Case `{self.type_name}.{self.name}` is never built." }
-
-        why: fn(self) -> String {
-            "Code may match this case, but nothing creates it, so the arms that handle it never run. Decoding and foreign code count as building it; matching does not."
-        }
-
-        fix: fn(self) -> String {
-            "Remove the case, or rename `{self.name}` to `_{self.name}` when it is intentional."
-        }
-    }
-}
-
 DivergentStatePaths: struct {
     value: String,
     one: String,

@@ -984,10 +984,9 @@ jet_cli_build_duration: fn(value: Float) -> String Never! {
 // Host must supply this pair only after successful native object production and
 // CAS publication. A graph key is not an artifact/cache key: it omits target,
 // profile and runtime identity. Retain the verified object handle separately;
-// the current RecordIndex contract has no native-object link kind. No host
-// supplies one yet, so only the inspect-build tests read `_node`.
+// the current RecordIndex contract has no native-object link kind.
 JetCLICompileNodeObservation: struct {
-    _node: BuildNodeRecord,
+    node: BuildNodeRecord,
     object: ObjectHandle,
 }
 
@@ -1007,7 +1006,7 @@ jet_cli_build_compile_observation: fn(executed: BuildGraphNode, duration_ms: Flo
     }
     return Ok(
         JetCLICompileNodeObservation{
-            _node: BuildNodeRecord{kind: executed.kind, key: executed.key, subject: executed.subject, duration_ms: duration_ms, why_ran: reason, inputs: executed.inputs},
+            node: BuildNodeRecord{kind: executed.kind, key: executed.key, subject: executed.subject, duration_ms: duration_ms, why_ran: reason, inputs: executed.inputs},
             object: object,
         },
     )

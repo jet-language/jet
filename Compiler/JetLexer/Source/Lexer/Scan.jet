@@ -2,8 +2,7 @@
 //
 // The scanner emits private four-field raw-token facts consumed by both
 // payload construction and the terminator pass:
-// [kind, byte_start, byte_end, case_name_start]: the last is 1 for an
-// identifier that can name a case (case_name_start).
+// [kind, byte_start, byte_end, first_char_is_uppercase].
 use {
     jet_foundation.[BLOCK_COMMENT_CLOSE, BLOCK_COMMENT_OPEN, COMMENT_PREFIX]
     unicode: core.text
@@ -82,14 +81,6 @@ first_char_is_upper: fn(source: [U8], start: Int) -> Bool Never! {
     if value >= 0 && value < 128 -> return value >= 65 && value <= 90
     scalar := scalar_at(source, start)
     unicode.is_alphabetic(scalar) && unicode.upper(scalar) == scalar && unicode.lower(scalar) != scalar
-}
-
-// An identifier at `start` (ending at `end`) that can name a case: an
-// uppercase first character, or one `_` before one (a case kept on purpose
-// that nothing builds, L0107).
-case_name_start: fn(source: [U8], start: Int, end: Int) -> Bool Never! {
-    if first_char_is_upper(source, start) -> return true
-    end > start + 1 && byte_at(source, start) == 95 && first_char_is_upper(source, start + 1)
 }
 
 is_whitespace_at: fn(source: [U8], index: Int) -> Bool Never! {
@@ -575,8 +566,7 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             end: if byte_at(source, word_end) == 35 -> scan_glued_paste_end(source, word_end) else -> word_end
             kind: word_kind(source, i, end, last_code)
             if kind == K_FN -> fn_in_range = true
-            case_name: kind == K_IDENT && ((value <= 90 && value >= 65) || (value == 95 && case_name_start(source, i, end)))
-            last_code = push_code(facts, kind, i, end, case_name)
+            last_code = push_code(facts, kind, i, end, kind == K_IDENT && value <= 90 && value >= 65)
             i = end
             next
         }
@@ -1125,9 +1115,9 @@ raw_token_facts_range: fn(source: [U8], config_surface: Bool, from: Int, to: Int
             end: if byte_at(source, word_end) == 35 -> scan_glued_paste_end(source, word_end) else -> word_end
             kind: word_kind(source, i, end, last_code)
             if kind == K_FN -> fn_in_range = true
-            case_name := false
-            if kind == K_IDENT -> case_name = case_name_start(source, i, end)
-            last_code = push_code(facts, kind, i, end, case_name)
+            upper := false
+            if kind == K_IDENT -> upper = first_char_is_upper(source, i)
+            last_code = push_code(facts, kind, i, end, upper)
             i = end
             next
         }

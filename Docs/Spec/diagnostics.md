@@ -108,14 +108,7 @@ lists only its errors. A dependency's lints are not reported. A binding whose
 value acts when it goes (a resource, a guard, a child process, a temporary
 directory, a task handle, the handle a scope head names) is used by being
 held, so it is no unused local (L0101); nor is a binding read only in a call
-that fails to check or in a `.skip` reason. A struct field no code reads is
-the tidy error L0106 and an enum case no code builds is L0107
-(D-MEMBER-LIVE1=A): writing a field never reads it and matching a case never
-builds it, while encoding or decoding, derived equality, hashing or ordering,
-reflection, generic code the type is handed to, a C layout and a foreign
-signature read every field and build every case; derived printing and cloning
-never read. A library's public members are exempt; an application's members
-and a library's private ones are judged. `#Allow(jet.Name, "why")` silences
+that fails to check or in a `.skip` reason. `#Allow(jet.Name, "why")` silences
 one lint, tidy error or library warning inside its target, and a package may
 deny a named lint through its lint policy, but a diagnostic code is never a
 policy value. JSON and LSP `code` stays the registered code; a

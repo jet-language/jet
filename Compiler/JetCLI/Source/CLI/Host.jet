@@ -2372,17 +2372,16 @@ JetCLICheckedTarget: struct {
 }
 
 // What a build target's compile leaves once its image is written: its
-// diagnostics, facts, checked rows and source snapshot. Only the release
-// task reads `diagnostics`; the `_` fields are held so they drop there.
+// diagnostics, facts, checked rows and source snapshot.
 JetCLICompileHeld: struct {
     diagnostics: [Diagnostic],
-    _generated: [SourceFile],
-    _structure_facts: [StructureFact],
-    _comptime_values: [SemaComptimeItemValue],
-    _doc_modules: [JetDriverDocModule],
-    _inputs: JetDriverLoweringInputs?,
-    _rows: JetDriverLoweringInputs?,
-    _snapshot: JetDriverAuthorizedSourceSnapshot,
+    generated: [SourceFile],
+    structure_facts: [StructureFact],
+    comptime_values: [SemaComptimeItemValue],
+    doc_modules: [JetDriverDocModule],
+    inputs: JetDriverLoweringInputs?,
+    rows: JetDriverLoweringInputs?,
+    snapshot: JetDriverAuthorizedSourceSnapshot,
 }
 
 // Drops what `checked` holds on a detached task. Drop glue walks every row,
@@ -2395,13 +2394,13 @@ jet_cli_compile_release: fn(checked: &&JetCLICheckedTarget) {
     owned: checked.move()
     held: JetCLICompileHeld{
         diagnostics: owned.result.diagnostics.move(),
-        _generated: owned.result.generated_source_files.move(),
-        _structure_facts: owned.result.structure_facts.move(),
-        _comptime_values: owned.result.comptime_values.move(),
-        _doc_modules: owned.result.doc_modules.move(),
-        _inputs: owned.inputs.move(),
-        _rows: owned.rows.move(),
-        _snapshot: owned.snapshot.move(),
+        generated: owned.result.generated_source_files.move(),
+        structure_facts: owned.result.structure_facts.move(),
+        comptime_values: owned.result.comptime_values.move(),
+        doc_modules: owned.result.doc_modules.move(),
+        inputs: owned.inputs.move(),
+        rows: owned.rows.move(),
+        snapshot: owned.snapshot.move(),
     }
     released: task &&held { held.diagnostics.len() }
     released.detach()

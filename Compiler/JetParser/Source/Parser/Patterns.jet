@@ -405,7 +405,7 @@ parser_pattern_rhs_ahead: fn(state: &JetParserState, value: Bool) -> Bool Never!
             next: parser_lookahead(state, 1)
             if next.kind == TOKEN_IDENT {
                 word: parser_value(state, next)
-                return parser_case_name(word) || word.starts_with("#{{") || parser_module_arm_ahead(state)
+                return parser_pascal_name(word) || word.starts_with("#{{") || parser_module_arm_ahead(state)
             }
             next.kind == TOKEN_NULL || next.kind == TOKEN_LBRACE
         }
@@ -664,13 +664,6 @@ parser_pascal_name: fn(name: String) -> Bool Never! {
     if name.len() == 0 -> return false
     first: Int{name.bytes()[0]}
     first >= 65 && first <= 90
-}
-
-// A case name as an arm head: PascalCase, or one `_` before it for a case
-// kept on purpose that nothing builds (L0107).
-parser_case_name: fn(name: String) -> Bool Never! {
-    if parser_pascal_name(name) -> return true
-    name.starts_with("_") && parser_pascal_name(name.slice(1..<name.len()))
 }
 
 // `Variant(…)`, or a non-constant `Variant |`, at the cursor.
