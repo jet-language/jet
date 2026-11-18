@@ -8164,6 +8164,12 @@ fails only its message; the worker begins again from its `state:` value
 within the tree's restart budget. With `batch:` and `wait:`, a `[Q]`
 handler takes up to `batch` waiting messages, waiting at most `wait` for a
 batch to fill; a failed batch is handed over again on each restart.
+The tree's worker methods (`mailbox_depth`, `restarts`, `fail_worker`,
+`drain_worker`, `partition_worker`, `reconcile_worker`, `directory_register`)
+take a typed endpoint as they take a `ServiceEndpoint`. A typed worker's depth
+counts the messages waiting in its mailbox, not the one its handler runs; a
+drained typed worker refuses new messages and runs the waiting ones, and a
+handoff keeps it at its generation until they have run.
 Under `delivery_durable()`, `tree.send_durable(endpoint, message, key: k)`
 keeps a message whose type is `Encode` and `Decode` (E0112 otherwise) as
 JSON in the authority until the worker's handler succeeds on it. Each

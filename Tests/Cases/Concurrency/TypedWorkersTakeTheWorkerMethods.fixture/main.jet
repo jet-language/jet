@@ -1,0 +1,19 @@
+// The tree's worker methods take a typed worker's endpoint: its depth and
+// restarts read back, and a drained typed worker refuses a new message.
+use service: core.service
+
+note: fn(n: Int) { print("note {n}") }
+
+run: fn() {
+    tree := service.tree("typed-methods")
+    worker: tree.worker("note", note, capacity: 4) ?? panic("worker")
+    tree.start() ?? panic("start")
+    print("depth: {tree.mailbox_depth(worker) ?? panic("depth")}")
+    print("restarts: {tree.restarts(worker) ?? panic("restarts")}")
+    tree.drain_worker(worker) ?? panic("drain")
+    if tree.send(worker, 1) == {
+        .Ok(_) -> { print("sent") }
+        .Err(_) -> print("drained")
+    }
+    tree.stop() ?? panic("stop")
+}

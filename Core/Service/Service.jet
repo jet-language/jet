@@ -667,6 +667,8 @@ priv TreeWorker: struct {
     endpoint: ServiceEndpoint,
     capacity: Int,
     channel: Shared<ServiceChannel>,
+    // The free places of a typed worker's mailbox; None for a String worker.
+    room: service_tasks.Semaphore?,
     restarts: [Int],
     running: Bool,
 }
@@ -4984,11 +4986,11 @@ pending_rollback_error: fn(error: ServiceError, authority_error: ServiceError?, 
 // Workers are declared before start. The tree mailbox and the endpoint
 // registry share one bounded channel per worker.
 worker: fn(tree: &ServiceTree, name: String, handler: fn(), handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
-    declare_worker(tree, name, handler_name, capacity)
+    declare_worker(tree, name, handler_name, capacity, None)
 }
 
 // Checks a worker declaration and registers its route, not yet published.
-priv declare_worker: fn(tree: &ServiceTree, name: String, handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
+priv declare_worker: fn(tree: &ServiceTree, name: String, handler_name: String, capacity: Int, room: service_tasks.Semaphore?) -> ServiceEndpoint ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot add workers after start"))
     if capacity <= 0 || capacity > 1000000 {
         return Err(ServiceError.Policy("mailbox capacity must be positive and bounded"))
@@ -5011,8 +5013,15 @@ priv declare_worker: fn(tree: &ServiceTree, name: String, handler_name: String, 
     // The mailbox exists before the endpoint is published, so a failed
     // allocation never leaves a ghost authority in the registry.
     authority_register(endpoint, false, Val(channel))
-    tree.workers.push(TreeWorker{name: name, handler_name: handler_name, endpoint: endpoint, capacity: capacity, channel: channel, restarts: [Int]{}, running: false})
+    tree.workers.push(TreeWorker{name: name, handler_name: handler_name, endpoint: endpoint, capacity: capacity, channel: channel, room: room, restarts: [Int]{}, running: false})
     Ok(endpoint)
+}
+
+// The messages waiting in a worker's mailbox: a typed worker's are the
+// places its mailbox has taken.
+priv worker_depth: fn(worker: TreeWorker) -> Int Never! {
+    if worker.room == .Val(room) -> return worker.capacity - room.value()
+    channel_depth(worker.channel)
 }
 
 // --- Typed workers ---------------------------------------------------------
@@ -5094,8 +5103,8 @@ priv batched_declare: fn<Q>(tree: &ServiceTree, name: String, handler: &&fn([Q])
     if batch < 1 || batch > capacity {
         return Err(ServiceError.Policy("batch must be positive and no larger than the mailbox capacity"))
     }
-    id: declare_worker(tree, name, handler_name, capacity)
     room: service_tasks.Semaphore.new(capacity)
+    id: declare_worker(tree, name, handler_name, capacity, Val(room))
     starved: Shared<Bool>{false}
     wake: service_tasks.Semaphore.new(0)
     // The timer reaches the worker through its own mailbox, which exists
@@ -5137,8 +5146,8 @@ priv worker_task_failed: fn(name: String) -> ServiceError Never! {
 // its place too; the answer goes to the asker of a `call`, and a durable
 // receipt is committed once its handler succeeds.
 priv typed_declare: fn<S, Q, R>(tree: &ServiceTree, name: String, handler_name: String, capacity: Int, state: &&S, handler: &&fn(&S, Q) -> R Err!, decoder: &&(fn(String) -> Q ServiceError!)?) -> Endpoint<Q, R> ServiceError! {
-    id: declare_worker(tree, name, handler_name, capacity)
     room: service_tasks.Semaphore.new(capacity)
+    id: declare_worker(tree, name, handler_name, capacity, Val(room))
     starved: Shared<Bool>{false}
     wake: service_tasks.Semaphore.new(0)
     step: fn(held: S, job: Job<Q, R>) -> S Err! {
@@ -5582,6 +5591,48 @@ priv delivery_settle: fn(delivery: Delivery) -> DeliveryState ServiceError! {
     delivery_status(delivery)
 }
 
+#Test("a typed worker's mailbox depth counts its waiting messages, and a drain and a handoff wait for them") {
+    gate: service_tasks.Semaphore.new(0)
+    ran: service_tasks.Semaphore.new(0)
+    services := tree("typed-depth")
+    slow: typed_worker(
+        services,
+        "slow",
+        fn(n: Int) -> Int Err! {
+            ran.release()
+            _: gate.acquire()
+            n
+        },
+        "slow",
+        4,
+    ) ?? panic("typed worker must declare")
+    start(services) ?? panic("typed tree must start")
+    typed_send(services, slow, 1) ?? panic("send 1")
+    // A running message has left the mailbox.
+    _: ran.acquire()
+    typed_send(services, slow, 2) ?? panic("send 2")
+    typed_send(services, slow, 3) ?? panic("send 3")
+    assert_eq(mailbox_depth(services, slow.id) ?? panic("depth"), 2)
+    drain_worker(services, slow.id) ?? panic("drain")
+    assert(services.workers[0].running)
+    if typed_send(services, slow, 4) == {
+        .Ok(_) -> { panic("a draining worker takes no new message") }
+        .Err(_) -> {}
+    }
+    // The waiting messages pin the draining worker through the handoff.
+    assert_eq(handoff_generation(services) ?? panic("handoff"), 2)
+    assert_eq(services.workers[0].endpoint.generation, 1)
+    gate.release()
+    gate.release()
+    gate.release()
+    loop _ in 0..<500 {
+        if (mailbox_depth(services, slow.id) ?? panic("depth")) == 0 -> break
+        service_sleep_ms(10)
+    }
+    assert_eq(mailbox_depth(services, slow.id) ?? panic("depth"), 0)
+    stop(services) ?? panic("stop")
+}
+
 worker_contains: fn(names: [String], name: String) -> Bool Never! {
     loop existing in names {
         if existing == name -> return true
@@ -5789,7 +5840,7 @@ mailbox_depth: fn(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceEr
     validate_tree_endpoint(tree, endpoint)
     loop worker in tree.workers {
         if worker.name == endpoint.worker && worker.endpoint.tree == endpoint.tree {
-            return Ok(channel_depth(worker.channel))
+            return Ok(worker_depth(worker))
         }
     }
     Err(ServiceError.Unknown("endpoint {endpoint.tree}/{endpoint.worker} is not in this tree"))
@@ -5938,7 +5989,7 @@ start: fn(tree: &ServiceTree) ServiceError! {
     loop index in 0..<tree.workers.len() {
         draining: worker_contains(tree.draining, tree.workers[index].name)
         partitioned: worker_contains(tree.partitioned, tree.workers[index].name)
-        running: !partitioned && (!draining || channel_depth(tree.workers[index].channel) > 0)
+        running: !partitioned && (!draining || worker_depth(tree.workers[index]) > 0)
         tree.workers[index].running = running
         if start_activate(tree, index, !partitioned && (running || draining), running) == {
             .Err(error) -> {
@@ -6075,7 +6126,7 @@ drain_worker: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
     // the same gate, so none can enqueue after drain observes an empty mailbox.
     authority_update_draining(endpoint, true)
     index: find_worker(tree, endpoint)
-    empty: channel_depth(tree.workers[index].channel) == 0
+    empty: worker_depth(tree.workers[index]) == 0
     if empty -> tree.workers[index].running = false
     tree.draining.push(tree.workers[index].name)
     if rollout_store_write(tree) == {
@@ -6264,7 +6315,7 @@ handoff_generation: fn(tree: &ServiceTree) -> Int ServiceError! {
     }
     loop name in candidates {
         index: worker_named(tree, name) ?? next
-        if !worker_contains(tree.partitioned, name) && channel_depth(tree.workers[index].channel) == 0 && generation_is_pinned(tree, name, tree.workers[index].endpoint.generation) {
+        if !worker_contains(tree.partitioned, name) && worker_depth(tree.workers[index]) == 0 && generation_is_pinned(tree, name, tree.workers[index].endpoint.generation) {
             _: promote_worker_generation(tree, name)
         }
     }
@@ -6284,7 +6335,7 @@ handoff_generation: fn(tree: &ServiceTree) -> Int ServiceError! {
     pinned := [String]{}
     loop worker in tree.workers {
         uncommitted: authority_has_uncommitted(worker.endpoint)
-        if worker_contains(tree.partitioned, worker.name) || (worker_contains(tree.draining, worker.name) && channel_depth(worker.channel) > 0) || uncommitted {
+        if worker_contains(tree.partitioned, worker.name) || (worker_contains(tree.draining, worker.name) && worker_depth(worker) > 0) || uncommitted {
             pinned.push(worker.name)
         }
     }
