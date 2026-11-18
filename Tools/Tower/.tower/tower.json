@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112242,
+    "rev": 112250,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -46720,69 +46720,6 @@
       "criteriaLastN": 15
     },
     {
-      "id": "c038vt4s",
-      "num": 4727,
-      "title": "jet perf memory method: per-line cache, TLB and page-fault counts, and a memory-level view in the code map",
-      "body": "Owner note: 'Cache hits are critical: how can we give control over L1, L2, L3 cache, and visualize when we are no longer in cache and go to RAM or SSD?' (OwnerNotes1 digest section 1). Jet has layout control (D-PLACE1, D-LAYOUT-ALIGN1, D-LAYOUT-SHOW1), Columns<T> (D-SOA-SITE1), cache blocking (D-ACCEL1), a cost view (D-COSTLAW1) and source-line profiles (D-PROFILE-DETAIL1, D-PROFILE-METHOD1), but nothing measures or shows cache behavior. This card adds measurement only; user-facing cache hints are ballot D-CACHE-CONTROL1.\n\nScope: a third profile method beside sample and count, reading hardware counters (Linux perf_event_open first: L1D misses, last-level misses, dTLB misses, minor and major page faults), attributed to the same source rows D-PROFILE-DETAIL1 keeps. Rows state the counter set, the CPU and completeness, as D-PROFILE-METHOD1 requires. The code map (D-CODEMAP-VIEW1) gains a mode that shades lines by where their data came from (L1, L2, L3, RAM, disk), derived from the counters. Unsupported hosts report 'unavailable' with the reason, never zeros.\n\nThe exact flag spelling (for example --profile-method=memory) extends an approved command; if review judges it a new public command surface, raise a short ballot first.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": "e11",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": "1. Counter reader in the Jet runtime behind core.mem.native (D-RT-NATIVE-CAP1). 2. Attribution to source rows. 3. Report rows and JSON. 4. Code-map mode. 5. Golden: a strided-vs-sequential array walk shows the expected miss ratio ordering.",
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "Merged into #6312 by board audit."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Merged #6016 \"Per-line cost view on the self-hosted toolchain: allocations, copies and Int boxing for each line\" into this card (jet perf per-line and memory cost views); its 3 open item(s) are carried as \"(was #6016)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 8,
-          "text": "Retired: merged into #6312 (same owner note on cache control; #6312 owns cache control and the cache visualization).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "merged into #6312",
-          "at": "2026-11-13T02:03:12.617Z",
-          "closure": "duplicate"
-        }
-      ],
-      "refs": [
-        "D-PROFILE-DETAIL1",
-        "D-PROFILE-METHOD1",
-        "D-CODEMAP-VIEW1",
-        "D-ACCEL1",
-        "D-CACHE-CONTROL1",
-        "$JET_STATE_ROOT/scratch/OwnerNotes1/DIGEST.md#1"
-      ],
-      "tags": [
-        "perf",
-        "tooling",
-        "owner-notes-2026-10-07",
-        "wayfinder:task"
-      ],
-      "parentId": "c0rak5ve",
-      "needsAcceptance": false,
-      "created": "2026-10-07T13:09:17.151Z",
-      "updated": "2026-11-15T14:02:14.812Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 9,
-      "completedAt": "2026-11-13T02:03:15.496Z"
-    },
-    {
       "id": "c0x9xmde",
       "num": 4730,
       "title": "Quaternion in core.math (reserved j/k literals), usable F16, and Decimal-with-Complex literals",
@@ -86929,6 +86866,82 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-18T13:44:01.492Z"
+        },
+        {
+          "n": 43,
+          "text": "Time travel over the chokepoint and sync order: (a) `jet run --record=r1` of a program whose tasks share channels and a lock, made at -O2, replays under `jet debug --replay=r1` with the same output and the same sync order at -O0, -O1 and -O2, on real threads; an unsafe write that changes the run is reported at the first sync event where it diverges. (b) In a replay, `reverse-step`, `reverse-next`, `reverse-finish` and `reverse-continue` reach the previous line, call, caller and breakpoint or watch hit, in the console and over DAP `stepBack` and `reverseContinue`. (c) `why x` in a replay names the write that gave `x` its value: file:line, task, stack and the value it replaced; a local optimized out at -O2 is shown from the -O0 replay and labeled recovered. Proof: `jet test Compiler --profile cases --filter Debug/replay_threads_across_tiers_`; `--filter Debug/replay_reverse_`; `--filter Debug/replay_why_`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R1)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:00.018Z",
+          "blockedBy": "D-TIMETRAVEL3"
+        },
+        {
+          "n": 44,
+          "text": "A sampler that is right on threads: (a) `jet perf run` samples each thread on its own CPU clock: four tasks running fib at once at -O2 keep at least 90% of the nominal samples, and every sample keeps its whole stack. (b) A sample in a compiler-emitted helper (a stop poll, a barrier) is charged to the Jet line that called it, and the receipt counts such samples; no fib sample is reported outside Jet functions. (c) A sample in an inlined function names the inlined function's line and its caller's line, at -O2. (d) Every receipt states the capture's overhead, measured against a matched unprofiled run, and the default rate costs under 2% on fib. Proof: `jet test Compiler --profile cases --filter Perf/every_thread_keeps_whole_stacks`; `--filter Perf/helper_samples_charge_the_calling_line`; `--filter Perf/inlined_samples_name_the_inlined_line`; `--filter Perf/receipt_reports_measured_overhead`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R2)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:03.006Z"
+        },
+        {
+          "n": 45,
+          "text": "One evaluator: the compiler's: Every debugger expression (console `print` and `watch`, breakpoint conditions, logpoint templates, DAP `evaluate`) is checked by the compiler at a position probe in the stopped function's own check, built at O0 against the eval runtime, and run in a fork of the stopped program, as `Docs/Proposals/2026-11-18-debug-eval-native.md` specifies. Field paths, indexing, method calls and generic functions work; an expression with an effect is refused with the effect named; `DebugEval.jet`'s second evaluator is gone. Built only after c40 is met. Proof: `jet test Compiler --profile cases --filter Debug/print_evaluates_compiled_expressions`; `--filter Debug/print_refuses_effectful_expression`; the proposal's §8.2 bars. (Docs/Audits/2026-11-18-best-debugger-profiler.md R3)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:05.633Z"
+        },
+        {
+          "n": 46,
+          "text": "Waits with wakers, off-CPU time, I/O: Every wait in the trace (channel send and receive, lock, join, sleep, I/O readiness) names its object, its blocking stack and the task whose action ended it; `jet perf view` lists off-CPU time per stack; file and network I/O through the capability chokepoint appear on the timeline with bytes and target and no instrumentation. Extends c7 from joins to every wait. Proof: `jet test Compiler --profile cases --filter Perf/every_wait_names_its_waker`; `--filter Perf/off_cpu_time_by_stack`; `--filter Perf/io_on_timeline_without_instrumentation`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R4)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:07.762Z"
+        },
+        {
+          "n": 47,
+          "text": "Zones, frame marks and plots: An effect-free zone, frame-mark and plot API and a `#Profiled` marker write one per-thread ring that `core.log.span` also writes, and line up with samples on the `jet perf view` timeline. Each zone site is a patchable no-op until `jet perf run` or `jet perf attach` turns zones on, at a cost c6 measures; a build setting strips the sites. Serves c3 and c6. Proof: `jet test Compiler --profile cases --filter Perf/zones_frames_plots_share_the_timeline`; c3; c6. (Docs/Audits/2026-11-18-best-debugger-profiler.md R5)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:10.457Z",
+          "blockedBy": "D-PERF-ZONES1"
+        },
+        {
+          "n": 48,
+          "text": "Deadlock stop: When the last task in a wait cycle (channels, locks, joins) blocks, the program stops with a diagnostic naming every task in the cycle, its wait and its line; a partial cycle is found while other tasks still run. Proof: `jet test Compiler --profile cases --filter Tasks/wait_cycle_stops_with_the_cycle`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R6)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:13.096Z",
+          "blockedBy": "D-DBG-DEADLOCK1"
+        },
+        {
+          "n": 49,
+          "text": "Console verbs, fast conditions, hardware watches: c36's verbs ship under the ratified spellings; `watch` uses the CPU's debug registers and stops at the changing write with old and new values; a condition that R3's scan places in the program (it writes no memory the program reads) and that is false a million times finishes in under a second, and a condition it cannot place says so when the breakpoint is set; `tasks` lists every task with state, wait and stack. Proof: `jet test Compiler --profile cases --filter Debug/watch_stops_at_the_changing_write`; `--filter Debug/conditional_breakpoint_runs_in_process`; `--filter Debug/tasks_lists_every_task`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R7)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:15.193Z",
+          "blockedBy": "D-DBG-VERBS1"
+        },
+        {
+          "n": 50,
+          "text": "Visualizers that never run in the target: A type's `debug_view` renders in `jet debug`, over DAP, in a crash dump and in a replay without running code in the target: R3's path builds it and runs it in a fork of the stopped program, or of the dump's or the replay's process. Built only after c40 is met. Proof: `jet test Compiler --profile cases --filter Debug/debug_view_renders_without_running_the_target`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R8)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:17.838Z"
         }
       ],
       "refs": [],
@@ -86936,9 +86949,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-18T13:48:49.035Z",
+      "updated": "2026-11-18T14:10:17.838Z",
       "updatedBy": "Main",
-      "criteriaLastN": 42
+      "criteriaLastN": 50
     },
     {
       "id": "c0in2dft",
@@ -133784,160 +133797,6 @@
       "ratifiedAt": "2026-10-07"
     },
     {
-      "id": "D-CACHE-CONTROL1",
-      "cardId": "c038vt4s",
-      "group": "api",
-      "title": "Expert cache hints in core.mem: prefetch, streaming store, cache-line size",
-      "situation": "Fast programs keep the data they need in the processor's small caches; a miss can cost a hundred times more than a hit. Jet already lets experts control memory layout, but it cannot ask for data early or write large results without flushing the cache. The vote decides whether core.mem gains three expert tools, a prefetch, a streaming store and the chip's cache-line size; we recommend yes, each proven by a measured test.",
-      "gist": "Should experts get cache hints in `core.mem`: prefetch, a streaming store, and the cache-line size?",
-      "lesson": "A CPU cache keeps recently used memory close to the processor; a miss waits for main memory. A prefetch asks for data before it is needed. A streaming store writes without filling the cache. Whichever option wins, the profiler work that shows misses per line goes ahead.",
-      "explainer": "",
-      "story": "Lee's physics step walks a grid by columns. Each read misses the cache, and the profiler will soon show it, but Jet gives Lee no way to fetch the next column early.",
-      "inWild": "// Zig\n@prefetch(&grid[i + 8], .{ .rw = .read, .locality = 3 });\n\n// C and C++ (GCC, Clang)\n__builtin_prefetch(&grid[i + 8], 0, 3);\n_mm_stream_si128(dst, v);   // streaming store\n\n// C++17\nalignas(std::hardware_destructive_interference_size) int hits;",
-      "detail": "Source: owner scratch note, line 17: cache hits are critical; give control over the L1, L2 and L3 caches, and show when code falls out of cache to RAM or disk.\n\nJet today. Layout control exists: `#Layout(c, align(N))` and target alignment (D-PLACE1, D-LAYOUT-ALIGN1). Byte sizes are facts (D-LAYOUT-SHOW1), and column storage is chosen per collection (D-SOA-SITE1). Proven kernels get cache blocking behind a measured gate (D-ACCEL1), and a hidden-cost view exists (D-COSTLAW1). No decision mentions prefetch, streaming stores or cache lines. The seeing half is card draft cards/cache-profiler.json, which needs no ballot.\n\nOption A, technical. `mem.prefetch(place, .Read | .Write, level: .L1 | .L2 | .L3 = .L1)` takes a place or view, never faults, and is a no-op on targets without the instruction. `mem.stream_store(&dst, value)` writes with a non-temporal store where the chip has one and an ordinary store elsewhere. `$build.cpu.cache_line` is a build fact for the selected CPU, defaulting to 64 when the target is generic.\n\nSafety and lowering. None of these needs #Unsafe, because none can read or write outside a checked place. They lower through D-CORE-BOUNDARY1 instruction entries whose plain bodies define the meaning.\n\nPerformance rule. AGENTS.md requires a surface added for performance to arrive with a paired two-program cell against the plain spelling, and ratification waits until it strictly beats the plain form. The cells are a strided grid walk with and without prefetch, a large copy with and without streaming stores, and contended counters with and without padding.\n\nEvidence. Zig ships @prefetch. GCC and Clang ship __builtin_prefetch and streaming-store intrinsics. C++17 added hardware_destructive_interference_size for padding. Linux kernel code pads hot counters to cache lines to avoid false sharing.\n\nWhy B loses: a profiler that shows misses without a way to act on them leaves experts reaching for #Unsafe or inline assembly.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Expert hints in core.mem",
-          "detail": "Three tools in core.mem: prefetch a place, store without filling the cache, and read the chip's cache-line size as a build fact. All are safe and need no #Unsafe.",
-          "technical": "`mem.prefetch(place, .Read | .Write, level: = .L1)`, `mem.stream_store(&dst, value)`, `$build.cpu.cache_line` (default 64 on generic targets). Lowered through Core instruction entries; no-ops where unsupported. Each needs a paired gauntlet cell before ratification.",
-          "code": "use core.mem as mem\nloop i in 0..<n {\n    mem.prefetch(grid[(i + 8) * stride], .Read)\n    total += grid[i * stride]\n}\nloop i in 0..<big.len() -> mem.stream_store(&out[i], big[i] * 2)\n#Layout(c, align($build.cpu.cache_line)) struct Counter { hits: Int }"
-        },
-        {
-          "key": "B",
-          "name": "Compiler and profiler only",
-          "detail": "No new API. The optimizer and D-ACCEL1 handle cache behavior, and the profiler shows misses.",
-          "technical": "No change beyond the profiler card.",
-          "code": "loop i in 0..<n {\n    total += grid[i * stride]   // compiler decides\n}"
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Zig",
-          "note": "Built-in prefetch.",
-          "code": "@prefetch(&grid[i + 8], .{ .rw = .read, .locality = 3 });"
-        },
-        {
-          "lang": "C",
-          "note": "GCC and Clang built-ins and intrinsics.",
-          "code": "__builtin_prefetch(&grid[i + 8], 0, 3);\n_mm_stream_si128(dst, v);"
-        },
-        {
-          "lang": "C++17",
-          "note": "A named cache-line size for padding.",
-          "code": "alignas(std::hardware_destructive_interference_size) int hits;"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "Seeing cache misses is only useful if an expert can act on them. A adds three small tools that never break safety, and each must beat plain code on a measured test.",
-        "gains": [
-          "Experts get the same cache control as C and Zig.",
-          "Beginners never meet it."
-        ],
-        "losses": [
-          {
-            "loss": "A wrong hint can make code slower.",
-            "mitigation": "The memory profiler shows misses before and after, and a paired test proves the gain."
-          },
-          {
-            "loss": "Cache-line size differs between chips.",
-            "mitigation": "It is a build fact for the chip you target, with 64 bytes as the portable default."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "It shows experts the problem and then gives them no way to fix it."
-          }
-        ],
-        "tradeoff": "Three expert tools, each kept only when it beats the plain loop."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should experts get cache hints in `core.mem`: prefetch, a streaming store, and the cache-line size?",
-        "lesson": "A CPU cache keeps recently used memory close to the processor; a miss waits for main memory. A prefetch asks for data before it is needed. A streaming store writes without filling the cache. Whichever option wins, the profiler work that shows misses per line goes ahead.",
-        "trio": {
-          "current": {
-            "note": "Layout and alignment are controllable, but there is no way to ask for data early or skip the cache.",
-            "code": "loop i in 0..<n {\n    total += grid[i * stride]   // each read may wait for RAM\n}\n// no way to ask for the next rows early"
-          },
-          "wild": {
-            "lang": "Zig",
-            "note": "Zig has a built-in prefetch with read or write intent and locality. See ziglang.org/documentation/master, @prefetch.",
-            "code": "@prefetch(&grid[(i + 8) * stride], .{ .rw = .read, .locality = 3 });\ntotal += grid[i * stride];"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Expert hints in core.mem",
-            "gist": "Three safe expert tools: prefetch, streaming store, and the cache-line size.",
-            "gains": [
-              "Experts can hide memory waits the compiler cannot predict.",
-              "Shared counters can be padded to the real cache line."
-            ],
-            "losses": [
-              "A wrong hint can make code slower.",
-              "Cache-line size differs between chips."
-            ],
-            "proposed": {
-              "code": "use core.mem as mem\nloop i in 0..<n {\n    mem.prefetch(grid[(i + 8) * stride], .Read)\n    total += grid[i * stride]\n}\n#Layout(c, align($build.cpu.cache_line)) struct Counter { hits: Int }"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Compiler and profiler only",
-            "gist": "No hints; the optimizer and the profiler handle the cache.",
-            "gains": [
-              "Nothing new to learn or misuse."
-            ],
-            "losses": [
-              "Irregular access patterns stay slow, with no expert fix."
-            ],
-            "proposed": {
-              "code": "loop i in 0..<n {\n    total += grid[i * stride]   // compiler decides\n}\n// jet perf shows the misses; no way to act on them"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "Seeing cache misses is only useful if an expert can act on them. A adds three small tools that never break safety, and each must beat plain code on a measured test.",
-          "gains": [
-            "Experts get the same cache control as C and Zig.",
-            "Beginners never meet it."
-          ],
-          "losses": [
-            {
-              "loss": "A wrong hint can make code slower.",
-              "mitigation": "The memory profiler shows misses before and after, and a paired test proves the gain."
-            },
-            {
-              "loss": "Cache-line size differs between chips.",
-              "mitigation": "It is a build fact for the chip you target, with 64 bytes as the portable default."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "It shows experts the problem and then gives them no way to fix it."
-            }
-          ],
-          "tradeoff": "Three expert tools, each kept only when it beats the plain loop."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-07T13:09:41.488Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-07"
-    },
-    {
       "id": "D-ENUM-BACKING1",
       "cardId": "c0vow6jh",
       "group": "api",
@@ -178548,6 +178407,118 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T14:10:17.838Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "50 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:17.838Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#50 Visualizers that never run in the target: A type's `debug_vi"
+    },
+    {
+      "at": "2026-11-18T14:10:15.193Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "49 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:15.193Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#49 Console verbs, fast conditions, hardware watches: c36's verb (blocked by D-DBG-VERBS1)"
+    },
+    {
+      "at": "2026-11-18T14:10:13.096Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "48 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:13.096Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#48 Deadlock stop: When the last task in a wait cycle (channels, (blocked by D-DBG-DEADLOCK1)"
+    },
+    {
+      "at": "2026-11-18T14:10:10.457Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "47 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:10.457Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#47 Zones, frame marks and plots: An effect-free zone, frame-mar (blocked by D-PERF-ZONES1)"
+    },
+    {
+      "at": "2026-11-18T14:10:07.762Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "46 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:07.762Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#46 Waits with wakers, off-CPU time, I/O: Every wait in the trac"
+    },
+    {
+      "at": "2026-11-18T14:10:05.633Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "45 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:05.633Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#45 One evaluator: the compiler's: Every debugger expression (co"
+    },
+    {
+      "at": "2026-11-18T14:10:03.007Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "44 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:03.007Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#44 A sampler that is right on threads: (a) `jet perf run` sampl"
+    },
+    {
+      "at": "2026-11-18T14:10:00.018Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "43 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:00.018Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#43 Time travel over the chokepoint and sync order: (a) `jet run (blocked by D-TIMETRAVEL3)"
+    },
     {
       "at": "2026-11-18T13:48:49.035Z",
       "by": "Main",

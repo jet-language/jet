@@ -4820,6 +4820,71 @@
       "completedAt": "2026-11-15T11:39:47.405Z",
       "questions": [],
       "retiredAt": "2026-11-18T13:35:15.846Z"
+    },
+    {
+      "id": "c038vt4s",
+      "num": 4727,
+      "title": "jet perf memory method: per-line cache, TLB and page-fault counts, and a memory-level view in the code map",
+      "body": "Owner note: 'Cache hits are critical: how can we give control over L1, L2, L3 cache, and visualize when we are no longer in cache and go to RAM or SSD?' (OwnerNotes1 digest section 1). Jet has layout control (D-PLACE1, D-LAYOUT-ALIGN1, D-LAYOUT-SHOW1), Columns<T> (D-SOA-SITE1), cache blocking (D-ACCEL1), a cost view (D-COSTLAW1) and source-line profiles (D-PROFILE-DETAIL1, D-PROFILE-METHOD1), but nothing measures or shows cache behavior. This card adds measurement only; user-facing cache hints are ballot D-CACHE-CONTROL1.\n\nScope: a third profile method beside sample and count, reading hardware counters (Linux perf_event_open first: L1D misses, last-level misses, dTLB misses, minor and major page faults), attributed to the same source rows D-PROFILE-DETAIL1 keeps. Rows state the counter set, the CPU and completeness, as D-PROFILE-METHOD1 requires. The code map (D-CODEMAP-VIEW1) gains a mode that shades lines by where their data came from (L1, L2, L3, RAM, disk), derived from the counters. Unsupported hosts report 'unavailable' with the reason, never zeros.\n\nThe exact flag spelling (for example --profile-method=memory) extends an approved command; if review judges it a new public command surface, raise a short ballot first.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e11",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "1. Counter reader in the Jet runtime behind core.mem.native (D-RT-NATIVE-CAP1). 2. Attribution to source rows. 3. Report rows and JSON. 4. Code-map mode. 5. Golden: a strided-vs-sequential array walk shows the expected miss ratio ordering.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Merged into #6312 by board audit."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6016 \"Per-line cost view on the self-hosted toolchain: allocations, copies and Int boxing for each line\" into this card (jet perf per-line and memory cost views); its 3 open item(s) are carried as \"(was #6016)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 8,
+          "text": "Retired: merged into #6312 (same owner note on cache control; #6312 owns cache control and the cache visualization).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "merged into #6312",
+          "at": "2026-11-13T02:03:12.617Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [
+        "D-PROFILE-DETAIL1",
+        "D-PROFILE-METHOD1",
+        "D-CODEMAP-VIEW1",
+        "D-ACCEL1",
+        "D-CACHE-CONTROL1",
+        "$JET_STATE_ROOT/scratch/OwnerNotes1/DIGEST.md#1"
+      ],
+      "tags": [
+        "perf",
+        "tooling",
+        "owner-notes-2026-10-07",
+        "wayfinder:task"
+      ],
+      "parentId": "c0rak5ve",
+      "needsAcceptance": false,
+      "created": "2026-10-07T13:09:17.151Z",
+      "updated": "2026-11-15T14:02:14.812Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-13T02:03:15.496Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T14:10:00.307Z"
     }
   ]
 }
