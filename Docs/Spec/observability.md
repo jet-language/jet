@@ -71,12 +71,14 @@ tables, so `-O2` code inlined into a caller counts at that caller, at the line
 the table gives the code. The rows are `cpu` rows, one per function and line of
 the checked source, hottest first; `coverage` is `complete` when every sample
 landed in that source and `partial` when some ran in the runtime or another
-file, which the `reason` counts. `jet perf view` sums them per function with
-its share of the samples, then its hottest lines. A run whose samples never
-reach the checked source (a short program, `jet perf test`, `jet perf
-attach`) keeps the observation rows, which attribute to the parsed `run: fn`
-declaration (`fn` through its closing brace) and do not separate the
-functions that `run` calls.
+file, which the `reason` counts and, for samples outside every Jet function,
+names by the image's `.symtab` function, hottest first, as `perf report` names
+them (the compiler's stop poll `jet_ir_stop_turn` is the usual one). `jet perf
+view` sums them per function with its share of the samples, then its hottest
+lines. A run whose samples never reach the checked source (a short program,
+`jet perf test`, `jet perf attach`) keeps the observation rows, which attribute
+to the parsed `run: fn` declaration (`fn` through its closing brace) and do not
+separate the functions that `run` calls.
 
 ## Canonical devtools protocol
 

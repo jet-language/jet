@@ -1,0 +1,26 @@
+# Linux perf is the comparator for `jet perf run`'s own sampler: on the same
+# -O2 fib, sampling the same CPU clock, both put fib first, at the same
+# hottest source line, and both name the compiler's stop poll beside it by
+# its symbol. `jet perf` reads no perf data; perf only checks it.
+requires: os-name:linux
+requires: tool:perf
+fixture: Fixtures/Fib
+step: jet build -O2 fib.jet
+exit: 0
+step: perf record -q -e cpu-clock -o {work}/fib.perf -- {work}/.jet/build/fib 35
+exit: 0
+stdout: = "fib=9227465\n" # the comparator ran the program to its end
+step: perf report -i {work}/fib.perf --stdio -q --sort overhead,sym
+exit: 0
+stdout: before "[.] fib.fib" "[.] jet_ir_stop_turn" # perf: fib has the most samples, the stop poll fewer
+step: perf report -i {work}/fib.perf --stdio -q --symbols fib.fib --sort overhead,srcline
+exit: 0
+stdout: before "fib.jet:7" "fib.jet:5" # perf: fib's recursive line is its hottest
+stdout: before "fib.jet:7" "fib.jet:6" # perf: fib's recursive line is its hottest
+step: jet perf run -O2 fib.jet --out {work}/fib.jettrace -- 35
+exit: 0
+stdout: = "fib=9227465\n" # the profiled run ran the same program to its end
+json: file fib.jettrace doc $.content.profile.rows[0].symbol.name = "fib" # jet perf: fib has the most samples
+json: file fib.jettrace doc $.content.profile.rows[0].source.start_line = 7 # jet perf: at the recursive line, as perf says
+file: fib.jettrace ~ "samples are outside fib.jet; outside Jet functions: " # jet perf names the samples outside Jet code by symbol
+file: fib.jettrace ~ "jet_ir_stop_turn " # the same stop poll perf names
