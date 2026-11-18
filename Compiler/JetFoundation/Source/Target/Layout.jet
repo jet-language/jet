@@ -1,10 +1,18 @@
 // Canonical target layout identity, profile contracts, and compiler-owned
 // physical layout facts. This module deliberately never asks a native layout
 // engine for an answer: `#Layout(c)` and `#Layout(columnar)` declarations
-// receive the facts of their declaration, and a struct without `#Layout`
-// receives the facts of the compiler's own placement (jet_target_layout_native_struct_facts).
+// receive the facts of their declaration, and a struct or enum without one
+// receives the facts of the compiler's own placement
+// (jet_target_layout_native_struct_facts, jet_target_layout_native_enum_facts).
 
 JET_TARGET_LAYOUT_FACT_VERSION: "layout-facts-v2"
+
+// The widest struct an enum case holds inline. An enum whose layout is
+// promised elsewhere boxes every value as wide as its widest case, so one
+// rare wide payload would make every value that wide. Past six words, a
+// wrapper box of its own costs the wide case one allocation and saves every
+// other case the width.
+JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES: 48
 
 JET_LAYOUT_U64_MAX: 0xffffffffffffffff
 
@@ -580,12 +588,13 @@ jet_target_layout_native_struct_facts: fn(engine: TargetLayoutEngine, definition
 
 // The bytes a value of `ty` takes as a member of a struct the native code
 // generator lays out, None when unknown. Int, Float, Char, String, Option,
-// Result, enums and raw pointers are one word; an IntN packs into 1, 2, 4 or
-// 8 bytes; a List is its 24-byte header. Core declarations are carried by
-// the runtime, not by their declared fields, and stay unknown.
+// Result, enums, raw pointers, closures, trait values and Shared handles are
+// one word; an IntN packs into 1, 2, 4 or 8 bytes; a List is its 24-byte
+// header. Core declarations are carried by the runtime, not by their
+// declared fields, and stay unknown.
 jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> ByteLayout? {
     if ty == {
-        .Int | .Float | .Char | .String | .Option(_) | .Result(_, _) -> Val(jet_target_layout_scalar(8))
+        .Int | .Float | .Char | .String | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Shared(_) -> Val(jet_target_layout_scalar(8))
         .Bool -> Val(jet_target_layout_scalar(1))
         .Float32 -> Val(jet_target_layout_scalar(4))
         .IntN(_, bits) -> {
@@ -596,7 +605,7 @@ jet_target_layout_native_type: fn(engine: TargetLayoutEngine, ty: Type, owner_qu
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_native_type(engine, base, owner_qualified_name, query)
         .Named(name) -> jet_target_layout_native_named(engine, name, owner_qualified_name, query)
         .Apply(name, args) -> if (name == "Ptr" && args.len() == 1) || jet_target_layout_bit_set(engine, name, args, owner_qualified_name) -> Val(jet_target_layout_scalar(8)) else -> None
-        .Map(_, _, _) | .Shared(_) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> None
+        .Map(_, _, _) | .Tuple(_) | .FixedList(_, _) | .Union(_) | .Case(_, _) | .Measure(_) -> None
     }
 }
 
@@ -646,7 +655,7 @@ jet_target_layout_native_item: fn(engine: TargetLayoutEngine, item: Item, identi
 
 jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definition: EnumDef, identity: String, owner_qualified_name: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
     variant_names: loop variant in definition.variants -> variant.name
-    enum_tag: jet_target_layout_enum_c_tag(definition) ?? return jet_target_layout_unknown(variant_names)
+    enum_tag: jet_target_layout_enum_c_tag(definition) ?? return jet_target_layout_native_enum_facts(engine, definition, identity, query)
     if !jet_target_layout_enter(query, identity) -> return jet_target_layout_unknown(variant_names)
     tag_layout: jet_target_layout_scalar(jet_target_layout_enum_tag_size(enum_tag))
     payloads := [ByteLayout?]{}
@@ -715,6 +724,70 @@ jet_target_layout_enum_facts_inner_named: fn(engine: TargetLayoutEngine, definit
     }
     query.active[identity] = false
     LayoutFacts{bytes: bytes, fields: facts}
+}
+
+// The bytes the native code generator gives enum `definition` without a C
+// tag. A value is one word: the tag when no case has a payload, else a
+// pointer to a heap box holding the tag word at 0 and the case's payload
+// members from byte 8, each at its alignment (a nested struct or List at 8),
+// a struct wider than JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES held by an
+// 8-byte pointer to a box of its own. A case's facts are its payload's offset
+// and bytes in the box; a case without a payload reports its tag word. A
+// generic enum lays out per instance and stays unknown.
+jet_target_layout_native_enum_facts: fn(engine: TargetLayoutEngine, definition: EnumDef, identity: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {
+    variant_names: loop variant in definition.variants -> variant.name
+    if definition.type_params.len() > 0 || !jet_target_layout_enter(query, identity) {
+        return jet_target_layout_unknown(variant_names)
+    }
+    word: jet_target_layout_scalar(8)
+    facts := [FieldLayoutFacts]{}
+    loop variant in definition.variants {
+        if variant.payload == .Unit {
+            facts.push(FieldLayoutFacts{name: variant.name, offset: Val(0), size: Val(word.size), alignment: Val(word.alignment), stride: Val(word.stride)})
+            next
+        }
+        cursor := 8
+        alignment := 1
+        known := true
+        if variant.payload == {
+            .Unit -> {}
+            .Single(ty, _) -> {
+                known = jet_target_layout_native_place(engine, ty, identity, query, cursor, alignment)
+            }
+            .Named(fields) -> {
+                loop field in fields {
+                    if !jet_target_layout_native_place(engine, field.ty, identity, query, cursor, alignment) {
+                        known = false
+                        break
+                    }
+                }
+            }
+        }
+        size: cursor - 8
+        stride: if known -> jet_layout_align_up(size, alignment) else -> None
+        if stride == .Val(bytes) {
+            facts.push(FieldLayoutFacts{name: variant.name, offset: Val(8), size: Val(size), alignment: Val(alignment), stride: Val(bytes)})
+        } else {
+            query.active[identity] = false
+            return jet_target_layout_unknown(variant_names)
+        }
+    }
+    query.active[identity] = false
+    LayoutFacts{bytes: Val(word), fields: facts}
+}
+
+// Place one payload member of type `ty` in an enum case's box at `cursor`
+// (jet_target_layout_native_enum_facts), moving `cursor` past it and raising
+// `alignment` to its own; false when its bytes are unknown.
+jet_target_layout_native_place: fn(engine: TargetLayoutEngine, ty: Type, identity: String, query: &JetTargetLayoutQuery, cursor: &Int, alignment: &Int) -> Bool Never! {
+    member: jet_target_layout_native_type(engine, ty, identity, query) ?? return false
+    boxed: member.size > JET_TARGET_LAYOUT_VARIANT_INLINE_BYTES
+    size: if boxed -> 8 else -> member.size
+    align: if boxed -> 8 else -> member.alignment
+    if size > 0 -> cursor = jet_layout_align_up(cursor, align) ?? return false
+    cursor = jet_layout_checked_add(cursor, size) ?? return false
+    if align > alignment -> alignment = align
+    true
 }
 
 jet_target_layout_aggregate: fn(engine: TargetLayoutEngine, names: [String], types: [Type], owner_qualified_name: String, query: &JetTargetLayoutQuery) -> LayoutFacts Never! {

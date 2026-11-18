@@ -2,6 +2,7 @@
 // answers from the checked index of the document's current text.
 use {
     core.encoding.[Dyn]
+    jet_driver.[jet_driver_layout_line, jet_driver_layout_summary]
     jet_foundation.[Span, Type, foundation_byte_text, foundation_json_quote, type_name]
     jet_lexer.[Lexed, Token, TOKEN_IDENT, TOKEN_LPAREN, TOKEN_RPAREN, TOKEN_LBRACKET, TOKEN_RBRACKET, TOKEN_LBRACE, TOKEN_RBRACE, TOKEN_COMMA, TOKEN_COLON, lex, token_text]
     jet_semindex.[SemDef, SemSymbolKind]
@@ -37,6 +38,10 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
                 if lsp_symbol_for(at.view.checked.symbols, def) == .Val(symbol) {
                     markdown = Val(lsp_hover_markdown(symbol.signature, symbol.summary))
                 }
+                // A struct or enum also shows its layout on the checked target.
+                if lsp_layout_markdown(at.view.checked, def) == .Val(layout) {
+                    markdown = if markdown == .Val(shown) -> Val("{shown}\n\n{layout}") else -> Val(layout)
+                }
             }
         }
     }
@@ -57,6 +62,19 @@ lsp_hover_response: fn(server: LSPServer, params: Dyn?, id: Dyn) -> String {
         range = ",\"range\":{lsp_range_json(lsp_byte_span_to_range(at.view.doc.text, name.span))}"
     }
     lsp_response(id, "{{\"contents\":{{\"kind\":\"markdown\",\"value\":{foundation_json_quote(text)}}}{range}}}")
+}
+
+// The hovered type's layout as one line, read from the record the check made
+// for it (JetDriver LayoutSummary.jet): no layout is computed here. None
+// when the definition is no struct or enum, or a byte fact is unknown.
+lsp_layout_markdown: fn(checked: LSPChecked, def: SemDef) -> String? Never! {
+    module_ref: checked.modules[lsp_module_index(checked, def.module_path) ?? return None]
+    loop row in module_ref.layout_facts {
+        if row.name != def.name || !lsp_span_holds(def.def_span, row.span.start) -> next
+        summary: jet_driver_layout_summary(row.value) ?? return None
+        return Val("Layout on `{summary.target}`: {jet_driver_layout_line(summary)} (not promised)")
+    }
+    None
 }
 
 // The automatic choices the check records on the hovered line of the

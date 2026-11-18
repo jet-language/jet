@@ -1294,12 +1294,15 @@ sema_comptime_reflection_struct_layout: fn(registration: SemaRegistrationGraph, 
     sema_comptime_reflection_layout_info(kind, guarantee, "struct declaration", target, facts, requested, effective, layout_fields)
 }
 
+// An enum without a C tag reports the compiler's own placement
+// (jet_target_layout_native_enum_facts), as a struct without `#Layout` does;
+// a generic one lays out per instance and has no byte facts.
 sema_comptime_reflection_enum_layout: fn(registration: SemaRegistrationGraph, caller: Int, definition: EnumDef, engine: TargetLayoutEngine, module_identity: String) -> TComptimeValue {
     target: jet_target_layout_engine_target(engine)
     c_tag: jet_target_layout_enum_c_tag(definition)
-    kind: if c_tag != None -> "c" else -> "default"
-    guarantee: if c_tag != None -> "repr(C) declaration" else -> "enum physical layout unspecified"
     facts: jet_target_layout_enum_facts_in_module(engine, definition, module_identity)
+    kind: if c_tag != None -> "c" else -> "default"
+    guarantee: if c_tag != None -> "repr(C) declaration" else if facts.bytes != None -> "optimized" else -> "enum physical layout unspecified"
     layout_fields := [TComptimeValue]{}
     loop variant_index in 0..<definition.variants.len() {
         index: sema_comptime_reflection_layout_field(facts, definition.variants[variant_index].name)

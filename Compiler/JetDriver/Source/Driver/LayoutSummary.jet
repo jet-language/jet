@@ -1,0 +1,141 @@
+// One declared type's byte layout as its checked record states it (the
+// `LayoutInfo` row of a doc module's `layout_facts`), read for `jet inspect
+// shapes` and the editor's hover. Both show these facts; neither lays a type
+// out again.
+use jet_foundation.[TComptimeValue]
+
+// A field of a struct, or a case of an enum, at its offset with its bytes.
+JetDriverLayoutMember: struct {
+    name: String,
+    offset: Int,
+    size: Int,
+}
+
+// The known byte facts of one type on the record's target. `boxed` when the
+// type is an enum whose value is a pointer to a heap box: its cases' offsets
+// count within the box, and a case at offset 0 holds only the tag.
+JetDriverLayoutSummary: struct {
+    kind: String,
+    target: String,
+    enumeration: Bool,
+    boxed: Bool,
+    size: Int,
+    alignment: Int,
+    stride: Int,
+    members: [JetDriverLayoutMember],
+}
+
+// The enum case whose payload sets the size, with the next widest case and
+// the ratio between them in tenths.
+JetDriverLayoutDominant: struct {
+    case_name: String,
+    size: Int,
+    next_name: String,
+    next_size: Int,
+    tenths: Int,
+}
+
+// The ratio, in tenths, from which one case is noted as setting the size.
+JET_DRIVER_LAYOUT_DOMINANT_TENTHS: 20
+
+jet_driver_layout_record_field: fn(value: TComptimeValue, name: String) -> TComptimeValue? Never! {
+    if value == .Struct(_, fields) {
+        loop field in fields {
+            if field.name == name -> return Val(field.value)
+        }
+    }
+    None
+}
+
+// A known Int member; an absent optional is None.
+jet_driver_layout_record_int: fn(value: TComptimeValue, name: String) -> Int? Never! {
+    found: jet_driver_layout_record_field(value, name) ?? return None
+    if found == .Int(number) -> return Val(number)
+    if found == .Present(inner) {
+        if inner == .Int(number) -> return Val(number)
+    }
+    None
+}
+
+jet_driver_layout_record_text: fn(value: TComptimeValue, name: String) -> String? Never! {
+    if jet_driver_layout_record_field(value, name) == .Val(.String(text)) -> Val(text) else -> None
+}
+
+// The record's byte facts, None when any of them is unknown.
+jet_driver_layout_summary: fn(layout: TComptimeValue) -> JetDriverLayoutSummary? Never! {
+    kind: jet_driver_layout_record_text(layout, "kind") ?? return None
+    target: jet_driver_layout_record_text(layout, "target") ?? return None
+    enumeration: (jet_driver_layout_record_text(layout, "source") ?? "") == "enum declaration"
+    size: jet_driver_layout_record_int(layout, "size") ?? return None
+    alignment: jet_driver_layout_record_int(layout, "alignment") ?? return None
+    stride: jet_driver_layout_record_int(layout, "stride") ?? return None
+    members := [JetDriverLayoutMember]{}
+    boxed := false
+    if jet_driver_layout_record_field(layout, "fields") == .Val(.List(values)) {
+        loop field in values {
+            name: jet_driver_layout_record_text(field, "name") ?? return None
+            offset: jet_driver_layout_record_int(field, "offset") ?? return None
+            bytes: jet_driver_layout_record_int(field, "size") ?? return None
+            if enumeration && kind == "default" && offset > 0 -> boxed = true
+            members.push(JetDriverLayoutMember{name: name, offset: offset, size: bytes})
+        }
+    }
+    Val(JetDriverLayoutSummary{kind: kind, target: target, enumeration: enumeration, boxed: boxed, size: size, alignment: alignment, stride: stride, members: members})
+}
+
+jet_driver_layout_bytes: fn(count: Int) -> String Never! {
+    if count == 1 -> "1 byte" else -> "{count} bytes"
+}
+
+// The summary as one line: the type's bytes, then each field or case.
+jet_driver_layout_line: fn(summary: JetDriverLayoutSummary) -> String Never! {
+    head: "{jet_driver_layout_bytes(summary.size)}, alignment {summary.alignment}"
+    if summary.enumeration && summary.kind == "default" {
+        if !summary.boxed {
+            names: loop member in summary.members -> member.name
+            return "{head}: the tag; cases: {names.join(", ")}"
+        }
+        cases := [String]{}
+        loop member in summary.members {
+            if member.offset == 0 -> cases.push("{member.name} (tag only)") else {
+                cases.push("{member.name} at {member.offset} ({jet_driver_layout_bytes(member.size)})")
+            }
+        }
+        return "{head}: a pointer to a box of an 8-byte tag and the case's fields; cases: {cases.join(", ")}"
+    }
+    label: if summary.enumeration -> "cases" else -> "fields"
+    if summary.members.len() == 0 -> return "{head}, stride {summary.stride}; no {label}"
+    members: loop member in summary.members -> "{member.name} at {member.offset} ({jet_driver_layout_bytes(member.size)})"
+    "{head}, stride {summary.stride}; {label}: {members.join(", ")}"
+}
+
+// The enum case whose payload sets the size, when its bytes are at least
+// JET_DRIVER_LAYOUT_DOMINANT_TENTHS tenths of the next widest case's. A case
+// at offset 0 has no payload; a type with no second payload has none to
+// compare and no note.
+jet_driver_layout_dominant: fn(summary: JetDriverLayoutSummary) -> JetDriverLayoutDominant? Never! {
+    if !summary.enumeration -> return None
+    widest := -1
+    runner := -1
+    loop (index, member) in summary.members {
+        if member.offset == 0 -> next
+        if widest < 0 || member.size > summary.members[widest].size {
+            runner = widest
+            widest = index
+        } else if runner < 0 || member.size > summary.members[runner].size { runner = index }
+    }
+    if widest < 0 || runner < 0 -> return None
+    top: summary.members[widest]
+    second: summary.members[runner]
+    if second.size <= 0 || top.size == second.size -> return None
+    tenths: top.size * 10 /% second.size
+    if tenths < JET_DRIVER_LAYOUT_DOMINANT_TENTHS -> return None
+    Val(JetDriverLayoutDominant{case_name: top.name, size: top.size, next_name: second.name, next_size: second.size, tenths: tenths})
+}
+
+// A ratio in tenths as `2.2x`.
+jet_driver_layout_ratio: fn(tenths: Int) -> String Never! { "{tenths /% 10}.{tenths % 10}x" }
+
+jet_driver_layout_dominant_note: fn(dominant: JetDriverLayoutDominant) -> String Never! {
+    "case `{dominant.case_name}` sets the size: its {jet_driver_layout_bytes(dominant.size)} are {jet_driver_layout_ratio(dominant.tenths)} the next case's (`{dominant.next_name}`, {jet_driver_layout_bytes(dominant.next_size)}), at or past the {jet_driver_layout_ratio(JET_DRIVER_LAYOUT_DOMINANT_TENTHS)} this note marks"
+}

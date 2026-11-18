@@ -1,0 +1,21 @@
+# `jet inspect shapes` prints one line per declared struct and enum with its
+# byte layout. Every line names the target and the compiler whose fact it is
+# and says the layout is not promised. An enum's line notes the case that sets
+# its size only when that case's bytes are at least 2.0x the next case's:
+# Command's Draw (36 bytes) is 2.2x Move (16 bytes) and is noted; Signal's
+# Pair (12 bytes) is 1.5x Level (8 bytes) and is not.
+env: NO_COLOR=1
+env: JET_COMPILER_IDENTITY=jet@case#layout
+step: jet inspect shapes {root}/Tests/Fixtures/inspect_shapes_layouts.jet
+exit: 0
+stdout: ~ ".Command: 8 bytes, alignment 8: a pointer to a box of an 8-byte tag and the case's fields; cases: Stop (tag only), Move at 8 (16 bytes), Draw at 8 (36 bytes); note: case `Draw` sets the size: its 36 bytes are 2.2x the next case's (`Move`, 16 bytes), at or past the 2.0x this note marks [target x86_64-unknown-linux-gnu, compiler jet@case#layout, not promised]\n" # the dominant case is noted with its ratio
+stdout: ~ ".Signal: 8 bytes, alignment 8: a pointer to a box of an 8-byte tag and the case's fields; cases: Off (tag only), Level at 8 (8 bytes), Pair at 8 (12 bytes) [target x86_64-unknown-linux-gnu, compiler jet@case#layout, not promised]\n" # below the ratio, no note
+stdout: ~ ".Padded: 16 bytes, alignment 8, stride 16; fields: flag at 10 (1 byte), count at 0 (8 bytes), small at 8 (2 bytes) [target x86_64-unknown-linux-gnu, compiler jet@case#layout, not promised]\n" # a struct names its fields at their offsets
+stdout: ~ ".Tick: 8 bytes, alignment 8, stride 8; no fields [target x86_64-unknown-linux-gnu, compiler jet@case#layout, not promised]\n" # a unit struct
+stdout: ~ ".Reading: 16 bytes, alignment 8, stride 16; fields: value at 0 (8 bytes), seen at 8 (1 byte) [target x86_64-unknown-linux-gnu, compiler jet@case#layout, not promised]\n" # the optional
+stdout: ~ ".Counter: 16 bytes, alignment 8, stride 16; fields: step at 0 (8 bytes), next at 8 (8 bytes) [target x86_64-unknown-linux-gnu, compiler jet@case#layout, not promised]\n" # the closure field
+stdout: !~ "note: case `Pair`" # the 1.5x case is not noted
+step: jet inspect shapes --target board.virt_aarch64 {root}/Tests/Fixtures/inspect_shapes_layouts.jet
+exit: 0
+stdout: ~ ".Padded: 16 bytes, alignment 8, stride 16; fields: flag at 10 (1 byte), count at 0 (8 bytes), small at 8 (2 bytes) [target aarch64-unknown-none, compiler jet@case#layout, not promised]\n" # the line names the target the compile checked for
+stdout: !~ "[target x86_64" # no line names the host

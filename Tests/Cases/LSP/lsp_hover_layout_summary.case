@@ -1,0 +1,26 @@
+# A hover on a struct or enum declaration shows its layout as one line, read
+# from the checked record `jet inspect shapes` reads: the target it holds on,
+# its bytes, each field or case at its offset, and that it is not promised.
+# Pair's members sit by descending alignment, count at 0 and flag at 8, and
+# the struct rounds up to 16; Step's value is one pointer to a box of its tag
+# and the case's fields.
+env: NO_COLOR=1
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"Pair: struct {\\n    flag: Bool,\\n    count: Int,\\n}\\n\\nStep: enum {\\n    Idle,\\n    Move(dx: Int, dy: Int),\\n}\\n\\nrun: fn() { print(Pair{flag: true, count: 1}.count) }\\n\"}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":0,\"character\":1}}}"
+recv lsp until $.id = 2
+stdout: ~ "Layout on `" # the line names the target
+stdout: ~ "`: 16 bytes, alignment 8, stride 16; fields: flag at 8 (1 byte), count at 0 (8 bytes) (not promised)" # the struct's bytes and its fields at their offsets
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":5,\"character\":1}}}"
+recv lsp until $.id = 3
+stdout: ~ "`: 8 bytes, alignment 8: a pointer to a box of an 8-byte tag and the case's fields; cases: Idle (tag only), Move at 8 (16 bytes) (not promised)" # the enum's box and its cases
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":10,\"character\":1}}}"
+recv lsp until $.id = 4
+stdout: !~ "Layout on" # a function has no layout line
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 5
+close lsp
+exit: any # the server's status after shutdown is not what this case shows

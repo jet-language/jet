@@ -1,0 +1,39 @@
+# `jet inspect shapes --json` reports each declared struct and enum's byte
+# layout from its checked record, on the target the compile checked for. Every
+# number below is worked out by hand from the native placement rules, and the
+# fixture's comments show the arithmetic:
+#   Padded  members by descending alignment: count 0..8, small 8..10, flag 10;
+#           rounded up to 16.
+#   Tick    no fields, still one 8-byte word.
+#   Command one pointer to a box: 8-byte tag at 0, then the case's fields from
+#           8. Move holds two Ints (16 bytes); Draw four Ints and a U32 (36
+#           bytes), 2.2x Move, so Draw is noted as setting the size.
+#   Reading `Int?` keeps the Int's one word: value 0..8, seen 8; 16.
+#   Counter a closure is one pointer to its box: step 0..8, next 8..16; 16.
+# The aarch64 board reports the same 64-bit numbers under its own triple.
+env: NO_COLOR=1
+env: JET_COMPILER_IDENTITY=jet@case#layout
+step: jet inspect shapes --json {root}/Tests/Fixtures/inspect_shapes_layouts.jet
+exit: 0
+json: stdout doc $ valid # the report parses
+stdout: ~ '"type":"Command","target":"x86_64-unknown-linux-gnu","compiler":"jet@case#layout","promised":false,"kind":"default","size":8,"alignment":8,"stride":8,"boxed":true,' # an enum with payloads is one pointer on x86_64 Linux
+stdout: ~ '"dominant":{"case":"Draw","size":36,"next_case":"Move","next_size":16,"ratio":"2.2x"},"members":[{"name":"Stop","offset":0,"size":8},{"name":"Move","offset":8,"size":16},{"name":"Draw","offset":8,"size":36}]' # the tag, then each case's fields from byte 8
+stdout: ~ '"type":"Counter","target":"x86_64-unknown-linux-gnu","compiler":"jet@case#layout","promised":false,"kind":"default","size":16,"alignment":8,"stride":16,"boxed":false,' # a closure field is one word
+stdout: ~ '"members":[{"name":"step","offset":0,"size":8},{"name":"next","offset":8,"size":8}]' # the closure's captures live in its box
+stdout: ~ '"type":"Padded","target":"x86_64-unknown-linux-gnu","compiler":"jet@case#layout","promised":false,"kind":"default","size":16,"alignment":8,"stride":16,"boxed":false,' # the padded struct rounds up to 16
+stdout: ~ '"members":[{"name":"flag","offset":10,"size":1},{"name":"count","offset":0,"size":8},{"name":"small","offset":8,"size":2}]' # members placed by descending alignment
+stdout: ~ '"type":"Reading","target":"x86_64-unknown-linux-gnu","compiler":"jet@case#layout","promised":false,"kind":"default","size":16,"alignment":8,"stride":16,"boxed":false,' # the optional keeps one word
+stdout: ~ '"members":[{"name":"value","offset":0,"size":8},{"name":"seen","offset":8,"size":1}]' # Int? takes the same 8 bytes as Int
+stdout: ~ '"type":"Tick","target":"x86_64-unknown-linux-gnu","compiler":"jet@case#layout","promised":false,"kind":"default","size":8,"alignment":8,"stride":8,"boxed":false,' # a unit struct takes one word
+stdout: ~ '"summary":"8 bytes, alignment 8, stride 8; no fields","dominant":null,"members":[]' # and has no fields
+step: jet inspect shapes --json --target board.virt_aarch64 {root}/Tests/Fixtures/inspect_shapes_layouts.jet
+exit: 0
+json: stdout doc $ valid # the report parses
+stdout: ~ '"type":"Command","target":"aarch64-unknown-none","compiler":"jet@case#layout","promised":false,"kind":"default","size":8,"alignment":8,"stride":8,"boxed":true,' # the Arm board names its own triple
+stdout: ~ '"dominant":{"case":"Draw","size":36,"next_case":"Move","next_size":16,"ratio":"2.2x"},"members":[{"name":"Stop","offset":0,"size":8},{"name":"Move","offset":8,"size":16},{"name":"Draw","offset":8,"size":36}]' # the same box on aarch64
+stdout: ~ '"type":"Padded","target":"aarch64-unknown-none","compiler":"jet@case#layout","promised":false,"kind":"default","size":16,"alignment":8,"stride":16,"boxed":false,' # the same padded struct
+stdout: ~ '"members":[{"name":"flag","offset":10,"size":1},{"name":"count","offset":0,"size":8},{"name":"small","offset":8,"size":2}]' # with the same offsets
+stdout: ~ '"type":"Reading","target":"aarch64-unknown-none","compiler":"jet@case#layout","promised":false,"kind":"default","size":16,"alignment":8,"stride":16,"boxed":false,' # the same optional
+stdout: ~ '"type":"Counter","target":"aarch64-unknown-none","compiler":"jet@case#layout","promised":false,"kind":"default","size":16,"alignment":8,"stride":16,"boxed":false,' # the same closure field
+stdout: ~ '"type":"Tick","target":"aarch64-unknown-none","compiler":"jet@case#layout","promised":false,"kind":"default","size":8,"alignment":8,"stride":8,"boxed":false,' # the same unit struct
+stdout: !~ "x86_64" # nothing reports the host's triple
