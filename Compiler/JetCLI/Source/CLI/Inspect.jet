@@ -32,6 +32,7 @@ use {
         DottedPathSplit,
         Func,
         Item,
+        JetLiveSnapshot,
         NameModule,
         Program,
         Span,
@@ -61,9 +62,10 @@ use {
     jetpack_artifact_store.[ArtifactStore]
 }
 
-// `InspectPlane.ALL`, in order, then `target` (the target machine dossier)
+// `InspectPlane.ALL`, in order, then `live` (a running program's tasks,
+// channels, deadlines and effects), `target` (the target machine dossier)
 // and `events` (the compiler event schema).
-JET_CLI_INSPECT_PLANES: [String]{"types", "rights", "claims", "shapes", "decisions", "structure", "build", "gates", "memory", "choices", "target", "events"}
+JET_CLI_INSPECT_PLANES: [String]{"types", "rights", "claims", "shapes", "decisions", "structure", "build", "gates", "memory", "choices", "live", "target", "events"}
 
 // `InspectScope`: `Target` is a source file or a package directory (a target
 // machine name for the `target` plane).
@@ -109,15 +111,17 @@ jet_cli_inspect_flag_takes_value: fn(argument: String) -> Bool Never! {
     [String]{"--before", "--color", "--facts", "--gate", "--kind", "--output", "--profile", "--scope", "--set", "--target", "--topic", "--threads"}.contains(argument)
 }
 
-// `parse_inspect_args` over the normalized argv (`inspect <plane> ...`).
+// `parse_inspect_args` over the normalized argv (`inspect <plane> ...`). The
+// live scope is `--live PID` on a plane and `--attach PID` on `live`.
 jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
     if argv.len() < 2 {
-        return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, choices, target, or events"}
+        return JetCLIInspectParse.Failed{message: "missing inspect plane; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, choices, live, target, or events"}
     }
     plane: argv[1]
     if !JET_CLI_INSPECT_PLANES.contains(plane) {
-        return JetCLIInspectParse.Failed{message: "unknown inspect plane `{plane}`; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, choices, target, or events"}
+        return JetCLIInspectParse.Failed{message: "unknown inspect plane `{plane}`; choose types, rights, claims, shapes, decisions, structure, build, gates, memory, choices, live, target, or events"}
     }
+    scope_flag: if plane == "live" -> "--attach" else -> "--live"
     target := String?{None}
     live := Int?{None}
     replay := String?{None}
@@ -125,26 +129,32 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
     index := 2
     loop index < argv.len() {
         argument: argv[index]
-        if argument == "--live" {
+        if plane == "live" && (argument == "--live" || argument.starts_with("--live=")) {
+            return JetCLIInspectParse.Failed{message: "`jet inspect live` names its process with `--attach PID`"}
+        }
+        if plane != "live" && (argument == "--attach" || argument.starts_with("--attach=")) {
+            return JetCLIInspectParse.Failed{message: "`--attach` belongs to `jet inspect live`; another plane reads a live process with `--live PID`"}
+        }
+        if argument == scope_flag {
             if index + 1 >= argv.len() {
-                return JetCLIInspectParse.Failed{message: "`--live` needs a process id"}
+                return JetCLIInspectParse.Failed{message: "`{scope_flag}` needs a process id"}
             }
             value: argv[index + 1]
-            pid: jet_cli_inspect_pid(value) ?? return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id, got `{value}`"}
+            pid: jet_cli_inspect_pid(value) ?? return JetCLIInspectParse.Failed{message: "`{scope_flag}` expects a positive process id, got `{value}`"}
             if pid == 0 {
-                return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id"}
+                return JetCLIInspectParse.Failed{message: "`{scope_flag}` expects a positive process id"}
             }
             live = Val(pid)
-            options.push("--live")
+            options.push(if plane == "live" -> "--attach" else -> "--live")
             options.push(value.copy())
             index += 2
             next
         }
-        if argument.starts_with("--live=") {
-            value: argument.slice(7..<argument.len())
-            pid: jet_cli_inspect_pid(value) ?? return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id, got `{value}`"}
+        if argument.starts_with("{scope_flag}=") {
+            value: argument.slice(scope_flag.len() + 1..<argument.len())
+            pid: jet_cli_inspect_pid(value) ?? return JetCLIInspectParse.Failed{message: "`{scope_flag}` expects a positive process id, got `{value}`"}
             if pid == 0 {
-                return JetCLIInspectParse.Failed{message: "`--live` expects a positive process id"}
+                return JetCLIInspectParse.Failed{message: "`{scope_flag}` expects a positive process id"}
             }
             live = Val(pid)
             options.push(argument.copy())
@@ -192,10 +202,10 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
         index += 1
     }
     if live != None && replay != None {
-        return JetCLIInspectParse.Failed{message: "inspect accepts at most one of `--live PID` or `--replay ARTIFACT`"}
+        return JetCLIInspectParse.Failed{message: "inspect accepts at most one of `{scope_flag} PID` or `--replay ARTIFACT`"}
     }
     if target != None && (live != None || replay != None) {
-        return JetCLIInspectParse.Failed{message: "inspect accepts a target, `--live PID`, or `--replay ARTIFACT` as one scope"}
+        return JetCLIInspectParse.Failed{message: "inspect accepts a target, `{scope_flag} PID`, or `--replay ARTIFACT` as one scope"}
     }
     scope := JetCLIInspectScope.Package
     if target == .Val(path) -> scope = JetCLIInspectScope.Target{target: path}
@@ -205,9 +215,9 @@ jet_cli_inspect_parse: fn(argv: [String]) -> JetCLIInspectParse Never! {
 }
 
 // `"inspect"`: parse the plane request, then run its projection.
-jet_cli_inspect_plane: fn(argv: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
+jet_cli_inspect_plane: fn(argv: [String], color: Bool, json: Bool, threads: Int?) -[FS, Env, Time, IO]> JetCLIPlan Never! {
     if jet_cli_inspect_parse(argv) == {
-        .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|decisions|structure|build|gates|memory|choices> [TARGET] [--live PID | --replay ARTIFACT]`, `jet inspect target [machine]` or `jet inspect events --schema`", color, JET_DRIVER_EXIT_USAGE)
+        .Failed(message) -> return jet_cli_fail("E2104", message, jet_cli_why("E2104"), "run `jet inspect <types|rights|claims|shapes|decisions|structure|build|gates|memory|choices> [TARGET] [--live PID | --replay ARTIFACT]`, `jet inspect live --attach PID`, `jet inspect target [machine]` or `jet inspect events --schema`", color, JET_DRIVER_EXIT_USAGE)
         .Parsed(request) -> return jet_cli_inspect_run(request, color, json, threads)
     }
 }
@@ -217,10 +227,19 @@ jet_cli_inspect_plane: fn(argv: [String], color: Bool, json: Bool, threads: Int?
 // Accel routes before the scopes, then the live and replay scopes, the build
 // coverage table and the Core catalog before the entry, and every other plane
 // reads the entry `inspect_entry_path` resolves.
-jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env, Time]> JetCLIPlan Never! {
+jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, threads: Int?) -[FS, Env, Time, IO]> JetCLIPlan Never! {
     plane: request.plane
     if plane == "target" -> return jet_cli_inspect_target(request, color: color, json: json)
     if plane == "events" -> return jet_cli_inspect_events(request, color: color)
+    if plane == "live" {
+        if request.scope == .Live(pid) {
+            if request.options.contains("--once") {
+                return jet_cli_inspect_live(plane, pid, color, json)
+            }
+            return jet_cli_inspect_live_watch(pid, color, json)
+        }
+        return jet_cli_fail("E2104", "`jet inspect live` needs `--attach PID`, the running program to watch", jet_cli_why("E2104"), "run the program with `jet run --observe`, then `jet inspect live --attach PID`", color, JET_DRIVER_EXIT_USAGE)
+    }
     if request.scope == .Live(pid) -> return jet_cli_inspect_live(plane, pid, color, json)
     if request.scope == .Replay(artifact) {
         if jet_cli_inspect_entry(request.scope, plane, color) == {
@@ -341,13 +360,37 @@ jet_cli_inspect_decisions: fn(request: JetCLIInspectRequest, color: Bool, json: 
 // run_inspect_live: one securely retained, validated snapshot supplies the text
 // renderer and all identity/shape/decision JSON projections.
 jet_cli_inspect_live: fn(plane: String, pid: Int, color: Bool, json: Bool) -[FS, Env, Time]> JetCLIPlan Never! {
-    fix: "start the program with --observe, then run `jet inspect {plane} --live {pid}`"
-    snapshot: jet_cli_live_read(pid) ?? return jet_cli_inspect_b_report("E2105", err.message, jet_cli_why("E2105"), fix, color, json, JET_DRIVER_EXIT_USER_ERROR)
-    output: if {
-        json -> jet_cli_live_json_report(snapshot, plane)
-        else -> jet_cli_live_text(snapshot)
+    snapshot: jet_cli_live_read(pid) ?? return jet_cli_inspect_b_report("E2105", err.message, jet_cli_why("E2105"), jet_cli_inspect_live_fix(plane, pid), color, json, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_done(jet_cli_inspect_live_view(snapshot, plane, json), "", JET_DRIVER_EXIT_OK)
+}
+
+// `jet inspect live --attach PID` without `--once`: a fresh view each second
+// for as long as the program publishes one. A first read that fails is the
+// refusal; a later one ends the watch, because the program has stopped.
+jet_cli_inspect_live_watch: fn(pid: Int, color: Bool, json: Bool) -[FS, Env, Time, IO]> JetCLIPlan Never! {
+    first: jet_cli_live_read(pid) ?? return jet_cli_inspect_b_report("E2105", err.message, jet_cli_why("E2105"), jet_cli_inspect_live_fix("live", pid), color, json, JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_write_output(JetDriverVerbOutput{stdout: jet_cli_inspect_live_view(first, "live", json), stderr: "", exit_code: JET_DRIVER_EXIT_OK})
+    separator: if json -> "" else -> "\n"
+    loop {
+        cli_time.sleep(1000ms)
+        snapshot: jet_cli_live_read(pid) ?? return jet_cli_done("", "jet inspect live: stopped watching process {pid}: {err.message}\n", JET_DRIVER_EXIT_OK)
+        jet_cli_write_output(JetDriverVerbOutput{stdout: "{separator}{jet_cli_inspect_live_view(snapshot, "live", json)}", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
     }
-    jet_cli_done(output, "", JET_DRIVER_EXIT_OK)
+}
+
+// One view of a live snapshot: the plane's JSON projection, or the text.
+jet_cli_inspect_live_view: fn(snapshot: JetLiveSnapshot, plane: String, json: Bool) -> String Never! {
+    if json -> return jet_cli_live_json_report(snapshot, plane)
+    jet_cli_live_text(snapshot)
+}
+
+// The fix a refused live read names: how to start an observable program of
+// one's own and attach the plane to it.
+jet_cli_inspect_live_fix: fn(plane: String, pid: Int) -> String Never! {
+    if plane == "live" {
+        return "run the program yourself with `jet run --observe`, then `jet inspect live --attach` its process id"
+    }
+    "start the program with --observe, then run `jet inspect {plane} --live {pid}`"
 }
 
 // Does the normalized command word belong to the inspect group? `inspect`

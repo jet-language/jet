@@ -38,7 +38,26 @@ inspect_parse_error: fn(argv: [String], expected: String) Never! {
             inspect_parse_target([String]{"inspect", plane, "{flag}=value", "input.jet"}, [String]{"{flag}=value"}, "{plane} {flag}=value")
         }
         inspect_parse_error([String]{"inspect", plane, "first.jet", "--threads", "1", "second.jet"}, "inspect accepts at most one file or package target")
-        inspect_parse_error([String]{"inspect", plane, "input.jet", "--threads=1", "--live", "23"}, "inspect accepts a target, `--live PID`, or `--replay ARTIFACT` as one scope")
-        inspect_parse_error([String]{"inspect", plane, "--live", "23", "--threads", "1", "--replay", "saved.json"}, "inspect accepts at most one of `--live PID` or `--replay ARTIFACT`")
+        // `live` names its process with `--attach`, every other plane with `--live`.
+        live: if plane == "live" -> "--attach" else -> "--live"
+        inspect_parse_error([String]{"inspect", plane, "input.jet", "--threads=1", "{live}", "23"}, "inspect accepts a target, `{live} PID`, or `--replay ARTIFACT` as one scope")
+        inspect_parse_error([String]{"inspect", plane, "{live}", "23", "--threads", "1", "--replay", "saved.json"}, "inspect accepts at most one of `{live} PID` or `--replay ARTIFACT`")
     }
+    if jet_cli_inspect_parse([String]{"inspect", "live", "--attach", "23", "--once", "--json"}) == {
+        .Parsed(request) -> {
+            inspect_parse_require(request.scope == JetCLIInspectScope.Live{pid: 23}, "live --attach: scope")
+            inspect_parse_require(request.options == [String]{"--attach", "23", "--once", "--json"}, "live --attach: options")
+        }
+        .Failed(message) -> panic("live --attach: {message}")
+    }
+    if jet_cli_inspect_parse([String]{"inspect", "live", "--attach=23"}) == {
+        .Parsed(request) -> {
+            inspect_parse_require(request.scope == JetCLIInspectScope.Live{pid: 23}, "live --attach=: scope")
+        }
+        .Failed(message) -> panic("live --attach=: {message}")
+    }
+    inspect_parse_error([String]{"inspect", "live", "--attach"}, "`--attach` needs a process id")
+    inspect_parse_error([String]{"inspect", "live", "--attach", "0"}, "`--attach` expects a positive process id")
+    inspect_parse_error([String]{"inspect", "live", "--live", "23"}, "`jet inspect live` names its process with `--attach PID`")
+    inspect_parse_error([String]{"inspect", "structure", "--attach", "23"}, "`--attach` belongs to `jet inspect live`; another plane reads a live process with `--live PID`")
 }

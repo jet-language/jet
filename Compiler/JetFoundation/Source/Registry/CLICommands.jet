@@ -185,6 +185,7 @@ JET_CLI_COMMANDS: #run { [JetCLICommandSpec]{
             {name: "gates", usage: "gates [TARGET] [--live PID]", summary: "Show the complete compile-time gate ledger", handler: "InspectPlane", also_canonical_top_level: false},
             {name: "memory", usage: "memory [TARGET] [--live PID]", summary: "Show worst-case stack per entry point", handler: "InspectPlane", also_canonical_top_level: false},
             {name: "choices", usage: "choices [TARGET] [--live PID]", summary: "Show automatic compiler choices and their reasons", handler: "InspectPlane", also_canonical_top_level: false},
+            {name: "live", usage: "live --attach PID [--once] [--json]", summary: "Watch the tasks, channels, deadlines and effects of a running program", handler: "InspectPlane", also_canonical_top_level: false},
             {name: "target", usage: "target [MACHINE] [--json]", summary: "List target machines or show the dossier of one", handler: "InspectPlane", also_canonical_top_level: false},
             {name: "events", usage: "events --schema", summary: "Print the JSON Schema of compiler events", handler: "InspectPlane", also_canonical_top_level: false},
             {name: "graph", usage: "graph <file.jet>", summary: "Show the build graph", handler: "Graph", also_canonical_top_level: false},
@@ -1012,6 +1013,8 @@ jet_cli_test_setting_text: fn(setting: TestSettingRow) -> String Never! {
 
 JET_CLI_FIXED_FLAGS: #run { [JetCLIFlagSpec]{
     {long: "--live", help: "With inspect: Process id for a live plane scope", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--attach", help: "With inspect live: Process id of a program run with --observe", value: JetCLIFlagValue.Value, typed: "operand"},
+    {long: "--once", help: "With inspect live: Print one view and exit instead of watching"},
     {long: "--observe", help: "With run: Expose bounded live runtime facts for attachment"},
     {long: "--log", help: "With run/dev: Set the log level filter, such as warn,shop.db=debug; above JET_LOG", value: JetCLIFlagValue.Value},
     {long: "--deep-checks", help: "With run/dev/test/build/debug/repl: Keep every deep check, or with =<scope> (repeatable) those of one package, module, type or function, such as =tree", value: JetCLIFlagValue.Optional, typed: "operand"},

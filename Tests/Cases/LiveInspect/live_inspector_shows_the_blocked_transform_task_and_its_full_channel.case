@@ -1,0 +1,24 @@
+# The live inspector's own example: `transform` has filled its bounded `out`
+# channel and blocks on the next send. `jet inspect live --attach` names the
+# blocked task, shows the full channel and its waiting sender, and counts the
+# effects the tasks wait on; the JSON view carries the same tree.
+fixture: Pipeline.fixture
+session app raw: jet run --observe pipeline.jet
+stdout: null
+stderr: null
+poll view: jet inspect live --attach {pid:app} --once until exit: 0 && stdout: ~ "label=transform" && stdout: ~ "depth 4/4 blocked send=1" timeout 10s every 25ms
+stdout: ~ "blocked  wait=channel send deadline=- canceled=false label=transform"
+stdout: ~ "Channel 2     depth 4/4 blocked send=1 recv=0 closed=false"
+stdout: ~ "label=ingest"
+stdout: ~ "label=root"
+stdout: ~ "Effects: "
+stdout: ~ "channel=1"
+step: jet inspect live --attach {pid:app} --once --json
+exit: 0
+stdout: ~ "\"label\":\"transform\",\"spawn_site\":"
+stdout: ~ "\"wait\":\"channel send\""
+stdout: ~ "\"depth\":4,\"capacity\":4,\"send_waiters\":1"
+stdout: ~ "\"effects\":{\"compute\":"
+signal app: KILL
+close app
+exit: any

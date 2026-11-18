@@ -1,0 +1,26 @@
+use time: core.time
+
+// The live inspector's example pipeline: `ingest` feeds `transform`, whose
+// bounded `out` channel nothing drains, so `transform` fills it and blocks
+// on its next send while the program runs on.
+transform: fn(input: Receiver<Int>, out: Sender<Int>) {
+    loop {
+        n: input.receive() ?? return
+        out.send(n * 2)
+    }
+}
+
+ingest: fn(out: Sender<Int>) {
+    loop n in 0..<8 -> out.send(n)
+    time.sleep(30000ms)
+}
+
+run: fn() {
+    { sender: raw_sender, receiver: raw }: channel<Int>(8)
+    { sender: out_sender, receiver: _out }: channel<Int>(4)
+    feeding: task ingest(raw_sender)
+    transforming: task transform(raw, out_sender)
+    feeding.detach()
+    transforming.detach()
+    time.sleep(30000ms)
+}
