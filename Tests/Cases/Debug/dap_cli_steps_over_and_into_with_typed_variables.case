@@ -1,6 +1,7 @@
 # VS Code's launch sequence over `jet debug --dap`: a breakpoint stops the
 # program, `variables` lists the frame's locals with their Jet types, and
 # `stepIn`, `next` and `stepOut` move through the call on the line.
+# The fixture must stay in jet fmt form; line 8 is the call to `double`.
 fixture: DapCLIStepsOverAndIntoWithTypedVariables.fixture
 env: NO_COLOR=1
 session dap content-length: jet debug --dap {work}/prog.jet
@@ -9,11 +10,11 @@ recv dap until $.request_seq = 1 timeout 30s every 100ms
 json: stdout doc $.success = true
 send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/prog.jet\",\"stopOnEntry\":false,\"args\":[]}}"
 recv dap until $.event = "initialized" timeout 30s every 100ms
-send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":7}]}}"
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":8}]}}"
 recv dap until $.request_seq = 3 timeout 30s every 100ms
 json: stdout doc $.success = true
 json: stdout doc $.body.breakpoints[0].verified = true
-json: stdout doc $.body.breakpoints[0].line = 7
+json: stdout doc $.body.breakpoints[0].line = 8
 send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
 recv dap until $.event = "stopped" timeout 30s every 100ms
 json: stdout doc $.body.reason = "breakpoint"
@@ -21,7 +22,7 @@ send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"argument
 recv dap until $.request_seq = 5 timeout 30s every 100ms
 json: stdout doc $.success = true
 json: stdout doc $.body.stackFrames[0].name = "run"
-json: stdout doc $.body.stackFrames[0].line = 7
+json: stdout doc $.body.stackFrames[0].line = 8
 capture: run_frame stdout doc $.body.stackFrames[0].id
 send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:run_frame}}}"
 recv dap until $.request_seq = 6 timeout 30s every 100ms

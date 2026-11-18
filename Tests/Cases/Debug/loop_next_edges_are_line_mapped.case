@@ -1,17 +1,20 @@
 # Stepping across a loop's `next` edge on the native O0 image stays on
-# Jet lines. From the loop body, `n` lands on the next iteration's first
-# statement with the loop variable advanced. Taking the `next` edge stops on
-# the `next` line, then skips the rest of the body, and the program's
-# own result is unchanged under the debugger.
+# Jet lines. From the loop body, `n` goes through the loop's head to the
+# next iteration's first statement with the loop variable advanced. Taking
+# the `next` edge stops on the `next` line, then skips the rest of the body,
+# and the program's own result is unchanged under the debugger.
+# The fixture must stay in jet fmt form: the `if` body holds two statements,
+# so `next` keeps a line of its own.
 fixture: LoopNextEdgesAreLineMapped.fixture
 env: NO_COLOR=1
 step: jet debug prog.jet
 stdin: loop_next_edges_are_line_mapped.stdin
 exit: 0
-stdout: ~ "Breakpoint hit  prog.jet:5  in run()\n7 |         hits += i        <- here" # the body breakpoint stops on its Jet line
-stdout: ~ "(Jet) n\n4 |         if i == 1 {        <- here" # `n` crosses the loop edge onto the next iteration's first line
-stdout: ~ "(Jet) p i\ni = 1\n(Jet) n\n5 |             next        <- here" # the loop variable advanced; n steps onto the next line
-stdout: ~ "(Jet) n\n4 |         if i == 1 {        <- here\nLocals:  hits = 0   i = 2" # the next edge goes straight to the following iteration
-stdout: ~ "(Jet) p i\ni = 2\n(Jet) c\nBreakpoint hit  prog.jet:5" # skipping the body on i == 1 never stopped on line 7
-stdout: ~ "2,3,0\nProgram finished\n" # the program's own result, then the end of the session
+stdout: ~ "Breakpoint hit  prog.jet:8  in run()\n8 |         hits += i        <- here" # the body breakpoint stops on its Jet line
+stdout: ~ "(Jet) n\n3 |     loop i in 0..<3 {        <- here\nLocals:  hits = 0   i = 0\n(Jet) n\n4 |         if i == 1 {        <- here\nLocals:  hits = 0   i = 1" # `n` crosses the loop's head onto the next iteration's first line
+stdout: ~ "(Jet) p i\ni = 1\n(Jet) n\n5 |             hits += 10        <- here" # the loop variable advanced; n steps into the taken branch
+stdout: ~ "(Jet) n\n6 |             next        <- here" # and onto the next line
+stdout: ~ "(Jet) n\n3 |     loop i in 0..<3 {        <- here\nLocals:  hits = 10   i = 1\n(Jet) n\n4 |         if i == 1 {        <- here\nLocals:  hits = 10   i = 2" # the next edge goes through the head straight to the following iteration
+stdout: ~ "(Jet) p i\ni = 2\n(Jet) c\nBreakpoint hit  prog.jet:8" # skipping the body on i == 1 never stopped on line 8
+stdout: ~ "12,3,0\nProgram finished\n" # the program's own result, then the end of the session
 stdout: !~ ".rs:" # no generated Rust anywhere

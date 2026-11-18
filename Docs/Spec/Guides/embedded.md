@@ -1,12 +1,13 @@
-# Embedded targets
+# Embedded systems
 
 Jet can compile one source model for hosted, browser, WASI, and embedded target
-machines. This page is for firmware and systems engineers choosing a target,
+machines. This guide is for firmware and systems engineers choosing a target,
 inspecting its machine contract, and embedding a generated library. The
 executable definitions are in
 [`Compiler/JetDriver/Source/Driver`](../../../Compiler/JetDriver/Source/Driver/),
 [`TargetMachine.jet`](../../../Compiler/JetFoundation/Source/Target/TargetMachine.jet),
-and [`tests/target_machines.rs`](../../../tests/target_machines.rs).
+and the cases under
+[`Tests/Cases/TargetMachines`](../../../Tests/Cases/TargetMachines/).
 
 ## Choose a target machine
 
@@ -22,11 +23,13 @@ built-in names are:
 | `wasm.wasi` | WebAssembly with WASI imports. |
 | `wasm.no-os` | WebAssembly without an operating-system import surface. |
 
-Inspect the machine dossier before selecting a board profile:
+Inspect the machine dossier before selecting a board profile. With no name,
+`jet inspect target` lists every declared machine:
 
 ```sh
-jet inspect dossier target board.sensor_v1
-jet inspect dossier target board.virt_aarch64
+jet inspect target
+jet inspect target board.sensor_v1
+jet inspect target board.virt_aarch64 --json
 ```
 
 The dossier describes the target triple, runtime providers, linker and runner
@@ -51,11 +54,14 @@ jet build --target board.sensor_v1 path/to/firmware.jet
 jet build --target board.virt_aarch64 path/to/firmware.jet
 ```
 
-A no-OS profile has no host filesystem, process, or network fallback. If a
-module requests an unavailable provider, the build should report the missing
-capability at the boundary. The test matrix in
-[`tests/target_machines.rs`](../../../tests/target_machines.rs) exercises
-machine selection, artifacts, and the QEMU runner contract.
+A no-OS profile has no host filesystem, process, or network fallback. A call
+that needs a service the machine lacks is refused where it is written, at
+`jet check --target=<machine>` and again at `jet build`, before any image is
+made. A `core.files.read` call checked for `board.sensor_v1` is refused at the
+call with E3301: "`files.read` is not available on a no-OS target." The cases
+in [`Tests/Cases/TargetMachines`](../../../Tests/Cases/TargetMachines/)
+exercise machine selection, these refusals, MMIO regions, fixed allocators and
+the board scheduler.
 
 ## QEMU and inspection
 
@@ -111,13 +117,16 @@ loaded: library.load(
 ```
 
 The grant is explicit. A loadable package does not acquire arbitrary filesystem
-or process access merely because the host has loaded it.
+or process access merely because the host has loaded it. The guarantees a host
+relies on (initialization, threads, re-entry, signals, panics and repeated
+loads) are the embedding contract in
+[architecture](../architecture.md#jet-as-guest-embedding-contract).
 
 ## Browser and sandbox targets
 
 `wasm.browser`, `wasm.wasi`, and `wasm.no-os` are separate target-machine
 choices. Browser partitioning and JavaScript/Wasm ABI rules are documented in
-[`web-backend-wasm.md`](web-backend-wasm.md). A browser artifact is not an
+[`web-backend-wasm.md`](../Reference/web-backend-wasm.md). A browser artifact is not an
 embedded board image, and a no-OS artifact must not assume WASI or browser
 imports.
 

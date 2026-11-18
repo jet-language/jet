@@ -2559,27 +2559,52 @@ priv internal: module {
     // of the innermost body a person drags in a page that holds it
     // (`web_drag`) and those of the innermost body that takes what is moved
     // onto it in a page that holds it (`web_zone`) (each slot 0 for none),
-    // x, y, width, height, color (its `to_hex` text, empty for none) and the
-    // label's UTF-8 byte length, then the label and a newline; then, for a
-    // body a person drags and then for a body that takes what is moved, one
-    // line of its name's byte length and a tab, then its name and a newline;
-    // then one line for each menu entry, in order: its kind, click slot and
-    // label's byte length, separated by tabs, then the label and a newline.
-    // A web build's host (JetWeb Host.jet) turns it into the page's
-    // elements.
+    // x, y, width, height, color (its `to_hex` text, empty for none), ARIA
+    // role (`scene_role`, empty for none) and the label's UTF-8 byte length,
+    // then the label and a newline; then, with a role, one line of its
+    // accessible name's byte length and a tab, then the name (`scene_name`)
+    // and a newline; then, for a body a person drags and then for a body
+    // that takes what is moved, one line of its name's byte length and a
+    // tab, then its name and a newline; then one line for each menu entry,
+    // in order: its kind, click slot and label's byte length, separated by
+    // tabs, then the label and a newline. A web build's host (JetWeb
+    // Host.jet) turns it into the page's elements.
     scene_record: fn(node: UINode, frame: Rect, held: UIHolders) -> String Never! {
         color: if node.color == .Val(fill) -> fill.to_hex() else -> ""
         place: "{float_text(frame.x)}\t{float_text(frame.y)}\t{float_text(frame.width)}\t{float_text(frame.height)}"
         moving: held.web_drag ?? UIWebMove{click: 0, kind: 0, label: ""}
         taking: held.web_zone ?? UIWebMove{click: 0, kind: 0, label: ""}
         moves: "{moving.click}\t{moving.kind}\t{taking.click}\t{taking.kind}"
-        record := "{scene_kind(node)}\t{node.click}\t{node.drop}\t{node.change}\t{held.files}\t{held.menu.len()}\t{moves}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n"
+        role: scene_role(node)
+        record := "{scene_kind(node)}\t{node.click}\t{node.drop}\t{node.change}\t{held.files}\t{held.menu.len()}\t{moves}\t{place}\t{color}\t{role}\t{node.label.bytes().len()}\t{node.label}\n"
+        if role != "" {
+            name: scene_name(node)
+            record = "{record}{name.bytes().len()}\t{name}\n"
+        }
         if moving.click != 0 -> record = "{record}{moving.label.bytes().len()}\t{moving.label}\n"
         if taking.click != 0 -> record = "{record}{taking.label.bytes().len()}\t{taking.label}\n"
         loop entry in held.menu {
             record = "{record}{scene_kind(entry)}\t{entry.click}\t{entry.label.bytes().len()}\t{entry.label}\n"
         }
         record
+    }
+
+    // A node's ARIA role in a web scene, "" for a node without one.
+    scene_role: fn(node: UINode) -> String Never! {
+        role: node.role ?? return ""
+        if role == {
+            .Button -> "button"
+            .Container -> "group"
+            .Label -> "label"
+            .TextInput -> "textbox"
+        }
+    }
+
+    // A node's accessible name in a web scene: its accessibility name, else
+    // its label.
+    scene_name: fn(node: UINode) -> String Never! {
+        if node.accessibility == .Val(access) && access.name == .Val(name) -> return name.copy()
+        node.label.copy()
     }
 
     // A node's kind in a web scene: Custom 0, Text 1, Box 2, Button 3 and
