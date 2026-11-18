@@ -4885,6 +4885,99 @@
       "completedAt": "2026-11-13T02:03:15.496Z",
       "questions": [],
       "retiredAt": "2026-11-18T14:10:00.307Z"
+    },
+    {
+      "id": "c0ems7zb",
+      "num": 6869,
+      "title": "Row policies: a typed Table.guard judges every read and write, and no path bypasses it",
+      "body": "Destination: a table's typed row policy (Table.guard(fn(db.Op, db.Who, db.Store) -> Bool)) is applied to every read and write from live queries, endpoints, jobs and webhooks, and no call path, malformed policy or unauthorized row gets around it.\n\nWhy it matters: row policies are the app's access control; one path that skips the guard leaks every row behind it.\n\nDecisions: D-DBPOLICY1=A (typed row-level access policies), D-WEBAPP-SHAPE1=A. Example app: Crewboard in Docs/proposals/2026-11-13-web-app-framework-shape.md.\n\nSource: #3709 c10-c12, c22. Parent: #3709.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Decision for c3 (Main, 2026-11-15): guarded tables judge an ambient, task-keyed caller in core.app, set by the request layer and by as_caller(who, fn); a live binding keeps the caller that created it. With no caller the policy sees Who.Anonymous (fail-closed), never System; System comes only from an explicit job or system run. No per-table acting(who) override, so the ambient caller is the one mechanism and no path can bypass it. c2 uses the same API. Owner: GoalsB-5-2."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Table.guard(fn(db.Op, db.Who, db.Store) -> Bool) judges a read on the stored row, an insert on the new row, a delete on the stored row and an update on both; the policy's reads see the transaction's earlier writes but not the write being judged, and a row the caller may not read is never returned.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p184 (dev 61b4ee98a7), 2026-11-15: cases --filter db/row_policy_judges_each_operation 1/1 PASS (landed e0ea647fe1)",
+          "at": "2026-11-15T14:48:10.814Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "db/row_policy_judges_each_operation"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Crewboard's policies hold: a Member's update of its own member row to Owner is refused; the creator rule admits an Owner member insert only for a project whose row names the caller as created_by and has no members, so create_project makes the caller its owner and nothing else can; an outsider's search and my_projects return nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: cases --filter web_app/crewboard_row_policies 1/1 PASS (landed 054383bbe1)",
+          "at": "2026-11-15T15:57:04.051Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/crewboard_row_policies"
+          }
+        },
+        {
+          "n": 3,
+          "text": "The guard runs on every path that reads or writes a guarded table: live queries, endpoints, jobs and webhooks; a seeded test tries each path with an unauthorized caller and every attempt is refused.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: cases --filter db/row_policy_no_bypass 1/1 PASS (landed f1a25b1980)",
+          "at": "2026-11-15T15:57:05.077Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "db/row_policy_no_bypass"
+          }
+        },
+        {
+          "n": 4,
+          "text": "A policy that does not type-check, or that reads a table it may not, is a compile error with a registered diagnostic and a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p184 (dev 61b4ee98a7), 2026-11-15: ui --filter row_policy_invalid_ 2/2 PASS (landed 66248e8f83)",
+          "at": "2026-11-15T14:48:11.775Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "row_policy_invalid_"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "db",
+        "security"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:54:11.163Z",
+      "updated": "2026-11-15T15:57:23.053Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-15T15:57:23.053Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T19:44:25.563Z"
     }
   ]
 }
