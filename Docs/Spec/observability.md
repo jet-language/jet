@@ -152,6 +152,14 @@ are not counted. `jet perf view` prints `counter l1d_misses captured
 period=10007` or `counter l1d_misses unavailable errno=2` per counter and
 adds each count to a line (`line 30 samples=40 inclusive=40 allocations=0
 l1d_misses=1600000`).
+It then prints the memory table: every function and source line that counted
+events, as `path:line function` and the four counts, with the lines most
+served from RAM first, then the most L1D misses, at most 16 lines
+(`  walk.jet:25 strided l1d_misses=1600000 llc_misses=9081 dtlb_misses=0
+page_faults=0`). Its first line says what each count means: `l1d_misses`
+left L1D, `llc_misses` were served from RAM, and `page_faults` fell to the
+page cache or disk. A counter the profile did not capture shows
+`unavailable`. Tests/Run/Perf/CacheVisualization is the worked example.
 
 `jet perf run` records each join's wait too. When a task spawns another, the
 runtime writes the new task's id with the Jet call sites of the spawning

@@ -1,0 +1,23 @@
+# The cache visualization: under `jet perf run --method=memory`, `jet perf
+# view` prints a memory table with each function and source line that
+# counted events and where its loads went: past L1D, to RAM, or to a page
+# fault. The strided walk (line 26) misses L1D at nearly every read, so its
+# line is in the table. The fill (line 15) and the sequential walk (line 20)
+# are listed when their samples land, which depends on the host's page
+# size and prefetcher, so the case asserts only the strided line.
+requires: os-name:linux
+requires: arch:x86_64
+step: built
+stdout: = CacheVisualization.out
+step: jet perf run --method=memory CacheVisualization.jet --out {work}/cache.jettrace
+env: NO_COLOR=1
+exit: 0
+stdout: = CacheVisualization.out
+json: file cache.jettrace doc $.content.profile.counters[?name="l1d_misses"][?status="captured"] #= 1
+json: file cache.jettrace doc $.content.profile.rows[?source.start_line=26][?l1d_miss_count>=1] #= 1 # the strided walk's L1D misses, counted
+step: jet perf view {work}/cache.jettrace
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "memory by line: l1d_misses left L1D, llc_misses were served from RAM, page_faults fell to the page cache or disk" # the table says what each column counts
+stdout: ~ "  CacheVisualization.jet:26 " # the strided walk's line, with its function
+stdout: ~ " page_faults=" # each line's page faults

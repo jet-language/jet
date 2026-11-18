@@ -211,6 +211,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
         if summary == .Val(line) -> out = "{out}{line}\n"
     }
     loop line in jet_cli_perf_counter_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_memory_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_receipt_lines(trace) -> out = "{out}{line}\n"
     if frames == "all" {
         out = "{out}generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)\n"
@@ -432,6 +433,56 @@ jet_cli_perf_counter_lines: fn(trace: CanonicalJSON) -> [String] Never! {
         status: jet_cli_perf_member_text(item, "status") ?? next
         detail: if jet_cli_perf_member_integer(item, "period") == .Val(period) -> "period={period}" else -> "errno={jet_cli_perf_member_integer(item, "errno") ?? "unknown"}"
         lines.push("counter {name} {status} {detail}")
+    }
+    lines
+}
+
+// One source line of a memory-method profile: its function, and its
+// sampled count of each of TRACE_COUNTERS (None for a counter the profile
+// did not capture).
+JetCLIPerfMemoryLine: struct {
+    path: String,
+    line: Int,
+    function: String,
+    events: [Int?],
+}
+
+// The memory table of a memory-method profile: each function and source
+// line that counted events, where its loads missed. `l1d_misses` are loads
+// that left the L1D cache, `llc_misses` the ones the last-level cache missed
+// too, served from RAM, and `page_faults` the points that fell to the page
+// cache or disk. The lines with the most RAM loads come first, then the most
+// L1D misses; at most 16 lines.
+jet_cli_perf_memory_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    profile: jet_cli_perf_profile(trace) ?? return [String]{}
+    if jet_cli_perf_field_text(profile, "method") != .Val("memory") -> return [String]{}
+    rows: jet_cli_perf_profile_rows(trace) ?? return [String]{}
+    found := [JetCLIPerfMemoryLine]{}
+    loop row in rows {
+        line: jet_cli_perf_row_line(row) ?? next
+        fields: jettrace_object_view(row, "jettrace row") ?? next
+        at: jet_cli_perf_key(fields, "symbol") ?? next
+        symbol: jettrace_object_view(fields[at].value, "symbol") ?? next
+        events: loop counter in TRACE_COUNTERS -> jet_cli_perf_member_number(row, trace_counter_key(counter))
+        counted := false
+        loop count in events {
+            if (count ?? 0) > 0 -> counted = true
+        }
+        if !counted -> next
+        found.push(JetCLIPerfMemoryLine{path: jet_cli_perf_field_text(symbol, "path") ?? next, line: line, function: jet_cli_perf_field_text(symbol, "name") ?? next, events: events})
+    }
+    // `events` is in TRACE_COUNTERS order: [1] is llc_misses, [0] l1d_misses.
+    found.sort_by(fn(left: JetCLIPerfMemoryLine, right: JetCLIPerfMemoryLine) { ((right.events[1] ?? 0) <=> (left.events[1] ?? 0)).then((right.events[0] ?? 0) <=> (left.events[0] ?? 0)).then(left.path <=> right.path).then(left.line <=> right.line) })
+    lines := [String]{"memory by line: l1d_misses left L1D, llc_misses were served from RAM, page_faults fell to the page cache or disk"}
+    shown: if found.len() > 16 -> 16 else -> found.len()
+    loop index in 0..<shown {
+        item: found[index]
+        counts := ""
+        loop (at, counter) in TRACE_COUNTERS {
+            count: if item.events[at] == .Val(value) -> "{value}" else -> "unavailable"
+            counts = "{counts} {trace_counter_name(counter)}={count}"
+        }
+        lines.push("  {item.path}:{item.line} {item.function}{counts}")
     }
     lines
 }
