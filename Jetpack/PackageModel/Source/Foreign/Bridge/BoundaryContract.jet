@@ -17,6 +17,7 @@ use {
         DerivationRef,
         TEST_COMPARISON_SCHEMA_VERSION,
         comparison_assertion_error_text,
+        comparison_parse_status,
         comparison_record_artifact_id,
         comparison_record_assert_equal,
         comparison_status_as_str,
@@ -62,8 +63,11 @@ ForeignSourceAuthority: enum {
     }
 }
 
-// The comparison API's outcome vocabulary.
-FOREIGN_BOUNDARY_COMPARISON_OUTCOMES: [String]{"matched", "mismatch", "empty", "unsupported", "unavailable", "timeout", "cancelled", "invalid_oracle", "contaminated", "unknown"}
+// The comparison API's outcome vocabulary: a comparison status, or `unknown`.
+foreign_boundary_comparison_outcome: fn(outcome: String) -[]> Bool {
+    _: comparison_parse_status(outcome) ?? return outcome == "unknown"
+    true
+}
 
 // One raw case from the comparison/evidence machinery. The boundary keeps the
 // input and both raw observations; it runs no relation of its own.
@@ -105,7 +109,7 @@ ForeignBoundaryObservation: struct {
         if self.foreign.trim() == "" || self.replacement.trim() == "" {
             return Err(pkg_bridge_error("foreign boundary comparison cases retain both raw foreign and replacement observations"))
         }
-        if !FOREIGN_BOUNDARY_COMPARISON_OUTCOMES.contains(self.outcome) {
+        if !foreign_boundary_comparison_outcome(self.outcome) {
             return Err(pkg_bridge_error("unknown foreign boundary comparison outcome `{self.outcome}`"))
         }
     }

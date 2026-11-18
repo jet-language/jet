@@ -1,0 +1,277 @@
+// Toolchain a0.0.45: the tokens Jet writes to a wire or to storage are
+// spelled the American way, each in a new version of its format, and the
+// readers take only the new spelling. This plan is the offline converter:
+// it rewrites a file of an old version into the new one, and `--against`
+// checks the result means what the old file meant, read by the old
+// version's rules beside the current reader. Its old tokens live here only,
+// as converter input. Each format, with its producer and its readers:
+//
+// - A comparison record (canonical JSON, `schema_version` 1 to 2): status
+//   `cancelled` is `canceled`. Written by comparison_record_to_json
+//   (JetFoundation Evidence/TestingComparison.jet) and read by
+//   comparison_record_from_json (Evidence/ComparisonDecode.jet), `jet import`
+//   (JetCLI ImportUpdate.jet) and the foreign boundary receipts (Jetpack
+//   PackageModel Foreign/Bridge/BoundaryContract.jet). The record's identity
+//   is the hash of its bytes, so a converted record has a new one.
+// - A recorded corpus (`jet test-compare`'s input, JSON with `cases`): its
+//   `status` is a word of the record's vocabulary, so it follows the
+//   record's version; JetCLI TestCompare.jet reads it and refuses any other
+//   word, the old spelling included.
+//
+// Only a top-level member the format names is rewritten: an observation, a
+// reason or any other text keeps its words, and a file in no known format
+// is left alone and reported.
+use jet_foundation.[ComparisonStatus, TEST_COMPARISON_SCHEMA_VERSION, canonical_json_parse, comparison_parse_status, comparison_record_from_json, comparison_status_as_str]
+
+// One word of an old comparison status vocabulary and the status it named.
+AmericanTokensStatus: struct {
+    token: String,
+    status: ComparisonStatus,
+}
+
+// Version 1's comparison status words, as its reader read them.
+AMERICAN_TOKENS1_COMPARISON_STATUS_V1: [AmericanTokensStatus]{
+    {token: "matched", status: ComparisonStatus.Matched},
+    {token: "mismatch", status: ComparisonStatus.Mismatch},
+    {token: "empty", status: ComparisonStatus.Empty},
+    {token: "unsupported", status: ComparisonStatus.Unsupported},
+    {token: "unavailable", status: ComparisonStatus.Unavailable},
+    {token: "timeout", status: ComparisonStatus.Timeout},
+    {token: "cancelled", status: ComparisonStatus.Canceled},
+    {token: "invalid_oracle", status: ComparisonStatus.InvalidOracle},
+    {token: "contaminated", status: ComparisonStatus.Contaminated},
+}
+
+// One member of a JSON document's top-level object: its key and the byte
+// range of its value's text.
+AmericanTokensMember: struct {
+    key: String,
+    start: Int,
+    end: Int,
+}
+
+// One replacement of a member's value text.
+AmericanTokensEdit: struct {
+    start: Int,
+    end: Int,
+    text: String,
+}
+
+// Converts one file to the current version of its format.
+american_tokens1_file: fn(path: String, text: String) -[]> MigrationOutcome {
+    bytes: text.bytes()
+    members: american_tokens1_members(bytes) ?? return american_tokens1_unknown(path, text)
+    edits := [AmericanTokensEdit]{}
+    if american_tokens1_is_record(members) {
+        if american_tokens1_value(bytes, members, "schema_version") != Val("1") {
+            return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+        }
+        // A canonical payload's keys are sorted, so `schema_version` comes
+        // before `status` and the edits are in order.
+        _: canonical_json_parse(bytes) ?? {
+            return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: a version 1 comparison record that is not canonical JSON ({err.message})"}}
+        }
+        at: american_tokens1_find(members, "schema_version")
+        edits.push(AmericanTokensEdit{start: members[at].start, end: members[at].end, text: "{TEST_COMPARISON_SCHEMA_VERSION}"})
+    } else if american_tokens1_find(members, "cases") < 0 {
+        return american_tokens1_unknown(path, text)
+    }
+    american_tokens1_status_edit(bytes, members, edits)
+    if edits.len() == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    out := [String]{}
+    cursor := 0
+    loop edit in edits {
+        out.push(String.from_bytes(bytes[cursor..<edit.start]) ?? "")
+        out.push(edit.text)
+        cursor = edit.end
+    }
+    out.push(String.from_bytes(bytes[cursor..<bytes.len()]) ?? "")
+    MigrationOutcome{text: out.join(""), rewritten: edits.len(), skipped: [String]{}}
+}
+
+// Why `after`, the plan's rewrite of `before`, does not mean what `before`
+// meant, or None when it does. Every member but the rewritten ones keeps
+// its text, the old status word names the status the current reader reads
+// from the new one, and a record is one the current reader accepts.
+american_tokens1_same_meaning: fn(path: String, before: String, after: String) -[]> String? {
+    if before == after -> return None
+    old_bytes: before.bytes()
+    new_bytes: after.bytes()
+    old: american_tokens1_members(old_bytes) ?? return Val("{path} was in no format this plan converts")
+    new: american_tokens1_members(new_bytes) ?? return Val("the rewrite is not a JSON object")
+    if old.len() != new.len() -> return Val("the rewrite has {new.len()} members, not {old.len()}")
+    loop (index, member) in old {
+        if new[index].key != member.key {
+            return Val("member {index} is `{new[index].key}`, not `{member.key}`")
+        }
+        if member.key == "status" || member.key == "schema_version" -> next
+        if american_tokens1_value(old_bytes, old, member.key) != american_tokens1_value(new_bytes, new, member.key) {
+            return Val("the `{member.key}` member changed")
+        }
+    }
+    old_word: american_tokens1_word(old_bytes, old) ?? ""
+    meant: american_tokens1_status_v1(old_word)
+    if american_tokens1_is_record(old) {
+        if american_tokens1_value(old_bytes, old, "schema_version") != Val("1") {
+            return Val("the old record is not version 1")
+        }
+        payload: canonical_json_parse(new_bytes) ?? return Val("the rewrite is not canonical JSON: {err.message}")
+        record: comparison_record_from_json(payload) ?? return Val("the current reader refuses the rewrite: {err.message}")
+        if meant != Val(record.status) {
+            return Val("version 1's `{old_word}` became `{comparison_status_as_str(record.status)}`")
+        }
+        return None
+    }
+    new_word: american_tokens1_word(new_bytes, new) ?? ""
+    read: comparison_parse_status(new_word) ?? return Val("the current reader refuses the status `{new_word}`")
+    if meant != Val(read) -> return Val("the old `{old_word}` became `{new_word}`")
+    None
+}
+
+american_tokens1_unknown: fn(path: String, text: String) -[]> MigrationOutcome {
+    MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: in no format this plan converts"}}
+}
+
+// A comparison record: the members its canonical payload always has.
+american_tokens1_is_record: fn(members: [AmericanTokensMember]) -[]> Bool {
+    american_tokens1_find(members, "schema_version") >= 0 && american_tokens1_find(members, "samples") >= 0 && american_tokens1_find(members, "universal_proof") >= 0
+}
+
+// Rewrites a `status` member holding a version 1 word to the current word
+// for the status it named.
+american_tokens1_status_edit: fn(bytes: [U8], members: [AmericanTokensMember], edits: &[AmericanTokensEdit]) -[]> {
+    word: american_tokens1_word(bytes, members) ?? return
+    status: american_tokens1_status_v1(word) ?? return
+    current: comparison_status_as_str(status)
+    if current == word {
+        return
+    }
+    at: american_tokens1_find(members, "status")
+    edits.push(AmericanTokensEdit{start: members[at].start, end: members[at].end, text: "\"{current}\""})
+}
+
+// The status word of a `status` member written as a plain string.
+american_tokens1_word: fn(bytes: [U8], members: [AmericanTokensMember]) -[]> String? {
+    at: american_tokens1_find(members, "status")
+    if at < 0 -> return None
+    start: members[at].start
+    end: members[at].end
+    if end - start < 2 || bytes[start] != 34 || bytes[end - 1] != 34 -> return None
+    word: String.from_bytes(bytes[start + 1..<end - 1]) ?? return None
+    if word.contains("\\") -> return None
+    Val(word)
+}
+
+american_tokens1_status_v1: fn(word: String) -[]> ComparisonStatus? {
+    loop row in AMERICAN_TOKENS1_COMPARISON_STATUS_V1 {
+        if row.token == word -> return Val(row.status)
+    }
+    None
+}
+
+american_tokens1_find: fn(members: [AmericanTokensMember], key: String) -[]> Int {
+    loop (index, member) in members {
+        if member.key == key -> return index
+    }
+    -1
+}
+
+// The text of the `key` member's value.
+american_tokens1_value: fn(bytes: [U8], members: [AmericanTokensMember], key: String) -[]> String? {
+    at: american_tokens1_find(members, key)
+    if at < 0 -> return None
+    Val(String.from_bytes(bytes[members[at].start..<members[at].end]) ?? return None)
+}
+
+// The members of the JSON object `bytes` holds, or None when it holds none.
+american_tokens1_members: fn(bytes: [U8]) -[]> [AmericanTokensMember]? {
+    at := american_tokens1_space(bytes, 0)
+    if at >= bytes.len() || bytes[at] != 123 -> return None
+    at += 1
+    members := [AmericanTokensMember]{}
+    loop {
+        at = american_tokens1_space(bytes, at)
+        if at >= bytes.len() -> return None
+        if bytes[at] == 125 {
+            if american_tokens1_space(bytes, at + 1) != bytes.len() -> return None
+            return Val(members)
+        }
+        if bytes[at] == 44 {
+            at += 1
+            next
+        }
+        if bytes[at] != 34 -> return None
+        key_end: american_tokens1_value_end(bytes, at) ?? return None
+        key: String.from_bytes(bytes[at + 1..<key_end - 1]) ?? return None
+        at = american_tokens1_space(bytes, key_end)
+        if at >= bytes.len() || bytes[at] != 58 -> return None
+        start: american_tokens1_space(bytes, at + 1)
+        end: american_tokens1_value_end(bytes, start) ?? return None
+        members.push(AmericanTokensMember{key: key, start: start, end: end})
+        at = end
+    }
+}
+
+// Where the JSON value starting at `start` ends: after its closing quote or
+// bracket, or at the byte that ends a number or a literal.
+american_tokens1_value_end: fn(bytes: [U8], start: Int) -[]> Int? {
+    if start >= bytes.len() -> return None
+    depth := 0
+    quoted := false
+    at := start
+    loop at < bytes.len() {
+        byte: bytes[at]
+        at += 1
+        if quoted {
+            if byte == 92 -> at += 1
+            if byte == 34 {
+                quoted = false
+                if depth == 0 -> return Val(at)
+            }
+            next
+        }
+        if byte == 34 -> quoted = true
+        if byte == 123 || byte == 91 -> depth += 1
+        if byte == 125 || byte == 93 {
+            if depth == 0 -> return Val(at - 1)
+            depth -= 1
+            if depth == 0 -> return Val(at)
+        }
+        if depth == 0 && (byte == 44 || american_tokens1_blank(byte)) -> return Val(at - 1)
+    }
+    if depth == 0 && !quoted -> return Val(at)
+    None
+}
+
+american_tokens1_space: fn(bytes: [U8], from: Int) -[]> Int {
+    at := from
+    loop at < bytes.len() && american_tokens1_blank(bytes[at]) -> at += 1
+    at
+}
+
+american_tokens1_blank: fn(byte: U8) -[]> Bool {
+    byte == 32 || byte == 10 || byte == 13 || byte == 9
+}
+
+#Test("a version 1 comparison record becomes version 2 and keeps its reason's words") {
+    old: "{{\"reason\":\"recorded runner outcome is cancelled\",\"samples\":[],\"schema_version\":1,\"status\":\"cancelled\",\"universal_proof\":false}}\n"
+    outcome: american_tokens1_file("record.json", old)
+    assert_eq(outcome.text, "{{\"reason\":\"recorded runner outcome is cancelled\",\"samples\":[],\"schema_version\":2,\"status\":\"canceled\",\"universal_proof\":false}}\n")
+    assert_eq(outcome.rewritten, 2)
+    assert_eq(american_tokens1_file("record.json", outcome.text).rewritten, 0)
+}
+
+#Test("a corpus's status is rewritten, an observation's is not") {
+    old: "{{\n  \"cases\": [{{\"reference\": {{\"status\": \"cancelled\"}}}}],\n  \"status\": \"cancelled\"\n}}\n"
+    outcome: american_tokens1_file("corpus.json", old)
+    assert_eq(outcome.text, "{{\n  \"cases\": [{{\"reference\": {{\"status\": \"cancelled\"}}}}],\n  \"status\": \"canceled\"\n}}\n")
+    assert_eq(american_tokens1_same_meaning("corpus.json", old, outcome.text), None)
+    swapped: outcome.text.replace("\"status\": \"canceled\"", "\"status\": \"timeout\"")
+    assert_eq(american_tokens1_same_meaning("corpus.json", old, swapped), Val("the old `cancelled` became `timeout`"))
+}
+
+#Test("a file in no known format is left alone and reported") {
+    outcome: american_tokens1_file("notes.txt", "cancelled\n")
+    assert_eq(outcome.rewritten, 0)
+    assert_eq(outcome.skipped, [String]{"notes.txt: in no format this plan converts"})
+}

@@ -212,9 +212,11 @@ a check fails and the lock is older than the running `jet`, it adds one line
 naming the two toolchains. Each rewrite has an old-spelling fixture that
 Tests/Cases/Migrations replays. Built today: the registered rewrites
 (`lambda-shape1`, `codable-options1`, `sig-arrow1`, `bit-sigils1`,
-`paren-tuple1`, `brace-layout1`, `american-ident1`) run one at a time through
-`jet run Compiler/Migrations/Migrate.jet -- <plan> --write PATH...`; `jet fix`
-reading the lock is not yet built.
+`paren-tuple1`, `brace-layout1`, `american-ident1`, `american-tokens1`) run
+one at a time through `jet run Compiler/Migrations/Migrate.jet -- <plan>
+--write PATH...`; `jet fix` reading the lock is not yet built. The
+`american-tokens1` plan converts data, not source: a file Jet wrote in an old
+version of a format that spelled a token the British way.
 
 **D-S14 teaching diagnostics** *(diagnostic-only; no new Jet syntax)*: the
 shared foreign-word table recognizes common declaration words (`fun`, `func`,

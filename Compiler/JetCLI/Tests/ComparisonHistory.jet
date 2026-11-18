@@ -18,7 +18,7 @@ use {
 // is typed equality with no checked equality result declared, so the status
 // is `invalid_oracle`; the foreign binding is not part of the record. The
 // canonical bytes end in one newline after this text.
-COMPARISON_RECORD_ORACLE: `{"contamination":null,"discarded_cases":0,"first_difference":null,"reason":"comparison relation did not declare a checked equality result","reduced_counterexample":null,"relation":"typed_equality","samples":[{"candidate":{"cleanup":[],"mutation":null,"ordered_effects":[],"raw":"{\"answer\":42}","typed_failure":null},"candidate_replay":null,"declared_equal":null,"identity":{"case_id":"sample-1","input_id":"input-1","seed":null,"source":"jet.test-compare","target":"recorded-corpus","tool":"jet"},"reference":{"cleanup":[],"mutation":null,"ordered_effects":[],"raw":"{\"answer\":42}","typed_failure":null},"reference_replay":null}],"schema_version":1,"status":"invalid_oracle","universal_proof":false}`
+COMPARISON_RECORD_ORACLE: `{"contamination":null,"discarded_cases":0,"first_difference":null,"reason":"comparison relation did not declare a checked equality result","reduced_counterexample":null,"relation":"typed_equality","samples":[{"candidate":{"cleanup":[],"mutation":null,"ordered_effects":[],"raw":"{\"answer\":42}","typed_failure":null},"candidate_replay":null,"declared_equal":null,"identity":{"case_id":"sample-1","input_id":"input-1","seed":null,"source":"jet.test-compare","target":"recorded-corpus","tool":"jet"},"reference":{"cleanup":[],"mutation":null,"ordered_effects":[],"raw":"{\"answer\":42}","typed_failure":null},"reference_replay":null}],"schema_version":2,"status":"invalid_oracle","universal_proof":false}`
 
 #Test("comparison_history") {
     input: "{{\"foreign_binding\":{{\"boundary_digest\":\"boundary-v1\",\"source_identity\":\"source-v1\",\"replacement_identity\":\"replacement-v1\",\"tool_identity\":\"tool-v1\",\"target_identity\":\"target-v1\",\"coverage_digest\":\"coverage-v1\",\"assumptions\":[\"z\",\"a\",\"a\"]}},\"cases\":[{{\"case_id\":\"sample-1\",\"input_id\":\"input-1\",\"reference\":{{\"answer\":42}},\"candidate\":{{\"answer\":42}}}}]}}\n"
@@ -29,12 +29,12 @@ COMPARISON_RECORD_ORACLE: `{"contamination":null,"discarded_cases":0,"first_diff
     if bytes != "{COMPARISON_RECORD_ORACLE}\n".bytes() {
         panic("canonical comparison record differs from COMPARISON_RECORD_ORACLE")
     }
-    if id != "580b78f7c709c23abf09d172feffbcc1c57233a5cfd19a758e64feaaeb1e09a7" || bytes.len() != 704 {
+    if id != "7808a555aff5ced1578d44257296a557e3c01e29fd1f5491f19198eba3fd560a" || bytes.len() != 704 {
         panic("canonical comparison identity")
     }
     report: jet_cli_comparison_evidence(run, "corpus.json", id) ?? panic("comparison fixture evidence")
     evidence: evidence_report_encode(report) ?? panic("comparison fixture evidence codec")
-    if evidence.len() != 1276 || receipt_crypto.sha256(evidence).hex() != "e70caadb13efc603dfe28a6730af7a08f18732deaea7a6e60ada920174638be1" {
+    if evidence.len() != 1276 || receipt_crypto.sha256(evidence).hex() != "8cf4b4df495ec66be8b9551a203681bb968a9afd1aa5c36ef5da05f6f7ef8352" {
         panic("canonical evidence bytes and derivation")
     }
     if !jet_cli_receipt_secret_name("--apiToken2") || !jet_cli_receipt_secret_name("--HTTPPassword") || jet_cli_receipt_secret_name("--monkey") {

@@ -3,7 +3,7 @@
 // history error to change the comparison verdict.
 use {
     comparison_files: core.files
-    jet_foundation.[ComparisonRecord, ComparisonSample, ComparisonIdentity, ComparisonObservation, ComparisonStatus, ObservationRelation, testing_compare_samples_with_discarded, comparison_status_as_str, observation_relation_as_str, foundation_parse_protocol_json, foundation_json_integer, foundation_json_quote]
+    jet_foundation.[ComparisonRecord, ComparisonSample, ComparisonIdentity, ComparisonObservation, ComparisonStatus, ObservationRelation, testing_compare_samples_with_discarded, comparison_parse_status, comparison_status_as_str, observation_relation_as_str, foundation_parse_protocol_json, foundation_json_integer, foundation_json_quote]
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
     core.encoding.[Dyn]
 }
@@ -196,17 +196,16 @@ jet_cli_comparison_sample: fn(value: Dyn, index: Int, seed: U64?, source: String
     Ok(ComparisonSample{identity: identity, reference: reference, candidate: candidate, reference_replay: reference_replay, candidate_replay: candidate_replay, declared_equal: jet_cli_comparison_bool(value, "declared_equal")})
 }
 
-jet_cli_comparison_terminal: fn(value: String) -> ComparisonStatus? Never! {
-    if value == {
-        "empty" -> Val(ComparisonStatus.Empty)
-        "unsupported" -> Val(ComparisonStatus.Unsupported)
-        "unavailable" -> Val(ComparisonStatus.Unavailable)
-        "timeout" -> Val(ComparisonStatus.Timeout)
-        "cancelled" -> Val(ComparisonStatus.Canceled)
-        "invalid_oracle" -> Val(ComparisonStatus.InvalidOracle)
-        "contaminated" -> Val(ComparisonStatus.Contaminated)
-        else -> None
-    }
+// A corpus's recorded `status`, in the comparison record's vocabulary
+// (comparison_parse_status): a runner outcome replaces the verdict, while
+// `matched` and `mismatch`, which only the samples decide, and an absent
+// status leave it to them. Any other word, an older spelling included, is
+// refused rather than read as no outcome.
+jet_cli_comparison_terminal: fn(recorded: String?) -[]> ComparisonStatus? JetCLIComparisonError! {
+    value: recorded ?? return Ok(None)
+    status: comparison_parse_status(value) ?? return Err(jet_cli_comparison_error("recorded `status` `{value}` is not a comparison status"))
+    if status == ComparisonStatus.Matched || status == ComparisonStatus.Mismatch -> return Ok(None)
+    Ok(Val(status))
 }
 
 jet_cli_comparison_parse: fn(input: String, relation_override: String?) -> JetCLIComparisonRun JetCLIComparisonError! {
@@ -237,7 +236,7 @@ jet_cli_comparison_parse: fn(input: String, relation_override: String?) -> JetCL
         samples.push(jet_cli_comparison_sample(value, index, seed, source, tool, target, relation))
     }
     record := testing_compare_samples_with_discarded(relation, samples, discarded)
-    if jet_cli_comparison_terminal(jet_cli_comparison_text(root, "status") ?? "") == .Val(status) {
+    if jet_cli_comparison_terminal(jet_cli_comparison_text(root, "status")) == .Val(status) {
         record.status = status
         record.reason = Val("recorded runner outcome is {comparison_status_as_str(status)}")
         record.universal_proof = false

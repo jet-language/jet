@@ -1,0 +1,38 @@
+# The registered american-tokens1 plan (toolchain a0.0.45) is the offline
+# converter for the formats whose tokens moved to the American spelling in a
+# new version. A version 1 comparison record becomes version 2 with status
+# `canceled`, and its reason keeps the words it was written with. A recorded
+# corpus's status becomes `canceled`, while the observations it carries keep
+# theirs. A file in no known format is reported and left alone. A second run
+# finds nothing left to convert. Checked `--against` the untouched copies in
+# `Old/`, both conversions mean what their sources meant, read by version 1's
+# rules beside the current reader, while a hand rewrite that also changed the
+# status, `swapped.json`, is reported as changed and fails the check. The
+# current `jet test-compare` reads the converted corpus and refuses the old
+# one's status word.
+fixture: AmericanTokens1MovesBritishTokensToNewVersions/Input
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json notes.txt
+exit: 0
+stdout: = "EDIT record.json 2\nEDIT corpus.json 1\nSKIP notes.txt: in no format this plan converts\nTOTAL 3 sites in 2 files\n"
+file: record.json = AmericanTokens1MovesBritishTokensToNewVersions/record.out
+file: corpus.json = AmericanTokens1MovesBritishTokensToNewVersions/corpus.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json notes.txt
+exit: 0
+stdout: = "SKIP notes.txt: in no format this plan converts\nTOTAL 0 sites in 0 files\n"
+file: record.json = AmericanTokens1MovesBritishTokensToNewVersions/record.out
+file: corpus.json = AmericanTokens1MovesBritishTokensToNewVersions/corpus.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --against Old record.json corpus.json
+exit: 0
+stdout: = "SAME 2 of 2 files\n"
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --against Old swapped.json
+exit: 1
+stdout: = "CHANGED swapped.json: version 1's `cancelled` became `timeout`\nSAME 0 of 1 files\n"
+step: jet test-compare corpus.json
+exit: 1
+stdout: = "status=canceled relation=typed_equality samples=1 reason=recorded runner outcome is canceled\n"
+step: jet test-compare Old/corpus.json
+exit: 1
+stdout: = ""
+stderr: = "invalid comparison corpus `Old/corpus.json`: recorded `status` `cancelled` is not a comparison status\n"
