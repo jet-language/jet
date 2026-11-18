@@ -4938,6 +4938,7 @@ package source is [`Core/Log/Log.jet`](../../../Core/Log/Log.jet).
 | `sample_every(n: Int) -[Log]>` | — | Sample every positive number of records. |
 | `counter(name: String, value: Int) -> LogField` | field | Build a counter field. |
 | `otlp_file(path: String) -[Log, FS]>` | — | Select a file sink for OTLP output. |
+| `otlp_traces_json(service: String, spans: [TraceSpan]) -> String` | text | The OTLP/HTTP JSON export request that carries finished `spans` for `service`, each with its `parentSpanId`; a redacted attribute exports `[redacted]`. |
 | `set_trace_id(id: String) -[Log]>` | — | Attach a trace identifier to later records. |
 | `setup(spec: String) -[Log]>` | — | Apply comma-separated `key=value` settings; a bare `auto`, `json` or `text` selects the format. |
 | `enabled(level: LogLevel) -[Log]> Bool` | Boolean | Test whether a record at `level` from the calling module would be written. |

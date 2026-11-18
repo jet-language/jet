@@ -12,7 +12,6 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [Log](Log.jet) — core.log — structured logging with levels, fields, spans and sinks.
 - [LogHuman](LogHuman.jet) — Human-readable log format.
 - [LogJob](LogJob.jet) — Composed flagship: file → pattern → aggregate.
-- [LogTraceExport](LogTraceExport.jet) — CORE-F023: one finite exported-trace job through `core.log`.
 - [NoPrelude](NoPrelude.jet)
 - [Stream](Stream.jet)
 
@@ -53,6 +52,10 @@ Run a lesson from the repository root, for example `jet run Examples/Systems/<Le
 - [WalkFiles](Files/WalkFiles.jet) — File-only traversal keeps the walk policy and drops directories.
 - [WalkOrder](Files/WalkOrder.jet) — `walk` yields the entries in path order, depth first, without sorting the whole tree.
 - [Watcher](Files/Watcher.jet) — core.watcher owns file/process/port watch handles.
+
+## Observability
+
+- [LogTraceExport](Observability/LogTraceExport.jet) — One finite exported-trace job through `core.log`, then its replay with parent links, redaction and a bounded span buffer.
 
 ## Process
 
