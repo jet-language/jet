@@ -1,0 +1,36 @@
+// A failing lambda handed through a `&&fn([Q])` parameter to a task.group
+// task: the batch that fails stops its task, whose join reports it.
+hand_over: fn<Q>(items: [Q], handler: fn([Q])) -> Bool {
+    handled := false
+    task.group group {
+        attempt: task handler(items)
+        if attempt.join() == {
+            .Ok(_) -> { handled = true }
+            .Err(_) -> {}
+        }
+    }
+    handled
+}
+
+declare: fn<Q>(handler: &&fn([Q]), items: [Q]) -> Bool { hand_over(items, handler) }
+
+run: fn() {
+    print(
+        declare(
+            fn(items: [Int]) Err! {
+                if items.len() > 1 -> return Err("too many")
+                print("ok {items}")
+            },
+            [1],
+        ),
+    )
+    print(
+        declare(
+            fn(items: [Int]) Err! {
+                if items.len() > 1 -> return Err("too many")
+                print("ok {items}")
+            },
+            [1, 2],
+        ),
+    )
+}

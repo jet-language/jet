@@ -289,9 +289,10 @@ IRBuilder: struct {
     // joins first (BuildCoreClosures.jet ir_spawn_joined_next): its spawn
     // defers the task to that join (ir_task_spawn).
     spawn_joined: Bool{false},
-    // A task body (ir_task_spawn): a failure that leaves it stops the task,
-    // which its join reports as TaskFailure.Panicked (ir_try_failure).
-    task_body: Bool{false},
+    // A task body (ir_task_spawn) or a narrowing function-value adapter
+    // (ir_fn_widen): a failure that leaves it stops as `panic` does, which a
+    // task's join reports as TaskFailure.Panicked (ir_try_failure).
+    failure_stops: Bool{false},
     // The breaks built so far (ir_loop_jump), whose ownership meets that of
     // their loop's other exits after it (ir_loop_join).
     loop_edges: [IRLoopEdge]{[IRLoopEdge]{}},
@@ -723,8 +724,9 @@ IRQueued: struct {
 // A lambda body to build as its own function: the box holds its captures
 // at their offsets; the instance it was created under; the checked
 // function whose tree holds its nodes and the nodes the creating builder
-// made (IRBuilder `row`, `made`, `next_node`); whether it is a task body
-// (IRBuilder `task_body`).
+// made (IRBuilder `row`, `made`, `next_node`); whether it is a task body or
+// an adapter narrowing a failing function value (ir_fn_widen), which both
+// stop on a failure that leaves them (IRBuilder `failure_stops`).
 IRLambdaJob: struct {
     lambda: BodyLambda,
     captures: [IRCaptureSlot],
@@ -735,6 +737,7 @@ IRLambdaJob: struct {
     made: BodyTree,
     next_node: Int,
     task_body: Bool{false},
+    narrows: Bool{false},
 }
 
 // One closure capture: the name the body reads, its byte offset in the box,
