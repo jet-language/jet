@@ -266,7 +266,7 @@ DataLoader :: struct<T> {
     limits: DataLimits
     payload: [U8]?
     last_good: [U8]?
-    cancelled: Bool
+    canceled: Bool
     offline: Bool
     status: DataLoaderStatus
 }
@@ -296,7 +296,7 @@ DataWatchStatus :: struct {
     freshness_ms: Int
     invalidation_cause: String
     refreshing: Bool
-    cancelled: Bool
+    canceled: Bool
     impl Display {
         display :: fn(self) -> String { data_watch_status_text(self) }
     }
@@ -306,13 +306,13 @@ DataWatchStatus :: struct {
 }
 
 data_watch_status_text :: fn(status: DataWatchStatus) -> String Never! {
-    "DataWatchStatus{{mode: {status.mode}, revision: {status.revision}, retained_rows: {status.retained_rows}, recomputations: {status.recomputations}, active: {status.active}, generation: {status.generation}, dirty: {status.dirty}, error: {status.error}, freshness_ms: {status.freshness_ms}, invalidation_cause: {status.invalidation_cause}, refreshing: {status.refreshing}, cancelled: {status.cancelled}}}"
+    "DataWatchStatus{{mode: {status.mode}, revision: {status.revision}, retained_rows: {status.retained_rows}, recomputations: {status.recomputations}, active: {status.active}, generation: {status.generation}, dirty: {status.dirty}, error: {status.error}, freshness_ms: {status.freshness_ms}, invalidation_cause: {status.invalidation_cause}, refreshing: {status.refreshing}, canceled: {status.canceled}}}"
 }
 
 DataStream :: struct<T> {
     items: [T]
     index: Int
-    cancelled: Bool
+    canceled: Bool
 }
 
 
@@ -794,7 +794,7 @@ json_reader :: fn<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStr
 }
 
 snapshot :: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
-    if loader.cancelled {
+    if loader.canceled {
         return Err(data_error(DataErrorKind.State, "loader was canceled before snapshot", loader.source.locator))
     }
     core.data.snapshot<T>(&loader)
@@ -1325,7 +1325,7 @@ make_loader :: fn<T>(kind: DataLoaderKind, locator: String, member: String, para
         limits: limits,
         payload: None,
         last_good: None,
-        cancelled: false,
+        canceled: false,
         offline: false,
         status: status,
     })
@@ -1953,7 +1953,7 @@ DataLoaderPortRecord :: struct {
     assert_eq(loader.authority.scope, "local")
     assert_eq(loader.format, DataFormat.JSON)
     assert(loader.last_good == None)
-    assert(!loader.cancelled)
+    assert(!loader.canceled)
     assert(!loader.offline)
 
     limits := DataLimits.safe()

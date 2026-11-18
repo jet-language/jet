@@ -168,11 +168,6 @@ realtime_join: fn(stream: I64) {
 
 #Export(c) jet_rt_is_canceled: fn(stream: I64) -> Bool { realtime_canceled(stream) }
 
-// Seed bridge, deleted once a seed built from this tree is the seed: the
-// seed that builds this runtime's compiler routes `core.rt.__is_canceled`
-// to the British export name.
-#Export(c) jet_rt_is_cancelled: fn(stream: I64) -> Bool { jet_rt_is_canceled(stream) }
-
 #Export(c) jet_rt_next_deadline: fn(stream: I64) -> I64 {
     scratch: sync_load(wrapping(stream + RT_SCRATCH))
     sync_mutex_lock(wrapping(scratch + RT_MATH_MUTEX))
