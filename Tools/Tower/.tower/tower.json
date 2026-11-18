@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112250,
+    "rev": 112265,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -86390,6 +86390,11 @@
         {
           "at": "2026-11-18",
           "by": "Main",
+          "text": "p295 landed the DeclTypes chain plus Lens args-and-next/first-stop-bar and IfHole debug-eval reviews 1-4 (dev 3f4dd54f21). c11 met. New suite failures sent to Lens: Perf/join_wait_names_awaited_task, Perf/recursive_inclusive_time, PerfRun/sampling_profile_per_line, goldens Perf/CacheVisualization + StridedVsSequentialL1D (o0-o2), JetDevServer LiveInspect E0107 MAX_RECONNECT_EVENTS; REFUSED proofs receipt_names_profile_and_capture, memory_counters_per_line, no_counters_reports_unavailable, program_arguments_reach_the_program, native_finds_an_o2_split_debug_file_through_the_debug_link; c22 proof audit_reports_list_findings_without_a_disposition FAIL."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
           "text": "p295 lands DeclTypes c14-c16.r4/c15.r2/c13.r2 as a whole chain; their memory mode is spelled --method=memory, against D-PERF-MEMORY1=A (--lens=memory). Recorded as a defect on c14 (reworded); Lens cuts the --lens cutover SUB for p296, removing --method=memory in one cutover. c13-c16 are not met until it lands."
         },
         {
@@ -86526,11 +86531,11 @@
         {
           "n": 11,
           "text": "`jet perf view` shows every profile with jet alone: the terminal per-line table, the flame graph and the timeline, plus `--html` that opens in a browser with no other program. The pprof and OTLP exports are optional interop, and their proof is a jet-side round trip (export, then `jet perf view` of the export reports the same per-line totals); no proof needs go, otelcol or any other tool. Proof: `jet test Compiler --profile cases --filter Perf/view_` and `--filter Perf/export_round_trip`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T07:55:05.562Z"
+          "evidence": "p295 batch compiler (census build of dev 3f4dd54f21), landed DeclTypes-6-1-6841-c11-pprof-otlp.r4: cases Perf/view_, Perf/export_round_trip, JetPerfTracePartsViews/perf_attach_view_compare_export_share_one_jettrace_truth all PASS; jet check PeerExport.jet rc=0",
+          "at": "2026-11-18T14:47:32.265Z"
         },
         {
           "n": 12,
@@ -86942,6 +86947,84 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-18T14:10:17.838Z"
+        },
+        {
+          "n": 51,
+          "text": "Typed crash dumps and the flight recorder: A stop writes a typed dump (every task's stack, values reachable from them to a budget, the flight-recorder ring) and `jet debug` opens it with the live verbs; `jet perf attach` drains the same ring. Proof: `jet test Compiler --profile cases --filter Debug/crash_dump_opens_typed`; `--filter Perf/attach_drains_flight_ring`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R9)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:21.562Z",
+          "blockedBy": "D-OBSERVE-FLIGHT1"
+        },
+        {
+          "n": 52,
+          "text": "Typed heap snapshots: Under `--lens=alloc`, a heap snapshot taken at exit, at a `perf.heap_mark` or on attach names each live block's type and allocation line; `jet perf compare` diffs two snapshots by type and line; `jet perf view --retained-by` shows a block's shortest retention path from a root. Proof: `jet test Compiler --profile cases --filter Perf/heap_snapshot_types_retention_and_diff`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R10)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:24.178Z",
+          "blockedBy": "D-PERF-HEAP1"
+        },
+        {
+          "n": 53,
+          "text": "Debugger start and step on large programs: Program arguments after `--` reach the debugged program (F8); `next` over a loop-heavy line costs one stop, not one per instruction; on a prebuilt 100,000-line image the first stop comes in under 200 ms (57 ms today on a 120,004-line image, F18, so this bar guards against regression). Adds the bar to c22's measurement. Proof: `jet test Compiler --profile cases --filter Debug/program_arguments_reach_the_program`; `--filter Debug/next_over_a_loop_is_one_stop`; `Tools/Perf/DebugLatency/Main.jet --bar 200`, as `latency.log`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R11)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:26.599Z"
+        },
+        {
+          "n": 54,
+          "text": "Native hot patch: Under `jet debug`, the fix command swaps an edited function into the running native process at its next call; a layout change migrates by D-HOTSTATE1=A's rules or is refused naming the field. Extends #6919 c5 to the native tier. Proof: `jet test Compiler --profile cases --filter Debug/fix_swaps_function_in_native_process`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R12)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:28.891Z",
+          "blockedBy": "D-DBG-VERBS1"
+        },
+        {
+          "n": 55,
+          "text": "Causal profiling: `--lens=causal` predicts the whole-program gain of speeding each hot line, with automatic progress points (closed zones, answered requests, finished tasks); on the fixture, the prediction for a line later sped up by hand is within the stated interval, and a run too short to rank is refused with the reason. Proof: `jet test Compiler --profile cases --filter Perf/causal_profile_predicts_speedup`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R13)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:31.772Z",
+          "blockedBy": "D-PERF-CAUSAL1"
+        },
+        {
+          "n": 56,
+          "text": "Cost facts and diffs in the views: `jet perf view` shows each hot line's #6897 cost facts beside its measured share; `jet perf compare` reports per-function and per-line deltas with a significance verdict over repeated captures and refuses a verdict on one capture each. Proof: `jet test Compiler --profile cases --filter Perf/view_shows_cost_facts_beside_samples`; `--filter Perf/compare_per_line_with_significance`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R14)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:34.355Z"
+        },
+        {
+          "n": 57,
+          "text": "Top-down counters: `--lens=topdown` reports TMA levels 1 and 2 per function and line on supported x86 cores, on the memory lens's counter path, and \"unavailable\" with a reason elsewhere (as c16). Proof: `jet test Compiler --profile cases --filter PerfRun/topdown_levels_per_function`. (Docs/Audits/2026-11-18-best-debugger-profiler.md R15)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:36.789Z",
+          "blockedBy": "D-PERF-TOPDOWN1"
+        },
+        {
+          "n": 58,
+          "text": "One window: Canvas grown: Canvas's Debug view shows source, stack, locals, watches and tasks together, with replay controls, and opens dumps and recordings; a Profile view draws the trace timeline (samples, zones, waits, I/O). No second graphical tool. Proof: `jet Tools/CanvasTest/Run.jet native-debug-panels` (a new mode beside `native-lifecycle`). (Docs/Audits/2026-11-18-best-debugger-profiler.md R16)",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T14:10:39.401Z",
+          "blockedBy": "D-DBG-UI1"
         }
       ],
       "refs": [],
@@ -86949,9 +87032,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-18T14:10:17.838Z",
+      "updated": "2026-11-18T14:47:50.148Z",
       "updatedBy": "Main",
-      "criteriaLastN": 50
+      "criteriaLastN": 58
     },
     {
       "id": "c0in2dft",
@@ -88242,11 +88325,11 @@
         {
           "n": 3,
           "text": "`jet fmt --simplify` inlines a needless temporary (an immutable binding used once, on the next line) only when evaluation order is unchanged, and never reports it; a fmt case pins an order-sensitive negative that is left alone.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:10:45.678Z",
+          "evidence": "p295 batch compiler (census build of dev 3f4dd54f21), landed Speed-3-3-6850-c3: jet test Compiler --profile cases --filter fmt_simplify_inline_temporary PASS (with the order-sensitive negative); jet check Formatter.jet rc=0",
+          "at": "2026-11-18T14:47:33.180Z",
           "proof": {
             "profile": "cases",
             "filter": "fmt_simplify_inline_temporary"
@@ -88283,7 +88366,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:10:45.678Z",
-      "updated": "2026-11-18T11:59:35.513Z",
+      "updated": "2026-11-18T14:47:33.180Z",
       "updatedBy": "Main",
       "criteriaLastN": 5
     },
@@ -89460,6 +89543,16 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Correction to the previous entry: the 47 untiered .Lint row dispositions are these (code=disposition): E2818=Tidy; E2930=Tidy; E2931=Tidy; E2934=Tidy; JT0101=Report; L0102=Tidy; L0104=Tidy; L0105=Tidy; L0152=Report; L0153=Tidy; L0203=Report; L0204=Report; L0205=Report; L0208=Report; L0502=Tidy; L0507=fmt; L0511=Tidy (decided); L0512=Tidy (decided); L0513=Tidy (decided); L0514=Tidy (decided); L0516=Tidy (decided); L0517=Tidy (decided); L0518=Tidy (decided); L0519=Tidy (decided); L0520=Tidy (decided); L0521=Tidy (decided); L0522=Tidy (decided); L0523=Tidy (decided); L0524=Tidy (decided); L0530=fmt; L0531=Tidy (decided); L0532=Tidy; L0533=Report; L0534=Report; L0535=fmt; L0601=Report; L0619=Tidy; L2001=Report; L2101=Report; L2201=Report; L2401=fmt (A) or retire (B); L2421=Tidy; L2608=Report; L2901=Tidy; L2902=Report; L3102=Tidy; L3103=Tidy; "
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "c3 plan (IfHole, Main ruling 09:2x): L0530 RedundantFinalReturn and L0507 BranchArmTable become parse-only jet fmt rewrites and retire; L2401 PositionalBool = A: jet fmt labels literal Bool args to a named Bool parameter from the resolved signature (unresolved/variadic/parse-only left unchanged), row retires (meets c1). Heuristic lints L0202 L0206 L0207 L0501 L0504-L0506 L1141 L2510 go .Report (listed by jet lint, fail nothing; label stays the severity's); L0502 FloatComparison out of .Report, see its SUB msg. The 47 untiered .Lint rows each carry a Tidy/Report/fmt disposition (list kept in the report-tier SUB's notes). Largest .Tidy site lists beyond the decided batch: L0102 (300), L2901 (220)."
+        },
+        {
           "at": "2026-11-16",
           "by": "Main",
           "text": "p216 (efb3da4f6c): tidy_errors_run_vs_check, failure_arm_cannot_arrive and Guards pass, but c2 is held. Builds now fail on tidy errors, which broke golden Examples/Apps/UI/Surface.jet and Tests/Run/Net/ConsumingMethodDropsSelf.jet on o1/o2 (UnusedLocalBinding) and about 8 cases. Sent to IfHole-6-1."
@@ -89547,7 +89640,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:41.937Z",
-      "updated": "2026-11-17T01:48:18.841Z",
+      "updated": "2026-11-18T14:41:04.797Z",
       "updatedBy": "Main",
       "criteriaLastN": 6
     },
@@ -94965,11 +95058,11 @@
         {
           "n": 10,
           "text": "The structural printing example (`{g:Debug}` on a struct with no hand-written display) prints the same on O0, O1 and O2 with no report, and Display interpolation, explicit Debug, manual overrides, negative derive controls and redaction keep their distinct contracts. Proof: `jet test Compiler --profile golden --filter Text/StructuralPrinting` and `jet test Compiler --profile cases --filter PrintBranchTiers/`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:11:03.810Z"
+          "evidence": "p295 batch compiler (census build of dev 3f4dd54f21), landed IfHole-6-1-6895-c10-structural-printing: golden Text/StructuralPrinting PASS on o0/o1/o2; cases PrintBranchTiers/ PASS",
+          "at": "2026-11-18T14:47:34.173Z"
         }
       ],
       "refs": [],
@@ -94980,7 +95073,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:53.787Z",
-      "updated": "2026-11-18T13:48:33.042Z",
+      "updated": "2026-11-18T14:47:34.173Z",
       "updatedBy": "Main"
     },
     {
@@ -106086,6 +106179,11 @@
         {
           "at": "2026-11-18",
           "by": "Main",
+          "text": "p295 landed c2 arms ffi-descriptor.r2, service, jobs, trace-live.r3 (dev 3f4dd54f21); service/jobs/trace-live proofs PASS on the p295 batch compiler. c2 stays open until the git-grep half holds (no British token in any live reader)."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
           "text": "p288: the american-sweep r3 landed (1b8bf7b65f). The guard passes and so does american_ident1, but task_failure_rail still expects \"cancelled\" (new suite failure). c1 waits on Speed fixing that fallout and closing the hole in the guard."
         }
       ],
@@ -106116,7 +106214,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-17T17:23:18.313Z",
-      "updated": "2026-11-18T03:18:13.165Z",
+      "updated": "2026-11-18T14:47:47.493Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
     }
@@ -178407,6 +178505,167 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T14:47:50.149Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-18T14:47:47.493Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0yk1mno",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-18T14:47:34.173Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0jt78qz",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-18T14:47:33.180Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0gokkbf",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-18T14:47:32.265Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-18T14:41:04.797Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gbe4aj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-18T14:40:56.066Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gbe4aj",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-18T14:10:39.401Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "58 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:39.401Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#58 One window: Canvas grown: Canvas's Debug view shows source,  (blocked by D-DBG-UI1)"
+    },
+    {
+      "at": "2026-11-18T14:10:36.789Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "57 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:36.789Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#57 Top-down counters: `--lens=topdown` reports TMA levels 1 and (blocked by D-PERF-TOPDOWN1)"
+    },
+    {
+      "at": "2026-11-18T14:10:34.355Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "56 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:34.355Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#56 Cost facts and diffs in the views: `jet perf view` shows eac"
+    },
+    {
+      "at": "2026-11-18T14:10:31.772Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "55 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:31.772Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#55 Causal profiling: `--lens=causal` predicts the whole-program (blocked by D-PERF-CAUSAL1)"
+    },
+    {
+      "at": "2026-11-18T14:10:28.891Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "54 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:28.891Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#54 Native hot patch: Under `jet debug`, the fix command swaps a (blocked by D-DBG-VERBS1)"
+    },
+    {
+      "at": "2026-11-18T14:10:26.599Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "53 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:26.599Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#53 Debugger start and step on large programs: Program arguments"
+    },
+    {
+      "at": "2026-11-18T14:10:24.178Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "52 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:24.178Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#52 Typed heap snapshots: Under `--lens=alloc`, a heap snapshot  (blocked by D-PERF-HEAP1)"
+    },
+    {
+      "at": "2026-11-18T14:10:21.562Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "51 criteria, soft limit 6: the best-in-existence review's ranked plan (c39) maps every surviving design to #6841; one card owns the debugger and profiler goal"
+    },
+    {
+      "at": "2026-11-18T14:10:21.562Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#51 Typed crash dumps and the flight recorder: A stop writes a t (blocked by D-OBSERVE-FLIGHT1)"
+    },
     {
       "at": "2026-11-18T14:10:17.838Z",
       "by": "Main",
