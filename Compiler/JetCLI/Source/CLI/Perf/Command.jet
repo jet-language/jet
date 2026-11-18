@@ -712,17 +712,19 @@ jet_cli_perf_flame: fn(trace: CanonicalJSON) -> [String] Never! {
 }
 
 // One function's profile rows on one clock: their samples, and those of
-// each row that is one source line.
+// each row that is one source line, with its inclusive samples when the
+// row has them.
 JetCLIPerfFlameFunction: struct {
     symbol: String,
     clock: String,
     weight: Int,
-    lines: [{line: Int, weight: Int}],
+    lines: [{line: Int, weight: Int, inclusive: Int?}],
 }
 
 // The profile rows by function and clock, hottest first: each function's
-// samples and its share of its clock's, then its hottest lines. At most 8
-// functions and 3 lines each.
+// samples and its share of its clock's, then its hottest lines, each with
+// its inclusive samples when the trace has them. At most 8 functions and 3
+// lines each.
 jet_cli_perf_flame_profile: fn(items: View<CanonicalJSON>) -> [String] Never! {
     functions := [JetCLIPerfFlameFunction]{}
     loop item in items {
@@ -738,11 +740,11 @@ jet_cli_perf_flame_profile: fn(items: View<CanonicalJSON>) -> [String] Never! {
         }
         if found < 0 {
             found = functions.len()
-            functions.push(JetCLIPerfFlameFunction{symbol: symbol, clock: clock, weight: 0, lines: [{line: Int, weight: Int}]{}})
+            functions.push(JetCLIPerfFlameFunction{symbol: symbol, clock: clock, weight: 0, lines: [{line: Int, weight: Int, inclusive: Int?}]{}})
         }
         functions[found].weight += weight
         if jet_cli_perf_row_line(item) == .Val(line) {
-            functions[found].lines.push({line: line, weight: weight})
+            functions[found].lines.push({line: line, weight: weight, inclusive: jet_cli_perf_member_number(item, "inclusive_count")})
         }
     }
     functions.sort_by(fn(left: JetCLIPerfFlameFunction, right: JetCLIPerfFlameFunction) { right.weight <=> left.weight })
@@ -756,10 +758,12 @@ jet_cli_perf_flame_profile: fn(items: View<CanonicalJSON>) -> [String] Never! {
         weight: functions[index].weight
         share: if total > 0 -> weight * 100 /% total else -> 0
         out.push("{functions[index].symbol} profile:{functions[index].clock} samples={weight} share={share}%")
-        functions[index].lines.sort_by(fn(left: {line: Int, weight: Int}, right: {line: Int, weight: Int}) { (right.weight <=> left.weight).then(left.line <=> right.line) })
+        functions[index].lines.sort_by(fn(left: {line: Int, weight: Int, inclusive: Int?}, right: {line: Int, weight: Int, inclusive: Int?}) { (right.weight <=> left.weight).then((right.inclusive ?? 0) <=> (left.inclusive ?? 0)).then(left.line <=> right.line) })
         shown: if functions[index].lines.len() > 3 -> 3 else -> functions[index].lines.len()
         loop at in 0..<shown {
-            out.push("  line {functions[index].lines[at].line} samples={functions[index].lines[at].weight}")
+            row: functions[index].lines[at]
+            inclusive: if row.inclusive == .Val(count) -> " inclusive={count}" else -> ""
+            out.push("  line {row.line} samples={row.weight}{inclusive}")
         }
     }
     out

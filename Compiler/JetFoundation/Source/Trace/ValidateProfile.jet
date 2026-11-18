@@ -75,7 +75,7 @@ jettrace_validate_profile: fn(value: CanonicalJSON, source_identity: CanonicalJS
     }
     loop index in 0..<rows.len() {
         label: "content.profile.rows[{index}]"
-        row: jettrace_object_keys(rows[index], label, [String]{"clock", "execution_count", "sample_count", "sample_weight", "source", "symbol"})
+        row: jettrace_object_keys(rows[index], label, [String]{"clock", "execution_count", "inclusive_count", "sample_count", "sample_weight", "source", "symbol"})
         clock: jettrace_text(row[jettrace_get(row, "clock")].value, "{label}.clock")
         if clock != "wall" && clock != "cpu" {
             return Err(jettrace_error("{label}.clock must be wall or cpu"))
@@ -84,6 +84,7 @@ jettrace_validate_profile: fn(value: CanonicalJSON, source_identity: CanonicalJS
         if execution != CanonicalJSON.Null {
             _: jettrace_unsigned(execution, "{label}.execution_count")
         }
+        _: jettrace_optional_unsigned(row[jettrace_get(row, "inclusive_count")].value, "{label}.inclusive_count")
         _: jettrace_unsigned(row[jettrace_get(row, "sample_count")].value, "{label}.sample_count")
         _: jettrace_unsigned(row[jettrace_get(row, "sample_weight")].value, "{label}.sample_weight")
         source: jettrace_object_keys(row[jettrace_get(row, "source")].value, "{label}.source", [String]{"end_column", "end_line", "path", "sha256", "start_column", "start_line"})

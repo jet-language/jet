@@ -63,22 +63,29 @@ event publishes nothing: its trace keeps the source identity and map, and its
 profile is `no_samples` with no window.
 `jet perf run` samples the program's CPU time: the runtime arms the process's
 profiling timer (`setitimer` `ITIMER_PROF`, one sample per millisecond of
-CPU) and records the program counter each `SIGPROF` interrupted, and `jet run`
-writes the program's image beside the samples. The session names each
-sample's Jet function and source line from that image's `.debug_jetline`
-location table, as Linux perf names the same image's samples from its line
-tables, so `-O2` code inlined into a caller counts at that caller, at the line
-the table gives the code. The rows are `cpu` rows, one per function and line of
-the checked source, hottest first; `coverage` is `complete` when every sample
-landed in that source and `partial` when some ran in the runtime or another
-file, which the `reason` counts and, for samples outside every Jet function,
-names by the image's `.symtab` function, hottest first, as `perf report` names
-them (the compiler's stop poll `jet_ir_stop_turn` is the usual one). `jet perf
-view` sums them per function with its share of the samples, then its hottest
-lines. A run whose samples never reach the checked source (a short program,
-`jet perf test`, `jet perf attach`) keeps the observation rows, which attribute
-to the parsed `run: fn` declaration (`fn` through its closing brace) and do not
-separate the functions that `run` calls.
+CPU) and records the program counter each `SIGPROF` interrupted with the call
+site of each Jet caller up the frame-pointer chain, and `jet run` writes the
+program's image beside the samples. The session names each sample's Jet
+function and source line from that image's `.debug_jetline` location table, as
+Linux perf names the same image's samples from its line tables, so `-O2` code
+inlined into a caller counts at that caller, at the line the table gives the
+code. The rows are `cpu` rows, one per function and line of the checked
+source, hottest first. A row's `sample_count` is its exclusive time, the
+samples whose program counter is on it; its `inclusive_count` is its inclusive
+time, the samples that hold it anywhere on the stack, each once however often
+(a recursive call's line counts once per sample), so a line the stack only
+passes through has a row with no exclusive samples. `coverage` is `complete`
+when every sample landed in that source and `partial` when some ran in the
+runtime or another file, which the `reason` counts and, for samples outside
+every Jet function, names by the image's `.symtab` function, hottest first, as
+`perf report` names them (the compiler's stop poll `jet_ir_stop_turn` is the
+usual one). `jet perf view` sums them per function with its share of the
+samples, then its hottest lines with their exclusive and inclusive samples
+(`line 7 samples=12 inclusive=40`). A run whose samples never reach the checked
+source (a short program, `jet perf test`, `jet perf attach`) keeps the
+observation rows, which attribute to the parsed `run: fn` declaration (`fn`
+through its closing brace) and do not separate the functions that `run` calls;
+their `inclusive_count` is null.
 
 ## Canonical devtools protocol
 

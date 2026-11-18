@@ -26,10 +26,14 @@ JET_CLI_PERF_SAMPLE_US: 1000
 
 // The samples of one function and source line: `function` indexes the
 // table's functions, and `own` says whether its file is the checked source.
+// `count` is its exclusive time, the samples whose program counter is on
+// it; `inclusive` its inclusive time, the samples that hold it anywhere on
+// the stack, once each however often.
 JetCLIPerfSampledLine: struct {
     function: Int,
     line: Int,
     count: U64,
+    inclusive: U64,
     own: Bool,
 }
 
@@ -87,60 +91,96 @@ jet_cli_perf_samples_read: fn(path: String, source: String) -[FS, Env]> JetCLIPe
     Val(sampled)
 }
 
-// The samples of `words`, each 8 bytes, by the function and line of `table`
-// that holds its address, hottest first; one outside every Jet function by
-// the function of `functions` that holds it.
+// A sample record's first word holds its program counter below this bit and
+// its word count from it up (PerfSamples.jet PERF_SAMPLES_ADDRESS_BITS).
+JET_CLI_PERF_ADDRESS_BITS: 48
+
+// The samples of `words`, records of 8-byte words (PerfSamples.jet): the
+// program counter, then the call site of each caller, innermost first.
+// Each sample counts once at the function and line of `table` its program
+// counter is on, its exclusive time, and once at each line it holds, call
+// sites too, its inclusive time: a line a recursive sample holds many times
+// counts once. Hottest first. A program counter outside every Jet function
+// counts at the function of `functions` that holds it.
 jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], words: [U8]) -> JetCLIPerfSamples Never! {
-    counts := [Int:U64]{}
-    addresses := [Int]{}
-    at := 0
-    loop at + 8 <= words.len() {
-        address: link_debug_addr(words, at)
-        at += 8
-        if !counts.has_key(address) {
-            counts[address] = U64{0}
-            addresses.push(address)
-        }
-        counts[address] = counts[address] + U64{1}
-    }
     sampled := JetCLIPerfSamples{table: table, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, functions: functions, natives: [JetCLIPerfNative]{}}
     // One key per function and line; a line number stays below 2^32.
     places := [Int:Int]{}
-    // Each native function's entry in `natives`.
+    // Each address's entry in `lines`, -1 outside every Jet function.
+    resolved := [Int:Int]{}
+    // Each program counter's entry in `natives`, -1 in no image function.
+    native_at := [Int:Int]{}
+    // Each image function's entry in `natives`.
     natives := [Int:Int]{}
-    loop address in addresses {
-        count: counts[address]
-        sampled.total += count
-        found: if address < 0 -> -1 else -> x64_jetline_find(sampled.table, address)
-        if found < 0 {
-            sampled.outside += count
-            native: x64_image_function_find(sampled.functions, address)
-            if native < 0 -> next
-            if !natives.has_key(native) {
-                natives[native] = sampled.natives.len()
-                sampled.natives.push(JetCLIPerfNative{function: native, count: U64{0}})
+    // The sample each line's inclusive time last counted.
+    counted := [Int:Int]{}
+    mask: (1 << JET_CLI_PERF_ADDRESS_BITS) - 1
+    sample := 0
+    at := 0
+    loop at + 8 <= words.len() {
+        first: link_debug_addr(words, at)
+        size: (first >> JET_CLI_PERF_ADDRESS_BITS) & 65535
+        record: if size < 1 -> 1 else -> size
+        pc: first & mask
+        sample += 1
+        sampled.total += U64{1}
+        place: jet_cli_perf_samples_place(sampled, places, resolved, pc)
+        if place >= 0 -> sampled.lines[place].count += U64{1}
+        if place < 0 {
+            sampled.outside += U64{1}
+            if !native_at.has_key(pc) {
+                native: x64_image_function_find(sampled.functions, pc)
+                entry := -1
+                if native >= 0 {
+                    if !natives.has_key(native) {
+                        natives[native] = sampled.natives.len()
+                        sampled.natives.push(JetCLIPerfNative{function: native, count: U64{0}})
+                    }
+                    entry = natives[native]
+                }
+                native_at[pc] = entry
             }
-            sampled.natives[natives[native]].count += count
-            next
+            if native_at[pc] >= 0 -> sampled.natives[native_at[pc]].count += U64{1}
         }
-        line: x64_jetline_line(sampled.table, sampled.table.functions[found], address) ?? sampled.table.functions[found].decl
-        key: found * 4294967296 + line
-        if !places.has_key(key) {
-            places[key] = sampled.lines.len()
-            sampled.lines.push(JetCLIPerfSampledLine{function: found, line: line, count: U64{0}, own: false})
+        loop k in 0..<record {
+            word: at + k * 8
+            if word + 8 > words.len() -> break
+            held: if k == 0 -> place else -> jet_cli_perf_samples_place(sampled, places, resolved, link_debug_addr(words, word))
+            if held < 0 -> next
+            if counted.has_key(held) && counted[held] == sample -> next
+            counted[held] = sample
+            sampled.lines[held].inclusive += U64{1}
         }
-        place: places[key]
-        sampled.lines[place].count += count
+        at += record * 8
     }
-    sampled.lines.sort_by(fn(left: JetCLIPerfSampledLine, right: JetCLIPerfSampledLine) { (right.count <=> left.count).then(left.function <=> right.function).then(left.line <=> right.line) })
+    sampled.lines.sort_by(fn(left: JetCLIPerfSampledLine, right: JetCLIPerfSampledLine) { (right.count <=> left.count).then(right.inclusive <=> left.inclusive).then(left.function <=> right.function).then(left.line <=> right.line) })
     sampled.natives.sort_by(fn(left: JetCLIPerfNative, right: JetCLIPerfNative) { (right.count <=> left.count).then(left.function <=> right.function) })
     sampled
 }
 
+// The entry in `sampled.lines` of the function and line that hold link
+// address `address`, added at first sight; -1 outside every Jet function.
+jet_cli_perf_samples_place: fn(sampled: &JetCLIPerfSamples, places: &[Int:Int], resolved: &[Int:Int], address: Int) -> Int Never! {
+    if resolved.has_key(address) -> return resolved[address]
+    found: if address < 0 -> -1 else -> x64_jetline_find(sampled.table, address)
+    place := -1
+    if found >= 0 {
+        line: x64_jetline_line(sampled.table, sampled.table.functions[found], address) ?? sampled.table.functions[found].decl
+        key: found * 4294967296 + line
+        if !places.has_key(key) {
+            places[key] = sampled.lines.len()
+            sampled.lines.push(JetCLIPerfSampledLine{function: found, line: line, count: U64{0}, inclusive: U64{0}, own: false})
+        }
+        place = places[key]
+    }
+    resolved[address] = place
+    place
+}
+
 // The CPU-time profile `sampled` gives the checked `source`: one row per
-// function and line in it, hottest first, and in its reason the hottest
-// image functions outside Jet code, by their symbols. None when no sample
-// landed in it.
+// function and line in it, with its exclusive and inclusive samples,
+// hottest first, and in its reason the hottest image functions outside Jet
+// code, by their symbols. None when no sample landed in it.
 jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSamples) -> TraceProfile? Never! {
     rows := [TraceProfileRow]{}
     elsewhere := sampled.outside
@@ -158,9 +198,11 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
         }
         location: TraceProfileSource{path: source.identity.path, sha256: source.identity.sha256, start_line: U64{place.line}, start_column: U64{1}, end_line: U64{place.line}, end_column: column}
         symbol: JetSymbolRef{path: source.identity.path, name: sampled.table.functions[place.function].name}
-        rows.push(TraceProfileRow{clock: "cpu", execution_count: None, sample_count: place.count, sample_weight: place.count, source: location, symbol: symbol})
+        rows.push(TraceProfileRow{clock: "cpu", execution_count: None, inclusive_count: Val(place.inclusive), sample_count: place.count, sample_weight: place.count, source: location, symbol: symbol})
     }
-    if rows.len() == 0 -> return None
+    // The rows are hottest first: a first row with no sample of its own
+    // means every one landed elsewhere, its stack only passing through.
+    if rows.len() == 0 || rows[0].sample_count == (U64{0}) -> return None
     status: if truncated -> "truncated" else -> "captured"
     coverage: if elsewhere == (U64{0}) -> "complete" else -> "partial"
     named := [String]{}
@@ -169,7 +211,7 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
         named.push("{sampled.functions[native.function].name} {native.count}")
     }
     natives: if named.len() == 0 -> "" else -> "; outside Jet functions: {named.join(", ")}"
-    reason: "one CPU-time sample per {JET_CLI_PERF_SAMPLE_US} microseconds of process CPU, each at the function and source line its program counter is in; {elsewhere} of {sampled.total} samples are outside {source.identity.path}{natives}"
+    reason: "one CPU-time sample per {JET_CLI_PERF_SAMPLE_US} microseconds of process CPU, at the function and source line its program counter is in and, inclusive, once at each line on its stack; {elsewhere} of {sampled.total} samples are outside {source.identity.path}{natives}"
     Val(TraceProfile{method: "sampling", status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: truncated, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "a matched unprofiled run was not captured", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"})
 }
 
@@ -245,10 +287,10 @@ jet_cli_perf_source_profile: fn(source: JetCLIPerfSource, wall_samples: U64, cpu
     wall_count: if wall_samples < (U64{4096}) -> wall_samples else -> U64{4096}
     cpu_count: if cpu_samples < (U64{4096}) -> cpu_samples else -> U64{4096}
     if wall_samples > (U64{0}) {
-        rows.push(TraceProfileRow{clock: "wall", execution_count: None, sample_count: wall_count, sample_weight: wall_count, source: location, symbol: symbol})
+        rows.push(TraceProfileRow{clock: "wall", execution_count: None, inclusive_count: None, sample_count: wall_count, sample_weight: wall_count, source: location, symbol: symbol})
     }
     if cpu_samples > (U64{0}) {
-        rows.push(TraceProfileRow{clock: "cpu", execution_count: None, sample_count: cpu_count, sample_weight: cpu_count, source: location, symbol: symbol})
+        rows.push(TraceProfileRow{clock: "cpu", execution_count: None, inclusive_count: None, sample_count: cpu_count, sample_weight: cpu_count, source: location, symbol: symbol})
     }
     limited: truncated || wall_samples > U64{4096} || cpu_samples > U64{4096}
     status: if limited -> "truncated" else if rows.len() == 0 -> "no_samples" else -> "captured"
