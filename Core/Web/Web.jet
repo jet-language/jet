@@ -261,6 +261,9 @@ priv AppState: struct {
     // Whether the app is served under `jet dev`, which app_serve reads once
     // from the environment, so an image page reads no environment itself.
     dev: Bool,
+    // Whether serving the app put the `web.requests` layer in its table
+    // (app_request_route).
+    requests_layered: Bool,
     // The handler of GET `/a/*jet_image`, made with the first page, which is
     // where its file reads are charged; serving the app only adds the row.
     image_handler: HTTPHandler?,
@@ -724,6 +727,7 @@ App: struct {
     // app graph's screens, whose handlers may read files when they answer.
     // It sets up the push services the graph names (`app_push_route`).
     bind: fn(self, address: String, *, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Net, FS.Read]> HTTPServer HTTPError! {
+        app_request_route(self)
         app_image_route(self)
         app_push_route(self)
         app_session_routes(self)
@@ -737,6 +741,7 @@ App: struct {
     // Answer the one connection `listener` accepts next. The first call
     // sets up the push services the graph names, as `bind` does.
     serve_once: fn(self, listener: TCPListener) -[Net, FS.Read, Time]> HTTPError! {
+        app_request_route(self)
         app_image_route(self)
         app_push_route(self)
         app_session_routes(self)
@@ -751,11 +756,9 @@ App: struct {
 // A new app. Each time the handler of a request its routes upgraded to a
 // WebSocket returns, app hears the live hub's leave signal
 // (`app.__live_left_settle`), so a closed connection's presence ends then.
-// Its first, outermost layer runs `web.requests` (app_request_layer).
 app: fn() -> App Never! {
     table: http_server.mux_new()
     http_server.__on_upgraded(table, fn() { calls.__live_left_settle() })
-    http_server.layer_add(table, fn(next: HTTPHandler) { app_request_layer(next) })
     App{
         __state: Shared{AppState{
             routes: [AppRoute]{},
@@ -777,6 +780,7 @@ app: fn() -> App Never! {
             image_bytes: [String:[U8]]{},
             image_settings: default_image_settings(),
             dev: false,
+            requests_layered: false,
             image_handler: None,
             traced: [AppTraced]{},
             services: Shared{[AppService]{}},
@@ -786,7 +790,7 @@ app: fn() -> App Never! {
 }
 
 // `web.requests`: the decision point each request a web app serves passes
-// before the app's own layers and routes (app_request_layer). A handler lets
+// before the app's own layers and routes (app_request_route). A handler lets
 // the request on (`.Continue`), hands on a changed one (`.Transform`),
 // refuses it (`.Cancel`, answered 403) or answers it itself
 // (`.Fail(response)`), and `web.under(prefix, handler)` scopes a handler to
@@ -801,7 +805,7 @@ requests: core.event.decision_point<HTTPRequest, HTTPResponse>(HookPolicy.FirstC
 // "/admin/users", not "/administrator", and "/" holds every path. Any other
 // request continues unchanged:
 // `web.requests.on(scope, web.under("/admin", require_login))`.
-under: fn(prefix: String, handler: &&fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> Never!) -[]> fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> Never! {
+under: fn(prefix: String, handler: &&fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> Never!) -[]> (fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> Never!) Never! {
     root: app_trim_slashes(if prefix.starts_with("/") -> prefix else -> "/{prefix}")
     fn(asked: HTTPRequest) { if app_path_under(asked.path, root) -> handler(asked) else -> HookDecision.Continue }
 }
@@ -810,6 +814,24 @@ under: fn(prefix: String, handler: &&fn(HTTPRequest) -> HookDecision<HTTPRequest
 // slash, so "" holds every path.
 priv app_path_under: fn(path: String, root: String) -[]> Bool Never! {
     path == root || path.starts_with("{root}/")
+}
+
+// Puts the layer that runs `web.requests` (app_request_layer) outermost in
+// the app's table, before the app's own layers, unless the app did this
+// before. Serving the app does this, so an app that is only built runs no
+// layer and reaches no effect of one.
+priv app_request_route: fn(app: App) -[Net, FS.Read]> Never! {
+    if app_request_layer_claimed(app) {
+        http_server.layer_add_outermost(app_table(app), fn(next: HTTPHandler) { app_request_layer(next) })
+    }
+}
+
+// Marks the app's `web.requests` layer as placed: true the first time.
+priv app_request_layer_claimed: fn(app: App) -> Bool Never! {
+    guard := app.__state.guard_edit()
+    if guard.value.requests_layered -> return false
+    guard.value.requests_layered = true
+    true
 }
 
 // The layer that runs `web.requests` on each request, then answers it as the
@@ -845,6 +867,7 @@ serve: fn<Settings: Decode>(*, prefix: String, build: fn(Settings) -> App, port:
 bind: fn<Settings: Decode>(address: String, *, prefix: String, build: fn(Settings) -> App, tls: HTTPServerTLS?{None}, deadline: Duration?{None}) -[Env, IO, Net, FS, Exec, Time]> HTTPServer HTTPError! {
     settings: app_settings<Settings>(prefix)
     app: build(settings) ?? core.process.fail(C_APP_SETTINGS_EXIT, app_build_failure("{err}"))
+    app_request_route(app)
     app_image_route(app)
     app_push_route(app)
     app_session_routes(app)
@@ -1006,6 +1029,7 @@ priv app_serve: fn(app: App, chosen: AppPort) -[Env, IO, Net, FS.Read, Time]> Ne
     }
     table: app_table(app)
     if dev -> app_dev_reload(table)
+    app_request_route(app)
     app_image_route(app)
     app_push_route(app)
     app_session_routes(app)

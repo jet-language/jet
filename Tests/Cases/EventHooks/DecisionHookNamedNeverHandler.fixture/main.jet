@@ -1,0 +1,28 @@
+use event: core.event
+
+gate: event.decision_point<String, String>(HookPolicy.FirstCancelElseTransform)
+
+refuse_stop: fn(text: String) -[]> HookDecision<String, String> Never! {
+    if text == "stop" -> HookDecision.Cancel else -> HookDecision.Transform("{text}-seen")
+}
+
+fail_save: fn(text: String) -[]> HookDecision<String, String> Never! {
+    if text == "save" -> HookDecision.Fail("denied {text}") else -> HookDecision.Continue
+}
+
+show: fn(text: String) -[IO]> Never! {
+    if gate.run(text.copy()) == {
+        .Continue(kept) -> { print("continue {kept}") }
+        .Cancel -> { print("cancel {text}") }
+        .Fail(failure) -> print("fail {failure}")
+    }
+}
+
+run: fn() -[IO]> Never! {
+    scope: event.scope()
+    _: gate.on_priority(scope, 10, fail_save)
+    _: gate.on(scope, refuse_stop)
+    show("go")
+    show("stop")
+    show("save")
+}

@@ -136,16 +136,22 @@ ir_event_query: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver
 
 // on / once / on_priority(scope, (priority,) handler): the provider takes the
 // handler's closure box, so a kept handler is cloned for it first; the
-// priority crosses as a native word.
+// priority crosses as a native word. A handler of a `T Never!` function
+// hands back its Result carrier, so the provider's slot gets its Ok payload
+// (lazy.carried), as a handler typed `-> T` writes it.
 ir_event_listen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], export: String, prioritized: Bool, once: Bool, span: Span) -> Int Never! {
     if args.len() != (if prioritized -> 3 else -> 2) {
         return ir_fail_slot(b, span, "Event listener registration with {args.len()} arguments")
     }
     handler_ty: ir_ty(p, b, args[args.len() - 1])
     closure_ty: handler_ty
-    if ir_untag(closure_ty) == .Fn(params, _, _, _, _, _) {
+    carried := false
+    if ir_untag(closure_ty) == .Fn(params, fn_ret, _, _, _, _) {
         if params.len() != 1 {
             return ir_fail_slot(b, span, "Event handler taking {params.len()} parameters")
+        }
+        if fn_ret == .Val(ret) {
+            if ir_never_carrier_success(ret) == .Val(success) -> carried = !ir_unit_type(success)
         }
     } else { return ir_fail_slot(b, span, "Event handler of {ir_type_name(closure_ty)}") }
     row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
@@ -168,7 +174,7 @@ ir_event_listen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
     handed: ir_closure_handover(m, p, b, closure, span)
     if handed.held < 0 -> return -1
     held: handed.held
-    invoke_id: ir_lazy_helper(m, p, b, "callback", closure_ty, span)
+    invoke_id: ir_lazy_helper(m, p, b, if carried -> "carried" else -> "callback", closure_ty, span)
     if invoke_id < 0 -> return -1
     invoke: ir_lazy_address(m, b, invoke_id)
     release: handed.release
