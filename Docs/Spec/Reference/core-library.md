@@ -827,8 +827,10 @@ looks `k` up once, on every tier from the same lowering. As a value it reads
 the stored value, or `start` when `k` is missing, and adds no entry, so it
 reads an immutable map too. As a place it first adds `start` under a missing
 `k`, then updates the stored value. The counter idiom is
-`counts[w, or: 0] += 1`, and `&groups[w, or: [String]{}].push(w)` groups
-values under their key. `slot: &m[k, or: start]` binds the entry the same way.
+`counts[w, or: 0] += 1`, and `groups[w, or: [String]{}].push(w)` groups
+values under their key (written `&groups[…].push(w)` under
+`#Policy(writes: .Explicit)`, which marks every call that changes a value).
+`slot: &m[k, or: start]` binds the entry the same way.
 `start` has the map's value type and runs only when `k` is missing, at most
 once per slot use. A plain `m[k, or: start] = v` sets `k` as `m[k] = v` does,
 and `start` does not run. A starting value on anything but a map is E0505, and
