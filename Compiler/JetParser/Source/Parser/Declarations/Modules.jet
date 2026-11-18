@@ -358,7 +358,8 @@ parser_parse_code_module_after_name: fn(state: &JetParserState, modifiers: Parse
     state.module_depth -= 1
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after module declarations")
     markers: parser_merge_inbody_markers(state, modifiers.markers, inside, modifiers.start_span.start, close.span.start, "module `{name_head.name}`")
-    Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(parser_module_body_visibility(body, modifiers.is_pub, modifiers.is_package_pub)), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span), markers: markers}}
+    members: parser_reexport_declarations(body, imports)
+    Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(parser_module_body_visibility(members, modifiers.is_pub, modifiers.is_package_pub)), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span), markers: markers}}
 }
 
 // `#FX(Net, !FS) pricing: module …` caps every function in the module (see
@@ -713,9 +714,10 @@ parser_parse_generic_module_after_name: fn(state: &JetParserState, modifiers: Pa
     }
     state.module_depth -= 1
     close: parser_expect(state, TOKEN_RBRACE, "`}}` after the generic module body")
+    members: parser_reexport_declarations(body, imports)
     // An `#FX(…)` above the template caps every function of each instance,
     // as it does a code module's.
-    generic := GenericModuleDef{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, imports: imports, body: parser_module_body_visibility(body, modifiers.is_pub, modifiers.is_package_pub), span: parser_cover(start, close.span), markers: modifiers.markers.copy()}
+    generic := GenericModuleDef{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, imports: imports, body: parser_module_body_visibility(members, modifiers.is_pub, modifiers.is_package_pub), span: parser_cover(start, close.span), markers: modifiers.markers.copy()}
     if parser_fx_cap_marker(state, modifiers.markers, "module") == .Val(marker) {
         if parser_module_fx_cap(state, marker, name_head.name) == .Val(cap) {
             generic.body = parser_module_body_caps(generic.body.copy(), cap)

@@ -40,22 +40,30 @@ use {
     ]
     jet_lexer.[
         TOKEN_BLOCK_COMMENT,
+        TOKEN_COLON,
         TOKEN_COMMA,
+        TOKEN_DOT,
         TOKEN_EOF,
+        TOKEN_FLOAT,
         TOKEN_GT,
+        TOKEN_HASH,
         TOKEN_IDENT,
+        TOKEN_INT,
         TOKEN_KW_PRIV,
+        TOKEN_KW_USE,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
         TOKEN_LINE_COMMENT,
         TOKEN_LPAREN,
         TOKEN_LT,
         TOKEN_MINUS,
+        TOKEN_RAW_STRING,
         TOKEN_RBRACE,
         TOKEN_RBRACKET,
         TOKEN_RPAREN,
         TOKEN_SEMI,
         TOKEN_SHR,
+        TOKEN_STRING,
         TOKEN_UNIFIED_ARROW,
         Token,
         lex,
@@ -393,6 +401,30 @@ jfmt_first_token_at: fn(f: JetFmt, start: Int) -> Int Never! {
 
 jfmt_is_comment_kind: fn(kind: Int) -> Bool Never! {
     kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT
+}
+
+// Whether the public import `imp` is written as a declaration
+// (`clamp: core.math.clamp`): no `use` heads its line, and it sits in no
+// `use { … }` block. A block's rows hold only names, paths, strings and
+// versions, so the search back stops at the first token no row holds.
+jfmt_import_declared: fn(f: JetFmt, imp: ImportDecl) -> Bool Never! {
+    at: jfmt_first_token_at(f, imp.span.start)
+    if at < f.source_toks.len() && f.source_toks[at].kind == TOKEN_KW_USE -> return false
+    index := at - 1
+    loop index >= 0 {
+        kind: f.source_toks[index].kind
+        if kind == TOKEN_LBRACE {
+            return index == 0 || f.source_toks[index - 1].kind != TOKEN_KW_USE
+        }
+        if !jfmt_import_row_kind(kind) -> return true
+        index -= 1
+    }
+    true
+}
+
+// A token kind a `use { … }` row, or the line break after one, holds.
+jfmt_import_row_kind: fn(kind: Int) -> Bool Never! {
+    jfmt_is_comment_kind(kind) || kind == TOKEN_IDENT || kind == TOKEN_DOT || kind == TOKEN_COLON || kind == TOKEN_COMMA || kind == TOKEN_LBRACKET || kind == TOKEN_RBRACKET || kind == TOKEN_SEMI || kind == TOKEN_STRING || kind == TOKEN_RAW_STRING || kind == TOKEN_HASH || kind == TOKEN_INT || kind == TOKEN_FLOAT
 }
 
 // The privacy word the author wrote directly before a member name: `priv `
