@@ -54,6 +54,7 @@ use jet_foundation.[
     core_source_owns_type,
     type_name,
     type_union_member_tag,
+    type_unqualified_nominals,
     name_rows_get_text,
     core_identity_in_module,
     core_identity_is,
@@ -1533,6 +1534,27 @@ sema_type_resolve_declared_recursive: fn(graph: SemaRegistrationGraph, ty: Type,
         .Map(key, key_span, value) -> Type.Map{key: sema_type_resolve_declared_recursive(graph, key, caller, generic_params), key_span: key_span.copy(), value: sema_type_resolve_declared_recursive(graph, value, caller, generic_params)}
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> ty
     }
+}
+
+// How a diagnostic names `written`, a type as its source spells it, when that
+// is an application of a generic alias: the alias as written, then its one
+// full expansion, `Grid<Int>` (which is [[Int]]). None for any other type,
+// and while the alias does not expand (sema_type_resolve_declared_recursive).
+sema_type_alias_shown: fn(graph: SemaRegistrationGraph, written: Type, caller: Int, generic_params: [TGenericParam]) -[]> String? {
+    if written == .Apply(name, args) {
+        if sema_type_name_is_generic(generic_params, name) -> return None
+        head: sema_type_graph_resolve_apply_name(graph, name, caller)
+        row: sema_type_lookup_nominal_row(graph, sema_type_graph_lookup_symbol_at(graph, caller, head), head, caller) ?? return None
+        nominal: graph.modules[row.module_index].nominals[row.row]
+        if nominal.kind != SemaRegistrationNominalKind.TypeAlias || nominal.generic_params.len() != args.len() {
+            return None
+        }
+        shown: type_name(type_unqualified_nominals(written))
+        expanded: sema_type_resolve_declared_recursive(graph, written, caller, generic_params)
+        if type_name(expanded) == shown -> return None
+        return Val("`{shown}` (which is {sema_type_show(expanded)})")
+    }
+    None
 }
 
 // The type an alias stands for under `args`, with `names` (its parameters, or

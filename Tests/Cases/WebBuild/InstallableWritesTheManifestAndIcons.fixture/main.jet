@@ -42,7 +42,7 @@ Manifest: struct {
 }
 
 // Serves one GET of `path` and gives its answer.
-fetch: fn(served: web.App, path: String) -> HTTPResponse {
+query: fn(served: web.App, path: String) -> HTTPResponse {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr()
     serving: task { served.serve_once(listener) ?? panic("serve") }
@@ -64,17 +64,17 @@ run: fn() {
         .installable(name: "Crewboard", icon: "brand/icon.png", color: 0x2a5bd7)
     served: web.app()
     loop path in ([String]{"/boards/b1", "/inbox/mine"}) {
-        page: fetch(served.copy(), path)
+        page: query(served.copy(), path)
         text: page.text() ?? "unreadable"
         print("{path}: {page.status} | manifest linked: {text.contains("<link rel=\"manifest\" href=\"/manifest.webmanifest\">")} | theme color: {text.contains("<meta name=\"theme-color\" content=\"#2a5bd7\">")}")
     }
-    answered: fetch(served.copy(), "/manifest.webmanifest")
+    answered: query(served.copy(), "/manifest.webmanifest")
     print("manifest: {answered.status} {answered.header("content-type") ?? "no type"} | {answered.header("cache-control") ?? "no cache"}")
     manifest: answered.json<Manifest>() ?? panic("manifest json: {err}")
     print("name: {manifest.name} | short: {manifest.short_name} | start: {manifest.start_url} | display: {manifest.display} | theme: {manifest.theme_color} | background: {manifest.background_color}")
     limits: image.Limits{max_input_bytes: 10000000, max_pixels: 1000000, max_output_bytes: 10000000}
     loop icon in manifest.icons {
-        got: fetch(served.copy(), icon.src)
+        got: query(served.copy(), icon.src)
         bytes: got.body().bytes(10000000) ?? panic("icon bytes: {err}")
         shown: image.decode(bytes, limits) ?? panic("icon decode: {err}")
         info: image.inspect(bytes, limits) ?? panic("icon inspect: {err}")
@@ -85,5 +85,5 @@ run: fn() {
         print("icon {icon.sizes} {icon.purpose ?? "any"}: {got.status} {got.header("content-type") ?? "no type"} | {got.header("cache-control") ?? "no cache"} | {shown.width}x{shown.height} {info.format}")
         print("  corner {pixel(shown, 0, 0)} | beside {pixel(shown, beside, middle)} | middle {pixel(shown, middle, middle)}")
     }
-    print("an unknown icon: {fetch(served, "/__jet/icons/0000000000000000.192.png").status}")
+    print("an unknown icon: {query(served, "/__jet/icons/0000000000000000.192.png").status}")
 }

@@ -41,7 +41,7 @@ inbox_head: fn(view: InboxView) -> app.Head Never! {
 // GET `path` with the header `name: value` ("" sends none), and print its
 // status and the page's `<head>`, with the address the server listens at
 // written HOST.
-fetch: fn(addr: String, path: String, name: String, value: String) HTTPError! {
+query: fn(addr: String, path: String, name: String, value: String) HTTPError! {
     fields := http.headers()
     if name != "" -> fields = http.headers_set(fields, name, value)
     answer: http.send_request(http.request_with(.Get, "http://{addr}{path}", fields, http.body_text("")))
@@ -67,9 +67,9 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     serving: task {
         loop _ in 0..<4 { served.serve_once(listener) }
     }
-    fetch(addr, "/guides/faq?from=mail", "", "")
-    fetch(addr, "/guides/draft", "", "")
-    fetch(addr, "/inbox/mine", "", "")
-    fetch(addr, "/inbox/mine", "authorization", "Bearer {auth.session_id(session)}")
+    query(addr, "/guides/faq?from=mail", "", "")
+    query(addr, "/guides/draft", "", "")
+    query(addr, "/inbox/mine", "", "")
+    query(addr, "/inbox/mine", "authorization", "Bearer {auth.session_id(session)}")
     serving.join()
 }

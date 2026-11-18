@@ -25,7 +25,7 @@ inbox: fn(view: InboxView) -> String Never! { view.box }
 
 // GET `path`, and print its status, its Cache-Control and, with `whole`,
 // its body.
-fetch: fn(addr: String, path: String, whole: Bool) HTTPError! {
+query: fn(addr: String, path: String, whole: Bool) HTTPError! {
     answer: http.send_request(http.request_with(.Get, "http://{addr}{path}", http.headers(), http.body_text("")))
     print("{path}: {answer.status} cache-control={answer.header("cache-control") ?? "none"}")
     if whole -> print(answer.text())
@@ -39,8 +39,8 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     serving: task {
         loop _ in 0..<3 { served.serve_once(listener) }
     }
-    fetch(addr, "/boards/p%201?tab=mine%26more", true)
-    fetch(addr, "/boards/p1", false)
-    fetch(addr, "/inbox/mine", false)
+    query(addr, "/boards/p%201?tab=mine%26more", true)
+    query(addr, "/boards/p1", false)
+    query(addr, "/inbox/mine", false)
     serving.join()
 }

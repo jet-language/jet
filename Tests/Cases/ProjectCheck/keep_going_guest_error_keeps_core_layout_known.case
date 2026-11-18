@@ -1,0 +1,22 @@
+# A C export's surface error leaves the registration graph incomplete, and
+# JET_KEEP_GOING checks on past it, Core's bodies included. Core registered
+# in full, so its marker rows are final (sema_scope_members_marker_rows_settled)
+# and `SysTargetPointer.reflect().layout` still reads its layout:
+# SYS_TARGET_POINTER_BYTES lands and the staged comptime graph never stalls.
+# The one E3203 is the only problem, with JET_KEEP_GOING as without it.
+fixture: KeepGoingGuestErrorKeepsCoreLayoutKnown.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check main.jet
+env: JET_RECEIPT_BYPASS=1
+exit: 1
+stdout+stderr: ~ "jet-lang.dev/e/E3203" # the export declares a carrier
+stdout+stderr: ~ "1 problem found" # and nothing else
+step: jet check main.jet
+env: JET_RECEIPT_BYPASS=1
+env: JET_KEEP_GOING=1
+exit: 1
+stdout+stderr: ~ "jet-lang.dev/e/E3203" # the same error
+stdout+stderr: !~ "has no static member `$layout`" # Core's layout reads still resolve
+stdout+stderr: !~ "staged comptime dependency graph is stalled" # so no Core value is stuck
+stdout+stderr: ~ "1 problem found" # and nothing else

@@ -454,6 +454,10 @@ SemaComptimeItemSource: struct {
     // computed while building when its evaluation is pure and succeeds, and
     // refused otherwise (E0643, jet_driver_module_value_refused).
     module_value: Bool{false},
+    // An immutable module binding of a declared point's shape
+    // (sema_casing_point_shaped): its name's span, which the run holds to
+    // ALL_CAPS when the value is not a point (sema_comptime_module_point).
+    point_name: Span?{None},
     // A refused module value's check as ordinary code, outside compile-time
     // execution, which reports its real errors.
     runtime_check: Bool{false},
@@ -1757,6 +1761,11 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     // A lifted inline-module member reports its own body under its source name.
     context.function_name = sema_inline_member_source_name(func.name)
+    // The written success names E0113's alias: the failure solver's `T Never!`
+    // and the default `T Err!` both show as T.
+    if func.return_type == .Val(written) {
+        context.return_alias = if written == .Result(success, error) && (sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) || error == (Type.Named{name: "Err"})) -> sema_call_alias_shown(success, updated, program) else -> sema_call_alias_shown(written, updated, program)
+    }
     // #6281 c176: the union solve reads this body's default `Err` route as
     // sema_failure_union_infer does: a top-level candidate other than the
     // entry `run`, which keeps the `Unit Err!` exit contract.
@@ -9640,6 +9649,9 @@ sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_mo
             last: sources.items.len() - 1
             if sources.items[last].key == constant_key {
                 if module_value -> sources.items[last].module_value = true
+                if module_value && !constant.declaration.mutable && !sema_context_key_declared(constant.declaration) && sema_casing_point_shaped(constant.declaration.value) {
+                    sources.items[last].point_name = Val(constant.declaration.name_span)
+                }
                 sources.items[last].step_limit = sema_comptime_step_limit(constant.declaration.markers)
             }
         }

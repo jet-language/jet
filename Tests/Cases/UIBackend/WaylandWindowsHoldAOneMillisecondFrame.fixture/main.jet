@@ -367,10 +367,10 @@ percentile: fn(samples: [Int], p: Int) -> Int {
     sorted := samples.copy()
     sorted.sort()
     if sorted.len() == 0 -> return 0
-    sorted[min(sorted.len() * p /% 100, sorted.len() - 1)]
+    sorted[low(sorted.len() * p /% 100, sorted.len() - 1)]
 }
 
-min: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
+low: fn(a: Int, b: Int) -> Int { if a < b -> a else -> b }
 
 client: fn() -[Env, IO, Net, Time]> {
     window: ui.open(width: 1160, height: 720, title: "Budget") ?? {

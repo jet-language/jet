@@ -115,18 +115,19 @@ ir_computed_constant_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, item_ke
     ir_process_cell_read(m, p, b, site, held, value, inner, row, span)
 }
 
-// A read of module event `definition` (`NAME: event.new<T>()`, an Event<T>
-// constant the build lands no value for, sema_comptime_module_event): a
-// Process site keyed by the constant holds the cell of the event its first
-// reader made, and every read borrows that event in place, so every reader
-// shares its listeners. The cell lives as long as the program.
-ir_event_holder_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -> Int Never! {
+// A read of declared point `definition` (`clicked: event.point<Int>()`, an
+// Event, Hook or DecisionHook constant whose landed value is its
+// construction option, sema_comptime_module_point): a Process site keyed by
+// the constant holds the cell of the carrier its first reader made, and
+// every read borrows that carrier in place, so every reader shares its
+// listeners. The cell lives as long as the program.
+ir_point_holder_read: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -[]> Int {
     row: ir_value_type(m, p, definition.ty) ?? return ir_type_fail(b, span, definition.ty)
-    site: ir_shared_site_word(m, b, "event:{definition.key}")
+    site: ir_shared_site_word(m, b, "point:{definition.key}")
     held: ir_process_cell_open(m, b, site)
-    event: ir_event_new(m, p, b, definition.ty, span)
+    point: ir_point_new(m, p, b, definition, span)
     if ir_failed(b) -> return -1
-    ir_process_cell_read(m, p, b, site, held, event, definition.ty, row, span)
+    ir_process_cell_read(m, p, b, site, held, point, definition.ty, row, span)
 }
 
 // Opens the first reader's branch of Process cell site `site`, taken while

@@ -83,9 +83,9 @@ env: JET_REGISTRY_CACHE_DIR={work}/cache
 env: JET_PACKAGE_STORE_DIR={work}/store
 env: JET_KEYS_DIR={work}/keys
 exit: 1
-stderr: ~ "breaks the public API item `blend`"
-stderr: ~ "public reexport `blend` changed signature"
-stderr: ~ "| was: reexport blend = fn core.math.lerp(a: Float, b: Float, t: Float)"
-stderr: ~ "| now: reexport blend = fn core.math.clamp_float(value: Float, low: Float, high: Float)"
+stderr: ~ "breaks the public API item `blend`" # the gate names the item
+stderr: ~ "public reexport `blend` changed signature" # and why it breaks
+stderr: ~ "| was: reexport blend = fn core.math.lerp(a: Float, b: Float, t: Float)" # the published row
+stderr: ~ "| now: reexport blend = fn core.math.clamp_float(value: Float, low: Float, high: Float)" # the row it would publish
 step: git --git-dir {work}/registry.git cat-file -e HEAD:apis/blender/1.1.0.api
 exit: nonzero

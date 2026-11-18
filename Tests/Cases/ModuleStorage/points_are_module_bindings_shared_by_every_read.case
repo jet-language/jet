@@ -1,0 +1,13 @@
+# A declared point (`clicked: event.point<Int>()`, `greeting:
+# event.hook_point<Int, String>("nobody")`) is a snake_case module binding
+# whose carrier the program makes at its first read and every read shares:
+# a listener or handler attached through one read hears an emit or a run
+# through another, on every tier.
+fixture: PointsAreModuleBindingsSharedByEveryRead.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "clicked 3\nhello 2\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "clicked 3\nhello 2\n"

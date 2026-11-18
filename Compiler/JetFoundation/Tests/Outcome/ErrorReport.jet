@@ -184,7 +184,7 @@ outcome_test_wire_refusal: fn(wire: String, expected: String) Never! {
     assert((JetErrorReport.from_json(wire) ?? panic("canonical wire rejected")).to_json() == wire)
     bad: [String]{" {wire}", "{wire}\n", "{{\"message\":\"plain\",\"schema\":\"jet.err/v1\",\"code\":null,\"cause\":null}}", "{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":[]}}", "{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null,\"context_frames\":[]}}", "{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null,\"unknown\":true}}"}
     loop text in bad -> outcome_test_wire_refusal(text, "error report is not canonical")
-    outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null,\"message\":\"other\"}}", "invalid error report: duplicate object key `message`")
+    outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":null,\"message\":\"other\"}}", "invalid error report: duplicate object key `message` (first at line 1, column 24)")
     outcome_test_wire_refusal("", "invalid error report: expected a JSON value")
     outcome_test_wire_refusal("{{\"schema\":\"jet.err/v1\",\"message\":\"plain\",\"code\":null,\"cause\":1}}", "error report cause is not null, an object, or an array")
 }

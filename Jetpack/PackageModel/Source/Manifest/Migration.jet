@@ -114,7 +114,9 @@ pkg_has_comment: fn(source: ManifestSource, start: Int, end: Int) -> Bool Never!
 // The entries of the record body `[start, end)` and the comments among
 // them, one line each (a nested record spans several). At the top level
 // (`top`) a blank line between two of them stays, one at most: it groups
-// the manifest the way its author wrote it (`deps: {}` apart).
+// the manifest the way its author wrote it (`deps: {}` apart). A nested
+// record whose entries are comma-separated ends every entry with a comma,
+// the last one too, as a record laid out over several lines is written.
 pkg_format_body: fn(source: ManifestSource, start: Int, end: Int, indent: Int, top: Bool) -> ManifestBody Never! {
     region: pkg_binder_slice(source.masked, start, end)
     cores := [EditSpan]{}
@@ -160,7 +162,7 @@ pkg_format_body: fn(source: ManifestSource, start: Int, end: Int, indent: Int, t
         if top && lines.len() > 0 && pkg_format_newlines(pkg_binder_slice(source.masked, last_end, core.start)) > 1 {
             lines.push("")
         }
-        separator: if comma && (entry_index + 1 < cores.len() || trailing_comma) -> "," else -> ""
+        separator: if comma && (!top || entry_index + 1 < cores.len() || trailing_comma) -> "," else -> ""
         lines.push("{pad}{pkg_format_entry_at(source, core, indent)}{separator}")
         entry_line = true
         last_end = core.end

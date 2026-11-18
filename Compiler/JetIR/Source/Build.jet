@@ -605,6 +605,11 @@ IRProgram: struct {
     // (FnBody.role), in row order, found once by ir_program_bind: a precise
     // operation finds its helper among them (ir_core_role_row).
     core_roles: [Int]{[Int]{}},
+    // The declared hook points that no handler can reach, found once by
+    // ir_program_bind (ir_quiet_points): every read of one is the receiver
+    // of a `run`, so no code attaches a handler, and each run is its
+    // fallback (ir_hook_run).
+    quiet_points: [String:Bool]{[String:Bool]{}},
     // Whether this program's code computes compile-time values (comptime
     // items, not a build invocation): outside an `#Impure` block, a Core
     // call that reads ambient host or process state with no system call the
@@ -1016,6 +1021,7 @@ ir_program_bind: fn(p: &IRProgram, functions: &&[FnBody], decls: DeclTable) Neve
     }
     p.spawn_sites = ir_spawn_sites(owned)
     p.functions = owned.move()
+    p.quiet_points = ir_quiet_points(p)
     p.rows = rows
     p.decode_helpers = ir_codec_decode_rows(p)
     p.trait_boxed = ir_trait_boxed(p)
@@ -1215,6 +1221,40 @@ ir_declared_owner: fn(declared: [String:String], module_identity: ModuleID, owne
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return None
     }
+}
+
+// IRProgram.quiet_points of `p`: the immutable declared hook points
+// (ir_point_type) that the program reads only as the receiver of a Hook
+// `run`. No read of such a point reaches an `on`, a `once` or an
+// `on_priority`, nor passes it along to code that could, so no handler is
+// ever attached, and each run returns its own fallback.
+ir_quiet_points: fn(p: IRProgram) -[]> [String:Bool] {
+    run := [String:Bool]{}
+    other := [String:Bool]{}
+    loop function in p.functions {
+        receivers := [Int:Bool]{}
+        loop node in function.tree.nodes {
+            if node.kind == .HandleMethod(receiver, operation, _) {
+                if operation == .EventMethod(route) && route == "jet_std.JetHook.run" {
+                    receivers[receiver] = true
+                }
+            }
+        }
+        loop node in function.tree.nodes {
+            if node.kind == .ConstRef(symbol) {
+                key: if symbol_is_local(symbol) -> symbol_local_keys_text(function.tree.symbols, symbol) else -> symbol_table_key(p.symbols, symbol)
+                if receivers.get(node.id) != None -> run[key] = true else -> other[key] = true
+            }
+        }
+    }
+    quiet := [String:Bool]{}
+    loop (key, _) in run {
+        if other.get(key) != None -> next
+        row: p.constants.get(key) ?? next
+        definition: p.constant_defs[row]
+        if ir_point_type(p, definition.ty) && !definition.is_storage -> quiet[key] = true
+    }
+    quiet
 }
 
 // IRProgram.spawn_sites of `functions`: the reports number a file's spawn

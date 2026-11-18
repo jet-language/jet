@@ -9079,6 +9079,32 @@ ModuleValueNotBuilt: struct {
     }
 }
 
+PointOutsideBinding: struct {
+    name: String,
+
+    impl Diagnostic {
+        code: "E0644",
+        safety_class: .Soundness,
+        safety_reason: "A point is the module binding it initializes, so every reader shares one carrier; a call in a body would make an anonymous carrier no reader shares.",
+        expert_path: "none: declare the point as a module binding",
+        stage: [.Sema],
+        meaning: "A point's constructor is called outside a module binding's value",
+        fix_next: "Declare the point at module level and use that binding.",
+
+        what: fn(self) -> String {
+            "`{self.name}` makes a point, which is declared only as a module binding's value"
+        }
+
+        why: fn(self) -> String {
+            "A point is the module binding it initializes: the program makes its carrier at the first read and every reader shares it, and a call in a body would make a new, anonymous carrier each time it runs"
+        }
+
+        fix: fn(self) -> String {
+            "Declare it at module level (`clicked: event.point<Int>()`) and use that binding; for a value that is local by design, use `event.new`, `event.hook` or `event.decision_hook`."
+        }
+    }
+}
+
 CompileTimeReadsRuntimeValue: struct {
     name: String,
 

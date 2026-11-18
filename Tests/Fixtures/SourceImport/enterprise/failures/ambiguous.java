@@ -2,7 +2,7 @@ package demo;
 import other.Library;
 
 public final class Ambiguous {
-    public static long keep(long value) {
+    public static long hold(long value) {
         return value;
     }
 

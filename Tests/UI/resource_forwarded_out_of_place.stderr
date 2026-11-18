@@ -127,7 +127,7 @@ More: jet-lang.dev/e/E0211
 Error [jet.CopyNotSupported]: `Res` can't be copied out of the place it is read from
   --> Tests/UI/resource_forwarded_out_of_place.jet:87:40
     |
- 87 |     loop item in list -> total += keep(item)
+ 87 |     loop item in list -> total += hold(item)
     |                                        ^^^^
  Why: It holds a resource, which has one cleanup owner; this position takes an owned value, so the copy and the place would both close the same resource
  Fix: Use `item` where it is, or move the place it reads with `.move()` when this scope owns it

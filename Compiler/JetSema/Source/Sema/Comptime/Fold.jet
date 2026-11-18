@@ -48,14 +48,13 @@ use jet_foundation.[
     Type,
     body_type_id,
     checked_comptime_integer_key,
-    module_text,
+    decl_id_index,
+    module_is_core,
     name_index,
     name_intern,
     name_table,
     symbol_key,
-    symbol_key_text,
     symbol_kind_name,
-    symbol_table_key,
 ]
 
 // The fold over `program`'s run table.
@@ -96,34 +95,59 @@ sema_comptime_shared_payload: fn(tree: BodyTree, expression: Int) -> Int? Never!
     None
 }
 
-// Whether `expression` makes a module event: the call `event.new<T>()` of
-// `core.event`, whose value is an `Event<T>`. The build lands no value for
-// it (its landed value is Unit); the program makes the event on its first
-// read, once per process, and every read shares it (JetIR
-// ir_event_holder_read). `new` returns on the `Never` rail, so its checked
-// call sits under that rail's propagation (sema_expression_auto_propagate).
-sema_comptime_module_event: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, tree: BodyTree, expression: Int) -> Bool Never! {
-    if !sema_comptime_event_type(tree.types.types[body_type_id(tree, expression)]) -> return false
+// A declared point (`clicked: event.point<Int>()`): a module value whose
+// whole expression calls a Core function filling a point role
+// (sema_core_point_constructor), found by that role, never by its name. `option`
+// is its one argument, a hook point's fallback or a decision point's
+// policy, which the build folds and lands; an event point has none and
+// lands Unit. The program makes the point's carrier on its first read, once
+// per process, and every read shares it (JetIR ir_point_holder_read). The
+// constructors return on the `Never` rail, so the checked call sits under
+// that rail's propagation (sema_expression_auto_propagate).
+SemaComptimeModulePoint: struct {
+    option: Int?,
+}
+
+sema_comptime_module_point: fn(program: SemaProgramTables, tree: BodyTree, expression: Int) -[]> SemaComptimeModulePoint? {
+    if !sema_comptime_point_type(tree.types.types[body_type_id(tree, expression)]) -> return None
     call := expression
     if tree.nodes[sema_comptime_fold_node_row(tree, expression)].kind == .TryWithContext(inner, _, _, _, _, _) {
         call = inner
     }
     if tree.nodes[sema_comptime_fold_node_row(tree, call)].kind == .Call(callee, _, args) {
-        if args.len() != 0 -> return false
+        if args.len() > 1 -> return None
         if program.registration_graph == .Val(graph) {
-            if callee.row.index() >= graph.decls.rows.len() -> return false
-            owner: sema_call_core_module_identity(environment, program, "core.event") ?? return false
-            wanted: symbol_key_text(SymbolKind.Function, module_text(graph.module_table, owner), "", "new")
-            return symbol_table_key(graph.symbols, graph.decls.rows[callee.row].symbol) == wanted
+            if decl_id_index(callee) >= graph.callables.len() -> return None
+            row: graph.callables[decl_id_index(callee)]
+            if !sema_core_point_constructor(graph, row) && !sema_comptime_event_new(graph, row) {
+                return None
+            }
+            if args.len() == 0 -> return Val(SemaComptimeModulePoint{option: None})
+            return Val(SemaComptimeModulePoint{option: Val(args[0].value)})
         }
+    }
+    None
+}
+
+// Whether callable `row` is core.event's `new`. Core's own module events
+// (app.LIFECYCLE) keep `event.new<T>()` until the compiler that builds
+// Core knows the point constructors, so as a module binding's whole value
+// it still declares an event point.
+sema_comptime_event_new: fn(graph: SemaRegistrationGraph, row: SemaRegistrationCallableRow) -[]> Bool {
+    if row == .Function(declaring, index) {
+        module_row: graph.modules[declaring]
+        return module_is_core(module_row.module_identity) && module_row.module_name == "core.event" && module_row.functions[index].declaration.name == "new"
     }
     false
 }
 
-// Whether `ty` is an `Event<T>`: a landed module value of that type is a
-// module event's (sema_comptime_module_event).
-sema_comptime_event_type: fn(ty: Type) -> Bool Never! {
-    if sema_event_handle_family(ty) == .Val(family) -> return family == "Event"
+// Whether `ty` is a point's carrier, an `Event<T>`, `Hook<T, R>` or
+// `DecisionHook<T, E>`: a landed module value of that type is a declared
+// point's (sema_comptime_module_point), which no read folds.
+sema_comptime_point_type: fn(ty: Type) -[]> Bool {
+    if sema_event_handle_family(ty) == .Val(family) {
+        return family == "Event" || family == "Hook" || family == "DecisionHook"
+    }
     false
 }
 
@@ -534,11 +558,11 @@ sema_comptime_fold_after_last: fn(name: String, pair: Bool) -> String Never! {
 }
 
 // The value of a constant that already landed in this run. A `Shared`
-// holder's landed value is its payload, not the holder, and a module
-// event's is no value, so neither folds a read.
+// holder's landed value is its payload, not the holder, and a declared
+// point's is its construction option or no value, so neither folds a read.
 sema_comptime_fold_landed: fn(values: [SemaComptimeItemValue], key: String) -> TComptimeValue? Never! {
     loop value in values {
-        if value.kind == SemaComptimeItemKind.Constant && value.key == key && !value.shared_holder && !sema_comptime_event_type(value.ty) {
+        if value.kind == SemaComptimeItemKind.Constant && value.key == key && !value.shared_holder && !sema_comptime_point_type(value.ty) {
             return Val(value.value)
         }
     }

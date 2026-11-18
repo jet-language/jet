@@ -8729,8 +8729,8 @@ ir_indirect_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, callee: Int, arg
 // value holding a compiler value, the compiler answers (ir_host_constant).
 // A read of module storage loads its cell, a read of a module `Shared`
 // holder shares its process cell (ir_shared_holder_read), and a read of a
-// module event shares the event its first reader made
-// (ir_event_holder_read). A constant the same compile-time program computes
+// declared point shares the carrier its first reader made
+// (ir_point_holder_read). A constant the same compile-time program computes
 // (TConstantDef.item_function) is read from the cell its first reader
 // computed (ir_computed_constant_read).
 ir_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String, span: Span) -> Int Never! {
@@ -8742,8 +8742,8 @@ ir_constant: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, key: String
         return ir_computed_constant_read(m, p, b, definition.item_function, item, span)
     }
     if definition.shared_holder -> return ir_shared_holder_read(m, p, b, definition, span)
-    if ir_event_type(definition.ty) && !definition.is_storage {
-        return ir_event_holder_read(m, p, b, definition, span)
+    if ir_point_type(p, definition.ty) && !definition.is_storage {
+        return ir_point_holder_read(m, p, b, definition, span)
     }
     if definition.is_storage {
         address: ir_storage_address(m, p, b, definition, span)

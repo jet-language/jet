@@ -1,7 +1,9 @@
 // Canonical tier-neutral comparison evidence. An equal finite sample is never a
 // universal proof; the record identity is the SHA-256 of its A-canonical JSON
-// payload (Encoding/CanonicalJSON.jet).
-TEST_COMPARISON_SCHEMA_VERSION: U16{1}
+// payload (Encoding/CanonicalJSON.jet). Version 2 spells the canceled status
+// `canceled`; a version 1 record is read only by the american-tokens1
+// converter (Compiler/Migrations), which writes it as version 2.
+TEST_COMPARISON_SCHEMA_VERSION: U16{2}
 
 // A comparison verdict. The non-success states are deliberately distinct: a
 // caller must not turn an empty, unavailable, or canceled run into pass.
@@ -94,7 +96,7 @@ comparison_status_as_str: fn(status: ComparisonStatus) -> String Never! {
         .Unsupported -> "unsupported"
         .Unavailable -> "unavailable"
         .Timeout -> "timeout"
-        .Canceled -> "cancelled"
+        .Canceled -> "canceled"
         .InvalidOracle -> "invalid_oracle"
         .Contaminated -> "contaminated"
     }

@@ -9,22 +9,22 @@ Res: struct {
     }
 }
 
-keep: fn(r: &&Res) { print("keep {r.name}") }
+hold: fn(r: &&Res) { print("keep {r.name}") }
 
 run: fn() {
     r := Res{name: "r1"}
-    loop round in 0..<3 { keep(r) }
+    loop round in 0..<3 { hold(r) }
     s := Res{name: "s1"}
     loop round in 0..<3 {
         if round == 1 {
-            keep(s)
+            hold(s)
             next
         }
         print("round {round}")
     }
     t := Res{name: "t1"}
     loop round in 0..<3 {
-        keep(t)
+        hold(t)
         t = Res{name: "t{round}"}
     }
     print("done")

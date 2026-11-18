@@ -65,6 +65,21 @@ sema_core_role_function: fn(graph: SemaRegistrationGraph, role: String) -> SemaC
     Val(found[0])
 }
 
+// Whether callable `row` is a top-level Core function that constructs a
+// declared point (`point`, `hook_point`, `decision_point`), whose call is a
+// module binding's identity: it fills a role whose name ends in `Point`
+// (jet_builtins RoleKind).
+sema_core_point_constructor: fn(graph: SemaRegistrationGraph, row: SemaRegistrationCallableRow) -[]> Bool {
+    if row == .Function(declaring, index) {
+        module_row: graph.modules[declaring]
+        if !module_is_core(module_row.module_identity) -> return false
+        markers: module_row.functions[index].declaration.markers
+        if markers.len() == 0 -> return false
+        return sema_core_role(markers, graph, module_row.module_identity).ends_with("Point")
+    }
+    false
+}
+
 // The jet_builtins enum whose cases are the roles.
 SEMA_CORE_ROLE_KIND: "RoleKind"
 

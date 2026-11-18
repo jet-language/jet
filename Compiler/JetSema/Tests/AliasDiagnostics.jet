@@ -1,0 +1,37 @@
+// A diagnostic names a generic alias as its source writes it, then its one
+// full expansion; any other type keeps its usual words.
+alias_reports: fn(source: String) -> String {
+    rows := [String]{}
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+        rows.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    rows.join("; ")
+}
+
+#Test("an argument for a generic alias parameter names the alias and its expansion") {
+    source: `Grid<T>: [[T]]
+
+total: fn(grid: Grid<Int>) -> Int { grid.len() }
+
+run: fn() { print(total([Int]{1, 2})) }
+`
+    assert_eq(alias_reports(source), "E0112: `total` wants `Grid<Int>` (which is [[Int]]) for argument 1, but this is [Int]")
+}
+
+#Test("a value returned for a generic alias result names the alias and its expansion") {
+    source: `Grid<T>: [[T]]
+
+firsts: fn() -> Grid<Int> { [Int]{1} }
+
+run: fn() { print(firsts().len()) }
+`
+    assert_eq(alias_reports(source), "E0113: This value is [Int], but `firsts` returns `Grid<Int>` (which is [[Int]])")
+}
+
+#Test("a type written without an alias keeps its words") {
+    source: `total: fn(grid: [[Int]]) -> Int { grid.len() }
+
+run: fn() { print(total([Int]{1, 2})) }
+`
+    assert_eq(alias_reports(source), "E0112: `total` wants [[Int]] for argument 1, but this is [Int]")
+}

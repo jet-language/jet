@@ -72,14 +72,8 @@ perf_samples_start: fn() {
     }
     image: alloc_check_image()
     bias: alloc_check_bias(image)
-    code: perf_samples_code(image)
-    low := I64{0}
-    high := I64{0}
-    if (code != I64{0}) {
-        // p_vaddr and p_memsz of the program header.
-        low = rt_text_word(wrapping(code + I64{16}))
-        high = wrapping(low + rt_text_word(wrapping(code + I64{40})))
-    }
+    low: perf_samples_code_edge(image, false)
+    high: perf_samples_code_edge(image, true)
     buffer: alloc_map_try(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) * I64{8}))
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
         perf_samples_bias = bias
@@ -134,26 +128,35 @@ rt_perf_samples_signal_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
-// The program header of the executable segment (PT_LOAD with PF_X) of the
-// ELF64 file `image` (alloc_check_image, a read-only mapping of the whole
-// file, its program header table inside it), or 0.
-perf_samples_code: fn(image: I64) -> I64 {
+// The first byte (`end` false) or the end (`end` true) of the executable
+// segments (PT_LOAD with PF_X) of the ELF64 file `image` (alloc_check_image,
+// a read-only mapping of the whole file, its program header table inside
+// it), as link-time addresses; 0 when it has none. A `jet run` image keeps
+// the program's code in a segment of its own after the runtime's, so the
+// code is every such segment, not the first.
+perf_samples_code_edge: fn(image: I64, end: Bool) -> I64 {
     if (image == I64{0}) { return I64{0} }
     // e_phoff; e_phentsize is bits 48..63 of the word at 48, e_phnum bits
     // 0..15 of the word at 56.
     table: rt_text_word(wrapping(image + I64{32}))
     entry: (rt_text_word(wrapping(image + I64{48})) >> I64{48}) & I64{65535}
     count: rt_text_word(wrapping(image + I64{56})) & I64{65535}
+    edge := I64{0}
     index := I64{0}
     loop index < count {
         header: wrapping(image + wrapping(table + wrapping(index * entry)))
         kind: rt_text_word(header)
         if (kind & I64{4294967295} == I64{1} && (kind >> I64{32}) & I64{1} != I64{0}) {
-            return header
+            // p_vaddr and p_memsz of the program header.
+            start: rt_text_word(wrapping(header + I64{16}))
+            if (end) {
+                last: wrapping(start + rt_text_word(wrapping(header + I64{40})))
+                if (last > edge) { edge = last }
+            } else if (edge == I64{0} || start < edge) { edge = start }
         }
         index = wrapping(index + I64{1})
     }
-    I64{0}
+    edge
 }
 
 // Whether link-time address `address` is in the image's code.

@@ -98,7 +98,7 @@ pkg_boundary_test_with_replays: fn(sample: ComparisonSample, reference: Comparis
 
 // A terminal record with no samples: the verdict engine's own record shape.
 pkg_boundary_test_terminal: fn(relation: ObservationRelation, status: ComparisonStatus, reason: String) -> ComparisonRecord Never! {
-    ComparisonRecord{schema_version: U16{1}, status: status, relation: relation, samples: [ComparisonSample]{}, discarded_cases: 0, first_difference: None, reduced_counterexample: None, contamination: None, reason: Val(reason), universal_proof: false}
+    ComparisonRecord{schema_version: TEST_COMPARISON_SCHEMA_VERSION, status: status, relation: relation, samples: [ComparisonSample]{}, discarded_cases: 0, first_difference: None, reduced_counterexample: None, contamination: None, reason: Val(reason), universal_proof: false}
 }
 
 pkg_boundary_test_compare: fn(relation: ObservationRelation, samples: [ComparisonSample]) -> ComparisonRecord Never! {
@@ -187,12 +187,12 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 #Test("boundary refuses unsupported schema and universal comparison proof without mutation") {
     contract := pkg_boundary_test_contract("py")
     record := pkg_boundary_test_comparison("42", true)
-    record.schema_version = U16{2}
+    record.schema_version = U16{3}
     error: if contract.record_comparison(record, None) == {
         .Ok(_) -> panic("schema")
         .Err(error) -> error.message
     }
-    assert_eq(error, "unsupported comparison schema version 2")
+    assert_eq(error, "unsupported comparison schema version 3")
     record.schema_version = TEST_COMPARISON_SCHEMA_VERSION
     record.universal_proof = true
     proof_error: if contract.record_comparison(record, None) == {
@@ -414,7 +414,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
     loop component in 0..<6 {
         row := receipt
         if component == {
-            0 -> row.comparison_schema_version = U16{2}
+            0 -> row.comparison_schema_version = U16{3}
             1 -> row.comparison_status = "mismatch"
             2 -> row.comparison_relation = " "
             3 -> row.compared_samples = 0

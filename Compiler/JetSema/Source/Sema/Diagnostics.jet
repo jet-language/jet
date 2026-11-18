@@ -740,8 +740,10 @@ sema_return_value_fix: fn(want: Type, got: Type) -> String Never! {
 }
 
 // E0113: a value handed back by `function` (None for the lambda a `return`
-// in its body leaves) does not match its return type `want`.
-sema_return_value_mismatch: fn(function: String?, want: Type, got: Type, span: Span) -> Diagnostic {
+// in its body leaves) does not match its return type `want`. A named
+// function's return type written as a generic alias is named as written
+// (`want_alias`, the check context's return_alias), with its expansion.
+sema_return_value_mismatch: fn(function: String?, want: Type, want_alias: String?, got: Type, span: Span) -> Diagnostic {
     // The failure solver wraps even a written infallible result in
     // `T Never!`. That erased error rail is not part of the value contract,
     // and must not hide the concrete conversion/wrapping advice for T.
@@ -749,7 +751,9 @@ sema_return_value_mismatch: fn(function: String?, want: Type, got: Type, span: S
     if sema_nested_fn_failure_mismatch(required, got, span) == .Val(nested_fn) -> return nested_fn
     want_name: type_name(required)
     name: function ?? return sema_error("E0113", span, "this value is {sema_type_show(got)}, but this lambda returns {want_name}", "this lambda's result is {want_name}, so the value it hands back must be {want_name}", sema_return_value_fix(required, got))
-    sema_error("E0113", span, "this value is {sema_type_show(got)}, but `{name}` returns {want_name}", "`{name}` declares {want_name} as its result, so the value it hands back must be {want_name}", sema_return_value_fix(required, got))
+    // The alias names the written success, so it stands for a result whose
+    // surface shows only that success (the default `Err` rail).
+    sema_error("E0113", span, "this value is {sema_type_show(got)}, but `{name}` returns {if required == .Result(ok, _) && type_name(ok) != want_name -> want_name else -> want_alias ?? want_name}", "`{name}` declares {want_name} as its result, so the value it hands back must be {want_name}", sema_return_value_fix(required, got))
 }
 
 // The leaf of a canonical Core nominal declared by `module_name`

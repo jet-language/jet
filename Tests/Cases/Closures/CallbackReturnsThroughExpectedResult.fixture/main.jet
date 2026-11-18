@@ -3,7 +3,7 @@ LoadError: struct {
     message: String,
 }
 
-fetch: fn(n: Int) -> Int LoadError! {
+query: fn(n: Int) -> Int LoadError! {
     if n < 0 -> return Err(LoadError{message: "negative"})
     Ok(n * 2)
 }
@@ -39,7 +39,7 @@ run: fn() {
     unit_case(true) ?? print("unit failed")
     matched: Loader{
         load: fn(n) {
-            if fetch(n) == {
+            if query(n) == {
                 .Ok(b) -> Ok(b + 1)
                 .Err(e) -> Err(e)
             }

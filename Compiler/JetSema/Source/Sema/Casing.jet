@@ -132,6 +132,37 @@ sema_casing_screaming: fn(name: String, span: Span, category: String, diagnostic
     }
 }
 
+// Whether `value` has a declared point's shape: a call of a function named
+// `point`, `hook_point` or `decision_point`. Its immutable binding may be
+// snake_case or ALL_CAPS here (sema_casing_point_name); whether the call is
+// a point is the check's, which finds the constructor by its role and holds
+// a binding that is not a point to ALL_CAPS (SemaComptimeItemSource.point_name).
+sema_casing_point_shaped: fn(value: Expr) -[]> Bool {
+    if value == .Call(call, _) {
+        if call.name.cut_last(".") == .Val(parts) {
+            return sema_casing_point_constructor_name(parts.after)
+        }
+        return sema_casing_point_constructor_name(call.name)
+    }
+    if value == .MethodCall(_, method, _, _, _, _, _) {
+        return sema_casing_point_constructor_name(method)
+    }
+    false
+}
+
+sema_casing_point_constructor_name: fn(name: String) -[]> Bool {
+    name == "point" || name == "hook_point" || name == "decision_point"
+}
+
+// A declared point's name: snake_case or ALL_CAPS; E0357 names the
+// snake_case spelling of one that is neither.
+sema_casing_point_name: fn(name: String, span: Span, diagnostics: &[Diagnostic]) -[]> {
+    if sema_casing_has_case(name, SemaNameCase.Screaming) {
+        return
+    }
+    sema_casing_snake(name, span, "point", diagnostics)
+}
+
 // The zero literal of a number type a file-level `name: Type` names, when the
 // declaration reads as a number written without its value (`limit: Int`): a
 // value-cased name over a number type and no type parameters.
@@ -300,7 +331,8 @@ sema_casing_item: fn(tables: ASTTables, item: Item, diagnostics: &[Diagnostic]) 
             // Owner ruling (2026-09-30): an immutable module binding is
             // ALL_CAPS; a mutable one is never ALL_CAPS. A `#ContextKey` is
             // read as `context.get(name)` beside `context.deadline`, so it is
-            // snake_case like a field (ContextKeys.jet).
+            // snake_case like a field (ContextKeys.jet). A declared point's
+            // binding may be snake_case too (sema_casing_point_shaped).
             if {
                 output_defaults -> {}
                 definition.mutable -> {
@@ -308,6 +340,9 @@ sema_casing_item: fn(tables: ASTTables, item: Item, diagnostics: &[Diagnostic]) 
                 }
                 sema_context_key_declared(definition) -> {
                     sema_casing_snake(definition.name, definition.name_span, "context key", diagnostics)
+                }
+                sema_casing_point_shaped(definition.value) -> {
+                    sema_casing_point_name(definition.name, definition.name_span, diagnostics)
                 }
                 else -> {
                     sema_casing_screaming(definition.name, definition.name_span, "constant", diagnostics)

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs";
 
-export function keep(value: number): number {
+export function hold(value: number): number {
     const increment = value + 1;
     return increment;
 }

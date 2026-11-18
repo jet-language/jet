@@ -69,6 +69,15 @@ sema_call_resolved_type: fn(ty: Type, environment: SemaScopeEnvironment, program
     }
 }
 
+// sema_type_alias_shown from the checked scope: how a diagnostic names a
+// written generic alias, or None for any other type.
+sema_call_alias_shown: fn(written: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -[]> String? {
+    if program.registration_graph == .Val(graph) {
+        return sema_type_alias_shown(graph, written, sema_scope_caller_row(environment, graph), environment.generic_params)
+    }
+    None
+}
+
 sema_call_type_assignable: fn(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool? {
     if program.registration_graph == {
         .Val(graph) -> sema_type_assignable_in_graph_at(graph, required, offered, sema_scope_caller_row(environment, graph), environment.generic_params)
@@ -704,7 +713,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
                 if sema_call_parameter_type_undeclared(required, environment, program) {
                     sema_call_argument_drop_mismatch(args[index].expr, diagnostic_start, diagnostics)
                 } else {
-                    sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, lambda_escapes, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
+                    sema_call_argument_replace_mismatch(callee, index, required, sema_call_alias_shown(required_declared, environment, program), args[index].expr, lambda_escapes, diagnostic_start, environment, program, scopes, state, tail_store, context, diagnostics)
                 }
             }
             complete = false
@@ -758,7 +767,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
         widened: if self_typed -> sema_stmt_numeric_slot_value(checked_value, required, environment, program, diagnostics) else -> Val(checked_value)
         value := widened ?? {
             if sema_integer_narrowing_fix(required, sema_call_resolved_type(checked_value.ty, environment, program)) == None {
-                sema_call_argument_replace_mismatch(callee, index, required, args[index].expr, lambda_escapes, slot_start, environment, program, scopes, state, tail_store, context, diagnostics)
+                sema_call_argument_replace_mismatch(callee, index, required, sema_call_alias_shown(required_declared, environment, program), args[index].expr, lambda_escapes, slot_start, environment, program, scopes, state, tail_store, context, diagnostics)
             }
             return None
         }
@@ -809,7 +818,7 @@ sema_call_typecheck_bound_arguments: fn(callee: String, params: [SemaCallParam],
                 }
                 if unmet -> return None
             } else {
-                diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_resolved_type(value.ty, environment, program), args[index].expr, expr_span(args[index].expr), program))
+                diagnostics.push(sema_call_argument_mismatch(callee, index, required, sema_call_alias_shown(required_declared, environment, program), sema_call_resolved_type(value.ty, environment, program), args[index].expr, expr_span(args[index].expr), program))
                 complete = false
                 next
             }
@@ -1156,8 +1165,10 @@ sema_crypto_argument_index: fn(params: [SemaCallParam], slots: [Int], parameter:
 }
 
 // (Rust `check_call_args`): an argument that does not fit its parameter is
-// E0112 about the call, after a checked typed-text rejection.
-sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, offered: Type, value: Expr, span: Span, program: SemaProgramTables) -> Diagnostic {
+// E0112 about the call, after a checked typed-text rejection. A parameter
+// written as a generic alias is named as written (`required_alias`, from
+// sema_call_alias_shown), with its expansion.
+sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, required_alias: String?, offered: Type, value: Expr, span: Span, program: SemaProgramTables) -> Diagnostic {
     // ("core.mem", "volatile_read" | "volatile_write"): the pointer argument is
     // not a typed pointer, or the written value is not the pointer's element
     // type.
@@ -1189,7 +1200,7 @@ sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, offe
     }
     leaf: sema_call_reflection_leaf_name(callee)
     fix: if (leaf == "write" || leaf == "write_line") && required == Type.String && offered == (Type.List{element: Type.IntN{signed: false, bits: 8}}) -> "`{leaf}` takes text; write bytes with `write_bytes(bytes)`" else -> sema_call_argument_fix_hint(required, offered, value)
-    sema_error("E0112", span, "`{leaf}` wants {sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", fix)
+    sema_error("E0112", span, "`{leaf}` wants {required_alias ?? sema_type_show(required)} for argument {index + 1}, but this is {sema_type_show(offered)}", "every argument must match its parameter's type", fix)
 }
 
 // A Decimal argument to a Float parameter is taught on the argument as
@@ -1238,7 +1249,7 @@ sema_call_argument_drop_mismatch: fn(value: Expr, diagnostic_start: Int, diagnos
 // report becomes the call's E0112, with the value's own type inferred without
 // the parameter as a target. A lambda value is probed under the parameter's
 // escape policy, so its capture facts match.
-sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Type, value: Expr, lambda_escapes: Bool?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
+sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Type, required_alias: String?, value: Expr, lambda_escapes: Bool?, diagnostic_start: Int, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) {
     value_span: expr_span(value)
     found := sema_value_mismatch_index(diagnostics, diagnostic_start, value_span)
     if found == None && value == .Lambda(body_lambda, _) && ast_lambda_single_expr_span(body_lambda.body) == .Val(body_span) {
@@ -1269,7 +1280,7 @@ sema_call_argument_replace_mismatch: fn(callee: String, index: Int, required: Ty
     if value == .Lambda(shown_lambda, _) && ast_lambda_single_expr_span(shown_lambda.body) == .Val(shown_body_span) {
         shown_span = Span{start: value_span.start, end: shown_body_span.end}
     }
-    diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, offered_ty, value, shown_span, program)
+    diagnostics[mismatch_index] = sema_call_argument_mismatch(callee, index, required, required_alias, offered_ty, value, shown_span, program)
 }
 
 // Whether an argument after `own` references the binding `key`: arguments
