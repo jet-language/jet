@@ -1,0 +1,63 @@
+// Structural printing: a struct with no hand-written display shows its fields
+// under `{value:Debug}`, the same bytes on every tier and with no report.
+// The other printing contracts stay distinct beside it:
+//   `{value}` runs a hand-written `Display`;
+//   `{value:Debug}` on that same type still shows its fields;
+//   a hand-written `Debug` wins over the structural form;
+//   `#!Debug` opts a type out of Debug, and it still prints through
+//   `Printable`;
+//   a `#Redact` field shows as `[redacted]` under Debug.
+Grid: struct {
+    width: Int,
+    height: Int,
+    label: String,
+    cells: [Int],
+}
+
+Shape: enum {
+    Dot,
+    Box(grid: Grid),
+}
+
+Money: struct {
+    cents: Int,
+
+    impl Display {
+        display: fn(self) -> String { "{self.cents} cents" }
+    }
+}
+
+Ticket: struct {
+    seat: Int,
+
+    impl Debug {
+        debug: fn(self) -> String { "Ticket#{self.seat}" }
+    }
+}
+
+#[!Debug, Printable]
+Token: struct {
+    kind: String,
+}
+
+Account: struct {
+    id: Int,
+    #Redact secret: String,
+}
+
+run: fn() {
+    grid: Grid{width: 3, height: 2, label: "board", cells: [1, 2, 3]}
+    print("{grid:Debug}")
+    boxed: Shape.Box{grid: grid}
+    print("{boxed:Debug}")
+    dot: Shape.Dot
+    print("{dot:Debug}")
+    price: Money{cents: 250}
+    print("{price}")
+    print("{price:Debug}")
+    ticket: Ticket{seat: 12}
+    print("{ticket:Debug}")
+    print(Token{kind: "word"})
+    account: Account{id: 7, secret: "hunter2"}
+    print("{account:Debug}")
+}
