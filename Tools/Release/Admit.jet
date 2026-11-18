@@ -37,8 +37,9 @@
 //             the jetpack engine that ships beside jet.
 //   suites    every native suite of COMMIT's Tools/CI/TestShards.jet (SUITES, the one list a
 //             full run covers). The registries suite: Tools/Agent/CompilerRegistries.jet pins
-//             COMMIT's registry manifest and runs every entry with s2, and every entry must
-//             pass, as in a full run (Tools/Agent/VerifyFull.jet). Every other suite is a test profile
+//             COMMIT's registry manifest and runs every entry with s2 in REGISTRY_SHARDS shards
+//             at once; every entry must pass or carry a `registries` disposition naming its
+//             owning card, as in a full run (Tools/Agent/VerifyFull.jet). Every other suite is a test profile
 //             (golden, ui, cases) that each side runs in one kit pool,
 //             `jet test Compiler --profile corpora`, run by s2 with `--compiler` naming s2,
 //             then the release column's jet, on COMMIT's fixtures, compared per (suite, case,
@@ -146,6 +147,10 @@ NATIVE_SUITES_SOURCE: "Tools/CI/TestShards.jet"
 NATIVE_SUITES_DECL: "SUITES: [String]{{"
 
 REGISTRY_SUITE: "registries"
+
+// The registries suite runs in this many shards at once (one registry `jet
+// test` peaks near 5G, so three fit the release slot's 16G).
+REGISTRY_SHARDS: 3
 
 ADMIT_USAGE: "usage: jet run Tools/Release/Main.jet -- admit COMMIT [--summary TEXT] [--dispositions FILE] [--min-gains N] [--shards N] [--jobs N] [--timeout SEC] [--filter SUBSTR] [--reuse ROWS] [--seeds DIR] [--work DIR] [--check-gate]\n       jet run Tools/Release/Main.jet -- rows COMMIT --source IDENTITY --compiler IDENTITY --out FILE RESULTS..."
 
@@ -837,7 +842,7 @@ preconditions: fn(options: AdmitOptions, root: String) -[Env, Exec, FS, Time.Wai
     if options.dispositions != "" {
         if files.read(options.dispositions) == {
             .Ok(text) -> {
-                parsed: parse_dispositions(text, kit_suites(native))
+                parsed: parse_dispositions(text, native)
                 errors.extend(parsed.errors.copy())
                 dispositions = parsed.rows.copy()
             }
@@ -2088,9 +2093,10 @@ judge_suites: fn(ctx: &Ctx, kit: [String], release: [SuiteRun], candidate: [Suit
 // The registries suite of COMMIT: Tools/Agent/CompilerRegistries.jet, run by
 // s2 in the dev shell from this checkout (it exports COMMIT and runs the
 // export's copy), pins the manifest of every registry under Compiler/*/Tests
-// and the kit's cases entry, then runs every entry with s2. Every entry must
-// pass (registries_verdict), as in Tools/Agent/VerifyFull.jet. A --filter run
-// narrows the kit suites and runs none of it.
+// and the kit's cases entry, then runs every entry with s2 in REGISTRY_SHARDS
+// shards at once, each in its own process and receipt. Every entry of every
+// shard must pass (registries_verdict), as in Tools/Agent/VerifyFull.jet. A
+// --filter run narrows the kit suites and runs none of it.
 registries_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     check: "suite:{REGISTRY_SUITE}"
     if ctx.options.filter != "" {
@@ -2100,7 +2106,6 @@ registries_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     }
     dir: files.join(ctx.work, "registries")
     manifest: files.join(dir, "manifest.json")
-    receipt: files.join(dir, "receipt.json")
     script: files.join(ctx.root, "Tools/Agent/CompilerRegistries.jet")
     log: files.join(ctx.work, "logs/registries.log")
     vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree)})
@@ -2110,32 +2115,68 @@ registries_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
         row(ctx, check, "FAIL", why)
         return
     }
-    ran: run_logged(in_dev_shell(ctx.candidate.jet, ctx.tree, false, [String]{ctx.candidate.jet.copy(), script, "run", "--jet", ctx.candidate.jet.copy(), "--manifest", manifest, "--receipt", receipt}), ctx.root, vars, log, 12 * 3600, true)
-    verdict: registries_verdict(read_text(receipt) ?? "", ctx.sha)
-    row(ctx, check, verdict.status, "{verdict.detail}{if ran.timed_out -> " (timed out)" else -> ""}; log {log}")
+    receipts := [String]{}
+    jobs := [Job]{}
+    loop at in 0..<REGISTRY_SHARDS {
+        shard: "{at + 1}/{REGISTRY_SHARDS}"
+        receipt: files.join(dir, "receipt.{at + 1}.json")
+        argv: in_dev_shell(ctx.candidate.jet, ctx.tree, false, [String]{ctx.candidate.jet.copy(), script, "run", "--jet", ctx.candidate.jet.copy(), "--manifest", manifest, "--receipt", receipt, "--shard", shard})
+        jobs.push(Job{argv: argv, cwd: ctx.root.copy(), vars: vars.copy(), log: files.join(ctx.work, "logs/registries.{at + 1}.log"), seconds: 12 * 3600})
+        receipts.push(receipt)
+    }
+    ran: run_batch(jobs)
+    texts: receipts.map(fn(receipt) { read_text(receipt) ?? "" })
+    verdict: registries_verdict(texts, ctx.sha, ctx.dispositions)
+    timed_out: ran.any(fn(one) { one.timed_out })
+    row(ctx, check, verdict.status, "{verdict.detail}{if timed_out -> " (timed out)" else -> ""}; logs {ctx.work}/logs/registries.*.log")
 }
 
-// The registries row of a CompilerRegistries.jet receipt `text` for COMMIT
-// `sha`: PASS only when it pins `sha` and every one of its entries passed.
-registries_verdict: fn(text: String, sha: String) -> {status: String, detail: String} Never! {
-    receipt: json.parse(text) ?? return {status: "FAIL", detail: "no registry receipt: {err}"}
-    head: text_field(receipt, "head")
-    if head != sha {
-        return {status: "FAIL", detail: "the registry receipt pins {if head == "" -> "no commit" else -> head}, not {sha}"}
+// The registries row of the CompilerRegistries.jet shard receipts `texts` for
+// COMMIT `sha`: PASS only when each pins `sha`, the shards together list every
+// entry of the manifest, and every entry passed or carries a `registries`
+// disposition (`registries<TAB>ENTRY-ID<TAB>*<TAB>#card<TAB>reason`) naming its
+// owning card, the rule every other suite's failing rows follow.
+registries_verdict: fn(texts: [String], sha: String, dispositions: [Disposition]) -> {status: String, detail: String} Never! {
+    if texts.len() == 0 -> return {status: "FAIL", detail: "no registry receipt"}
+    untracked := [String]{}
+    carded := 0
+    total := 0
+    passed := 0
+    listed := 0
+    full := -1
+    whole := true
+    loop text in texts {
+        receipt: json.parse(text) ?? return {status: "FAIL", detail: "no registry receipt: {err}"}
+        head: text_field(receipt, "head")
+        if head != sha {
+            return {status: "FAIL", detail: "the registry receipt pins {if head == "" -> "no commit" else -> head}, not {sha}"}
+        }
+        entries: array_field(receipt, "entries")
+        loop entry in entries {
+            one: text_field(entry, "status")
+            if one == "PASS" -> next
+            id: text_field(entry, "id")
+            if disposition_for(dispositions, REGISTRY_SUITE, id, "-") != None {
+                carded += 1
+            } else {
+                untracked.push("{id} {one}")
+            }
+        }
+        shard_total: int_field(receipt, "total") ?? -1
+        if entries.len() == 0 || shard_total != entries.len() -> whole = false
+        if int_field(receipt, "fullTotal") == .Val(count) -> full = count
+        total += shard_total
+        passed += int_field(receipt, "passed") ?? 0
+        listed += entries.len()
     }
-    entries: array_field(receipt, "entries")
-    failing := [String]{}
-    loop entry in entries {
-        status: text_field(entry, "status")
-        if status != "PASS" -> failing.push("{text_field(entry, "id")} {status}")
+    if full >= 0 && full != total -> whole = false
+    tracked: if carded > 0 -> ", {carded} failing with a disposition" else -> ""
+    if whole && untracked.len() == 0 {
+        return {status: "PASS", detail: if carded > 0 -> "{passed} of {total} registry entries pass{tracked}" else -> "{total} registry entries pass"}
     }
-    total: int_field(receipt, "total") ?? -1
-    passed: int_field(receipt, "passed") ?? -1
-    if text_field(receipt, "status") == "PASS" && entries.len() > 0 && total == entries.len() && passed == total && failing.len() == 0 {
-        return {status: "PASS", detail: "{total} registry entries pass"}
-    }
-    shown: if failing.len() > 6 -> "{failing[0..<6].join(" | ")} | ..." else -> failing.join(" | ")
-    {status: "FAIL", detail: "{passed} of {total} registry entries pass ({entries.len()} listed, status {text_field(receipt, "status")}){if failing.len() > 0 -> "; not passing: {shown}" else -> ""}"}
+    shown: if untracked.len() > 6 -> "{untracked[0..<6].join(" | ")} | ..." else -> untracked.join(" | ")
+    counted: if full >= 0 && full != total -> "; the shards list {total} of {full} entries" else -> ""
+    {status: "FAIL", detail: "{passed} of {total} registry entries pass ({listed} listed{tracked}){counted}{if untracked.len() > 0 -> "; failing with no disposition: {shown}" else -> ""}"}
 }
 
 // The train speed gate (#5479 c5) and the compile-throughput record (#5479
@@ -2253,10 +2294,12 @@ reused_flaky: fn(failures: [SuiteRow], rows: [SuiteRow], suite: String, disposit
 }
 
 // The dispositions that track no row, lost, carded or flaky: a typo in a
-// case ID or tier must not pass unseen.
+// case ID or tier must not pass unseen. A registries disposition is judged by
+// registries_verdict, not here.
 unused_dispositions: fn(dispositions: [Disposition], suites: [SuiteResult]) -> [String] Never! {
     unused := [String]{}
     loop entry in dispositions {
+        if entry.suite == REGISTRY_SUITE -> next
         used := false
         loop result in suites {
             loop lost in result.compared.lost {
