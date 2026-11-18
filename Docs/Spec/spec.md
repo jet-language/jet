@@ -5910,6 +5910,14 @@ With `false` the image has no `.debug_*` section; `.eh_frame` stays, and a
 crash report prints the faulting address and the return addresses of its
 frames instead of function names and lines.
 
+An image's symbol table names each Jet function by its Jet path: its module
+and its name joined by `.` (`fib_sum: fn` in `prog.jet` is `prog.fib_sum`),
+so `nm`, `perf`, `gdb` and `lldb` show Jet names, and `fib_sum` in `prog`
+stays apart from `sum` in `prog_fib`. A closure, an instance or a split part
+adds its suffix after the name (`prog.fib_sum__lambda_<hash>`). The Core
+library's exports and the runtime's keep their C names (`jet_core_fn_*`,
+`jet_rt_*`).
+
 `debug_info` also takes `split`, the value of the stock `release` profile
 (`--release` is `optimize: O2` and `debug_info: split`; a `release` profile
 in `package.jet` replaces both). Under `split`, `jet build` writes the DWARF,
