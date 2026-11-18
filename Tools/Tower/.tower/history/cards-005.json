@@ -381,6 +381,176 @@
       "completedAt": "2026-11-15T03:51:25.044Z",
       "questions": [],
       "retiredAt": "2026-11-18T04:06:57.480Z"
+    },
+    {
+      "id": "c0ue0hua",
+      "num": 6819,
+      "title": "Codec cutover: distinct types code as their base (D-CODABLE-DISTINCT1=A) and the D-CODABLE-OPTIONS1=A forms",
+      "body": "Gap card K6 from the #6792 r2 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md) and review round 1 (Docs/audits/2026-11-13-web-app-framework-shape-review.md). It fixes seed-b14 bugs found by the proposal and does not wait on the ballot.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-15 TowerKeeper-1 (plan approved by Main): retitled as the codec cutover card. c2-c7 were already met; c1 is cutover SUB 1 (473701c0ba) and stays. c1, c8, c10 and c11 restated with exact proofs; c12 unchanged."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`#Codable` derives a codec for `distinct Int` and `distinct String` fields: a distinct type codes as its base by default (D-CODABLE-DISTINCT1=A; seed-b14 gave jet.NotSerializable).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 040e5e08f6 (GoalsB-5-10). p144 batch compiler (built from dev 95dc5c6aef), 2026-11-14 23:15: jet test Compiler --profile cases --filter codable_options/distinct_types_code_as_their_base_by_default -> PASS 1.",
+          "at": "2026-11-15T04:19:53.065Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "codable_options/distinct_types_code_as_their_base_by_default"
+          }
+        },
+        {
+          "n": 2,
+          "text": "`pkg.ID.from_int(n)` works from another package (seed-b14: jet.ModuleAsValue `pkg` is a module, not a value). (#6792 r2 gap K6)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 03d5f7b309 (merged batch, GoalsB-2-6819c2-case-fix). On the gate-p66 jet: jet test Compiler --profile cases --filter lang/distinct_conversion_through_a_module_path -> PASS 1, FAIL 0.",
+          "at": "2026-11-14T14:32:02.823Z"
+        },
+        {
+          "n": 3,
+          "text": "The AliasWithoutParameters fix-it stops suggesting `Name: struct(BaseType)`, which does not parse. (#6792 r2 gap K6)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main goal sweep 2026-11-13 on the batch-15 jet (gate-p20, dev 734568e5cd): jet test Compiler --profile ui --filter type_alias_no_params gives PASS with 0 FAIL, 0 KNOWN-FAILING and 0 ERROR (Lander5 sweep, results row in $JET_SCRATCH_ROOT/lanes/Main/sweep/results.tsv).",
+          "at": "2026-11-14T00:45:20.590Z"
+        },
+        {
+          "n": 4,
+          "text": "Closure-parameter inference: `ui.style(fn(t: CrewTheme) { ... })` and `ui.drop_zone(body, label:, on_drop: fn(task: logic.Task) { ... })` infer the type parameter from the annotated closure parameter (seed-b14 gives UninferableTypeArgument, Appendix A.6 finding 3).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 97111023e1, gate-p64 jet, b53proofs 2026-11-14 (dev 99aa698189): jet test Compiler --profile cases --filter lang/generic_inferred_from_annotated_closure_param -> PASS 1/FAIL 0.",
+          "at": "2026-11-14T13:36:35.214Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "lang/generic_inferred_from_annotated_closure_param"
+          }
+        },
+        {
+          "n": 5,
+          "text": "A closure passed where the parameter is `fn() -> R E!` infers R as Unit when its last call returns nothing (A.6 finding 3).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev in batch 16 (980e02feb4, Lander5); b16proofs on the batch-16 jet (gate-p21): 3560681764 (G3Core2-6819): case closures/closure_ending_in_unit_call_infers_unit 1/0 (criterion proof path edited to closures/ earlier).",
+          "at": "2026-11-14T01:23:15.574Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "closures/closure_ending_in_unit_call_infers_unit"
+          }
+        },
+        {
+          "n": 6,
+          "text": "L0530 jet.RedundantFinalReturn does not fire on a struct`s `validate {` block, which has no return (A.6 finding 6; crewboard/Logic/model.jet).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G3Core2-6819fix landed in batch 22 (e70d4622af..7a649c3166), with G5DevX2-refused-case-reasons (light9) so the case runs. b22proofs on the batch-22 jet (gate-p28): jet test Compiler --profile cases --filter ui_lint_style/redundant_final_return_skips_validate_block 1/0.",
+          "at": "2026-11-14T02:38:01.718Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "ui_lint_style/redundant_final_return_skips_validate_block"
+          }
+        },
+        {
+          "n": 7,
+          "text": "An `impl A -> B` error conversion declared in package P applies in every package that depends on P, both for a fallible call in a function and inside a closure (seed-b14 gives MissingErrorConversion / ErrorNotPropagatable, A.6 finding 7).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev b40b2eaa54, gate-p64 jet, b53proofs 2026-11-14 (dev 99aa698189): jet test Compiler --profile cases --filter lang/error_conversion_from_dependency_propagates -> PASS 1/FAIL 0.",
+          "at": "2026-11-14T13:36:36.878Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "lang/error_conversion_from_dependency_propagates"
+          }
+        },
+        {
+          "n": 8,
+          "text": "The Data/Syntax registry rows name only the D-CODABLE-OPTIONS1=A forms. Proof: `jet test tests/guards` passes and `git grep -n -E '#(CodableAsBase|PublishedSchema|DenyUnknownFields|Discriminant|Untagged)' -- Compiler/JetFoundation/Data/Syntax` prints nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 04e397982f. git grep for the retired wire markers (#CodableAsBase #PublishedSchema #Encode #Decode #!Encode #!Decode #DenyUnknownFields #Discriminant #Untagged #Skip #Flatten, bundle_family) in Compiler/JetFoundation/Data/Syntax at 0487a6552b prints nothing; p142 batch compiler (built from dev 0487a6552b), 2026-11-14 22:40: jet test tests/guards -> 171 passed 0 failed.",
+          "at": "2026-11-15T03:40:33.941Z"
+        },
+        {
+          "n": 9,
+          "text": "syntax-decisions.md log entry",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0487a6552b (GoalsB-5-7): Docs/spec/syntax-decisions.md holds the **D-CODABLE-OPTIONS1 = A** entry (git grep -c -F gives 1 at 0487a6552b); jet test tests/guards -> 171 passed 0 failed on p141, 2026-11-14 22:36.",
+          "at": "2026-11-15T03:33:10.100Z"
+        },
+        {
+          "n": 10,
+          "text": "The editor grammars match the registry. Proof: `jet self devtools grammars --check` exits 0.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 04e397982f (GoalsB-5-6). p142 batch compiler (built from dev 0487a6552b), 2026-11-14 22:40: jet self devtools grammars --check -> rc=0.",
+          "at": "2026-11-15T03:40:32.272Z"
+        },
+        {
+          "n": 11,
+          "text": "The UI snapshots for the codec diagnostics are re-blessed. Proof: `jet test Compiler --profile ui --filter codable` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 040e5e08f6 (GoalsB-5-10). p144 batch compiler (built from dev 95dc5c6aef), 2026-11-14 23:15: jet test Compiler --profile ui --filter codable -> PASS 16 FAIL 0 (union_codable_distinct_ambiguous reports E2415 at 5:5; new union_codable_auto_enum_ambiguous); jet test Compiler/JetFoundation/Tests --filter 'owned trait' -> 3 passed.",
+          "at": "2026-11-15T04:19:54.313Z"
+        },
+        {
+          "n": 12,
+          "text": "A `#Codable(only: .Decode)` struct whose field has a declared default decodes without the field type's Encode: an absent key takes the default value directly, in both the tree decode and the streaming read, never through `default.encode()`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 658a9327de (GoalsB-5-8). p143 batch compiler (built from dev 6f82527b17), 2026-11-14 22:50: jet test Compiler --profile cases --filter codable_options/decode_only_default_field_needs_no_encode -> PASS 1; jet check Tools/perf/asm-parity/asm-parity/run.jet -> no errors (only: .Decode restored).",
+          "at": "2026-11-15T04:05:36.570Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "codable_options/decode_only_default_field_needs_no_encode"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:43:27.015Z",
+      "updated": "2026-11-15T04:20:14.138Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 12,
+      "completedAt": "2026-11-15T04:20:14.138Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T04:26:46.039Z"
     }
   ]
 }
