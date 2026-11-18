@@ -551,6 +551,1426 @@
       "completedAt": "2026-11-15T04:20:14.138Z",
       "questions": [],
       "retiredAt": "2026-11-18T04:26:46.039Z"
+    },
+    {
+      "id": "c0rkebo4",
+      "num": 6366,
+      "title": "FFI v3: build the ratified boundary design for calling and being called by almost any language",
+      "body": "Owner direction 2026-10-30: a terse but thoroughly engineered, robust proposal for a theoretically perfect FFI that beats every existing one, designed greenfield with no Jet limitations, then judged for adoption into Jet. It must follow the composition principle: a complete primitives layer that can express everything, plus high-quality wrappers for the common cases.\n\n**The proposal:** Docs/proposals/ffi-perfect-boundary-2026-10-30.md (commit e99e795e4c). Section 9 maps every idea onto Jet; three owner ballots follow from it: D-FFI-PRIMS1 (public primitives layer), D-FFI-ISOLATE1 (isolation as a placement option) and D-FFI-EXPORT2 (rich exports).\n\n## Plain summary\n\n- **The idea.** Every foreign boundary is described once, as a *boundary\n  contract*. That is a typed list of functions and types, plus the facts a C\n  header cannot say: who owns memory, how long a view lives, how errors come\n  back, which thread may call, and whether a call is async.\n- **Readers and writers.** A reader package builds the contract from whatever\n  the other side has (a C header, a Rust crate, a `.d.ts`, a WIT file, a JVM\n  class, Windows metadata, a GPU shader). A writer package turns the same\n  contract into bindings for whoever calls *us*. Both directions share one\n  model, so N languages cost N readers plus N writers, not N×N bridges.\n- **Two layers.** A small, complete, unsafe *primitives* layer can express\n  every boundary: layout, symbols, calls, memory, callbacks, errors, threads,\n  async, isolation. Pareto *wrappers* sit on top: `use \"png.h\" as png`,\n  `#Export`, and typed imports for Rust, Python and JS. Every wrapper\n  expands into primitives that you can inspect, so the expert path is a ladder,\n  not a cliff.\n- **Safe by default.** A call is safe when its facts are checked, vouched for\n  in a named `#Unsafe(\"reason\")`, or *isolated*. Isolated means the same import\n  runs in a wasm sandbox or a separate process, with no source changes.\n- **Zero cost.** A crossing whose types already match costs one direct call.\n  When the foreign source is visible, the optimizer can inline across the\n  boundary.\n- **For Jet.** Most of this is already ratified: header import, C source import,\n  binder packages, ownership sigils at the border, vouches, both embedding\n  artifacts, and the hardened profile. The new pieces are a public primitives\n  layer, isolation as a placement option, and rich exports. Each is one ballot.\n  Inline C stays, and becomes a thin wrapper over C-source import, which\n  removes the \"two ways to bring in C\" loss that D-FFI-ONE1 recorded.\n\nThis builds on, and does not replace, the boundary audit\n[`Docs/audits/ffi-owned-source-and-boundaries.md`](../audits/ffi-owned-source-and-boundaries.md)\n(#2933), which covers project arrangements and workflows. This document is the\nmechanism underneath them.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Split and closed 2026-11-15 by TowerKeeper-1. c2 met by decision (D-FFI-PRIMS1, D-FFI-PLACE1, D-FFI-EXPORT3 ratified). The design stays in Docs/proposals/ffi-perfect-boundary-2026-10-31.md. New cards: #6945 C ABI shapes, #6946 C boundary types, #6947 callbacks, #6948 foreign facts and C++, #6949 binding-cache resolver, #6950 language binders, #6951 Rust crates. Sandbox rows moved to #6930, WIT export to #6906, the PowerShell binder row to #6942. Known-failing rows that cited #6366 should cite these cards."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "G5DevX-1 diagnosis, 2026-11-12 00:2x, b10: the *_bind cases fail with E1002 jet.ReservedRootShadowed on `use x: <lang>.<lib>` (for example lua_bind_runs_embedded_vm_and_recovers_after_hostile_calls: `ops: lua.ops`). The rule is jet_driver_check_reserved_import (Loader.jet:2956), whose .Module root check against JET_DRIVER_FIRST_PARTY_RESERVED exempts only c and cpp (jet_driver_is_foreign_provider_import, Loader.jet:2269). The case needs tool:lua, so it only SKIP-HOSTed until lua reached the devshell PATH. Lifting E1002 alone turns it into E0610, because no resolver maps an active ForeignLanguage import <lang>.<lib> to the generated .jet/bindings/<lang>/<lib>.jet under the importer's root. Planned languages (swift) stay E1002 per c3 and c4. That resolver is the root fix for c3 and c27 and for the KF rows at 72, 73, 103, 104, 292-304, 324 and 325."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Main, 2026-11-11, #4260 c29 cleanup (G5DevX-dead-codes-3): diagnostic code E3014 is removed from the registry because nothing emits it, and its known-failing cases go with it. When this card builds the behavior, it registers the code again with its emitter, what/why/fix text and a UI snapshot. The behavior the deleted cases expected: tests/ui/runtime_e3014 and diagnostics_coverage/ffi_runtime_stop_keeps_one_jet_source_frame.case, with the explain_E3014 goldens: a failing foreign function renders Stop [E3014] with one Jet source frame."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c12: Examples/features/lowlevel/ffi.jet -> Examples/Interop/FFI/FFI.jet; c29: Examples/ffi/adaptations/pointer-count/after.jet -> Examples/Interop/FFI/Adaptations/PointerCount/after.jet."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`)."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "2026-11-05: E3014 (foreign panic stops the program at one Jet source frame) has no reachable path: its only snapshot (tests/ui/runtime_e3014) and c15's ffi_runtime_stop case go through a built-in extern rust call, which D-FFI-LANG1 (ratified) replaces with a Rust Language package. E3014 is built with the FFI v3 foreign-call path, not ported; until then ui --coverage shows it as a snapshot without an emitter. The ICE 'foreign import requires a checked direct C scalar signature' on extern rust is c28."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 8 criteria from archived #351, #1900, #2953, #2956, #2957, #2960, #3926: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "FFI v3 posted 2026-10-31 20:40 (Main, by FFIDesign-1): 10 new ballots replace v2. New: D-FFI-LANG1, PRIMS2, FACTS1, EXPERT1, AUDIT1, PLACE1, CONCUR1, EXPORT3, TOOLS1, COMPTIME2. v2 ballots marked supersededBy: PACK1→FACTS1, VOUCH2→EXPERT1, TRACE1→AUDIT1, ISOLATE1→PLACE1, CALLBACK3→CONCUR1, EXPORT2→EXPORT3, RUST2→TOOLS1, COMPTIME1→COMPTIME2. Design: $JET_SCRATCH_ROOT/lanes/FFIDesign/v3/ffi-v3.md + downsides-resolved.md; the 30-program gallery cards follow."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Main 2026-10-31: FFI v2 posted. The design and gallery (18 programs, simple to complex) and the 23-downside list land on dev as Docs/proposals/ffi-perfect-boundary-2026-10-31.md and ffi-perfect-boundary-downsides-2026-10-31.md (wave 11), replacing the 2026-10-30 proposal. Eight ballots are ready: D-FFI-ISOLATE1 and D-FFI-EXPORT2 (reworked) and D-FFI-VOUCH2, CALLBACK3, PACK1, RUST2, COMPTIME1, TRACE1. Authored by FFIDesign-1; fresh adversarial review by FFIReview. VOUCH2, CALLBACK3, RUST2 and COMPTIME1 amend ratified decisions or spec rules, and each says so."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "The proposal ballots are now on this card, ballot-ready: D-FFI-PRIMS1 (public building blocks in core.ffi), D-FFI-ISOLATE1 (isolate: .Wasm / .Process on the import), D-FFI-EXPORT2 (rich #Export types with per-language writer packages). Each is a short ballot; no adversarial review pass has been run yet."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5984 \"Map: FFI, SIMD, GPU and plugins\" into this card (FFI, SIMD and plugin boundary design); its 2 open item(s) are carried as \"(was #5984)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5482 \"Drop built-in Rust interop (RustBridge); users bind Rust through the C FFI\" into this card (the FFI design for calling and being called by other languages); its 4 open item(s) are carried as \"(was #5482)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6194 \"Foreign import roots: `use js.plotly as plot` is refused as reserved, and `use swift.[foundation, ui]` reports E0610 instead of E1002\" into this card (the FFI design for calling and being called by other languages); its 3 open item(s) are carried as \"(was #6194)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A proposal in Docs/proposals covers the full design (calling into and being called from C, C++, Rust, Zig, Swift, Objective-C, Java/Kotlin, C#, Python, JS/wasm, GPU kernels and OS ABIs), comparing every major existing FFI with sourced evidence, and states the primitives layer, the wrapper layer, safety (I1), ownership, errors, callbacks, threads, layout, build and binding generation.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 9e420c58ae added Docs/proposals/ffi-perfect-boundary-2026-10-31.md (v2, replacing the 2026-10-30 proposal), covering every language named, the primitives and wrapper layers, safety, ownership, errors, callbacks, threads, layout, build and binding generation. Proof: git ls-files Docs/proposals/ffi-perfect-boundary-2026-10-31.md on dev.",
+          "at": "2026-11-15T04:59:03.959Z"
+        },
+        {
+          "n": 2,
+          "text": "An adoption analysis maps each idea onto Jet today (what fits, what replaces ratified decisions such as D-FFI-ONE1, migration size), and every owner choice is a READY + PLAIN OK ballot.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "D-FFI-PRIMS1=A (ratified 2026-10-31), with D-FFI-PLACE1=A (isolation as placement) and D-FFI-EXPORT3=A (rich exports) ratified 2026-11-01: the adoption analysis in Docs/proposals/ffi-perfect-boundary-2026-10-31.md section 9 produced these ballots and the owner ratified them.",
+          "at": "2026-11-15T04:57:44.980Z",
+          "closure": "decision"
+        },
+        {
+          "n": 3,
+          "text": "(was #6194) The ported case foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved passes and its known-failing row is removed",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6949 c1: foreign roots card",
+          "at": "2026-11-15T04:58:09.111Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 4,
+          "text": "(was #6194) `use swift.[foundation, ui]` reports E1002, with a UI snapshot",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6949 c1: the swift half of the same case",
+          "at": "2026-11-15T04:58:10.103Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 6,
+          "text": "(was #5482) (was #4948) Native user-Rust FFI: cargo metadata forwards only CARGO_NET_OFFLINE (hosted forwards all ambient CARGO_*)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6951 c1: Rust FFI card",
+          "at": "2026-11-15T04:58:14.441Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 8,
+          "text": "(was #5482) (was #5488) Move core.data Parquet off the Rust bridge (arrow/parquet crates) to a Jet reader: the core.data Parquet examples and goldens on every tier with the bridge disabled.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardClose-1 verdict 2026-10-31: Core/Data/Parquet.jet:1-11 is a Jet flat-schema Parquet reader behind data.loader (Thrift footer, PLAIN/dictionary, SNAPPY); the only core.data Parquet golden, tooling/data_loader (embeds int32_with_null_pages.parquet), gives w11 gold4 \"stdout == .../expected/tooling/data_loader.out\" on o0/o1/o2 and AOT (build exit 0, run exit 0); the Rust bridge was deleted (c9129d174d)",
+          "at": "2026-10-31T19:52:12.988Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #5984) (was #5932) C FFI: callback ABI (pass a Jet function as a C function pointer)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6947 c1: passing a Jet function as a C function pointer is the same outcome",
+          "at": "2026-11-15T04:58:01.681Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 11,
+          "text": "(was #5984) (was #5943) core.plugin __authority_to_wire core-call row is missing: CoreCalls.jet self-test fails, sema boundary would panic",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 797d14d15b (2026-10-29) carries the core.plugin __authority_to_wire core-call row (now Compiler/JetFoundation/Source/Registry/CoreCallExtensions.jet:33, used at CoreCalls.jet:127); CardClose-1 verdict 2026-10-31: jet test of CoreCalls.jet printed 2 passed, 0 failed, exit 0.",
+          "at": "2026-11-15T04:59:46.889Z"
+        },
+        {
+          "n": 12,
+          "text": "lowlevel/ffi (Examples/features/lowlevel/ffi.jet) builds and passes its golden on the run and build tiers with no ICE (today: foreign import requires a checked direct C scalar signature / jet_ffi_<name>_cabi), and its known-failing row is removed.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6945 c1: C ABI card; path updated per the 2026-11-06 Examples cutover",
+          "at": "2026-11-15T04:57:46.507Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 13,
+          "text": "tests/cases/cffi/cffi_named_pure_callback_has_stable_c_symbol.case passes (a named pure Jet fn and a lambda cross to C as int32_t(*)(int32_t), also from 4 threads, printing 42 10 40), and its known-failing row is removed",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6947 c1: callbacks card",
+          "at": "2026-11-15T04:58:00.046Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 14,
+          "text": "tests/cases/cffi/generated_c_nominals_share_the_imported_signature_owner.case passes: jet check loads the .jet/bindings/c cache so p.Point and p.echo resolve through one alias, and its known-failing row is removed",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev a1357816c2: tests/cases/cffi/generated_c_nominals_share_the_imported_signature_owner.case PASS; the testkit stages the fixture's .jet/bindings/c cache; known-failing row removed.",
+          "at": "2026-11-15T04:59:05.085Z"
+        },
+        {
+          "n": 15,
+          "text": "tests/cases/cffi/inline_ffi_pin_works_inside_manifest_project.case and tests/cases/diagnostics_coverage/ffi_runtime_stop_keeps_one_jet_source_frame.case pass: extern rust builds inside a package (base64 prints aGk=) and a foreign panic stops exit 70 as Stop [E3014] --> ffi.jet:7 in run; their known-failing rows are removed",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6951 c2: Rust FFI card; its panic half is RUSTFFI c3",
+          "at": "2026-11-15T04:58:15.462Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 16,
+          "text": "(was #351) Syntax gap: audit/complete D-PLUGIN1 + D-DEP-WASM1 plugin target Proof: a syntax-registry row and a golden for the isolated package kind, spelled `target: sandbox` since D-ONCE-SANDBOX1=A retired `target: plugin` (precut audit 2026-11: unproven at 9c7ddf1359).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6930 c12: sandbox package kind belongs on #6930",
+          "at": "2026-11-15T04:58:16.864Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 17,
+          "text": "(was #1900 c1) E0956's fix text names the real limitation and a workaround that is not the failing command; snapshot updated Proof: the tests/ui snapshot of E0956 (precut audit 2026-11: unproven at 9c7ddf1359).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6949 c5: binder errors",
+          "at": "2026-11-15T04:58:12.141Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 18,
+          "text": "(was #1900 c2) E3208 carries the binder's root cause, including file-not-found; snapshot updated Proof: the tests/ui snapshots of E3208, including file-not-found (precut audit 2026-11: unproven at 9c7ddf1359).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6949 c6: binder errors",
+          "at": "2026-11-15T04:58:13.420Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 24,
+          "text": "tests/cases/cffi/cffi_card436_c_abi_shapes_round_trip.case, cffi_repr_c_enums_match_native_c_layout.case, cffi_raw_status_out_pointer_reads_only_on_success.case and cffi_sysv64_abi_executes_native_symbol.case pass: jet build marshals F32 results, #Layout(c) structs by value, #Layout(c) enums, raw pointer parameters and #ABI(sysv64) imports, and a C-import source holding a multi-byte UTF-8 character builds without E0003 'source provenance line starts'; their known-failing rows are removed",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6945 c2: C ABI card",
+          "at": "2026-11-15T04:57:47.746Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 25,
+          "text": "tests/cases/cffi/default_int_outside_i64_stops_at_c_boundary_with_e1003.case passes: an Int outside i64 passed to a C Int parameter stops exit 70 with exactly one Stop [E1003] 'Integer value is outside destination width' (today E3010 'native Int argument exceeds host range' --> <core.prelude>:0), and its known-failing row is removed",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6946 c2: C types card",
+          "at": "2026-11-15T04:57:54.446Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 26,
+          "text": "tests/cases/cffi/auto_bind_on_cache_miss.case passes: with no binding cache, jet check on a header-path use (use m: \"include/mylib.h\") runs the C binder, writes .jet/bindings/c/mylib.jet and checks with no error (today no cache is written and m.mylib_ping is E0102), and its known-failing row is removed",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/cases/cffi/auto_bind_on_cache_miss.case PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:47:58.293Z"
+        },
+        {
+          "n": 27,
+          "text": "tests/cases/cffi/cobol_cache_without_descriptor_rejects_abi_unknown.case passes: use payroll: cobol.payroll with a .jet/bindings/cobol/payroll.jet cache that has no descriptor stamp fails closed with E3208 (today E1002 'cobol is reserved'), and its known-failing row is removed",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6949 c3: foreign roots card",
+          "at": "2026-11-15T04:58:11.099Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 28,
+          "text": "tests/ui/ffi_bad_type.fixed passes: the fixed companion of tests/ui/ffi_bad_type (an extern rust call that takes String by value) builds and runs, instead of the ICE 'foreign import requires a checked direct C scalar signature', and its known-failing row is removed",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/ui/ffi_bad_type.jet PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:47:59.284Z"
+        },
+        {
+          "n": 29,
+          "text": "An `#Import module c.<lib>` row may declare a C counted-pointer parameter as a list of a fixed-width `T`: `[T]`/`View<T>` when C only reads, `&[T]` when C writes. Jet passes the element pointer and the element count with no copy. `Examples/ffi/adaptations/pointer-count/after.jet` builds and prints its golden at O0/O2, and a 64000-byte `[U8]` round-trips through a C checksum with matching output. Found by the 2026-11-05 Doom port investigation (ratified, not built; compiler 0ccdff27ea).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6946 c1: C types card",
+          "at": "2026-11-15T04:57:52.959Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 30,
+          "text": "(was #4280) {\"decisionId\": \"D-CPPINTEROP1\", \"text\": \"Complete adoption through the existing header-driven binder and ordinary Jet calls.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_cppinterop1_contract\", \"suite\": \"tests/ratified/P16.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P16/d_cppinterop1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"header-driven C++ real linked calls with supported ABI/value layouts and unsupported type refusal, including C Ptr<T> boundary\", \"captured async callback registration keeps capture alive; borrowed event nonblocking stop from itself; in-flight drain/native-stop acknowledgment precedes release; later invocation rejected\", \"every ownership/lifetime/effect/failure fact names basis and artifact coverage; wrong target/digest/ABI or unavailable evidence refuses admission\"]}} (was #4284 c34)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6948 c4: foreign facts card",
+          "at": "2026-11-15T04:58:08.057Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 31,
+          "text": "(was #4280) {\"decisionId\": \"D-FFI-CALLBACK2\", \"text\": \"Generate an owning registration and a borrowed event for each invocation. The event can request stop without waiting on itself.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_ffi_callback2_contract\", \"suite\": \"tests/ratified/P16.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P16/d_ffi_callback2.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"header-driven C++ real linked calls with supported ABI/value layouts and unsupported type refusal, including C Ptr<T> boundary\", \"captured async callback registration keeps capture alive; borrowed event nonblocking stop from itself; in-flight drain/native-stop acknowledgment precedes release; later invocation rejected\", \"every ownership/lifetime/effect/failure fact names basis and artifact coverage; wrong target/digest/ABI or unavailable evidence refuses admission\"]}} (was #4284 c35)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6947 c2: callbacks card",
+          "at": "2026-11-15T04:58:03.343Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 32,
+          "text": "(was #4280) {\"decisionId\": \"D-FFI-CONTRACT1\", \"text\": \"Extend the existing Jet descriptor. Each ownership, lifetime, effect, and failure fact carries its basis and artifact coverage.\", \"proof\": {\"kind\": \"required Jet production integration #Test and reviewed golden/receipt\", \"testName\": \"d_ffi_contract1_contract\", \"suite\": \"tests/ratified/P16.jet (proposed Jet-side suite, not an existing/passing fixture)\", \"golden\": \"tests/ratified/expected/P16/d_ffi_contract1.out (proposed; external-state or measurement cases also attach source-bound receipt)\", \"requiredCases\": [\"header-driven C++ real linked calls with supported ABI/value layouts and unsupported type refusal, including C Ptr<T> boundary\", \"captured async callback registration keeps capture alive; borrowed event nonblocking stop from itself; in-flight drain/native-stop acknowledgment precedes release; later invocation rejected\", \"every ownership/lifetime/effect/failure fact names basis and artifact coverage; wrong target/digest/ABI or unavailable evidence refuses admission\"]}} (was #4284 c36)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6948 c1: foreign facts card",
+          "at": "2026-11-15T04:58:04.618Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 34,
+          "text": "(was #4280) [#4344] The C binder generates user-namespace names (no reserved __bindgen__, no E0067). Opaque-handle headers bind and check. (was #4284 c38)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6945 c5: C ABI card",
+          "at": "2026-11-15T04:57:49.013Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 35,
+          "text": "(was #4280) [#4467] #Import(c) of an infallible fixed-scalar function emits a plain scalar return (no Result with an undefined Never). (was #4284 c39)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6945 c6: C ABI card",
+          "at": "2026-11-15T04:57:50.257Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 36,
+          "text": "(was #4280) [#4248] Each extern form has a probe recording which Jet memory foreign code can reach when it writes out of bounds. The work ends with measured no-surface fixes or a short ballot with measured options. (was #4284 c40)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6948 c3: foreign facts card",
+          "at": "2026-11-15T04:58:06.953Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 37,
+          "text": "D-WIT-EXPORT2=A: Wasm component export against a pinned WIT world, with type pairing and canonical-ABI diagnostics. Proof: `jet test Compiler --profile cases --filter wit_export` passes, with a UI snapshot for each canonical-ABI diagnostic.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6906 c5: component exports belong with #6906",
+          "at": "2026-11-15T04:58:20.357Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 38,
+          "text": "Foreign effects are derived by the compiler, never declared by hand (D-FFI-FACTS1=A): for a locked foreign artifact, the compiler reads its imported symbols and internal call graph (from machine code, or from source when Jet builds it), maps each libc and system-call entry to a Jet effect through one table, and propagates through the foreign call graph with the same solver as Jet code. Unknown reach (raw system calls, callbacks into unknown code, dlopen, JIT) stays every effect. Facts are bound to the artifact hash. Proof: cases where libc abs() is admitted under !Net; a C library calling connect is refused under !Net with the chain into the library named; a library with a raw syscall instruction stays every effect; changing the artifact re-derives its facts.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6948 c2: foreign facts card",
+          "at": "2026-11-15T04:58:05.847Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 39,
+          "text": "`ffi.Bool<U32>` in core.ffi holds a C API's sized true-or-false field (VkBool32, Win32 BOOL) with exact conversions to and from Bool (D-PRIM-BOOLSIZE1=A); misuse is a registered error. Proof: `jet test Compiler --profile golden --filter FFI/SizedBool` on o0, o1 and o2 and `jet test Compiler --profile ui --filter ffi_sized_bool_`.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6946 c3: C types card",
+          "at": "2026-11-15T04:57:55.948Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 40,
+          "text": "`ffi.USize` and `ffi.ISize` in core.ffi are sized to the target, so a C binding is right on 32-bit and 64-bit targets (D-PRIM-USIZE1=A); a lossy conversion is a registered error. Reconcile with #4524 c4 (core.mem.CSize, D-USIZE-TARGET1) first. Proof: `jet test Compiler --profile golden --filter FFI/PointerSizedInts` on o0, o1 and o2 and `jet test Compiler --profile ui --filter ffi_usize_`.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6946 c4: C types card",
+          "at": "2026-11-15T04:57:57.286Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 41,
+          "text": "C strings: once an owner ballot decides them, the chosen type has a registry row, an example with golden output on every tier and a misuse UI snapshot, or the spec lists the refusal with its reason and the Jet mechanism that covers the use. Proof: `jet test Compiler --profile golden --filter FFI/CStrings`, or the spec row and `jet test tests/guards --filter core_declarations`.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6946 c5: C types card",
+          "at": "2026-11-15T04:57:58.443Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 42,
+          "text": "A `targets: [sandbox]` manifest entry builds a wasm component, or the manifest refuses it with a registered error. Today Jetpack's manifest model accepts it (Jetpack/PackageModel/Source/Manifest/Blocks/Targets.jet:236 on dev 72a8142651) and the compiler has no sandbox build target.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6930 c13: sandbox package kind belongs on #6930",
+          "at": "2026-11-15T04:58:18.153Z",
+          "closure": "obsolete",
+          "proof": {
+            "profile": "cases",
+            "filter": "manifest_target_sandbox"
+          }
+        },
+        {
+          "n": 43,
+          "text": "Examples/Modules/Packages/SandboxMathKit builds mathkit.wasm from SandboxSource during its own build instead of loading a committed binary, so no example ships a prebuilt guest. Proof: `git ls-files '*.wasm' -- Examples` prints nothing and `jet test Compiler --profile golden --filter Modules/Packages/SandboxMathKit` passes on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6930 c14: sandbox package kind belongs on #6930",
+          "at": "2026-11-15T04:58:19.264Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 44,
+          "text": "The sqlite3 C-module fixture imports through `use c.sqlite3` and its calls dispatch to the C library on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6945 c7: C ABI card",
+          "at": "2026-11-15T04:57:51.592Z",
+          "closure": "obsolete",
+          "proof": {
+            "profile": "cases",
+            "filter": "cffi/sqlite3_import_dispatch"
+          }
+        }
+      ],
+      "refs": [
+        "Docs/proposals/ffi-perfect-boundary-2026-10-30.md"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-30T19:01:48.265Z",
+      "updated": "2026-11-15T04:59:48.768Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 44,
+      "completedAt": "2026-11-15T04:59:48.768Z",
+      "questions": [
+        {
+          "id": "q3wcxum8",
+          "cardId": "c0rkebo4",
+          "decisionId": "D-FFI-PLACE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "this is confusing and unclear to me. what is this, why are we not using plain english, and where does this even go? doesnt seem super cohesive or idiomatic or elegant",
+          "status": "answered",
+          "answer": "Agreed; rewriting in plain English. It's about where a foreign library runs: inside your program (fastest), in a sandbox, or in a separate process (safest), with a good default so most people never write it. The ballot will show the exact line in your root package.jet, in normal package.jet field names, without jargon.",
+          "created": "2026-11-01T01:00:59.544Z",
+          "answeredAt": "2026-11-01",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q4pnvqyq",
+          "cardId": "c0rkebo4",
+          "decisionId": "D-FFI-EXPERT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "but experts need to be able to easily see and audit all the sites where something is unsafe. could we use some kind of glyph or marker for this so we dont have the unsafe boilerplate?",
+          "status": "answered",
+          "answer": "Yes. Reworking so each unsafe site gets a short, visible, greppable marker instead of the #Unsafe(\"reason\") { … } boilerplate. jet audit lists every marked site with file:line. The options compare 2-3 concrete glyphs, plus how the reason is kept without boilerplate. A new glyph needs this ballot's ratification.",
+          "created": "2026-11-01T01:02:10.973Z",
+          "answeredAt": "2026-11-01",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-18T05:20:59.701Z"
+    },
+    {
+      "id": "c00tcdfc",
+      "num": 6632,
+      "title": "Jetpack package-manager behaviors: environments, store, providers, build graph, plugins and tools (moved from #3590)",
+      "body": "Jetpack as a package manager: the product behaviors the Rust engine had or its cards promised, beyond the port itself. Moved from #3590 on 2026-11-06 at the owner's direction, because they are package-manager work (G7), not Rust removal (G2). Each criterion keeps its #3590 text and names its #3590 number. #3590 keeps the port-parity criteria: every Rust item has a Jet home, check.sh passes per area, and the carried-over port claims hold.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Split and closed 2026-11-15 by TowerKeeper-1: all 88 open criteria moved. New cards: #6933 store, #6934 fn build graph, #6935 build plugins, #6936 legacy build imports, #6937 environment lifecycle, #6938 shell verbs and dispatch, #6939 trust and secrets, #6940 registry, #6941 user tool updates, #6942 PowerShell adapter, #6943 CLI battery. Moved to existing cards: dependency builds to #6621, remote scheduling to #6026, public-API tests to #6860, provider leaves to #6856, manifest rows to #4275, the derivation relation to #3186, Nix evaluator parity to #3402. c51 is obsolete (owner ruling 2026-08-25: no shim)."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Not concrete yet (rewrite each before it is built, or remove it): c4, c8 and c9 are truncated 2025 titles; c13, c16, c17, c19, c23 and c39-c45 are generic 'Every behavior named by ...' rows. c83-c86 need ProcessSpec.keep_open (#3594 c8; a7795b522f is phase 1). c1 moved to #5949 (ScriptBench, G11)."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "MechC landed 19d19cb61f toward c73 (was #6096 c32): two model-level BuildRecipe staged-plan tests in Jetpack/PackageModel/Tests/BuildRecipe.jet (staged validation rejects undeclared tool/effect/platform and escaping output; staged lock and identity ignore authority declaration order). The production-path half (staged_plan_action_production_path_is_deterministic_and_complete) is not ported. Awaits the batch proof."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Unlanded (PortsLead, 2026-11-06): RecipePlan.jet (~29 KB, fully written, not yet in Jetpack/Bootstrap/sources.list) is parked at $JET_SCRATCH_ROOT/lanes/PortsLead/parked/; it is the recipe staged-plan admission for c84-c91/c112-c118-era rows (D-BUILD-CORE1 seam)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 2,
+          "text": "(moved from #3590 c32) (was #4040) (was #4034) [#3578] A toolchain closure over 1 GiB exports and imports into an empty Hangar without network or host Nix. Shared objects are stored once. Peak memory and disk are bounded. Real binaries execute after replay.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c5: store card",
+          "at": "2026-11-15T04:52:50.453Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 3,
+          "text": "(moved from #3590 c34) (was #4040) (was #4034) [#3634] The trust gate, Jet pins and repo secrets are integrated against the vault owner (#3667).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6939 c1: vault",
+          "at": "2026-11-15T04:53:30.185Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 11,
+          "text": "(moved from #3590 c73) (was #420 c1) Every production producer registers canonical object descriptors, named outputs, references, action/output relations, and package records through one crash-recoverable transaction; legacy migration is idempotent [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c1: store card",
+          "at": "2026-11-15T04:52:51.382Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 12,
+          "text": "(moved from #3590 c74) (was #420 c2) Direct and transitive references, referrers, closures, and action/output queries are deterministic, cycle-safe, and reject or quarantine inconsistent graph state [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c2: store card",
+          "at": "2026-11-15T04:52:52.336Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 14,
+          "text": "(moved from #3590 c76) (was #427 c2, #933 c2) The action graph captures every declared input, output, tool, effect, and platform fact. Repeated builds produce the same result identity [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6934 c4: same action identity outcome",
+          "at": "2026-11-15T04:52:58.232Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 15,
+          "text": "(moved from #3590 c77) (was #427 c3, #933 c3) Reject undeclared access, cycles, invalid outputs, and partial stage results. Cancellation or failure leaves no valid-looking artifact [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6934 c5: same fail-before-publication outcome",
+          "at": "2026-11-15T04:53:00.053Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 19,
+          "text": "(moved from #3590 c84) (was #692 c1) Every behavior named by “fn build graph: target dependencies, kinds, and toolchains”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6934 c3: generic 'every behavior named by' row restated from #692's title",
+          "at": "2026-11-15T04:52:56.434Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 20,
+          "text": "(moved from #3590 c85) (was #692 c2, #1041 c2, #1042 c2) Action and probe identity includes toolchain, inputs, environment, authority, resources, outputs, and provenance; plan, cache, execution, and receipt agree [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6934 c4: build graph card",
+          "at": "2026-11-15T04:52:57.316Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 21,
+          "text": "(moved from #3590 c86) (was #692 c3, #1041 c3, #1042 c3) Missing locks, ambient-tool access, undeclared inputs, policy denial, probe failure, cycles, cancellation, and partial outputs fail before publication and cannot be waived by a boolean label [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6934 c5: build graph card",
+          "at": "2026-11-15T04:52:59.162Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 22,
+          "text": "(moved from #3590 c87) (was #692 c4, #1041 c4, #1042 c4) Focused driver tests use conflicting host and declared toolchains, locked and ambient probes, denied grants, cancellation, and cache invalidation to prove the production executor honors the graph [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6934 c6: the driver test scenarios restated as outcomes",
+          "at": "2026-11-15T04:53:00.941Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 23,
+          "text": "(moved from #3590 c88) (was #695 c1) Every behavior named by “Build plugins: packaged WASM loading and version negotiation”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6935 c1: generic row restated from #695's title",
+          "at": "2026-11-15T04:53:04.680Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 24,
+          "text": "(moved from #3590 c89) (was #695 c2, #1048 c2) Package identity, component bytes, interface version, granted capabilities, resource limits, guest output, graph mutation, provenance, and receipt agree [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6935 c2: build plugins",
+          "at": "2026-11-15T04:53:05.660Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 25,
+          "text": "(moved from #3590 c90) (was #695 c3, #1048 c3) Tamper, incompatible version, denied capability, trap, timeout, fuel or memory exhaustion, malformed guest output, and partial mutation fail closed and roll back fully [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6935 c3: build plugins",
+          "at": "2026-11-15T04:53:06.665Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 26,
+          "text": "(moved from #3590 c91) (was #695 c4, #1048 c4) Focused tests instantiate benign and hostile packaged components through the driver and prove guest output, isolation limits, rollback, and provenance; header validation alone does not count [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6935 c4: build plugins",
+          "at": "2026-11-15T04:53:09.103Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 27,
+          "text": "(moved from #3590 c96) (was #784 c1) One typed lifecycle planner supports dotenv, unset, on_enter, checks, reload, and the existing D-ECO7 hook with simple defaults and expert policy [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6937 c1: env lifecycle",
+          "at": "2026-11-15T04:53:13.929Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 28,
+          "text": "(moved from #3590 c97) (was #784 c2) First use prompts for trust. Grants bind role modules and plan hashes. A denied or unseen hook is skipped, and the shell still opens [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6937 c2: env lifecycle",
+          "at": "2026-11-15T04:53:14.906Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 29,
+          "text": "(moved from #3590 c98) (was #784 c3) Background reload is on by default, coalesces changes, rejects cycles, and applies a checked plan at the next prompt [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6937 c3: env lifecycle",
+          "at": "2026-11-15T04:53:15.880Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 30,
+          "text": "(moved from #3590 c99) (was #784 c4) Dotenv allowlists, secret redaction, task effects, plan order, failure policy, rollback, and retained-state facts have focused proof [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6937 c4: env lifecycle",
+          "at": "2026-11-15T04:53:16.835Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 31,
+          "text": "(moved from #3590 c100) (was #784 c5) jet env test starts from a clean shell. Dossier JSON, diagnostics, docs, examples, goldens, and platform tests match the ratified lifecycle [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6937 c5: env lifecycle",
+          "at": "2026-11-15T04:53:17.777Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 32,
+          "text": "(moved from #3590 c101) (was #790 c2, #793 c2, #1069 c2, #1072 c2, #1093 c2, #1103 c2, #1070 c2, #1073 c2, #1094 c2, #1071 c2, #1104 c2) Composition, profiles, follows, lifecycle, locks, and active-facet disclosure resolve to one deterministic environment graph [precut audit: the proof is Jetpack behaviour; the jetpack bootstrap fails on 9c7ddf1359 (the Jetpack compiler slice drifted from the compiler packages), so no Jetpack test ran]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6937 c6: env graph",
+          "at": "2026-11-15T04:53:18.795Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 33,
+          "text": "(moved from #3590 c102) (was #790 c3, #793 c3, #1069 c3, #1072 c3, #1093 c3, #1103 c3, #1070 c3, #1073 c3, #1094 c3, #1071 c3, #1104 c3) Cycles, stale grants, conflicting profiles, unsafe paths, denied hooks, and failed reloads preserve the previous usable environment [precut audit: the proof is Jetpack behaviour; the jetpack bootstrap fails on 9c7ddf1359 (the Jetpack compiler slice drifted from the compiler packages), so no Jetpack test ran]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6937 c7: env graph",
+          "at": "2026-11-15T04:53:19.727Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 34,
+          "text": "(moved from #3590 c105) (was #886 c2) Pinned differential fixtures match the required Nix behavior, including values, errors, locks, and output identities [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3402 c13: Nix evaluator parity belongs with the Nixpkgs translation on #3402",
+          "at": "2026-11-15T04:54:11.883Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 35,
+          "text": "(moved from #3590 c106) (was #886 c3) Unsupported or over-budget input fails honestly. The product proof runs with Nix absent and PATH stripped, with no hidden shell-out [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3402 c14: Nix evaluator limits belong with #3402",
+          "at": "2026-11-15T04:54:12.844Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 36,
+          "text": "(moved from #3590 c107) (was #928 c3) Concurrent publish, duplicate version, interrupted upload, stale index, bad credential, and corrupt artifact fail atomically and redact secrets [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6940 c2: registry",
+          "at": "2026-11-15T04:53:36.011Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 37,
+          "text": "(moved from #3590 c109) (was #986 c2) Foreign values, errors, shapes, widths, calling conventions, and imported source retain their declared meaning through the real adapter or importer [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6942 c1: PowerShell adapter (#986)",
+          "at": "2026-11-15T04:53:54.999Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 38,
+          "text": "(moved from #3590 c110) (was #986 c3) Unsupported constructs, toolchain failure, ABI mismatch, and non-equivalent imports produce precise diagnostics and TODO provenance rather than guessed translations [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6942 c2: PowerShell adapter (#986)",
+          "at": "2026-11-15T04:53:56.125Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 39,
+          "text": "(moved from #3590 c112) (was #1041 c1) Every behavior named by “fn build graph: action policy, helpers, signing, and resource pools”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6934 c7: generic row restated from #1041's title",
+          "at": "2026-11-15T04:53:01.832Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 40,
+          "text": "(moved from #3590 c113) (was #1042 c1) Every behavior named by “fn build graph: typed probes and end-to-end driver execution”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6934 c8: generic row restated from #1042's title",
+          "at": "2026-11-15T04:53:02.740Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 41,
+          "text": "(moved from #3590 c114) (was #1044 c1) Every behavior named by “Legacy build wrappers: CMake and Make”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6936 c1: generic row restated from #1044 and #694",
+          "at": "2026-11-15T04:53:10.067Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 42,
+          "text": "(moved from #3590 c115) (was #1045 c1) Every behavior named by “Legacy build wrappers: Gradle”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6936 c2: generic row restated from #1045 and #694",
+          "at": "2026-11-15T04:53:11.004Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 43,
+          "text": "(moved from #3590 c116) (was #1046 c1) Every behavior named by “Legacy build wrappers: npm”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6936 c3: generic row restated from #1046 and #694",
+          "at": "2026-11-15T04:53:11.979Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 44,
+          "text": "(moved from #3590 c117) (was #1047 c1) Every behavior named by “Legacy build wrappers: Cargo”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6936 c4: generic row restated from #1047 and #694",
+          "at": "2026-11-15T04:53:12.976Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 45,
+          "text": "(moved from #3590 c118) (was #1048 c1) Every behavior named by “Build plugins: capability isolation, rollback, and hostile failures”, its body, and ratified decisions works through the production path; no demo, label, stub, or sibling claim substitutes [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6935 c3: generic row for #1048 (isolation, rollback, hostile failures) is BUILDPLUG c3 and c4",
+          "at": "2026-11-15T04:53:07.931Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 46,
+          "text": "(moved from #3590 c120) (was #1083 c2, #1085 c2, #1090 c2) Service, task, file, readiness, dependency, and discovery facts drive one observable lifecycle with bounded behavior [precut audit: the proof is Jetpack behaviour; the jetpack bootstrap fails on 9c7ddf1359 (the Jetpack compiler slice drifted from the compiler packages), so no Jetpack test ran]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6937 c8: services lifecycle",
+          "at": "2026-11-15T04:53:20.696Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 47,
+          "text": "(moved from #3590 c121) (was #1779 c4) Composed secrets: parts (for example host, user, password) plus one declared template yield an assembled value readable through the same Secret-effect path; rotating one part changes the composed value. The spelling is D-JPK-SECRETCOMPOSE1=D (Docs/spec/spec.md:2717) [precut audit: not proven on 9c7ddf1359: C:secrets/secrets_unset_reencrypts_store_and_removes_value not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack compiler slice drifted from the compiler packages); C:secrets/secrets_keygen_set_get_roundtrip_no_plaintext_on_disk not run: it needs jetpack,…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6939 c2: vault",
+          "at": "2026-11-15T04:53:31.113Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 48,
+          "text": "(moved from #3590 c122) (was #1779 c5) Per-secret metadata (required, description, per-profile default, generated value): built as D-JPK-SECRETMETA1=B rules (Docs/spec/spec.md:2717); required-but-missing fails activation with a registered diagnostic [precut audit: not proven on 9c7ddf1359: C:secrets/secrets_unset_reencrypts_store_and_removes_value not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack compiler slice drifted from the compiler packages); C:secrets/secrets_keygen_set_get_roundtrip_no_plaintext_on_disk not run: it needs jetpack,…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6939 c3: vault",
+          "at": "2026-11-15T04:53:32.245Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 49,
+          "text": "(moved from #3590 c123) (was #1779 c7) New secrets verbs are registered in the syntax registry (Compiler/JetFoundation/Data/Syntax), and Docs/research/2026-07-24-devenv-parity.md section I rows are updated with the 0.18 delta.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6939 c4: vault",
+          "at": "2026-11-15T04:53:33.174Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 50,
+          "text": "(moved from #3590 c126) (was #2188 c4) all 185 measured occurrences of the deleted spellings across docs tests examples and skills are migrated or deleted, with a fresh rg proving zero remain outside historical decision text [precut audit: failing on 9c7ddf1359: C:fmt_project/top_level_jet_fmt_delegates_non_jet_file_to_realized_formatter ERROR testkit task stopped before reporting this entry]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6938 c7: retired jetpack verbs (#2188 boundary law)",
+          "at": "2026-11-15T04:53:28.216Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 51,
+          "text": "(moved from #3590 c132) (was #2193 c4) on a normal invocation the shim performs no closure resolution [precut audit: not proven on 9c7ddf1359: C:jetpack_tool/declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_generation not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack compiler slice drifted from the compiler packages); C:jetpack_tool/tool_profile_reports_drift_without_prompt_and_yes_moves_pin not run: it needs jetpack,…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Owner ruling 2026-08-25 (#2193 body): there is no shim; #2193 c4, the source of this row, was withdrawn by that ruling, so 'the shim performs no closure resolution' describes nothing. The live drift-cost outcome is TOOLUPD c13.",
+          "at": "2026-11-15T04:53:54.048Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 52,
+          "text": "(moved from #3590 c133) (was #2193 c11) Drift detection adds no closure resolution, no network call, and no full-binary hash to a normal jetpack command, measured against the pre-change command time [precut audit: not proven on 9c7ddf1359: C:jetpack_tool/declarative_user_tools_realize_outside_repo_and_rollback_runs_previous_generation not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack compiler slice drifted from the compiler packages); C:jetpack_tool/tool_profile_reports_drift_without_prompt_and_yes_moves_pin not run: it needs jetpack,…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c13: drift detection",
+          "at": "2026-11-15T04:53:53.131Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 53,
+          "text": "(moved from #3590 c150) (was #2232 c1) jetpack env --prep -y completes exit 0 on this repo env.dev including lld@default with zero admission errors [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6938 c5: repo env prep",
+          "at": "2026-11-15T04:53:25.396Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 54,
+          "text": "(moved from #3590 c151) (was #2232 c2) The E1355/E1340 dead-end chain described on the card is re-run and no longer reproduces [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6938 c5: the E1355/E1340 chain is the same repo env prep outcome",
+          "at": "2026-11-15T04:53:26.304Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 55,
+          "text": "(moved from #3590 c152) (was #2330 c1) Three consecutive unchanged `jetpack env < /dev/null` runs report a 100 percent cache hit and reach the shell in less than 1.0 second each on this workstation [precut audit: not proven on 9c7ddf1359: C:jetpack_env_use_offline/fully_materialized_env_and_use_enter_without_network_or_prompt not run: it needs jetpack, and the base's jetpack bootstrap failed (Jetpack compiler slice drifted from the compiler packages)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6938 c6: warm entry",
+          "at": "2026-11-15T04:53:27.273Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 59,
+          "text": "(moved from #3590 c176) (was #2945 c1) One interned checked derivation relation, authoritative producers, lossless persistence and CLI/LSP consumers are implemented and proven by a test.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3186 c15: one checked fact owner for developer tools (#3186, G5)",
+          "at": "2026-11-15T04:54:10.949Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 65,
+          "text": "(moved from #3590 c182) (was #3508 c5) Explicit AOT includes run only under the dependency package authority and record producer/input/output identity in the Jetpack lock [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6621 c7: dependency builds belong with fn build per-package permissions on #6621",
+          "at": "2026-11-15T04:53:57.079Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 66,
+          "text": "(moved from #3590 c183) (was #3508 c6) Import-only and ordinary helper use do not implicitly execute dependency build entries or hooks [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6621 c8: dependency builds",
+          "at": "2026-11-15T04:53:58.101Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 67,
+          "text": "(moved from #3590 c184) (was #3508 c7) Plan fragments and generated modules merge transactionally; collisions and denied effects leave no partial publication [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6621 c9: dependency builds",
+          "at": "2026-11-15T04:53:59.036Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 68,
+          "text": "(moved from #3590 c185) (was #3508 c8) Equivalent shared-prep generation is possible without misusing fn build on non-AOT tiers [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6621 c10: dependency builds",
+          "at": "2026-11-15T04:53:59.965Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 69,
+          "text": "(moved from #3590 c186) (was #3508 c9) An Examples/ golden (bindings package via b.include) passes on the self-hosted compiler path [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6621 c11: dependency builds",
+          "at": "2026-11-15T04:54:00.868Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 70,
+          "text": "(moved from #6096 c13) pkg-snapshot-metadata: 5 deleted Rust tests have a Jet test covering the same behavior (tests/pkg.rs::v2_snapshot_upgrade_matches_duplicate_inline_leaves, tests/pkg.rs::public_effect_metadata_preserves_symbolic_rows, tests/pkg.rs::public_trait_effect_contract_drift_is_breaking, tests/pkg.rs::physical_unit_trait_methods_use_canonical_dimensions, …)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6860 c6: same deleted-test group (its physical-unit test is PUBUNITS)",
+          "at": "2026-11-15T04:54:05.326Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 71,
+          "text": "(moved from #6096 c23) jetpack-engine-remote-scheduler: 3 deleted Rust tests have a Jet test covering the same behavior (tests/jetpack_engine.rs::remote_scheduler_selects_capabilities_then_fails_over_in_order, tests/jetpack_engine.rs::remote_ineligible_builder_honors_local_fallback, tests/jetpack_engine.rs::remote_execution_identity_binds_the_complete_action_request)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6026 c13: remote scheduling belongs with remote builds on #6026",
+          "at": "2026-11-15T04:54:01.755Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 72,
+          "text": "(moved from #6096 c24) pkg-api-freeze: 3 deleted Rust tests have a Jet test covering the same behavior (tests/pkg.rs::physical_unit_api_freeze_and_semver_share_one_canonical_signature, tests/pkg.rs::soft_public_names_are_not_semver_promises, tests/pkg.rs::inferred_public_effect_drift_is_breaking)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6860 c6: soft-name and effect-drift tests; its physical-unit test is PUBUNITS",
+          "at": "2026-11-15T04:54:06.222Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 73,
+          "text": "(moved from #6096 c32) jetpack-engine-staged-plan: 2 deleted Rust tests have a Jet test covering the same behavior (tests/jetpack_engine.rs::staged_plan_action_production_path_is_deterministic_and_complete, tests/jetpack_engine.rs::staged_plan_action_rejects_sandbox_and_graph_failures_without_artifact)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6934 c9: staged plan",
+          "at": "2026-11-15T04:53:03.664Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 74,
+          "text": "(moved from #6096 c62) pkg-cli-typed-defaults: 1 deleted Rust tests have a Jet test covering the same behavior (tests/pkg.rs::cli_typed_default_is_not_frozen_as_positional)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6860 c5: cli_typed_default_is_not_frozen_as_positional is the PUBAPI example",
+          "at": "2026-11-15T04:54:03.539Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 75,
+          "text": "(moved from #6418 c7) jet publish and registry keygen are built; every cases row that reported E2104 for it passes on the default tier.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6940 c1: registry; the command is `jet registry publish` (CLICommands.jet:148-154)",
+          "at": "2026-11-15T04:53:35.079Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 76,
+          "text": "(moved from #6418 c17) CLI dispatch: a retired route (serve, bench, store, gc, lock) gets the generic unknown-command error that lists the legal commands, with no teaching text (D-TEACH-RECONCILE1=A), `jet hangar` and the other engine verbs dispatch to jetpack (D-JPK-DISPATCH1), and external `jet-<name>` subcommands are discovered; their cases rows pass.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6938 c8: CLI dispatch; restated without `jet hangar` per the owner boundary law of 2026-08-25 (#2188 c3), newer than D-JPK-DISPATCH1=B (2026-07-02)",
+          "at": "2026-11-15T04:53:29.167Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 77,
+          "text": "(moved from #6418 c94) (was #1610 c2) The two physical-unit signature tests pass: physical_unit_api_freeze_and_semver_share_one_canonical_signature, physical_unit_trait_methods_use_canonical_dimensions [precut audit: failing on 9c7ddf1359: C:pkg/cli_publish_no_sign_leaves_signature_empty KNOWN-FAILING #6418 `jet publish` is not built yet (E2104): exit 2; expected 0 (known-failing #6418: `jet publish` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6860 c7: physical-unit API tests",
+          "at": "2026-11-15T04:54:07.137Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 78,
+          "text": "(moved from #6418 c118) (was #2797 c1) The CLI battery and its typed executable consumer build, install and pass their goldens.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6943 c1: CLI battery card",
+          "at": "2026-11-15T04:54:13.762Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 79,
+          "text": "(moved from #6418 c119) (was #2797 c2) All named library consumer paths use canonical APIs, including closed stdin and ignore-aware walk.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6943 c2: CLI battery card",
+          "at": "2026-11-15T04:54:14.705Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 80,
+          "text": "(moved from #6418 c135) jet fetch and jet fetch --locked are built; tests/cases/pkg/foreign_package_provider_fetch_lock_and_locked_round_trip.case passes (stale or missing provider artifact fails E1256 and writes no lock; a good one fetches, projects .jet/bindings/js/plotly.jet, compiles, and verifies byte-identical in locked mode), and its known-failing row is removed",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6940 c4: fetch",
+          "at": "2026-11-15T04:53:37.872Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 81,
+          "text": "(moved from #6418 c137) jet publish has a Jet public-API producer (PublicAPIItem from the checked package, structs included); a Jetpack/Publication #Test proves #CLI struct Config { port: Int{3000}; required: Int } freezes as struct Config { port: Int; required: Int [positional 0] } (tests/pkg.rs:5948), which meets #6096 c62",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6860 c5: public-API promises belong on #6860",
+          "at": "2026-11-15T04:54:02.643Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 82,
+          "text": "(moved from #6418 c140) Publication #Tests over the Jet public-API producer (c137) port tests/pkg.rs v2_snapshot_upgrade_matches_duplicate_inline_leaves (pkg.rs:6136), public_effect_metadata_preserves_symbolic_rows (pkg.rs:6179) and public_trait_effect_contract_drift_is_breaking (pkg.rs:6194) from 7c301d390a, and pass; this with c94 meets #6096 c13.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6860 c6: public-API tests",
+          "at": "2026-11-15T04:54:04.430Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 83,
+          "text": "(moved from #6419 c37) (was #2189 c1) jetpack env with no argument enters the default env module, and jetpack env <name> enters that module positionally [precut audit: failing on 9c7ddf1359: C:jetpack_tool/use_ephemeral_execs_inside_and_outside_project_without_path_projection KNOWN-FAILING #6419 unbuilt: Core cannot pass a cache lease's open descriptors to a child process (E1340): exit 127; expected 0 (known-failing #6419: unbuilt: Core cannot pass…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6938 c1: shell verbs",
+          "at": "2026-11-15T04:53:21.666Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 84,
+          "text": "(moved from #6419 c38) (was #2189 c2) jetpack env -- <cmd> runs in the project env and exits with the command's status [precut audit: failing on 9c7ddf1359: C:jetpack_tool/use_ephemeral_execs_inside_and_outside_project_without_path_projection KNOWN-FAILING #6419 unbuilt: Core cannot pass a cache lease's open descriptors to a child process (E1340): exit 127; expected 0 (known-failing #6419: unbuilt: Core cannot pass…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6938 c2: shell verbs",
+          "at": "2026-11-15T04:53:22.593Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 85,
+          "text": "(moved from #6419 c39) (was #2189 c5) jetpack tool run is removed and its help, tests and docs no longer mention it [precut audit: failing on 9c7ddf1359: C:jetpack_tool/use_ephemeral_execs_inside_and_outside_project_without_path_projection KNOWN-FAILING #6419 unbuilt: Core cannot pass a cache lease's open descriptors to a child process (E1340): exit 127; expected 0 (known-failing #6419: unbuilt: Core cannot pass…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6938 c3: shell verbs",
+          "at": "2026-11-15T04:53:23.515Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 86,
+          "text": "(moved from #6419 c40) (was #2189 c8) The --prep flag on env and on use materializes the closure and exits without entering, and a following entry performs no download [precut audit: failing on 9c7ddf1359: C:jetpack_tool/use_ephemeral_execs_inside_and_outside_project_without_path_projection KNOWN-FAILING #6419 unbuilt: Core cannot pass a cache lease's open descriptors to a child process (E1340): exit 127; expected 0 (known-failing #6419: unbuilt: Core cannot pass…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6938 c4: shell verbs",
+          "at": "2026-11-15T04:53:24.442Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 88,
+          "text": "(moved from #4717 c9) (was #3690) Provider leaves are Jet source via the ratified F4/F5 facilities.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6856 c4: providers card #6856",
+          "at": "2026-11-15T04:54:08.103Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 89,
+          "text": "(moved from #4717 c52) (was #4766) (was #3908) [#3909] The inline `package {}` header for single-file packages is parsed into ordinary package info. E1362 and E1363 cover malformed and header-plus-manifest cases.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #4275 c149: package manifest belongs on #4275",
+          "at": "2026-11-15T04:54:09.059Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 90,
+          "text": "(moved from #4717 c53) (was #4766) (was #3908) [#3911] Package outputs validation (E1321) and named multi-executable entries (ruling B).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #4275 c150: package manifest belongs on #4275",
+          "at": "2026-11-15T04:54:10.015Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 91,
+          "text": "(was #3521) [#3933] Jet implementation of programmable builds: fn build checking, BuildPlan evaluation in compile-time code (natively at O0), action authority, generation rounds, cycle locking and the host executor seam. (was #4275 c99)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6934 c1: build graph card; generation rounds split to BUILDGRAPH c2",
+          "at": "2026-11-15T04:52:55.106Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 92,
+          "text": "(was #3033) User-tool updates resolve, authorize, acquire, hash, realize and activate one exact release for the next launch. Project update changes only the channel lock; the later existing project realization path performs acquisition and activation. (was #4275 c123)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c1: user tools",
+          "at": "2026-11-15T04:53:39.988Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 93,
+          "text": "(was #3033) `jetpack update --deps` resolves the project channel lock but does not realize packages. `jetpack use <ref> --prep` realizes a user profile independent of project cwd and lock. (was #4275 c124)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c2: user tools",
+          "at": "2026-11-15T04:53:40.927Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 94,
+          "text": "(was #3033) The shared lifecycle gates candidate and redirect origins before requests, direct-source trust before unsigned GET and existing authentication before acquisition. (was #4275 c125)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c3: user tools",
+          "at": "2026-11-15T04:53:41.850Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 95,
+          "text": "(was #3033) Known pins require matching concrete identity and expected SHA-256 before GET and after GET. Same-identity mutation never replaces the working install. (was #4275 c126)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c4: user tools",
+          "at": "2026-11-15T04:53:42.791Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 96,
+          "text": "(was #3033) Raw assets become executable entries. Archives use declared safe roots and entries. App bundles use one declared .app root and executable entry. (was #4275 c127)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c5: user tools",
+          "at": "2026-11-15T04:53:43.735Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 97,
+          "text": "(was #3033) Raw, archive and app-bundle updates need no manual hash, catalog entry or recipe edit. (was #4275 c128)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c6: user tools",
+          "at": "2026-11-15T04:53:44.674Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 98,
+          "text": "(was #3033) Every metadata, trust, origin, authentication, acquisition, extraction, install, validation, cancellation and crash failure preserves a complete working generation. (was #4275 c129)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c7: user tools",
+          "at": "2026-11-15T04:53:45.656Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 99,
+          "text": "(was #3033) An initial-install failure leaves no active entry. A failed update leaves the prior active entry and lock facts unchanged. (was #4275 c130)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c8: user tools",
+          "at": "2026-11-15T04:53:46.608Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 100,
+          "text": "(was #3033) Concurrent activation revalidates source, grant, candidate, artifact and generation facts under the transaction boundary. (was #4275 c131)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c9: user tools",
+          "at": "2026-11-15T04:53:47.511Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 101,
+          "text": "(was #3033) The running old app keeps its executable and resources. The next launch selects the verified complete closure. (was #4275 c132)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c10: user tools",
+          "at": "2026-11-15T04:53:48.416Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 102,
+          "text": "(was #3033) Existing Store, lock, receipt, producer facts, sandbox and recovery mechanisms remain canonical. No runtime proof is claimed here. (was #4275 c133)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c11: user tools",
+          "at": "2026-11-15T04:53:49.330Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 103,
+          "text": "(was #3033) Proof: `jet test Compiler --profile packages` passes, including Store/Tests/ReleaseActivation.jet failpoint claims (prior generation preserved, no active entry after a failed first install) and CLI claims for raw, archive and .app updates. (was #4275 c134)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6941 c7: a proof-only row; its ReleaseActivation failpoint and CLI claims are now the proofs of TOOLUPD c1-c10",
+          "at": "2026-11-15T04:53:50.276Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 104,
+          "text": "(was #3033) [#3032] A direct source without authentication needs interactive approval before the first artifact GET; `-y` and `--trust` cannot grant it. A grant binds source, metadata authority, repo, resolver, selector, asset policy, target, platform, proof floor and ordered HTTPS origins, and excludes mutable version, tag, digest and URL. A later candidate in an unchanged scope needs no new prompt. A new origin stops before the request. Any scope change invalidates the grant. Known pins check identity, grant and origins before the GET and the SHA-256 after it. Same identity with different bytes fails and preserves the working pin and generation. Release trust never authorizes builds, execution or elevation. Proof: `--area Trust --tests` CHECK OK with the ReleaseTrust claims. (was #4275 c135)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6941 c12: direct-source trust",
+          "at": "2026-11-15T04:53:52.061Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 105,
+          "text": "Opening a fresh store is idempotent under concurrent runs: N jet processes started on an empty store all succeed with one consistent store. Proof: `jet test Compiler --profile packages --filter Store` (concurrent open case).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c3: store card",
+          "at": "2026-11-15T04:52:53.265Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 106,
+          "text": "Store verification and hashing fan out across OS threads through a task group (D-TASKRUNTIME1=A, M:N tasks) and the store verification and hashing performance cells record the speedup. Proof: `jet test Compiler --profile packages --filter Store` (parallel verify case) and the perf cells in the measurement manifest. (Frozen #3598 item 2 holds the original.)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6933 c4: store card",
+          "at": "2026-11-15T04:52:54.181Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 107,
+          "text": "D-1912-NAME1=A: publishing refuses a package name within edit distance 1 of an existing name, an exact confusable match or a reserved suffix. A name at distance 2 is reported but publish proceeds. The same rule applies to core and community packages.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6940 c3: registry",
+          "at": "2026-11-15T04:53:36.926Z",
+          "closure": "obsolete",
+          "proof": {
+            "profile": "packages",
+            "filter": "publish_name_distance_"
+          }
+        },
+        {
+          "n": 108,
+          "text": "The Jetpack Jet port refuses any write that skips a policy gate (TrustStore, workspace lock or invocation flags) with E3415.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6939 c5: trust policy gate",
+          "at": "2026-11-15T04:53:34.087Z",
+          "closure": "obsolete",
+          "proof": {
+            "profile": "packages",
+            "filter": "Trust"
+          }
+        },
+        {
+          "n": 109,
+          "text": "The netrc parser follows the exact netrc rules (default entry, macdef, quoting, malformed input) rather than treating netrc as INI, keeps credentials out of errors, and adds no ambient file discovery or network authentication as a side effect. Proof: `jet test Compiler --profile cases --filter jetpack/netrc_parse_` and `--filter jetpack/netrc_redacts_credentials`.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6940 c5: credentials",
+          "at": "2026-11-15T04:53:38.920Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T02:16:33.944Z",
+      "updated": "2026-11-15T04:54:17.141Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 109,
+      "completedAt": "2026-11-15T04:54:17.140Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T05:20:59.701Z"
     }
   ]
 }
