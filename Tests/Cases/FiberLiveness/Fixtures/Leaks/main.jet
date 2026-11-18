@@ -28,15 +28,15 @@ round: fn() -> Int {
     loop _ in 0..<TASKS -> parked.push(task waiter(rx))
     time.sleep(50ms)
     loop i in 0..<parked.len() -> parked[i].cancel()
-    cancelled := 0
+    canceled := 0
     loop handle in parked {
         if handle.join() == {
             .Ok(_) -> {}
-            .Err(_) -> cancelled += 1
+            .Err(_) -> canceled += 1
         }
     }
     tx.close()
-    cancelled
+    canceled
 }
 
 // A /proc status field's number ("Threads:\t33", "VmSize:\t 123 kB").

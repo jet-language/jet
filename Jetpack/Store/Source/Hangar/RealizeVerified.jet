@@ -39,14 +39,14 @@ RealizeRequest: enum {
 }
 
 // Controls a source-only independent-root reproducibility certification. A
-// retry always starts both builds in fresh roots. `cancelled` is polled
+// retry always starts both builds in fresh roots. `canceled` is polled
 // between build/promotion boundaries; a canceled run never enters Hangar.
 IndependentRootOptions: struct {
     retries: Int,
-    cancelled: (fn() -[FS]> Bool)?,
+    canceled: (fn() -[FS]> Bool)?,
 
     default: fn() -> IndependentRootOptions Never! {
-        IndependentRootOptions{retries: 1, cancelled: None}
+        IndependentRootOptions{retries: 1, canceled: None}
     }
 }
 
@@ -555,9 +555,9 @@ store_certify_independent_root_build: fn(verification: &StoreVerification, roots
 
 store_certify_prepared: fn(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, options: IndependentRootOptions, prepared: PreparedRealization) -> IndependentRootCertification RealizeError! {
     action_key: prepared.action_key ?? return Err(RealizeError.Store(StoreError.InvalidData("independent certification produced no action identity")))
-    if options.cancelled == {
-        .Val(cancelled) -> {
-            if cancelled() {
+    if options.canceled == {
+        .Val(canceled) -> {
+            if canceled() {
                 return Err(RealizeError.Store(StoreError.Interrupted("independent reproducibility certification canceled")))
             }
         }

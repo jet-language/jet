@@ -2993,16 +2993,16 @@ repeat: fn(text: String, times: Int) -> String {
     assert_eq(option_value(sent[2], "filters"), Val(DbusValue.Array{signature: "(sa(us))", items: [DbusValue]{filter.copy()}}))
     assert_eq(option_value(sent[2], "current_filter"), Val(filter))
     // The person cancels: no file, and nothing is offered but the name.
-    cancelled := test_bus("save-cancelled")
+    canceled := test_bus("save-canceled")
     script = ok.copy()
     append(script, wire(reply_to(1, [DbusValue]{DbusValue.Text(":1.54")}), 1))
     append(script, wire(reply_to(2, [DbusValue]{}), 2))
     append(script, wire(reply_to(3, [DbusValue]{DbusValue.Path(request)}), 3))
     append(script, wire(signal(request, REQUEST, "Response", [DbusValue]{DbusValue.Uint32(1), options_of([DbusValue]{})}), 4))
-    bus_says(cancelled.server, script)
-    d := start(cancelled.client.move(), 1000, 1000000000) ?? panic("start: {err}")
+    bus_says(canceled.server, script)
+    d := start(canceled.client.move(), 1000, 1000000000) ?? panic("start: {err}")
     assert_eq(found_text(portal_save_file(d, "Save", "notes.txt", [FileFilter]{}, 1000000000)), String?{None})
-    options: messages_heard(cancelled.server)[2].body[2]
+    options: messages_heard(canceled.server)[2].body[2]
     assert_eq(option_value(options, "filters"), DbusValue?{None})
     assert_eq(option_value(options, "current_name"), Val(DbusValue.Text("notes.txt")))
 }

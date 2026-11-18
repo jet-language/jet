@@ -45,7 +45,7 @@ answer: fn(outcome: Int TaskFailure!) -> HTTPResponse HTTPError! {
         .Err(error) -> {
             if error == {
                 .DeadlineBlown -> return Ok(http_server.response(504, "worker deadline"))
-                .Cancelled -> return Ok(http_server.response(503, "worker canceled"))
+                .Canceled -> return Ok(http_server.response(503, "worker canceled"))
                 .Panicked(reason) -> return Ok(http_server.response(500, "worker panicked: {reason}"))
             }
         }
@@ -85,5 +85,5 @@ run: fn() (HTTPError | RangeError | TaskFailure)! {
     print("next: {fetch(addr, "/")}")
     report: server.shutdown(100ms) ?? panic("shutdown")
     serving.join() ?? panic("serve task")
-    print("accepted {report.accepted}, completed {report.completed}, canceled {report.cancelled}")
+    print("accepted {report.accepted}, completed {report.completed}, canceled {report.canceled}")
 }

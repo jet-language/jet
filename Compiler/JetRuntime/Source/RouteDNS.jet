@@ -29,7 +29,7 @@ dns_cause: fn(prefix: I64, code: I64) -> I64 {
     text
 }
 
-dns_cancelled: fn(name: I64, error: I64) -> I64 {
+dns_canceled: fn(name: I64, error: I64) -> I64 {
     dns_fail(error, dns_named(rt_static_text("network operation canceled during DNS lookup for `"), name, rt_static_text("`")))
 }
 
@@ -43,7 +43,7 @@ dns_timed_out: fn(name: I64, error: I64) -> I64 {
 // jet_net_dns_remaining: the remaining nanoseconds, or 0 with the canceled
 // or timed-out message.
 dns_remaining: fn(deadline: I64, name: I64, error: I64) -> I64 {
-    if (scheduler_task_cancelled() && !scheduler_shielded()) { return dns_cancelled(name, error) }
+    if (scheduler_task_canceled() && !scheduler_shielded()) { return dns_canceled(name, error) }
     remaining: deadline - sync_now_ns()
     if (remaining <= I64{0}) { return dns_timed_out(name, error) }
     remaining
@@ -1326,7 +1326,7 @@ dns_system_addresses: fn(name: I64, milliseconds: I64, rows_out: I64, count_out:
         return I64{0}
     }
     if (status == LK_STOP) { return I64{0} }
-    if (status == LK_CANCEL) { return dns_cancelled(name, error) }
+    if (status == LK_CANCEL) { return dns_canceled(name, error) }
     if (status == LK_TIMEOUT) { return dns_timed_out(name, error) }
     failure: net_gai_error(status, code)
     _ := dns_fail(error, dns_named(rt_static_text("DNS lookup for `"), name, rt_static_text("` failed: ")))
@@ -1442,7 +1442,7 @@ dns_net_result: fn(status: I64, name: I64, error: I64) -> I64 {
         return I64{0}
     }
     if dns_text_starts_with(message, rt_static_text("network operation canceled")) {
-        trap_store(error, net_error_new(NET_ERROR_CANCELLED, dns_net_detail_take(name, message)))
+        trap_store(error, net_error_new(NET_ERROR_CANCELED, dns_net_detail_take(name, message)))
         return I64{0}
     }
     if dns_text_starts_with(message, rt_static_text("network protocol error")) {

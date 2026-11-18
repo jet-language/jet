@@ -157,7 +157,7 @@ net_route_errno: fn(operation: I64, address: I64, code: I64, error: I64) -> I64 
     // host_net_ready's ECANCELED is a canceled process root's wait: the
     // same failure as a task's canceled wait (net_route_wait_stop).
     if (code == I64{125}) {
-        return net_route_fail_take(NET_ERROR_CANCELLED, operation, address, net_route_message(operation, rt_static_text(" canceled")), I64{0}, error)
+        return net_route_fail_take(NET_ERROR_CANCELED, operation, address, net_route_message(operation, rt_static_text(" canceled")), I64{0}, error)
     }
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, operation)
@@ -185,7 +185,7 @@ net_route_wait_stop: fn(operation: I64, error: I64) -> Bool {
     if (kind != I64{1} && kind != I64{2} && kind != I64{5}) { return true }
     taken: scheduler_control_take_stop(control)
     if (kind == I64{2}) { _ := net_route_timeout(operation, error) } else if (kind == I64{1}) {
-        _ := net_route_fail_take(NET_ERROR_CANCELLED, operation, I64{0}, net_route_message(operation, rt_static_text(" canceled")), I64{0}, error)
+        _ := net_route_fail_take(NET_ERROR_CANCELED, operation, I64{0}, net_route_message(operation, rt_static_text(" canceled")), I64{0}, error)
     } else {
         text: jet_rt_string_builder_new()
         jet_rt_string_builder_push(text, operation)

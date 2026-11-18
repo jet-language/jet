@@ -344,7 +344,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
         publication_read_error(.Other, path, "fsync refused"),
         publication_read_error(.Other, path, "file authority directory moved while it was held"),
         publication_read_error(.PermissionDenied, path, "native write refused"),
-        publication_read_error(.Cancelled, path, "cancelled"),
+        publication_read_error(.Canceled, path, "canceled"),
     }) {
         actual: if publication_oci_reconcile_winner(authority, path, "winner".bytes(), "OCI referrer blob", failure) == {
             .Err(observed) -> observed
@@ -354,7 +354,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
         }
         if failure == .Other(_) -> assert(actual == .Other(_))
         if failure == .PermissionDenied(_) -> assert(actual == .PermissionDenied(_))
-        if failure == .Cancelled(_) -> assert(actual == .Cancelled(_))
+        if failure == .Canceled(_) -> assert(actual == .Canceled(_))
         assert_eq("{actual}", "{failure}")
     }
     files.remove(path) ?? panic("remove winner")

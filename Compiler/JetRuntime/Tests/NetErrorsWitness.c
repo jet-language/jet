@@ -45,7 +45,7 @@ extern int64_t jet_rt_record_tag_jet_net_error(Error *);
 extern Text *jet_rt_handle_show_jet_net_error(Error *);
 extern Text *jet_rt_handle_display_jet_net_error(Error *);
 extern Text *jet_rt_handle_debug_jet_net_error(Error *);
-#define DETAIL_VARIANTS(X) X(invalid_input) X(permission_denied) X(address_in_use) X(address_unavailable) X(connection_refused) X(connection_reset) X(not_connected) X(closed) X(timeout) X(cancelled) X(unsupported) X(tls) X(protocol) X(other)
+#define DETAIL_VARIANTS(X) X(invalid_input) X(permission_denied) X(address_in_use) X(address_unavailable) X(connection_refused) X(connection_reset) X(not_connected) X(closed) X(timeout) X(canceled) X(unsupported) X(tls) X(protocol) X(other)
 #define DECLARE(NAME) extern Error *jet_rt_record_new_jet_net_error_##NAME(Detail *); extern Detail *jet_rt_record_get_jet_net_error_##NAME(Error *);
 DETAIL_VARIANTS(DECLARE)
 #undef DECLARE

@@ -12,7 +12,7 @@ jet_cli_live_text: fn(snapshot: JetLiveSnapshot) -> String Never! {
     loop live_task in snapshot.tasks {
         deadline: if live_task.deadline_ms == .Val(value) -> "{value}" else -> "-"
         wait: if live_task.wait == "" -> "-" else -> live_task.wait
-        out = "{out}  Task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} cancelled={live_task.cancelled}\n"
+        out = "{out}  Task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} canceled={live_task.canceled}\n"
     }
     out = "{out}\nChannels\n"
     if snapshot.channels.len() == 0 -> out = "{out}  (no live channels)\n"
@@ -22,7 +22,7 @@ jet_cli_live_text: fn(snapshot: JetLiveSnapshot) -> String Never! {
     }
     effects: snapshot.effects
     resources: snapshot.resources
-    out = "{out}\nEffects: compute={effects.get("compute") ?? 0} waiting={effects.get("waiting") ?? 0} channel={effects.get("channel") ?? 0} time={effects.get("time") ?? 0} io={effects.get("io") ?? 0}\nResources: workers={resources.get("workers") ?? 0} running={resources.get("running") ?? 0} queued={resources.get("queued") ?? 0} cancelled={resources.get("cancelled") ?? 0} arenas={resources.get("arenas") ?? 0} arena_allocations={resources.get("arena_allocations") ?? 0} arena_bytes={resources.get("arena_bytes") ?? 0}\n\nValues\n"
+    out = "{out}\nEffects: compute={effects.get("compute") ?? 0} waiting={effects.get("waiting") ?? 0} channel={effects.get("channel") ?? 0} time={effects.get("time") ?? 0} io={effects.get("io") ?? 0}\nResources: workers={resources.get("workers") ?? 0} running={resources.get("running") ?? 0} queued={resources.get("queued") ?? 0} canceled={resources.get("cancelled") ?? 0} arenas={resources.get("arenas") ?? 0} arena_allocations={resources.get("arena_allocations") ?? 0} arena_bytes={resources.get("arena_bytes") ?? 0}\n\nValues\n"
     if snapshot.values.len() == 0 -> out = "{out}  (no live value decisions)\n"
     loop value in snapshot.values {
         reason: if value.reason == "" -> "" else -> " reason={value.reason}"

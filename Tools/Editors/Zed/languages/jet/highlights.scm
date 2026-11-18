@@ -70,7 +70,7 @@
   "self"
 ] @keyword
 
-; literal: Cancelled DeadlineBlown None Panicked Val false true
+; literal: Canceled DeadlineBlown None Panicked Val false true
 [
   "false"
   "true"

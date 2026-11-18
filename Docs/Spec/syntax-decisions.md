@@ -212,9 +212,9 @@ a check fails and the lock is older than the running `jet`, it adds one line
 naming the two toolchains. Each rewrite has an old-spelling fixture that
 Tests/Cases/Migrations replays. Built today: the registered rewrites
 (`lambda-shape1`, `codable-options1`, `sig-arrow1`, `bit-sigils1`,
-`paren-tuple1`, `brace-layout1`) run one at a time through `jet run
-Compiler/Migrations/Migrate.jet -- <plan> --write PATH...`; `jet fix` reading
-the lock is not yet built.
+`paren-tuple1`, `brace-layout1`, `american-ident1`) run one at a time through
+`jet run Compiler/Migrations/Migrate.jet -- <plan> --write PATH...`; `jet fix`
+reading the lock is not yet built.
 
 **D-S14 teaching diagnostics** *(diagnostic-only; no new Jet syntax)*: the
 shared foreign-word table recognizes common declaration words (`fun`, `func`,
@@ -2077,7 +2077,7 @@ an initial state. This outcome adds no syntax.
 
 **D-MACHINE1=A** *(ratified 2026-11-01, card #6326)*: a type lists its states
 and moves once, in a `state { }` block inside a `struct` or an `enum` body. Each
-line names a state and its moves (`Draft -> Confirmed, Cancelled`); a state with
+line names a state and its moves (`Draft -> Confirmed, Canceled`); a state with
 no moves stands alone (`Shipped`); a group names a set (`Open: Draft |
 Confirmed`). In an enum the states are its cases, with their data; a name that
 is not a case is E0151. A type path `Order.Draft` is a state type, `|` joins
@@ -3810,7 +3810,7 @@ D-TASKGROUP-PARAM1=A only at its parameter-position boundary.
 **D-CONC-OUTCOME1=A — typed outcome and status** *(ratified 2026-08-06,
 card #1505; retired by D-CONC-FAIL1=A)*: the ballot first ratified consuming
 `outcome()` with `TaskOutcome` and borrowing `status()` with `TaskStatus`,
-covering `Finished`, `Panicked`, `Cancelled`, and `DeadlineBlown`; `status()`
+covering `Finished`, `Panicked`, `Canceled`, and `DeadlineBlown`; `status()`
 covered running, paused, and cancel-requested states. The later
 D-CONC-FAIL1=A ruling retires that separate surface. `TaskOutcome`,
 `TaskStatus`, `trace()`, and `exception()` do not ship. It amends
@@ -3901,7 +3901,7 @@ positional branches is one parse error (E1117), with no successful lowering.
 **D-CONC-FAIL1=A — task failure uses the one `?` rail** *(ratified
 2026-08-06, card #1505; amends D-COROUTINE1 and retires D-CONC-OUTCOME1)*:
 `join()` returns `T !TaskFailure`. `TaskFailure` is a normal enum the prelude
-declares, with `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` uses the
+declares, with `.Canceled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` uses the
 same rail: positional form returns its ordered list and named form its
 anonymous tuple/record. A joined child panic becomes `.Panicked(reason)`;
 it does not kill the process. The reason uses the canonical task identity and
@@ -3936,7 +3936,7 @@ D-TASK-SLICE1=A adds the check at each loop iteration and at each call of a
 function that can call itself, where a cancel or a passed deadline lands the
 same way, so a task that only computes stops too. A
 canceled `task.all` member reports
-`Cancelled`, not a completed `Value`. A scoped shielded region defers (never
+`Canceled`, not a completed `Value`. A scoped shielded region defers (never
 discards) the unwind until a critical section finishes. **D-SHIELDNAME1 = A**
 *(ratified 2026-07-11)*: the shielded region is spelled `#Shield { … }`,
 joining the `#Unsafe` / `#Context` sigil family. A cancellation (or blown
@@ -5846,11 +5846,11 @@ index, not a substitute for that law.
   observe the current `#Context`, yield through the shared runtime where
   available, and obey the earliest context, persistent socket, or explicit
   per-call deadline. The same handles expose readiness; cancellation and
-  expiry are distinct `.Cancelled` and `.Timeout` values. **Implementation
+  expiry are distinct `.Canceled` and `.Timeout` values. **Implementation
   status:** TCP reads and writes use nonblocking handles plus the shared AOT
   readiness backend. On Unix, UDP send/receive and Unix-socket accept/read/write
   use the same scheduler park slots; blocked operations return typed
-  `.Cancelled` or `.Timeout`, UDP preserves datagram atomicity, and Unix streams
+  `.Canceled` or `.Timeout`, UDP preserves datagram atomicity, and Unix streams
   preserve the shared byte/half-close/idempotent-close contract. TLS consumes
   that same nonblocking TCP handle: handshake, read, write, write_all, and
   close-notify park through the shared readiness slots, preserve inherited

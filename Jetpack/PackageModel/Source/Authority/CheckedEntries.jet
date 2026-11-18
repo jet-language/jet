@@ -292,7 +292,7 @@ pkg_authority_require_single_link: fn(path: String, info: files.Stat) AuthorityE
 // The OS error number behind a provider failure, when known.
 pkg_io_os_code: fn(error: IOError) -> Int? Never! {
     if error == {
-        .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) | .TimedOut(context) | .Cancelled(context) | .Closed(context) | .Protocol(context) | .Other(context) | .AlreadyExists(context) | .Unsupported(context) -> context.os_code
+        .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) | .TimedOut(context) | .Canceled(context) | .Closed(context) | .Protocol(context) | .Other(context) | .AlreadyExists(context) | .Unsupported(context) -> context.os_code
         .ResourceLimit(_) -> None
     }
 }
@@ -301,7 +301,7 @@ pkg_io_os_code: fn(error: IOError) -> Int? Never! {
 // 2)`), without the public IOError display prefix.
 pkg_io_cause: fn(error: IOError) -> String Never! {
     if error == {
-        .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) | .TimedOut(context) | .Cancelled(context) | .Closed(context) | .Protocol(context) | .Other(context) | .AlreadyExists(context) | .Unsupported(context) -> context.cause ?? "{error}"
+        .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) | .TimedOut(context) | .Canceled(context) | .Closed(context) | .Protocol(context) | .Other(context) | .AlreadyExists(context) | .Unsupported(context) -> context.cause ?? "{error}"
         .ResourceLimit(_) -> "{error}"
     }
 }
@@ -323,7 +323,7 @@ pkg_io_is_not_a_directory: fn(error: IOError) -> Bool Never! {
 pkg_io_is_not_found: fn(error: IOError) -> Bool Never! {
     if error == {
         .NotFound(_) -> true
-        .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> false
     }
 }
 

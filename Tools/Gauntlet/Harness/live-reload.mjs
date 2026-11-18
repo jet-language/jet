@@ -458,7 +458,7 @@ function validateAxisBudget(axis) {
 }
 
 function outputSpec(runner) {
-  const spec = runner.output ?? runner.output_acknowledgement;
+  const spec = runner.output ?? runner.output_acknowledgment;
   if (!spec || typeof spec.path !== "string" || spec.path.length === 0) {
     throw new Error("axis runner must declare output acknowledgment path");
   }
@@ -1109,14 +1109,14 @@ export async function runLiveReloadRunner(axis, runner, axisDir, jetBin, { repoD
   const probes = await probeAxisTools(envRunner, runnerDir, runner.tools, jetBin, { envRunnerArgs });
   const result = {
     id: runner.id,
-    output_acknowledgement: runner.output ?? runner.output_acknowledgement,
+    output_acknowledgment: runner.output ?? runner.output_acknowledgment,
     workload: axis.workload,
     tools: probes,
     tool_provenance: probes,
     source_files: files,
     edit_file: runner.edit_file,
     readiness: runner.readiness,
-    output: runner.output ?? runner.output_acknowledgement,
+    output: runner.output ?? runner.output_acknowledgment,
     declared_command: runner.command,
     status: "unmeasured",
     measurements: [],

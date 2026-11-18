@@ -28,8 +28,8 @@ run: fn() {
         cancel_scope.cancel()
         queued_report: cancel_queued.join() ?? panic("cancel queued join")
         pending_report: cancel_pending.join() ?? panic("cancel pending join")
-        print("cancel queued={queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
-        print("cancel pending={pending_report.state() == .Cancelled} trace={pending_report.trace().summary()}")
+        print("cancel queued={queued_report.state() == .Canceled} trace={queued_report.trace().summary()}")
+        print("cancel pending={pending_report.state() == .Canceled} trace={pending_report.trace().summary()}")
     }
     _: cancel_hold.join() ?? panic("cancel hold join")
     print("cancel counts={cancel_event.queued_count()},{cancel_event.running_count()},{cancel_event.blocked_count()}")
@@ -54,7 +54,7 @@ run: fn() {
         close_scope.cancel()
         queued_report: close_queued.join() ?? panic("close queued join")
         pending_report: close_pending.join() ?? panic("close pending join")
-        print("close queued={queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
+        print("close queued={queued_report.state() == .Canceled} trace={queued_report.trace().summary()}")
         print("close pending={pending_report.state() == .Closed} trace={pending_report.trace().summary()}")
     }
     _: close_hold.join() ?? panic("close hold join")

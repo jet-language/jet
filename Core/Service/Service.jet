@@ -63,7 +63,7 @@ DeliveryState: enum {
     Delivering,
     Delivered,
     DeadLettered,
-    Cancelled,
+    Canceled,
 }
 
 delivery_state_show: fn(state: DeliveryState) -> String Never! {
@@ -73,7 +73,7 @@ delivery_state_show: fn(state: DeliveryState) -> String Never! {
         .Delivering -> "Delivering"
         .Delivered -> "Delivered"
         .DeadLettered -> "DeadLettered"
-        .Cancelled -> "Cancelled"
+        .Canceled -> "Cancelled"
     }
 }
 
@@ -122,7 +122,7 @@ TaskOutcome: enum {
         debug: fn(&&self) -> String {
             if self == {
                 .Failed(.Panicked(reason)) -> "Panicked({reason:Debug})"
-                .Finished | .Failed(.Cancelled) | .Failed(.DeadlineBlown) -> task_outcome_show(self)
+                .Finished | .Failed(.Canceled) | .Failed(.DeadlineBlown) -> task_outcome_show(self)
             }
         }
     }
@@ -132,14 +132,14 @@ task_outcome_show: fn(outcome: TaskOutcome) -> String Never! {
     if outcome == {
         .Finished -> "Finished"
         .Failed(.Panicked(reason)) -> "Panicked({reason})"
-        .Failed(.Cancelled) -> "Cancelled"
+        .Failed(.Canceled) -> "Cancelled"
         .Failed(.DeadlineBlown) -> "DeadlineBlown"
     }
 }
 
 #Test("task outcome display and debug distinguish raw and quoted panic reasons") {
     assert(task_outcome_show(TaskOutcome.Finished) == "Finished")
-    assert(task_outcome_show(TaskOutcome.Failed(.Cancelled)) == "Cancelled")
+    assert(task_outcome_show(TaskOutcome.Failed(.Canceled)) == "Cancelled")
     assert(task_outcome_show(TaskOutcome.Failed(.DeadlineBlown)) == "DeadlineBlown")
     assert(task_outcome_show(TaskOutcome.Failed(.Panicked("a\"b"))) == "Panicked(a\"b)")
     outcome: TaskOutcome.Failed(.Panicked("a\"b"))
@@ -526,7 +526,7 @@ observe: fn(tree: ServiceTree) -> String Never! {
     pending := 0
     finished := 0
     panicked := 0
-    cancelled := 0
+    canceled := 0
     deadline_blown := 0
     loop workflow in tree.workflows {
         if workflow.status == {
@@ -538,7 +538,7 @@ observe: fn(tree: ServiceTree) -> String Never! {
             .None -> { pending += 1 }
             .Val(.Finished) -> { finished += 1 }
             .Val(.Failed(.Panicked(_))) -> { panicked += 1 }
-            .Val(.Failed(.Cancelled)) -> { cancelled += 1 }
+            .Val(.Failed(.Canceled)) -> { canceled += 1 }
             .Val(.Failed(.DeadlineBlown)) -> deadline_blown += 1
         }
     }
@@ -546,7 +546,7 @@ observe: fn(tree: ServiceTree) -> String Never! {
         .Val(receipt) -> receipt.rollback_available
         .None -> false
     }
-    "Observe(workers={tree.workers.len()}, started={tree.started}, generation={tree.generation}, dead_letters={tree.dead_letters.len()}, events={tree.event_log.len()}, chaos={tree.chaos_fails}, draining={tree.draining.len()}, partitions={tree.partitioned.len()}, rollback={rollback}, workflows={tree.workflows.len()},statuses={{running:{running},paused:{paused},cancel_requested:{cancel_requested}}},outcomes={{pending:{pending},finished:{finished},panicked:{panicked},cancelled:{cancelled},deadline_blown:{deadline_blown}}})"
+    "Observe(workers={tree.workers.len()}, started={tree.started}, generation={tree.generation}, dead_letters={tree.dead_letters.len()}, events={tree.event_log.len()}, chaos={tree.chaos_fails}, draining={tree.draining.len()}, partitions={tree.partitioned.len()}, rollback={rollback}, workflows={tree.workflows.len()},statuses={{running:{running},paused:{paused},cancel_requested:{cancel_requested}}},outcomes={{pending:{pending},finished:{finished},panicked:{panicked},canceled:{canceled},deadline_blown:{deadline_blown}}})"
 }
 
 #Test("service state records use UTF-8 byte lengths and exact corruption errors") {
@@ -1621,7 +1621,7 @@ authority_has_uncommitted: fn(endpoint: ServiceEndpoint) -> Bool ServiceError! {
     entries: authority_entries(runtime, authority_read(runtime))
     now: service_now()
     loop entry in entries {
-        if entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.state == DeliveryState.Cancelled {
+        if entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.state == DeliveryState.Canceled {
             next
         }
         if !delivery_routes_to_endpoint(runtime, entry, endpoint) -> next
@@ -1635,7 +1635,7 @@ authority_has_uncommitted: fn(endpoint: ServiceEndpoint) -> Bool ServiceError! {
 #Test("fresh service tree exposes every native seed without starting a task") {
     fresh: tree("seed")
     assert(tree_show(fresh) == "ServiceTree(name=seed, workers=0, handlers=[], started=false, restart=OneForOne, budget=5/60000ms, delivery=AtMostOnce)")
-    assert(observe(fresh) == "Observe(workers=0, started=false, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=0,statuses={{running:0,paused:0,cancel_requested:0}},outcomes={{pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0}})")
+    assert(observe(fresh) == "Observe(workers=0, started=false, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=0,statuses={{running:0,paused:0,cancel_requested:0}},outcomes={{pending:0,finished:0,panicked:0,canceled:0,deadline_blown:0}})")
     assert(directory_generation(fresh) == 1)
     assert(event_count(fresh) == 0)
     assert(dead_letter_count(fresh) == 0)
@@ -1739,7 +1739,7 @@ stat_cause: fn(error: IOError) -> String Never! {
         .NotFound(value) -> Val(value)
         .PermissionDenied(value) -> Val(value)
         .TimedOut(value) -> Val(value)
-        .Cancelled(value) -> Val(value)
+        .Canceled(value) -> Val(value)
         .Closed(value) -> Val(value)
         .Protocol(value) -> Val(value)
         .Other(value) -> Val(value)
@@ -2729,7 +2729,7 @@ workflow_token_valid: fn(text: String) -> Bool Never! {
 
 workflow_outcome_from_wire: fn(value: String) -> TaskOutcome ServiceError! {
     if value == "Finished" -> return Ok(TaskOutcome.Finished)
-    if value == "Cancelled" -> return Ok(TaskOutcome.Failed(.Cancelled))
+    if value == "Cancelled" -> return Ok(TaskOutcome.Failed(.Canceled))
     if value == "DeadlineBlown" -> return Ok(TaskOutcome.Failed(.DeadlineBlown))
     if !value.starts_with("Panicked:") -> return Err(state_error("unknown task outcome"))
     outcome: TaskOutcome.Failed(.Panicked(workflow_field(value.removeprefix("Panicked:"), "panic reason")))
@@ -2841,7 +2841,7 @@ workflow_apply: fn(workflows: &[TreeWorkflowState], payload: String) ServiceErro
         }
         workflows[index].history.push("sleep-cancelled")
         workflows[index].status = TaskStatus.CancelRequested
-        workflows[index].outcome = Val(TaskOutcome.Failed(.Cancelled))
+        workflows[index].outcome = Val(TaskOutcome.Failed(.Canceled))
     } else if payload.starts_with("workflow-wait-sleep-deadline:") {
         run_id: workflow_parse_int(payload.removeprefix("workflow-wait-sleep-deadline:"), "deadline sleep run id")
         if run_id < 1 -> return Err(state_error("workflow deadline sleep run id is invalid"))
@@ -3102,7 +3102,7 @@ workflow_sleep: fn(workflow: ServiceWorkflow, duration: Duration) ServiceError! 
             if state.value.history[cursor] == "sleep-cancelled" {
                 state.value.replay_cursor = cursor + 1
                 state.value.status = TaskStatus.CancelRequested
-                state.value.outcome = Val(TaskOutcome.Failed(.Cancelled))
+                state.value.outcome = Val(TaskOutcome.Failed(.Canceled))
                 return Err(ServiceError.Policy("workflow sleep was canceled"))
             }
             if state.value.history[cursor] == "sleep-deadline" {
@@ -3296,14 +3296,14 @@ workflow_frame: fn(text: String) -> String Never! { "{text.bytes().len()}:{text}
 workflow_valid_outcome: fn(outcome: TaskOutcome) -> Bool Never! {
     if outcome == {
         .Failed(.Panicked(reason)) -> reason.trim() != "" && workflow_visible(reason, 1048576)
-        .Finished | .Failed(.Cancelled) | .Failed(.DeadlineBlown) -> true
+        .Finished | .Failed(.Canceled) | .Failed(.DeadlineBlown) -> true
     }
 }
 
 workflow_outcome_wire: fn(outcome: TaskOutcome) -> String Never! {
     if outcome == {
         .Failed(.Panicked(reason)) -> "Panicked:{workflow_frame(reason)}"
-        .Finished | .Failed(.Cancelled) | .Failed(.DeadlineBlown) -> task_outcome_show(outcome)
+        .Finished | .Failed(.Canceled) | .Failed(.DeadlineBlown) -> task_outcome_show(outcome)
     }
 }
 
@@ -3971,10 +3971,10 @@ delivery_transition_allowed: fn(entry: DeliveryEntry, state: DeliveryState, atte
     }
     allowed: if entry.state == {
         .Pending -> state == DeliveryState.Accepted
-        .Accepted -> state == DeliveryState.Accepted || state == DeliveryState.Delivering || state == DeliveryState.DeadLettered || state == DeliveryState.Cancelled
-        .Delivering -> state == DeliveryState.Accepted || state == DeliveryState.Delivered || state == DeliveryState.DeadLettered || state == DeliveryState.Cancelled
+        .Accepted -> state == DeliveryState.Accepted || state == DeliveryState.Delivering || state == DeliveryState.DeadLettered || state == DeliveryState.Canceled
+        .Delivering -> state == DeliveryState.Accepted || state == DeliveryState.Delivered || state == DeliveryState.DeadLettered || state == DeliveryState.Canceled
         .Delivered -> state == DeliveryState.DeadLettered || (state == DeliveryState.Accepted && entry.retained_until != None)
-        .DeadLettered | .Cancelled -> false
+        .DeadLettered | .Canceled -> false
     }
     if !allowed {
         return Err(authority_error("delivery event contains an invalid lifecycle transition"))
@@ -4066,7 +4066,7 @@ authority_entries: fn(runtime: ServiceRuntime, records: [DeliveryRecord]) -> [De
 }
 
 delivery_entry_expired: fn(entry: DeliveryEntry, now: Int) -> Bool Never! {
-    if entry.state == DeliveryState.DeadLettered || entry.state == DeliveryState.Cancelled {
+    if entry.state == DeliveryState.DeadLettered || entry.state == DeliveryState.Canceled {
         return false
     }
     if entry.retained_until == {
@@ -4303,7 +4303,7 @@ authority_take_pending: fn(endpoint: ServiceEndpoint, capacity: Int, skip_ids: [
                 queued = true
             }
         }
-        if entry.authority == "" || entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.state == DeliveryState.Cancelled || entry.dead {
+        if entry.authority == "" || entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.state == DeliveryState.Canceled || entry.dead {
             next
         }
         if !delivery_routes_to_endpoint(runtime, entry, endpoint) -> next
@@ -4358,7 +4358,7 @@ authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [PendingEntry]
         if receipt.dead {
             return Err(ServiceError.Unavailable("cannot requeue a dead-lettered service receipt"))
         }
-        if receipt.state == DeliveryState.Cancelled {
+        if receipt.state == DeliveryState.Canceled {
             return Err(ServiceError.Unavailable("cannot requeue a canceled service receipt"))
         }
         if delivery_entry_expired(receipt, service_now()) {
@@ -4397,7 +4397,7 @@ authority_mark_delivered: fn(store: String, id: String) ServiceError! {
         pending_remove_entry(runtime, entry)
         return Err(ServiceError.Unavailable("cannot deliver a dead-lettered service receipt"))
     }
-    if entry.state == DeliveryState.Cancelled {
+    if entry.state == DeliveryState.Canceled {
         pending_remove_entry(runtime, entry)
         return Err(ServiceError.Unavailable("cannot deliver a canceled delivery"))
     }
@@ -4514,8 +4514,8 @@ delivery_cancel: fn(delivery: Delivery) -> Delivery ServiceError! {
     if entry.state == DeliveryState.Delivered {
         return Err(ServiceError.Policy("delivered work cannot be canceled"))
     }
-    if entry.state != DeliveryState.Cancelled {
-        authority_append_event(runtime, entry, DeliveryState.Cancelled, entry.attempts, service_now())
+    if entry.state != DeliveryState.Canceled {
+        authority_append_event(runtime, entry, DeliveryState.Canceled, entry.attempts, service_now())
         pending_remove_entry(runtime, entry)
     }
     Ok(delivery)
@@ -4545,7 +4545,7 @@ runtime_send: fn(runtime: ServiceRuntime, endpoint: ServiceEndpoint, message: St
         if entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.message != message {
             return Err(ServiceError.Policy("idempotency key was already used by another service authority or delivery"))
         }
-        if !entry.dead && entry.expires > now && !entry.delivered && entry.state != DeliveryState.Cancelled {
+        if !entry.dead && entry.expires > now && !entry.delivered && entry.state != DeliveryState.Canceled {
             authority_enqueue_entry(runtime, entry)
         }
         return Ok(delivery_for_entry(runtime, entry, true))
@@ -4590,7 +4590,7 @@ retry_accept: fn(runtime: ServiceRuntime, delivery: Delivery) -> DeliveryEntry S
         return Err(ServiceError.Unavailable("service receipt has no endpoint authority"))
     }
     if entry.dead -> return Err(ServiceError.Unavailable("cannot retry a dead-lettered delivery"))
-    if entry.state == DeliveryState.Cancelled {
+    if entry.state == DeliveryState.Canceled {
         return Err(ServiceError.Policy("canceled delivery cannot be retried"))
     }
     if entry.delivered && entry.retained_until == None -> return Ok(entry)
@@ -4631,7 +4631,7 @@ runtime_retain: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery Serv
     index: delivery_entry_index(entries, id) ?? return Err(ServiceError.Unknown("service id `{id}` is unknown"))
     entry: entries[index]
     if entry.dead -> return Ok(delivery_for_entry(runtime, entry, false))
-    if entry.state == DeliveryState.Cancelled {
+    if entry.state == DeliveryState.Canceled {
         return Err(ServiceError.Policy("canceled delivery cannot be retained"))
     }
     until: authority_retention_deadline(service_now(), runtime.retention_ms)
@@ -4723,7 +4723,7 @@ delivery_parse_state: fn(text: String) -> DeliveryState? Never! {
     if text == "Delivering" -> return Val(DeliveryState.Delivering)
     if text == "Delivered" -> return Val(DeliveryState.Delivered)
     if text == "DeadLettered" -> return Val(DeliveryState.DeadLettered)
-    if text == "Cancelled" -> return Val(DeliveryState.Cancelled)
+    if text == "Cancelled" -> return Val(DeliveryState.Canceled)
     None
 }
 

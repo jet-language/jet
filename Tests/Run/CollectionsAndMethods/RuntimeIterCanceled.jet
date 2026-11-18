@@ -1,6 +1,6 @@
 // A stopped native map pull must not become a successful short collection.
 package: {
-    name: "runtime_iter_cancelled"
+    name: "runtime_iter_canceled"
     authority: { allow: [IO, Mem.Alloc, Time.Wait] }
 }
 
@@ -85,7 +85,7 @@ run: fn() {
         .Ok(short_result) -> { panic("canceled map returned short success: {short_result}") }
         .Err(error) -> {
             if error == {
-                .Cancelled -> { print("canceled") }
+                .Canceled -> { print("canceled") }
                 .DeadlineBlown -> { panic("unexpected deadline") }
                 .Panicked(reason) -> panic("unexpected panic: {reason}")
             }
@@ -102,7 +102,7 @@ run: fn() {
         .Ok(short_result) -> { panic("canceled loop returned short success: {short_result}") }
         .Err(error) -> {
             if error == {
-                .Cancelled -> { print("loop canceled") }
+                .Canceled -> { print("loop canceled") }
                 .DeadlineBlown -> { panic("unexpected deadline") }
                 .Panicked(reason) -> panic("unexpected panic: {reason}")
             }
@@ -119,7 +119,7 @@ run: fn() {
             .Ok(result) -> { panic("canceled family {family} returned success: {result}") }
             .Err(error) -> {
                 if error == {
-                    .Cancelled -> { print("family {family} canceled") }
+                    .Canceled -> { print("family {family} canceled") }
                     .DeadlineBlown -> { panic("unexpected deadline") }
                     .Panicked(reason) -> panic("unexpected panic: {reason}")
                 }

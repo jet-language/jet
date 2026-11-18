@@ -22,7 +22,7 @@ jetos_write_hardware_facts: fn(dir: String, system: SystemPlan) -[FS]> IOError! 
         .None -> [String]{}
     }
     profiles: if declared_profiles.len() == 0 -> [String]{"generic-pc"} else -> declared_profiles
-    specialisations: jetos_prefixed_options(system, "hardware.{system.name}.specialisation.")
+    specializations: jetos_prefixed_options(system, "hardware.{system.name}.specialisation.")
     files.write(
         files.join(hw_dir, "facts.json"),
         pkg_json_render(
@@ -33,7 +33,7 @@ jetos_write_hardware_facts: fn(dir: String, system: SystemPlan) -[FS]> IOError! 
                     "firmware": pkg_json_texts(firmware),
                     "drivers": pkg_json_texts(drivers),
                     "profiles": pkg_json_texts(profiles),
-                    "specialisations": jetos_specialisation_items(specialisations),
+                    "specialisations": jetos_specialization_items(specializations),
                     "scan_source": Dyn.Text("hardware/{system.name}.jet"),
                     "doctor": Dyn.Text("sw/bin/jetos-hardware-doctor"),
                     "audit": Dyn.Text("declared hardware facts enter generation proof before activation"),
@@ -80,13 +80,13 @@ jetos_write_hardware_facts: fn(dir: String, system: SystemPlan) -[FS]> IOError! 
                 [
                     "kind": Dyn.Text("jetos.hardware-specialisations"),
                     "host": Dyn.Text(system.name.copy()),
-                    "items": jetos_specialisation_items(specialisations),
+                    "items": jetos_specialization_items(specializations),
                     "proof": Dyn.Text("boot-selectable-variants"),
                 ],
             ),
         ),
     )
-    loop item in specialisations {
+    loop item in specializations {
         files.write(files.join(boot_spec_dir, "{item.key}.conf"), "title {jetos_release_label(false)} — {system.name} ({item.key})\nhost {system.name}\nenabled {item.value}\ngeneration /run/current-system\nproof hardware-specialisation\n")
     }
     host: jetos_shell_single_quote(system.name)
@@ -106,9 +106,9 @@ jetos_write_hardware_facts: fn(dir: String, system: SystemPlan) -[FS]> IOError! 
 }
 
 // `{"name": .., "enabled": .., "boot_entry": ..}` per declared NixOS `specialisation`.
-jetos_specialisation_items: fn(specialisations: [{key: String, value: String}]) -> Dyn Never! {
+jetos_specialization_items: fn(specializations: [{key: String, value: String}]) -> Dyn Never! {
     items := [Dyn]{}
-    loop item in specialisations {
+    loop item in specializations {
         items.push(
             Dyn.Object(
                 [

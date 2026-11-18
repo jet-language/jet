@@ -121,7 +121,7 @@ PublicationIOKind: enum {
     PermissionDenied,
     AlreadyExists,
     TimedOut,
-    Cancelled,
+    Canceled,
     Other,
 }
 
@@ -143,7 +143,7 @@ publication_io_error: fn(kind: PublicationIOKind, write: Bool, path: String, cau
         .PermissionDenied -> IOError.PermissionDenied(context)
         .AlreadyExists -> IOError.AlreadyExists(context)
         .TimedOut -> IOError.TimedOut(context)
-        .Cancelled -> IOError.Cancelled(context)
+        .Canceled -> IOError.Canceled(context)
         .Other -> IOError.Other(context)
     }
 }
@@ -184,7 +184,7 @@ publication_index_read_or_empty: fn(path: String) -[FS]> String IOError! {
         .Ok(text) -> Ok(text)
         .Err(error) -> if error == {
             .NotFound(_) -> Ok("")
-            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(error)
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(error)
         }
     }
 }
@@ -208,7 +208,7 @@ publication_package_names: fn(repo: String) -[FS]> [String] IOError! {
         info: files.stat(path) ?? {
             if err == {
                 .NotFound(_) -> {}
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(err)
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(err)
             }
             next
         }
@@ -250,7 +250,7 @@ publication_with_index_lock: fn<T>(repo: String, name: String, action: fn() -[FS
         writer: files.create(path, if_exists: .Refuse, links: .Refuse) ?? {
             if err == {
                 .AlreadyExists(_) -> {}
-                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(err)
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(err)
             }
             if files.stat(path) == .Ok(metadata) {
                 if time.unix_ns() - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) > 300000000000 {

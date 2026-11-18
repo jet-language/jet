@@ -25,7 +25,7 @@ require_timeout: fn(request: HTTPRequest) {
         .Err(error) -> {
             if error == {
                 .Timeout(_) -> { _: 0 }
-                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> {
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Canceled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> {
                     panic("negative timeout wrong error")
                 }
             }
@@ -46,7 +46,7 @@ require_proxy: fn(request: HTTPRequest) {
         .Err(error) -> {
             if error == {
                 .Proxy(_) -> { _: 0 }
-                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> {
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Canceled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> {
                     panic("original Proxy variant lost")
                 }
             }
@@ -75,7 +75,7 @@ check_pre_response_errors: fn() {
                 .Err(error) -> {
                     if error == {
                         .Timeout(_) -> time.sleep(1ms)
-                        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
+                        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
                             panic("accept failed")
                         }
                     }
@@ -95,7 +95,7 @@ check_pre_response_errors: fn() {
         .Err(error) -> {
             if error == {
                 .Connect(_) -> { _: 0 }
-                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> {
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Canceled | .BodyTooLarge(_) | .Resolve(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> {
                     panic("original Connect variant lost")
                 }
             }
@@ -109,7 +109,7 @@ check_pre_response_errors: fn() {
         .Err(error) -> {
             if error == {
                 .IO(_) -> { _: 0 }
-                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> {
+                .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Canceled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> {
                     panic("original IO variant lost")
                 }
             }

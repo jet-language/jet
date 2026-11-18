@@ -383,7 +383,7 @@ store_archive_repair_rollback: fn(error: StoreError, object_path: String, backup
         .Err(missing) -> {
             if missing == {
                 .NotFound(_) -> {}
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     rollback_errors.push("checking imported output: {StoreError.IO(missing).message()}")
                 }
             }
@@ -1153,7 +1153,7 @@ store_archive_write_private_atomic: fn(path: String, bytes: [U8]) StoreError! {
             .Err(cleanup) -> {
                 if cleanup == {
                     .NotFound(_) -> {}
-                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(failure.with_message("{failure.message()}; could not remove private archive-key staging file: {StoreError.IO(cleanup).message()}"))
+                    .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(failure.with_message("{failure.message()}; could not remove private archive-key staging file: {StoreError.IO(cleanup).message()}"))
                 }
             }
             .Ok(_) -> {}
@@ -1216,7 +1216,7 @@ store_archive_lstat: fn(path: String) -> files.Stat? StoreError! {
     info: files.stat(path) ?? {
         if err == {
             .NotFound(_) -> return Ok(None)
-            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(StoreError.IO(err))
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(StoreError.IO(err))
         }
     }
     Ok(Val(info))

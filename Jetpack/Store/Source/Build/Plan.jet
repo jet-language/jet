@@ -253,8 +253,8 @@ HermeticBuildPlan: struct {
                 }
                 if failed_prereq == .Val(prereq) {
                     failed.push(action)
-                    metrics.cancelled_actions += 1
-                    events.push(BuildExecutionEvent.Cancelled{action: action, failed_prereq: prereq})
+                    metrics.canceled_actions += 1
+                    events.push(BuildExecutionEvent.Canceled{action: action, failed_prereq: prereq})
                     next
                 }
                 if supplied.get(action) == {
@@ -368,7 +368,7 @@ BuildExecutionStage: struct {
 BuildExecutionEvent: enum {
     Ready(action: Int, stage: Int),
     Finished(action: Int, outcome: ActionOutcome),
-    Cancelled(action: Int, failed_prereq: Int),
+    Canceled(action: Int, failed_prereq: Int),
     Pending(action: Int),
 }
 
@@ -380,7 +380,7 @@ BuildExecutionMetrics: struct {
     reusable_actions: Int,
     ambient_actions: Int,
     failed_actions: Int,
-    cancelled_actions: Int,
+    canceled_actions: Int,
     cache_restored_actions: Int,
     pending_actions: Int,
 }
@@ -563,7 +563,7 @@ build_execution_metrics: fn(actions: [HermeticBuildAction], stages: [BuildExecut
         reusable_actions: reusable,
         ambient_actions: ambient,
         failed_actions: 0,
-        cancelled_actions: 0,
+        canceled_actions: 0,
         cache_restored_actions: 0,
         pending_actions: 0,
     }

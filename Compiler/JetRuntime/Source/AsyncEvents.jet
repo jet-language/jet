@@ -5,7 +5,7 @@
 //
 // AsyncCore184: refs0 owners8 lock16 listeners{len24 cap32 data40}
 //   queued{len48 cap56 data64} blocked{len72 cap80 data88} running96
-//   closed104 cancelled112 capacity120 overflow128 failure136 sequence144
+//   closed104 canceled112 capacity120 overflow128 failure136 sequence144
 //   next_id152 e_meta160 r_meta168 running_entry176
 //   refs counts the handles, entries and scopes holding the core; owners
 //   counts the handles (Rust's owner Arc): the last owner hard-cancels.
@@ -64,7 +64,7 @@ DISPATCH_DROPPED_OLDEST: I64{3}
 
 DISPATCH_CLOSED: I64{4}
 
-DISPATCH_CANCELLED: I64{5}
+DISPATCH_CANCELED: I64{5}
 
 DISPATCH_DEADLINE_EXCEEDED: I64{6}
 
@@ -156,7 +156,7 @@ async_trace_text: fn(trace: I64, lines: I64, state: I64) -> I64 {
             jet_rt_string_builder_push(text, rt_static_text("DroppedOldest"))
         }
         state == DISPATCH_CLOSED -> jet_rt_string_builder_push(text, rt_static_text("Closed"))
-        state == DISPATCH_CANCELLED -> jet_rt_string_builder_push(text, rt_static_text("Cancelled"))
+        state == DISPATCH_CANCELED -> jet_rt_string_builder_push(text, rt_static_text("Canceled"))
         else -> jet_rt_string_builder_push(text, rt_static_text("DeadlineExceeded"))
     }
     jet_rt_string_builder_finish(text)
@@ -388,7 +388,7 @@ async_payload_free: fn(payload: I64, meta: I64) {
 }
 
 // hard_cancel_state :1316-1339: once; every queued and blocked entry ends
-// `Cancelled` (a queued one accepted), and the running one's task is
+// `Canceled` (a queued one accepted), and the running one's task is
 // canceled so its handler stops at its next wait.
 async_hard_cancel: fn(core: I64) {
     async_lock(core)
@@ -397,8 +397,8 @@ async_hard_cancel: fn(core: I64) {
         return
     }
     sync_store(wrapping(core + I64{112}), I64{1})
-    async_drain(wrapping(core + I64{48}), true, DISPATCH_CANCELLED)
-    async_drain(wrapping(core + I64{72}), false, DISPATCH_CANCELLED)
+    async_drain(wrapping(core + I64{48}), true, DISPATCH_CANCELED)
+    async_drain(wrapping(core + I64{72}), false, DISPATCH_CANCELED)
     running: sync_load(wrapping(core + I64{176}))
     control: if (running != I64{0}) -> sync_load(wrapping(running + I64{64})) else -> I64{0}
     scheduler_control_retain(control)
@@ -525,12 +525,12 @@ async_count: fn(core: I64, offset: I64) -> I64 {
     async_lock(core)
     capacity: sync_load(wrapping(core + I64{120}))
     closed: sync_load(wrapping(core + I64{104})) != I64{0}
-    cancelled: sync_load(wrapping(core + I64{112})) != I64{0}
+    canceled: sync_load(wrapping(core + I64{112})) != I64{0}
     has_room: event_word(wrapping(core + I64{48})) < capacity
     policy: sync_load(wrapping(core + I64{128}))
     if {
         closed -> async_complete(entry, false, DISPATCH_CLOSED)
-        cancelled -> async_complete(entry, false, DISPATCH_CANCELLED)
+        canceled -> async_complete(entry, false, DISPATCH_CANCELED)
         has_room -> async_enqueue(core, entry)
         policy == ASYNC_BLOCK -> {
             async_entry_trace(entry, ASYNC_TRACE_PENDING)
@@ -598,7 +598,7 @@ async_entry_run: fn(entry: I64) -> I64 {
             return report
         }
         if (sync_load(wrapping(core + I64{112})) != I64{0}) {
-            async_complete(entry, sync_load(wrapping(entry + I64{48})) != I64{0}, DISPATCH_CANCELLED)
+            async_complete(entry, sync_load(wrapping(entry + I64{48})) != I64{0}, DISPATCH_CANCELED)
             next
         }
         if async_deadline_passed() {
@@ -665,7 +665,7 @@ async_handler_line: fn(lines: I64, index: I64, outcome: I64) {
 // handler's `Result<Unit, E>` lands in `scratch`: an Err is a failure the
 // FailurePolicy keeps (StopFirst and Collect), logs or ignores. A panic is a
 // Panic failure that ends the run HandlerFailed; a cancel or deadline stop
-// ends it `Cancelled` or `DeadlineExceeded`, and any other stop ends the task
+// ends it `Canceled` or `DeadlineExceeded`, and any other stop ends the task
 // with no report.
 async_dispatch: fn(core: I64, entry: I64) -> I64 {
     event_words_remove(wrapping(core + I64{48}), I64{0})
@@ -770,7 +770,7 @@ async_dispatch: fn(core: I64, entry: I64) -> I64 {
     } else {
         jet_rt_string_drop(text)
         async_failures_free(failures, e_meta)
-        terminal: if (stop == I64{2}) -> DISPATCH_DEADLINE_EXCEEDED else -> DISPATCH_CANCELLED
+        terminal: if (stop == I64{2}) -> DISPATCH_DEADLINE_EXCEEDED else -> DISPATCH_CANCELED
         async_complete(entry, true, terminal)
         if (stop == I64{1} || stop == I64{2}) {
             report = jet_rt_handle_clone_jet_dispatch_report(sync_load(wrapping(entry + I64{40})))

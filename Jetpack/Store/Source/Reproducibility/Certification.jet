@@ -160,7 +160,7 @@ store_build_for_cache: fn(verification: &StoreVerification, roots: HangarRoots, 
     attempts: options.retries + 1
     loop attempt in 0..<attempts {
         final_attempt: attempt + 1 >= attempts
-        store_repro_check_cancelled(options)
+        store_repro_check_canceled(options)
         left_workspace: RootWorkspace.new(roots, "left", attempt) ?? return Err(RealizeError.Store(err))
         left: if store_realize_uncached(verification, left_workspace.roots, store_repro_workspace_ctx(ctx, left_workspace.roots.hangar_dir()), request) == {
             .Ok(value) -> value
@@ -181,7 +181,7 @@ store_build_for_cache: fn(verification: &StoreVerification, roots: HangarRoots, 
             return Ok(PreparedRealization{realized: left, action_key: None, attestation: None, workspaces: [RootWorkspace]{left_workspace}})
         }
 
-        store_repro_check_cancelled(options)
+        store_repro_check_canceled(options)
         right_workspace: RootWorkspace.new(roots, "right", attempt) ?? {
             failure: err
             left_workspace.remove()
@@ -218,7 +218,7 @@ store_build_for_cache: fn(verification: &StoreVerification, roots: HangarRoots, 
             right_workspace.remove()
             return Err(RealizeError.Store(reported))
         }
-        store_repro_check_cancelled(options)
+        store_repro_check_canceled(options)
         attestation: store_repro_independent_attestation(comparison.left_action, left.envelope.output_hash)
         return Ok(PreparedRealization{realized: left, action_key: Val(comparison.left_action), attestation: Val(attestation), workspaces: [RootWorkspace]{left_workspace, right_workspace}})
     }
@@ -268,9 +268,9 @@ store_repro_request_package: fn(request: RealizeRequest) -> String Never! {
     }
 }
 
-store_repro_check_cancelled: fn(options: IndependentRootOptions) -[FS]> RealizeError! {
-    cancelled: options.cancelled ?? return
-    if cancelled() {
+store_repro_check_canceled: fn(options: IndependentRootOptions) -[FS]> RealizeError! {
+    canceled: options.canceled ?? return
+    if canceled() {
         return Err(RealizeError.Store(StoreError.Interrupted("independent reproducibility certification canceled")))
     }
 }

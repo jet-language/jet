@@ -62,7 +62,7 @@ engine_independent_root_cleanup: fn(base: String) {
         }
         false
     }
-    options: IndependentRootOptions{retries: 0, cancelled: Val(changed)}
+    options: IndependentRootOptions{retries: 0, canceled: Val(changed)}
     if store_certify_independent_root_build(verification, fixture.roots, fixture.ctx, RealizeRequest.Package{spec: fixture.spec, table: fixture.table}, options) == {
         .Ok(_) -> { panic("divergent roots were promoted") }
         .Err(error) -> assert(error.message().contains("conflicting independent roots"))
@@ -86,8 +86,8 @@ engine_independent_root_cleanup: fn(base: String) {
 #Test("independent_root_runner_cancellation_leaves_no_store_result") {
     fixture: engine_independent_root_fixture()
     verification := StoreVerification.new()
-    cancelled: fn() -[FS]> Bool { true }
-    options: IndependentRootOptions{retries: 1, cancelled: Val(cancelled)}
+    canceled: fn() -[FS]> Bool { true }
+    options: IndependentRootOptions{retries: 1, canceled: Val(canceled)}
     if store_certify_independent_root_build(verification, fixture.roots, fixture.ctx, RealizeRequest.Package{spec: fixture.spec, table: fixture.table}, options) == {
         .Ok(_) -> { panic("canceled certification was promoted") }
         .Err(error) -> assert(error.message().contains("canceled"))

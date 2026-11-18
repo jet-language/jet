@@ -1,6 +1,6 @@
 // Native homogeneous payload channels. State160: mutex0, refs8, queue
 // len16/cap24/data32/head40, bound48, owned meta56, recvwait64/sendwait72,
-// reservations80, closed88/cancelled96, kind104 (0 channel,1 timer,2 interval),
+// reservations80, closed88/canceled96, kind104 (0 channel,1 timer,2 interval),
 // delay112, senders120/receivers128, observe136,
 // recvwaitcount144/sendwaitcount152. Endpoint handles are the opaque state
 // pointer, each retaining one ref and one logical endpoint. WaitNode24: next0,
@@ -147,10 +147,10 @@ channel_select_remove: fn(channel: I64, node: I64) {
     sync_mutex_unlock(channel)
 }
 
-channel_close: fn(channel: I64, cancelled: Bool) {
+channel_close: fn(channel: I64, canceled: Bool) {
     sync_mutex_lock(channel)
     sync_store(wrapping(channel + I64{88}), I64{1})
-    if cancelled -> sync_store(wrapping(channel + I64{96}), I64{1})
+    if canceled -> sync_store(wrapping(channel + I64{96}), I64{1})
     channel_wake_all(channel, false)
     channel_wake_all(channel, true)
     channel_update(channel)
@@ -351,7 +351,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
     if ready -> I64{1} else -> I64{0}
 }
 
-// Receiver metadata: kind104 (1 timer, 2 interval), cancelled96 and the
+// Receiver metadata: kind104 (1 timer, 2 interval), canceled96 and the
 // delay112 of a timer channel, read under the state lock.
 channel_word: fn(channel: I64, offset: I64) -> I64 {
     sync_mutex_lock(channel)
@@ -368,8 +368,15 @@ channel_word: fn(channel: I64, offset: I64) -> I64 {
     if (channel_word(channel, I64{104}) == I64{2}) -> I64{1} else -> I64{0}
 }
 
-#Export(c) jet_rt_native_receiver_is_cancelled: fn(channel: I64) -> I64 {
+#Export(c) jet_rt_native_receiver_is_canceled: fn(channel: I64) -> I64 {
     if (channel_word(channel, I64{96}) != I64{0}) -> I64{1} else -> I64{0}
+}
+
+// Seed bridge, deleted once a seed built from this tree is the seed: the
+// seed that builds this runtime's compiler lowers a Receiver's
+// `is_canceled` to the British export name.
+#Export(c) jet_rt_native_receiver_is_cancelled: fn(channel: I64) -> I64 {
+    jet_rt_native_receiver_is_canceled(channel)
 }
 
 #Export(c) jet_rt_native_receiver_delay_ms: fn(channel: I64) -> I64 {

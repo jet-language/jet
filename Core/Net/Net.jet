@@ -87,7 +87,7 @@ NetError: enum {
     NotConnected(NetErrorDetail),
     Closed(NetErrorDetail),
     Timeout(NetErrorDetail),
-    Cancelled(NetErrorDetail),
+    Canceled(NetErrorDetail),
     Unsupported(NetErrorDetail),
     TLS(NetErrorDetail),
     Protocol(NetErrorDetail),
@@ -696,7 +696,7 @@ dns_srv_at: fn(server: String, name: String) -[Net, Time.Wait]> [SRVRecord] NetE
 dns_error: fn(name: String, message: String) -> NetError Never! {
     if starts_with(message, "DNS name not found") -> return NetError.DNS(NetDNSError.NotFound(name))
     detail: NetErrorDetail{operation: "dns", address: None, name: Val(name), message: message, os_code: None}
-    if starts_with(message, "network operation canceled") -> return NetError.Cancelled(detail)
+    if starts_with(message, "network operation canceled") -> return NetError.Canceled(detail)
     if starts_with(message, "network protocol error") -> return NetError.Protocol(detail)
     if message.contains("timed out") || message.contains("timeout") {
         return NetError.Timeout(detail)
@@ -710,13 +710,13 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
     assert(error_name(missing) == expected_name)
     if missing == {
         .DNS(.NotFound(name)) -> assert(name == "example.test")
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
             panic("DNS NotFound")
         }
     }
-    cancelled: dns_error("example.test", "network operation canceled: timeout")
-    if cancelled == {
-        .Cancelled(detail) -> {
+    canceled: dns_error("example.test", "network operation canceled: timeout")
+    if canceled == {
+        .Canceled(detail) -> {
             assert(detail.operation == "dns")
             assert(detail.address == None)
             assert(detail.name == expected_name)
@@ -739,7 +739,7 @@ dns_error: fn(name: String, message: String) -> NetError Never! {
     failure: dns_error("example.test", "DNS lookup worker failed")
     if failure == {
         .DNS(.Failure(message)) -> assert(message == "DNS lookup worker failed")
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
             panic("DNS failure")
         }
     }
@@ -872,7 +872,7 @@ error_detail: fn(err: NetError) -> NetErrorDetail? Never! {
         .NotConnected(detail) -> Val(detail)
         .Closed(detail) -> Val(detail)
         .Timeout(detail) -> Val(detail)
-        .Cancelled(detail) -> Val(detail)
+        .Canceled(detail) -> Val(detail)
         .Unsupported(detail) -> Val(detail)
         .TLS(detail) -> Val(detail)
         .Protocol(detail) -> Val(detail)
@@ -1058,7 +1058,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
             assert(detail.name == None && detail.os_code == expected_os_code)
             assert(detail.message == "resolve socket address failed: denied")
         }
-        .InvalidInput(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
+        .InvalidInput(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> {
             assert(false)
         }
     }
@@ -1067,7 +1067,7 @@ slice_bytes: fn(raw: [U8], start: Int, end: Int) -> [U8] Never! {
         .Other(detail) -> {
             assert(detail.message == "resolve socket address failed: no address" && detail.os_code == None)
         }
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .DNS(_) -> {
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .DNS(_) -> {
             assert(false)
         }
     }

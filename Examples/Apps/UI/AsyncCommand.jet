@@ -2,7 +2,7 @@
 // a signal a view reads; here an autorun prints each status it takes. A
 // disabled command and a command that is already running ignore activation,
 // a refused save surfaces as Failed rather than a panic, a canceled save is
-// `Failed(cancelled)`, and the task group that owns a save joins it before the
+// `Failed(canceled)`, and the task group that owns a save joins it before the
 // owner goes away.
 package: {
     name: "async_command"
@@ -53,7 +53,7 @@ save_job: fn(value: Int, wait: Duration) -> Status {
 settle: fn(job: &&Task<Status>) -> Status {
     if job.join() == {
         .Ok(status) -> status
-        .Err(.Cancelled) -> Status.Failed("cancelled")
+        .Err(.Canceled) -> Status.Failed("canceled")
         .Err(.DeadlineBlown) -> Status.Failed("deadline blown")
         .Err(.Panicked(reason)) -> Status.Failed("panicked: {reason}")
     }

@@ -65,7 +65,7 @@ publication_oci_referrer_root: fn(repo: String, subject: String) -[FS, Env]> Str
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> files.create_dir_all(root)
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
             }
         }
     }
@@ -84,7 +84,7 @@ publication_oci_referrer_root: fn(repo: String, subject: String) -[FS, Env]> Str
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> files.create_dir_all(subject_root)
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
             }
         }
     }
@@ -128,7 +128,7 @@ publication_finalize_oci_referrers: fn(repo: String, entry: PublicationIndexEntr
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> return
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
             }
         }
     }
@@ -149,7 +149,7 @@ publication_finalize_oci_referrers: fn(repo: String, entry: PublicationIndexEntr
                     }
                     return Err(publication_invalid_oci("registry OCI SBOM evidence was not staged; restore or rebuild the immutable evidence set"))
                 }
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
             }
         }
     }
@@ -215,7 +215,7 @@ publication_oci_check_existing: fn(path: String, bytes: [U8], label: String) -[F
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> return Ok(false)
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
             }
         }
     }
@@ -255,7 +255,7 @@ publication_write_oci_file: fn(path: String, bytes: [U8], label: String) -[FS, E
 publication_oci_reconcile_winner: fn(authority: FoundationDirectoryAuthority, path: String, bytes: [U8], label: String, error: IOError) -[FS, Env]> IOError! {
     collision: if error == {
         .AlreadyExists(_) -> true
-        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> false
+        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> false
     }
     if !collision -> return Err(error)
     // Retain the original ancestor chain across publication and winner read.
@@ -307,7 +307,7 @@ publication_read_oci_file: fn(path: String, limit: Int) -[FS, Env]> [U8] IOError
                     }
                     return Err(error)
                 }
-                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
             }
         }
     }
@@ -329,7 +329,7 @@ publication_oci_unavailable: fn(error: IOError, detail: String) -> IOError Never
         .AlreadyExists(context) -> IOError.AlreadyExists(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .InvalidInput(context) -> IOError.InvalidInput(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .TimedOut(context) -> IOError.TimedOut(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
-        .Cancelled(context) -> IOError.Cancelled(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
+        .Canceled(context) -> IOError.Canceled(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .Closed(context) -> IOError.Closed(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .Protocol(context) -> IOError.Protocol(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})
         .Other(context) -> IOError.Other(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(detail)})

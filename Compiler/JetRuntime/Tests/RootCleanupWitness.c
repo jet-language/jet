@@ -120,7 +120,7 @@ static void callback(int64_t word) {
     }
 }
 
-static int64_t cancelled_record(void) {
+static int64_t canceled_record(void) {
     int64_t save[4], control = jet_rt_control_new();
     jet_rt_control_enter(control, WORD(save));
     assert(jet_rt_stop_domain() == 0);
@@ -232,7 +232,7 @@ int main(int argc, char **argv, char **envp) {
     assert(zero == 0);
     jet_rt_session_cleanup_leave(zero); /* owned zero token is restored */
     if (!strcmp(mode, "bare-cancel")) {
-        int64_t record = cancelled_record();
+        int64_t record = canceled_record();
         assert(jet_rt_stop_kind(record) == 1);
         jet_rt_stop_drop(record);
         puts("ROOT CLEANUP OK");
@@ -388,7 +388,7 @@ int main(int argc, char **argv, char **envp) {
         assert(jet_rt_session_poll() == 0 && jet_rt_session_status() == 0);
         assert(((int64_t *)(uintptr_t)root)[6] == 0);
     } else if (!strcmp(mode, "corrupt-root-take")) {
-        int64_t record = cancelled_record();
+        int64_t record = canceled_record();
         ((int64_t *)(uintptr_t)root)[4] = 1;
         ((int64_t *)(uintptr_t)root)[5] = record; /* transfer the real owned bare record */
         int64_t code;

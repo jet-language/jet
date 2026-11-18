@@ -1,7 +1,7 @@
 // State lists: a type lists its states and the moves between them once, in a
 // `state { }` block, and each method's types name the move it makes.
 //
-//   `Order: struct { state { Draft -> Confirmed, Cancelled ... } }`
+//   `Order: struct { state { Draft -> Confirmed, Canceled ... } }`
 //   `confirm: fn(self: &&Order.Draft) -> Order.Confirmed`
 //
 // `Order.Draft` is a state type: an `Order` known to be in `Draft`. A set is
@@ -28,10 +28,10 @@ Lamp: struct {
 
 Order: struct {
     state {
-        Draft -> Confirmed, Cancelled
-        Confirmed -> Shipped, Cancelled
+        Draft -> Confirmed, Canceled
+        Confirmed -> Shipped, Canceled
         Shipped
-        Cancelled
+        Canceled
         Open: Draft | Confirmed
     }
 
@@ -43,7 +43,7 @@ Order: struct {
 
     ship: fn(self: &&Order.Confirmed) -> Order.Shipped { self }
 
-    cancel: fn(self: &&Order.Open) -> Order.Cancelled { self }
+    cancel: fn(self: &&Order.Open) -> Order.Canceled { self }
 }
 
 // Parameters name a state, a set, or a group.

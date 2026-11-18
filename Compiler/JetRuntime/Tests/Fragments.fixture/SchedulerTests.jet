@@ -67,7 +67,7 @@ scheduler_test_env: fn(log: I64, mode: I64, value: I64) -> I64 {
             if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
         }
         (mode == I64{2}) -> {
-            message: scheduler_msg_cancelled()
+            message: scheduler_msg_canceled()
             jet_rt_panic_message(sync_load(message), sync_load(message + I64{8}))
             jet_rt_string_drop(message)
             if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
@@ -312,7 +312,7 @@ scheduler_test_spawn: fn(callbacks: I64, meta: I64, log: I64, mode: I64, value: 
 }
 
 #Export(c) jet_rt_scheduler_fixture_root_panic: fn() -> I64 {
-    message: scheduler_msg_cancelled()
+    message: scheduler_msg_canceled()
     jet_rt_panic_message(sync_load(message), sync_load(message + I64{8}))
     I64{1}
 }

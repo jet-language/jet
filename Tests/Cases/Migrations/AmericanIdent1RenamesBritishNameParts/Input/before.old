@@ -1,0 +1,17 @@
+// A stopped task is cancelled; aria-labelledby is a foreign name and stays.
+Reading: struct {
+    litre: Float,
+    colouredLabel: Bool,
+}
+
+stopped: fn(failure: TaskFailure) -> Bool {
+    if failure == {
+        .Cancelled -> true
+        .DeadlineBlown | .Panicked(_) -> false
+    }
+}
+
+run: fn() {
+    is_cancelled: stopped(TaskFailure.Cancelled)
+    print("{is_cancelled} cancelled")
+}

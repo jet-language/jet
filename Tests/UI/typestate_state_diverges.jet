@@ -4,9 +4,9 @@
 // rule reports that instead of keeping whichever arm was walked last.
 Order: struct {
     state {
-        Draft -> Confirmed, Cancelled
+        Draft -> Confirmed, Canceled
         Confirmed -> Draft
-        Cancelled -> Draft
+        Canceled -> Draft
     }
 
     id: Int,
@@ -15,11 +15,11 @@ Order: struct {
 
     confirm: fn(self: &&Order.Draft) -> Order.Confirmed { self }
 
-    cancel: fn(self: &&Order.Draft) -> Order.Cancelled { self }
+    cancel: fn(self: &&Order.Draft) -> Order.Canceled { self }
 
     reopen: fn(self: &&Order.Confirmed) -> Order.Draft { self }
 
-    restore: fn(self: &&Order.Cancelled) -> Order.Draft { self }
+    restore: fn(self: &&Order.Canceled) -> Order.Draft { self }
 }
 
 job: fn(cents: Int) {

@@ -307,7 +307,7 @@ ForeignErrorModel: enum {
 
 ForeignCallbackModel: enum {
     ReentrantThreadSafe,
-    AdapterMarshalled,
+    AdapterMarshaled,
     NoCallback,
     CABI,
     HostRegistration,
@@ -315,7 +315,7 @@ ForeignCallbackModel: enum {
     debug_name: fn(self) -> String Never! {
         if self == {
             .ReentrantThreadSafe -> "ReentrantThreadSafe"
-            .AdapterMarshalled -> "AdapterMarshalled"
+            .AdapterMarshaled -> "AdapterMarshalled"
             .NoCallback -> "None"
             .CABI -> "CAbi"
             .HostRegistration -> "HostRegistration"
@@ -325,24 +325,24 @@ ForeignCallbackModel: enum {
 
 ForeignAsyncModel: enum {
     JetTask,
-    AdapterMarshalled,
+    AdapterMarshaled,
 
     debug_name: fn(self) -> String Never! {
         if self == {
             .JetTask -> "JetTask"
-            .AdapterMarshalled -> "AdapterMarshalled"
+            .AdapterMarshaled -> "AdapterMarshalled"
         }
     }
 }
 
 ForeignTaskBoundary: enum {
     RejectCapturedState,
-    AdapterMarshalled,
+    AdapterMarshaled,
 
     debug_name: fn(self) -> String Never! {
         if self == {
             .RejectCapturedState -> "RejectCapturedState"
-            .AdapterMarshalled -> "AdapterMarshalled"
+            .AdapterMarshaled -> "AdapterMarshalled"
         }
     }
 }
@@ -464,9 +464,9 @@ ForeignABIContract: struct {
         contract.layout = ForeignLayoutModel.AdapterTyped
         contract.ownership = ForeignOwnershipModel.AdapterOwned
         contract.errors = ForeignErrorModel.AdapterResult
-        contract.callbacks = ForeignCallbackModel.AdapterMarshalled
-        contract.async_completion = ForeignAsyncModel.AdapterMarshalled
-        contract.task_boundary = ForeignTaskBoundary.AdapterMarshalled
+        contract.callbacks = ForeignCallbackModel.AdapterMarshaled
+        contract.async_completion = ForeignAsyncModel.AdapterMarshaled
+        contract.task_boundary = ForeignTaskBoundary.AdapterMarshaled
         contract.safety = ForeignSafety.GeneratedWrapper
         contract
     }

@@ -192,7 +192,7 @@ int main(int argc, char **argv, char **envp) {
         budget_case(mode, false);
         budget_case(mode, true);
     }
-    signal_case(1, "Cancelled");
+    signal_case(1, "Canceled");
     signal_case(2, "Deadline");
     panic_case();
     flush_case();

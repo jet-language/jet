@@ -29,13 +29,13 @@ StagedPlanReport: struct {
 // input authority; the last names the violated sandbox rule.
 #Error
 StagedPlanActionError: enum {
-    Cancelled,
+    Canceled,
     Failed(String),
     UndeclaredAccess(String),
 
     message: fn(self) -> String Never! {
         if self == {
-            .Cancelled -> "staged plan action was canceled"
+            .Canceled -> "staged plan action was canceled"
             .Failed(detail) -> detail
             .UndeclaredAccess(detail) -> "undeclared staged-plan access: {detail}"
         }
@@ -346,7 +346,7 @@ recipe_staged_plan_model_error: fn(error: StagedPlanError) -> RecipeDiagnostic N
 
 recipe_staged_plan_action_error: fn(error: StagedPlanActionError) -> RecipeDiagnostic Never! {
     if error == {
-        .Cancelled -> RecipeDiagnostic.new("E1238", "staged plan action was canceled", "the finite stage produced no publishable fragment", "retry the build; cancellation leaves the previous artifact unchanged.")
+        .Canceled -> RecipeDiagnostic.new("E1238", "staged plan action was canceled", "the finite stage produced no publishable fragment", "retry the build; cancellation leaves the previous artifact unchanged.")
         .Failed(detail) -> RecipeDiagnostic.e1238_plan("staged plan action failed before publication: {detail}")
         .UndeclaredAccess(detail) -> RecipeDiagnostic.e1238_plan("staged plan action denied {detail}")
     }

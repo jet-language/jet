@@ -257,7 +257,7 @@ retryable_method: fn(method: String) -> Bool Never! {
 retryable_error: fn(error: HTTPError) -> Bool Never! {
     if error == {
         .IO(_) -> true
-        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Cancelled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> false
+        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .InvalidFraming | .UnsupportedEncoding | .Canceled | .BodyTooLarge(_) | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> false
     }
 }
 
@@ -845,7 +845,7 @@ priv build_net_portable: fn(err: NetError) -> String Never! {
         .ConnectionReset(_) -> "connection_reset"
         .NotConnected(_) -> "not_connected"
         .Timeout(_) -> "timed_out"
-        .Cancelled(_) -> "interrupted"
+        .Canceled(_) -> "interrupted"
         .Closed(detail) -> build_errno_portable(detail.os_code)
         .Other(detail) -> build_errno_portable(detail.os_code)
         .InvalidInput(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .DNS(_) -> "unmapped"
@@ -857,7 +857,7 @@ priv build_io_portable: fn(err: IOError) -> String Never! {
     if err == {
         .TimedOut(_) -> "timed_out"
         .PermissionDenied(_) -> "permission_denied"
-        .Cancelled(_) -> "interrupted"
+        .Canceled(_) -> "interrupted"
         .Closed(context) -> build_errno_portable(context.os_code)
         .Other(context) -> build_errno_portable(context.os_code)
         .InvalidInput(_) | .NotFound(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> "unmapped"
@@ -1719,11 +1719,11 @@ priv live_fill: fn(live: &LiveBody) -[Net]> Int HTTPError! {
 }
 
 // A body read's failure: its deadline passing is Timeout, a task stop is
-// `Cancelled`, and any other is IO.
+// `Canceled`, and any other is IO.
 priv live_error: fn(error: NetError) -> HTTPError Never! {
     if error == {
         .Timeout(_) -> HTTPError.Timeout{phase: "transport"}
-        .Cancelled(_) -> HTTPError.Cancelled
+        .Canceled(_) -> HTTPError.Canceled
         .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Other(_) | .InvalidInput(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .DNS(_) -> HTTPError.IO{operation: "transport"}
     }
 }
@@ -1732,7 +1732,7 @@ priv live_error: fn(error: NetError) -> HTTPError Never! {
 priv live_tls_error: fn(error: IOError) -> HTTPError Never! {
     if error == {
         .TimedOut(_) -> HTTPError.Timeout{phase: "transport"}
-        .Cancelled(_) -> HTTPError.Cancelled
+        .Canceled(_) -> HTTPError.Canceled
         .PermissionDenied(_) | .Closed(_) | .Other(_) | .InvalidInput(_) | .NotFound(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> HTTPError.IO{operation: "transport"}
     }
 }

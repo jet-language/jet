@@ -1,6 +1,6 @@
 // L8a scheduler: an OS worker runs each task to completion. A wait returns a
 // delivered stop word; no Jet frame unwinds. Linux synchronization is Sync.jet.
-// Control160: refs0 paused8 cancelled16 attention24 status32 stop40 pending48
+// Control160: refs0 paused8 canceled16 attention24 status32 stop40 pending48
 // observe56 park64 mutex72 waiters80 callbacks88 inline96 scopeFlags104
 // requestedRootCode112 capture120 openGroups128 joinedReason136
 // joinedSite144 site152. StopCleanup's opaque token
@@ -582,7 +582,7 @@ scheduler_stop_new: fn(kind: I64, message: I64) -> I64 {
 }
 
 // Takes the record, including on rejection. First stop wins, except Deadline
-// supersedes `Cancelled`. Record precedes release status.
+// supersedes `Canceled`. Record precedes release status.
 scheduler_control_publish: fn(control: I64, record: I64) -> Bool {
     kind: sync_load(record)
     // A root never unwinds a cancellation (scheduler_root_cancel_observed).
@@ -789,7 +789,7 @@ scheduler_hook_checks_arm: fn(before: I64) {
             scheduler_deliver_deadline(kind)
             jet_rt_string_drop(kind)
         }
-        scheduler_task_cancelled() -> { scheduler_deliver_cancel() }
+        scheduler_task_canceled() -> { scheduler_deliver_cancel() }
     }
 }
 
@@ -838,7 +838,7 @@ scheduler_body_leave: fn(saved: I64) { sync_store(wrapping(thread_base() + I64{6
     sync_store(wrapping(thread_base() + I64{64}), saved)
 }
 
-scheduler_task_cancelled: fn() -> Bool {
+scheduler_task_canceled: fn() -> Bool {
     control: scheduler_control_current()
     control != I64{0} && sync_load(wrapping(control + I64{16})) != I64{0}
 }
@@ -939,14 +939,14 @@ scheduler_control_inline: fn(control: I64, target: I64) {
     sync_mutex_lock(wrapping(control + I64{72}))
     previous: sync_load(wrapping(control + I64{96}))
     sync_store(wrapping(control + I64{96}), target)
-    cancelled: sync_load(wrapping(control + I64{16})) != I64{0}
+    canceled: sync_load(wrapping(control + I64{16})) != I64{0}
     sync_mutex_unlock(wrapping(control + I64{72}))
     scheduler_control_drop(previous)
-    if (cancelled && target != I64{0}) { scheduler_control_cancel(target) }
+    if (canceled && target != I64{0}) { scheduler_control_cancel(target) }
 }
 
 // A cancel the task has consumed into its own result (an AsyncEvent entry's
-// `Cancelled` report): no later wait point or shield exit delivers it again.
+// `Canceled` report): no later wait point or shield exit delivers it again.
 scheduler_control_cancel_consume: fn(control: I64) {
     sync_store(wrapping(control + I64{16}), I64{0})
 }
@@ -1073,7 +1073,7 @@ scheduler_check_loop_deadline: fn(control: I64) {
 
 scheduler_wait_point_cancel_check: fn() -> I64 {
     _ := scheduler_wait_while_paused()
-    if scheduler_task_cancelled() && !scheduler_shielded() -> scheduler_deliver_cancel()
+    if scheduler_task_canceled() && !scheduler_shielded() -> scheduler_deliver_cancel()
     jet_scheduler_native_propagate()
 }
 
@@ -1098,12 +1098,12 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     shielded: scheduler_shielded()
     if (control != I64{0}) { scheduler_observe_update(I64{2}, wait_kind) }
     if (control != I64{0}) {
-        if !shielded && scheduler_task_cancelled() {
+        if !shielded && scheduler_task_canceled() {
             scheduler_deliver_cancel()
             return jet_scheduler_native_status()
         }
         _ := scheduler_wait_while_paused()
-        if !shielded && scheduler_task_cancelled() {
+        if !shielded && scheduler_task_canceled() {
             scheduler_deliver_cancel()
             return jet_scheduler_native_status()
         }
@@ -1133,7 +1133,7 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
         scheduler_deliver_deadline(wait_kind)
         return jet_scheduler_native_status()
     }
-    if !shielded && scheduler_task_cancelled() {
+    if !shielded && scheduler_task_canceled() {
         scheduler_deliver_cancel()
         return jet_scheduler_native_status()
     }

@@ -138,9 +138,9 @@ test_rejection: fn(request: InspectRequest, session: PausedSession) -> RejectRea
 
 #Test("cancellation_budget_and_absent_result_are_fail_closed") {
     paused: test_session()
-    cancelled := test_inspect_request("request-cancelled", test_identity())
-    cancelled.cancellation = cancellation_requested("user stopped") ?? panic("cancellation")
-    assert(test_rejection(cancelled, paused) == RejectReason.Cancelled)
+    canceled := test_inspect_request("request-canceled", test_identity())
+    canceled.cancellation = cancellation_requested("user stopped") ?? panic("cancellation")
+    assert(test_rejection(canceled, paused) == RejectReason.Canceled)
     budget: EvaluationBudget.new(4, 16, 4096, 1) ?? panic("budget")
     request: test_evaluate_request("request-budget", "count", budget)
     if evaluate(paused, request, evaluator_completed(test_identity(), "scope-1", None, test_usage(1, 1, 1, 2))) == {

@@ -274,11 +274,11 @@ parser_loop_body_can_break: fn(statements: [Stmt]) -> Bool Never! {
     parser_loop_body_can_break_inner(statements, [String]{}, true)
 }
 
-parser_loop_body_can_break_inner: fn(statements: [Stmt], nested_labels: [String], allow_unlabelled: Bool) -> Bool Never! {
+parser_loop_body_can_break_inner: fn(statements: [Stmt], nested_labels: [String], allow_unlabeled: Bool) -> Bool Never! {
     loop stmt in statements {
         can_break := if stmt == {
-            .Break(_) -> allow_unlabelled
-            .BreakValue(_, _) -> allow_unlabelled
+            .Break(_) -> allow_unlabeled
+            .BreakValue(_, _) -> allow_unlabeled
             .BreakLabel(name, _) -> {
                 nested: loop nested_label in nested_labels {
                     if nested_label == name {
@@ -297,12 +297,12 @@ parser_loop_body_can_break_inner: fn(statements: [Stmt], nested_labels: [String]
             }
             .Switch(_, arms, else_body, _) -> {
                 found_in_arms: loop arm in arms {
-                    if parser_loop_body_can_break_inner(arm.body, nested_labels, allow_unlabelled) {
+                    if parser_loop_body_can_break_inner(arm.body, nested_labels, allow_unlabeled) {
                         break true
                     }
                 } ?? false
                 if else_body == {
-                    .Val(body) -> found_in_arms || parser_loop_body_can_break_inner(body, nested_labels, allow_unlabelled)
+                    .Val(body) -> found_in_arms || parser_loop_body_can_break_inner(body, nested_labels, allow_unlabeled)
                     .None -> found_in_arms
                 }
             }

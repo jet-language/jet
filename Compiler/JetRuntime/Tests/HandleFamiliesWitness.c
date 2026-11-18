@@ -44,7 +44,7 @@ extern Text *jet_rt_handle_display_jet_ws_error(WsError *);
 extern Message *jet_rt_handle_clone_jet_ws_message(Message *);
 extern void jet_rt_handle_drop_jet_ws_message(Message *);
 extern bool jet_rt_handle_eq_jet_ws_message(Message *,Message *);
-extern Failure *jet_rt_record_new_jet_task_failure_cancelled(void);
+extern Failure *jet_rt_record_new_jet_task_failure_canceled(void);
 extern Failure *jet_rt_record_new_jet_task_failure_deadline_blown(void);
 extern Failure *jet_rt_record_new_jet_task_failure_panicked(Text *);
 extern int64_t jet_rt_record_tag_jet_task_failure(Failure *);
@@ -137,14 +137,14 @@ static void failure_cases(void) {
     const char reason[]="\xcc\x81""panic \"x\"\n\0",raw[]="Panicked(\xcc\x81""panic \"x\"\n\0)";
     for(int64_t kind=0;kind<3;++kind) {
         Text *input=jet_rt_string_from_static(reason,(int64_t)sizeof(reason)-1);
-        Failure *a=kind==0?jet_rt_record_new_jet_task_failure_cancelled():kind==1?jet_rt_record_new_jet_task_failure_deadline_blown():jet_rt_record_new_jet_task_failure_panicked(input),*b=jet_rt_handle_clone_jet_task_failure(a);
+        Failure *a=kind==0?jet_rt_record_new_jet_task_failure_canceled():kind==1?jet_rt_record_new_jet_task_failure_deadline_blown():jet_rt_record_new_jet_task_failure_panicked(input),*b=jet_rt_handle_clone_jet_task_failure(a);
         assert(a!=b && jet_rt_record_tag_jet_task_failure(a)==kind && jet_rt_handle_eq_jet_task_failure(a,a) && jet_rt_handle_eq_jet_task_failure(a,b));
         Text *getter=NULL;
         if(kind==2) {
             assert(a->reason==input && b->reason==input && owners(input)==3);getter=jet_rt_record_get_jet_task_failure_panicked(a);assert(getter==input && owners(input)==4);
             expect_bytes(jet_rt_handle_show_jet_task_failure(a),raw,(int64_t)sizeof(raw)-1);expect_bytes(jet_rt_handle_display_jet_task_failure(a),raw,(int64_t)sizeof(raw)-1);
             expect(jet_rt_handle_debug_jet_task_failure(a),"Panicked(\"\\u{301}panic \\\"x\\\"\\n\\0\")");Text *shared=b->reason;b->reason=flipped(shared);assert(!jet_rt_handle_eq_jet_task_failure(a,b));jet_rt_string_drop(b->reason);b->reason=shared;
-        } else { const char *s=kind==0?"Cancelled":"DeadlineBlown";expect(jet_rt_handle_show_jet_task_failure(a),s);expect(jet_rt_handle_debug_jet_task_failure(a),s);expect(jet_rt_handle_display_jet_task_failure(a),s); }
+        } else { const char *s=kind==0?"Canceled":"DeadlineBlown";expect(jet_rt_handle_show_jet_task_failure(a),s);expect(jet_rt_handle_debug_jet_task_failure(a),s);expect(jet_rt_handle_display_jet_task_failure(a),s); }
         jet_rt_string_drop(input);b->kind=(kind+1)%3;assert(!jet_rt_handle_eq_jet_task_failure(a,b));b->kind=kind;
         watch(a,16,8);watch(b,16,8);if(kind==2) {watch_text(a->reason);watch_text(b->reason);assert(owners(getter)==3);}
         unsigned before=intercepted;jet_rt_handle_drop_jet_task_failure(a);jet_rt_handle_drop_jet_task_failure(b);
@@ -170,7 +170,7 @@ static void lane_cases(void) {
 int main(int argc,char **argv) {
     assert(jet_rt_alloc_check_observe(0, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
-    if(argc>1) { if(strcmp(argv[1],"wrong-failure-variant")==0) (void)jet_rt_record_get_jet_task_failure_panicked(jet_rt_record_new_jet_task_failure_cancelled());else return 2;assert(!"stop returned"); }
+    if(argc>1) { if(strcmp(argv[1],"wrong-failure-variant")==0) (void)jet_rt_record_get_jet_task_failure_panicked(jet_rt_record_new_jet_task_failure_canceled());else return 2;assert(!"stop returned"); }
     const char *env[]={"invalid environment variable name","invalid environment variable value","environment contains a name or value that is not valid Unicode"},*status[]={"Running","Paused","CancelRequested"};
     unit_cases(env,3,jet_rt_handle_clone_env_error,jet_rt_handle_drop_env_error,jet_rt_handle_eq_env_error,jet_rt_handle_show_env_error,jet_rt_handle_debug_env_error,jet_rt_handle_display_env_error);
     unit_cases(status,3,jet_rt_handle_clone_jet_task_status,jet_rt_handle_drop_jet_task_status,jet_rt_handle_eq_jet_task_status,jet_rt_handle_show_jet_task_status,jet_rt_handle_debug_jet_task_status,jet_rt_handle_display_jet_task_status);

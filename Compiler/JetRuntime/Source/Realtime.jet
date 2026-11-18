@@ -97,7 +97,7 @@ realtime_big_product: fn(result: I64, left: I64, low: I64, high: I64, temporary:
     quotient
 }
 
-realtime_cancelled: fn(stream: I64) -> Bool {
+realtime_canceled: fn(stream: I64) -> Bool {
     sync_load(wrapping(sync_load(wrapping(stream + RT_CONTROL)) + I64{16})) != I64{0}
 }
 
@@ -166,7 +166,12 @@ realtime_join: fn(stream: I64) {
     realtime_join(stream)
 }
 
-#Export(c) jet_rt_is_cancelled: fn(stream: I64) -> Bool { realtime_cancelled(stream) }
+#Export(c) jet_rt_is_canceled: fn(stream: I64) -> Bool { realtime_canceled(stream) }
+
+// Seed bridge, deleted once a seed built from this tree is the seed: the
+// seed that builds this runtime's compiler routes `core.rt.__is_canceled`
+// to the British export name.
+#Export(c) jet_rt_is_cancelled: fn(stream: I64) -> Bool { jet_rt_is_canceled(stream) }
 
 #Export(c) jet_rt_next_deadline: fn(stream: I64) -> I64 {
     scratch: sync_load(wrapping(stream + RT_SCRATCH))
@@ -285,13 +290,13 @@ rt_realtime_worker_address: fn() -> I64 {
     sync_mutex_lock(wrapping(scratch + RT_MATH_MUTEX))
     deadline := realtime_add(start, jet_rt_native_realtime_deadline_offset(rate, frames, I64{1}, I64{0}, scratch))
     sync_mutex_unlock(wrapping(scratch + RT_MATH_MUTEX))
-    loop !realtime_cancelled(stream) {
+    loop !realtime_canceled(stream) {
         identity: sync_load(wrapping(stream + RT_DEADLINE_IDENTITY))
         remaining: realtime_remaining(deadline, realtime_now_ns())
         // Persistent park is NOT on the control's cancel-wake list. Rust cancel
         // waits for sleep's deadline before the callback-boundary check.
         if (remaining > I64{0}) { sync_park(wrapping(scratch + RT_SLEEP_PARK), remaining) }
-        if realtime_cancelled(stream) -> break
+        if realtime_canceled(stream) -> break
         lateness: realtime_remaining(realtime_now_ns(), identity)
         if (lateness > I64{0}) {
             realtime_counter_add(wrapping(stream + RT_MISSED), I64{1})

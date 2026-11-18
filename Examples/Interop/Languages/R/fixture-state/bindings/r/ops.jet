@@ -40,7 +40,7 @@ Session: struct {
 RError: enum {
     NotRunning,
     Timeout,
-    Cancelled,
+    Canceled,
     Protocol,
     CommandFailed,
     Limit,
@@ -59,7 +59,7 @@ cancel: fn(session: Session) { abi.cancel(session.value) }
 decode_response: fn(raw: String, code: Int) -> Dyn RError! {
     if code == 1 -> return Err(RError.NotRunning)
     if code == 2 -> return Err(RError.Timeout)
-    if code == 3 -> return Err(RError.Cancelled)
+    if code == 3 -> return Err(RError.Canceled)
     if code == 5 -> return Err(RError.Limit)
     if code != 0 -> return Err(RError.Protocol)
     response := json.parse(raw) ?? return Err(RError.Protocol)

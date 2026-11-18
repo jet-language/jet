@@ -14,7 +14,7 @@ state_name: fn(delivery: &&Delivery) -> String {
         .Delivering -> { return "Delivering" }
         .Delivered -> { return "Delivered" }
         .DeadLettered -> { return "DeadLettered" }
-        .Cancelled -> { return "Cancelled" }
+        .Canceled -> { return "Canceled" }
     }
     return "unknown"
 }
@@ -77,9 +77,9 @@ run: fn() {
     retry_done: state_name(retry_copy)
     print("retry_done:{retry_done}")
 
-    cancelled_handle: runtime.send(endpoint, "cancel", key: "cancel") ?? panic("cancel source")
-    cancelled: cancelled_handle.cancel() ?? panic("cancel")
-    cancel_state: state_name(cancelled)
+    canceled_handle: runtime.send(endpoint, "cancel", key: "cancel") ?? panic("cancel source")
+    canceled: canceled_handle.cancel() ?? panic("cancel")
+    cancel_state: state_name(canceled)
     print("cancel:{cancel_state}")
 
     dead_handle: runtime.send(endpoint, "dead", key: "dead") ?? panic("dead source")

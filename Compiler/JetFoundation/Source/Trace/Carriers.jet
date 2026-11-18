@@ -150,7 +150,7 @@ TraceTask: struct {
     parent: U64,
     state: String,
     wait: String,
-    cancelled: Bool,
+    canceled: Bool,
     symbol: JetSymbolRef,
 }
 
@@ -362,7 +362,7 @@ trace_allocation_to_json: fn(value: TraceAllocation) -> CanonicalJSON JetTraceEr
 }
 
 trace_task_to_json: fn(value: TraceTask) -> CanonicalJSON JetTraceError! {
-    jettrace_object([CanonicalJSONField]{jettrace_field("cancelled", .Bool(value.cancelled)), jettrace_field("id", jettrace_uint(value.id)), jettrace_field("parent", jettrace_uint(value.parent)), jettrace_field("state", .String(value.state.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("wait", .String(value.wait.copy()))})
+    jettrace_object([CanonicalJSONField]{jettrace_field("cancelled", .Bool(value.canceled)), jettrace_field("id", jettrace_uint(value.id)), jettrace_field("parent", jettrace_uint(value.parent)), jettrace_field("state", .String(value.state.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("wait", .String(value.wait.copy()))})
 }
 
 trace_lock_to_json: fn(value: TraceLock) -> CanonicalJSON JetTraceError! {

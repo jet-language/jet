@@ -55,10 +55,10 @@ Reservation: struct {
 // stop the workflow, and read-only reporting remains legal in each terminal state.
 Workflow: struct {
     state {
-        Pending -> Success, Failure, Cancelled
+        Pending -> Success, Failure, Canceled
         Success
         Failure
-        Cancelled
+        Canceled
         Orphan
     }
 
@@ -68,13 +68,13 @@ Workflow: struct {
 
     fail: fn(self: &&Workflow.Pending) -> Workflow.Failure { self }
 
-    cancel: fn(self: &&Workflow.Pending) -> Workflow.Cancelled { self }
+    cancel: fn(self: &&Workflow.Pending) -> Workflow.Canceled { self }
 
     success_report: fn(self: Workflow.Success) -> String { "success" }
 
     failure_report: fn(self: Workflow.Failure) -> String { "failure" }
 
-    cancel_report: fn(self: Workflow.Cancelled) -> String { "cancelled" }
+    cancel_report: fn(self: Workflow.Canceled) -> String { "canceled" }
 }
 
 // Self-loops and reopen edges keep their source state nonterminal.
@@ -115,9 +115,9 @@ run_terminal_outcomes: fn() {
     failure = failure.fail()
     print(failure.failure_report())
 
-    cancelled := Workflow.begin()
-    cancelled = cancelled.cancel()
-    print(cancelled.cancel_report())
+    canceled := Workflow.begin()
+    canceled = canceled.cancel()
+    print(canceled.cancel_report())
 
     session := Session.open()
     session = session.heartbeat()

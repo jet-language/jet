@@ -68,8 +68,8 @@ PausedDebugSessionAdapter: struct {
         if request.identity != self.identity || request.scope_id != self.scope_id {
             return evaluator_failed(request.identity, request.scope_id, "paused debugger request does not match the published stop", usage)
         }
-        if request.cancellation.requested || self.state == .Cancelled {
-            return evaluator_cancelled(request.identity, request.scope_id, usage)
+        if request.cancellation.requested || self.state == .Canceled {
+            return evaluator_canceled(request.identity, request.scope_id, usage)
         }
         if self.state != .Paused {
             return evaluator_failed(request.identity, request.scope_id, "paused debugger is no longer stopped", usage)
@@ -107,7 +107,7 @@ PausedDebugSessionAdapter: struct {
     }
 
     cancel: fn(&self, host: &PausedEvaluateHost, reason: String) PausedEvaluateError! {
-        self.state = .Cancelled
+        self.state = .Canceled
         if self.host_is_current(host) {
             if host.cancel_session(reason) == .Err(failure) {
                 return Err(paused_error(failure.display()))

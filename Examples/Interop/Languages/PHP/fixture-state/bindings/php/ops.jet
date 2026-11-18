@@ -26,7 +26,7 @@ PhpPool: struct {
 PhpError: enum {
     NotRunning,
     Timeout,
-    Cancelled,
+    Canceled,
     Protocol,
     CommandFailed,
     Limit,
@@ -45,7 +45,7 @@ cancel: fn(pool: PhpPool) { abi.cancel(pool.value) }
 decode_response: fn(raw: String, code: Int) -> Dyn PhpError! {
     if code == 1 -> return Err(PhpError.NotRunning)
     if code == 2 -> return Err(PhpError.Timeout)
-    if code == 3 -> return Err(PhpError.Cancelled)
+    if code == 3 -> return Err(PhpError.Canceled)
     if code == 5 -> return Err(PhpError.Limit)
     if code != 0 -> return Err(PhpError.Protocol)
     response := json.parse(raw) ?? return Err(PhpError.Protocol)

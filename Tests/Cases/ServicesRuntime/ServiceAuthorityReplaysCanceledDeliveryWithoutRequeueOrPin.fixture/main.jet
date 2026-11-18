@@ -14,12 +14,12 @@ run: fn() {
     endpoint: tree.worker("worker", worker, capacity: 1) ?? panic("worker")
     tree.start() ?? panic("start")
     if phase == "send" {
-        accepted: runtime.send(endpoint, "cancelled", key: "cancelled") ?? panic("send")
-        cancelled: accepted.cancel() ?? panic("cancel")
-        state: cancelled.status() ?? panic("cancel status")
+        accepted: runtime.send(endpoint, "canceled", key: "canceled") ?? panic("send")
+        canceled: accepted.cancel() ?? panic("cancel")
+        state: canceled.status() ?? panic("cancel status")
         print("send:{state.show()}")
     } else {
-        recovered: runtime.send(endpoint, "cancelled", key: "cancelled") ?? panic("recover")
+        recovered: runtime.send(endpoint, "canceled", key: "canceled") ?? panic("recover")
         // copy: status consumes its handle and the events read below still needs it.
         state: (recovered.copy()).status() ?? panic("recover status")
         history: recovered.events() ?? panic("recover events")
