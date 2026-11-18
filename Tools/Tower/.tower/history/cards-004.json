@@ -115100,6 +115100,1710 @@
         }
       ],
       "retiredAt": "2026-11-18T02:42:50.900Z"
+    },
+    {
+      "id": "c0iuv3zr",
+      "num": 5976,
+      "title": "Map: Core data, collections and codecs",
+      "body": "Destination: Collections and codecs are linear-time, one-meaning and typed (DataTree/Dyn, #Codable).\nNotes: Batch C04 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && JET=$JET Tools/agent/jet-env jet test Core (collections, json, encoding, data suites) plus serde/* goldens. Order: #3236 #3280 #4295 #4306 #4472 #4602 #4626 #4667 #4884 #3271 #3272 #4412 #4499 #4520 #4682 #4739 #4757 #4781 #4789 #4828 #4886 #4611.\nDecisions so far: D-LIST-RETAIN1 (ratified=A) on #4412; D-KEY-TRAITS1 (ratified=A) on #4499; D-ORDER-BY1 (ratified=A) on #4499; D-MAPLIT-DUP1 (ratified=A) on #4626; D-JSON-READER1 (open) on #4739; D-DATATREE-RULES1 (ratified=A) on #4602; D-BINARY-CANONICAL1 (ratified=A) on #4472; D-ONE-CODECS1 (ratified=A) on #3236\nFog: no criteria yet on #4667 #4682 #4884 #4886 #4499 #4739 #4611 #4602 #4781 #4789 #4828 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed (Map card replaced). New cards: #6870, #6871, #6872, #6873, #6874, #6875, #6876, #6877, #6878, #6879. Added to existing cards: #3593 (#3593 c16-#3593 c20), #3549 (#3549 c17, #3549 c18), #6700 (#6700 c10), #4022 (#4022 c19-#4022 c21), #6518 (#6518 c7), #6851 (#6851 c13, #6851 c14), #6853 (#6853 c8), #6846 (#6846 c12), #4761 (#4761 c3), #6445 (#6445 c10), #6366 (#6366 c44), #3665 (#3665 c24), #3262 (#3262 c32), #3325 (#3325 c20, #3325 c21), #3317 (#3317 c45-#3317 c47), #3329 (#3329 c24), #3236 (#3236 c29-#3236 c32), #4695 (#4695 c5, #4695 c6), #4268 (#4268 c59, #4268 c60). Merged: c34 into #6637 c14, c37 into #4022 c2. c76 met on dev."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t18b landed G8Fix-16 (0a995af312..0efcf91a49): the read-into memory measurement is restored with a Jet twin, Tools/perf/read-into/Memory.jet, paired with memory.mjs through the gauntlet tool entry read-into-memory (parity PASS, ScriptPairing ok). c112 stays open until the paired two-program cell (read(4096) loop against read_into) is measured in the manifest and read_into strictly wins."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t17a landed G8Fix-6 (e75850d064..c2cecce162): the c112 consumer half (HTTP server, HTTP client and the TLS record reader read through read_into). c112 stays open for its paired two-program cell (read(4096) loop against read_into) in the measurement manifest, with read_into strictly winning. The memory.mjs tool was left out (ScriptPairing) and needs a Jet twin or a Jet-only measurement."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "t16a landed G8Fix-5 (8327f5ae47..e75850d064): c112 first half, read_into(buffer, limit) on TCPStream, UnixStream, TLS streams and FileReader, with golden Examples/Network/ReadInto. Tools/perf/read-into/memory.mjs was left out (ScriptPairing); it is saved unlanded in G8Fix's lane. c112 stays open for its second half."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Deadline triage, 2026-11-10: #5976 is G3, not a 15:00 goal. TlsLead moved to G1/G4 work after c111 (TlsLead-58). c110 (the wss server transport: option A, the runtime WsConn over a checked Jet closure transport, was proposed) and c80-c82 (the zero-arg cycle replay design) are deferred."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c11 ruling (Main, within the ratified D-ONCE-VERB1=A): List replace is the by-value swap that the ratified ballot shows (names.replace(\"Bob\", \"Rob\"), \"List: swap first equal value\"). xs.replace(old, new) -> Bool swaps the first equal element in place and reports whether it found one. The index form replace(index, value) duplicates indexed assignment xs[i] = v (I8), so it is removed and its callers migrate in one cutover. The stdlib-api-laws.md table row, which says swap at an index, is corrected to match the decision. TlsLead-2 is building it."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c13 is parked. My earlier in-scope ruling is withdrawn. The ratified D-ENV-MUTATE1 ships the fallible set as an edition-gated correction and keeps set () on existing editions (release-policy.md:123-124), and the cases env_overlay/old_edition_invalid_set_{uses_exact_runtime_error,names_its_call_site} pin that. c13 can be done only in a new edition, which is an owner gate."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c42: the internal part is done. TlsLead-38 landed in ecf04d985a, and tcp_reads_reuse_one_buffer_and_return_only_the_bytes_read PASSes: one reused buffer per stream, and a list the caller holds stays unchanged. The public read-into surface waits on D-NET-READINTO1, so c42 stays open."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c91 is not met: the Set type's methods (len, has, clear, shuffle, max, from, to_list...) still lower to runtime builtins (Compiler/JetIR/Source/RouteBuiltin.jet:52-212 jet_set_* and HashSet::clear; BuildSets.jet:520+), not the Jet set implementation. The core.collections.set module itself has no dispatcher row. c90 has a SUB in train 3 (Main-5976c90: the core_set_foundations cases gain O1 and O2 steps)."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c54-c58 probe (seed a0_042, dev e4096a0f3b, Examples/Systems/Terminal/Progress.jet). The golden passes on o0, o1 and o2 but pins only stdout. With stderr not a TTY, progress writes nothing at all (empty stderr at O0, O1 and O2), which breaks c56's 'non-TTY output emits one line per update'. On a pty it redraws one line per pull, e.g. '\\rwork 33% 1/3', then 2/3 and 3/3, plus step 1/3..3/3 and break 1/3. So c54 and c55 hold on a TTY, but no committed test sees the progress text. Next: make non-TTY emit one line per update, then pin both modes in a case (a pty step and a piped step) on O0, O1 and O2."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c81: Examples/features/collections/lazy_cycle.jet -> Examples/Collections/LazyCycle.jet [new path does not exist yet: the criterion still has to create it]; c81: Examples/features/expected/collections/lazy_cycle.out -> Examples/Collections/LazyCycle.out [new path does not exist yet: the criterion still has to create it]; c87: Examples/features/collections/destructive_iter.jet -> Examples/Collections/DestructiveIter.jet [new path does not exist yet: the criterion still has to create it]; c87: Examples/features/expected/collections/destructive_iter.out -> Examples/Collections/DestructiveIter.out [new path does not exist yet: the criterion still has to create it]."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); the AGENTS.md Performance gate (Jet/peer < 1.00 with no Rust band, then the asm-parity ceiling); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 40 criteria from archived #41, #1402, #1493, #1584, #1886, #2853, #3041, #3231, #3260, #3316, #3371, #3545, #4462: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at 94dacfc354 in GoldC-39 (patch row: criterion/count 2): yaml_hostile depth golden follows EncodingLimits.safe() max_depth 256 (encoding-decisions.md:105-108), row removed; json_parser_is_rfc8259_complete re-reasoned verify-intent (insertion order + exact Number lexeme, removed EncodingError.message)"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at 94dacfc354 in GoldC-37 (patch row: criterion/count 1): published-schema unknown-field holder (D-BOUND-EVOLVE1) unbuilt: generated decode keeps no unknown keys; every tier prints {\"known\":7}"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5979 \"Map: Core time\" into this card (Core library map: one map for Core's per-area defects); its 3 open item(s) are carried as \"(was #5979)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6007 \"Map: Core text and Unicode\" into this card (Core library map: one map for Core's per-area defects); its 3 open item(s) are carried as \"(was #6007)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6008 \"Map: Core net and HTTP\" into this card (Core library map: one map for Core's per-area defects); its 6 open item(s) are carried as \"(was #6008)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5978 \"Map: Core naming and surface cleanup (one name per operation, private __ internals)\" into this card (Core library map: one map for Core's per-area defects); its 15 open item(s) are carried as \"(was #5978)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5975 \"Map: Core math and numbers\" into this card (Core library map: one map for Core's per-area defects); its 4 open item(s) are carried as \"(was #5975)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #5977 \"Map: Core files, process and sys\" into this card (Core library map: one map for Core's per-area defects); its 8 open item(s) are carried as \"(was #5977)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4886 \"List.replace does not have the ratified D-ONCE-VERB1 swap meaning (it clones to a new list)\" (CardTrim 2026-10-28: single-root bug step of map #5976 (Map: Core data, collections and codecs); 0 criteria, 0 ratified decisions). Body: Found by CopyPareto1. Ratified D-ONCE-VERB1=A (Docs/spec/syntax-decisions.md:7049): 'replace keeps only the List swap meaning'. Today List.replace is a pure clone-to-new-list in both the registry and the Rust Prelude (~Prelude:3041), not the in-place swap that returns the old value. Fix both tiers to the ratified meaning (in-place replace returning the old element) and migrate every caller in one cutover; regression on both tiers. Check the exact ratified signature first (Tower card for D-ONCE-VERB1)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4884 \"List.sort_by must be O(n log n) on the JetIR route\" (CardTrim 2026-10-28: single-root bug step of map #5976 (Map: Core data, collections and codecs); 0 criteria, 0 ratified decisions). Body: Found by CopyPareto1 (goal 10), confirmed by NativeReview2 / NativeLead24-2: native O0 List.sort_by computes insertion positions over an index permutation (O(n^2)) and then allocates a replacement element buffer once (Lower/Combinators.jet:523-698/713); it may have replaced an older O(n log n) canonical index-merge. Every native program sorting a large list pays quadratic time. Main-admitted fix: make the canonical List.sort_by kernel a stable O(n log n) sort by reusing the existing canonical stable index-merge + swap-cycle (no second sort implementation), same stability / comparator semantics on every tier; regression with a large list + a stability case + a timing bound. Order: CopyPareto1"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4828 \"core.data.sketch: native shared-clone (Arc<Mutex>) violates ratified D-COPY-DEFAULT1=A (sketches are plain values)\" (CardTrim 2026-10-28: single-root bug step of map #5976 (Map: Core data, collections and codecs); 0 criteria, 0 ratified decisions). Body: I9 divergence, pre-existing. core.data.sketch {cms, hll, reservoir, tdigest}: the Core source new factories build ordinary value records (a clone copies), while the native seed Sketch.rs uses Arc<Mutex> with SHARED clone semantics (a clone aliases the same sketch), and no source types{} registration exists, so the shipped behavior is the native sharing. Runtime keeps native carriers preserving it for now. Owner decision (ballot D-SKETCH-CLONE1, later): which clone semantics the public sketch types have, and whether the source factories are dead or must change. Raised by CoreReview4."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4789 \"data/plot row_type names differ by tier (I9): Rust type_name vs Jet row names vs none\" (CardTrim 2026-10-28: single-root bug step of map #5976 (Map: Core data, collections and codecs); 0 criteria, 0 ratified decisions). Body: The data/plot row_type naming differs by execution tier: native uses Rust std::any::type_name::<T>() (fully qualified Rust paths), comptime builds checked Jet row names, and the interpreter has no generic type-name marshal at all. The plot factory and the data Rows constructor stay native (uncredited) until a single per-tier type-name contract exists; other plot/data rows port normally (CoreReview4)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4781 \"Lenient untyped JSON decode is declared pure but reads the wall clock and writes to stderr\" (CardTrim 2026-10-28: single-root bug step of map #5976 (Map: Core data, collections and codecs); 0 criteria, 0 ratified decisions). Body: D-JSON3's lenient untyped decode ships with no effects, yet the seed reads SystemTime::now (JSONDataTree.rs:159) and writes an audit line to stderr (eprintln). The Core port (JsonStreams7) keeps today's effect row and ledgers the hidden Time/IO as a truthfulness gap. Fixing it like the JobQueue A' ruling (add the effects; migrate callers) changes public effects, so it needs an owner decision."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4739 \"json.JSONReader / jsonl.JSONLReader: one public type name, two next() signatures (DataEvent for text, DataEvent? for files)\" (CardTrim 2026-10-28: single-root bug step of map #5976 (Map: Core data, collections and codecs); 0 criteria, 0 ratified decisions). Body: Found by CorelibX3 (2026-10-07) while porting the JSON/JSONL streams to Jet. Core.jet's text reader JSONReader(text).next returns DataEvent, while the native file-handle JSONReader.next returns DataEvent?; explicit parameters typed json.JSONReader mean the file handle. One public name has two shapes, so no single Jet class can express it, and users can't tell from the name which next() they get (I8: one mechanism). The port keeps today's behavior: the file-handle reader stays a native nominal boundary (dispatch only; all parse, limit, state and error policy in Jet), recorded in leaves.d. Needed: check the ratified streams/data decisions for the reader contract. Then either make both readers "
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4682 \"core.collections Counter/OrderedMap/Chain and heap helpers copy on every operation (quadratic)\" (CardTrim 2026-10-28: single-root bug step of map #5976 (Map: Core data, collections and codecs); 0 criteria, 0 ratified decisions). Body: Source read at dev 595e0dca3: every Counter inc and OrderedMap map_set is an O(n) scan plus a full copy, so counting n words is O(n^2); heap helpers copy the list on each push and are Int-only. Back them with the built-in [K:V] map or retire them for [K:V] methods; heap helpers take &[Int] and sift in place; add a 10^5-insert scale budget row."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4667 \"json.parse is about 460 times slower than V8 on a 2.4 MB document\" (CardTrim 2026-10-28: single-root bug step of map #5976 (Map: Core data, collections and codecs); 0 criteria, 0 ratified decisions). Body: Proven: 30,000 records, 2,366,671 bytes; default jet run parse about 12.3 s wall versus Node JSON.parse 26.5 ms (json_probe.jet, node_json.js). Fix: byte-level parser without per-character String/DataTree churn, or a native provider; add a JSON throughput budget (for example 50 MB/s on this shape) to the performance gate. Related: csv.to_string and JSONWriter grow a String by self-interpolation in a loop (csv.jet:77-80, json.jet:208-212), a quadratic copy; collect and join once."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4611 \"Owner ballot candidate: json.parse_with_limits / parse_allow_duplicates_with_limits (custom depth/size limits on parse, mirroring patch_with_limits)\" (CardTrim 2026-10-28: single-root idea step of map #5976 (Map: Core data, collections and codecs); 0 criteria, 0 ratified decisions). Body: Found 2026-10-05 by PortIntegrate: the port's Jet sources (seed shared by port/tools and port/compiler) called core.encoding.json.parse_with_limits and parse_allow_duplicates_with_limits, which exist only as unregistered functions in Core/encoding/json.jet (not in Prelude/Core.jet exports, CoreModuleExports, CoreCallRows, docs or conformance). Main ruled: callers use parse()/parse_allow_duplicates() (defaults depth 256, 16 MiB items) and the unregistered functions are removed; if a real caller needs custom limits, ballot the API (precedent: patch_with_limits)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4602 \"One DataTree: owner rulings on duplicate keys, exact numbers, strict typed text and bytes\" (CardTrim 2026-10-28: single-root task step of map #5976 (Map: Core data, collections and codecs); 1 criteria, 1 ratified decisions). Body: Owner rulings 2026-10-05 (from Idiom-Runtime3's comparison $JET_STATE_ROOT/scratch/Idiom-Runtime3/DATATREE-DIFF.md of the ported runtime carrier vs the compiler built-in DataTree; I8: one DataTree, the built-in). (1) Duplicate object keys are a parse error; the explicit parse_allow_duplicates option keeps the later value. (2) Numbers keep their exact text: a Number variant holds the original lexeme (1.50 re-renders as 1.50; 1e400 and integers beyond Int are kept exactly); reading as Int/Float checks range at that point. (3) Decoding is strict: JSON \"42\" into an Int field is an error. (4) CBOR (and other binary) byte strings decode to a Bytes variant. Reconcile Docs/spec/reference/core-libra"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4412 \"Core List: keep only some items, in place (D-LIST-RETAIN1)\" (CardTrim 2026-10-28: single-root task step of map #5976 (Map: Core data, collections and codecs); 2 criteria, 1 ratified decisions). Body: Add an in-place stable retain to Core List, as ratified in D-LIST-RETAIN1. Ports of Vec::retain must not allocate a new list. No new ballot is needed. Acceptance: retain keeps order, removes in place, and a golden checks no reallocation on the performance cell. Earlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired): Found 2026-10-03 by the tools port (TOOLS-N10 notebook trust store, ToolsLead-1). Core and Foundation lists have push/pop/remove/reverse/update_first but no in-place stable retain (filter by predicate keeping order), truncate or swap. Ports of Rust Vec::retain must drain by ownership into a new vector (linear, on"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "(was #4412) Core List: keep only some items, in place (D-LIST-RETAIN1): [#4513] D-ARRAY-INIT1=A: [T#N].filled(value) and [T#N].from_fn(make) write direct slots, with copy-law refusal and exact partial-initialization cleanup on every backend.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6870 c1: in-place list editing is its own stream; retain is LISTED c2",
+          "at": "2026-11-15T03:03:54.624Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 2,
+          "text": "(was #4602) One DataTree: owner rulings on duplicate keys, exact numbers, strict typed text and bytes",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6877 c1: the DataTree rulings go to the DataTree card (split into DTREE c1-c2)",
+          "at": "2026-11-15T03:03:55.985Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 3,
+          "text": "(was #4611) Owner ballot candidate: json.parse_with_limits / parse_allow_duplicates_with_limits (custom depth/size limits on parse, mirroring patch_with_limits)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6877 c3: parse_with_limits exists (Core/Encoding/Json.jet:98); the allow-duplicates form still lacks limits",
+          "at": "2026-11-15T03:03:57.077Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 6,
+          "text": "(was #4739) json.JSONReader / jsonl.JSONLReader: one public type name, two next() signatures (DataEvent for text, DataEvent? for files)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6877 c4: reader shape goes to the DataTree card",
+          "at": "2026-11-15T03:03:58.384Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 7,
+          "text": "(was #4781) Lenient untyped JSON decode is declared pure but reads the wall clock and writes to stderr",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6877 c5: decode purity goes to the DataTree card",
+          "at": "2026-11-15T03:03:59.613Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 8,
+          "text": "(was #4789) data/plot row_type names are identical on O0, O1, O2 and web, with a golden.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Already true on dev 76955986d0 (TlsLead3 sweep, 2026-11-10, t6c compiler). `jet test Compiler --profile golden Examples/Data/Analysis/DataCore` passes on O0/O1/O2 (3/0). The golden pins the data.schema(rows) row type names team:String, minutes:Float and generic:value:Int, built from sema's checked row type. On web, `jet build --os=web Examples/Data/Analysis/DataCore.jet` then `node app.js` matches DataCore.out with no diff. Core's plot schema structs no longer carry a row_type. The stale IR_RECORD_SCHEMAS row_type fields at RuntimeRoutes.jet:1522-1523 are being removed by TlsLead3 as a defect.",
+          "at": "2026-11-10T11:26:55.162Z"
+        },
+        {
+          "n": 9,
+          "text": "(was #4828) core.data.sketch values are plain values under D-COPY-DEFAULT1=A: copying a sketch copies its state, with no shared-clone handle, proven by a golden.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB TlsLead-49. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). sketch copy golden PASS on none/basic/full.",
+          "at": "2026-11-10T10:26:06.307Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #4884) List.sort_by must be O(n log n) on the JetIR route",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB TlsLead-44. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). case list_sort_by_makes_n_log_n_comparisons PASS.",
+          "at": "2026-11-10T10:26:03.583Z"
+        },
+        {
+          "n": 11,
+          "text": "(was #4886) List.replace does not have the ratified D-ONCE-VERB1 swap meaning (it clones to a new list)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "TlsLead-52 (65b8498f71) landed on dev 1e1492c924 (train t8c, 76955986d0..1e1492c924), run with the t8c-built compiler: PASS golden tests/run/CollectionsAndMethods/ListReplaceValue, ListSurface, PatternsAndFields/BuiltinDispatchReadsTheFieldReceiverType, Examples/Collections/PopTable; PASS cases --filter=collection_pop_table; CoreSourceRows --check rc 0.",
+          "at": "2026-11-10T12:14:12.086Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #5977) (was #4378) Core Path: lossless native OS paths (D-OSPATH-NATIVE1): [#4479] Canonical follow-symlink stat producer with exact identity and ns stamps. No-follow authority operations are preserved.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3593 c16: Stat belongs on the core.files card",
+          "at": "2026-11-15T03:04:00.741Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 13,
+          "text": "(was #5977) (was #4427) Core sys.set declared Never! but the leaf returns a Result: a golden calls sys.set and handles the EnvError result.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3549 c17: env belongs on the CoreLib system card",
+          "at": "2026-11-15T03:04:01.942Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 14,
+          "text": "(was #5977) (was #4750) Source-owned core.files stat skips fault injection that the old native stat honored (and exists/is_dir never had it)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB TlsLead-48. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). case stat_exists_and_is_dir_take_the_injected_read_fault PASS.",
+          "at": "2026-11-10T10:26:05.387Z"
+        },
+        {
+          "n": 15,
+          "text": "(was #5977) (was #4826) core.files Stat on Windows: size_on_disk / changed deviate from ratified D-CORE-FILESTAT1 terms (3ec4f6b0c)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3593 c17: Stat belongs on the core.files card",
+          "at": "2026-11-15T03:04:03.332Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 16,
+          "text": "(was #5977) (was #4831) Core env APIs cannot express non-Unicode raw-byte values (D-ENV-RAW-BYTES1)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3549 c18: env belongs on the CoreLib system card",
+          "at": "2026-11-15T03:04:04.341Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 17,
+          "text": "(was #5977) (was #4832) core.files has no modification-time setter (D-FILES-SET-MTIME1)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3593 c18: file times belong on the core.files card",
+          "at": "2026-11-15T03:04:05.428Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 18,
+          "text": "(was #5977) (was #4850) Core Directory.lock() is public surface not in ratified FILEDIR1 (D-DIR-LOCK1)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3593 c19: directory locks belong on the core.files card",
+          "at": "2026-11-15T03:04:06.595Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 19,
+          "text": "(was #5977) (was #4856) Core Stat has no Windows reparse-point fact (Jetpack registry needs it); ballot D-STAT-REPARSE1",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3593 c20: Stat belongs on the core.files card",
+          "at": "2026-11-15T03:04:07.695Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 20,
+          "text": "(was #5975) (was #4658) Core Vec2/Vec4 parity: Vec2 * Float panics at run time at line 0, Vec2 display prints <invalid>, no length_sq/distance/distance_sq",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB TlsLead-47. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). golden VectorParity PASS on O0/O1/O2.",
+          "at": "2026-11-10T10:26:04.479Z"
+        },
+        {
+          "n": 22,
+          "text": "(was #5975) (was #4747) core.math source façade is Float-only while the legacy sema APIs accept F32: same-width F32 calls lose support when carve-outs are removed",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6700 c10: F32 math belongs on the Core math card",
+          "at": "2026-11-15T03:04:08.715Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 23,
+          "text": "(was #5975) (was #4941) Jet Foundation IntegerKinds.jet has unratified I128/U128 rows (S42 closes the integer menu at <=64 bits)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB TlsLead-57. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). IntegerKinds.jet menu is I8..I64 and U8..U64, pinned by a #Test.",
+          "at": "2026-11-10T16:28:21.591Z"
+        },
+        {
+          "n": 24,
+          "text": "(was #5978) (was #4021) Elegance audit fixes: one spelling per name (jet fold, Time.Wait roots, CLI flag pairs, PascalCase #Allow/#Wire): #3987: `jet Fold` is capitalized; ratified D-ECO-TRANSITION1=A names it `jet fold` (2",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #4022 c19: the open elegance fixes (#4016 markers, #3993 flags) go to the elegance card; jet fold and Time.Wait were met on #4021; flags are EL2",
+          "at": "2026-11-15T03:04:09.864Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 25,
+          "text": "(was #5978) (was #4561) New results come back as returns (D-OUTPUT-RETURNS1)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6879 c1: API shape cutovers are their own stream",
+          "at": "2026-11-15T03:04:10.976Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 26,
+          "text": "(was #5978) (was #4565) Compiler/CoreLib boundary and lazy Core loading (D-CORE-BOUNDARY1)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6518 c7: chip knowledge in Core belongs on the core.hw card",
+          "at": "2026-11-15T03:04:11.993Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 27,
+          "text": "(was #5978) (was #4570) Owner direction: elegant foundations for Core and the compiler (jet_builtins, comptime-built type families, effect/ability/requirement markers)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c13: split by decision: BUILTINS1 to #6851, ROLE1 to #6853, NUMFAMILY1 to #6846, PROVIDER1 to #4761; DERIVE-HOME1 is carried by #6849 (D-DECL-TYPES1)",
+          "at": "2026-11-15T03:04:13.417Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 29,
+          "text": "(was #5978) (was #4674) Core maturity tags and APIs that can never succeed",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6879 c2: API shape cutovers are their own stream; maturity as a typed fact is #6848 c5",
+          "at": "2026-11-15T03:04:14.540Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 30,
+          "text": "(was #5978) (was #4677) core-library.md drift batch from the 2026-10-05 API comparisons",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6879 c3: API shape cutovers are their own stream",
+          "at": "2026-11-15T03:04:15.780Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 31,
+          "text": "(was #5978) (was #4784) Core effect rows understate real effects: socket_addr, gethostname, ws connect/upgrade",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev ecf04d985a (train t5b, 973d760c89..ecf04d985a), SUB TlsLead-40. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t5b/REPORT.md). effects/net_and_websocket_calls_name_every_effect_they_use PASS.",
+          "at": "2026-11-10T06:06:40.443Z"
+        },
+        {
+          "n": 32,
+          "text": "(was #5978) (was #4877) Retired authority vocabulary still in source: 'Capability' in Core/compiler/lang.jet and the CLI syntax dictionary; '#Grant' in generated selfhost_terminators data",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 6aaa5c8879: `git grep -n -w Capability -- Core/Compiler/Lang.jet` prints nothing; `git grep -n -w Capability -- Core Compiler` finds only the DataInvalidationCause.Capability variant (Core/Data/Data.jet:196 and its CompilerOwned/RuntimeRoutes mirrors), a Formatter comment and a Canvas JS label, none authority vocabulary.",
+          "at": "2026-11-15T03:05:42.580Z"
+        },
+        {
+          "n": 33,
+          "text": "(was #5978) (was #4934) Core leftovers after the 2026-10-09 grammar sweep: core.web store generic impl; sqlite3 fixture C-module import dispatch",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6445 c10: split: the web store to #6445, the sqlite3 C-module fixture to #6366",
+          "at": "2026-11-15T03:04:16.972Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 34,
+          "text": "(was #5978) (was #5071) Greenfield cleanup: remove retired forms, decision IDs, editions, garbage; make fmt + lint safe gates: Comments in Compiler/, Core/ and Jetpack/ cite no deleted Rust source: `git grep",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6637 c14: same outcome: no .jet comment cites deleted Rust source",
+          "at": "2026-11-15T03:04:18.112Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 35,
+          "text": "(was #5978) (was #5074) Core PascalCase: module identity must not embed file paths",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6879 c4: API shape cutovers are their own stream",
+          "at": "2026-11-15T03:04:19.209Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 36,
+          "text": "(was #5978) (was #5955) Core internals named `__...` become private to their package; a public `__` name fails the build: Every `__`-prefixed item in Core/ is private to its package under the",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c14: Core-private names belong on the no-privilege card",
+          "at": "2026-11-15T03:04:20.337Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 37,
+          "text": "(was #5978) (was #5963) Delete Core's duplicate names: one Jet name per operation, foreign names taught (D-CORE-ONE-NAME1): The kept Jet name for each family is posted in this card's log before deletion;",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #4022 c2: #4022 c2 is the D-CORE-ONE-NAME1 cutover",
+          "at": "2026-11-15T03:04:21.414Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 38,
+          "text": "(was #5978) The 20 most common Python collection and string spellings in the ScriptBench Python programs (`sorted`, `list(range(...))`, `Counter`, `join`, `split`, `strip`, `startswith` and so on) each map to one Jet name or get an E0311 whose `fix_edits` names it. `xs.sorted()` and `(0..<8).to_list()` no longer fail without a fix (today E0311 for both; probe bat/dict.jet).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #4022 c21: foreign spellings taught by fix go with D-CORE-ONE-NAME1 on the elegance card",
+          "at": "2026-11-15T03:04:22.457Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 39,
+          "text": "(was #6008) (was #4428) Core HTTP: raw request body bytes and one form decoder (D-HTTP-BYTES-FORM1): [#4431] http.parse_request checks body length before allocating and copies at most once.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev ecf04d985a (train t5b, 973d760c89..ecf04d985a), SUB TlsLead-39r. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t5b/REPORT.md). jet test Core/Http/Http.jet, cases tolerant_form_decode and http/ PASS.",
+          "at": "2026-11-10T06:06:38.586Z"
+        },
+        {
+          "n": 40,
+          "text": "(was #6008) (was #4664) tcp_read_text loses bytes when a UTF-8 character is split across reads",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev ecf04d985a (train t5b, 973d760c89..ecf04d985a), SUB TlsLead-38. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t5b/REPORT.md). tcp_text_reads_keep_a_cut_character_for_the_next_read and tls_text_reads_keep_a_cut_character_for_the_next_read PASS.",
+          "at": "2026-11-10T06:06:36.822Z"
+        },
+        {
+          "n": 41,
+          "text": "(was #6008) (was #4665) TCP writes: send/tcp_write_bytes return short counts that callers ignore; five write spellings",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3665 c24: TCP write semantics belong on the Core HTTP and socket card",
+          "at": "2026-11-15T03:04:23.628Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 42,
+          "text": "(was #6008) (was #4666) Every TCP read allocates a fresh limit-sized buffer; add read_into",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6878 c1: read_into is D-NET-READINTO1",
+          "at": "2026-11-15T03:04:24.684Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 43,
+          "text": "(was #6008) (was #4672) WebSocket upgrade handlers must return a fake HTTPResponse after the socket is gone",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6878 c3: under D-WS-ROUTE1=A the handler returns nothing",
+          "at": "2026-11-15T03:04:25.731Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 46,
+          "text": "(was #6007) (was #4656) Case conversion has two homes with different answers; casefold and final sigma are incomplete",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3262 c32: case conversion belongs on the Unicode and text card; casefold and final sigma are #3262 c4",
+          "at": "2026-11-15T03:04:26.663Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 47,
+          "text": "(was #6007) (was #4820) Core text.words and text.sentences follow UAX #29 (no split at every '.'), with the same output on every tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Already true on dev 76955986d0 (TlsLead3 sweep, 2026-11-10, t6c compiler). `jet run --optimize=none|basic|full` on tests/conformance/corpus/core/text/words_uax29.jet and sentences_uax29.jet (the generated full UAX #29 Unicode 17 word and sentence corpora, with every case asserted) exits 0 in all 6 runs. `jet test Compiler --profile golden tests/run/Foundations/Text/run` passes on O0/O1/O2 (3/0). A probe of \"Pi is 3.14. e.g. this one. Done! Next?\" gives [Pi is 3.14. e.g. this one., Done!, Next?] on all three levels. Compiler/package.jet has no web test tier for these corpora.",
+          "at": "2026-11-10T11:22:38.987Z"
+        },
+        {
+          "n": 48,
+          "text": "(was #5979) (was #3265) Prove time, timezone and calendar resource semantics",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6873 c4: time is its own stream",
+          "at": "2026-11-15T03:04:27.595Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 49,
+          "text": "(was #5979) (was #4441) One meaning for date and time format patterns (D-TIME-FORMAT-CANONICAL1): [#4312] unix_ms(now()) equals epoch milliseconds: the shared now/Instant identity is canonical (CoreCallRows.jet:436/441).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6873 c1: time is its own stream; split into TIME c1 and c2",
+          "at": "2026-11-15T03:04:28.490Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 50,
+          "text": "(was #5979) (was #4685) One sleep: tasks.sleep(Int) is unit-less and clamps negatives to zero",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6873 c3: time is its own stream",
+          "at": "2026-11-15T03:04:29.418Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 51,
+          "text": "(was #3285) Investigate mail, MIME and mailbox data helpers. Parsing and formatting stay separate from sending and authentication. Parsing has no credential or network side effect. (Re-homed 2026-11-04 by the #6563 c1 audit: this requirement was merged into a card that was later deleted and survived on no card.)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6874 c1: mail parsing is its own stream",
+          "at": "2026-11-15T03:04:30.369Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 52,
+          "text": "(was #3285) Mail and MIME parsing covers hostile headers, encodings, size limits and attachment streaming. Each missing library, API or placement choice gets its own ballot. (Re-homed 2026-11-04 by the #6563 c1 audit: this requirement was merged into a card that was later deleted and survived on no card.)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6874 c2: mail parsing is its own stream",
+          "at": "2026-11-15T03:04:31.285Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 54,
+          "text": "(was #1402 c1) The public core.io.progress adapter accepts List<T> and Iter<T>, remains lazy until consumption, and reports count plus percent when an exact total is available without caller bookkeeping [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6875 c1: progress is its own stream",
+          "at": "2026-11-15T03:04:32.294Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 55,
+          "text": "(was #1402 c2) Progress updates account for actual source pulls through mapped, filtered, stepped, deduplicated, chunked, windowed, flattened, interspersed, zipped, take/skip-while, filter-map, and try-collect paths, including natural exhaustion and early break [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6875 c2: progress is its own stream",
+          "at": "2026-11-15T03:04:33.255Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 56,
+          "text": "(was #1402 c3) TTY output redraws one line; non-TTY output emits one line per update; NO_COLOR strips ANSI from custom formats; description and format are explicit controls and all dynamic fields render through the shared Prelude renderer [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6875 c3: progress is its own stream",
+          "at": "2026-11-15T03:04:34.258Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 57,
+          "text": "(was #1402 c4) The focused progress example produces identical output in O0, O1 and O2 paths, with no fallback runtime [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6875 c1: the tier proof is PROG c1's proof",
+          "at": "2026-11-15T03:04:35.247Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 58,
+          "text": "(was #1402 c5) The example golden, core library reference, and D-COREIO1 syntax record describe the shipped adapter and no stale manual-bookkeeping claim remains [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6875 c5: progress is its own stream",
+          "at": "2026-11-15T03:04:36.785Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 59,
+          "text": "(was #1493 c2) Bits.copy() exists and returns an independent value, not a reference alias, proven by a golden on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On dev e4096a0f3b: Examples/Collections/Iterators/IterToolsAudit.jet calls bits.copy(), adds 8 to the copy and asserts bits.has(8) == false, then prints both lists. Its golden IterToolsAudit.out PASSes on o0, o1 and o2 in the Lander's fR3 fullprof run, so the copy is an independent value, not an alias.",
+          "at": "2026-11-10T01:56:30.317Z"
+        },
+        {
+          "n": 61,
+          "text": "(was #1493 c7) Docs/spec/reference/core-library.md lists Bits.copy() in its Bits section.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t6c, ecf04d985a..76955986d0), SUB TlsLead-43. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md: 23 SUBs OK, census rc=0, ratchets rc=0). The Bits row is in core-library.md; the golden prints `[64] [3, 5, 64] 1 3` on O0/O1/O2.",
+          "at": "2026-11-10T10:26:02.685Z"
+        },
+        {
+          "n": 62,
+          "text": "Each declined Set row carries verdict declined with the ratified decision id, or ships if the owner picks B; `jet Tools/agent/CoreSurfaceLedger.jet --check` exits 0.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3325 c20: D-SET-DECLINE1=C is ratified; Set rows belong on the collection contract card",
+          "at": "2026-11-15T03:04:37.767Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 63,
+          "text": "(was #1886 c1) A ballot-ready Tower decision presents 2-3 worked one-lookup upsert spellings with peer-language evidence and an I8 single-mechanism argument [precut audit: no one-lookup upsert exists; Map.update takes an entries argument (a merge), and no ballot chose an upsert spelling]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6872 c1: upsert is its own stream",
+          "at": "2026-11-15T03:04:38.851Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 64,
+          "text": "(was #1886 c2) Post-ratification: the chosen surface performs one hash lookup, ships on O0, O1 and O2 from one Prelude semantic, with example + golden and the counter idiom in a teaching example [precut audit: no one-lookup upsert exists; Map.update takes an entries argument (a merge), and no ballot chose an upsert spelling]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6872 c2: upsert is its own stream",
+          "at": "2026-11-15T03:04:39.976Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 66,
+          "text": "(was #1886 c4) type/behavior case rows added under tests/cases/corelib/; core-library.md documents the method; no second upsert spelling exists anywhere [precut audit: no one-lookup upsert exists; Map.update takes an entries argument (a merge), and no ballot chose an upsert spelling]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6872 c2: cases and docs are part of UPSERT c2",
+          "at": "2026-11-15T03:04:40.905Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 68,
+          "text": "(was #2853 c1) Stream.key_by/window/watermark/late disposition use one SendFn callback identity and bare event side-output shape on O0, O1, O2 and web where applicable; sema proves callback-result sendability and rejects callback escape; a runtime golden proves it.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3317 c45: stream adapters belong on the iterator card",
+          "at": "2026-11-15T03:04:41.848Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 69,
+          "text": "(was #3041 c2) A copies only selected payloads for independent List values. Its [View<T>] results inspect actual move-only records without payload copies, preserve the source and carry receiver provenance through aggregates/wrappers. No raw top-k position result is required. Direct selected[2][0].score must read an actual move-only record without cloning it; fold/map-only access is insufficient. Preserve general projection behavior and errors across applicable tiers. Register receiver-rooted [] return provenance for every plain, keyed and fallible view producer [precut audit: no input-preserving top-k helper ships; the named golden collections/topk_views and UI tests topk_view_escape/topk_view_invalidated do not exist]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6871 c1: views are their own stream",
+          "at": "2026-11-15T03:04:42.726Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 70,
+          "text": "(was #3041 c3) A rejects local-owner escape and invalidating source changes before a later view use. Existing permissible writes do not automatically re-rank. List owned/borrowed keys and Iter owned keys preserve exact call/error behavior across applicable tiers. Zero/negative counts precede reads and keys; Iter ownership and failing-prefix consumption remain explicit [precut audit: no input-preserving top-k helper ships; the named golden collections/topk_views and UI tests topk_view_escape/topk_view_invalidated do not exist]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6871 c2: views are their own stream",
+          "at": "2026-11-15T03:04:43.635Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 72,
+          "text": "(was #3041 c5) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `jet test Compiler --profile golden collections/topk_views` passes, and tests/ui/topk_view_escape.jet plus tests/ui/topk_view_invalidated.jet snapshots pass under `jet test Compiler --profile ui`. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. [precut audit: no input-preserving top-k helper ships; the named golden collections/topk_views and UI tests topk_view_escape/topk_view_invalidated do not exist]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6871 c1: the proof criterion is VIEWS c1 and c2's proofs",
+          "at": "2026-11-15T03:04:44.556Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 75,
+          "text": "(was #3260 c1) Cover key changes, comparer/order, missing group, duplicate/null inputs, remove-empty-group and observer cleanup [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3329 c24: grouping belongs on the collection destinations card; observer cleanup does not apply to the eager group_by",
+          "at": "2026-11-15T03:04:45.493Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 76,
+          "text": "(was #3260 c2) separate iterator collection destinations from UI notification semantics [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 452b6443f3: List.group_by is an eager destination with no observers (Core/Collections; `git grep -n -i -E 'observer|subscribe' -- Core/Collections` prints nothing), and notification lives only in core.reactive (Core/Reactive/Reactive.jet). Same verdict as archived #3260 c2.",
+          "at": "2026-11-15T03:04:46.432Z"
+        },
+        {
+          "n": 78,
+          "text": "(was #3316 c1) A finite prefix can be taken from a repeating nonempty source without materializing an unbounded source [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a388e96b3e: repeating_sources_take_a_finite_prefix_and_empty_ones_stop passes at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:27.098Z"
+        },
+        {
+          "n": 79,
+          "text": "(was #3316 c2) An empty repeating source terminates without spinning [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "a388e96b3e: the same case shows that empty repeating sources stop, at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:29.059Z"
+        },
+        {
+          "n": 80,
+          "text": "(was #3316 c3) Replay eligibility and allocation are visible and checked; arbitrary effectful sources are not silently replayed or cached without a bound [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #3317 c46: bounded replay is part of the cycle criterion",
+          "at": "2026-11-15T03:04:47.373Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 81,
+          "text": "(was #3316 c5) Examples/features/collections/lazy_cycle.jet matches Examples/features/expected/collections/lazy_cycle.out on O0, O1 and O2 (`jet test Compiler --profile golden collections/lazy_cycle`): `[1,2].lazy().cycle().take(5)` prints [1,2,1,2,1], an empty replayable source ends, an effectful map runs once per source item per pass, and the existing `cycle(5)` output is unchanged [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3317 c46: lazy cycle belongs on the iterator card",
+          "at": "2026-11-15T03:04:48.383Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 82,
+          "text": "(was #3316 c6) tests/ui/cycle_one_shot_source.jet snapshots the rejection of zero-argument `cycle()` on a Stream/one-shot source (`jet test Compiler --profile ui cycle_one_shot_source`).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3317 c47: lazy cycle belongs on the iterator card",
+          "at": "2026-11-15T03:04:49.325Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 83,
+          "text": "(was #3371 c1) Drain owns its removal range, including specified unyielded removal on early drop [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6870 c3: in-place list editing is its own stream",
+          "at": "2026-11-15T03:04:50.221Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 84,
+          "text": "(was #3371 c2) Predicate extraction removes only visited selected values; unvisited values and predicate failures follow the exact producer contract [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6870 c4: in-place list editing is its own stream",
+          "at": "2026-11-15T03:04:51.206Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 85,
+          "text": "(was #3371 c3) Splice states when replacements are consumed and what early drop leaves behind [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6870 c5: in-place list editing is its own stream",
+          "at": "2026-11-15T03:04:52.111Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 86,
+          "text": "(was #3371 c4) Live mutable borrows exclude invalidating collection access and resize; no cloning substitutes for intended mutation [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6870 c6: in-place list editing is its own stream",
+          "at": "2026-11-15T03:04:53.018Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 87,
+          "text": "(was #3371 c5) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): Examples/features/collections/destructive_iter.jet matches Examples/features/expected/collections/destructive_iter.out on O0, O1 and O2 (`jet test Compiler --profile golden collections/destructive_iter`): drain(1..<3) on [1,2,3,4] yields [2,3] and leaves [1,4] even when dropped after one read; extract_if stopped after the first odd leaves 2,3,4; splice finish gives [1,8,9,4]; cancel leaves [1,4]. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6870 c3: the golden is the proof of LISTED c3-c5",
+          "at": "2026-11-15T03:04:53.921Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 88,
+          "text": "(was #3371 c6) Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): tests/ui/drain_live_loan.jet and tests/ui/splice_unfinished_guard.jet snapshot the rejection of collection access during a live drain and the unused-obligation diagnostic on an unfinished splice guard (`jet test Compiler --profile ui drain_live_loan` and the same for splice_unfinished_guard). Goldens pass on O0, O1 and O2; UI fixtures match their snapshots. [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6870 c6: the UI snapshots are LISTED c6's proof",
+          "at": "2026-11-15T03:04:54.832Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 89,
+          "text": "(was #3545 c1) Core source metadata owns every public core.collections.set function [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "At dev e4096a0f3b, Compiler/Prelude/Core.jet:38-39 show core.collections.set exporting 19 names. Its source_module row (Core/Collections/Set.jet) owns 18 of them, every public function. The one export it does not own is the type StringSet, which is a type export and not a function. No dispatcher_row names core.collections.set. jet Tools/agent/CoreSourceRows.jet --check, which holds these rows to Core source, passes on that tree (seed a0_042).",
+          "at": "2026-11-10T02:31:33.615Z"
+        },
+        {
+          "n": 90,
+          "text": "(was #3545 c3) Fresh O0, O1 and O2 fixtures preserve exact set outputs [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ad5a7828aa: 76 tier-named cases gain O1 and O2 steps, including both core_set_foundations cases. With the c057 compiler: 71 PASS, 7 pre-existing KF, 0 FAIL. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:30.894Z"
+        },
+        {
+          "n": 91,
+          "text": "(was #3545 c4) Runtime set calls go through the Jet set implementation, with no dispatcher row or tier-specific wrapper [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3325 c21: no dispatcher row remains, but no test covers Set; belongs on the collection contract card",
+          "at": "2026-11-15T03:04:55.737Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 93,
+          "text": "(was #2503 c1) The canonical DataTree and generated format/error source replace duplicate encoding carriers, including Web ambient JSON, with byte and diagnostic parity proven by goldens on every tier. (was #4276 c57)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6877 c6: carriers go to the DataTree card",
+          "at": "2026-11-15T03:04:56.665Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 94,
+          "text": "(was #2503 c2) Published-schema add, remove, change and rename migration plus examples and goldens are implemented, and computed-text typed JSON dispatch is integrated, proven on O0, O1 and O2. (was #4276 c58)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3236 c29: codec projections belong on the typed codec card",
+          "at": "2026-11-15T03:04:57.565Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 95,
+          "text": "(was #2503 c3) Non-entry Args decode, checked builder plans and the flag/env/default merge use the shared Args projection on O0, O1 and O2, with invalid-present behavior proven by a case. (was #4276 c59)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3236 c30: codec projections belong on the typed codec card",
+          "at": "2026-11-15T03:04:58.494Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 96,
+          "text": "(was #2503 c4) Checked per-projection rename metadata reaches text formats, Env, Args, DB, and Layout inspection source; migration remains scoped to published schemas [precut audit: no dev test, golden, case or snapshot proves this today] (was #4276 c60)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3236 c31: codec projections belong on the typed codec card",
+          "at": "2026-11-15T03:04:59.414Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 97,
+          "text": "(was #2503 c5) The five-projection Shape fixture and golden cover JSON, Env, Args, DB and Layout and pass on O0, O1 and O2. (was #4276 c61)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #3236 c31: the five-projection Shape golden is CD3's proof",
+          "at": "2026-11-15T03:05:00.322Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 98,
+          "text": "D-IMAGE-ENCODE1=A: Implement Jet-only memory-safe VP8L lossless encode/decode with fuzz coverage then VP8 lossy encode; reuse shared inflater where applicable; canonical manifest documents fixed corpus, stated size margin at equal SSIM and encode-time comparator; receipt passes before each source type enables automatic WebP; production encoder depends on neither Rust nor C; AVIF remains a separate later ballot with demand evidence. (was #4695 c2)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #4695 c5: back to the web image card it came from; split into WP1 and WP2",
+          "at": "2026-11-15T03:05:01.236Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 99,
+          "text": "(was #3000) Deterministic schedules fail each reachable write/sync boundary and include dropped/reordered writes within the stated storage model. (was #3239 c41)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6876 c1: crash schedules are DBCRASH c1",
+          "at": "2026-11-15T03:05:02.179Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 100,
+          "text": "(was #3000) Reopening yields the whole committed transaction or its absence, never a partial accepted transaction; integrity and cleanup are checked. (was #3239 c42)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6876 c1: whole-or-absent reopen is DBCRASH c1",
+          "at": "2026-11-15T03:05:03.435Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 101,
+          "text": "(was #3000) The actual emitted DB bridge is exercised, with exact build, storage, target, and execution identity. (was #3239 c43)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6876 c1: the real bridge is named in DBCRASH c1",
+          "at": "2026-11-15T03:05:04.417Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 102,
+          "text": "(was #3000) Timeout, invalid oracle, unsupported storage, and incomplete schedules never count as passes. Network filesystems receive no untested atomicity promise. (was #3239 c44)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6876 c2: crash testing is its own stream",
+          "at": "2026-11-15T03:05:05.492Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 103,
+          "text": "(was #3000) The smallest failure has replayable seed/schedule and a reduced counterexample on the existing evidence rail. (was #3239 c45)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6876 c1: replay and reduction are in DBCRASH c1",
+          "at": "2026-11-15T03:05:06.445Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 104,
+          "text": "(was #3000) A Jet test, db_crash_reopen, crashes every reachable write and sync boundary of a two-transaction workload under the stated model (including dropped and reordered unsynced writes); each reopen shows whole-or-absent transactions with `PRAGMA integrity_check` = ok, and a seeded failing schedule replays and reduces. (was #3239 c46)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6876 c1: crash testing is its own stream",
+          "at": "2026-11-15T03:05:07.384Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 105,
+          "text": "(was #3000) [#3001] Metamorphic SQL pairs over generated data compare equal under core.testing.compare. A planted wrong query yields the first difference plus a reduced replay. Malformed DB/SQL input reports typed failures. Empty, timeout or contaminated evidence never passes. The real DB adapter is exercised. (was #3239 c47)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6876 c3: crash testing is its own stream",
+          "at": "2026-11-15T03:05:08.357Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 106,
+          "text": "(was #3309 c1) Capture exact parser/writer/default-source and malformed-input rules rather than treating netrc as INI [precut audit: no dev test, golden, case or snapshot proves this today] (was #4268 c47)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #4268 c59: back to the credential-safety card it came from (archived #3309); Jetpack reads netrc",
+          "at": "2026-11-15T03:05:09.299Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 107,
+          "text": "(was #3309 c2) Keep credentials out of diagnostics and do not add ambient file discovery or network authentication as a parsing side effect [precut audit: no dev test, golden, case or snapshot proves this today] (was #4268 c48)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #4268 c60: back to the credential-safety card it came from (archived #3309); Jetpack reads netrc",
+          "at": "2026-11-15T03:05:10.272Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 109,
+          "text": "(Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reworded by Main 2026-11-10 under the owner order that non-Jet spellings get no teaching diagnostic, the same as the retired Vec/dict teaching E0028) `Map<String, Int>{}` is refused by the ordinary unknown-type diagnostic E0119, exactly like any undeclared type name. There is no Map-specific code, text, rule or jet fix rewrite. Under D-LISTMAP-CANON1=A, `[K: V]` is the only map spelling. Proof: a UI snapshot pinning the E0119 output for `Map<String, Int>{}`, plus a case where `[String: Int]{}` builds an empty map on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB TlsLead-56. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). Map<String, Int>{} is the ordinary E0119 (UI snapshot); [String: Int]{} builds on O0/O1/O2.",
+          "at": "2026-11-10T16:28:23.667Z"
+        },
+        {
+          "n": 110,
+          "text": "(Found by AgreedBallots while probing, seed a0_042, 2026-11-09; reprobe on dev first) The Core HTTP server can upgrade a TLS connection to WebSocket (Http.jet:271-275 needs fd >= 0 today); a case covers wss on the server side.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6878 c4: the server stream card",
+          "at": "2026-11-15T03:05:11.162Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 111,
+          "text": "(Found 2026-11-10 by BallotFix, probe lc/l06 on dev 76955986d0) civil_tzif reads the TZif footer (the POSIX TZ rule string after the last transition), so times past the zone's last listed transition follow the rule: time.zone(\"America/New_York\") shows EDT (UTC-4) in July 2045, not EST. Proof: a golden over a zone whose table ends before the queried date, in summer and in winter, on O0/O1/O2 and web.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB TlsLead-61r. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). civil_tzif reads the TZif footer: New_York EDT in July 2045, EST in January; case on O0/O1/O2 and web.",
+          "at": "2026-11-10T16:28:25.941Z"
+        },
+        {
+          "n": 112,
+          "text": "D-NET-READINTO1=A is built. `read_into(buffer, limit)` appends up to `limit` bytes to the caller's `[U8]` and returns the count, as an inherent method on TCPStream, UnixStream, TLSStream and file readers, with a deadline form. It returns 0 at end of stream, and a limit below 1 is invalid input. The Reader trait is unchanged. The HTTP server, the HTTP client and the TLS record reader switch to it. A paired two-program cell (a read(4096) loop against read_into: wall time, allocations per read, peak memory) is in the measurement manifest, and read_into strictly wins it. Goldens run on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6878 c1: the server stream card; split into NETSRV c1 and c2",
+          "at": "2026-11-15T03:05:12.106Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 113,
+          "text": "D-WS-ROUTE1=A is built. `mux.websocket(pattern, handler)` and `#Server.WebSocket(path)`: the server runs authentication and Origin policy, then validates and upgrades, and the handler returns nothing. One route-table adapter and handshake serve TCP and TLS. The route owns GET, so an equivalent GET registration is refused, HEAD gets 405 without an upgrade, and OPTIONS lists GET. Upgraded tasks stay inside the server limits and shutdown. Protocol close codes are kept; an application failure may send 1011 only before the transport closes. OpenAPI describes handshake responses only. This depends on the concurrent serve loop (#4635). Goldens on O0, O1 and O2, plus a TLS case.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6878 c3: the server stream card",
+          "at": "2026-11-15T03:05:13.004Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 114,
+          "text": "Map.update lowers on every tier. Found by ScriptAPI on 2026-11-11: on seed-t23, checked code that calls Map.update stops in ir.build with an unlowered jet_map_update_all, an invariant I2 defect, and dev's BuildMaps.jet has no case for it. Fix: the IR build lowers it to the shared runtime symbol, and a sweep reports any other Map or Set method that checks but doesn't lower. Proof: an executable example that uses Map.update prints its golden at O0, O1 and O2, and the sweep lists 0 unlowered collection methods.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "b8632d4f6e (ScriptAPI-36r): Map.update lowers on every tier through BuildMaps.jet; Tools/agent/CollectionLowering.jet sweep passes.",
+          "at": "2026-11-11T19:03:58.895Z"
+        },
+        {
+          "n": 115,
+          "text": "Derived codecs work across modules. Found by G1Lead4 porting scaling tools on 2026-11-11 (a0.0.44): (1) a derived encode() is private to its declaring module (E0605 when another module calls it), so Tools write tree-building workarounds (receipt_tree/config_tree in the scaling Gate); (2) derivation fails for a field whose type is declared in another file (enqueue's Planned{config: Dyn}); (3) encode drops None fields with no way to keep them as null. Fix: a derived codec has the visibility of its type; field types from any imported module derive; and the None policy is one documented rule (omit or null) with a typed option for the other where JSON needs it. Proof: a multi-module example with a golden at O0, O1 and O2 that encodes and decodes a type whose fields come from two other modules, and UI snapshots for any refusal.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #3236 c32: derived codecs belong on the typed codec card",
+          "at": "2026-11-15T03:05:13.956Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:map",
+        "consolidation-2026-10-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T11:18:41.600Z",
+      "updated": "2026-11-15T03:05:45.170Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 115,
+      "completedAt": "2026-11-15T03:05:45.170Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T03:11:58.907Z"
+    },
+    {
+      "id": "c0u5tm84",
+      "num": 5985,
+      "title": "Map: Domain foundations: games, data, sync, web apps, backends",
+      "body": "Destination: Each domain has a first-party foundation proven by an example.\nNotes: Batch DOM of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: per-card example programs with goldens. Order: #1914 #3290 #3709 #5086 #238 #1061 #3000 #3030 #3033 #3078 #3242 #3259 #3304 #4663 #4695 #4722 #5035 #5036 #5968 #3092 #3244 #4632.\nDecisions so far: D-GAME-ASSET1 (ratified=A) on #238; D-GAME-ECS1 (ratified=B) on #238; D-GAME-INPUT1 (ratified=A) on #238; D-GAME-REPLAY1 (ratified=A) on #238; D-GAME-BACKEND1 (ratified=A) on #238; D-GAME-BUDGET1 (ratified=A) on #238; D-GAME-ENTITY1 (ratified=A) on #238; D-GAME-SCREENS1 (ratified=A) on #238; D-GAME-PLATFORM1 (open) on #5035; D-RAYLIB-DRIVER-LOAD1 (open) on #5086; D-LOG-SPAN-SCOPE1 (ratified=A) on #4632; D-DATA-FRAME1 (open) on #5968; D-DBPOLICY-CHECK1 (ratified=A) on #4722; D-WEB-IMAGE1 (ratified=A) on #4695; D-IMAGE-ENCODE1 (ratified=A) on #4695; D-WASISRV1 (ratified=A) on #1914; D-TARGET-ORDER1 (open) on #1914; D-ONE-LIFECYCLE1 (ratified=A) on #3078; D-CORE-CLI-MARKDOWN1 (ratified=A) on #3242; D-RELEASE-RECIPE1 (ratified=A) on #3030\nFog: no criteria yet on #5086 #4663 #4722 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e15",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed (Map card replaced): notebook app to #6619 (#6619 c11-#6619 c14); data loaders to new #6862; app generators to new #6863; job semantics to #6825 (#6825 c6-#6825 c9); response cache to #6814 (#6814 c3-#6814 c5); one-app and server calls to #6552 (#6552 c35, #6552 c36); --target to #6418 (#6418 c152); view goldens to #6821 (#6821 c2); mail, sync and accessibility merged into #6826 c4, #3709 c6 and #6807 c1."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner ratified D-ONEAPP-MODEL1=A, D-RUN-DEVICE1=A, D-SERVER-FN1=A, D-SYNC2=A, D-A11Y-EXPORT1=B, D-MOBILE-UNDEFER1=B, D-VIEW-SET1=C; implementation criteria added here."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 34 criteria from archived #530, #2446, #2448, #2457, #2458, #3084, #3085, #3097, #3128, #3129: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4722 \"tooling/sync_crdt golden: row-policy check and display have no core.db home after the core.sync cleanup\" (CardTrim 2026-10-28: single-root task step of map #5985 (Map: Domain foundations: games, data, sync, web apps,); 0 criteria, 1 ratified decisions). Body: The tooling/sync_crdt example asserts a row policy check (allows(policy, user, row_owner)) and prints the policy (`RowPolicy(table=tickets, expr=owner == user)`). Per D-DBPOLICY1 the row rule belongs to core.db, but the registered core.db API has only policy and policy_audit; the check and display leaves exist only as core.sync rows (Prelude jet_db_policy_allows/show). Golden stem parked until the owner ballot on where these functions live is ratified. Found by GoldenW2b/GoldenFix13, 2026-10-07."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4663 \"core.game.raylib bridge gaps: no draw_line or measure_text, colour channels clamp silently, keys are strings, loaders cannot fail\" (CardTrim 2026-10-28: single-root bug step of map #5985 (Map: Domain foundations: games, data, sync, web apps,); 0 criteria, 0 ratified decisions). Body: raylib.jet declares 15 functions, none a line or text measure, so the iprof overlay port from DaJWWePhRsM cannot be written. color(300, -5, 1, 255) silently clamps (raylib.jet:34-36,108-112). raylib.key_down(\"SPCE\") checks clean and returns false (probe g_key.jet); gamepad buttons, axes and sprite names have the same shape (raylib.jet:76-94). Texture and sound loaders return Never! and play_sound returns Bool (raylib.jet:96-106), breaking stdlib law 2. Fix: draw_line, measure_text, U8 colour fields plus color_normalized, Key/PadButton/PadAxis/SpriteId enums and key_pressed under D-GAME-INPUT1, !IOError/!AudioError loaders."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 2,
+          "text": "(was #4722) tooling/sync_crdt golden: row-policy check and display have no core.db home after the core.sync cleanup",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 452b6443f3: core.db owns the row-policy check and display (Core/Db/Db.jet:325 policy_show, :327 policy_allows; landed in 764097f6be). The old Examples/features/tooling/sync_crdt.jet example is gone; Core/Db/Db.jet's inline test 'row policies scope SQL to one table and bind the owner' checks both: `jet test Core/Db/Db.jet` 8 passed, 0 failed.",
+          "at": "2026-11-15T02:50:50.784Z"
+        },
+        {
+          "n": 3,
+          "text": "(was #530) core email/SMTP substrate — magic links, notifications [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6826 c4: outgoing mail (magic links, notifications) is app.mail on the account-and-mail card",
+          "at": "2026-11-15T02:49:34.558Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 4,
+          "text": "(was #2446 c1) The selected local-app command starts a loopback server for a notebook and renders executable-cell outputs, layouts, and controls without copying evaluation into a second runtime, proven by a tests/cases row.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6619 c11: the notebook local app belongs on the notebook card",
+          "at": "2026-11-15T02:49:35.603Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 5,
+          "text": "(was #2446 c2) A typed function's supported arguments and return values become validated controls and typed output views; unsupported or unsafe mappings produce structured diagnostics before launch, proven by a tests/cases row.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6619 c2: typed arguments as validated controls is #6619 c2",
+          "at": "2026-11-15T02:49:36.577Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 6,
+          "text": "(was #2446 c3) Two browser tabs receive isolated typed session state, deterministic callback ordering, and independent reset/reconnect behavior; one tab cannot read or mutate the other tab's state, proven by a tests/cases row.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6619 c12: the notebook local app belongs on the notebook card",
+          "at": "2026-11-15T02:49:37.991Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 7,
+          "text": "(was #2446 c4) Editing the notebook or typed function through `jet dev` updates the local app, preserves compatible state, and reports any reset reason or stale output, proven by a tests/cases row.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6619 c13: the notebook local app belongs on the notebook card",
+          "at": "2026-11-15T02:49:39.262Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 8,
+          "text": "(was #2446 c5) Local bind, optional sharing, data movement, and trust grants are shown in a machine-readable receipt, with no public exposure unless explicitly authorized, proven by a tests/cases row.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6619 c14: the notebook local app belongs on the notebook card",
+          "at": "2026-11-15T02:49:40.437Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 9,
+          "text": "(was #2448 c1) Declared loader construction, canonical snapshot content, provenance and schema identity, and typed result marshalling are integrated, proven by determinism and execution tests on every applicable tier.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6862 c1: data loaders are their own stream",
+          "at": "2026-11-15T02:49:41.499Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 10,
+          "text": "(was #2448 c2) Loader/input/archive-member/parameter/authority invalidation and dependency identity use the shared loader state, proven by cache-closure execution tests on every applicable tier.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6862 c2: data loaders are their own stream",
+          "at": "2026-11-15T02:49:42.554Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 11,
+          "text": "(was #2448 c3) The shared loader kernel separates authority and credential-sensitive metadata from public state and admits only authorized bound provider payloads, proven by denial/redaction execution tests on every applicable tier.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6862 c3: data loaders are their own stream",
+          "at": "2026-11-15T02:49:43.497Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 12,
+          "text": "(was #2448 c4) Loader preview/status/cleanup and app/notebook carrier paths use invocation-owned state and the canonical data kernel rather than a semantic sidecar, proven by execution tests on every applicable tier.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6862 c4: data loaders are their own stream",
+          "at": "2026-11-15T02:49:44.453Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 13,
+          "text": "(was #2457 c1) The selected durable store, typed payload carriers and lifecycle receipt source are complete, proven by restart/delivery execution tests on every applicable tier. [precut audit: failing on 9c7ddf1359: U:job_queue_checked_identity FAIL snapshot mismatch: tests/ui/job_queue_checked_identity.stderr]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/ui/job_queue_checked_identity.jet PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:47:36.112Z"
+        },
+        {
+          "n": 14,
+          "text": "(was #2457 c2) Delayed/bulk enqueue, stable identity, retry and terminal-failure source retain ordering, attempts, duration and reason [precut audit: failing on 9c7ddf1359: U:job_queue_checked_identity FAIL snapshot mismatch: tests/ui/job_queue_checked_identity.stderr]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/ui/job_queue_checked_identity.jet PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:47:37.114Z"
+        },
+        {
+          "n": 15,
+          "text": "(was #2457 c3) Bounded queue status exposes real depth/wait/capacity/pause/freshness without publishing payloads or inventing worker counts [precut audit: failing on 9c7ddf1359: U:job_queue_checked_identity FAIL snapshot mismatch: tests/ui/job_queue_checked_identity.stderr]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/ui/job_queue_checked_identity.jet PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:47:38.109Z"
+        },
+        {
+          "n": 16,
+          "text": "(was #2458 c1) The existing jet new surface defines service, route, job, and migration generation with explicit inputs, preview, and inverse operations, proven by CLI tests on every applicable tier.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6863 c1: app generators are their own stream",
+          "at": "2026-11-15T02:49:45.393Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 17,
+          "text": "(was #2458 c2) Generated service, route, model, migration, queue job, and consumer source use the canonical checked project/module APIs and deterministic output names, proven by compilation tests on every applicable tier.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6863 c2: app generators are their own stream",
+          "at": "2026-11-15T02:49:46.386Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 18,
+          "text": "(was #2458 c3) Preview and receipt-driven inverse are implemented with recorded inputs, exact output admission, integrity checks, and stable migration-version reuse, proven by filesystem execution tests on every applicable tier.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6863 c3: app generators are their own stream",
+          "at": "2026-11-15T02:49:47.617Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 19,
+          "text": "(was #2458 c4) Generated migrations and queue jobs use the ratified D-DX-MIGRATE1 and D-DX-QUEUE1 APIs, including checked top-level #Job identity, proven by execution tests on every applicable tier.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6863 c2: generated jobs and migrations use the ratified APIs; folded into the compile criterion",
+          "at": "2026-11-15T02:49:48.885Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 20,
+          "text": "(was #3084 c1) Unacknowledged disconnect causes the documented redelivery behavior [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6825 c6: job delivery semantics belong on the app jobs card",
+          "at": "2026-11-15T02:49:50.198Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 21,
+          "text": "(was #3084 c2) A duplicate delivery follows explicit idempotency policy [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6825 c6: duplicate delivery and idempotency are one outcome with redelivery",
+          "at": "2026-11-15T02:49:51.420Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 22,
+          "text": "(was #3084 c3) Queue durability/ack policy is declared, not copied from a tutorial default [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6825 c9: the declared durability and ack contract is checked through the store adapter",
+          "at": "2026-11-15T02:49:52.867Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 29,
+          "text": "(was #3085 c1) Process restart distinguishes persistent queued work from local schedule state [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6825 c7: job restart semantics belong on the app jobs card",
+          "at": "2026-11-15T02:49:54.105Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 30,
+          "text": "(was #3085 c2) Retry and duplicate job outcomes are specified [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6825 c7: retry outcomes go with the restart criterion",
+          "at": "2026-11-15T02:49:55.147Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 31,
+          "text": "(was #3085 c3) Shutdown bounds in-flight work without silently acknowledging it [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6825 c8: job shutdown semantics belong on the app jobs card",
+          "at": "2026-11-15T02:49:56.160Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 33,
+          "text": "(was #3085 c8, #3099 c5) An adapter that cannot preserve the existing store/lifecycle contract is rejected rather than weakening D-DX-QUEUE1=A [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6825 c9: the store adapter contract belongs on the app jobs card",
+          "at": "2026-11-15T02:49:57.127Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 37,
+          "text": "D-ONEAPP-MODEL1=A: one first-party app package serves web, desktop and phones; one example app builds for web and Linux desktop from the same source with goldens",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6552 c35: the one-app proof belongs on the web framework card",
+          "at": "2026-11-15T02:49:58.175Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 38,
+          "text": "D-RUN-DEVICE1=A: one --target flag names the platform for jet run, dev, test and build, and --device picks a phone; cli cases prove the flag on each command",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6418 c152: the --target flag is CLI work on the unbuilt-commands card",
+          "at": "2026-11-15T02:49:59.185Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 39,
+          "text": "D-SERVER-FN1=A: a #Server function runs on the server and is called from any screen like a plain function; a web case proves the call crosses the boundary with typed arguments and errors",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6552 c36: server calls belong on the web framework card",
+          "at": "2026-11-15T02:50:00.166Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 40,
+          "text": "D-SYNC2=A: app data lives in typed local collections that work offline and sync with the server; a case proves an offline edit syncs on reconnect",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #3709 c6: the offline-edit-syncs-on-reconnect case is #3709 c6",
+          "at": "2026-11-15T02:50:01.225Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 41,
+          "text": "D-A11Y-EXPORT1=B: one accessibility provider contract as ratified; a case proves the tree reaches the platform provider on Linux desktop",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6807 c1: the accessibility provider build-out (AT-SPI on Linux) is #6807 c1",
+          "at": "2026-11-15T02:50:02.312Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 42,
+          "text": "D-MOBILE-UNDEFER1=B: phone apps follow Linux and web with no pilot; phone work is sequenced after the Linux and web criteria on this card",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "D-MOBILE-UNDEFER1=B ratified 2026-11-06: phone work follows Linux and web with no pilot; this is a sequencing rule, carried by the phone criteria of the D-WEBAPP-SHAPE1 child cards (#6799-#6831)",
+          "at": "2026-11-15T02:50:03.813Z",
+          "closure": "decision"
+        },
+        {
+          "n": 43,
+          "text": "D-VIEW-SET1=C: the standard view set as ratified (option C); each shipped view has a golden on every applicable tier",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6821 c2: the standard view goldens belong on the D-VIEW-SET1 build card",
+          "at": "2026-11-15T02:50:05.563Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 44,
+          "text": "(was #3087 c1) Stored false,0 and empty text remain hits [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #6026 c9)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6814 c3: server response caching belongs on the HTTP caching card",
+          "at": "2026-11-15T02:50:06.967Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 45,
+          "text": "(was #3087 c2) TTL units and expiration boundary are explicit [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #6026 c10)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6814 c4: server response caching belongs on the HTTP caching card",
+          "at": "2026-11-15T02:50:08.251Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 46,
+          "text": "(was #3087 c3) HTTP GET response cache does not silently become GraphQL field caching or mutation persistence [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #6026 c11)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6814 c1: the response cache is HTTP-level (.cache<V> on GET routes); no GraphQL field caching exists to drift into",
+          "at": "2026-11-15T02:50:09.436Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 47,
+          "text": "(was #3087 c7, #3100 c4) Exercise two service instances read a cached false value, invalidate it after an order change and recover from store failure. with independent client/system evidence before a capability claim [precut audit: no dev test, golden, case or snapshot proves this today] (moved from #6026 c12)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6814 c5: server response caching belongs on the HTTP caching card",
+          "at": "2026-11-15T02:50:10.681Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:map",
+        "consolidation-2026-10-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T11:19:21.465Z",
+      "updated": "2026-11-15T02:50:52.722Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 47,
+      "completedAt": "2026-11-15T02:50:52.722Z",
+      "questions": [
+        {
+          "id": "q0x4qov2",
+          "cardId": "c0u5tm84",
+          "decisionId": "D-GPU-UI1",
+          "by": "owner",
+          "kind": "question",
+          "text": "no idea what this means, redo in plain english with downsides engineered away",
+          "status": "answered",
+          "answer": "A would use the phone's graphics chip only after Jet measures a win for the same app, with software fallback if graphics startup fails or the device is lost. Desktop defaults stay unchanged, and experts can explicitly choose either path; phone work still starts after Linux and web, without a pilot. One cost remains: the two drawing paths can differ slightly on real devices, so shared-scene checks and a software override reduce the risk rather than prove identical pixels everywhere. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
+          "created": "2026-11-06T15:23:16.401Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q1y3xsld",
+          "cardId": "c0u5tm84",
+          "decisionId": "D-I18N1",
+          "by": "owner",
+          "kind": "question",
+          "text": "I dont know what this means or what committing to the recommendation entails and whether the juice is worth the squeeze and whether it would be better to have this as an external package or to use metaprogramming or something",
+          "status": "answered",
+          "answer": "Yes, automatic collection is useful for apps that may translate: A makes view literals typed messages and later adds translation through an opt-in package built on public text metaprogramming. This also explicitly approves extending Jet's literal capability to text; runtime data uses ui.verbatim(value), while English-only apps need no catalogs or language data. One cost remains: authors must review helpers, runtime text and phrases with different meanings; the extractor cannot infer intent or promise to find every phrase. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
+          "created": "2026-11-06T15:25:00.946Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q2fwcntm",
+          "cardId": "c0u5tm84",
+          "decisionId": "D-LAYOUT2",
+          "by": "owner",
+          "kind": "question",
+          "text": "can we offer sensible pareto defaults with opt in full expert control?",
+          "status": "answered",
+          "answer": "A gives containers useful defaults: the signup form needs only a column count, then fits its labels and becomes one column below 600 logical pixels of available width, not simply because the device is a phone. Experts can override every setting, disable that collapse, or use custom layout functions and the existing constraint solver through the same layout contract. No default-lock-in cost remains; browser layout follows the companion web-output vote, and oversized content still needs scrolling rather than a promise that previews prevent every overflow. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
+          "created": "2026-11-06T15:26:26.916Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q3rc9mv2",
+          "cardId": "c0u5tm84",
+          "decisionId": "D-ONEAPP-RENDER1",
+          "by": "owner",
+          "kind": "question",
+          "text": "recommended option is the good beginner default. if users want the native looks, then that should be opt in for the experts",
+          "status": "answered",
+          "answer": "A gives beginners Jet-drawn controls with consistent styling and shared actions, while system typing, accessibility and expected platform behavior remain. Experts can choose supported real controls through the shared native package; inline use also requires the companion system-view option A, and native.theme() only styles drawn controls. One cost remains: exact host controls are not the default and need explicit replacements, which inherit the embedding limits and extra drawing work. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
+          "created": "2026-11-06T15:29:13.043Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q4hca5vl",
+          "cardId": "c0u5tm84",
+          "decisionId": "D-ONEAPP-WEBOUT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "does not look like the downside was engineered away on this one. fix",
+          "status": "answered",
+          "answer": "Shared fonts and browser comparison checks reduce differences, but cannot guarantee identical line breaks: font fallback, shaping, rounding and reader settings still matter. One cost remains: web text can wrap differently from native, so layouts need flexible heights, reflow and clipping/focus checks. Voting A explicitly permits the browser to implement web layout and text shaping; app rules and actions remain shared, and every option keeps server HTML and resumable handlers. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
+          "created": "2026-11-06T15:30:11.212Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q5mpjpe1",
+          "cardId": "c0u5tm84",
+          "decisionId": "D-OTA1",
+          "by": "owner",
+          "kind": "question",
+          "text": "i am not keen on jet being a distribution platform. we want to make development easier, but actually shipping is slightly outside the initial purview. Understood? Update accordingly. I would essentially want jet to generate the files we need to send to apple for an ios app (as an example) or whatever, then it is handled through them. jet shouldnt have a ship cli command",
+          "status": "answered",
+          "answer": "Jet's no-distribution boundary is settled: there is no ship command, store login, upload service or update engine. A would produce signed upload files after the developer supplies app details and signing credentials; developers upload them, and stores handle review and delivery. One cost remains: Apple signing assets need manual setup and renewal, not a one-time download forever; a valid upload file does not guarantee store approval. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
+          "created": "2026-11-06T15:32:09.083Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q6z627du",
+          "cardId": "c0u5tm84",
+          "decisionId": "D-PLATFORM-OVERRIDE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "no clue what this means. rewrite in plain english",
+          "status": "answered",
+          "answer": "A explicitly places a real system view, such as Apple Maps, inside a Jet screen through native.view(...), joining layout, focus and accessibility. One cost remains: mixed screens add drawing work and cannot apply Jet pixel filters to the live host view; keep embedded regions small or use a drawn substitute where those effects matter. Unsupported combinations must be reported when a scene is built, including at runtime, because preview checks cannot cover every possible screen. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
+          "created": "2026-11-06T15:33:39.084Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q7lo06nq",
+          "cardId": "c0u5tm84",
+          "decisionId": "D-THEME2",
+          "by": "owner",
+          "kind": "question",
+          "text": "if experts want to match the look of a native system, then they should be able to use a library as opt in or something like that",
+          "status": "answered",
+          "answer": "A gives beginners one useful Jet design with typed app-wide and local overrides, while honoring live light, dark and accessibility settings. Experts can choose native.theme() for system-like styling through the same theme type; exact host controls use the separate native embedding path, not the theme preset. One cost remains: those presets are opt-in approximations and can lag a system redesign, so they do not guarantee an exact host appearance. Final: this answer matches the reworked ballot now live on Tower after its Opus and Sol reviews.",
+          "created": "2026-11-06T15:36:12.819Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "qcg2gigj",
+          "cardId": "c0u5tm84",
+          "decisionId": "D-GPU-UI1",
+          "by": "owner",
+          "kind": "question",
+          "text": "are you asking about measuring whether gpu acceleration should also be tested and implemented for desktop? Why wouldnt we do that??",
+          "status": "answered",
+          "answer": "Yes, desktops should be measured too; the ballot left them out for the wrong reason. Linux was set aside because D-RAYLIB-DRIVER-LOAD1=A keeps graphical Linux programs as one static file, and GPU drivers (Mesa, NVIDIA) are shared libraries a static program cannot load, so GPU on Linux was only an opt-in dynamic build. That is a real constraint, but one to engineer around, not to accept: the revision will test whether a static program can carry a small GPU helper started through the system loader only when a driver is present, keeping the single-file deploy. I am revising the ballot so A uses the graphics chip by default on every platform (Linux, macOS, Windows and phones), each only after its own paired measurement passes, with software fallback; how Linux loads the driver gets its own clear choice. The revised ballot goes through a fresh author, Opus and Sol review before I post it, and I will tell you when it is live.",
+          "created": "2026-11-06T17:09:11.574Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-18T03:11:58.908Z"
     }
   ]
 }
