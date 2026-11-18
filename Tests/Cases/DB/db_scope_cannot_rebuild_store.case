@@ -1,0 +1,13 @@
+# The scope-escape probe: code holding a DBScope cannot rebuild the whole
+# Store from it. The scope's connection, policy and user are private fields,
+# so reading its user, building a Store around its connection and building a
+# scope for another user are each refused at compile time (E0605).
+fixture: DBScopeCannotRebuildStore.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet check main.jet
+exit: 1
+stderr: count "[jet.PrivateItem]" = 3 # the user read, the Store literal and the forged scope
+stderr: ~ "main.jet:12:21" # the Store rebuilt from `scope.state`
+stderr: ~ "main.jet:14:21" # the scope forged for another user
+stderr: ~ "`state` is private to its module" # the refusal names the private field

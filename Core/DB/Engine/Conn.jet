@@ -1380,8 +1380,12 @@ Conn: struct {
     n_statement: Int,
     n_deferred_cons: Int,
     n_deferred_imm_cons: Int,
-    // xAuth is set (the Host holds the callback).
+    // xAuth is set: Prepare's prepare_tables turns this build's one
+    // authorizer on for one compile.
     has_auth: Bool,
+    // The schema tables the compile under has_auth read or wrote, each once,
+    // as the schema spells them.
+    auth_tables: [[U8]],
 }
 
 init_info_new: fn() -> InitInfo Never! {
@@ -1476,6 +1480,7 @@ conn_new: fn() -> Conn Never! {
         n_deferred_cons: 0,
         n_deferred_imm_cons: 0,
         has_auth: false,
+        auth_tables: [[U8]]{},
     }
 }
 

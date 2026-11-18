@@ -1,0 +1,16 @@
+// A scope is a confinement boundary: code holding one cannot rebuild the
+// whole Store from it. Its connection, policy and user are private fields,
+// so reading them, building a Store around the connection, or building a
+// scope for another user does not compile outside core.db.
+use db: core.db
+
+run: fn() {
+    c := db.open_memory()
+    owned: db.policy("notes", "owner == user") ?? panic("policy: {err}")
+    ann: c.with_policy(owned, "ann")
+    print(ann.user)
+    whole: db.Store{state: ann.state}
+    print("{whole}")
+    ben: db.DBScope{state: ann.state, policy: owned, user: "ben"}
+    print("{db.policy_audit(ben)}")
+}

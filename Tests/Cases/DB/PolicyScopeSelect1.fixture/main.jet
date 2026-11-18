@@ -1,7 +1,7 @@
-// A row policy narrows the rows of its one table and nothing else: a scope
-// over `notes` runs `SELECT 1` and reads another table unchanged, narrows
-// its own table's rows to its user, and refuses SQL that would read its
-// table's rows past the policy through a join.
+// A row policy narrows the rows of its one table, and its scope reaches no
+// other: a scope over `notes` runs `SELECT 1`, which names no table, narrows
+// its own table's rows to its user, and refuses SQL that names another table
+// (E2477), a join through its table included.
 use db: core.db
 
 run: fn() {
@@ -13,8 +13,10 @@ run: fn() {
     ann: c.with_policy(owned, "ann")
     one: ann.query(SQL{"SELECT 1 AS one"}) ?? panic("select 1: {err}")
     print("select 1: {one.len()} row, one = {db.row_int(one[0], "one") ?? -1}")
-    tags: ann.query(SQL{"SELECT tag FROM tags"}) ?? panic("tags: {err}")
-    print("another table: {tags.len()} row")
+    if ann.query(SQL{"SELECT tag FROM tags"}) == {
+        .Ok(tags) -> { print("another table: {tags.len()} row") }
+        .Err(failure) -> { print("another table: {failure.message()}") }
+    }
     mine: ann.query(SQL{"SELECT title FROM notes"}) ?? panic("notes: {err}")
     print("ann's notes: {mine.len()}")
     if ann.query(SQL{"SELECT tag FROM tags JOIN notes"}) == {

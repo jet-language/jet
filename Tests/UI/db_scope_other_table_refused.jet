@@ -1,0 +1,19 @@
+// @run_cli
+// A scope over `notes` reads no other table: its query of `tags` is refused
+// before it runs with the registered E2477, and the entry returns the
+// refusal.
+package: {
+    name: "db_scope_other_table_refused"
+    authority: { allow: [DB, IO, Time] }
+}
+
+use db: core.db
+
+run: fn() {
+    store := db.open_memory()
+    _: db.migrate(store.all_rows(), "notes-v1", [SQL{"CREATE TABLE notes (owner TEXT, title TEXT)"}, SQL{"CREATE TABLE tags (tag TEXT)"}]) ?? panic("migrate: {err}")
+    owned: db.policy("notes", "owner == user") ?? panic("policy: {err}")
+    ann: store.with_policy(owned, "ann")
+    read: ann.query(SQL{"SELECT tag FROM tags"}) ?? return Err(err.message())
+    print("the scope read tags: {read.len()} row")
+}

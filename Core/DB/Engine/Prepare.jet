@@ -17,9 +17,11 @@
 // - EngineGen is the Parse's Gen: the calls the code generators make up
 //   the part order (sqlite3ReadSchema, sqlite3NestedParse, sqlite3Select).
 // - EngineHost is the VDBE's Host: SQL functions, OP_SqlExec,
-//   OP_ParseSchema and sqlite3Reprepare. No hook, trace, authorizer or
+//   OP_ParseSchema and sqlite3Reprepare. No hook, trace, user authorizer or
 //   virtual table module can be registered in this build, so the callbacks
-//   C tests for NULL first do nothing here.
+//   C tests for NULL first do nothing here. The one authorizer is the
+//   build's own: prepare_tables turns it on to learn the tables a statement
+//   names.
 //
 // The AST arena is the connection's (Conn.ast): the schema's expressions
 // (CHECK constraints, column defaults) live in it. An API call moves it
@@ -451,8 +453,19 @@ EngineGen: struct {
             rc
         }
 
-        // No authorizer can be registered in this build (db->xAuth is NULL).
+        // This build's one authorizer (on only inside prepare_tables) denies
+        // nothing: it records each schema table a statement reads or writes.
         authorize: fn(self, p: &cg.Parse, code: Int, arg1: [U8]?, arg2: [U8]?, arg3: [U8]?) -[DB]> Int Never! {
+            if code != conn.AUTH_READ && code != conn.AUTH_INSERT && code != conn.AUTH_UPDATE && code != conn.AUTH_DELETE {
+                return base.OK
+            }
+            name: arg1 ?? return base.OK
+            t: conn.find_table(p.db, name, arg3)
+            if t < 0 -> return base.OK
+            loop held in p.db.auth_tables {
+                if util.str_icmp(held, p.db.tables[t].name) == 0 -> return base.OK
+            }
+            p.db.auth_tables.push(p.db.tables[t].name.copy())
             base.OK
         }
 
@@ -1367,6 +1380,20 @@ prepare_v3: fn(db: &conn.Conn, sql: [U8], flags: Int) -[DB]> {rc: Int, stmt: Int
     r: lock_and_prepare<EngineHost>(h, db, a, sql, sql.len(), conn.PREPARE_SAVESQL | flags & conn.PREPARE_MASK, None)
     db.ast = a
     {rc: r.rc, stmt: r.stmt, tail: r.tail}
+}
+
+// sqlite3_prepare_v3 under this build's authorizer: the statement and the
+// schema tables it reads or writes, each named once as the schema spells it.
+// A subquery's or a CTE's own name is no schema table, so it is not among
+// them.
+prepare_tables: fn(db: &conn.Conn, sql: [U8], flags: Int) -[DB]> {rc: Int, stmt: Int, tail: Int, tables: [[U8]]} Never! {
+    db.has_auth = true
+    db.auth_tables = [[U8]]{}
+    r: prepare_v3(db, sql, flags)
+    db.has_auth = false
+    tables := db.auth_tables
+    db.auth_tables = [[U8]]{}
+    {rc: r.rc, stmt: r.stmt, tail: r.tail, tables: tables}
 }
 
 // sqlite3_step.

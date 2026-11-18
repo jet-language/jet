@@ -7699,11 +7699,16 @@ requires the explicit `SQL.raw` escape. Database operations carry `DB` (and,
 when they wait, `Time.Wait`) effects. The module source is
 [`Core/DB/DB.jet`](../../../Core/DB/DB.jet).
 The backend-neutral driver/policy boundary keeps query operations and the user policy attached to the typed scope (`D-DBDRIVER1=A`; `D-DBPOLICY-BIND1=A`).
-A row policy constrains only the rows of its own table: inside a policy scope,
-SQL that targets no table (`SELECT 1`) or another table runs unchanged, SQL on
-the policy's table must name it as its one simple target and gets the policy
-predicate, and SQL that reads the policy's table any other way (a join or
-subquery from another table) is refused.
+A policy scope is a confinement boundary. Its row policy constrains the rows
+of its own table: SQL on the policy's table must name it as its one simple
+target and gets the policy predicate. SQL that names no table (`SELECT 1`)
+runs, and SQL that names any other table, or reads the policy's table other
+than as its target, is refused before it runs with `E2477`. The tables a
+statement reads or writes come from the engine's compile of it, so a join, a
+subquery and an `INSERT ... SELECT` each count; `db.migrate`'s steps are not
+confined. A scope's connection, policy and user are private fields, so code
+holding a scope cannot rebuild the whole `Store`, or a scope for another
+user, from it.
 
 | Signature | Result | Description |
 |---|---|---|
