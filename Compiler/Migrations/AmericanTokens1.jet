@@ -17,11 +17,26 @@
 //   `status` is a word of the record's vocabulary, so it follows the
 //   record's version; JetCLI TestCompare.jet reads it and refuses any other
 //   word, the old spelling included.
+// - A generated binding's descriptor stamp (`// jet-ffi-descriptor=`, its
+//   first line): an adapter contract's marshaled models are spelled
+//   `AdapterMarshaled` and the contract is version 2. Written by
+//   BinderDescriptor.stamp (Jetpack PackageModel
+//   Foreign/Bridge/BinderDescriptor.jet; JetDriver RustForeign.jet keeps
+//   the Rust binder's) into every binding a binder generates, and read by
+//   the provider's stale-stamp check (Jetpack Provider
+//   Foreign/ForeignRealization.jet), the C import assembly and the COM
+//   binder, which take only the stamp the binder writes now. A converted
+//   stamp must be that stamp. The cache identities that hash a stamp (a
+//   binding's `.hash` and `.provenance`) are not converted: `jet inspect
+//   bind` regenerates them.
 //
-// Only a top-level member the format names is rewritten: an observation, a
+// Only the members the format names are rewritten: an observation, a
 // reason or any other text keeps its words, and a file in no known format
 // is left alone and reported.
-use jet_foundation.[ComparisonStatus, TEST_COMPARISON_SCHEMA_VERSION, canonical_json_parse, comparison_parse_status, comparison_record_from_json, comparison_status_as_str]
+use {
+    jet_foundation.[ComparisonStatus, TEST_COMPARISON_SCHEMA_VERSION, canonical_json_parse, comparison_parse_status, comparison_record_from_json, comparison_status_as_str]
+    jet_pkg_model.[FOREIGN_ADAPTER_CONTRACT_VERSION, pkg_binder_descriptor, pkg_foreign_binders]
+}
 
 // One word of an old comparison status vocabulary and the status it named.
 AmericanTokensStatus: struct {
@@ -42,6 +57,15 @@ AMERICAN_TOKENS1_COMPARISON_STATUS_V1: [AmericanTokensStatus]{
     {token: "contaminated", status: ComparisonStatus.Contaminated},
 }
 
+// Version 1's spelling of an adapter contract's marshaled models.
+AMERICAN_TOKENS1_MARSHALED_V1: "AdapterMarshalled"
+
+// Version 2's spelling of them.
+AMERICAN_TOKENS1_MARSHALED: "AdapterMarshaled"
+
+// The start of a generated binding's first line, its descriptor stamp.
+AMERICAN_TOKENS1_DESCRIPTOR_LINE: "// jet-ffi-descriptor="
+
 // One member of a JSON document's top-level object: its key and the byte
 // range of its value's text.
 AmericanTokensMember: struct {
@@ -59,6 +83,9 @@ AmericanTokensEdit: struct {
 
 // Converts one file to the current version of its format.
 american_tokens1_file: fn(path: String, text: String) -[]> MigrationOutcome {
+    if text.starts_with(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
+        return american_tokens1_binding(path, text)
+    }
     bytes: text.bytes()
     members: american_tokens1_members(bytes) ?? return american_tokens1_unknown(path, text)
     edits := [AmericanTokensEdit]{}
@@ -95,6 +122,9 @@ american_tokens1_file: fn(path: String, text: String) -[]> MigrationOutcome {
 // from the new one, and a record is one the current reader accepts.
 american_tokens1_same_meaning: fn(path: String, before: String, after: String) -[]> String? {
     if before == after -> return None
+    if before.starts_with(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
+        return american_tokens1_binding_same_meaning(before, after)
+    }
     old_bytes: before.bytes()
     new_bytes: after.bytes()
     old: american_tokens1_members(old_bytes) ?? return Val("{path} was in no format this plan converts")
@@ -130,6 +160,81 @@ american_tokens1_same_meaning: fn(path: String, before: String, after: String) -
 
 american_tokens1_unknown: fn(path: String, text: String) -[]> MigrationOutcome {
     MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: in no format this plan converts"}}
+}
+
+// Converts a binding whose descriptor stamp carries a version 1 adapter
+// contract: its marshaled models take the new spelling and the contract is
+// version 2. The reader takes only the stamp the binder writes now, so a
+// converted stamp that is not that one is reported and left alone.
+american_tokens1_binding: fn(path: String, text: String) -[]> MigrationOutcome {
+    line: american_tokens1_first_line(text)
+    renamed := 0
+    stamp: american_tokens1_stamp(line.removeprefix(AMERICAN_TOKENS1_DESCRIPTOR_LINE), AMERICAN_TOKENS1_MARSHALED_V1, AMERICAN_TOKENS1_MARSHALED, "1", "{FOREIGN_ADAPTER_CONTRACT_VERSION}", renamed)
+    if renamed == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    if !american_tokens1_current_stamp(stamp) {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: a descriptor stamp no current binder writes, even converted; `jet inspect bind` regenerates the binding"}}
+    }
+    MigrationOutcome{text: "{AMERICAN_TOKENS1_DESCRIPTOR_LINE}{stamp}{text.removeprefix(line)}", rewritten: renamed + 1, skipped: [String]{}}
+}
+
+// Whether a converted binding means what its version 1 source meant: only
+// its descriptor stamp changed, the stamp is the one its binder writes now,
+// and with the old spelling and contract version restored it is the
+// source's stamp.
+american_tokens1_binding_same_meaning: fn(before: String, after: String) -[]> String? {
+    old_line: american_tokens1_first_line(before)
+    new_line: american_tokens1_first_line(after)
+    if before.removeprefix(old_line) != after.removeprefix(new_line) {
+        return Val("the binding changed beyond its descriptor stamp")
+    }
+    if !new_line.starts_with(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
+        return Val("the rewrite has no descriptor stamp")
+    }
+    stamp: new_line.removeprefix(AMERICAN_TOKENS1_DESCRIPTOR_LINE)
+    if !american_tokens1_current_stamp(stamp) {
+        return Val("the current reader refuses the rewrite's descriptor stamp: no binder writes it")
+    }
+    restored := 0
+    if american_tokens1_stamp(stamp, AMERICAN_TOKENS1_MARSHALED, AMERICAN_TOKENS1_MARSHALED_V1, "{FOREIGN_ADAPTER_CONTRACT_VERSION}", "1", restored) != old_line.removeprefix(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
+        return Val("the descriptor stamp changed beyond its marshaled models and contract version")
+    }
+    None
+}
+
+// `stamp` with each marshaled model (a field whose value is `from`) spelled
+// `to`, counting them in `renamed`, and, when one was, its contract version
+// `from_version` set to `to_version`.
+american_tokens1_stamp: fn(stamp: String, from: String, to: String, from_version: String, to_version: String, renamed: &Int) -[]> String {
+    fields := stamp.split(";").to_list()
+    old_version: "version={from_version}"
+    version := -1
+    loop index in 0..<fields.len() {
+        if index > 0 && fields[index] == old_version && fields[index - 1].starts_with("contract=") {
+            version = index
+            next
+        }
+        parts: fields[index].split_once("=") ?? next
+        if parts.after == from {
+            fields[index] = "{parts.before}={to}"
+            renamed += 1
+        }
+    }
+    if renamed > 0 && version >= 0 -> fields[version] = "version={to_version}"
+    fields.join(";")
+}
+
+// Whether a binder writes `stamp` now.
+american_tokens1_current_stamp: fn(stamp: String) -[]> Bool {
+    loop binder in pkg_foreign_binders() {
+        if binder.stamp() == stamp -> return true
+    }
+    false
+}
+
+// `text` up to its first line break.
+american_tokens1_first_line: fn(text: String) -[]> String {
+    parts: text.split_once("\n") ?? return text
+    parts.before
 }
 
 // A comparison record: the members its canonical payload always has.
@@ -274,4 +379,27 @@ american_tokens1_blank: fn(byte: U8) -[]> Bool {
     outcome: american_tokens1_file("notes.txt", "cancelled\n")
     assert_eq(outcome.rewritten, 0)
     assert_eq(outcome.skipped, [String]{"notes.txt: in no format this plan converts"})
+}
+
+#Test("a binding's version 1 adapter stamp becomes the one its binder writes now") {
+    current: (pkg_binder_descriptor("js") ?? panic("the js binder")).stamp()
+    restored := 0
+    old_stamp: american_tokens1_stamp(current, AMERICAN_TOKENS1_MARSHALED, AMERICAN_TOKENS1_MARSHALED_V1, "{FOREIGN_ADAPTER_CONTRACT_VERSION}", "1", restored)
+    assert_eq(restored, 3)
+    assert(old_stamp.contains(";version=1;calling=HostMessage;") && old_stamp.contains(";tasks=AdapterMarshalled;"))
+    old: "// jet-ffi-descriptor={old_stamp}\nscatter: fn() -> Int {{ return 7 }}\n"
+    outcome: american_tokens1_file("plotly.jet", old)
+    assert_eq(outcome.text, "// jet-ffi-descriptor={current}\nscatter: fn() -> Int {{ return 7 }}\n")
+    assert_eq(outcome.rewritten, 4)
+    assert_eq(american_tokens1_same_meaning("plotly.jet", old, outcome.text), None)
+    assert_eq(american_tokens1_same_meaning("plotly.jet", old, "{outcome.text}x"), Val("the binding changed beyond its descriptor stamp"))
+}
+
+#Test("a C binding's stamp has nothing to convert and a stale adapter stamp is reported") {
+    c_binding: "// jet-ffi-descriptor={(pkg_binder_descriptor("c") ?? panic("the c binder")).stamp()}\n"
+    assert_eq(american_tokens1_file("c.jet", c_binding).rewritten, 0)
+    stale: "// jet-ffi-descriptor=jet-ffi-descriptor-v1;language=JS;contract=jet-ffi-descriptor-v1;version=1;callbacks=AdapterMarshalled\n"
+    outcome: american_tokens1_file("old.jet", stale)
+    assert_eq(outcome.text, stale)
+    assert_eq(outcome.skipped, [String]{"old.jet: a descriptor stamp no current binder writes, even converted; `jet inspect bind` regenerates the binding"})
 }

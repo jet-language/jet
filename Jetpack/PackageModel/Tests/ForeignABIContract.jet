@@ -2,6 +2,7 @@
 // the canonical descriptor stamp.
 use jet_pkg_model.[
     FOREIGN_ABI_CONTRACT_VERSION,
+    FOREIGN_ADAPTER_CONTRACT_VERSION,
     FOREIGN_DESCRIPTOR_SCHEMA,
     ForeignSafety,
     ForeignScalar,
@@ -13,7 +14,8 @@ use jet_pkg_model.[
     loop language in languages {
         descriptor: pkg_binder_descriptor(language) ?? panic("conformance language descriptor")
         contract: descriptor.contract
-        assert_eq(contract.version, FOREIGN_ABI_CONTRACT_VERSION)
+        version: if language == "c" -> FOREIGN_ABI_CONTRACT_VERSION else -> FOREIGN_ADAPTER_CONTRACT_VERSION
+        assert_eq(contract.version, version)
         assert(contract.integer == ForeignScalar.Int)
         assert(contract.floating == ForeignScalar.Float)
         assert(contract.boolean == ForeignScalar.Bool)
@@ -22,4 +24,12 @@ use jet_pkg_model.[
         assert(contract.safety == ForeignSafety.GeneratedWrapper)
         assert(descriptor.stamp().starts_with(FOREIGN_DESCRIPTOR_SCHEMA))
     }
+}
+
+#Test("an adapter contract stamp is version 2 and spells its marshaled models the American way") {
+    stamp: (pkg_binder_descriptor("js") ?? panic("js descriptor")).stamp()
+    assert(stamp.contains(";contract={FOREIGN_DESCRIPTOR_SCHEMA};version=2;calling=HostMessage;"))
+    assert(stamp.contains(";callbacks=AdapterMarshaled;async=AdapterMarshaled;tasks=AdapterMarshaled;"))
+    c_stamp: (pkg_binder_descriptor("c") ?? panic("c descriptor")).stamp()
+    assert(c_stamp.contains(";contract={FOREIGN_DESCRIPTOR_SCHEMA};version=1;calling=C;"))
 }

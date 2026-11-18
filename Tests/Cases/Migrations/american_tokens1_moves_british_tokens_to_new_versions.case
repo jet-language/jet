@@ -3,29 +3,34 @@
 # new version. A version 1 comparison record becomes version 2 with status
 # `canceled`, and its reason keeps the words it was written with. A recorded
 # corpus's status becomes `canceled`, while the observations it carries keep
-# theirs. A file in no known format is reported and left alone. A second run
-# finds nothing left to convert. Checked `--against` the untouched copies in
-# `Old/`, both conversions mean what their sources meant, read by version 1's
-# rules beside the current reader, while a hand rewrite that also changed the
-# status, `swapped.json`, is reported as changed and fails the check. The
-# current `jet test-compare` reads the converted corpus and refuses the old
-# one's status word.
+# theirs. A generated binding's descriptor stamp with a version 1 adapter
+# contract takes the stamp its binder writes now: the marshaled models are
+# `AdapterMarshaled` and the contract is version 2, while the binding's code
+# is untouched. A file in no known format is reported and left alone. A
+# second run finds nothing left to convert. Checked `--against` the
+# untouched copies in `Old/`, every conversion means what its source meant,
+# read by version 1's rules beside the current reader, while a hand rewrite
+# that also changed the status, `swapped.json`, is reported as changed and
+# fails the check. The current `jet test-compare` reads the converted corpus
+# and refuses the old one's status word.
 fixture: AmericanTokens1MovesBritishTokensToNewVersions/Input
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json notes.txt
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json plotly.jet notes.txt
 exit: 0
-stdout: = "EDIT record.json 2\nEDIT corpus.json 1\nSKIP notes.txt: in no format this plan converts\nTOTAL 3 sites in 2 files\n"
+stdout: = "EDIT record.json 2\nEDIT corpus.json 1\nEDIT plotly.jet 4\nSKIP notes.txt: in no format this plan converts\nTOTAL 7 sites in 3 files\n"
 file: record.json = AmericanTokens1MovesBritishTokensToNewVersions/record.out
 file: corpus.json = AmericanTokens1MovesBritishTokensToNewVersions/corpus.out
-step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json notes.txt
+file: plotly.jet = AmericanTokens1MovesBritishTokensToNewVersions/plotly.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json plotly.jet notes.txt
 exit: 0
 stdout: = "SKIP notes.txt: in no format this plan converts\nTOTAL 0 sites in 0 files\n"
 file: record.json = AmericanTokens1MovesBritishTokensToNewVersions/record.out
 file: corpus.json = AmericanTokens1MovesBritishTokensToNewVersions/corpus.out
-step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --against Old record.json corpus.json
+file: plotly.jet = AmericanTokens1MovesBritishTokensToNewVersions/plotly.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --against Old record.json corpus.json plotly.jet
 exit: 0
-stdout: = "SAME 2 of 2 files\n"
+stdout: = "SAME 3 of 3 files\n"
 step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --against Old swapped.json
 exit: 1
 stdout: = "CHANGED swapped.json: version 1's `cancelled` became `timeout`\nSAME 0 of 1 files\n"
