@@ -99,7 +99,8 @@ sema_expression_type_symbol: fn(scopes: &SemaScopeTable, environment: SemaScopeE
 // in a constructor is E2422. `alias.Name` through a Core module
 // alias, naming a declaration that module doesn't export, is the E0609 its
 // `use core.X.[Name]` import gets; `alias.child.Name` into a `priv module`
-// of the imported module is E0605; anything else is an unknown name.
+// of the imported module, or `alias.Name` naming a declaration the source
+// module `alias` keeps private, is E0605; anything else is an unknown name.
 sema_expression_unknown_type: fn(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Diagnostic {
     if name == "Never" -> return sema_never_as_value(span)
     if program.registration_graph == .Val(graph) {
@@ -110,6 +111,9 @@ sema_expression_unknown_type: fn(name: String, span: Span, environment: SemaScop
             }
             if sema_registration_core_private_qualified(graph, graph.modules[caller].module_identity, qualified.before, qualified.after) == .Val(module_name) {
                 return sema_registration_core_private_error(qualified.after, module_name, span)
+            }
+            if !qualified.after.contains(".") && sema_registration_private_member(graph, graph.modules[caller].module_identity, qualified.before, qualified.after) {
+                return sema_registration_private_member_error(qualified.after, qualified.before, span)
             }
         }
     }

@@ -4758,6 +4758,31 @@ sema_registration_private_module_error: fn(path: String, span: Span) -> Diagnost
     sema_error("E0605", span, "`{path}` is private to its module", "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module", "use what `{path}` holds from inside its enclosing module, or remove `priv` from the module")
 }
 
+// Whether `alias.member` names a declaration that the source module imported
+// as `alias` keeps private from `module_identity` (`geo.Secret` for a
+// `priv Secret: struct` of the file module `geo`). Core modules keep their
+// own route (sema_registration_core_private_qualified).
+sema_registration_private_member: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, alias: String, member: String) -> Bool Never! {
+    module_index: sema_registration_module_index(graph, module_identity) ?? return false
+    loop import in graph.modules[module_index].imports {
+        if import.declaration.alias != alias || sema_registration_file_import_taken_over(graph.modules[module_index], import) {
+            next
+        }
+        target_index: sema_registration_module_index(graph, import.target_module_identity) ?? return false
+        target: graph.modules[target_index]
+        if target_index == module_index || module_is_core(target.module_identity) -> return false
+        declared: sema_registration_direct_symbol(target, member) ?? return false
+        return !sema_registration_visible(declared.visibility, module_identity, graph.modules[module_index].package_identity, target.module_identity, target.package_identity)
+    }
+    false
+}
+
+// E0605 for `member`, a `priv` declaration of module `owner` used outside
+// that module and its children.
+sema_registration_private_member_error: fn(member: String, owner: String, span: Span) -> Diagnostic Never! {
+    sema_error("E0605", span, "`{member}` is private to module `{owner}`", "a `priv` declaration is usable only inside the module that declares it and that module's children", "use `{member}` from inside `{owner}`, or remove `priv` from it")
+}
+
 sema_registration_resolve_export: fn(graph: SemaRegistrationGraph, module_index: Int, name: String, requester_module: ModuleID, requester_package: String, seen: [String]) -> SemaRegistrationExport? {
     if module_index < 0 || module_index >= graph.modules.len() -> return None
     key: "{module_index}:{name}"
