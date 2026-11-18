@@ -3226,7 +3226,7 @@ sema_taint_collect_imports: fn(graph: SemaRegistrationGraph, module_identity: Mo
         target_name := sema_taint_import_module_name(graph, import)
         imports.push(SemaTaintImportAlias{alias: import.declaration.alias, module_name: target_name, module_identity: import.target_module_identity})
         loop binding in import.bindings {
-            imports.push(SemaTaintImportAlias{alias: binding.local, module_name: target_name, module_identity: module_none()})
+            imports.push(SemaTaintImportAlias{alias: binding.local, module_name: target_name.copy(), module_identity: module_none()})
         }
     }
     imports

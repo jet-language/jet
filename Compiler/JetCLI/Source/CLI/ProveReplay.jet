@@ -600,7 +600,7 @@ jet_cli_replay_encode: fn(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt:
                         jet_cli_replay_integer_field("call_id", io_calls),
                         CanonicalJSONField{key: "requested_bytes", value: jet_cli_replay_uint(read.request)},
                         jet_cli_replay_string("site_id", read.site_id),
-                        stream,
+                        stream.copy(),
                     },
                 ),
             ),
@@ -618,7 +618,7 @@ jet_cli_replay_encode: fn(run: JetCLIReplayRun, reads: [JetCLIReplayRead], salt:
                             [CanonicalJSONField]{
                                 CanonicalJSONField{key: "bytes", value: jet_cli_replay_bytes_value(read.bytes.slice(start, end))},
                                 jet_cli_replay_integer_field("chunk_index", chunk),
-                                stream,
+                                stream.copy(),
                             },
                         ),
                     ),
@@ -722,7 +722,7 @@ jet_cli_replay_net_frames: fn(payloads: &[[U8]], kinds: &[Int], read: JetCLIRepl
                     [CanonicalJSONField]{
                         CanonicalJSONField{key: "bytes", value: jet_cli_replay_bytes_value(hop.stream.slice(start, end))},
                         jet_cli_replay_integer_field("chunk_index", chunk),
-                        id,
+                        id.copy(),
                     },
                 ),
             ),

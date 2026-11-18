@@ -51,7 +51,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 }
                 capture_scopes = capture_scopes.slice(0, capture_scopes.len() - 1)
             }
-            plan.steps.push(KitStep{argv: [line], stdin: "", exit: "0", assertions: [], action: line})
+            plan.steps.push(KitStep{argv: [line.copy()], stdin: "", exit: "0", assertions: [], action: line})
             plan.steps.push(KitStep{argv: [], stdin: "", exit: "any", assertions: [], action: "assert"})
             modifier_adjacent = false
             next
@@ -359,7 +359,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid {key} setup action"
                 return plan
             }
-            argv := [String]{key}
+            argv := [String]{key.copy()}
             loop word in words -> argv.push(word)
             plan.steps.push(KitStep{argv: argv, stdin: "", exit: "0", assertions: [], action: key})
             next
@@ -393,7 +393,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 plan.error = "line {line_number}: invalid {key} path count"
                 return plan
             }
-            argv := [String]{key}
+            argv := [String]{key.copy()}
             loop (position, path) in paths {
                 external_source: key == "copy" && position == 0 && (path.contains("{{root}}") || path.contains("{{jet}}") || path.contains("{{jetpack}}"))
                 template: key == "write" && position == 1
@@ -492,7 +492,7 @@ kit_steps_parse: fn(source: String) -> KitPlan {
                 duration = kit_steps_duration_ns(words[2]) ?? 0
             }
             joined.push(label.copy())
-            plan.steps.push(KitStep{argv: ["wait", label], stdin: "", exit: "0", assertions: [], label: label, action: if key == "close" -> "close" else -> "wait", duration: duration})
+            plan.steps.push(KitStep{argv: ["wait", label.copy()], stdin: "", exit: "0", assertions: [], label: label, action: if key == "close" -> "close" else -> "wait", duration: duration})
             next
         }
         if key.starts_with("send ") || key.starts_with("signal ") {

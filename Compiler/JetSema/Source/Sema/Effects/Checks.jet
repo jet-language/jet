@@ -1713,7 +1713,7 @@ sema_effect_check_module_cap: fn(nodes: [SemaEffectNode], node_index: Int, solve
             _: sema_effect_memory_project(nodes, node_index, EffectRowEntry{name: effect_name, span: span}, diagnostics)
             next
         }
-        reached: sema_effect_covered(solved, [String]{effect_name})
+        reached: sema_effect_covered(solved, [String]{effect_name.copy()})
         if reached.len() == 0 {
             declared: sema_effect_declared_hits(node.declared, effect_name)
             if declared.len() > 0 {
@@ -1947,7 +1947,7 @@ sema_effect_type_caps: fn(graph_modules: [SemaRegistrationModule]) -> [U32:SemaE
     loop module_row in graph_modules {
         loop nominal in module_row.nominals {
             cap: sema_effect_nominal_cap(nominal) ?? next
-            caps[nominal.symbol.id.id] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap, site: Val(sema_effect_cap_site(module_row, cap.span))}}
+            caps[nominal.symbol.id.id] = SemaEffectTypeCap{module_identity: module_row.module_identity, cap: SemaEffectModuleCap{cap: cap.copy(), site: Val(sema_effect_cap_site(module_row, cap.span))}}
         }
     }
     caps
@@ -2066,7 +2066,7 @@ sema_effect_file_module_caps: fn(graph_modules: [SemaRegistrationModule], edges:
             seen[pair] = taken
             parents[target].push(source)
             cap: sema_effect_file_module_cap(graph_modules[source].program.items, edge.declaration.alias) ?? next
-            direct[target].push(SemaEffectModuleCap{cap: cap, site: Val(sema_effect_cap_site(graph_modules[source], cap.span))})
+            direct[target].push(SemaEffectModuleCap{cap: cap.copy(), site: Val(sema_effect_cap_site(graph_modules[source], cap.span))})
         }
     }
     // A head cap comes last in its own file's row, labeled where it is
@@ -3252,7 +3252,7 @@ sema_effect_check_callback_bounds: fn(nodes: [SemaEffectNode], node_by_key: Name
         }
         denied := [String]{}
         loop name in sema_effect_covered(solved[target], obligation.row.denied) {
-            if sema_effect_covered([String]{name}, nodes[target].prohibited).len() == 0 {
+            if sema_effect_covered([String]{name.copy()}, nodes[target].prohibited).len() == 0 {
                 sema_effect_set_add(denied, name)
             }
         }
@@ -6526,8 +6526,8 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         memory_facts.declarations.push(declaration)
         loop root in 0..<nodes.len() {
             memory_diagnostics := [Diagnostic]{}
-            projection: sema_effect_memory_project(nodes, root, EffectRowEntry{name: name, span: Span{start: 0, end: 0}}, memory_diagnostics)
-            memory_facts.projections.push(SemaMemoryProjectionRow{root: nodes[root].display_key, fact: fact, projection: projection})
+            projection: sema_effect_memory_project(nodes, root, EffectRowEntry{name: name.copy(), span: Span{start: 0, end: 0}}, memory_diagnostics)
+            memory_facts.projections.push(SemaMemoryProjectionRow{root: nodes[root].display_key, fact: fact.copy(), projection: projection})
             sema_effect_publish_diagnostics(diagnostics, inputs[nodes[root].module_index].source_segments, memory_diagnostics)
         }
     }
@@ -6548,7 +6548,7 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         loop node_index in 0..<nodes.len() {
             graph_module: inputs[nodes[node_index].module_index].module_index
             if graph_module >= denial_modules.len() || !denial_modules[graph_module] -> next
-            reached: sema_effect_covered(solved[node_index], [String]{denied})
+            reached: sema_effect_covered(solved[node_index], [String]{denied.copy()})
             if reached.len() == 0 -> next
             panic_steps := [String]{}
             if sema_effect_root(denied) == "Panic" {

@@ -397,7 +397,7 @@ core_decl_coverage: fn(expression: String, context: String) -> CoreCallCoverage 
             bits |= bit
             next
         }
-        bits |= core_decl_rust_int(part, context) ?? return Err(err)
+        bits |= core_decl_rust_int(part.copy(), context) ?? return Err(err)
     }
     Ok(CoreCallCoverage{bits: bits})
 }
@@ -812,7 +812,7 @@ core_decl_call_record: fn(expression: String, context: String, constants: [Strin
         if (Int{bytes[position]}) != 46 {
             return Err(core_decl_fail("unsupported CoreCallRecord expression in {context}: {value}"))
         }
-        builder: core_decl_read_call(value, position + 1, context) ?? return Err(err)
+        builder: core_decl_read_call(value.copy(), position + 1, context) ?? return Err(err)
         record = core_decl_apply_builder(record, builder, context, constants) ?? return Err(err)
         position = builder.end
     }

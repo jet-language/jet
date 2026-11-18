@@ -136,10 +136,10 @@ jet_cli_perf_capture_allowlist: fn(raw: String) -> [String] JetCLIReadError! {
     loop part in raw.split(",") {
         item: part.trim()
         if item == "" -> next
-        if !DEFAULT_EXCLUSIONS.contains(item) {
+        if !DEFAULT_EXCLUSIONS.contains(item.copy()) {
             return Err(jet_cli_read_error("`--capture` item `{item}` is not a privacy field; allowed: {DEFAULT_EXCLUSIONS.join(", ")}"))
         }
-        if !items.contains(item) -> items.push(item)
+        if !items.contains(item.copy()) -> items.push(item.copy())
     }
     if items.len() == 0 {
         return Err(jet_cli_read_error("`--capture` needs at least one privacy field"))

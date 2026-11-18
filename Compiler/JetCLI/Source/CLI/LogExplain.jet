@@ -45,7 +45,7 @@ jet_cli_explain_log: fn(args: [String], color: Bool, json: Bool) -[FS, Env]> Jet
             loop (index, line) in source.split("\n").to_list() {
                 code: line.trim()
                 if code.starts_with(COMMENT_PREFIX) || !code.contains("set_level(") -> next
-                ladder.push(JetCLILogSource{rung: "code", filter: code, site: "{entry.path}:{index + 1}"})
+                ladder.push(JetCLILogSource{rung: "code", filter: code.copy(), site: "{entry.path}:{index + 1}"})
             }
         }
     }
@@ -104,7 +104,7 @@ jet_cli_log_merge: fn(pairs: &[JetCLILogPair], filter: String) {
         replaced := false
         loop index in 0..<pairs.len() {
             if pairs[index].path == path {
-                pairs[index].level = level
+                pairs[index].level = level.copy()
                 replaced = true
             }
         }

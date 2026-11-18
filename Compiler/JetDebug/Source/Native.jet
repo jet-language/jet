@@ -1848,11 +1848,11 @@ native_debug_view_shown: fn(image: NativeImage, memory: NativeMemory, ty: Int, a
     stored: if shown == 0 -> [U8]{} else -> native_debug_bytes(memory, data, size * shown) ?? return None
     items := [String]{}
     loop k in 0..<shown {
-        label := NATIVE_DEBUG_UNAVAILABLE
-        value := NATIVE_DEBUG_UNAVAILABLE
+        label := NATIVE_DEBUG_UNAVAILABLE.copy()
+        value := NATIVE_DEBUG_UNAVAILABLE.copy()
         loop member in image.members[found.group] {
             text: native_debug_text(native_number(stored, k * size + member.offset, 8, X64DebugEncoding.Signed), memory, false) ?? NATIVE_DEBUG_UNAVAILABLE
-            if member.name == "label" -> label = text
+            if member.name == "label" -> label = text.copy()
             if member.name == "value" -> value = text
         }
         items.push("{label}: {value}")

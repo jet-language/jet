@@ -97,7 +97,7 @@ jet_cli_struct_load: fn(path: String) -> JetCLIStructLoaded {
                 if fact.span.start < 0 || fact.span.start > fact.span.end || fact.span.end > source.bytes().len() {
                     return JetCLIStructLoaded.Failed{output: jet_cli_struct_fail("semantic index returned an invalid source span", "run `jet check` and report this compiler bug")}
                 }
-                units.push(JetCLIStructUnit{fact: fact, source: semindex_doc_text(source.bytes(), fact.span.start, fact.span.end).trim(), leading: ""})
+                units.push(JetCLIStructUnit{fact: fact.copy(), source: semindex_doc_text(source.bytes(), fact.span.start, fact.span.end).trim(), leading: ""})
             }
             units.sort_by(fn(left: JetCLIStructUnit, right: JetCLIStructUnit) { left.fact.span.start <=> right.fact.span.start })
             cursor := 0
@@ -405,14 +405,14 @@ jet_cli_struct_install: fn(argv: [String]) -> JetDriverVerbOutput {
     values: [String]{"Jet structural merge", "jet merge --structural %O %A %B --out %A"}
     loop row in 0..<keys.len() {
         key: keys[row]
-        written: cli_process.cmd([String]{"git", "config", "--file", config, "--replace-all", key, values[row]}).run() ?? return jet_cli_struct_fail("could not run Git: {jet_cli_io_error_text(err)}", "install Git before enabling its merge driver")
+        written: cli_process.cmd([String]{"git", "config", "--file", config.copy(), "--replace-all", key.copy(), values[row]}).run() ?? return jet_cli_struct_fail("could not run Git: {jet_cli_io_error_text(err)}", "install Git before enabling its merge driver")
         if !written.success {
             return jet_cli_struct_fail("could not update Git config `{key}`", "fix repository config permissions")
         }
     }
     loop row in 0..<keys.len() {
         key: keys[row]
-        read: cli_process.cmd([String]{"git", "config", "--file", config, "--get", key}).run() ?? return jet_cli_struct_fail("could not run Git: {jet_cli_io_error_text(err)}", "install Git before enabling its merge driver")
+        read: cli_process.cmd([String]{"git", "config", "--file", config.copy(), "--get", key.copy()}).run() ?? return jet_cli_struct_fail("could not run Git: {jet_cli_io_error_text(err)}", "install Git before enabling its merge driver")
         if !read.success {
             return jet_cli_struct_fail("could not read back Git config `{key}`", "repair the repository config")
         }

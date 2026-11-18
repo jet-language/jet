@@ -1821,7 +1821,7 @@ jet_cli_authority_flags: fn(jet_argv: [String], color: Bool) -> JetCLIAuthorityF
         }
         loop raw in value.split(",") {
             right: raw.trim()
-            canonical: jet_cli_parse_right(right) ?? return JetCLIAuthorityFlags.Refused{plan: jet_cli_fail("E2104", "unknown authority right `{right}`", "authority names match the canonical effect roots and leaves", "use `--{kind}=FS.Read,Time`", color, JET_DRIVER_EXIT_USAGE)}
+            canonical: jet_cli_parse_right(right.copy()) ?? return JetCLIAuthorityFlags.Refused{plan: jet_cli_fail("E2104", "unknown authority right `{right}`", "authority names match the canonical effect roots and leaves", "use `--{kind}=FS.Read,Time`", color, JET_DRIVER_EXIT_USAGE)}
             if kind == "allow" {
                 if !allow.contains(canonical) -> allow.push(canonical)
             } else {

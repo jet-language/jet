@@ -153,7 +153,7 @@ effect_vocabulary_words: fn(text: String) -> [String] {
         loop part in word.split("\t") {
             loop piece in part.split(",") {
                 trimmed: piece.trim()
-                if trimmed != "" -> out.push(trimmed)
+                if trimmed != "" -> out.push(trimmed.copy())
             }
         }
     }
@@ -235,7 +235,7 @@ effect_vocabulary_source_scan: fn(source: String, path: String, machine: [Effect
                     }
                 }
             }
-            type_name = name
+            type_name = name.copy()
             type_span = Span{start: start, end: start + name.bytes().len()}
             family = fields[1] == "enum"
             cases = [String]{}
@@ -339,8 +339,8 @@ effect_vocabulary_kernel: fn(line: String, machine: [EffectVocabularyRow], place
         if !known {
             panic("{place}: `{entry}` is no machine effect of {EFFECT_VOCABULARY_MACHINE_PATH}")
         }
-        if kernel.contains(entry) -> panic("{place}: `{entry}` is listed twice")
-        kernel.push(entry)
+        if kernel.contains(entry.copy()) -> panic("{place}: `{entry}` is listed twice")
+        kernel.push(entry.copy())
     }
     if kernel.len() == 0 -> panic("{place}: the `#FX(…)` line lists no machine effect")
     kernel

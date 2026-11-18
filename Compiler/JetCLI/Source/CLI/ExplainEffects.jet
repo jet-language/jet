@@ -718,7 +718,7 @@ jet_cli_explain_effects_report: fn(result: JetDriverCompileResult, job: JetCLIIn
         } else if ordered[0].lambda {
             lambda_span: ordered[0].span
             direct: loop name in ordered[0].direct -> EffectRowEntry{name: name, span: lambda_span}
-            edges: loop edge in ordered[0].edges -> EffectRowEntry{name: edge, span: jet_cli_effects_call_span(doc_module, edge, lambda_span)}
+            edges: loop edge in ordered[0].edges -> EffectRowEntry{name: edge.copy(), span: jet_cli_effects_call_span(doc_module, edge, lambda_span)}
             jet_cli_effects_part_reaches(doc_module, found.key, direct, edges, summaries, modules, reaches)
         } else {
             jet_cli_effects_span_reaches(doc_module, found.key, ordered[0].span, summaries, modules, reaches)

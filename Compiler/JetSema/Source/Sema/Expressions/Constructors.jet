@@ -520,7 +520,7 @@ sema_expression_struct_field_view_escape: fn(field_value: Expr, scopes: SemaScop
 // The owner's type arguments as far as `bindings` has inferred them; an
 // unbound parameter stays itself.
 sema_expression_struct_inferred_args: fn(names: [String], bindings: [SemaInferenceBinding]) -> [Type] Never! {
-    args: loop name in names -> (sema_inference_binding_at(bindings, name) ?? SemaInferenceBinding{name: name, ty: Type.Named{name: name}, source: ""}).ty
+    args: loop name in names -> (sema_inference_binding_at(bindings, name) ?? SemaInferenceBinding{name: name.copy(), ty: Type.Named{name: name}, source: ""}).ty
     args
 }
 

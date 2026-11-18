@@ -680,7 +680,7 @@ sema_error_conversion_items: fn(items: &[Item], facts: &[AppliedRuleApplication]
                 }
                 routine := sema_error_conversion_routine(route, param_name, convention, type_params, local_types, edges, diagnostics) ?? next
                 if kept {
-                    hooked := definition
+                    hooked := definition.copy()
                     hooked.methods[0].body = sema_error_conversion_hook_body(route, definition.methods[0])
                     output.push(Item.Impl{value: hooked})
                 }

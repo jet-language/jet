@@ -1574,7 +1574,7 @@ sema_stmt_check_switch: fn(subject: Expr, arms: [SwitchArm], else_body: [Stmt]?,
             target := sema_stmt_type_switch_target(param, arms[arm_index].cond, type_arms, environment, program, scopes, diagnostics)
             if target == .Val(arm_type) {
                 if return_type == .Val(declared) {
-                    arm_return = Val(sema_inference_substitute_type(declared, [String]{param}, [Type]{arm_type}))
+                    arm_return = Val(sema_inference_substitute_type(declared, [String]{param.copy()}, [Type]{arm_type.copy()}))
                 }
                 type_arms.push(arm_type.copy())
                 arm_target = Val(arm_type)
@@ -3575,7 +3575,7 @@ sema_stmt_local_view_facts_inner: fn(expr: Expr, scopes: SemaScopeTable, state: 
                 projected_expr := expr
                 projectable := true
                 loop part in local_fact.output_path {
-                    member := part
+                    member := part.copy()
                     if part.starts_with(".") -> member = part.slice(1, part.len())
                     if part.starts_with("[") || part == "*" {
                         projectable = false
@@ -5934,7 +5934,7 @@ sema_stmt_check_destructure: fn(binding: Binding, pattern: BindPattern, environm
                 sema_stmt_destructure_count(elements.len(), items.len(), false, true, pattern_span, diagnostics)
             }
             loop (index, _) in elements {
-                fields.push(TypeTupleField{name: "{index}", ty: element_type})
+                fields.push(TypeTupleField{name: "{index}", ty: element_type.copy()})
             }
         }
         .Tuple(elements, pattern_span) -> {
@@ -6075,7 +6075,7 @@ sema_stmt_tuple_destructure_by_name: fn(elements: [BindName], fields: [TypeTuple
             binding = spare[next_spare]
             next_spare += 1
         }
-        if binding == "" || used.contains(binding) -> binding = member
+        if binding == "" || used.contains(binding) -> binding = member.copy()
         loop used.contains(binding) -> binding = "{binding}_value"
         renames.push("{member}: {binding}")
         used.push(binding)
@@ -10142,7 +10142,7 @@ sema_check_statements: fn(statements: [Stmt], return_type: Type?, environment: S
                                 valid = false
                             }
                         }
-                        first_type := item_type
+                        first_type := item_type.copy()
                         second_type := Type?{None}
                         if pair_name != None && pair_types != None {
                             pair: pair_types ?? SemaForInPairTypes{first: item_type, second: item_type}

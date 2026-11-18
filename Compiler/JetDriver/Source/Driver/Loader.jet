@@ -2048,7 +2048,7 @@ jet_driver_bind_script_dependencies: fn(packages: &[JetDriverPackageInfo], snaps
             diagnostics.push(diagnostic_with_source_path(pkg_inline_deps_l0203_unpinned(reference), source_path, 0))
         }
         if jet_driver_find_dependency(package, admitted.name) != None -> next
-        package.dependencies.push(JetDriverPackageDependency{name: admitted.name, source: "inline:{admitted.name}#{admitted.selector}", source_path: source_path, span: Val(admitted.span), target_root_index: target, script_version: Val(admitted.resolved_version)})
+        package.dependencies.push(JetDriverPackageDependency{name: admitted.name, source: "inline:{admitted.name}#{admitted.selector}", source_path: source_path.copy(), span: Val(admitted.span), target_root_index: target, script_version: Val(admitted.resolved_version)})
     }
     packages[entry_index] = package
 }
@@ -2100,7 +2100,7 @@ jet_driver_build_source_catalog: fn(request: JetDriverCompileRequest) -> JetDriv
                     root_identity: root.identity,
                     package_identity: package.identity,
                     module_name: jet_driver_default_module_alias(file.relative_path),
-                    path: unit_path,
+                    path: unit_path.copy(),
                     relative_path: file.relative_path,
                     source_segments: jet_driver_unparsed_source_segments(unit_path, file.source.count_bytes(), SemaSourceOrigin.Snapshot),
                     source_origin: SemaSourceOrigin.Snapshot,
@@ -2139,7 +2139,7 @@ jet_driver_build_source_catalog: fn(request: JetDriverCompileRequest) -> JetDriv
                 root_identity: snapshot.roots[owner].identity,
                 package_identity: generated.package_identity,
                 module_name: generated.name,
-                path: path,
+                path: path.copy(),
                 relative_path: generated.relative_path,
                 source_segments: jet_driver_unparsed_source_segments(path, generated.source.count_bytes(), SemaSourceOrigin.CompilerGenerated),
                 source_origin: SemaSourceOrigin.CompilerGenerated,
@@ -2912,7 +2912,7 @@ jet_driver_bind_dependency_imports: fn(program: &Program, unit: JetDriverSourceU
                 }
                 if jet_driver_find_dependency(packages[package_index], module_alias) == None -> next
                 span: Span{start: module_alias_span.start, end: module_alias_span.start}
-                bindings.push(ImportDecl{kind: ImportKind.Module{name: module_alias, span: span}, alias: module_alias, alias_span: span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None})
+                bindings.push(ImportDecl{kind: ImportKind.Module{name: module_alias.copy(), span: span}, alias: module_alias, alias_span: span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: false, is_package_pub: false, inline_version: None})
             }
             .File(_, _) | .Module(_, _) -> {}
         }
@@ -3114,7 +3114,7 @@ jet_driver_func_default_regions: fn(function: Func, template: Bool, module_index
     // A precondition is checked at each call site, in the caller's scope.
     loop clause in function.pre {
         end: if clause.message_span.end > clause.span.end -> clause.message_span.end else -> clause.span.end
-        regions.push(JetDriverDefaultRegion{key: key, module_index: module_index, start: clause.span.start, end: end})
+        regions.push(JetDriverDefaultRegion{key: key.copy(), module_index: module_index, start: clause.span.start, end: end})
     }
 }
 
@@ -3491,7 +3491,7 @@ jet_driver_bind_package_namespaces: fn(
         }
         namespace: source_units[modules[members[0]].source_unit_index].package_identity
         loop position in 0..<members.len() {
-            modules[members[position]].namespace = namespace
+            modules[members[position]].namespace = namespace.copy()
             modules[members[position]].namespace_names = loop declared in names[position] -> declared.name
         }
         if members.len() > 1 {

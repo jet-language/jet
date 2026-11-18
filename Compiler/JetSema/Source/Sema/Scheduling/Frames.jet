@@ -510,7 +510,7 @@ sema_frame_retentions: fn(operations: [FrameOperation], events: [FrameEventIndex
             .Pending(token) -> {
                 completed := sema_frame_event_index(events, token) > index
                 loop access in operation.accesses {
-                    retentions.push(FrameRetention{resource: sema_frame_resource_label(access.resource), operation: index, owner: operation.name, completion_token: Val(token), completed: completed})
+                    retentions.push(FrameRetention{resource: sema_frame_resource_label(access.resource), operation: index, owner: operation.name, completion_token: Val(token.copy()), completed: completed})
                 }
             }
             .Synchronous | .Event(_) -> {}

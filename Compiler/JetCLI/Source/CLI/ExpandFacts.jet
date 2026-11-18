@@ -86,7 +86,7 @@ jet_cli_expand_memory: fn(modules: [JetDriverDocModule], index: SemIndex) -> [Je
                 jet_cli_status_field("status", status.value),
             }
             jet_cli_expand_location(fields, modules, declaration.source, declaration.span)
-            facts.push(JetCLIExpandFact{source: declaration.source, offset: declaration.span.start, name: root, text: "{root}: {declaration.fact} — {status.text} ({declaration.provenance})", value: jet_cli_status_object(fields)})
+            facts.push(JetCLIExpandFact{source: declaration.source, offset: declaration.span.start, name: root.copy(), text: "{root}: {declaration.fact} — {status.text} ({declaration.provenance})", value: jet_cli_status_object(fields)})
         }
     }
     facts.sort_by(fn(left: JetCLIExpandFact, right: JetCLIExpandFact) { left.text <=> right.text })
@@ -227,7 +227,7 @@ jet_cli_expand_origin: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] N
                         jet_cli_status_field("value", jet_cli_expand_checked_json(row.value)),
                     },
                 )
-                facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: receiver, text: "{unit.path}:{line}:{column}   {receiver}.reflect().origin   {fact_type}={jet_cli_expand_checked_show(row.value)}", value: value})
+                facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: receiver.copy(), text: "{unit.path}:{line}:{column}   {receiver}.reflect().origin   {fact_type}={jet_cli_expand_checked_show(row.value)}", value: value})
             }
         }
     }

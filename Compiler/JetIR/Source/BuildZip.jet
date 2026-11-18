@@ -51,7 +51,7 @@ ir_zip: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, a
             meta: ir_lazy_meta(m, p, b, target, span)
             if meta < 0 -> return -1
             release: mapped.release
-            iter_row: ir_value_type(m, p, Type.Apply{name: "Iter", args: [Type]{target}}) ?? return ir_type_fail(b, span, target)
+            iter_row: ir_value_type(m, p, Type.Apply{name: "Iter", args: [Type]{target.copy()}}) ?? return ir_type_fail(b, span, target)
             source: columns[index]
             columns[index] = ir_lazy_runtime(m, b, "jet_rt_native_iter_map", [Int]{source, mapped.closure, mapped.callback, release, meta}, iter_row, source)
             absent_node: ir_node(b, target, NodeKind.Absent, span)
@@ -61,7 +61,7 @@ ir_zip: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, a
             fills.push(absent)
             next
         }
-        actual := fill_ty
+        actual := fill_ty.copy()
         column_fill := fill
         if fill_mode == .Columns {
             actual = ir_zip_tuple_field(fill_ty, fields[index]) ?? return ir_fail_slot(b, span, "builtin Zip fills without column {fields[index]}")
@@ -98,10 +98,10 @@ ir_zip: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, a
         }
         values.push(ir_zip_local(b, "zip_1", right_type, span))
         body: ir_node(b, row_type, NodeKind.Tuple{values: values}, span)
-        joined: ir_zip_adapter(m, p, b, "zip_{index}", [Type]{left_type, right_type}, [String]{"zip_0", "zip_1"}, row_type, body, span)
+        joined: ir_zip_adapter(m, p, b, "zip_{index}", [Type]{left_type.copy(), right_type.copy()}, [String]{"zip_0", "zip_1"}, row_type, body, span)
         if joined.closure < 0 -> return -1
         last: index + 1 == input_count
-        result_ty: if last -> ty.copy() else -> Type.Apply{name: "Iter", args: [Type]{row_type}}
+        result_ty: if last -> ty.copy() else -> Type.Apply{name: "Iter", args: [Type]{row_type.copy()}}
         result_row: ir_value_type(m, p, result_ty) ?? return ir_type_fail(b, span, result_ty)
         meta: ir_lazy_meta(m, p, b, row_type, span)
         if meta < 0 -> return -1

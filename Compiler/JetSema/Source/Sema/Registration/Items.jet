@@ -279,7 +279,7 @@ sema_registration_unit_family_facts: fn(definition: UnitFamilyDef, facts: &[Sema
                 facts,
                 SemaRegistrationUnitFact{
                     name: name,
-                    package: package,
+                    package: package.copy(),
                     family: definition.family,
                     member: member.name,
                     dimension: definition.resolved_dimension,
@@ -1443,7 +1443,7 @@ sema_registration_extern_parameters: fn(function: ExternFn, module_id: ModuleID,
                     module_identity: module_id,
                     owner: Val(owner_key),
                     span: parameter.name_span,
-                    ty: Val(parameter_ty),
+                    ty: Val(parameter_ty.copy()),
                     visibility: 0,
                 },
                 ty: parameter_ty,
@@ -1501,7 +1501,7 @@ sema_registration_function_parameters: fn(func: Func, module_id: ModuleID, modul
                     module_identity: module_id,
                     owner: Val(owner_key),
                     span: parameter.name_span,
-                    ty: Val(parameter_ty),
+                    ty: Val(parameter_ty.copy()),
                     visibility: 0,
                 },
                 ty: parameter_ty,
@@ -2003,7 +2003,7 @@ sema_registration_struct_fields: fn(definition: StructDef, module_identity: Stri
             kind: SymbolKind.Field,
             name: definition.fields[field_index].name,
             module_identity: owner.module_identity,
-            owner: Val(owner_key),
+            owner: Val(owner_key.copy()),
             span: definition.fields[field_index].name_span,
             ty: Val(definition.fields[field_index].ty),
             visibility: sema_registration_visibility(definition.fields[field_index].is_pub, definition.fields[field_index].is_package_pub),
@@ -2036,7 +2036,7 @@ sema_registration_enum_variants: fn(definition: EnumDef, module_identity: String
             kind: SymbolKind.Variant,
             name: definition.variants[variant_index].name,
             module_identity: owner.module_identity,
-            owner: Val(owner_key),
+            owner: Val(owner_key.copy()),
             span: definition.variants[variant_index].name_span,
             ty: payload_ty,
             visibility: owner.visibility,
@@ -2107,7 +2107,7 @@ sema_registration_trait_method: fn(method: TraitMethodSig, module_identity: Stri
         parameters.push(
             SemaRegistrationParameter{
                 index: index,
-                symbol: Symbol{id: symbol_mint(symbols, SymbolKind.Parameter, module_identity, key, parameter.name), kind: SymbolKind.Parameter, name: parameter.name, module_identity: owner.module_identity, owner: Val(key), span: parameter.name_span, ty: Val(parameter_ty), visibility: 0},
+                symbol: Symbol{id: symbol_mint(symbols, SymbolKind.Parameter, module_identity, key, parameter.name), kind: SymbolKind.Parameter, name: parameter.name, module_identity: owner.module_identity, owner: Val(key.copy()), span: parameter.name_span, ty: Val(parameter_ty.copy()), visibility: 0},
                 ty: parameter_ty,
                 convention: parameter.convention,
                 zone: parameter.zone,
@@ -2840,8 +2840,8 @@ sema_registration_impl: fn(module_row: SemaRegistrationModule, module_text: Stri
     symbol: Symbol{id: impl_id, kind: SymbolKind.Impl, name: definition.type_name, module_identity: module_row.module_identity, owner: None, span: definition.type_span, ty: Val(target_type), visibility: 0}
     impl_key: symbol_key_text(SymbolKind.Impl, module_text, "", identity_key)
     associated_types: loop declaration in definition.assoc_type_impls -> {
-        associated_symbol: Symbol{id: symbol_mint(symbols, SymbolKind.Type, module_text, impl_key, declaration.name), kind: SymbolKind.Type, name: declaration.name, module_identity: module_row.module_identity, owner: Val(impl_key), span: declaration.span, ty: Val(declaration.ty), visibility: 0}
-        SemaRegistrationAssociatedType{symbol: associated_symbol, declaration: declaration, ty: declaration.ty}
+        associated_symbol: Symbol{id: symbol_mint(symbols, SymbolKind.Type, module_text, impl_key, declaration.name), kind: SymbolKind.Type, name: declaration.name, module_identity: module_row.module_identity, owner: Val(impl_key.copy()), span: declaration.span, ty: Val(declaration.ty), visibility: 0}
+        SemaRegistrationAssociatedType{symbol: associated_symbol, declaration: declaration.copy(), ty: declaration.ty}
     }
     hook_owner: sema_registration_operator_owner(owner_id, symbols, module_text, target_type, definition.trait_name, definition.operator_rhs)
     methods := loop method_index in 0..<definition.methods.len() -> sema_registration_function(definition.methods[method_index], sema_raw_protocol_function_return(definition.trait_name, false, definition.methods[method_index]), module_row.module_identity, module_text, Val(hook_owner), symbols, module_row.source_file, module_row.source_origin, module_row.source_segments, diagnostics)
@@ -3145,7 +3145,7 @@ sema_registration_attach_namespace_impls: fn(graph: &SemaRegistrationGraph) {
                     sema_registration_push_graph_diagnostic(graph, module_index, diagnostic)
                 }
             }
-            graph.modules[module_index].impls[impl_index] = row
+            graph.modules[module_index].impls[impl_index] = row.copy()
             loop method in row.methods {
                 graph.modules[owner_index].nominals[owner_nominal].methods.push(method)
             }
@@ -3408,7 +3408,7 @@ sema_registration_prepare_module_row: fn(input: &&SemaRegistrationModuleInput, m
         symbol: module_row.symbols[symbol_index].copy()
         if symbol.visibility > 0 {
             declaration_position: sema_registration_declaration_position(module_row, symbol)
-            module_row.exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol, declaration_position: declaration_position, source_module_identity: module_row.module_identity, visibility: symbol.visibility})
+            module_row.exports.push(SemaRegistrationExport{name: symbol.name, symbol: symbol.copy(), declaration_position: declaration_position, source_module_identity: module_row.module_identity, visibility: symbol.visibility})
         }
     }
 
@@ -3481,13 +3481,13 @@ sema_registration_expand_impl_self: fn(items: &[Item]) {
         replacement := Item?{None}
         if items[index] == {
             .Impl(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 if sema_registration_impl_self_methods(sema_registration_impl_self_type(definition.type_name, type_params), updated.methods) {
                     replacement = Val(Item.Impl{value: updated})
                 }
             }
             .Struct(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 self_type: sema_registration_impl_self_type(definition.name, type_params)
                 changed := sema_registration_impl_self_methods(self_type, updated.methods)
                 loop block_index in 0..<updated.trait_impls.len() {
@@ -3498,7 +3498,7 @@ sema_registration_expand_impl_self: fn(items: &[Item]) {
                 if changed -> replacement = Val(Item.Struct{value: updated})
             }
             .Enum(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 self_type: sema_registration_impl_self_type(definition.name, type_params)
                 changed := sema_registration_impl_self_methods(self_type, updated.methods)
                 loop block_index in 0..<updated.trait_impls.len() {
@@ -5037,7 +5037,7 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                                 }
                                 else -> {
                                     imported_symbol := export.symbol
-                                    imported_symbol.name = local
+                                    imported_symbol.name = local.copy()
                                     origin_index: sema_registration_cached_module_index(graph, export.source_module_identity, import_module_indices)
                                     sema_registration_push_import_binding(graph, module_index, import_index, SemaRegistrationImportBinding{original: item.original, local: local, symbol: imported_symbol, declaration_position: export.declaration_position, target_module_identity: export.source_module_identity, target_module_index: origin_index, visibility: export.visibility})
                                     if declaration.is_pub || declaration.is_package_pub {

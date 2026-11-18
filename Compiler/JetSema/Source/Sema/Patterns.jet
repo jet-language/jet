@@ -1103,7 +1103,7 @@ sema_pattern_list: fn(subject_ty: Type, items: [PatSlot], rest: ListPatRest?, sp
     }
     facts := [TPatternBindingFact]{}
     slots := [TPatternBinding]{}
-    expected: loop _ in items -> elem
+    expected: loop _ in items -> elem.copy()
     if !sema_pattern_slot_facts(items, expected, "list", false, env, program, writes, state, tail_store, context, span, false, diagnostics, facts, slots) {
         complete = false
     }
@@ -1216,7 +1216,7 @@ sema_pattern_map: fn(subject_ty: Type, entries: [MapPatEntry], rest: Span?, span
             keys.push(identity)
         }
         slots := [TPatternBinding]{}
-        slot_ty: if entry.optional -> Type.Option{inner: value_ty} else -> value_ty
+        slot_ty: if entry.optional -> Type.Option{inner: value_ty.copy()} else -> value_ty
         if !sema_pattern_slot_facts([PatSlot]{entry.slot}, [Type]{slot_ty}, "map", false, env, program, writes, state, tail_store, context, entry.span, false, diagnostics, facts, slots) {
             complete = false
         }

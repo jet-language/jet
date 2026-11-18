@@ -365,7 +365,7 @@ perf_validate_phase_totals: fn(value: CanonicalJSON, name: String) -> [String:In
                 if phase == "" || (prior != "" && prior >= phase) {
                     return Err(perf_error("{name} is not sorted by phase name"))
                 }
-                prior = phase
+                prior = phase.copy()
                 ns: perf_report_unsigned(f[perf_report_index(f, "ns")].value, "{name}.ns")
                 if totals.has_key(phase) {
                     return Err(perf_error("{name} contains a duplicate phase"))

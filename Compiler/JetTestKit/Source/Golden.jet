@@ -52,7 +52,7 @@ kit_golden_collect: fn(root: String, directory: String) -> [KitEntry] {
             nested: kit_golden_collect(root, shown)
             loop entry in nested -> entries.push(entry)
         } else if child.name != "package.jet" && child.name != "workspace.jet" && kit_golden_entry_stem(child.name) == .Val(stem) {
-            entries.push(KitEntry{path: shown, expected: kit_steps_byte_slice(shown, 0, shown.count_bytes() - child.name.count_bytes() + stem.count_bytes()), project: directory, suite: "golden", mode: ""})
+            entries.push(KitEntry{path: shown.copy(), expected: kit_steps_byte_slice(shown, 0, shown.count_bytes() - child.name.count_bytes() + stem.count_bytes()), project: directory, suite: "golden", mode: ""})
         }
     }
     entries

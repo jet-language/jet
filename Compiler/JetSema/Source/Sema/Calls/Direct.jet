@@ -669,7 +669,7 @@ sema_call_check_ambient_print: fn(call: Call, environment: SemaScopeEnvironment,
             complete = false
             next
         }
-        formatted: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked}, Type.String, checked.span, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
+        formatted: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked.copy()}, Type.String, checked.span, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
         values.push(formatted)
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
@@ -908,7 +908,7 @@ sema_call_check_term_eprint: fn(record: CoreCallRecord, args: [CallArg], span: S
             next
         }
         if parts.len() > 0 -> parts.push(TStrPart.Literal{text: "\n"})
-        formatted: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked}, Type.String, checked.span, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
+        formatted: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked.copy()}, Type.String, checked.span, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
         parts.push(TStrPart.Interpolation{value: formatted, format: TStrFormat.Display})
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}

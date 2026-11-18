@@ -245,7 +245,7 @@ import_walk_bindings: fn(declaration: ImportDecl) -> [ImportBinding] Never! {
             loop (index, item) in items {
                 item_span: if index < declaration.item_spans.len() -> Val(declaration.item_spans[index]) else -> None
                 local_span: if index < declaration.local_spans.len() -> declaration.local_spans[index] else -> item_span ?? module_alias_span
-                bindings.push(ImportBinding{module_alias: module_alias, original: Val(item.original), local: member_import_local(item.original, item.alias), alias: item.alias, module_alias_span: module_alias_span, item_span: item_span, local_span: local_span, items_span: Val(items_span), import_span: declaration.span, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub})
+                bindings.push(ImportBinding{module_alias: module_alias.copy(), original: Val(item.original), local: member_import_local(item.original, item.alias), alias: item.alias, module_alias_span: module_alias_span, item_span: item_span, local_span: local_span, items_span: Val(items_span), import_span: declaration.span, is_pub: declaration.is_pub, is_package_pub: declaration.is_package_pub})
             }
         }
         .File(_, _) -> {}

@@ -162,7 +162,7 @@ jet_driver_rust_foreign_dependencies: fn(entries: [JetDriverRustForeignEntry]) -
     names.sort()
     rows := [JetDriverRustForeignDependency]{}
     loop name in names {
-        rows.push(JetDriverRustForeignDependency{name: name, version: versions[name]})
+        rows.push(JetDriverRustForeignDependency{name: name.copy(), version: versions[name]})
     }
     Ok(rows)
 }
@@ -264,9 +264,9 @@ jet_driver_rust_foreign_collect_items: fn(items: [Item], owner: String, module_i
                 if !is_c -> next
                 key: if owner == "" -> definition.name else -> "{owner}::{definition.name}"
                 rust_name: "__JetCRecord_{jet_driver_rust_foreign_mangle(key)}"
-                records.names[key] = rust_name
+                records.names[key] = rust_name.copy()
                 if records.names.get(definition.name) == None {
-                    records.names[definition.name] = rust_name
+                    records.names[definition.name] = rust_name.copy()
                 }
                 alignment: if definition.layout == {
                     .Val(.CAligned(value, _)) -> Val(value)

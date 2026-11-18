@@ -17,21 +17,21 @@ sema_os_target_check: fn(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic
             if item == {
                 .Impl(implementation) -> {
                     os: implementation.os_target ?? next
-                    gate_of_type[implementation.type_name] = os
+                    gate_of_type[implementation.type_name] = os.copy()
                     label: if implementation.trait_name == .Val(trait_name) -> "{implementation.type_name}.{trait_name}" else -> implementation.type_name
                     sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, label, implementation.type_span, found)
                 }
                 .Struct(definition) -> {
                     loop block in definition.trait_impls {
                         os: block.os_target ?? next
-                        gate_of_type[definition.name] = os
+                        gate_of_type[definition.name] = os.copy()
                         sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, "{definition.name}.{block.trait_name}", block.trait_span, found)
                     }
                 }
                 .Enum(definition) -> {
                     loop block in definition.trait_impls {
                         os: block.os_target ?? next
-                        gate_of_type[definition.name] = os
+                        gate_of_type[definition.name] = os.copy()
                         sema_os_target_mixed_axis(graph_module.program.web_target_ceiling, os, "{definition.name}.{block.trait_name}", block.trait_span, found)
                     }
                 }

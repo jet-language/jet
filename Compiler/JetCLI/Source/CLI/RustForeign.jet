@@ -376,7 +376,7 @@ jet_cli_rust_foreign_bwrap: fn(bwrap: String, source: String, output: String, re
         if cli_sys.get(ENV_JET_RUST_MUSL_LINKER) == .Val(linker) {
             loop name in
                 ([String]{"CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER", "CC_x86_64_unknown_linux_musl"}) {
-                loop argument in ([String]{"--setenv", name, linker}) -> args.push(argument)
+                loop argument in ([String]{"--setenv", name, linker.copy()}) -> args.push(argument)
             }
         }
         if cli_sys.get(ENV_JET_RUST_MUSL_AR) == .Val(archiver) {

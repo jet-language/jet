@@ -401,7 +401,7 @@ sema_call_static_builtin_conversion_targets: fn(graph: SemaRegistrationGraph, ow
             signature: sema_type_resolve_declared_with_generics(graph, function.signature, module_row.module_identity, generics)
             target: sema_call_static_function_target(function.symbol, signature, sema_inference_registration_params(function.generic_params), [Type]{}, environment, program, span, diagnostics) ?? next
             reference := TMethodRef{symbol: function.symbol.id, name: function.symbol.name, mangled: true, trait_owner: None, operator_identity: None}
-            targets.push(SemaStaticMethodTarget{owner_name: owner_name, owner_type: owner_type, method: reference, target: target, function: Val(function.declaration)})
+            targets.push(SemaStaticMethodTarget{owner_name: owner_name, owner_type: owner_type.copy(), method: reference, target: target, function: Val(function.declaration)})
         }
     }
     targets

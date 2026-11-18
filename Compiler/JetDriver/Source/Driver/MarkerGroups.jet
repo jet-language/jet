@@ -15,7 +15,7 @@ JetDriverScopedImport: struct {
 
 jet_driver_scoped_imports: fn(imports: [ImportDecl], items: [Item], scope: String, exported: Bool, rows: &[JetDriverScopedImport]) Never! {
     loop declaration in imports {
-        rows.push(JetDriverScopedImport{declaration: declaration, scope: scope, exported: exported && declaration.is_pub})
+        rows.push(JetDriverScopedImport{declaration: declaration.copy(), scope: scope, exported: exported && declaration.is_pub})
     }
     loop item in items {
         if item == .CodeModule(code_module) && code_module.body == .Val(body) {
@@ -233,7 +233,7 @@ jet_driver_expand_imported_marker_groups: fn(modules: &[JetDriverLoadedModule], 
         rows := [JetDriverMarkerGroup]{}
         own: raw.get(modules[module_index].module_identity.id) ?? [JetDriverMarkerGroup]{}
         loop group in own {
-            row := group
+            row := group.copy()
             row.tokens.name = jet_driver_marker_group_name("", group.tokens.name)
             rows.push(row)
         }

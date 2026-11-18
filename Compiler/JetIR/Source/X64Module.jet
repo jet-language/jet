@@ -556,7 +556,7 @@ ir_x64_function_tables: fn(m: IRModule, row: Int, names: [String]) -> IRX64Funct
             text: m.names[f.a[at]]
             _ := ir_x64_use_text(tables, text)
             if tables.ints.get(text) == None && ir_x64_static_int_fits(text) {
-                tables.ints[text] = ir_x64_add_use(tables, IRX64Use.StaticInt{text: text}, 8)
+                tables.ints[text] = ir_x64_add_use(tables, IRX64Use.StaticInt{text: text.copy()}, 8)
             }
         }
         if f.op[at] == .CallRuntime && tables.fma < 0 && f.a[at] >= 0 && f.a[at] < m.names.len() && m.names[f.a[at]] == "jet_std_math_fma" {

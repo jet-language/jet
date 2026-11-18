@@ -100,7 +100,7 @@ sema_call_devtools_panel_for_field: fn(environment: SemaScopeEnvironment, progra
                 if graph.modules[module_index].program.items[item_index] == .Func(function) {
                     if !sema_call_devtools_marks_panel(function) -> next
                     if !sema_call_devtools_state_declares(graph, package, function, field) -> next
-                    identity: SemaDevtoolsPanelIdentity{package: package, module_name: graph.modules[module_index].module_path, panel: function.name}
+                    identity: SemaDevtoolsPanelIdentity{package: package.copy(), module_name: graph.modules[module_index].module_path, panel: function.name}
                     if module_index == caller -> return Val(identity)
                     count += 1
                     found = Val(identity)

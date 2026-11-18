@@ -119,7 +119,7 @@ kit_steps_recv_unit: fn(buffer: [U8], unit: String, ended: Bool) -> KitRecvUnit 
         header: String.from_bytes(buffer.slice(0, at)) ?? return Err("recv frame header is not UTF-8")
         length := -1
         loop field in header.lines() {
-            pair: field.trim()
+            pair: field.trim().copy()
             if !kit_steps_ascii_lower(pair).starts_with("content-length:") -> next
             length = Int.parse(kit_steps_byte_slice(pair, 15, pair.count_bytes()).trim()) ?? return Err("recv frame length is not a number")
         }

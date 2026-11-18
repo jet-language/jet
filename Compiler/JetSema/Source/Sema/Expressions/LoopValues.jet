@@ -162,7 +162,7 @@ sema_loop_value_rewrite_collecting_statements: fn(statements: &[TStmt], local: T
                 if !sema_loop_value_rewrite_collecting_statements(updated_then_body, local, item_type, environment, program, diagnostics) {
                     return false
                 }
-                updated_else_body := else_body
+                updated_else_body := else_body.copy()
                 if else_body == .Val(else_statements) {
                     rewritten := else_statements.copy()
                     if !sema_loop_value_rewrite_collecting_statements(rewritten, local, item_type, environment, program, diagnostics) {
@@ -192,7 +192,7 @@ sema_loop_value_rewrite_collecting_statements: fn(statements: &[TStmt], local: T
                     }
                     updated_arms[arm_index].body = arm_body
                 }
-                updated_else_body := else_body
+                updated_else_body := else_body.copy()
                 if else_body == .Val(else_statements) {
                     rewritten := else_statements.copy()
                     if !sema_loop_value_rewrite_collecting_statements(rewritten, local, item_type, environment, program, diagnostics) {
@@ -226,7 +226,7 @@ sema_loop_value_rewrite_collecting_statements: fn(statements: &[TStmt], local: T
                     }
                     updated_arms[arm_index].body = arm_body
                 }
-                updated_else_body := else_body
+                updated_else_body := else_body.copy()
                 if else_body == .Val(else_statements) {
                     rewritten := else_statements.copy()
                     if !sema_loop_value_rewrite_collecting_statements(rewritten, local, item_type, environment, program, diagnostics) {
@@ -424,7 +424,7 @@ sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: Str
                 if !sema_loop_value_widen_result_breaks_in(updated_then_body, root_label, result_type, allow_unlabeled, environment, program, diagnostics) {
                     return false
                 }
-                updated_else_body := else_body
+                updated_else_body := else_body.copy()
                 if else_body == .Val(else_statements) {
                     rewritten := else_statements.copy()
                     if !sema_loop_value_widen_result_breaks_in(rewritten, root_label, result_type, allow_unlabeled, environment, program, diagnostics) {
@@ -454,7 +454,7 @@ sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: Str
                     }
                     updated_arms[arm_index].body = arm_body
                 }
-                updated_else_body := else_body
+                updated_else_body := else_body.copy()
                 if else_body == .Val(else_statements) {
                     rewritten := else_statements.copy()
                     if !sema_loop_value_widen_result_breaks_in(rewritten, root_label, result_type, allow_unlabeled, environment, program, diagnostics) {
@@ -488,7 +488,7 @@ sema_loop_value_widen_result_breaks_in: fn(statements: &[TStmt], root_label: Str
                     }
                     updated_arms[arm_index].body = arm_body
                 }
-                updated_else_body := else_body
+                updated_else_body := else_body.copy()
                 if else_body == .Val(else_statements) {
                     rewritten := else_statements.copy()
                     if !sema_loop_value_widen_result_breaks_in(rewritten, root_label, result_type, allow_unlabeled, environment, program, diagnostics) {

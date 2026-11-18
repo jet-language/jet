@@ -66,7 +66,7 @@ sema_type_value_of: fn(ty: Type, value_type: Type, span: Span, environment: Sema
                     fact: sema_expression_struct_field_fact(field, owner, [String]{}, [Type]{}, environment, program, context)
                     reference := sema_expression_field_ref(fact.symbol, Val(owner.id), fact.field_ty)
                     reference.boxed = fact.boxed
-                    return Val(sema_tree_node(value_type, TExprKind.StructLit{fields: [TStructFieldValue]{TStructFieldValue{field: reference, value: text, boxed: reference.boxed}}}, span))
+                    return Val(sema_tree_node(value_type, TExprKind.StructLit{fields: [TStructFieldValue]{TStructFieldValue{field: reference.copy(), value: text, boxed: reference.boxed}}}, span))
                 }
             }
         }
