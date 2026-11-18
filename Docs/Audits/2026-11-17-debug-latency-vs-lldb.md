@@ -44,3 +44,11 @@ Command: `jet run Tools/Perf/DebugLatency/Main.jet -- --runs 5`
 ## Reading
 
 (to fill once the rows are measured)
+
+## Finding dispositions
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| F1: no Jet test measures the time to the first stop or the time per step on a large program | no-action | measured by Tools/Perf/DebugLatency/Main.jet, the tool this report runs |
+<!-- /audit-dispositions -->
