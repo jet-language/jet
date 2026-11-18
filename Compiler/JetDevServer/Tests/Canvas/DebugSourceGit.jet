@@ -3,8 +3,9 @@
 use {
     debug_test_files: core.files
     debug_test_process: core.process
+    jet_canvas.[source_revision]
     jet_debug.[DebugSnapshot, FrameSnapshot, ValueSnapshot]
-    jet_devserver.[DebugOkRequest, DebugSession, DebugSessions, DebugTier, MAX_DEBUG_VALUE_BYTES, SessionStatus, debug_ok, debug_span_json, line_span, source_revision]
+    jet_devserver.[DebugOkRequest, DebugSession, DebugSessions, DebugTier, MAX_DEBUG_VALUE_BYTES, SessionStatus, debug_ok, debug_span_json, line_span]
 }
 
 test_debug_request: fn(src: String, graph_json: String, transcript: String, snapshot: DebugSnapshot?, status: SessionStatus, watches: [String]) -> DebugOkRequest Never! {
@@ -51,8 +52,8 @@ test_debug_request: fn(src: String, graph_json: String, transcript: String, snap
     named: DebugTier.parse(Val("native-lldb")) ?? panic("native tier")
     assert(named == DebugTier.NativeLLDB)
     if DebugTier.parse(Val("jet-dev-replay")) == {
-        .Err(failure) -> assert(failure.body.contains("\"kind\":\"unsupported\""), failure.body)
-        else -> panic("the replay tier was accepted")
+        .Err(failure) -> { assert(failure.body.contains("\"kind\":\"unsupported\""), failure.body) }
+        .Val(_) -> panic("the replay tier was accepted")
     }
 }
 
