@@ -18,7 +18,7 @@ Run a lesson from the repository root, for example `jet run Examples/Modules/<Le
 - [MemberImportTypes](MemberImportTypes/) — A member import names any public declaration of a file module, and qualified or contextual enum spellings follow the imported enum.
 - [ModuleDir](ModuleDir/) — Directory module — module banner finds banner/module.jet
 - [ModuleFile](ModuleFile/) — File-based module declaration: `math: module` loads `math.jet`.
-- [ModuleReexport](ModuleReexport/) — A directory module re-exports a submodule item with `pub use`.
+- [ModuleReexport](ModuleReexport/) — A directory module re-exports a submodule item by declaring it: `wrap: wrap.wrap`.
 - [PackageMembers](PackageMembers/) — A package is one namespace, even when declarations live in sibling files.
 - [Packages](Packages/)
 - [Prototype](Prototype/) — Loose files: this folder has no package.jet, so it is an early multi-file prototype.

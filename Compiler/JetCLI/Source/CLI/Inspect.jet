@@ -251,7 +251,9 @@ jet_cli_inspect_run: fn(request: JetCLIInspectRequest, color: Bool, json: Bool, 
     project := true
     if request.scope == .Target(target) -> project = cli_files.is_dir(target)
     if plane == {
-        "types" | "shapes" | "rights" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
+        "types" | "rights" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
+        // `shapes --target` reports layouts for the machine `jet check --target` checks for.
+        "shapes" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: plane, file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project, target_machine: jet_cli_check_target_machine(request.options)}}
         "structure" -> return JetCLIPlan.Inspect{job: JetCLIInspectJob{action: "structure", file: file, subject: None, json: json, color: color, threads: threads, notice: notice, project: project}}
         "claims" -> return jet_cli_with_notices([String]{notice}, jet_cli_inspect_claims_manifest(file, json, color))
         "build" -> {
@@ -438,6 +440,9 @@ JetCLIInspectJob: struct {
     // compiled entry loads, and the 1-based line it names (0 for a whole file).
     site: String{""},
     line: Int{0},
+    // `shapes --target`: the declared machine whose layout the plane reports
+    // ("" for the host).
+    target_machine: String{""},
 }
 
 // The entry an inspect scope names, and the stderr notices project entry
@@ -1748,7 +1753,7 @@ jet_cli_inspect_run_job: fn(job: JetCLIInspectJob) -> JetDriverVerbOutput {
     semantic: job.action == "rights" || job.action == "impact" || job.action == "shapes" || job.action == "expand" || job.action == "web-graph" || job.action == "routes" || job.action == "explain-effects"
     mode: if semantic -> JetDriverCompileMode.Doc else -> JetDriverCompileMode.Program
     watch: cli_time.start()
-    compiled: jet_cli_compile_file(job.file, job.color, job.threads, mode)
+    compiled: jet_cli_compile_entry(job.file, job.color, job.threads, mode, None, None, target_machine: job.target_machine)
     if compiled == {
         .Refused(refusal) -> { output = refusal.move() }
         .Compiled(result, snapshot) -> {

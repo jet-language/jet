@@ -9,12 +9,13 @@
 // - AS_IDENTIFIERS: a Jet identifier or machine value whose rename is a
 //   public API and machine-output change. Its exact spelling passes where it
 //   is written as code: in Jet code outside comments and string text, in
-//   program output (a snapshot, a case file's steps, or a generated `.rows`
-//   table), in backticks, after a `.`, as a quoted token without spaces
-//   (`"Cancelled"`, `'cancelled'`, `"sleep-cancelled"`), as the key of a
-//   `key=value` or `key:value` field (`cancelled=false`, `cancelled:0`), or
-//   as the label of an interpolated value (`cancelled: {n}`). Written as
-//   prose, it fails.
+//   backticks, after a `.`, as a quoted token without spaces (`"Cancelled"`,
+//   `'cancelled'`, `"sleep-cancelled"`), as the key of a `key=value` or
+//   `key:value` field (`cancelled=false`, `cancelled:0`), as the label of an
+//   interpolated value (`cancelled: {n}`), or joined to the program output
+//   before it (`send:Cancelled`, `status=cancelled`) in a snapshot, a case
+//   file's steps or a generated `.rows` table. Written as prose, a bare word
+//   of output included, it fails.
 // - AS_QUOTED: a file that quotes an external name (an API identifier, a URL,
 //   a title, quoted upstream text), with the count of each word it keeps.
 // - AS_SKIPPED: the paths the census does not read at all: dated data dumps,
@@ -107,6 +108,7 @@ AS_QUOTED: [SpellingQuote]{
     SpellingQuote{path: "Tests/Cases/JetpackJetOS/os_import_live_semantic_eval_reports_omissions.case", word: "virtualisation", count: 1, reason: "the NixOS option `virtualisation.docker.enable`"},
     SpellingQuote{path: "Tests/Cases/Cffi/ForeignActiveJSImportIsAcceptedWhilePlannedSwiftStaysReserved.fixture/.jet/bindings/js/plotly.jet", word: "marshalled", count: 3, reason: "the `AdapterMarshalled` values of the binding's jet-ffi-descriptor-v1 stamp"},
     SpellingQuote{path: "Tests/Cases/Pkg/foreign_package_provider_fetch_lock_and_locked_round_trip.binding.template", word: "marshalled", count: 3, reason: "the `AdapterMarshalled` values of the binding's jet-ffi-descriptor-v1 stamp"},
+    SpellingQuote{path: "Tests/Cases/TestingTiers/test_compare_passes_only_a_matched_recorded_corpus.case", word: "cancelled", count: 2, reason: "the fixture folder of a corpus whose status is the `cancelled` wire token, and the runner reason that prints that token"},
     SpellingQuote{path: "Tools/Tower/Test/apply.test.mjs", word: "colour", count: 2, reason: "the unknown field the apply test feeds"},
 }
 
@@ -587,8 +589,8 @@ AS_WORDS: [AmericanSpelling]{
     AmericanSpelling{british: "kerb", american: "curb"},
 }
 
-// Program output and generated tables: every word of such a line is the text
-// of its source, which the census reads there.
+// Program output and generated tables: a word of such a line joined to the
+// output before it is the text of its source, which the census reads there.
 AS_OUTPUT_SUFFIXES: [String]{".out", ".stdout", ".stderr", ".expected", ".rows"}
 
 // The code trees: there each part of an identifier is a word of its own
@@ -695,16 +697,20 @@ as_jet_code: fn(bytes: [U8], mask: &[Bool]) {
     }
 }
 
+// Whether `line` of the file at `path` is program output: a snapshot or
+// generated table line, or a case file's step outside its comments.
+as_output_line: fn(path: String, line: String) -> Bool Never! {
+    loop suffix in AS_OUTPUT_SUFFIXES {
+        if path.ends_with(suffix) -> return true
+    }
+    path.ends_with(".case") && !line.trim().starts_with("#")
+}
+
 // Which bytes of `line` of the file at `path` are code (see AS_IDENTIFIERS).
 as_code_mask: fn(path: String, line: String) -> [Bool] Never! {
     bytes: line.bytes()
-    output := false
-    loop suffix in AS_OUTPUT_SUFFIXES {
-        if path.ends_with(suffix) -> output = true
-    }
-    if path.ends_with(".case") && !line.trim().starts_with("#") -> output = true
     mask := [Bool]{}
-    loop _ in 0..<bytes.len() -> mask.push(output)
+    loop _ in 0..<bytes.len() -> mask.push(false)
     if path.ends_with(".jet") -> as_jet_code(bytes, mask)
     quoted := false
     loop at in 0..<bytes.len() {
@@ -722,31 +728,41 @@ AmericanHit: struct {
     code: Bool,
 }
 
-// The first space, tab, or quote byte from `at` on, stepping by `step`, or 0
-// at the edge of the line.
+// The first space, tab, quote or escape byte from `at` on, stepping by
+// `step`, or 0 at the edge of the line. A line or tab escape such as `\n`
+// ends the text before it.
 as_token_edge: fn(bytes: [U8], at: Int, step: Int) -> Int Never! {
     index := at
     loop index >= 0 && index < bytes.len() {
         code: Int{bytes[index]}
         if code == 32 || code == 9 || code == 34 || code == 39 -> return code
+        if code == 92 && as_escape_letter(as_byte_at(bytes, index + 1)) -> return code
         index += step
     }
     0
 }
+
+// Whether `code` is the letter of a line or tab escape (`\n`, `\r`, `\t`).
+as_escape_letter: fn(code: Int) -> Bool Never! { code == 110 || code == 114 || code == 116 }
 
 // The British words of `text`, line `line` of the file at `path`: whole
 // words, and in a code tree each British part of an identifier.
 as_line_hits: fn(path: String, line: String, text: String, words: [String:String], out: &[AmericanHit]) {
     bytes: text.bytes()
     mask: as_code_mask(path, text)
+    output: as_output_line(path, text)
     at := 0
     loop at < bytes.len() {
         if !as_word_byte(Int{bytes[at]}) {
             at += 1
             next
         }
-        start: at
+        start := at
         loop at < bytes.len() && as_word_byte(Int{bytes[at]}) -> at += 1
+        // The letter of an escape before the word (`\ncancelled`) is not part
+        // of it: the escape ends the text before the word.
+        escaped: as_byte_at(bytes, start - 1) == 92 && at - start > 1 && as_escape_letter(Int{bytes[start]})
+        if escaped -> start += 1
         word: String.from_bytes(bytes.slice(start, at)) ?? ""
         parts: if as_code_tree(path) -> as_word_parts(word) else -> [String]{word}
         british := [String]{}
@@ -761,7 +777,12 @@ as_line_hits: fn(path: String, line: String, text: String, words: [String:String
         left: as_token_edge(bytes, start - 1, -1)
         right: as_token_edge(bytes, at, 1)
         token: (left == 34 || left == 39) && (right == 34 || right == 39)
-        code: mask[start] || before == 46 || token || label
+        // A word of output is code joined to the output before it
+        // (`send:Cancelled`, `status=cancelled`, `sleep-cancelled`); a bare
+        // word at a line's start, after a space or after an escape is prose.
+        // In a case file a double quote opens the expected text.
+        joined: output && !escaped && before != 0 && before != 32 && before != 9 && !(before == 34 && path.ends_with(".case"))
+        code: mask[start] || before == 46 || token || label || joined
         loop part in british {
             out.push(AmericanHit{path: path.copy(), line: line.copy(), word: part.copy(), code: code})
         }
@@ -882,7 +903,20 @@ as_stale_skips: fn() -> [String] {
     output := [AmericanHit]{}
     as_line_hits("a.case", "1", "# the colour", words, output)
     as_line_hits("a.case", "2", "stdout: colour", words, output)
-    assert(!output[0].code && output[1].code)
+    as_line_hits("a.case", "3", "stdout: = \"state=colour\\nColour\\n\"", words, output)
+    as_line_hits("a.out", "1", "send:colour colour (colour)", words, output)
+    assert_eq(output.len(), 7)
+    assert(!output[0].code && !output[1].code && output[2].code && !output[3].code)
+    assert(output[4].code && !output[5].code && output[6].code)
+}
+
+#Test("an escape is not part of the word after it, which is a bare word of output") {
+    words: as_word_map()
+    hits: as_hits([String]{"Tests/a.case:7:stdout: = \"deadline\\ncancelled\\n\"", "Docs/a.md:2:\"red\\ncolour\""}, words)
+    assert_eq(hits.len(), 2)
+    findings: as_findings(hits, words)
+    assert(findings.contains("Tests/a.case:7: `cancelled` is British; write `canceled`"))
+    assert(findings.contains("Docs/a.md:2: `colour` is British; write `color`"))
 }
 
 #Test("each word list row is lower case, listed once, and changes the word") {

@@ -1,0 +1,112 @@
+// A module re-exports a declaration by declaring a name for it:
+// `clamp: core.math.clamp` is a public import row, not a constant.
+use jet_foundation.[ImportDecl, Item, Program]
+
+reexport_test_row: fn(imports: [ImportDecl], alias: String) -> String {
+    loop import in imports {
+        if import.alias != alias -> next
+        if import.kind == .Module(name, _) -> return if import.is_pub -> "pub {name}" else -> name
+    }
+    panic("expected a module row named `{alias}`")
+}
+
+reexport_test_names: fn(items: [Item]) -> [String] {
+    names := [String]{}
+    loop item in items {
+        if item == .Const(definition) -> names.push("{definition.name}")
+        if item == .Func(definition) -> names.push("{definition.name}")
+    }
+    names
+}
+
+#Test("a module binding to a path of value names re-exports what it names") {
+    program: parser_test_program(
+        `use core.math.[clamp]
+use core.files
+
+limit: clamp
+sqrt: core.math.sqrt
+fs: files
+read: files.read
+LIMIT: other.LIMIT
+Point: geo.Point
+grouped: (core.math.clamp)
+forward: again
+
+run: fn() {}
+`,
+    )
+    assert_eq(program.imports.len(), 6)
+    assert_eq(reexport_test_row(program.imports, "limit"), "pub core.math.clamp")
+    assert_eq(reexport_test_row(program.imports, "sqrt"), "pub core.math.sqrt")
+    assert_eq(reexport_test_row(program.imports, "fs"), "pub core.files")
+    assert_eq(reexport_test_row(program.imports, "read"), "pub core.files.read")
+    assert_eq(reexport_test_names(program.items), [String]{"LIMIT", "Point", "forward", "run"})
+}
+
+#Test("a re-export names the binding a re-export before it declares") {
+    program: parser_test_program("first: core.math.clamp\nsecond: first\n\nrun: fn() {{}}\n")
+    assert_eq(reexport_test_row(program.imports, "first"), "pub core.math.clamp")
+    assert_eq(reexport_test_row(program.imports, "second"), "pub core.math.clamp")
+}
+
+#Test("an inline module re-exports through its own imports") {
+    program: parser_test_program(
+        `geo: module {
+    use core.files
+
+    read: files.read
+    area: fn() -> Int { 1 }
+}
+
+run: fn() {}
+`,
+    )
+    if program.items[0] == .CodeModule(definition) {
+        assert_eq(reexport_test_row(definition.imports, "read"), "pub core.files.read")
+        assert_eq(reexport_test_names(definition.body ?? [Item]{}), [String]{"area"})
+    } else { panic("expected the inline module first") }
+}
+
+#Test("a mutable binding stays a binding") {
+    program: parser_test_program("total := core.math.zero\n\nrun: fn() {{}}\n")
+    assert_eq(program.imports.len(), 0)
+    assert_eq(reexport_test_names(program.items), [String]{"total", "run"})
+}
+
+#Test("fmt writes a re-export as the declaration it is, after the imports") {
+    formatted: parser_test_stable(
+        `use core.math.[clamp]
+
+run: fn() {}
+
+// The bound the shapes keep.
+limit: clamp
+sqrt: core.math.sqrt
+`,
+    )
+    assert_eq(
+        formatted,
+        `use core.math.[clamp]
+
+// The bound the shapes keep.
+limit: clamp
+sqrt: core.math.sqrt
+
+run: fn() {}
+`,
+    )
+}
+
+#Test("fmt keeps a pub use block beside a re-export declaration") {
+    source: `pub use {
+    t: core.time
+    core.sys
+}
+
+clamp: core.math.clamp
+
+run: fn() {}
+`
+    assert_eq(parser_test_stable(source), source)
+}

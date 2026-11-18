@@ -546,6 +546,15 @@ the host. The origin lens reads the checked prepared value, not a source-text
 guess about whether a value was tracked. `expand --facts reflect` lists each
 checked `reflect.of(x)` call with the type identity and stored-field tree the
 call retains, read from the checked call itself.
+`inspect shapes` reads the same layout values: beside each struct's shape it
+prints every declared struct and enum's bytes, alignment, stride, and each
+field or case at its offset, for the target the compile checked for
+(`--target <machine>` checks for another). Every line and JSON entry names
+that target and the compiler identity, and says the layout is not promised.
+An enum without `#Layout` is one pointer to a box of an 8-byte tag and the
+case's fields; when one case's fields are at least 2.0x the next case's, the
+line notes that case as setting the size. The editor hover on a struct or enum
+shows the same one-line summary.
 Convention routing reads complete retained directory listings from the
 authorized compiler request, including empty directories. It never invents
 directories from source-file names or reopens ambient filesystem paths.

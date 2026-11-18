@@ -1340,11 +1340,8 @@ jet_cli_check_prelude: fn(args: [String], color: Bool, quiet: Bool, threads: Int
 // its `--profile`, its `--style` and its `--target`: the check compiles what
 // `jet run` with the same writers and profile would, so an undeclared or
 // conflicting writer, or a profile no member declares, is refused here too
-// (jet_cli_build_options). `--style` adds the opt-in style checks. A
-// `--target` naming a declared machine other than the browser's checks one
-// file for that machine, as `jet build --target` does, and `--target web`
-// (or `wasm.browser`) checks it for the browser's machine, which `jet build
-// --target web` builds for; any other value leaves the host's.
+// (jet_cli_build_options). `--style` adds the opt-in style checks; `--target`
+// picks the machine jet_cli_check_target_machine names.
 jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     settings := [BuildSettingOverride]{}
     if jet_cli_setting_flags(jet_argv, color) == {
@@ -1352,10 +1349,7 @@ jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet
         .Given(given) -> settings = given.copy()
     }
     style: jet_argv.contains("--style")
-    machine := ""
-    if jet_cli_target_flag(jet_argv) == .Named(name) {
-        machine = if name == "web" || name == "wasm.browser" -> "wasm.browser" else -> jet_cli_checked_machine(name) ?? ""
-    }
+    machine: jet_cli_check_target_machine(jet_argv)
     planned: jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)
     if planned == {
         .Check(file, source, _, _, _, project, notice, _, verbose, _, _, _, _) -> if jet_cli_check_profile(jet_argv, [String]{file}, [String]{source}, color) == {
@@ -1370,6 +1364,17 @@ jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet
         }
         .Done(_) | .Refused(_, _, _, _) | .Diagnostics(_, _, _, _, _) | .CheckPrelude(_, _, _, _, _, _) | .CheckCore(_, _, _, _, _) | .Build(_, _, _, _, _, _, _, _, _, _, _) | .LockedBuild(_, _) | .BuildPackage(_, _, _, _, _, _, _, _) | .Run(_, _, _, _, _, _, _, _, _, _, _, _) | .RunRemote(_, _, _, _, _, _, _, _) | .NativeSource(_, _, _, _, _) | .DevWeb(_, _, _, _, _, _, _, _) | .DevCanvas(_, _, _, _, _, _) | .Jobs(_, _, _, _) | .Test(_, _, _, _, _, _) | .TestWorkspace(_, _, _, _, _, _, _, _) | .TestProfile(_, _, _, _, _, _) | .New(_, _, _, _, _, _) | .NewApp(_) | .Doc(_, _, _, _, _) | .Emit(_, _, _, _, _, _) | .Eval(_, _, _, _, _) | .Fill(_, _, _) | .Structural(_, _, _) | .Review(_, _, _) | .Keygen(_, _, _) | .KeyBackup(_, _, _) | .Publish(_, _, _, _) | .Yank(_, _, _) | .Lint(_, _, _, _, _, _, _) | .Fmt(_) | .FmtLang(_, _) | .Fix(_, _, _, _, _, _, _, _, _) | .Inspect(_) | .InspectB(_) | .ForeignBind(_, _, _) | .Perf(_, _) | .Semindex(_, _, _) | .Find(_, _, _, _) | .Cache(_, _) | .Remote(_, _, _) | .Comparison(_, _, _) | .Try(_, _, _) | .Maintenance(_, _, _, _) | .Completion(_, _, _) | .Schema(_, _, _, _, _) | .Codemod(_, _, _, _, _) | .PolicyExplain(_, _, _, _, _, _) | .DiagnosticTypeExplain(_, _, _, _) | .BuildFactExplain(_, _, _, _, _, _, _) | .Gates(_, _, _, _, _) | .Output(_, _, _, _) | .Doctor(_, _, _, _) | .UpdateJet(_, _, _, _, _) | .AuditCopies(_, _, _, _, _) | .AuditForeign(_, _, _, _, _) | .CompilerService(_) | .Repl(_, _, _, _) | .LSP | .ReplChild(_) | .EvalExpression(_, _, _) | .Prove(_, _, _, _, _, _) | .Budget(_, _, _, _) | .AuditWrites(_, _, _, _, _) -> planned
     }
+}
+
+// The machine a check compiles for under `--target`: a declared machine other
+// than the browser's is itself, as `jet build --target` builds for it, and
+// `web` (or `wasm.browser`) is the browser's machine, which `jet build
+// --target web` builds for; any other value, or none, leaves the host's ("").
+jet_cli_check_target_machine: fn(jet_argv: [String]) -> String Never! {
+    if jet_cli_target_flag(jet_argv) == .Named(name) {
+        return if name == "web" || name == "wasm.browser" -> "wasm.browser" else -> jet_cli_checked_machine(name) ?? ""
+    }
+    ""
 }
 
 JetCLICheckProfile: enum {

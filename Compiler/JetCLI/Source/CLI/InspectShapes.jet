@@ -1,12 +1,21 @@
 // `jet inspect shapes`: project the checked modules, including imported
 // declarations and folded defaults. Shape construction follows the canonical
-// Schema.jet `shape_fact_from_struct` from origin/port/compiler.
+// Schema.jet `shape_fact_from_struct` from origin/port/compiler. Each declared
+// struct and enum also reports its byte layout from its checked record
+// (JetDriver LayoutSummary.jet), on the target the compile checked for.
 use {
     jet_driver.[
         JetDriverVerbOutput,
         JetDriverDocModule,
+        JetDriverLayoutSummary,
         JET_DRIVER_EXIT_OK,
         JET_DRIVER_EXIT_USER_ERROR,
+        jet_driver_layout_dominant,
+        jet_driver_layout_dominant_note,
+        jet_driver_layout_line,
+        jet_driver_layout_ratio,
+        jet_driver_layout_record_text,
+        jet_driver_layout_summary,
     ]
     jet_foundation.[
         ASTTables,
@@ -467,6 +476,90 @@ jet_cli_shape_fact_text: fn(fact: JetCLIShapeFact) -> String Never! {
     out
 }
 
+// One declared type's layout row: its record's target and kind, and its byte
+// facts when every one is known.
+JetCLIShapeLayout: struct {
+    source: String,
+    type_name: String,
+    target: String,
+    kind: String,
+    summary: JetDriverLayoutSummary?,
+}
+
+// The layout rows of the checked modules, by source, then type name.
+jet_cli_shape_layouts: fn(modules: [JetDriverDocModule]) -> [JetCLIShapeLayout] Never! {
+    rows := [JetCLIShapeLayout]{}
+    loop checked in modules {
+        loop row in checked.layout_facts {
+            target: jet_driver_layout_record_text(row.value, "target") ?? "unknown"
+            kind: jet_driver_layout_record_text(row.value, "kind") ?? "unknown"
+            rows.push(JetCLIShapeLayout{source: checked.path, type_name: row.name, target: target, kind: kind, summary: jet_driver_layout_summary(row.value)})
+        }
+    }
+    rows.sort_by(fn(left: JetCLIShapeLayout, right: JetCLIShapeLayout) { (left.source <=> right.source).then(left.type_name <=> right.type_name) })
+    rows
+}
+
+// A layout row as JSON. A layout is a fact of this target and this compiler,
+// never a promise: `promised` is always false.
+jet_cli_shape_layout_value: fn(layout: JetCLIShapeLayout, compiler: String) -> JetCLIStatusValue Never! {
+    fields := [JetCLIStatusField]{
+        jet_cli_status_field("source", jet_cli_status_text(layout.source)),
+        jet_cli_status_field("type", jet_cli_status_text(layout.type_name)),
+        jet_cli_status_field("target", jet_cli_status_text(layout.target)),
+        jet_cli_status_field("compiler", jet_cli_status_text(compiler)),
+        jet_cli_status_field("promised", jet_cli_status_bool(false)),
+        jet_cli_status_field("kind", jet_cli_status_text(layout.kind)),
+    }
+    summary: layout.summary ?? {
+        loop name in ([String]{"size", "alignment", "stride", "boxed", "summary", "dominant"}) {
+            fields.push(jet_cli_status_field(name, JetCLIStatusValue.Null))
+        }
+        fields.push(jet_cli_status_field("members", jet_cli_status_array([JetCLIStatusValue]{})))
+        return jet_cli_status_object(fields)
+    }
+    members: loop member in summary.members -> jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("name", jet_cli_status_text(member.name)),
+            jet_cli_status_field("offset", jet_cli_status_int(member.offset)),
+            jet_cli_status_field("size", jet_cli_status_int(member.size)),
+        },
+    )
+    dominant := JetCLIStatusValue.Null
+    if jet_driver_layout_dominant(summary) == .Val(found) {
+        dominant = jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("case", jet_cli_status_text(found.case_name)),
+                jet_cli_status_field("size", jet_cli_status_int(found.size)),
+                jet_cli_status_field("next_case", jet_cli_status_text(found.next_name)),
+                jet_cli_status_field("next_size", jet_cli_status_int(found.next_size)),
+                jet_cli_status_field("ratio", jet_cli_status_text(jet_driver_layout_ratio(found.tenths))),
+            },
+        )
+    }
+    fields.push(jet_cli_status_field("size", jet_cli_status_int(summary.size)))
+    fields.push(jet_cli_status_field("alignment", jet_cli_status_int(summary.alignment)))
+    fields.push(jet_cli_status_field("stride", jet_cli_status_int(summary.stride)))
+    fields.push(jet_cli_status_field("boxed", jet_cli_status_bool(summary.boxed)))
+    fields.push(jet_cli_status_field("summary", jet_cli_status_text(jet_driver_layout_line(summary))))
+    fields.push(jet_cli_status_field("dominant", dominant))
+    fields.push(jet_cli_status_field("members", jet_cli_status_array(members)))
+    jet_cli_status_object(fields)
+}
+
+// A layout row as one human line, naming the target and the compiler whose
+// fact it is and that it is not promised.
+jet_cli_shape_layout_text: fn(layout: JetCLIShapeLayout, compiler: String) -> String Never! {
+    facts := "byte facts unknown"
+    if layout.summary == .Val(summary) {
+        facts = jet_driver_layout_line(summary)
+        if jet_driver_layout_dominant(summary) == .Val(found) {
+            facts = "{facts}; note: {jet_driver_layout_dominant_note(found)}"
+        }
+    }
+    "Layout {layout.source}.{layout.type_name}: {facts} [target {layout.target}, compiler {compiler}, not promised]\n"
+}
+
 // `run_shapes`: module display identity, then type name.
 jet_cli_inspect_shapes: fn(modules: [JetDriverDocModule], json: Bool, color: Bool) -> JetDriverVerbOutput Never! {
     facts := [JetCLIShapeFact]{}
@@ -491,11 +584,15 @@ jet_cli_inspect_shapes: fn(modules: [JetDriverDocModule], json: Bool, color: Boo
         }
     }
     facts.sort_by(fn(left: JetCLIShapeFact, right: JetCLIShapeFact) { (left.source <=> right.source).then(left.type_name <=> right.type_name) })
+    layouts: jet_cli_shape_layouts(modules)
+    compiler: jet_cli_compiler_identity() ?? "unversioned"
     if json {
         values: loop fact in facts -> jet_cli_shape_fact_value(fact)
-        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.shapes", true, [JetCLIStatusField]{jet_cli_status_field("shapes", jet_cli_status_array(values))})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        layout_values: loop layout in layouts -> jet_cli_shape_layout_value(layout, compiler)
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.shapes", true, [JetCLIStatusField]{jet_cli_status_field("shapes", jet_cli_status_array(values)), jet_cli_status_field("layouts", jet_cli_status_array(layout_values))})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     }
     out := if facts.len() == 0 -> "No shape facts declared.\n" else -> ""
     loop fact in facts -> out = "{out}{jet_cli_shape_fact_text(fact)}"
+    loop layout in layouts -> out = "{out}{jet_cli_shape_layout_text(layout, compiler)}"
     JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }

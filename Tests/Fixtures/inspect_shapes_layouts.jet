@@ -1,0 +1,54 @@
+// Hand-derived layouts: Tests/Cases/Inspect/shapes_match_hand_derived_layouts
+// works out every byte of these declarations by hand and checks that
+// `jet inspect shapes` reports the same numbers; shapes_human_lines reads
+// the same declarations as text.
+
+// A struct without `#Layout` places its members by descending alignment, so
+// `count` takes bytes 0..8, `small` 8..10 and `flag` 10; the struct rounds
+// up to 16, five of them padding.
+Padded: struct {
+    flag: Bool,
+    count: Int,
+    small: U16,
+}
+
+// A struct with no fields still takes one 8-byte word.
+Tick: struct {}
+
+// A value of an enum with payloads is one pointer to a heap box: the 8-byte
+// tag, then the case's fields from byte 8. `Draw` holds four Ints and a U32
+// (36 bytes), 2.25 times `Move`'s two Ints (16 bytes).
+Command: enum {
+    Stop,
+    Move(dx: Int, dy: Int),
+    Draw(x: Int, y: Int, width: Int, height: Int, color: U32),
+}
+
+// `Pair` holds an Int and a U32 (12 bytes), 1.5 times `Level`'s Int: no
+// case is wide enough over the next to be noted as setting the size.
+Signal: enum {
+    Off,
+    Level(value: Int),
+    Pair(low: Int, high: U32),
+}
+
+// `Int?` keeps the one word of an Int: absence is a value no Int takes.
+Reading: struct {
+    value: Int?,
+    seen: Bool,
+}
+
+// A closure is one pointer to its box; what it captures lives in the box.
+Counter: struct {
+    step: Int,
+    next: fn(Int) -> Int,
+}
+
+make_counter: fn(step: Int) -> Counter Never! {
+    Counter{step: step, next: fn(value: Int) -> Int { value + step }}
+}
+
+run: fn() {
+    counter: make_counter(2)
+    print(counter.next(counter.step))
+}

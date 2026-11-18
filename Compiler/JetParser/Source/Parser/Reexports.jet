@@ -1,0 +1,112 @@
+// A module re-exports a declaration by declaring a second name for it:
+// `clamp: core.math.clamp` in a module body makes `clamp` a member of that
+// module which is the declaration `core.math.clamp` itself, with its home,
+// privacy, generics, defaults, methods and traits, and public like any
+// declaration. A `use` stays local to its file or module body.
+//
+// The parser reads such a line as a module binding. Once a module body is
+// whole, each binding that re-exports becomes the import it means, a public
+// `name: path` row, so the loader loads its target and registration binds
+// the name as a member, as it binds any import. A binding re-exports when it
+// is a plain, immutable, unannotated and unmarked `name: path` whose name and
+// path words are value names (each starts with a lowercase letter): a
+// function, a value or a module. The path's head is a module the body can
+// name (`core`, a module beside it, a package), or a name a `use` of the
+// same body binds, which stands for what that `use` imports: after
+// `use core.math.[clamp]`, `my_clamp: clamp` re-exports `core.math.clamp`.
+// A one-word path that no `use` binds stays a binding (a module alias, a
+// constant). A type name re-exports through the alias rule
+// (`Point: geo.Point`), and a parenthesized path stays a constant.
+use jet_foundation.[ConstDef, Expr, ImportDecl, ImportKind, Item, Span, expr_span, member_import_local]
+
+// `items` with each re-exporting binding moved out, as a public import, to
+// the end of `imports`; the items as they are when none re-exports.
+parser_reexport_declarations: fn(items: &&[Item], imports: &[ImportDecl]) -> [Item] Never! {
+    found := false
+    loop item in items {
+        if item == .Const(definition) {
+            if parser_reexport_import(definition, imports) != None {
+                found = true
+                break
+            }
+        }
+    }
+    if !found -> return items.move()
+    kept := [Item]{}
+    loop item in items.move() {
+        if item == .Const(definition) {
+            if parser_reexport_import(definition, imports) == .Val(import) {
+                imports.push(import)
+                next
+            }
+        }
+        kept.push(item)
+    }
+    kept
+}
+
+// The public import a re-exporting binding means, or None for any other
+// binding.
+parser_reexport_import: fn(definition: ConstDef, imports: [ImportDecl]) -> ImportDecl? Never! {
+    if definition.mutable || definition.is_comptime || definition.is_persist || definition.ty != None || definition.meta != None || definition.ct != None || definition.attrs.len() > 0 || definition.markers.len() > 0 {
+        return None
+    }
+    if !parser_reexport_value_word(definition.name) -> return None
+    target: parser_reexport_target(definition.value, imports, true) ?? return None
+    path: parser_cover(parser_reexport_head_span(definition.value), expr_span(definition.value))
+    ImportDecl{kind: ImportKind.Module{name: target, span: path}, alias: definition.name, alias_span: definition.name_span, span: parser_cover(definition.span, path), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None}
+}
+
+// The span of the first word of the path `value`; a field's own span is its
+// member's.
+parser_reexport_head_span: fn(value: Expr) -> Span Never! {
+    if value == .Field(base, _, _, _) -> return parser_reexport_head_span(base)
+    expr_span(value)
+}
+
+// The dotted path `value` re-exports, its head replaced by what a `use` of
+// the body binds it to; None when `value` is not a bare path of value names,
+// or is one word (`whole`) that no `use` binds.
+parser_reexport_target: fn(value: Expr, imports: [ImportDecl], whole: Bool) -> String? Never! {
+    if value == .Ident(name, _, _) {
+        if !parser_reexport_value_word(name) -> return None
+        bound: parser_reexport_bound(name, imports)
+        if bound != None || whole -> return bound
+        return Val("{name}")
+    }
+    if value == .Field(base, member, _, _) {
+        if !parser_reexport_value_word(member) -> return None
+        head: parser_reexport_target(base, imports, false) ?? return None
+        return Val("{head}.{member}")
+    }
+    None
+}
+
+// The path the word `name` stands for through a `use` row of `imports`, or
+// None when no row binds it. A build-only row binds nothing a member can
+// name, and a file row has no path to name.
+parser_reexport_bound: fn(name: String, imports: [ImportDecl]) -> String? Never! {
+    loop import in imports {
+        if import.comptime_span != None -> next
+        if import.kind == .Module(path, _) {
+            if import.alias == name -> return Val("{path}")
+        }
+        if import.kind == .Unqualified(module_alias, _, items, _, _) {
+            loop item in items {
+                if member_import_local(item.original, item.alias) == name {
+                    return Val("{module_alias}.{item.original}")
+                }
+            }
+        }
+    }
+    None
+}
+
+// A value name: it starts with a lowercase letter, or with one `_` before
+// one (a soft-public `_preview`).
+parser_reexport_value_word: fn(word: String) -> Bool Never! {
+    bytes: word.bytes()
+    first := 0
+    if bytes.len() > 1 && bytes[0] == 95 -> first = 1
+    bytes.len() > first && bytes[first] >= 97 && bytes[first] <= 122
+}

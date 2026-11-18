@@ -2886,25 +2886,46 @@ jfmt_fmt_const: fn(f: &JetFmt, c: ConstDef) {
 
 // The imports of one scope (#6542): two or more print as one `use { … }`
 // block with a row per line, the build-only rows as one `#run use { … }`
-// block, the re-exports as one `pub use { … }` block, and a lone import
-// keeps its one line. Comments before the first import print above the
-// group; the rest stay beside their rows.
+// block, the `pub use` re-exports as one `pub use { … }` block, and a lone
+// import keeps its one line. A re-export written as a declaration
+// (`clamp: core.math.clamp`) prints as one, a line each, after the imports.
+// Comments before the first import print above the group; the rest stay
+// beside their rows.
 jfmt_fmt_import_groups: fn(f: &JetFmt, imports: [ImportDecl]) {
-    groups := [[ImportDecl]]{[ImportDecl]{}, [ImportDecl]{}, [ImportDecl]{}, [ImportDecl]{}}
+    groups := [[ImportDecl]]{[ImportDecl]{}, [ImportDecl]{}, [ImportDecl]{}, [ImportDecl]{}, [ImportDecl]{}}
     loop import in jfmt_import_rows(imports) {
         slot := if import.is_pub -> 2 else -> 0
         if import.comptime_span != None -> slot += 1
+        if import.is_pub && jfmt_import_declared(f, import) -> slot = 4
         groups[slot].push(import)
     }
     printed := false
-    loop group in groups {
-        if group.len() == 0 -> next
+    loop slot in 0..<groups.len() {
+        if groups[slot].len() == 0 -> next
         if printed {
             jfmt_newline(f)
             jfmt_newline(f)
         }
-        jfmt_fmt_import_group(f, group)
+        if slot == 4 -> jfmt_fmt_reexport_group(f, groups[slot]) else {
+            jfmt_fmt_import_group(f, groups[slot])
+        }
         printed = true
+    }
+}
+
+// Re-exports written as declarations, a `name: path` line each, the path as
+// written.
+jfmt_fmt_reexport_group: fn(f: &JetFmt, imports: [ImportDecl]) {
+    loop index in 0..<imports.len() {
+        if index > 0 -> jfmt_newline(f)
+        imp: imports[index]
+        jfmt_emit_leading(f, imp.span.start)
+        jfmt_write(f, "{imp.alias}: ")
+        if imp.kind == .Module(_, span) {
+            path: jfmt_src_text(f, span.start, span.end)
+            jfmt_write(f, path)
+        }
+        jfmt_emit_trailing(f, imp.span.end)
     }
 }
 
@@ -2975,8 +2996,8 @@ jfmt_fmt_import: fn(f: &JetFmt, imp: ImportDecl) {
     jfmt_fmt_import_row(f, imp)
 }
 
-// `pub use` is the only re-export spelling (ballot pending); `#run use`
-// marks a build-only import.
+// `pub use` re-exports what it imports, until re-exports are only
+// declarations; `#run use` marks a build-only import.
 jfmt_fmt_import_head: fn(f: &JetFmt, imp: ImportDecl) {
     if imp.is_pub -> jfmt_write(f, "pub ")
     if imp.comptime_span != None -> jfmt_write(f, "#run ")
