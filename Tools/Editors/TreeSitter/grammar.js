@@ -15,7 +15,7 @@
 
 // BEGIN GENERATED JET SYNTAX HIGHLIGHTS
 const JET_HIGHLIGHT_KEYWORD_CONTROL = ["after", "break", "defer", "else", "if", "in", "loop", "next", "return", "task", "task.all", "task.any", "task.group", "task.race", "yield"];
-const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Unsafe", "add", "as", "change", "client", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "policy", "priv", "protocol", "pub", "remove", "rename", "rust", "server", "state", "struct", "trait", "use", "validate", "via", "wrap"];
+const JET_HIGHLIGHT_KEYWORD_DECLARATION = ["Context", "Impure", "Reactive", "Scrub", "State", "Test", "Todo", "Transact", "Unsafe", "add", "as", "change", "client", "distinct", "enum", "extern", "fn", "impl", "migration", "module", "policy", "priv", "protocol", "remove", "rename", "rust", "server", "state", "struct", "trait", "use", "validate", "via", "wrap"];
 const JET_HIGHLIGHT_KEYWORD_OWNERSHIP = ["uninit"];
 const JET_HIGHLIGHT_KEYWORD_OTHER = ["#build", "#caller", "#code", "#here", "#if", "#loop", "#package", "#phase", "#program", "#run", "@SOURCE", "@TYPES", "it", "self"];
 const JET_HIGHLIGHT_LITERAL = ["Canceled", "DeadlineBlown", "None", "Panicked", "Val", "false", "true"];
@@ -59,7 +59,7 @@ const PREC = {
 // Anonymous lowercase keywords that may still name a member after `.`.
 const MEMBER_KEYWORDS = [
   "break", "else", "if", "in", "loop", "return", "enum", "extern",
-  "fn", "impl", "module", "pub", "struct", "trait", "use", "self",
+  "fn", "impl", "module", "struct", "trait", "use", "self",
 ];
 
 const OPERATORS = [
@@ -403,7 +403,7 @@ module.exports = grammar({
     _keyword_word: ($) =>
       choice(
         "if", "else", "in", "loop", "break", "return",
-        "extern", "pub", "use",
+        "extern", "use",
         // `module.id`: a declaration word used as a value.
         prec(-1, alias("module", $.identifier)),
       ),

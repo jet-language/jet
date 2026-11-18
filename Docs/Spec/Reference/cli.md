@@ -533,6 +533,12 @@ script needs the complete generated synopsis rather than this index.
 ledger. Unambiguous visible names stay short; ambiguous names retain their
 canonical path. Generated inline and generic-module names project to their
 authored member path without changing package-qualified semantic identity.
+`inspect impact <file> <symbol>` takes a declaration's bare name or a dotted
+path. A path splits at its longest prefix that names a module of the
+program's module graph (`main.Shape.area` is the method `Shape.area` of the
+module `main`; `core.process.spawn` is `spawn` of `core.process`). A path
+whose prefix names no module, or names more than one, is refused with E2122
+rather than guessed.
 
 Doc-mode compiler results retain the selected target triple and layout
 capabilities, typed layout reflection values, and transitive memory-denial

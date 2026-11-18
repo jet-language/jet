@@ -6,7 +6,7 @@
 // hot loop. The gate builds the catalog with `--release --debug-info=true`,
 // runs it against expected.out, and disassembles each function with
 // objdump. A row's symbol names the function exactly or as the prefix of a
-// specialized name (`main_list_sum` matches `main_list_sum__value_<hash>`).
+// specialized name (`main.list_sum` matches `main.list_sum__value_<hash>`).
 // A row also counts the parts the backend moved out of its function (PART),
 // as if they were still in it. It counts:
 // - insns: instructions in the function;
@@ -583,7 +583,7 @@ gate: fn(root: String, jet: [String], update: Bool, run_dir: String, scratch: St
 }
 
 // A function's name without the hashes the compiler adds to a specialized
-// one (`main_scan__value_3a05…` reads `main_scan__value`): two builds of the
+// one (`main.scan__value_3a05…` reads `main.scan__value`): two builds of the
 // same function hash differently when their programs differ.
 stem: fn(name: String) -> String Never! {
     kept := [String]{}
@@ -670,7 +670,7 @@ ZERO_COST_FILES: [[String]]{[String]{"package.jet", "kernel.jet", "main.jet"}, [
 
 ZERO_COST_LEVELS: [String]{"-O1", "-O2"}
 
-ZERO_COST_HOT: [String]{"main_churn", "main_grow", "main_scan", "main_tally", "main_pages", "main_run"}
+ZERO_COST_HOT: [String]{"main.churn", "main.grow", "main.scan", "main.tally", "main.pages", "main.run"}
 
 // One arm built at one level: its binary and its `nm` output.
 ZeroCostBuild: struct {
@@ -705,7 +705,7 @@ ZeroCostFunction: struct {
 }
 
 // A hot function of one build, as one: the function and every function
-// named after it (`main_scan__value_<hash>`, its parts), in `nm` order. A
+// named after it (`main.scan__value_<hash>`, its parts), in `nm` order. A
 // build may keep a function both as itself and as the value the program
 // reads it as; the pair holds the two builds to the same sum.
 zero_cost_function: fn(build: ZeroCostBuild, symbol: String, run_dir: String, scratch: String) -[Exec, Env, IO, Time.Wait]> ZeroCostFunction Err! {
@@ -792,26 +792,26 @@ run: fn() {
 }
 
 #Test("a stem drops the hashes of a specialized name") {
-    assert_eq(stem("main_scan__value_3a05f1c2d4e5b6a7"), "main_scan__value")
-    assert_eq(stem("core_mem_from_addr__4802937694827900"), "core_mem_from_addr_")
-    assert_eq(stem("kernel_claim"), "kernel_claim")
+    assert_eq(stem("main.scan__value_3a05f1c2d4e5b6a7"), "main.scan__value")
+    assert_eq(stem("core.mem.from_addr__4802937694827900"), "core.mem.from_addr_")
+    assert_eq(stem("kernel.claim"), "kernel.claim")
 }
 
 #Test("two builds of the same code read the same once addresses and hashes are set aside") {
-    ours: "  401000:\tcall   40b630 <jet_ir_drop_9afa72ef4523a3b8>\n  401005:\tmov    0x256a0(%rip),%rax        # 426aa5 <x>\n  40100c:\tjne    401000 <main_k__value_3a05f1c2d4e5b6a7>\n"
-    theirs: "  402000:\tcall   40c000 <jet_ir_drop_0d69d289780faae2>\n  402005:\tmov    0x1000(%rip),%rax        # 403005 <y>\n  40200c:\tjne    402000 <main_k__value_4d91aa00bb11cc22>\n"
+    ours: "  401000:\tcall   40b630 <jet_ir_drop_9afa72ef4523a3b8>\n  401005:\tmov    0x256a0(%rip),%rax        # 426aa5 <x>\n  40100c:\tjne    401000 <main.k__value_3a05f1c2d4e5b6a7>\n"
+    theirs: "  402000:\tcall   40c000 <jet_ir_drop_0d69d289780faae2>\n  402005:\tmov    0x1000(%rip),%rax        # 403005 <y>\n  40200c:\tjne    402000 <main.k__value_4d91aa00bb11cc22>\n"
     assert_eq(normal_listing(ours), normal_listing(theirs))
     assert_eq(normal_listing(ours)[1], "mov (%rip),%rax")
 }
 
 #Test("a function only the kernel build keeps is reported with how many more it keeps") {
-    kernel: "000000000040b630 T kernel_claim\n000000000040b700 t jet_ir_drop_9afa72ef4523a3b8\n000000000040b800 t jet_ir_drop_0d69d289780faae2\n0000000000433980 D data_row\n"
+    kernel: "000000000040b630 T kernel.claim\n000000000040b700 t jet_ir_drop_9afa72ef4523a3b8\n000000000040b800 t jet_ir_drop_0d69d289780faae2\n0000000000433980 D data_row\n"
     direct: "000000000040c000 t jet_ir_drop_0d69d289780faae2\n"
-    assert_eq(kept_functions(kernel, direct), [String]{"jet_ir_drop x1", "kernel_claim x1"})
+    assert_eq(kept_functions(kernel, direct), [String]{"jet_ir_drop x1", "kernel.claim x1"})
 }
 
 #Test("a listing counts saves, frame slots and its innermost loop") {
-    listing: "0000000000401000 <main_k>:\n  401000:\tpush   %rbp\n  401001:\tmov    %rsp,%rbp\n  401004:\tmov    %rdi,-0x8(%rbp)\n  401008:\tadd    (%rax),%rcx\n  40100b:\tadd    $0x8,%rax\n  40100f:\tcmp    %rdx,%rax\n  401012:\tjne    401008 <main_k+0x8>\n  401014:\tpop    %rbp\n  401015:\tret\n"
+    listing: "0000000000401000 <main.k>:\n  401000:\tpush   %rbp\n  401001:\tmov    %rsp,%rbp\n  401004:\tmov    %rdi,-0x8(%rbp)\n  401008:\tadd    (%rax),%rcx\n  40100b:\tadd    $0x8,%rax\n  40100f:\tcmp    %rdx,%rax\n  401012:\tjne    401008 <main.k+0x8>\n  401014:\tpop    %rbp\n  401015:\tret\n"
     counts: count_listing(listing)
     assert_eq(counts.insns, 9)
     assert_eq(counts.pushes, 1)
@@ -871,7 +871,7 @@ run: fn() {
 }
 
 #Test("a loop whose body calls a function that can stop still counts") {
-    listing: "  10:\tcall   401000 <main_step>\n  15:\ttest   %edx,%edx\n  17:\tjne    20 <k+0x10>\n  19:\tadd    $0x1,%rbx\n  1d:\tjmp    10 <k>\n  20:\tmov    $0x1,%edx\n  25:\tret\n"
+    listing: "  10:\tcall   401000 <main.step>\n  15:\ttest   %edx,%edx\n  17:\tjne    20 <k+0x10>\n  19:\tadd    $0x1,%rbx\n  1d:\tjmp    10 <k>\n  20:\tmov    $0x1,%edx\n  25:\tret\n"
     counts: count_listing(listing)
     assert_eq(counts.loops, 1)
     assert_eq(counts.loop_insns, 5)
@@ -889,26 +889,26 @@ run: fn() {
 
 #Test("golden rows need the header and eight numeric fields") {
     assert(parse_golden("kernel\tinsns\n") == .Err(_))
-    assert(parse_golden("{HEADER}\nmain_k\t1\t2\t3\n") == .Err(_))
-    rows: parse_golden("{HEADER}\n# a note\nmain_k\t9\t1\t1\t0\t1\t4\t3\n") ?? panic("{err}")
+    assert(parse_golden("{HEADER}\nmain.k\t1\t2\t3\n") == .Err(_))
+    rows: parse_golden("{HEADER}\n# a note\nmain.k\t9\t1\t1\t0\t1\t4\t3\n") ?? panic("{err}")
     assert_eq(rows.len(), 1)
     assert_eq(rows[0].golden.loops, 1)
     assert_eq(rows[0].ceiling, 3)
 }
 
 #Test("a row's symbol names its function or one specialization of it") {
-    symbols: "0000000000411df0 T jet_rt_alloc_8\n000000000040dc50 t main_list_sum__value_dac2\n000000000040e720 t main_list_sum_wide__value_ba4a\n"
+    symbols: "0000000000411df0 T jet_rt_alloc_8\n000000000040dc50 t main.list_sum__value_dac2\n000000000040e720 t main.list_sum_wide__value_ba4a\n"
     assert_eq((resolve(symbols, "jet_rt_alloc_8") ?? panic("{err}")).join(" "), "jet_rt_alloc_8")
-    assert_eq((resolve(symbols, "main_list_sum") ?? panic("{err}")).join(" "), "main_list_sum__value_dac2")
-    assert(resolve(symbols, "main_point_sum") == .Err(_))
-    twice: "1 t main_k__a\n2 t main_k__b\n"
-    assert(resolve(twice, "main_k") == .Err(_))
+    assert_eq((resolve(symbols, "main.list_sum") ?? panic("{err}")).join(" "), "main.list_sum__value_dac2")
+    assert(resolve(symbols, "main.point_sum") == .Err(_))
+    twice: "1 t main.k__a\n2 t main.k__b\n"
+    assert(resolve(twice, "main.k") == .Err(_))
 }
 
 #Test("a row counts the continuations its function leaves to as part of it") {
-    symbols: "1 t main_list_sum__value_dac2\n2 t main_list_sum__value_dac2__general_77aa\n3 t main_list_sum__value_dac2__general_77aa.own3\n4 t main_list_sum_wide__value_ba4a__general_10ff\n"
-    found: resolve(symbols, "main_list_sum") ?? panic("main_list_sum does not resolve")
-    assert_eq(found.join(" "), "main_list_sum__value_dac2 main_list_sum__value_dac2__general_77aa main_list_sum__value_dac2__general_77aa.own3")
+    symbols: "1 t main.list_sum__value_dac2\n2 t main.list_sum__value_dac2__general_77aa\n3 t main.list_sum__value_dac2__general_77aa.own3\n4 t main.list_sum_wide__value_ba4a__general_10ff\n"
+    found: resolve(symbols, "main.list_sum") ?? panic("main.list_sum does not resolve")
+    assert_eq(found.join(" "), "main.list_sum__value_dac2 main.list_sum__value_dac2__general_77aa main.list_sum__value_dac2__general_77aa.own3")
     // The kernel keeps its fast loop; the continuation holds the general one.
     kernel: count_listing("  10:\tpush   %rbx\n  11:\tadd    (%rax),%rcx\n  14:\tjne    11 <k+0x1>\n  16:\tpop    %rbx\n  17:\tret\n")
     general: count_listing("  20:\tpush   %rbx\n  21:\tmov    %rcx,-0x8(%rbp)\n  25:\tcall   30 <jet_int_add>\n  2a:\tjmp    21 <c+0x1>\n")

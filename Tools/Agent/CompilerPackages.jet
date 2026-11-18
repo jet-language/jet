@@ -564,15 +564,9 @@ fixture_unit: fn(units: [UnitFile], names: [String]) -> String PackagesError! {
     String.from_bytes(out) ?? ""
 }
 
-// The name a line declares at the top level (`name: ` or `pub name: ` at
-// its start), "" when it declares none.
-declared_name: fn(line: String) -> String Never! {
-    if line.starts_with("pub ") {
-        name: ident_colon(line.bytes(), 4)
-        if name != "" -> return name
-    }
-    ident_colon(line.bytes(), 0)
-}
+// The name a line declares at the top level (`name: ` at its start), "" when
+// it declares none.
+declared_name: fn(line: String) -> String Never! { ident_colon(line.bytes(), 0) }
 
 // The identifier at `at` of `raw` when `: ` follows it, else "".
 ident_colon: fn(raw: [U8], at: Int) -> String Never! {
@@ -873,7 +867,7 @@ is_space: fn(b: U8) -> Bool Never! {
 // A `use { … }` block (#6542) rewritten as one `use` line per row, keeping
 // every line and byte offset: `use {` and its `}` turn to spaces and each
 // row's last four columns of indentation become `use `. Line-based import
-// scans then see the single-line form. `pub use { … }` blocks stay as written.
+// scans then see the single-line form.
 unblock_uses: fn(text: String) -> String Never! {
     lines := text.split("\n").to_list()
     indent := ""
@@ -917,14 +911,14 @@ unblock_uses: fn(text: String) -> String Never! {
     assert(is_core_use("use fs: core.files"))
     assert(is_core_use("use core.text.[Text, Rune]"))
     assert(!is_core_use("use jet_lexer.[lex]"))
-    assert(!is_core_use("pub use core.sys"))
+    assert(!is_core_use("sys: core.sys"))
 }
 
-#Test("unblock_uses keeps every offset and leaves pub blocks") {
-    source: "use {{\n    jet_lexer.[\n        lex,\n    ]\n    // note\n    fs: core.files\n}}\npub use {{\n    core.sys\n}}\nm: module {{\n    use {{\n        core.term\n    }}\n}}\n"
+#Test("unblock_uses keeps every offset and leaves re-export declarations") {
+    source: "use {{\n    jet_lexer.[\n        lex,\n    ]\n    // note\n    fs: core.files\n}}\nsys: core.sys\nm: module {{\n    use {{\n        core.term\n    }}\n}}\n"
     flat: unblock_uses(source)
     assert_eq(flat.count_bytes(), source.count_bytes())
-    assert_eq(flat, "     \nuse jet_lexer.[\n        lex,\n    ]\n    // note\nuse fs: core.files\n \npub use {{\n    core.sys\n}}\nm: module {{\n         \n    use core.term\n     \n}}\n")
+    assert_eq(flat, "     \nuse jet_lexer.[\n        lex,\n    ]\n    // note\nuse fs: core.files\n \nsys: core.sys\nm: module {{\n         \n    use core.term\n     \n}}\n")
 }
 
 #Test("a fixture unit blanks package imports and repeated Core imports in place") {

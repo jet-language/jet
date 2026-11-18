@@ -1585,12 +1585,15 @@ ir_callee_fact: fn(p: IRProgram, b: &IRBuilder, row: Int, args: [Type], ty: Type
     ty.copy()
 }
 
-// The object symbol of a function: its module and name, made a C identifier.
+// The object symbol of a function: its Jet path, its module and name joined
+// by `.` (`prog.fib`), so native tools that print the symbol table (nm,
+// perf, gdb) show Jet names, and `fib_sum` in `prog` stays apart from `sum`
+// in `prog_fib`. A byte that is no letter, digit, `_` or `.` becomes `_`.
 ir_symbol_name: fn(function: FnBody) -> String Never! {
     bytes := [U8]{}
     loop byte in "{function.module_name}.{function.name}".bytes() {
-        alphanumeric: (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122)
-        bytes.push(if alphanumeric -> byte else -> U8{95})
+        kept: (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 || byte == 46
+        bytes.push(if kept -> byte else -> U8{95})
     }
     String.from_bytes(bytes) ?? function.name.copy()
 }

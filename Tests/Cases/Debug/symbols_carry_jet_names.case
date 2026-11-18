@@ -1,0 +1,23 @@
+# A function's symbol is its Jet path, `module.name`, so lldb, perf and gdb
+# show the name the source writes. `prog.fib_sum` and `sum` of module
+# `prog_fib` were both `prog_fib_sum` when the module's dot became `_`; now
+# each has its own symbol and a lookup by the Jet name finds exactly one.
+# -O0 keeps every function out of line. The fixture stays in jet fmt form.
+requires: tool:nm
+requires: tool:lldb
+fixture: SymbolsCarryJetNames.fixture
+env: NO_COLOR=1
+step: jet build -O0 prog.jet
+exit: 0
+step: {work}/.jet/build/prog
+exit: 0
+stdout: = "10945 190\n"
+step: nm {work}/.jet/build/prog
+exit: 0
+stdout: ~ " prog.fib\n" # the module's function under its Jet path
+stdout: ~ " prog.fib_sum\n" # an underscore in a name stays an underscore
+stdout: ~ " prog_fib.sum\n" # and in a module's name too
+stdout: !~ " prog_fib_sum" # so no two functions share one symbol
+step: lldb --no-lldbinit --no-use-colors -b -o "image lookup -s prog.fib_sum" {work}/.jet/build/prog
+exit: 0
+stdout+stderr: ~ "1 symbols match 'prog.fib_sum'" # the debugger finds it by its Jet name

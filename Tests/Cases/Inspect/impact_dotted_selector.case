@@ -1,0 +1,35 @@
+# `jet inspect impact` reads a dotted symbol as a path: it splits at the
+# longest prefix that names a module of the program's module graph, and the
+# rest names the declaration in that module. `selector.square` and
+# `selector.Box.area` are declarations of the module `selector`;
+# `core.process.cmd` splits at the Core module `core.process`, which the index
+# does not hold, so only its call sites match. A path no module starts, such
+# as `nowhere.square` or `Box.area`, is refused with E2122 instead of guessed.
+fixture: ImpactDottedSelector.fixture
+env: NO_COLOR=1
+step: jet inspect impact selector.jet selector.square --json
+exit: 0
+stdout: ~ "\"symbol\":\"selector.square\",\"found\":true" # module `selector`, declaration `square`
+stdout: ~ "\"definition_module\":\"selector.jet\"" # defined in the module's file
+stdout: ~ "{\"depth\":1,\"caller\":\"Box.area\",\"callee\":\"square\"" # called from the method
+stdout: ~ "{\"depth\":1,\"caller\":\"run\",\"callee\":\"square\"" # and from the entry
+step: jet inspect impact selector.jet selector.Box.area --json
+exit: 0
+stdout: ~ "\"symbol\":\"selector.Box.area\",\"found\":true" # a method is its type's name, then its own
+stdout: ~ "\"upstream_callers\":[{\"depth\":1,\"caller\":\"run\",\"callee\":\"area\"" # its caller reaches it by its own name
+stdout: ~ "\"downstream_callees\":[{\"depth\":1,\"caller\":\"Box.area\",\"callee\":\"square\"" # and it calls `square`
+step: jet inspect impact selector.jet selector.square
+exit: 0
+stdout: ~ "Blast radius for `selector.square` (defined in selector.jet)" # the human report names the path
+step: jet inspect impact selector.jet core.process.cmd --json
+exit: 1
+stdout: ~ "\"symbol\":\"core.process.cmd\",\"found\":false" # Core's declarations are not in the program's index
+stdout: ~ "\"call_sites\":[{\"depth\":1,\"caller\":\"launch\",\"callee\":\"cmd\"" # but the split names `cmd`, whose call sites match
+stdout: !~ "E2122" # `core.process` is a module of the graph
+step: jet inspect impact selector.jet nowhere.square --json
+exit: 1
+stdout: ~ "\"code\":\"E2122\"" # no module is named `nowhere`
+stdout: ~ "`nowhere.square` starts with no module of this program." # and the report says so
+step: jet inspect impact selector.jet Box.area --json
+exit: 1
+stdout: ~ "\"code\":\"E2122\"" # a type is no module: a path starts at one

@@ -20,7 +20,7 @@
 //    its own module) names its member identity, so it passes like any
 //    function and keeps its inferred effect row;
 // 4. a module's own `use` declarations
-//    bind inside that module only, and its `pub use` re-exports a member as
+//    bind inside that module only, and its re-exports declare a member as
 //    `module.name`; a module named as a value is E0107.
 //
 // A generic-module instance arrives here as an ordinary module expanded by
@@ -127,7 +127,7 @@ SemaInlineModuleSurface: struct {
     // The members written `priv`, each with its name's span;
     // only this module and its children reach them.
     private_members: [String:Span],
-    // `pub use` inside the module: re-exported local name -> its owner.
+    // A re-export inside the module: re-exported local name -> its owner.
     reexports: [String:SemaInlineTarget],
 }
 
@@ -354,7 +354,7 @@ sema_inline_module_lowered: fn(definition: CodeModule) -> Bool Never! {
 }
 
 // Every inline module with a body lowers. A Core member it binds (`use
-// core.[math.abs]`, `pub use exported: core.math.abs`) and a Core module it
+// core.[math.abs]`, `exported: core.math.abs`) and a Core module it
 // binds in a member list (`use core.[math]`) read through the file-level Core
 // alias sema_inline_core_imports adds; its own module or file import (`use
 // rules: second`) reads through the generated file-level alias
@@ -834,7 +834,7 @@ sema_inline_rewrite_enum_args: fn(rewrite: &SemaInlineRewrite, args: [EnumLitArg
 }
 
 // `bank.f(...)` from anywhere in the file (Rust `infer_code_module_call`):
-// a `pub use` re-export calls its owner, a member function its member
+// a re-export calls its owner, a member function its member
 // identity; any other name is E0608. The file is the enclosing module, so it
 // reaches the members of its `priv module`s too.
 sema_inline_rewrite_module_call: fn(rewrite: &SemaInlineRewrite, surface: SemaInlineModuleSurface, alias_span: Span, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr? Never! {
@@ -857,7 +857,7 @@ sema_inline_rewrite_module_call: fn(rewrite: &SemaInlineRewrite, surface: SemaIn
 }
 
 // `bank.open` or `math.inner.RATE` read as a value, not called: a member
-// function or constant names its member identity, a `pub use` re-export
+// function or constant names its member identity, a re-export
 // names its owner, and a field of the module's Module record (`bank.category`)
 // reads its record. Any other member is E0608, and the read is left as
 // written. A member that is itself a module reads as its record. None when
@@ -1809,14 +1809,14 @@ sema_inline_bind_imports: fn(program: Program, surfaces: [SemaInlineModuleSurfac
 
 // Rust `resolve_inline_module_imports`: a module's own `use alias.[f]` binds
 // `f` inside that module only. `alias` is a sibling inline module (its member
-// must exist, E0611, and be `pub`, E0609) or a file module this file imports
+// must exist, E0611, and be public, E0609) or a file module this file imports
 // (the member is read qualified). A group with any problem binds nothing.
-// `pub use` also re-exports each bound name as `module.name`.
+// A re-export also declares each bound name as `module.name`.
 sema_inline_bind_module_imports: fn(definition: CodeModule, surfaces: [SemaInlineModuleSurface], file_aliases: [String:Bool], rewrite: &SemaInlineRewrite) -> [String:SemaInlineTarget] {
     reexports := [String:SemaInlineTarget]{}
     names := [String:Bool]{}
     loop declaration in definition.imports {
-        // `pub use exported: core.math.abs`: a Core member under the module's
+        // `exported: core.math.abs`: a Core member under the module's
         // own alias.
         if declaration.kind == .Module(name, _) {
             target: sema_inline_core_member(name) ?? next
@@ -1940,7 +1940,7 @@ sema_inline_modules_check_imports: fn(graph: &SemaRegistrationGraph, module_inde
 
 // Every inline module nested in `body` (module `parent`), depth first, with
 // the import bindings its members see. Each module binds its imports here,
-// once, so its `pub use` re-exports are on its surface before any body is
+// once, so its re-exports are on its surface before any body is
 // rewritten.
 sema_inline_collect_nested: fn(body: [Item], parent: String, file_imports: [ImportDecl], surfaces: [SemaInlineModuleSurface], file_aliases: [String:Bool], inherited: [String:String], nested: &[SemaInlineModuleSurface], bindings: &[SemaInlineRewrite]) Never! {
     loop item in body {

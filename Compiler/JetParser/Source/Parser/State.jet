@@ -37,7 +37,6 @@ use {
         TOKEN_KW_IMPL,
         TOKEN_KW_IN,
         TOKEN_KW_MODULE,
-        TOKEN_KW_PUB,
         TOKEN_KW_STRUCT,
         TOKEN_IDENT,
         TOKEN_LBRACE,
@@ -1047,7 +1046,7 @@ parser_recover_statement: fn(state: &JetParserState) Never! {
 parser_sync_top: fn(state: &JetParserState) Never! {
     loop {
         kind: parser_current_kind(state)
-        if kind == TOKEN_EOF || kind == TOKEN_KW_FN || kind == TOKEN_KW_PUB || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_CONST {
+        if kind == TOKEN_EOF || kind == TOKEN_KW_FN || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_CONST {
             break
         }
         if kind == TOKEN_PREP && (state.position == 0 || state.tokens[state.position - 1].kind == TOKEN_SEMI) {

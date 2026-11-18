@@ -9,7 +9,7 @@
 // build --release`, reads each image's symbols with nm (the `.debug` file
 // beside an image when there is one, since the release image is stripped),
 // and prints each image's size, its arbitrary-precision Int symbols (the
-// unit_int_* and jet_int_* routines) and the gap to the empty program. It
+// unit.int_* and jet_int_* routines) and the gap to the empty program. It
 // prints PASS, or FAIL with the broken facts and exits 1.
 package: {
     name: "int-floor"
@@ -39,7 +39,7 @@ wide_symbols: fn(listing: String) -> [String] {
     loop line in listing.lines() {
         fields: line.split(" ").to_list()
         name: fields[fields.len() - 1]
-        if name.starts_with("unit_int_") || name.starts_with("jet_int_") -> wide.push(name.copy())
+        if name.starts_with("unit.int_") || name.starts_with("jet_int_") -> wide.push(name.copy())
     }
     wide
 }

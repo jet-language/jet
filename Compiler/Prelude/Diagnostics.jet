@@ -6916,12 +6916,12 @@ VisibilitySectionLabel: struct {
         safety_class: .Opinion,
         safety_reason: "A section label could set the visibility of the items under it and run safely, and Jet refuses it because moving an item across the label would silently change its visibility.",
         stage: [.Parse],
-        meaning: "A `pub:` or `priv:` section label",
+        meaning: "A `priv:` section label",
         structured_fix: .SourceEdit,
         no_fix: None,
         fix_safety: .NeedsReview,
 
-        what: fn(self) -> String { "Section visibility labels `pub:` / `priv:` rejected" }
+        what: fn(self) -> String { "Section visibility labels like `priv:` rejected" }
 
         why: fn(self) -> String {
             "Moving an item above or below a label would silently change its visibility"
@@ -20363,6 +20363,33 @@ DeepCheckScopeHoldsNone: struct {
 
         fix: fn(self) -> String {
             "Drop it, or name a scope that holds a deep check: {self.holders}."
+        }
+    }
+}
+
+DottedPathPrefixUnresolved: struct {
+    path: String,
+    start: String,
+    modules: String,
+
+    impl Diagnostic {
+        code: "E2122",
+        safety_class: .Soundness,
+        safety_reason: "A path whose prefix names no one module would be read against a guessed module, so the answer would describe a declaration the path never named.",
+        expert_path: "none: the path starts with the name of exactly one module",
+        stage: [.Jet],
+        meaning: "A dotted path starts with no module of the program, or with a name more than one of its modules has",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "`{self.path}` starts with {self.start}." }
+
+        why: fn(self) -> String {
+            "A dotted path splits at its longest prefix that names one module of the program, and the rest names a declaration in that module."
+        }
+
+        fix: fn(self) -> String {
+            "Start the path with the dotted name of exactly one module of the program: {self.modules}."
         }
     }
 }

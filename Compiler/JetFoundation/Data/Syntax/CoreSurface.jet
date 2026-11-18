@@ -68,15 +68,16 @@ GENERIC_CALL_OPEN: "<"
 
 GENERIC_CALL_CLOSE: ">"
 
-/// `pub use` re-export is the only remaining `pub` form (re-export
-/// ballot pending, card #4723). No rule accepts `pub` on a declaration or
-/// field.
-KW_PUB: "pub"
-
 /// (owner directive 2026-10-07, card #4723): everything is public by
 /// default. `priv` marks a module (`priv name: module`, usable only by its
 /// enclosing module) or a struct field (usable only by the type's own module).
 KW_PRIV: "priv"
+
+/// The removed visibility keyword: everything is public by default. The
+/// lexer reads `pub` as a name and no grammar rule accepts it, so `pub use`
+/// and `pub fn` get the generic parse error. A re-export is a bare-path
+/// declaration, `clamp: core.math.clamp`, which keeps its target's identity.
+REMOVED_PUB: "pub"
 
 /// Retired file marker spelling; no parser rule accepts it.
 MARKER_PUB_FILE: "PubFile"

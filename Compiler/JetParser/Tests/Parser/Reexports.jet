@@ -5,7 +5,7 @@ use jet_foundation.[ImportDecl, Item, Program]
 reexport_test_row: fn(imports: [ImportDecl], alias: String) -> String {
     loop import in imports {
         if import.alias != alias -> next
-        if import.kind == .Module(name, _) -> return if import.is_pub -> "pub {name}" else -> name
+        if import.kind == .Module(name, _) -> return if import.is_pub -> "export {name}" else -> name
     }
     panic("expected a module row named `{alias}`")
 }
@@ -37,17 +37,17 @@ run: fn() {}
 `,
     )
     assert_eq(program.imports.len(), 6)
-    assert_eq(reexport_test_row(program.imports, "limit"), "pub core.math.clamp")
-    assert_eq(reexport_test_row(program.imports, "sqrt"), "pub core.math.sqrt")
-    assert_eq(reexport_test_row(program.imports, "fs"), "pub core.files")
-    assert_eq(reexport_test_row(program.imports, "read"), "pub core.files.read")
+    assert_eq(reexport_test_row(program.imports, "limit"), "export core.math.clamp")
+    assert_eq(reexport_test_row(program.imports, "sqrt"), "export core.math.sqrt")
+    assert_eq(reexport_test_row(program.imports, "fs"), "export core.files")
+    assert_eq(reexport_test_row(program.imports, "read"), "export core.files.read")
     assert_eq(reexport_test_names(program.items), [String]{"LIMIT", "Point", "forward", "run"})
 }
 
 #Test("a re-export names the binding a re-export before it declares") {
     program: parser_test_program("first: core.math.clamp\nsecond: first\n\nrun: fn() {{}}\n")
-    assert_eq(reexport_test_row(program.imports, "first"), "pub core.math.clamp")
-    assert_eq(reexport_test_row(program.imports, "second"), "pub core.math.clamp")
+    assert_eq(reexport_test_row(program.imports, "first"), "export core.math.clamp")
+    assert_eq(reexport_test_row(program.imports, "second"), "export core.math.clamp")
 }
 
 #Test("an inline module re-exports through its own imports") {
@@ -63,9 +63,19 @@ run: fn() {}
 `,
     )
     if program.items[0] == .CodeModule(definition) {
-        assert_eq(reexport_test_row(definition.imports, "read"), "pub core.files.read")
+        assert_eq(reexport_test_row(definition.imports, "read"), "export core.files.read")
         assert_eq(reexport_test_names(definition.body ?? [Item]{}), [String]{"area"})
     } else { panic("expected the inline module first") }
+}
+
+#Test("a name a file use row binds re-exports that file module") {
+    program: parser_test_program("use bank_file: \"bank.jet\"\n\nbank: bank_file\n\nrun: fn() {{}}\n")
+    assert_eq(program.imports.len(), 2)
+    exported: program.imports[1]
+    assert(exported.is_pub)
+    assert_eq(exported.alias, "bank")
+    if exported.kind == .File(path, _) -> assert_eq(path, "bank.jet") else -> panic("expected a file row")
+    assert_eq(parser_test_stable("use bank_file: \"bank.jet\"\n\nbank: bank_file\n\nrun: fn() {{}}\n"), "use bank_file: \"bank.jet\"\n\nbank: bank_file\n\nrun: fn() {{}}\n")
 }
 
 #Test("a mutable binding stays a binding") {
@@ -98,15 +108,13 @@ run: fn() {}
     )
 }
 
-#Test("fmt keeps a pub use block beside a re-export declaration") {
-    source: `pub use {
-    t: core.time
-    core.sys
-}
-
-clamp: core.math.clamp
-
-run: fn() {}
-`
-    assert_eq(parser_test_stable(source), source)
+#Test("`pub` is a plain name, so `pub use` and `pub fn` get the generic parse error") {
+    sources: [String]{"pub use core.sys\n\nrun: fn() {{}}\n", "pub run: fn() {{}}\n"}
+    loop source in sources {
+        errors: parser_test_errors(source)
+        assert(!errors.is_empty(), source)
+        assert(!errors[0].fix.contains("re-export") && !errors[0].fix.contains("delete `pub`"), errors[0].fix)
+    }
+    program: parser_test_program("use core.files\n\npub: files.read\n\nrun: fn() {{}}\n")
+    assert_eq(reexport_test_row(program.imports, "pub"), "export core.files.read")
 }

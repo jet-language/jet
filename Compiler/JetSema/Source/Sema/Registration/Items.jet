@@ -2488,7 +2488,7 @@ sema_registration_module_has_import_name: fn(module_row: SemaRegistrationModule,
 
 // A body-less `name: module` binds its file as a file import aliased `name`.
 // When the same module also takes `name` from that file with a top-level
-// `use` (`pub use wrap.wrap`), that item owns the name: the file import binds
+// re-export (`wrap: wrap.wrap`), that item owns the name: the file import binds
 // nothing and exports nothing, and the file stays reachable only where a
 // module is expected (a `use` root), which the loader resolves.
 sema_registration_file_import_taken_over: fn(module_row: SemaRegistrationModule, import: SemaRegistrationImport) -> Bool Never! {
@@ -4667,8 +4667,8 @@ sema_registration_direct_symbol: fn(module_row: SemaRegistrationModule, name: St
 }
 
 // A Core module's public surface is its `module core.X exports {…}` row in
-// Compiler/Prelude/Core.rows, not its source visibility: Core declares no
-// `pub`, so every Core item is visible by default. Code outside Core reaches
+// Compiler/Prelude/Core.rows, not its source visibility: every Core item is
+// public by default. Code outside Core reaches
 // only the names that row lists, or a Core submodule; the rest (a handle
 // struct such as `SqliteDB { raw }`, a host leaf, an internal constant) is
 // Core's own. Core itself reaches every Core item. A dotted member
@@ -5039,7 +5039,7 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                             }
                             if {
                                 private_template -> {
-                                    sema_registration_push_graph_diagnostic(graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `{item.original}: module` in the defining file"))
+                                    sema_registration_push_graph_diagnostic(graph, module_index, sema_error("E0609", declaration.span, "`{item.original}` is private in module `{target_name}`", "only public items can be brought into scope with `use`", "remove `priv` from `{item.original}: module` in the defining file"))
                                 }
                                 direct != None && !declared_private && sema_registration_core_private(graph.modules[target_index], item.original, source_identity) -> {
                                     sema_registration_push_graph_diagnostic(graph, module_index, sema_registration_core_private_error(item.original, target_name, declaration.span))
@@ -5154,8 +5154,8 @@ sema_registration_namespace_function_owner: fn(graph: SemaRegistrationGraph, mod
 // Whether importing `original` from `source_module_identity` as `local`
 // collides with a package function another member declares. The import that
 // names the very declaration the package already binds under that name
-// (`use mathlib.clamp` beside the `clamp` of mathlib.jet, `pub use
-// wrap.wrap`) binds nothing new, so it is no collision.
+// (`use mathlib.clamp` beside the `clamp` of mathlib.jet, `wrap: wrap.wrap`)
+// binds nothing new, so it is no collision.
 sema_registration_namespace_function_conflict: fn(graph: SemaRegistrationGraph, module_index: Int, local: String, original: String, source_module_identity: ModuleID) -> Bool Never! {
     owner: sema_registration_namespace_owner(graph, module_index, local) ?? return false
     if graph.modules[owner.module_index].symbols[owner.row].kind != .Function -> return false

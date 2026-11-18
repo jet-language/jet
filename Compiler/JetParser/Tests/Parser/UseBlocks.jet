@@ -70,16 +70,14 @@ run: fn() {}
     assert_eq(use_test_import(program, 3).alias, "p")
 }
 
-#Test("several use blocks, a pub block and an inline module block all parse") {
+#Test("several use blocks, re-export declarations and an inline module block all parse") {
     program: parser_test_program(
         `use {
     core.files
     core.term
 }
-pub use {
-    core.math
-    t: core.time
-}
+math: core.math
+t: core.time
 use {
     core.process
     core.sys
@@ -99,9 +97,9 @@ run: fn() {}
     )
     assert_eq(program.imports.len(), 6)
     assert(!program.imports[0].is_pub)
-    assert(program.imports[2].is_pub)
-    assert(program.imports[3].is_pub)
-    assert(!program.imports[4].is_pub)
+    assert(!program.imports[3].is_pub)
+    assert(program.imports[4].is_pub)
+    assert(program.imports[5].is_pub)
 }
 
 #Test("an empty use block is an error") {
@@ -123,8 +121,8 @@ use core.term
 use plot: js.plotly
 use h: "./helper"
 use biggest: core.math.max
-pub use t: core.time
-pub use core.sys
+t: core.time
+sys: core.sys
 
 run: fn() {}
 `,
@@ -139,10 +137,8 @@ run: fn() {}
     biggest: core.math.max
 }
 
-pub use {
-    t: core.time
-    core.sys
-}
+t: core.time
+sys: core.sys
 
 run: fn() {}
 `,

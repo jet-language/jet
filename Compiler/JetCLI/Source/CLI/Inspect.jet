@@ -29,8 +29,10 @@ use {
         BuildOptions,
         Diagnostic,
         DiagnosticRegistryStatus,
+        DottedPathSplit,
         Func,
         Item,
+        NameModule,
         Program,
         Span,
         Type,
@@ -38,6 +40,9 @@ use {
         diagnostic_from_registry,
         diagnostic_registry_rows,
         diagnostic_render_all,
+        dotted_path_split,
+        dotted_path_unresolved,
+        name_facts_leaf,
         owned_trait,
         owned_trait_arithmetic,
         owned_trait_commutative,
@@ -52,7 +57,7 @@ use {
     jet_parser.[
         parse_source,
     ]
-    jet_semindex.[SemCall, SemRef]
+    jet_semindex.[SemCall, SemRef, semindex_identity_path]
     jetpack_artifact_store.[ArtifactStore]
 }
 
@@ -946,7 +951,7 @@ JET_CLI_TOKEN_KIND_NAMES: [String]{
     "comment.line",
     "comment.block",
     "keyword.fn",
-    "keyword.pub",
+    "",
     "keyword.priv",
     "keyword.if",
     "keyword.else",
@@ -1842,49 +1847,77 @@ JetCLIImpactEdge: struct {
     span: Span,
 }
 
-// Over jet-impact `impact_report`: the symbol's definition (`module.name`
-// matches a module suffix), its references and direct call
-// sites, and the transitive callers and callees to the depth limit, each edge
-// once, breadth first. The explicit-file check result
-// (`check_result_text`/`check_result_value`) leads the report.
+// Where the module of a dotted impact symbol ends in it, or the E2122 report
+// when no one module of the program starts it.
+JetCLIImpactModule: enum {
+    Cut(at: Int),
+    Refused(report: Diagnostic),
+}
+
+// The split of a dotted impact symbol over the checked program's module graph
+// (dotted_path_split): its longest prefix that names one module.
+jet_cli_impact_module: fn(symbol: String, result: JetDriverCompileResult) -> JetCLIImpactModule {
+    if result.doc_modules.len() == 0 {
+        return JetCLIImpactModule.Refused{report: dotted_path_unresolved(symbol, [NameModule]{}, result.package_identity, DottedPathSplit{cut: 0, named: 0})}
+    }
+    storage: result.doc_modules[0].name_ledger ?? panic("checked documentation row lost its NameLedger")
+    permit: storage.guard_read()
+    modules: permit.value.facts.modules
+    split: dotted_path_split(symbol, modules)
+    if split.named == 1 -> return JetCLIImpactModule.Cut{at: split.cut}
+    JetCLIImpactModule.Refused{report: dotted_path_unresolved(symbol, modules, result.package_identity, split)}
+}
+
+// Over jet-impact `impact_report`: the symbol's definition, its references
+// and direct call sites, and the transitive callers and callees to the depth
+// limit, each edge once, breadth first. A bare symbol is a declaration's
+// name; a dotted one is a path whose longest prefix naming one module of the
+// program is that module and whose rest names the declaration in it
+// (`main.Shape.area`), and one no module starts is refused (E2122). The
+// explicit-file check result (`check_result_text`/`check_result_value`)
+// leads the report.
 jet_cli_inspect_impact_report: fn(job: JetCLIInspectJob, result: JetDriverCompileResult, diagnostics: Int, elapsed_ms: Int) -> JetDriverVerbOutput {
     symbol: job.subject ?? ""
+    module_cut := 0
+    if symbol.contains(".") {
+        if jet_cli_impact_module(symbol, result) == {
+            .Cut(at) -> { module_cut = at }
+            .Refused(report) -> return jet_cli_diagnostics_output(if job.json -> job.file else -> "", "", report, job.color, job.json, "")
+        }
+    }
+    // The declaration's name in its module (`Shape.area`), and its own name,
+    // which its references and the call sites that reach it carry.
+    in_module: if {
+        module_cut == 0 -> symbol.slice(0..<symbol.len())
+        module_cut >= symbol.len() -> ""
+        else -> symbol.slice(module_cut + 1..<symbol.len())
+    }
+    leaf: name_facts_leaf(in_module)
     index: jet_cli_checked_semindex(result)
     definition_module := String?{None}
-    parts: symbol.split(".").to_list()
-    if parts.len() > 1 {
-        name: parts[parts.len() - 1]
-        module_name: symbol.slice(0..<(symbol.len() - name.len() - 1))
-        loop definition in index.definitions {
-            if definition.def.name == name && (definition.def.module_path == module_name || definition.def.module_path.ends_with(module_name)) {
-                definition_module = Val(definition.def.module_path)
-                break
-            }
-        }
-    } else {
-        loop definition in index.definitions {
-            if definition.def.name == symbol {
-                definition_module = Val(definition.def.module_path)
-                break
-            }
+    loop definition in index.definitions {
+        named: if module_cut == 0 -> definition.def.name == symbol else -> semindex_identity_path(definition.def.identity) == symbol
+        if named {
+            definition_module = Val(definition.def.module_path)
+            break
         }
     }
     found: definition_module != None
     references := [SemRef]{}
     loop reference in index.references {
-        if reference.name == symbol -> references.push(reference)
+        if reference.name == leaf -> references.push(reference)
     }
     call_sites := [JetCLIImpactEdge]{}
     loop call in index.calls {
-        if call.callee == symbol {
+        if call.callee == leaf {
             call_sites.push(JetCLIImpactEdge{depth: 1, caller: call.caller, callee: call.callee, module_path: call.module_path, span: call.span})
         }
     }
     upstream := [JetCLIImpactEdge]{}
     downstream := [JetCLIImpactEdge]{}
     if found {
-        upstream = jet_cli_impact_walk(index.calls, symbol, job.depth, true)
-        downstream = jet_cli_impact_walk(index.calls, symbol, job.depth, false)
+        upstream = jet_cli_impact_walk(index.calls, leaf, job.depth, true)
+        downstream = jet_cli_impact_walk(index.calls, in_module, job.depth, false)
     }
     source: job.file
     if job.json {

@@ -90,7 +90,6 @@ use {
         TOKEN_HASH,
         TOKEN_IDENT,
         TOKEN_KW_PRIV,
-        TOKEN_KW_PUB,
         TOKEN_LINE_COMMENT,
         TOKEN_LPAREN,
         TOKEN_RPAREN,
@@ -342,7 +341,7 @@ sema_comptime_reflection_newlines: fn(bytes: [U8], start: Int, end: Int) -> Int 
 
 // The `///` comments that document the declaration whose name is written at
 // `name`, in source order: reading up from the name past its markers
-// (`#M`, `#M(…)`), its `pub` or `priv` and any other comment, each `///`
+// (`#M`, `#M(…)`), its `priv` and any other comment, each `///`
 // line counts until a blank line or any other code. Marker arguments are
 // tokens, never comments, so a `///` inside one is text.
 sema_comptime_reflection_documentation: fn(source: SemaComptimeReflectionSource, name: Span?) -> [TComptimeValue] Never! {
@@ -372,7 +371,7 @@ sema_comptime_reflection_documentation: fn(source: SemaComptimeReflectionSource,
             cursor -= 1
             next
         }
-        if kind == TOKEN_SEMI || kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV {
+        if kind == TOKEN_SEMI || kind == TOKEN_KW_PRIV {
             below = tokens[cursor].span.start
             cursor -= 1
             next

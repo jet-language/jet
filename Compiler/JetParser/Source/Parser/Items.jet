@@ -121,7 +121,6 @@ use {
         TOKEN_KW_MOVE,
         TOKEN_KW_MUTATE,
         TOKEN_KW_PRIV,
-        TOKEN_KW_PUB,
         TOKEN_KW_STRUCT,
         TOKEN_KW_TRAIT,
         TOKEN_KW_USE,
@@ -164,8 +163,6 @@ ParsedItemModifiers: struct {
     is_comptime: Bool,
     markers: [Marker],
     start_span: Span,
-    // `pub use` re-exports (the only remaining `pub`, ballot pending).
-    reexport: Bool{false},
     // The markers came from at least one `#[…]` list (Rust's grouped marker path).
     grouped_markers: Bool{false},
 }
@@ -267,11 +264,11 @@ parser_parse_item_or_import: fn(state: &JetParserState) -> ParsedItemOrImport {
             return ParsedItemOrImport{item: Val(value), handled: true}
         }
         parser_current_kind(state) == TOKEN_KW_USE -> {
-            return ParsedItemOrImport{item: None, imports: parser_parse_import(state, modifiers.reexport, None), handled: true}
+            return ParsedItemOrImport{item: None, imports: parser_parse_import(state, None), handled: true}
         }
         parser_prep_verb_ahead(state, 0, TOKEN_KW_USE) -> {
             head: parser_bump(state)
-            return ParsedItemOrImport{item: None, imports: parser_parse_import(state, modifiers.reexport, Val(head.span)), handled: true}
+            return ParsedItemOrImport{item: None, imports: parser_parse_import(state, Val(head.span)), handled: true}
         }
     }
     token: parser_current(state)
@@ -366,48 +363,21 @@ parser_report_repeated_state_section: fn(state: &JetParserState, section: StateD
     parser_add_error_code(state, "E0168", section.span, "`{type_name}` may declare only one `state {{ … }}` section", "A type's states and moves form one list", "Merge the states and moves into one `state {{ … }}` section")
 }
 
-// (card #4723): declarations are public by default. `priv` and
-// `priv(package)` mark a module (`item_visibility`) or a field (members);
-// `priv` on any other declaration is reported with a fix that deletes it, and
-// the declaration parses as if it were absent. `pub use` and
-// `pub(package) use` are the re-export spellings.
+// Declarations are public by default. `priv` and `priv(package)` mark a
+// module (`item_visibility`) or a field (members); `priv` on any other
+// declaration is reported with a fix that deletes it, and the declaration
+// parses as if it were absent.
 parser_parse_item_modifiers: fn(state: &JetParserState, item_visibility: Bool) -> ParsedItemModifiers {
     start := parser_current(state).span
     is_pub := true
     is_package_pub := false
     is_comptime := false
-    reexport := false
     markers := [Marker]{}
     marker_chunks := 0
     bracket_chunks := 0
     sequence := parser_current(state).span
     loop {
         kind := parser_current_kind(state)
-        if kind == TOKEN_KW_PUB && item_visibility && (parser_kind_at(state, 1) == TOKEN_KW_USE || (parser_kind_at(state, 1) == TOKEN_LPAREN && parser_kind_at(state, 4) == TOKEN_KW_USE)) {
-            parser_bump(state)
-            if parser_current_kind(state) == TOKEN_LPAREN {
-                parser_bump(state)
-                qualifier: parser_current(state)
-                if qualifier.kind == TOKEN_IDENT && parser_value(state, qualifier) == "package" {
-                    parser_bump(state)
-                    is_pub = false
-                    is_package_pub = true
-                    if parser_current_kind(state) == TOKEN_RPAREN -> parser_bump(state) else {
-                        close_span: parser_current(state).span
-                        parser_add_error(state, close_span, "expected `)` to close `pub(package)`", "write `pub(package)` with no extra content inside the parentheses", "use `pub(package)` to restrict access to sibling packages in the same payload")
-                    }
-                } else {
-                    found: parser_describe_token(state, qualifier)
-                    parser_add_error(state, qualifier.span, "expected `package` inside `pub(…)`, found {found}", "a re-export is `pub use` (public to all) or `pub(package) use` (sibling packages in the same payload)", "write `pub use` or `pub(package) use`")
-                    loop parser_current_kind(state) != TOKEN_RPAREN && parser_current_kind(state) != TOKEN_EOF {
-                        parser_bump(state)
-                    }
-                    if parser_current_kind(state) == TOKEN_RPAREN -> parser_bump(state)
-                }
-            }
-            reexport = true
-            next
-        }
         if kind == TOKEN_KW_PRIV {
             word: parser_bump(state)
             marker_span := word.span
@@ -469,7 +439,7 @@ parser_parse_item_modifiers: fn(state: &JetParserState, item_visibility: Bool) -
     if noun != "" {
         parser_report_adjacent_markers(state, markers, marker_chunks, bracket_chunks, sequence, noun)
     }
-    ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, reexport: reexport, grouped_markers: bracket_chunks > 0}
+    ParsedItemModifiers{is_pub: is_pub, is_package_pub: is_package_pub, is_comptime: is_comptime, markers: markers, start_span: start, grouped_markers: bracket_chunks > 0}
 }
 
 // The target a declaration marker sequence attaches to, named as Rust's
@@ -545,10 +515,11 @@ parser_marker_first_expr: fn(marker: Marker) -> Expr? {
 
 // `use ROW` or a `use { … }` block with one ROW per line (#6542). A row is
 // a module path, a member list, or a "file" path, any of them after an
-// `alias:`: `alias: path` means what `use alias: path` means. `pub`
-// before `use` re-exports every row. `comptime_head` is the `#run`
-// before `use`, which makes every row a build-only import.
-parser_parse_import: fn(state: &JetParserState, is_pub: Bool, comptime_head: Span?) -> [ImportDecl] {
+// `alias:`: `alias: path` means what `use alias: path` means. A `use` is
+// local to its file or module; a re-export is a declaration
+// (`clamp: core.math.clamp`). `comptime_head` is the `#run` before `use`,
+// which makes every row a build-only import.
+parser_parse_import: fn(state: &JetParserState, comptime_head: Span?) -> [ImportDecl] {
     keyword: parser_bump(state)
     comptime_span := Span?{None}
     if comptime_head == .Val(head) {
@@ -557,7 +528,6 @@ parser_parse_import: fn(state: &JetParserState, is_pub: Bool, comptime_head: Spa
     imports := [ImportDecl]{}
     if parser_current_kind(state) != TOKEN_LBRACE {
         import := parser_parse_import_row(state, comptime_head ?? keyword.span)
-        import.is_pub = is_pub
         import.comptime_span = comptime_span
         imports.push(import)
         return imports
@@ -571,7 +541,6 @@ parser_parse_import: fn(state: &JetParserState, is_pub: Bool, comptime_head: Spa
         before: state.position
         row_start: parser_current(state).span
         import := parser_parse_import_row(state, row_start)
-        import.is_pub = is_pub
         import.comptime_span = comptime_span
         imports.push(import)
         parser_skip_semicolons(state)
@@ -1782,7 +1751,7 @@ parser_function_body_missing: fn(state: &JetParserState) -> Bool Never! {
     if kind == TOKEN_HASH {
         return !(parser_kind_at(state, 1) == TOKEN_IDENT && parser_value_at(state, 1) == "Todo")
     }
-    kind == TOKEN_KW_FN || kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_USE || kind == TOKEN_KW_EXTERN || kind == TOKEN_EOF || kind == TOKEN_RBRACE || kind == TOKEN_SEMI
+    kind == TOKEN_KW_FN || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_STRUCT || kind == TOKEN_KW_ENUM || kind == TOKEN_KW_MODULE || kind == TOKEN_KW_IMPL || kind == TOKEN_KW_TRAIT || kind == TOKEN_KW_USE || kind == TOKEN_KW_EXTERN || kind == TOKEN_EOF || kind == TOKEN_RBRACE || kind == TOKEN_SEMI
 }
 
 // A unit or unit-fallible (`E!`) result carries no value, so the body's final
@@ -2286,9 +2255,9 @@ parser_parse_enum: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
     value
 }
 
-// A method inside a type body: `fn`, `pub fn`, `#run fn`, or `pub #run fn`.
+// A method inside a type body: `fn` or `#run fn`.
 parser_method_starts_here: fn(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(state) == TOKEN_KW_FN || parser_prep_fn_ahead(state) || (parser_current_kind(state) == TOKEN_KW_PUB && (parser_kind_at(state, 1) == TOKEN_KW_FN || parser_prep_verb_ahead(state, 1, TOKEN_KW_FN)))
+    parser_current_kind(state) == TOKEN_KW_FN || parser_prep_fn_ahead(state)
 }
 
 parser_parse_type_method: fn(state: &JetParserState) -> Func {
@@ -2473,7 +2442,7 @@ parser_parse_trait_impl_block: fn(state: &JetParserState, above: [Marker]) -> Tr
             constants.push(parser_parse_impl_constant(state))
             next
         }
-        if token.kind != TOKEN_KW_FN && token.kind != TOKEN_KW_PUB && token.kind != TOKEN_HASH && !parser_prep_fn_ahead(state) {
+        if token.kind != TOKEN_KW_FN && token.kind != TOKEN_HASH && !parser_prep_fn_ahead(state) {
             found: parser_describe_token(state, token)
             parser_add_error(state, token.span, "expected a method `name: fn(…)`, found {found}", "an impl body holds methods, associated types and trait constants", "write a method as `name: fn(…)`, or a trait constant as `name: value`")
             break
@@ -3221,7 +3190,7 @@ parser_parse_impl: fn(state: &JetParserState, modifiers: ParsedItemModifiers) ->
             constants.push(parser_parse_impl_constant(state))
             next
         }
-        if token.kind != TOKEN_KW_FN && token.kind != TOKEN_KW_PUB && token.kind != TOKEN_HASH && !parser_prep_fn_ahead(state) {
+        if token.kind != TOKEN_KW_FN && token.kind != TOKEN_HASH && !parser_prep_fn_ahead(state) {
             found: parser_describe_token(state, token)
             parser_add_error(state, token.span, "expected a method `name: fn(…)`, found {found}", "an impl body holds methods, associated types and trait constants", "write a method as `name: fn(…)`, or a trait constant as `name: value`")
             break

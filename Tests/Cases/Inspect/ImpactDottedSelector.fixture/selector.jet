@@ -1,0 +1,20 @@
+use process: core.process
+
+square: fn(n: Int) -> Int { n * n }
+
+Box: struct {
+    side: Int,
+
+    area: fn(self) -> Int { square(self.side) }
+}
+
+launch: fn() -[Exec]> Int {
+    process.cmd(["true"]).run() ?? return 1
+    0
+}
+
+run: fn() -[Exec, IO]> {
+    print(square(3))
+    print(Box{side: 2}.area())
+    print(launch())
+}

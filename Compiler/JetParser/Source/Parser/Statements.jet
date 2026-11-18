@@ -74,7 +74,6 @@ use {
         TOKEN_KW_LOOP,
         TOKEN_KW_MOVE,
         TOKEN_KW_MUTATE,
-        TOKEN_KW_PUB,
         TOKEN_KW_YIELD,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -1957,7 +1956,7 @@ parser_report_not_a_statement: fn(state: &JetParserState, start: Token) {
 // surface before a name is an expression: a spawn.
 parser_word_follows: fn(state: &JetParserState) -> Bool Never! {
     next: parser_kind_at(state, 1)
-    if !(next == TOKEN_IDENT || next == TOKEN_KW_PUB || next == TOKEN_KW_MUTATE || parser_is_item_keyword(next)) {
+    if !(next == TOKEN_IDENT || next == TOKEN_KW_MUTATE || parser_is_item_keyword(next)) {
         return false
     }
     if next != TOKEN_IDENT -> return true

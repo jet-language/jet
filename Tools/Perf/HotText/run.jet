@@ -309,18 +309,18 @@ image_missing_over: fn(missing: Int, rows: Int) -> Bool Never! {
 }
 
 // What the sources declare, under the names the build gives functions
-// (JetIR ir_symbol_name: the module and the name made one C identifier). A
-// source file's module is its name, so `jet_cli_run: fn` in Host.jet, or a
-// method of that name there, is `Host_jet_cli_run`. A Core file's module is
-// `core.` and its directories' snake_case names, then the file's own unless
-// it names its directory: `decode_scalars: fn` in
+// (JetIR ir_symbol_name: the module and the name joined by `.`). A source
+// file's module is its name, so `jet_cli_run: fn` in Host.jet, or a method
+// of that name there, is `Host.jet_cli_run`. A Core file's module is `core.`
+// and its directories' snake_case names, then the file's own unless it names
+// its directory: `decode_scalars: fn` in
 // Core/Text/Runtime/KernelTextWidth.jet is
-// `core_text_runtime_kernel_text_width_decode_scalars`, and `read: fn` in
-// Core/Files/Files.jet is `core_files_read`. A private Core part's module is
+// `core.text.runtime.kernel_text_width.decode_scalars`, and `read: fn` in
+// Core/Files/Files.jet is `core.files.read`. A private Core part's module is
 // its name in PARTS: `start: fn` in Core/Crypto/MD.jet is
-// `__core_crypto_md_start`. `modules` holds every file's modules, `typed`
+// `__core_crypto_md.start`. `modules` holds every file's modules, `typed`
 // those that declare a struct or an enum, whose order the compiler derives
-// (`<module>_compare`).
+// (`<module>.compare`).
 HotTextDeclared: struct {
     functions: Set<String>,
     modules: Set<String>,
@@ -360,8 +360,8 @@ hot_text_modules: fn(dir: String, relative: String, parts: [String:String]) -> [
     if dir != "Core" -> return [String]{stem}
     if parts.get("Core/{relative}") == .Val(part) -> return [String]{part}
     segments: relative.split("/").to_list()
-    path: ["core"].concat(segments[0..<segments.len() - 1].map(fn(segment) { hot_text_snake(segment) })).join("_")
-    [String]{path, "{path}_{hot_text_snake(stem)}"}
+    path: ["core"].concat(segments[0..<segments.len() - 1].map(fn(segment) { hot_text_snake(segment) })).join(".")
+    [String]{path, "{path}.{hot_text_snake(stem)}"}
 }
 
 // The snake_case name of a PascalCase path segment, as the compiler names
@@ -393,7 +393,7 @@ hot_text_declare: fn(declared: &HotTextDeclared, modules: [String], text: String
     loop line in text.lines() {
         if FN_DECL.match(line) == .Val(found) {
             name: found.group(1) ?? next
-            loop prefix in modules -> declared.functions.add("{prefix}_{name}")
+            loop prefix in modules -> declared.functions.add("{prefix}.{name}")
         } else if TYPE_DECL.is_match(line) {
             loop prefix in modules -> declared.typed.add(prefix.copy())
         }
@@ -403,19 +403,19 @@ hot_text_declare: fn(declared: &HotTextDeclared, modules: [String], text: String
 // Whether list row `row` names a function `declared` holds. A row may name
 // a copy of one (COPY_SUFFIX); `jet_ir_` rows are helpers the build makes
 // (drops, clones, stop polls), with no source to check. The build also makes
-// a module's failure conversions (`<module>_errconv_<Source>_to_<Target>`)
-// and a typed module's computed-field getters (`<module>___computed_<field>`).
+// a module's failure conversions (`<module>.errconv_<Source>_to_<Target>`)
+// and a typed module's computed-field getters (`<module>.__computed_<field>`).
 hot_text_row_declared: fn(declared: HotTextDeclared, row: String) -> Bool Never! {
     name := row.copy()
     loop COPY_SUFFIX.is_match(name) -> name = COPY_SUFFIX.replace_first(name, "")
     if name.starts_with("jet_ir_") || declared.functions.has(name) -> return true
-    if declared.modules.has(name.split("_errconv_").to_list()[0]) && name.contains("_errconv_") {
+    if declared.modules.has(name.split(".errconv_").to_list()[0]) && name.contains(".errconv_") {
         return true
     }
-    if declared.typed.has(name.split("___computed_").to_list()[0]) && name.contains("___computed_") {
+    if declared.typed.has(name.split(".__computed_").to_list()[0]) && name.contains(".__computed_") {
         return true
     }
-    name.ends_with("_compare") && declared.typed.has(name.remove_suffix("_compare"))
+    name.ends_with(".compare") && declared.typed.has(name.remove_suffix(".compare"))
 }
 
 #Test("a row names a declared function, a copy of one, or a build-made helper") {
@@ -426,27 +426,28 @@ hot_text_row_declared: fn(declared: HotTextDeclared, row: String) -> Bool Never!
     hot_text_declare(declared, hot_text_modules("Core", "Files/Files.jet", parts), "is_dir: fn(path: String) -> Bool {{ false }}\n")
     hot_text_declare(declared, hot_text_modules("Core", "Text/Runtime/KernelTextWidth.jet", parts), "decode_scalars: fn(text: String) -> [Int] {{ [] }}\n")
     hot_text_declare(declared, hot_text_modules("Core", "Crypto/MD.jet", parts), "start: fn() -> Int {{ 0 }}\n")
-    assert(hot_text_row_declared(declared, "Host_jet_cli_run"))
-    assert(hot_text_row_declared(declared, "Host_open"))
-    assert(hot_text_row_declared(declared, "Host_put_text"))
-    assert(hot_text_row_declared(declared, "Host_jet_cli_run.own2"))
-    assert(hot_text_row_declared(declared, "Host_jet_cli_run__lambda_c6ecc473a20ea58a"))
-    assert(hot_text_row_declared(declared, "Host_jet_cli_run__4c09dc3a67987b87"))
-    assert(hot_text_row_declared(declared, "Host_compare"))
-    assert(hot_text_row_declared(declared, "Host___computed_path"))
-    assert(hot_text_row_declared(declared, "Plain_errconv_IOError_to_LockError"))
-    assert(hot_text_row_declared(declared, "core_files_is_dir"))
-    assert(hot_text_row_declared(declared, "core_text_runtime_kernel_text_width_decode_scalars"))
-    assert(hot_text_row_declared(declared, "__core_crypto_md_start"))
+    assert(hot_text_row_declared(declared, "Host.jet_cli_run"))
+    assert(hot_text_row_declared(declared, "Host.open"))
+    assert(hot_text_row_declared(declared, "Host.put_text"))
+    assert(hot_text_row_declared(declared, "Host.jet_cli_run.own2"))
+    assert(hot_text_row_declared(declared, "Host.jet_cli_run__lambda_c6ecc473a20ea58a"))
+    assert(hot_text_row_declared(declared, "Host.jet_cli_run__4c09dc3a67987b87"))
+    assert(hot_text_row_declared(declared, "Host.compare"))
+    assert(hot_text_row_declared(declared, "Host.__computed_path"))
+    assert(hot_text_row_declared(declared, "Plain.errconv_IOError_to_LockError"))
+    assert(hot_text_row_declared(declared, "core.files.is_dir"))
+    assert(hot_text_row_declared(declared, "core.text.runtime.kernel_text_width.decode_scalars"))
+    assert(hot_text_row_declared(declared, "__core_crypto_md.start"))
     assert(hot_text_row_declared(declared, "jet_ir_drop_7906809aed821885"))
-    assert(!hot_text_row_declared(declared, "Host_jet_cli_parse_root"))
-    assert(!hot_text_row_declared(declared, "Plain___computed_path"))
-    assert(!hot_text_row_declared(declared, "Gone_errconv_IOError_to_LockError"))
-    assert(!hot_text_row_declared(declared, "core_files_compare"))
-    assert(!hot_text_row_declared(declared, "core_files_stat"))
-    assert(!hot_text_row_declared(declared, "core_text_decode_scalars"))
-    assert(!hot_text_row_declared(declared, "core_crypto_md_start"))
-    assert(!hot_text_row_declared(declared, "__core_crypto_md_hash_start"))
+    assert(!hot_text_row_declared(declared, "Host.jet_cli_parse_root"))
+    assert(!hot_text_row_declared(declared, "Host_jet_cli_run"))
+    assert(!hot_text_row_declared(declared, "Plain.__computed_path"))
+    assert(!hot_text_row_declared(declared, "Gone.errconv_IOError_to_LockError"))
+    assert(!hot_text_row_declared(declared, "core.files.compare"))
+    assert(!hot_text_row_declared(declared, "core.files.stat"))
+    assert(!hot_text_row_declared(declared, "core.text.decode_scalars"))
+    assert(!hot_text_row_declared(declared, "core.crypto.md.start"))
+    assert(!hot_text_row_declared(declared, "__core_crypto_md.hash_start"))
     assert_eq(hot_text_snake("HTTPServer"), "http_server")
     assert_eq(hot_text_snake("SSL"), "ssl")
 }
