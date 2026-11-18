@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112138,
+    "rev": 112144,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47296,11 +47296,11 @@
         {
           "n": 3,
           "text": "D-LAYOUT-SHOW1=B: T.$layout.size, alignment, stride and field offsets return this target's numbers for every default-layout type (struct, enum, optional, function value), with guarantee none, and reflection and derives read the same record as inspect and hover; compile-time code may branch on them. Proof: the Examples/Metaprogramming/Reflection/LayoutFacts golden prints a default-layout struct's and enum's size and offsets on o0, o1 and o2, matching jet inspect shapes for the same target, and a case shows a comptime branch on Event.$layout.size.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T03:19:29.914Z"
+          "evidence": "p292 batch compiler (dev 18de3a687e; IfHole-6-1-4633-c3-layout-values landed 18de3a687e): golden Metaprogramming/Reflection/LayoutFacts n=3 PASS (o0, o1, o2), cases Comptime/layout_size_selects_a_comptime_branch PASS, Inspect/shapes_match_hand_derived_layouts PASS, CoreLib/user_derive_layout_fact_matches_reflection_projection PASS, golden LowLevel/LayoutOptimized PASS; no new suite failure from it.",
+          "at": "2026-11-18T04:12:19.358Z"
         },
         {
           "n": 4,
@@ -47352,7 +47352,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:54.070Z",
-      "updated": "2026-11-18T03:19:31.650Z",
+      "updated": "2026-11-18T04:12:19.358Z",
       "updatedBy": "Main"
     },
     {
@@ -47876,20 +47876,20 @@
         {
           "n": 1,
           "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/Spec/syntax-decisions.md entry and regenerated editor grammars in the same change (bare-path re-exports and the removed pub keyword). Proof: after `jet self devtools grammars`, `git status --short Tools/Editors` is empty, and `jet test Tests/Guards --filter grammar` and `jet test Tests/Guards --filter syntax_reconciliation` pass.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:55:32.509Z"
+          "evidence": "p292 batch compiler (dev 18de3a687e): `jet self devtools grammars` regenerates and git status --short Tools/Editors is empty; p291 (dev fddd5c3723, drop-pub d00ad39e70) ran jet test Tests/Guards --filter grammar PASS and --filter syntax_reconciliation PASS.",
+          "at": "2026-11-18T04:12:24.610Z"
         },
         {
           "n": 5,
           "text": "A bare-path re-export declaration `clamp: core.math.clamp` re-exports a declaration with its canonical identity: home, privacy, generics, defaults, named arguments, effects, borrow and move, constructors, patterns, methods and traits (D-VIS-REEXPORT1=A, D-DECL-COLON1=A). `use` stays local. Today re-exports are still `pub use` (Examples/Modules/ModuleReexport). Proof: `jet test Compiler --profile golden --filter Modules/ModuleReexport` passes on o0, o1 and o2 with no `pub use`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T02:44:19.697Z"
+          "evidence": "p292 batch compiler (dev 18de3a687e; reexport landed 903da7aa3a, drop-pub d00ad39e70, member row e647b4fa9e): golden Modules/ModuleReexport PASS on o0, o1 and o2, and git grep finds no 'pub use' in Examples/Modules.",
+          "at": "2026-11-18T04:12:22.595Z"
         },
         {
           "n": 6,
@@ -47933,11 +47933,11 @@
         {
           "n": 9,
           "text": "`pub` is removed: every `pub use` and `pub` declaration (20 files on dev 72a8142651, including Compiler/Prelude/Core/prelude.jet, Core/Encoding/Hex.jet and Core/Testing/Testing.jet) migrates to a bare-path re-export or a plain declaration in one cutover, K_PUB leaves the lexer, and `pub` gets the generic parse error with no teaching. Proof: `git grep -l -E '^\\s*pub ' -- '*.jet'` lists only foreign-language fixtures, and `git grep -n K_PUB -- Compiler` prints nothing.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:55:34.777Z"
+          "evidence": "dev 18de3a687e (drop-pub landed d00ad39e70): git grep -l -E '^\\s*pub ' -- '*.jet' lists only Jetpack/Integrations/Source/Foreign/RustBridge/WrapperEmit.jet, whose hits are Rust text it emits (pub extern \"C\" fn); git grep -n K_PUB -- Compiler prints nothing.",
+          "at": "2026-11-18T04:12:23.562Z"
         },
         {
           "n": 10,
@@ -47951,11 +47951,11 @@
         {
           "n": 11,
           "text": "A priv struct is private like a priv function: naming, building or using it as a parameter type outside its module gets E0605, as a priv fn beside it already does. Today the struct is usable from outside with no diagnostic (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probe n12b_priv_type_vs_fn.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a UI snapshot of each refused use.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T05:19:57.098Z"
+          "evidence": "p292 batch compiler (dev 18de3a687e; Speed-3-3-4723-priv-type landed d4e7198ff3): ui vis_priv_type_module PASS.",
+          "at": "2026-11-18T04:12:20.593Z"
         },
         {
           "n": 12,
@@ -47969,11 +47969,11 @@
         {
           "n": 13,
           "text": "Using a priv struct from a file module outside that module gets E0605 (private), not E0119 'There's no type called geo.Secret' (p205, O0/O1/O2 alike; D-PRIM-ANY1 round 4), probe o8d in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes. Pairs with c11 (inline modules). Proof: a UI snapshot.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T05:37:45.164Z"
+          "evidence": "p292 batch compiler (dev 18de3a687e; Speed-3-3-4723-priv-type landed d4e7198ff3): ui PrivateTypeFileModule PASS.",
+          "at": "2026-11-18T04:12:21.552Z"
         }
       ],
       "refs": [],
@@ -47983,7 +47983,7 @@
       "parentId": "c0jmyt4x",
       "needsAcceptance": false,
       "created": "2026-10-07T11:23:08.090Z",
-      "updated": "2026-11-18T01:55:30.480Z",
+      "updated": "2026-11-18T04:12:24.610Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -90742,12 +90742,16 @@
         },
         {
           "n": 33,
-          "text": "jet perf's short-program source attribution is repeatable: the case perf_run_short_program_has_repeatable_source_attribution passes (it fails on gate-p291, dev fddd5c3723, before the c12 change). Proof: `jet test Compiler --profile cases --filter perf_run_short_program_has_repeatable_source_attribution`.",
+          "text": "jet perf's short-program source attribution is repeatable: the case perf_run_short_program_has_repeatable_source_attribution passes (it fails on gate-p291, dev fddd5c3723, before the c12 change).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-18T04:06:57.342Z"
+          "at": "2026-11-18T04:06:57.342Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "perf_run_short_program_has_repeatable_source_attribution"
+          }
         }
       ],
       "refs": [],
@@ -184510,6 +184514,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T04:12:24.610Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06m6abh",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-18T04:12:23.562Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06m6abh",
+      "note": "#9"
+    },
+    {
+      "at": "2026-11-18T04:12:22.595Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06m6abh",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-18T04:12:21.552Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06m6abh",
+      "note": "#13"
+    },
+    {
+      "at": "2026-11-18T04:12:20.593Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06m6abh",
+      "note": "#11"
+    },
+    {
+      "at": "2026-11-18T04:12:19.359Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08idy63",
+      "note": "#3"
+    },
     {
       "at": "2026-11-18T04:06:57.342Z",
       "by": "Main",
