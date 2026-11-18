@@ -10,7 +10,8 @@ exit: 0
 stdout: = "7\n"
 when arch x86_64
 when tool objdump
-step: objdump -d --no-show-raw-insn --disassemble=main.run .jet/build/main
+# A release build inlines `run` into its generated entry, main.run__entry.
+step: objdump -d --no-show-raw-insn --disassemble=main.run__entry .jet/build/main
 exit: 0
 stdout: ~ "lock incq" # card #6477: a task spawn route is in the runtime's thread receipt
 stdout: !~ "\tincq" # card #6477: no count update in a multi-threaded program is unlocked

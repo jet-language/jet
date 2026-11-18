@@ -11,7 +11,8 @@ exit: 0
 stdout: = "6\n"
 when arch x86_64
 when tool objdump
-step: objdump -d --no-show-raw-insn --disassemble=main.run .jet/build/main
+# A release build inlines `run` into its generated entry, main.run__entry.
+step: objdump -d --no-show-raw-insn --disassemble=main.run__entry .jet/build/main
 exit: 0
 stdout: ~ "incq" # card #6477: the entry body retains its strings and lists inline
 stdout: !~ "lock " # card #6477: a vetted libc leaf cannot start a second thread
