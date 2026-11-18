@@ -68,6 +68,53 @@ JetLiveEvent: struct {
     terminal: String,
 }
 
+// One record of a core.game run's relay (JetRuntime ObserveLive.jet
+// observe_game_record), as the runtime wrote it: `kind` is "frame" for an
+// issued frame, whose `ns` is its thread CPU, `ordinal` its count of
+// callbacks run and `scene` its scene; "callback" for one of its callbacks,
+// whose `ns` is its wall time, `code` its code address, `ordinal` its place
+// in registration order and `function` the Jet function the image's
+// location table names for that code (None when the table names none).
+// `start_ns` is on the monotonic clock. Sequences rise from 1; the relay
+// retires its oldest records past JET_LIVE_GAME_RECORDS.
+JetLiveGameRecord: struct {
+    sequence: Int,
+    kind: String,
+    frame_index: Int,
+    start_ns: Int,
+    ns: Int,
+    code: Int,
+    ordinal: Int,
+    scene: String,
+    function: JetLiveGameFunction?,
+}
+
+// A callback's function as the runtime's location table names it (JetRuntime
+// Fault.jet trace_address_text): its name, the file the table names, and the
+// line of its code's first row.
+JetLiveGameFunction: struct {
+    name: String,
+    file: String,
+    line: Int,
+}
+
+// ObserveLive.jet OBSERVE_GAME_RECORDS.
+JET_LIVE_GAME_RECORDS: 512
+
+// A callback's function line, `name\tfile\tline\n`. Empty, or cut short by
+// the runtime's 160-scalar text bound (no closing newline), it names none.
+jet_live_game_function: fn(raw: &&[U8]) -> JetLiveGameFunction? JetLiveSnapshotError! {
+    if raw.len() == 0 || raw[raw.len() - 1] != (U8{10}) -> return Ok(None)
+    whole: String.from_bytes(raw.move()) ?? return Err(jet_live_error("live game callback function is not valid UTF-8"))
+    fields: whole.slice(0..<whole.len() - 1).split("\t").to_list()
+    if fields.len() != 3 || fields[0] == "" || fields[1] == "" {
+        return Err(jet_live_error("live game callback function line is malformed"))
+    }
+    line: Int.parse(fields[2]) ?? return Err(jet_live_error("live game callback function line is malformed"))
+    if line < 0 -> return Err(jet_live_error("live game callback function line is malformed"))
+    Ok(Val(JetLiveGameFunction{name: fields[0], file: fields[1], line: line}))
+}
+
 // start_id and runtime.cpu_ns come from the process (jet_live_bind);
 // boot_ns, start_ticks and clock_hz are the writer's facts for that binding.
 // `events` is a reader's rendering of event_records; the codec leaves it None.
@@ -88,6 +135,7 @@ JetLiveSnapshot: struct {
     resources: [String:Int],
     runtime: JetLiveRuntime,
     event_records: [JetLiveEvent],
+    game_records: [JetLiveGameRecord],
     events: String?,
     boot_ns: U64,
     start_ticks: U64,
@@ -255,6 +303,7 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     tasks := [JetLiveTask]{}
     channels := [JetLiveChannel]{}
     events := [JetLiveEvent]{}
+    games := [JetLiveGameRecord]{}
     effects := [String:Int]{}
     loop key in ([String]{"compute", "waiting", "channel", "time", "io"}) -> effects[key] = 0
     running := 0
@@ -355,6 +404,37 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                 terminal: jet_live_read_text(cursor, "runtime event observation `terminal`")
                 events.push(JetLiveEvent{sequence: sequence, source: source, event_id: event_id, owner_id: owner_id, subscription_id: subscription_id, dispatch_id: dispatch_id, lifecycle: lifecycle, queued: queued, blocked: blocked, running: event_running, capacity: capacity, overflow: overflow, priority: priority, failure: failure, terminal: terminal})
             }
+        } else if section == 5 {
+            if count > JET_LIVE_GAME_RECORDS {
+                return Err(jet_live_error("live runtime snapshot has too many game records"))
+            }
+            loop _ in 0..<count {
+                sequence: jet_live_unsigned(cursor)
+                kind_word: jet_live_word(cursor)
+                frame_index: jet_live_unsigned(cursor)
+                start_ns: jet_live_unsigned(cursor)
+                ns: jet_live_unsigned(cursor)
+                code: jet_live_unsigned(cursor)
+                ordinal: jet_live_unsigned(cursor)
+                text: jet_live_raw(cursor)
+                previous: if games.len() == 0 -> 0 else -> games[games.len() - 1].sequence
+                if sequence <= previous {
+                    return Err(jet_live_error("live game records are out of sequence"))
+                }
+                if kind_word == (U64{0}) {
+                    scene: jet_live_shown(text ?? [U8]{}, "game frame `scene`")
+                    if scene == "" || code != 0 {
+                        return Err(jet_live_error("live game frame needs a scene and no code address"))
+                    }
+                    games.push(JetLiveGameRecord{sequence: sequence, kind: "frame", frame_index: frame_index, start_ns: start_ns, ns: ns, code: 0, ordinal: ordinal, scene: scene, function: None})
+                } else if kind_word == (U64{1}) {
+                    if code == 0 {
+                        return Err(jet_live_error("live game callback needs a code address"))
+                    }
+                    function: jet_live_game_function(text ?? [U8]{})
+                    games.push(JetLiveGameRecord{sequence: sequence, kind: "callback", frame_index: frame_index, start_ns: start_ns, ns: ns, code: code, ordinal: ordinal, scene: "", function: function})
+                } else { return Err(jet_live_error("live game record has an unknown kind")) }
+            }
         } else { return Err(jet_live_error("live runtime snapshot has an unknown section")) }
     }
     if cursor.at != bytes.len() {
@@ -367,7 +447,7 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     effects["compute"] = tasks.len() - (effects.get("waiting") ?? 0)
     resources["running"] = running
     resources["canceled"] = canceled
-    Ok(JetLiveSnapshot{protocol: "jet.live.v2", session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: "", captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: JetLiveRuntime{elapsed_ns: elapsed_ns, cpu_ns: None, exit: exit}, event_records: events, events: None, boot_ns: boot_ns, start_ticks: start_ticks, clock_hz: clock_hz})
+    Ok(JetLiveSnapshot{protocol: "jet.live.v2", session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: "", captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: JetLiveRuntime{elapsed_ns: elapsed_ns, cpu_ns: None, exit: exit}, event_records: events, game_records: games, events: None, boot_ns: boot_ns, start_ticks: start_ticks, clock_hz: clock_hz})
 }
 
 // A /proc/<pid>/stat tick count: decimal digits that fit U64.

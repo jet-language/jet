@@ -1,0 +1,19 @@
+# `jet perf run` puts each file and network transfer the program makes on
+# the timeline with no instrumentation in it: the runtime's I/O leaves
+# record every read and write with the bytes it moved, what it moved them
+# to or from (a file by the path the program named, a socket by its peer's
+# address) and the line that made it.
+requires: os-name:linux
+fixture: IOOnTimelineWithoutInstrumentation.fixture
+env: NO_COLOR=1
+step: jet perf run main.jet --out {work}/io.jettrace
+exit: 0
+stdout: = "11 4\n"
+step: jet perf view {work}/io.jettrace
+exit: 0
+stdout: ~ "io count=4 read_bytes=15 write_bytes=15 errors=0 · " # the summary counts the transfers and sums their bytes
+stdout: ~ "] task 1 wrote 11 bytes to file notes.txt at main.jet:11" # files.write, by its path and line
+stdout: ~ "] task 1 read 11 bytes from file notes.txt at main.jet:12" # files.read reads the file back
+stdout: ~ "] task 1 wrote 4 bytes to peer 127.0.0.1:" # the client's send, by the listener's address
+stdout: ~ "] task 1 read 4 bytes from peer 127.0.0.1:" # the server's receive, by the client's address
+stdout: before "wrote 11 bytes to file notes.txt" "read 11 bytes from file notes.txt" # in the order they ran

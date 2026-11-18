@@ -205,13 +205,15 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
         jet_cli_perf_native_summary(trace),
         jet_cli_perf_span_summary(trace),
         jet_cli_perf_log_span_summary(trace),
-        jet_cli_perf_join_summary(trace),
+        jet_cli_perf_wait_summary(trace),
     }
     loop summary in summaries {
         if summary == .Val(line) -> out = "{out}{line}\n"
     }
     loop line in jet_cli_perf_counter_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_memory_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_off_cpu_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_game_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_receipt_lines(trace) -> out = "{out}{line}\n"
     if frames == "all" {
         out = "{out}generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)\n"
@@ -422,7 +424,7 @@ jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
 }
 
 // `counter <name> captured period=<events>` or `counter <name> unavailable
-// errno=<errno>` for each counter of a memory-method profile.
+// errno=<errno>` for each counter of a profile the memory lens took.
 jet_cli_perf_counter_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     profile: jet_cli_perf_profile(trace) ?? return [String]{}
     at: jet_cli_perf_key(profile, "counters") ?? return [String]{}
@@ -437,7 +439,7 @@ jet_cli_perf_counter_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines
 }
 
-// One source line of a memory-method profile: its function, and its
+// One source line of a profile the memory lens took: its function, and its
 // sampled count of each of TRACE_COUNTERS (None for a counter the profile
 // did not capture).
 JetCLIPerfMemoryLine: struct {
@@ -447,15 +449,18 @@ JetCLIPerfMemoryLine: struct {
     events: [Int?],
 }
 
-// The memory table of a memory-method profile: each function and source
-// line that counted events, where its loads missed. `l1d_misses` are loads
-// that left the L1D cache, `llc_misses` the ones the last-level cache missed
-// too, served from RAM, and `page_faults` the points that fell to the page
-// cache or disk. The lines with the most RAM loads come first, then the most
-// L1D misses; at most 16 lines.
+// The memory table of a profile the memory lens took, which lists its
+// counters: each function and source line that counted events, where its
+// loads missed. `l1d_misses` are loads that left the L1D cache,
+// `llc_misses` the ones the last-level cache missed too, served from RAM,
+// and `page_faults` the points that fell to the page cache or disk. The
+// lines with the most RAM loads come first, then the most L1D misses; at
+// most 16 lines.
 jet_cli_perf_memory_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     profile: jet_cli_perf_profile(trace) ?? return [String]{}
-    if jet_cli_perf_field_text(profile, "method") != .Val("memory") -> return [String]{}
+    counters_at: jet_cli_perf_key(profile, "counters") ?? return [String]{}
+    counters: jettrace_array(profile[counters_at].value, "content.profile.counters") ?? return [String]{}
+    if counters.len() == 0 -> return [String]{}
     rows: jet_cli_perf_profile_rows(trace) ?? return [String]{}
     found := [JetCLIPerfMemoryLine]{}
     loop row in rows {
@@ -707,14 +712,23 @@ jet_cli_perf_lock_summary: fn(trace: CanonicalJSON) -> String? Never! {
     Val("locks count={items.len()} waiters={waiters} · {symbol ?? "?"}")
 }
 
+// The file and network transfers (`io` rows): how many, the bytes read and
+// written, how many the OS refused, and the first's symbol.
 jet_cli_perf_io_summary: fn(trace: CanonicalJSON) -> String? Never! {
     items: jet_cli_perf_rows(trace, "io") ?? return None
     if items.len() == 0 -> return None
-    symbol := String?{None}
+    read := 0
+    written := 0
+    failed := 0
     loop item in items {
-        if symbol == None -> symbol = jet_cli_perf_member_symbol(item)
+        bytes: jet_cli_perf_member_number(item, "bytes") ?? 0
+        if {
+            (jet_cli_perf_member_text(item, "operation") ?? "") == "write" -> written += bytes
+            else -> read += bytes
+        }
+        if jet_cli_perf_member_integer(item, "error") != None -> failed += 1
     }
-    Val("io count={items.len()} · {symbol ?? "?"}")
+    Val("io count={items.len()} read_bytes={read} write_bytes={written} errors={failed} · {jet_cli_perf_member_symbol(items[0]) ?? "?"}")
 }
 
 jet_cli_perf_native_summary: fn(trace: CanonicalJSON) -> String? Never! {
@@ -796,35 +810,147 @@ jet_cli_perf_log_span_summary: fn(trace: CanonicalJSON) -> String? Never! {
     Val("log spans count={count} window={start}..{end}ns · {symbol}")
 }
 
-// The joins' waits (`task_join` rows): how many, and the first: the task
-// that waited, how long, and the task it awaited.
-jet_cli_perf_join_summary: fn(trace: CanonicalJSON) -> String? Never! {
+// The tasks' waits (`task_wait` rows): how many, and the longest
+// (jet_cli_perf_wait_text).
+jet_cli_perf_wait_summary: fn(trace: CanonicalJSON) -> String? Never! {
     items: jet_cli_perf_rows(trace, "spans") ?? return None
     count := 0
-    first := ""
+    longest := -1
+    text := ""
     loop item in items {
-        if (jet_cli_perf_member_text(item, "kind") ?? "") != "task_join" -> next
-        if count == 0 {
-            start: jet_cli_perf_member_number(item, "start_ns") ?? return None
-            end: jet_cli_perf_member_number(item, "end_ns") ?? return None
-            first = "task {jet_cli_perf_member_integer(item, "task_id") ?? "?"} waited {end - start}ns for {jet_cli_perf_join_awaited(item)}"
-        }
+        if (jet_cli_perf_member_text(item, "kind") ?? "") != "task_wait" -> next
         count += 1
+        start: jet_cli_perf_member_number(item, "start_ns") ?? next
+        end: jet_cli_perf_member_number(item, "end_ns") ?? next
+        if end - start <= longest -> next
+        longest = end - start
+        text = jet_cli_perf_wait_text(item)
     }
     if count == 0 -> return None
-    Val("joins count={count} · {first}")
+    if longest < 0 -> return Val("waits count={count}")
+    Val("waits count={count} · longest {longest}ns: {text}")
 }
 
-// The task a join row `item` awaits and, when the trace knows it, the line
-// that spawned it: `task 2 spawned at main.jet:4`.
-jet_cli_perf_join_awaited: fn(item: CanonicalJSON) -> String Never! {
-    awaited: "task {jet_cli_perf_member_integer(item, "awaited_task_id") ?? "?"}"
-    line: jet_cli_perf_member_integer(item, "spawn_line") ?? return awaited
-    fields: jettrace_object_view(item, "jettrace row") ?? return awaited
-    at: jet_cli_perf_key(fields, "symbol") ?? return awaited
-    symbol: jettrace_object_view(fields[at].value, "symbol") ?? return awaited
-    path: jet_cli_perf_field_text(symbol, "path") ?? return awaited
-    "{awaited} spawned at {path}:{line}"
+// A wait row `item` in words: its task, its name and line, what it waited
+// for and what ended it: `task 1 in task join at main.jet:5 for task 2
+// spawned at main.jet:4, woken by task 2 at main.jet:11`. A channel's wait
+// waits for `channel 3`; a wake outside every task is `the runtime`'s, and
+// a wait no wake ended ended at `its timeout`.
+jet_cli_perf_wait_text: fn(item: CanonicalJSON) -> String Never! {
+    path: jet_cli_perf_member_symbol_text(item, "path") ?? "?"
+    text := "task {jet_cli_perf_member_integer(item, "task_id") ?? "?"} in {jet_cli_perf_member_symbol_text(item, "name") ?? "wait"}"
+    stack: jet_cli_perf_row_stack(item, "wait_stack")
+    if stack.len() > 0 -> text = "{text} at {path}:{stack[0].line}"
+    if jet_cli_perf_member_integer(item, "awaited_task_id") == .Val(awaited) {
+        text = "{text} for task {awaited}"
+        if jet_cli_perf_member_integer(item, "spawn_line") == .Val(line) {
+            text = "{text} spawned at {path}:{line}"
+        }
+    }
+    if jet_cli_perf_member_integer(item, "channel_id") == .Val(channel) {
+        text = "{text} for channel {channel}"
+    }
+    waker: jet_cli_perf_member_text(item, "waker") ?? ""
+    if waker == "runtime" -> return "{text}, woken by the runtime"
+    if waker != "task" -> return "{text}, woken by its timeout"
+    text = "{text}, woken by task {jet_cli_perf_member_integer(item, "waker_task_id") ?? "?"}"
+    if jet_cli_perf_member_integer(item, "waker_line") == .Val(line) {
+        text = "{text} at {path}:{line}"
+    }
+    text
+}
+
+// An I/O row `item` in words: its task, what it moved to or from what, and
+// its line: `task 1 wrote 5 bytes to file notes.txt at main.jet:6`, `task 2
+// read 4 bytes from peer 127.0.0.1:4000 at main.jet:14`; a refused one
+// `task 1 read from file gone.txt at main.jet:9 failed: errno 2`.
+jet_cli_perf_io_text: fn(item: CanonicalJSON) -> String Never! {
+    path: jet_cli_perf_member_symbol_text(item, "path") ?? "?"
+    who: if jet_cli_perf_member_integer(item, "task_id") == .Val(task) -> "task {task} " else -> ""
+    writing: (jet_cli_perf_member_text(item, "operation") ?? "") == "write"
+    place: if (jet_cli_perf_member_text(item, "kind") ?? "") == "network" -> "peer" else -> "file"
+    target: "{place} {jet_cli_perf_member_text(item, "target") ?? "?"}"
+    stack: jet_cli_perf_row_stack(item, "stack")
+    at: if stack.len() > 0 -> " at {path}:{stack[0].line}" else -> ""
+    if jet_cli_perf_member_integer(item, "error") == .Val(error) {
+        return if writing -> "{who}wrote to {target}{at} failed: errno {error}" else -> "{who}read from {target}{at} failed: errno {error}"
+    }
+    bytes: jet_cli_perf_member_integer(item, "bytes") ?? "?"
+    if writing -> "{who}wrote {bytes} bytes to {target}{at}" else -> "{who}read {bytes} bytes from {target}{at}"
+}
+
+// A frame of a row's stack (`wait_stack`, an I/O row's `stack`): its
+// function and line.
+JetCLIPerfStackFrame: struct {
+    name: String,
+    line: String,
+}
+
+// The frames of row `item`'s stack `key`, innermost first.
+jet_cli_perf_row_stack: fn(item: CanonicalJSON, key: String) -> [JetCLIPerfStackFrame] Never! {
+    fields: jettrace_object_view(item, "jettrace row") ?? return [JetCLIPerfStackFrame]{}
+    at: jet_cli_perf_key(fields, key) ?? return [JetCLIPerfStackFrame]{}
+    frames: jettrace_array(fields[at].value, key) ?? return [JetCLIPerfStackFrame]{}
+    loop frame in frames -> JetCLIPerfStackFrame{name: jet_cli_perf_member_text(frame, "name") ?? "?", line: jet_cli_perf_member_integer(frame, "line") ?? "?"}
+}
+
+// A wait row `item`'s stack in words, outermost frame first: `run
+// main.jet:5 > nap main.jet:10`; empty for none.
+jet_cli_perf_wait_stack_text: fn(item: CanonicalJSON) -> String Never! {
+    path: jet_cli_perf_member_symbol_text(item, "path") ?? "?"
+    frames: jet_cli_perf_row_stack(item, "wait_stack")
+    parts: loop index in 0..<frames.len() -> "{frames[frames.len() - 1 - index].name} {path}:{frames[frames.len() - 1 - index].line}"
+    parts.join(" > ")
+}
+
+// One stack's off-CPU time: its text, the time its waits took and how many
+// there were.
+JetCLIPerfOffCPU: struct {
+    stack: String,
+    ns: Int,
+    waits: Int,
+}
+
+// Off-CPU time by stack: the tasks' waits (`task_wait` rows) summed by
+// their stack, outermost frame first, and the wait it blocked in: `run
+// main.jet:5 > pause main.jet:12 > nap main.jet:10 > time sleep`. The
+// longest first; at most 16 stacks.
+jet_cli_perf_off_cpu_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    items: jet_cli_perf_rows(trace, "spans") ?? return [String]{}
+    found := [JetCLIPerfOffCPU]{}
+    places := [String:Int]{}
+    loop item in items {
+        if (jet_cli_perf_member_text(item, "kind") ?? "") != "task_wait" -> next
+        start: jet_cli_perf_member_number(item, "start_ns") ?? next
+        end: jet_cli_perf_member_number(item, "end_ns") ?? next
+        held: jet_cli_perf_wait_stack_text(item)
+        name: jet_cli_perf_member_symbol_text(item, "name") ?? "wait"
+        stack: if held.len() == 0 -> name else -> "{held} > {name}"
+        if !places.has_key(stack) {
+            places[stack] = found.len()
+            // copy: the map keys the stack; its row owns its own.
+            found.push(JetCLIPerfOffCPU{stack: stack.copy(), ns: 0, waits: 0})
+        }
+        found[places[stack]].ns += end - start
+        found[places[stack]].waits += 1
+    }
+    if found.len() == 0 -> return [String]{}
+    found.sort_by(fn(left: JetCLIPerfOffCPU, right: JetCLIPerfOffCPU) { (right.ns <=> left.ns).then(left.stack <=> right.stack) })
+    lines := [String]{"off-cpu by stack: the time tasks spent waiting, by the stack each wait blocked on, the longest first"}
+    shown: if found.len() > 16 -> 16 else -> found.len()
+    loop index in 0..<shown {
+        row: found[index]
+        lines.push("  {row.ns}ns waits={row.waits} · {row.stack}")
+    }
+    lines
+}
+
+// The text `key` of a row `item`'s symbol: its `path` or `name`.
+jet_cli_perf_member_symbol_text: fn(item: CanonicalJSON, key: String) -> String? Never! {
+    fields: jettrace_object_view(item, "jettrace row") ?? return None
+    at: jet_cli_perf_key(fields, "symbol") ?? return None
+    symbol: jettrace_object_view(fields[at].value, "symbol") ?? return None
+    jet_cli_perf_field_text(symbol, key)
 }
 
 // Whether the object `value` has `key` set to null.
@@ -836,7 +962,58 @@ jet_cli_perf_member_is_null: fn(value: CanonicalJSON, key: String) -> Bool Never
 
 // Whether the trace holds any typed evidence a summary reads.
 jet_cli_perf_has_evidence: fn(trace: CanonicalJSON) -> Bool Never! {
-    jet_cli_perf_first_sample(trace) != None || jet_cli_perf_profile_summary(trace) != None || jet_cli_perf_allocation_summary(trace) != None || jet_cli_perf_browser_summary(trace) != None || jet_cli_perf_task_summary(trace) != None || jet_cli_perf_lock_summary(trace) != None || jet_cli_perf_io_summary(trace) != None || jet_cli_perf_native_summary(trace) != None || jet_cli_perf_span_summary(trace) != None || jet_cli_perf_log_span_summary(trace) != None || jet_cli_perf_join_summary(trace) != None
+    jet_cli_perf_first_sample(trace) != None || jet_cli_perf_profile_summary(trace) != None || jet_cli_perf_allocation_summary(trace) != None || jet_cli_perf_browser_summary(trace) != None || jet_cli_perf_task_summary(trace) != None || jet_cli_perf_lock_summary(trace) != None || jet_cli_perf_io_summary(trace) != None || jet_cli_perf_native_summary(trace) != None || jet_cli_perf_span_summary(trace) != None || jet_cli_perf_log_span_summary(trace) != None || jet_cli_perf_wait_summary(trace) != None || jet_cli_perf_game_lines(trace).len() > 0
+}
+
+// A core.game run's frames and draw events: `game frames=… draw_events=…
+// scene=… cpu=…ns slowest_frame=… · <function>` (the slowest frame's
+// responsible function), then each callback function's draw events, the
+// most time first, at most 8: `game draw <name> <file>:<line> count=…
+// ns=…`.
+jet_cli_perf_game_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    frames: jet_cli_perf_rows(trace, "game_frames") ?? return [String]{}
+    if frames.len() == 0 -> return [String]{}
+    cpu := 0
+    slowest := 0
+    responsible := "none"
+    scene := ""
+    loop frame in frames {
+        ns: jet_cli_perf_member_number(frame, "cpu_ns") ?? next
+        cpu += ns
+        if scene == "" -> scene = jet_cli_perf_member_text(frame, "scene") ?? ""
+        if ns < slowest -> next
+        slowest = ns
+        responsible = jet_cli_perf_game_function_label(frame, "responsible_function") ?? "none"
+    }
+    draws: jet_cli_perf_rows(trace, "game_draw_events") ?? return [String]{}
+    counts := [String:Int]{}
+    totals := [String:Int]{}
+    loop draw in draws {
+        label: jet_cli_perf_game_function_label(draw, "function") ?? next
+        ns: jet_cli_perf_member_number(draw, "duration_ns") ?? 0
+        counts[label] = (counts.get(label) ?? 0) + 1
+        totals[label] = (totals.get(label) ?? 0) + ns
+    }
+    labels := counts.keys().to_list()
+    labels.sort_by(fn(left: String, right: String) { if totals[left] == totals[right] -> left <=> right else -> totals[right] <=> totals[left] })
+    lines := [String]{"game frames={frames.len()} draw_events={draws.len()} scene={scene} cpu={cpu}ns slowest_frame={slowest}ns · {responsible}"}
+    loop index in 0..<(if labels.len() > 8 -> 8 else -> labels.len()) {
+        lines.push("game draw {labels[index]} count={counts[labels[index]]} ns={totals[labels[index]]}")
+    }
+    lines
+}
+
+// `<name> <file>:<line>` of the function member `key` of a game row.
+jet_cli_perf_game_function_label: fn(row: CanonicalJSON, key: String) -> String? Never! {
+    fields: jettrace_object_view(row, "jettrace row") ?? return None
+    at: jet_cli_perf_key(fields, key) ?? return None
+    function: fields[at].value
+    name: jet_cli_perf_member_text(function, "name") ?? return None
+    source: jettrace_object_view(function, "jettrace function") ?? return None
+    span: jet_cli_perf_key(source, "source") ?? return None
+    file: jet_cli_perf_member_text(source[span].value, "file") ?? return None
+    line: jet_cli_perf_member_integer(source[span].value, "start_line") ?? return None
+    Val("{name} {file}:{line}")
 }
 
 // A bar of `count` marks, 1 to 40 wide.
@@ -1077,23 +1254,32 @@ jet_cli_perf_timeline: fn(trace: CanonicalJSON) -> [String] Never! {
         }
     }
     if jet_cli_perf_rows(trace, "spans") == .Ok(items) {
-        // Up to 8 task and log spans and up to 8 joins' waits, all on the
+        // Up to 8 task and log spans and up to 8 tasks' waits, all on the
         // one clock of every span.
         spans := 0
-        joins := 0
+        waits := 0
         loop item in items {
             if (jet_cli_perf_member_text(item, "status") ?? "") != "captured" -> next
             start: jet_cli_perf_member_integer(item, "start_ns") ?? next
             end: jet_cli_perf_member_integer(item, "end_ns") ?? next
-            if (jet_cli_perf_member_text(item, "kind") ?? "") == "task_join" {
-                if joins >= 8 -> next
-                joins += 1
-                rows.push("[{start}..{end}] join task {jet_cli_perf_member_integer(item, "task_id") ?? "?"} awaits {jet_cli_perf_join_awaited(item)}")
+            if (jet_cli_perf_member_text(item, "kind") ?? "") == "task_wait" {
+                if waits >= 8 -> next
+                waits += 1
+                rows.push("[{start}..{end}] {jet_cli_perf_wait_text(item)}")
                 next
             }
             if spans >= 8 -> next
             spans += 1
             rows.push("[{start}..{end}] {jet_cli_perf_member_symbol(item) ?? "span"}")
+        }
+    }
+    if jet_cli_perf_rows(trace, "io") == .Ok(items) {
+        // Up to 8 file and network transfers, on the same clock.
+        limit: if items.len() > 8 -> 8 else -> items.len()
+        loop index in 0..<limit {
+            start: jet_cli_perf_member_integer(items[index], "start_ns") ?? next
+            end: jet_cli_perf_member_integer(items[index], "end_ns") ?? next
+            rows.push("[{start}..{end}] {jet_cli_perf_io_text(items[index])}")
         }
     }
     rows

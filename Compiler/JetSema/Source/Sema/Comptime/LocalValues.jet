@@ -217,11 +217,11 @@ sema_comptime_value_runtime_handle: fn(ty: Type, environment: SemaScopeEnvironme
 // `function_key` of module `module_identity`. It is apart from the site's
 // own key (sema_comptime_body_source_key), so no body check reads it.
 sema_comptime_local_value_ahead_key: fn(module_identity: ModuleID, function_key: String, source_span: Span, site_span: Span) -> String Never! {
-    "{module_identity.id}::{sema_comptime_local_value_ahead_destination(function_key, source_span, site_span)}"
+    "{module_identity.id}.{sema_comptime_local_value_ahead_destination(function_key, source_span, site_span)}"
 }
 
 sema_comptime_local_value_ahead_destination: fn(function_key: String, source_span: Span, site_span: Span) -> String Never! {
-    "{function_key}{SEMA_COMPTIME_LOCAL_VALUE_AHEAD}{site_span.start}:{site_span.end}::{source_span.start}:{source_span.end}"
+    "{function_key}{SEMA_COMPTIME_LOCAL_VALUE_AHEAD}{site_span.start}:{site_span.end}.{source_span.start}:{source_span.end}"
 }
 
 // The source that computes ahead the value of local value site `site`,
@@ -237,7 +237,7 @@ sema_comptime_local_value_ahead_site: fn(site: SemaComptimeBodySource) -> SemaCo
 }
 
 // What every destination key of a value computed ahead holds.
-SEMA_COMPTIME_LOCAL_VALUE_AHEAD: "::local-value-ahead::"
+SEMA_COMPTIME_LOCAL_VALUE_AHEAD: ".local-value-ahead."
 
 // The locals of `source_module`'s top-level functions that its declaration
 // pass stages to be computed ahead: none in a `jet check` (which computes no

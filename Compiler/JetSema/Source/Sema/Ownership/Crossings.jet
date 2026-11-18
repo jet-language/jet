@@ -111,7 +111,7 @@ sema_ownership_crossing_stored_types: fn(types: [Type], crossing: SemaSendCrossi
 }
 
 sema_ownership_crossing_type_leaf: fn(name: String) -> String Never! {
-    parts := name.split("::").to_list()
+    parts := name.split(".").to_list()
     if parts.len() > 1 -> return parts[parts.len() - 1]
     parts = name.split(".").to_list()
     if parts.len() > 1 -> return parts[parts.len() - 1]
@@ -259,7 +259,7 @@ sema_ownership_crossing_named_type: fn(ty: Type, name: String, crossing: SemaSen
             }
             .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Named(_) | .Apply(_, _) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
         }
-        // A Core type the caller never names (`session :: browser.connect(…)`
+        // A Core type the caller never names (`session: browser.connect(…)`
         // gives a `Browser`) has no nominal row in the caller's scope; its
         // owning Core module still decides whether it is thread-confined.
         if sema_copy_named_is_core(name) {
@@ -272,7 +272,7 @@ sema_ownership_crossing_named_type: fn(ty: Type, name: String, crossing: SemaSen
         }
     }
     parts: sema_ownership_crossing_core_row_parts(name) ?? return Val(sema_ownership_crossing_new_problem(SemaSendProblemKind.UnknownType{name: name}))
-    key: "<core-row>::{name}"
+    key: "<core-row>.{name}"
     if walk.active.contains(key) || name_find(walk.finished, key) != None -> return None
     walk.active.push(key.copy())
     found := SemaSendabilityProblem?{None}

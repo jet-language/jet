@@ -253,7 +253,7 @@ dimension_identity: fn(dimension: Dimension) -> String Never! {
 dimension_display_name: fn(dimension: Dimension) -> String Never! {
     parts := [String]{}
     loop axis in dimension.axes {
-        leaf := axis.name.split("::").to_list()
+        leaf: axis.name.split(".").to_list()
         name: if leaf.len() == 0 -> axis.name else -> leaf[leaf.len() - 1]
         exponent: measure_signed_value(axis.exponent)
         rendered: if {
@@ -484,10 +484,77 @@ symbol_is_none: fn(id: SymbolID) -> Bool Never! { id.id == U32{0} }
 
 symbol_is_local: fn(id: SymbolID) -> Bool Never! { id.id & SYMBOL_LOCAL_BIT != U32{0} }
 
-// The key text of a declaration: its kind, module identity, owner key and
-// name.
+// The key text of a declaration: its kind, then its module identity, owner
+// key and name joined by `.`, an empty module or owner adding no segment
+// (`function:<corelib>/core.files.exists`, `function:Display.display`,
+// `type:Int`). The kind is a namespace of its own: `type:m.Point` and
+// `function:m.Point` are two keys.
 symbol_key_text: fn(kind: SymbolKind, module_name: String, owner: String, name: String) -> String Never! {
-    "{symbol_kind_name(kind)}:{module_name}:{owner}:{name}"
+    kind_name: symbol_kind_name(kind)
+    if module_name == "" && owner == "" -> return "{kind_name}:{name}"
+    if module_name == "" -> return "{kind_name}:{owner}.{name}"
+    if owner == "" -> return "{kind_name}:{module_name}.{name}"
+    "{kind_name}:{module_name}.{owner}.{name}"
+}
+
+// Where the declared name in symbol key `key` starts: after its last `.` or
+// `:` (symbol_key_text). A name holds neither.
+symbol_key_leaf_start: fn(key: String) -> Int Never! {
+    bytes: key.bytes()
+    at := bytes.len()
+    loop at > 0 {
+        if bytes[at - 1] == (U8{46}) || bytes[at - 1] == (U8{58}) -> return at
+        at -= 1
+    }
+    0
+}
+
+// The declared name symbol key `key` ends with: `exists` for
+// `function:<corelib>/core.files.exists`.
+symbol_key_leaf: fn(key: String) -> String Never! {
+    foundation_byte_text(key.bytes(), symbol_key_leaf_start(key), key.count_bytes())
+}
+
+// Whether symbol key `key` ends with the declared name `name`: `name` after
+// a `.` or the kind's `:`.
+symbol_key_names: fn(key: String, name: String) -> Bool Never! {
+    key_bytes: key.bytes()
+    name_bytes: name.bytes()
+    if name_bytes.len() == 0 || name_bytes.len() >= key_bytes.len() || !key.ends_with(name) -> return false
+    before: key_bytes[key_bytes.len() - name_bytes.len() - 1]
+    before == (U8{46}) || before == (U8{58})
+}
+
+#Test("symbol keys join kind, module, owner and name with `.`, and read their name back") {
+    core: "<corelib>/core.files"
+    user: "module:3:app:src/main.jet"
+    keys: [String]{
+        symbol_key_text(SymbolKind.Function, core, "", "exists"),
+        symbol_key_text(SymbolKind.Function, user, "", "Point"),
+        symbol_key_text(SymbolKind.Type, user, "", "Point"),
+        symbol_key_text(SymbolKind.Function, user, "Point", "area"),
+        symbol_key_text(SymbolKind.Parameter, user, symbol_key_text(SymbolKind.Function, user, "", "helper"), "x"),
+        symbol_key_text(SymbolKind.Function, "", "Display", "display"),
+        symbol_key_text(SymbolKind.Type, "", "", "Int"),
+    }
+    assert_eq(keys[0], "function:<corelib>/core.files.exists")
+    assert_eq(keys[3], "function:module:3:app:src/main.jet.Point.area")
+    assert_eq(keys[4], "parameter:module:3:app:src/main.jet.function:module:3:app:src/main.jet.helper.x")
+    assert_eq(keys[5], "function:Display.display")
+    assert_eq(keys[6], "type:Int")
+    loop (index, key) in keys {
+        assert(!key.contains("::"), "`{key}` holds `::`")
+        loop other in index + 1..<keys.len() -> assert(key != keys[other], "two declarations share `{key}`")
+    }
+    names: [String]{"exists", "Point", "Point", "area", "x", "display", "Int"}
+    loop (index, key) in keys {
+        assert_eq(symbol_key_leaf(key), names[index])
+        assert(symbol_key_names(key, names[index]), "`{key}` names `{names[index]}`")
+    }
+    assert(!symbol_key_names(keys[3], "rea"), "a name is matched whole")
+    assert(!symbol_key_names("type:Int", "type:Int"), "the kind is no name")
+    assert_eq(symbol_key_leaf("plain"), "plain")
+    assert_eq(symbol_key_leaf_start("plain"), 0)
 }
 
 symbol_keys: fn(base: Int, bound: Int) -> SymbolKeys Never! {
@@ -886,8 +953,8 @@ symbol_mint: fn(table: &SymbolTable, kind: SymbolKind, module_name: String, owne
     assert(symbol_find(table, "") != None)
     fresh: symbol_mint(table, SymbolKind.Function, "m", "", "g")
     assert_eq(Int{fresh.id}, 1101)
-    assert(symbol_intern(table, "function:m::g") == fresh)
-    assert_eq(symbol_table_key(table, fresh), "function:m::g")
+    assert(symbol_intern(table, "function:m.g") == fresh)
+    assert_eq(symbol_table_key(table, fresh), "function:m.g")
     assert_eq(symbol_table_key(table, SymbolID{id: U32{1001}}), "local:m:f:v0")
 }
 
@@ -1310,7 +1377,7 @@ type_name: fn(ty: Type) -> String Never! {
 
 // (Rust `AST.union_member_tag`): a union member's own tag. Rust spells a
 // declared member by its own name, so every nominal reads without its
-// module qualifier (`module::LocalDate` is `LocalDate`); a compound spelling
+// module qualifier (`module.LocalDate` is `LocalDate`); a compound spelling
 // is sanitized into an identifier (`[String]` is `M__String_`). A named case
 // is tagged by its name. Two members may share it; the tag an arm names is
 // type_union_member_tag_in.
@@ -1369,7 +1436,7 @@ type_union_member_payload: fn(ty: Type) -> Type Never! {
 // so two spellings of one union are one Type. Members sort by their spelling
 // read without module qualifiers, the full spelling breaking ties: resolving
 // a member to its declaration key (`net.NetError` to
-// `<corelib>/core.net::NetError`) never reorders the union. Each member's key
+// `<corelib>/core.net.NetError`) never reorders the union. Each member's key
 // is built once per sort, not once per comparison.
 type_union_sort: fn(members: &[Type]) -[]> {
     if members.len() < 2 {
@@ -1413,11 +1480,11 @@ type_union_order_key: fn(ty: Type) -[]> String {
     type_name(ty)
 }
 
-// A nominal name's leaf: what follows its last `::` (a declaration key's
+// A nominal name's leaf: what follows its last `.` (a declaration key's
 // module) and then its last `.` (a written module alias, `net.NetError`).
 type_union_unqualified: fn(name: String) -[]> String {
     leaf := name
-    loop part in name.split("::") -> leaf = part
+    loop part in name.split(".") -> leaf = part
     unaliased := leaf
     loop part in leaf.split(".") -> unaliased = part
     unaliased
@@ -1449,7 +1516,7 @@ type_union_member_tag_name: fn(raw: String) -> String Never! {
     String.from_bytes(bytes) ?? "M_"
 }
 
-// `ty` with each nominal head read without its `module::` qualifier.
+// `ty` with each nominal head read without its `module.` qualifier.
 type_unqualified_nominals: fn(ty: Type) -> Type Never! {
     if ty == {
         .Named(name) -> Type.Named{name: type_unqualified_name(name)}
@@ -1477,7 +1544,7 @@ type_unqualified_nominals: fn(ty: Type) -> Type Never! {
 
 type_unqualified_name: fn(name: String) -> String Never! {
     leaf := name
-    loop part in name.split("::") -> leaf = part
+    loop part in name.split(".") -> leaf = part
     leaf
 }
 
@@ -1868,7 +1935,7 @@ compute_shape_dimensions: fn(ty: Type) -> [Int]? {
 is_compute_tensor_family: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(_, inner) -> is_compute_tensor_family(inner)
-        .Named(name) -> name == "Tensor" || name == "<corelib>/core.compute::Tensor"
+        .Named(name) -> name == "Tensor" || name == "<corelib>/core.compute.Tensor"
         .Apply(name, args) -> is_compute_tensor_application(name, args)
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }

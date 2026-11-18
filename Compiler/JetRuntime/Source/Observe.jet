@@ -1,8 +1,9 @@
 // Native task/channel registry. It records only identities and wait/resource
-// facts, never a task payload, channel element or environment. Root136:
+// facts, never a task payload, channel element or environment. Root168:
 // mutex0/next-task8/next-channel16/tasks24/task-count32/channels40/
 // workers48/queued56/exit-reported64/writer72/event-sequence80/events88/
-// event-tail96/event-count104/values112/value-count120/task-table128.
+// event-tail96/event-count104/values112/value-count120/task-table128/
+// game-sequence136/games144/game-tail152/game-count160 (Game.jet's relay).
 // Task112: next0/id8/parent16/site24/label32/state40/wait48/deadline-present56/
 // deadline64/canceled72/control80/previous88/open-spans96/arena-allocations104.
 // Channel64: next0/id8/depth16/bounded24/capacity32/send40/recv48/closed56.
@@ -19,9 +20,9 @@ observe_channels_code := I64{0}
     if (observe_root != I64{0}) {
         return
     }
-    root: jet_rt_alloc(I64{136}, I64{8})
+    root: jet_rt_alloc(I64{168}, I64{8})
     #Unsafe("runtime-init runs before any other thread exists") { observe_root = root }
-    thread_zero(observe_root, I64{136})
+    thread_zero(observe_root, I64{168})
     sync_store(wrapping(observe_root + I64{8}), I64{2})
     sync_store(wrapping(observe_root + I64{16}), I64{1})
     sync_store(wrapping(observe_root + I64{80}), I64{1})
@@ -399,8 +400,11 @@ observe_cancel_live_tasks: fn() {
     jet_rt_free(controls, capacity * I64{8}, I64{8})
 }
 
-// Publishes the writer's exit snapshot, once per process run.
+// Publishes the writer's exit snapshot, once per process run, after
+// writing the record of the CPU time `jet perf run` sampled (PerfSamples.jet
+// perf_samples_exit).
 #Export(c) jet_rt_observe_exit: fn(_unused: I64) -> I64 {
+    perf_samples_exit()
     if observe_root == (I64{0}) -> return I64{0}
     if sync_swap(wrapping(observe_root + I64{64}), I64{1}) != (I64{0}) -> return I64{0}
     observe_publish_exit()

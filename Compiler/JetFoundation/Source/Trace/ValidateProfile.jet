@@ -7,13 +7,12 @@ jettrace_optional_unsigned: fn(value: CanonicalJSON, label: String) -> U64? JetT
 jettrace_validate_profile: fn(value: CanonicalJSON, source_identity: CanonicalJSON) JetTraceError! {
     fields: jettrace_object_keys(value, "content.profile", [String]{"counters", "coverage", "method", "overhead_ns", "overhead_reason", "overhead_status", "reason", "row_limit", "rows", "rows_truncated", "status", "window_cpu_ns", "window_reason", "window_status", "window_wall_ns"})
     method: jettrace_text(fields[jettrace_get(fields, "method")].value, "content.profile.method")
-    if method != "sampling" && method != "memory" {
-        return Err(jettrace_error("content.profile.method must be sampling or memory"))
-    }
+    if method != "sampling" -> return Err(jettrace_error("content.profile.method must be sampling"))
+    // The memory lens lists every counter of TRACE_COUNTERS; a profile it did
+    // not take lists none.
     counters: jettrace_array(fields[jettrace_get(fields, "counters")].value, "content.profile.counters")
-    expected: if method == "memory" -> TRACE_COUNTERS.len() else -> 0
-    if counters.len() != expected {
-        return Err(jettrace_error("content.profile.counters must hold the {method} method's {expected} counters"))
+    if counters.len() != 0 && counters.len() != TRACE_COUNTERS.len() {
+        return Err(jettrace_error("content.profile.counters must hold all {TRACE_COUNTERS.len()} counters of the memory lens, or none"))
     }
     // Which counters the profile captured: only their counts are in rows.
     captured := [Bool]{}

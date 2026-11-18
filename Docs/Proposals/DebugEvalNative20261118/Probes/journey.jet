@@ -1,0 +1,30 @@
+// Probe P4 (revision 4, after review 3's journey.jet): which runtime entry
+// points do ordinary fallible forms reach? Each peek is an expression a user
+// would type at a stop. `peek_propagate` reaches a failure that a callee
+// propagates from its own callee.
+peek_parse: fn(text: String) -[]> Int { Int.parse(text) ?? 0 }
+
+peek_get: fn(xs: [Int]) -[]> Int { xs.get(5) ?? 0 }
+
+peek_key: fn(ages: [String:Int]) -[]> Int { ages.get("ann") ?? 0 }
+
+peek_first: fn(xs: [Int]) -[]> Int { xs.first() ?? 0 }
+
+parse_twice: fn(text: String) -[]> Int Err! {
+    n: Int.parse(text) ?? return Err("not a number: {text}")
+    Ok(n * 2)
+}
+
+add_parsed: fn(a: String, b: String) -[]> Int Err! {
+    x: parse_twice(a)
+    y: parse_twice(b)
+    Ok(x + y)
+}
+
+peek_propagate: fn(a: String, b: String) -[]> Int { add_parsed(a, b) ?? 0 }
+
+run: fn() {
+    ages: [String:Int]{"bob": 3}
+    print(peek_parse("12") + peek_get([Int]{1, 2}) + peek_key(ages) + peek_first([Int]{4}))
+    print(peek_propagate("1", "2") + peek_propagate("1", "x"))
+}

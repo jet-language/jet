@@ -1,0 +1,41 @@
+// Probe N3: the empty ceiling and the deny-only denials composed on two
+// rungs, a `#FX(!Time.Wait, !Unsafe)` module over `-[]>` functions. Is each
+// body of the review's wait_row refused, and `print` with them?
+use mem: core.mem
+
+#FX(!Time.Wait, !Unsafe) probe: module {
+    peek_receive: fn(rx: Receiver<Int>) -[]> Int { rx.receive() ?? 0 }
+
+    peek_send: fn(tx: Sender<Int>) -[]> Int {
+        tx.send(7)
+        1
+    }
+
+    peek_atomic: fn(flag: Atomic<Bool>) -[]> Int {
+        flag.store(true)
+        1
+    }
+
+    peek_raw: fn(total: Int) -[]> Int {
+        cell := total
+        #Unsafe("probe: a raw write under the empty row") {
+            p: mem.Ptr<Int>.from_addr(mem.address_of(cell))
+            mem.volatile_write(p, 42)
+        }
+        cell
+    }
+
+    peek_print: fn() -[]> Int {
+        print("side effect")
+        1
+    }
+
+    peek_pure: fn(xs: [Int]) -[]> Bool { xs.len() > 2 }
+}
+
+run: fn() {
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 8)
+    flag: Atomic<Bool>.try_new(false) ?? panic("no flag")
+    print(probe.peek_send(tx) + probe.peek_receive(rx) + probe.peek_atomic(flag) + probe.peek_raw(1) + probe.peek_print())
+    print(probe.peek_pure([Int]{1, 2, 3}))
+}

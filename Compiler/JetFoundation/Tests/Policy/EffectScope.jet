@@ -67,15 +67,15 @@ COVERS_TABLE: [String]{
 }
 
 #Test("a written row's run-time frame names its FS and Net entries") {
-    assert_eq(effect_scope_descriptor("read_scoped", "fn:app::read_scoped", false, Val([String]{"FS.Read(\"data/\")", "IO"})), "read_scoped\nFS.Read(\"data/\")")
-    assert_eq(effect_scope_descriptor("read_open", "fn:app::read_open", false, Val([String]{"FS.Read(\"data/\")", "!FS.Read(\"data/private/\")"})), "read_open\nFS.Read(\"data/\")\n!FS.Read(\"data/private/\")")
-    assert_eq(effect_scope_descriptor("fetch", "fn:app::fetch", false, Val([String]{"Net(\"api.example.com\")", "Time.Wait", "FS.Read"})), "fetch\nNet(\"api.example.com\")\nFS.Read")
-    assert_eq(effect_scope_descriptor("read", "fn:<corelib>/core.files::read", true, Val([String]{"FS.Read"})), "@FS.Read")
-    assert_eq(effect_scope_descriptor("get", "fn:<corelib>/core.http::get", false, Val([String]{"Net", "Time.Wait"})), "@Net")
-    assert(effect_scope_descriptor("load", "fn:app::load", false, Val([String]{"FS.Read", "IO"})) == "", "a bare row names no scope")
-    assert(effect_scope_descriptor("map", "fn:app::map", false, Val([String]{"FS.Read(\"data/\")", "..E"})) == "", "an open row has no closed ceiling")
-    assert(effect_scope_descriptor("gpu", "fn:app::gpu", false, Val([String]{"GPU(\"npu\")"})) == "", "a value scope stays static")
-    assert(effect_scope_descriptor("plain", "fn:app::plain", false, None) == "", "no row, no frame")
+    assert_eq(effect_scope_descriptor("read_scoped", "fn:app.read_scoped", false, Val([String]{"FS.Read(\"data/\")", "IO"})), "read_scoped\nFS.Read(\"data/\")")
+    assert_eq(effect_scope_descriptor("read_open", "fn:app.read_open", false, Val([String]{"FS.Read(\"data/\")", "!FS.Read(\"data/private/\")"})), "read_open\nFS.Read(\"data/\")\n!FS.Read(\"data/private/\")")
+    assert_eq(effect_scope_descriptor("fetch", "fn:app.fetch", false, Val([String]{"Net(\"api.example.com\")", "Time.Wait", "FS.Read"})), "fetch\nNet(\"api.example.com\")\nFS.Read")
+    assert_eq(effect_scope_descriptor("read", "fn:<corelib>/core.files.read", true, Val([String]{"FS.Read"})), "@FS.Read")
+    assert_eq(effect_scope_descriptor("get", "fn:<corelib>/core.http.get", false, Val([String]{"Net", "Time.Wait"})), "@Net")
+    assert(effect_scope_descriptor("load", "fn:app.load", false, Val([String]{"FS.Read", "IO"})) == "", "a bare row names no scope")
+    assert(effect_scope_descriptor("map", "fn:app.map", false, Val([String]{"FS.Read(\"data/\")", "..E"})) == "", "an open row has no closed ceiling")
+    assert(effect_scope_descriptor("gpu", "fn:app.gpu", false, Val([String]{"GPU(\"npu\")"})) == "", "a value scope stays static")
+    assert(effect_scope_descriptor("plain", "fn:app.plain", false, None) == "", "no row, no frame")
 }
 
 #Test("a scoped effect splits into its bare effect and its scope") {
@@ -129,14 +129,14 @@ COVERS_TABLE: [String]{
 }
 
 #Test("a publisher's constant argument names its scope") {
-    assert_eq(effect_scope_published_effect("fn:<corelib>/core.files::read", true, [String]{"FS.Read"}) ?? "", "FS.Read")
-    assert_eq(effect_scope_published_effect("fn:<corelib>/core.files::write_bytes", true, [String]{"FS.Write"}) ?? "", "FS.Write")
-    assert_eq(effect_scope_published_effect("fn:<corelib>/core.http::get", false, [String]{}) ?? "", "Net")
+    assert_eq(effect_scope_published_effect("fn:<corelib>/core.files.read", true, [String]{"FS.Read"}) ?? "", "FS.Read")
+    assert_eq(effect_scope_published_effect("fn:<corelib>/core.files.write_bytes", true, [String]{"FS.Write"}) ?? "", "FS.Write")
+    assert_eq(effect_scope_published_effect("fn:<corelib>/core.http.get", false, [String]{}) ?? "", "Net")
     assert(effect_scope_published_effect("fn:<corelib>/core.files:FileReader:read", true, [String]{"FS.Read"}) == None, "a method publishes nothing")
-    assert(effect_scope_published_effect("fn:<corelib>/core.files::rename", false, [String]{"FS.Write"}) == None, "a first parameter that isn't the path publishes nothing")
-    assert(effect_scope_published_effect("fn:<corelib>/core.files::remove_all", true, [String]{"FS"}) == None, "a bare root publishes nothing")
-    assert(effect_scope_published_effect("fn:<corelib>/core.files::absolute", true, [String]{"FS", "Env"}) == None, "a row of two effects publishes nothing")
-    assert(effect_scope_published_effect("fn:app::read", true, [String]{"FS.Read"}) == None, "only core.files publishes a path")
+    assert(effect_scope_published_effect("fn:<corelib>/core.files.rename", false, [String]{"FS.Write"}) == None, "a first parameter that isn't the path publishes nothing")
+    assert(effect_scope_published_effect("fn:<corelib>/core.files.remove_all", true, [String]{"FS"}) == None, "a bare root publishes nothing")
+    assert(effect_scope_published_effect("fn:<corelib>/core.files.absolute", true, [String]{"FS", "Env"}) == None, "a row of two effects publishes nothing")
+    assert(effect_scope_published_effect("fn:app.read", true, [String]{"FS.Read"}) == None, "only core.files publishes a path")
     assert_eq(effect_scope_of_argument("FS.Read", "assets/logo.txt", true) ?? "", "assets/logo.txt")
     assert_eq(effect_scope_of_argument("FS.Read", "assets/icons/", false) ?? "", "assets/icons/")
     assert(effect_scope_of_argument("FS.Read", "logo", false) == None, "no folder before the interpolation")

@@ -401,7 +401,7 @@ sema_pattern_flat_union_owner_name: fn(carrier: Type, variant: String, env: Sema
 // (`key<Int>`, a declaration key with its arguments' carrier identities),
 // which a later pass over the tree reads back to the same type.
 sema_pattern_trait_arm_written: fn(variant: String) -[]> Type {
-    if !variant.contains("::") || !variant.ends_with(">") {
+    if !variant.contains(".") || !variant.ends_with(">") {
         return parse_type_text(variant) ?? Type.Named{name: variant}
     }
     parts: variant.split_once("<") ?? return Type.Named{name: variant}

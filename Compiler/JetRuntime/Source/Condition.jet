@@ -121,19 +121,25 @@ condition_reacquire: fn(cell: I64) -> Bool {
     mutex: wrapping(cell + I64{8})
     sync_mutex_lock(mutex)
     _ := sync_add(wrapping(cell + I64{40}), I64{1})
+    began := I64{0}
     loop {
         if condition_interrupted() {
             _ := sync_add(wrapping(cell + I64{40}), I64{-1})
+            at: perf_samples_lock_release()
             sync_cond_notify_all(wrapping(cell + I64{16}))
             sync_mutex_unlock(mutex)
+            perf_samples_lock_wait(wrapping(cell + I64{16}), began)
+            if (at != I64{0}) { perf_samples_wake(wrapping(cell + I64{16}), at, I64{-1}) }
             return false
         }
         if sync_load(wrapping(cell + I64{32})) == (I64{0}) && sync_load(wrapping(cell + I64{24})) == (I64{0}) {
             _ := sync_add(wrapping(cell + I64{40}), I64{-1})
             sync_store(wrapping(cell + I64{32}), I64{1})
             sync_mutex_unlock(mutex)
+            perf_samples_lock_wait(wrapping(cell + I64{16}), began)
             return true
         }
+        if (began == I64{0}) { began = perf_samples_lock_block() }
         _ := sync_cond_wait(wrapping(cell + I64{16}), mutex, sync_deadline(I64{10000000}))
     }
 }

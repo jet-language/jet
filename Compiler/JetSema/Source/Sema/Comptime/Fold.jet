@@ -54,6 +54,7 @@ use jet_foundation.[
     name_intern,
     name_table,
     symbol_key,
+    symbol_key_leaf,
     symbol_kind_name,
 ]
 
@@ -83,7 +84,7 @@ sema_comptime_fold_node_row: fn(tree: BodyTree, id: Int) -> Int Never! {
 }
 
 // The payload node of a module `Shared{X}` holder: `expression` is the
-// `Shared.new` static (`jet_std::JetShared`) over its one argument. The build
+// `Shared.new` static (`jet_std.JetShared`) over its one argument. The build
 // folds the payload; the program allocates the cell on its first read
 // (JetIR ir_shared_holder_read).
 sema_comptime_shared_payload: fn(tree: BodyTree, expression: Int) -> Int? Never! {
@@ -208,9 +209,9 @@ sema_comptime_fold_node: fn(tree: BodyTree, expression: Int, kind: NodeKind, exp
         }
         .EnumCtor(_, variant, payload) -> {
             type_name: sema_comptime_fold_type_name(expression_ty) ?? return None
-            return sema_comptime_fold_enum(tree, type_name, sema_comptime_fold_after_last(symbol_key(symbols, tree.symbols, variant), false), payload, values, symbols)
+            return sema_comptime_fold_enum(tree, type_name, symbol_key_leaf(symbol_key(symbols, tree.symbols, variant)), payload, values, symbols)
         }
-        .EnumLit(enum_type, variant, payload) -> return sema_comptime_fold_enum(tree, sema_comptime_fold_after_last(enum_type, true), variant, payload, values, symbols)
+        .EnumLit(enum_type, variant, payload) -> return sema_comptime_fold_enum(tree, symbol_key_leaf(enum_type), variant, payload, values, symbols)
         .Present(value) -> {
             if expression_ty == .Option(_) {
                 return Val(TComptimeValue.Present{value: sema_comptime_fold(tree, value, values, symbols) ?? return None})
@@ -531,30 +532,10 @@ sema_comptime_fold_enum: fn(tree: BodyTree, type_name: String, variant: String, 
 // aggregate carries and constant lowering resolves against its type.
 sema_comptime_fold_type_name: fn(ty: Type) -> String? Never! {
     if ty == {
-        .Named(name) -> Val(sema_comptime_fold_after_last(name, true))
-        .Apply(name, _) -> Val(sema_comptime_fold_after_last(name, true))
+        .Named(name) -> Val(symbol_key_leaf(name))
+        .Apply(name, _) -> Val(symbol_key_leaf(name))
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
-}
-
-// The last segment of `name` split on `::` (`pair`) or on `:`, as
-// `name.split(sep).to_list()`'s last element: separators match left to
-// right without overlap, so the segment starts after the last match.
-sema_comptime_fold_after_last: fn(name: String, pair: Bool) -> String Never! {
-    bytes: name.bytes()
-    start := 0
-    index := 0
-    loop index < bytes.len() {
-        if bytes[index] != (U8{58}) -> index += 1 else if !pair {
-            index += 1
-            start = index
-        } else if index + 1 < bytes.len() && bytes[index + 1] == (U8{58}) {
-            index += 2
-            start = index
-        } else { index += 1 }
-    }
-    if start == 0 -> return name.copy()
-    String.from_bytes(bytes.slice(start, bytes.len())) ?? name.copy()
 }
 
 // The value of a constant that already landed in this run. A `Shared`

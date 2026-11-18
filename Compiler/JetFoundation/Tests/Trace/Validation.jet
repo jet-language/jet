@@ -3,17 +3,14 @@ use jet_foundation.[
     CanonicalJSON,
     CanonicalJSONField,
     JetDevtoolsEventBody,
-    JetSymbolRef,
     SourceIdentity,
     TraceCounter,
     TraceCounterName,
-    TraceIO,
     TraceProfileRow,
     TraceProfileSource,
     TraceReceiptSection,
     TraceSample,
     TraceSkeleton,
-    TraceTask,
     canonical_json_bytes,
     canonical_json_object,
     canonical_json_sha256,
@@ -80,9 +77,6 @@ use jet_foundation.[
     assert(jettrace_test_error(skeleton).contains("duplicates task 1"))
     skeleton.tasks[1].id = U64{0}
     assert(jettrace_test_error(skeleton).contains("id must be greater than zero"))
-    skeleton.tasks = [TraceTask]{jettrace_test_task(U64{1}, U64{0}, "blocked", "tcp accept")}
-    skeleton.io.push(TraceIO{start_ns: U64{1}, end_ns: U64{2}, kind: "tcp", task_id: U64{1}, wait: "tcp accept", symbol: JetSymbolRef{path: "app.jet", name: "wrong"}})
-    assert(jettrace_test_error(skeleton).contains("symbol does not match its task"))
 }
 
 jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
@@ -138,10 +132,10 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     assert(jettrace_test_error(skeleton).contains("truncated profile must retain bounded rows"))
 }
 
-#Test("JetTrace memory profile counters are captured with counts or unavailable with an errno") {
+#Test("JetTrace memory lens counters are captured with counts or unavailable with an errno") {
     skeleton := jettrace_test_profile_skeleton()
-    skeleton.profile.method = "memory"
-    assert(jettrace_test_error(skeleton).contains("must hold the memory method's 4 counters"))
+    skeleton.profile.counters = [TraceCounter]{TraceCounter{name: TraceCounterName.L1dMisses, period: Val(U64{1000}), errno: None}}
+    assert(jettrace_test_error(skeleton).contains("must hold all 4 counters of the memory lens, or none"))
     skeleton.profile.counters = [TraceCounter]{
         TraceCounter{name: TraceCounterName.L1dMisses, period: Val(U64{1000}), errno: None},
         TraceCounter{name: TraceCounterName.LlcMisses, period: None, errno: Val(U64{2})},
@@ -167,8 +161,8 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     skeleton.profile.counters[3].name = TraceCounterName.L1dMisses
     assert(jettrace_test_error(skeleton).contains("counters[3].name must be page_faults"))
     skeleton.profile.counters[3].name = TraceCounterName.PageFaults
-    skeleton.profile.method = "sampling"
-    assert(jettrace_test_error(skeleton).contains("must hold the sampling method's 0 counters"))
+    skeleton.profile.method = "memory"
+    assert(jettrace_test_error(skeleton).contains("content.profile.method must be sampling"))
 }
 
 #Test("JetTrace receipt sections enforce UTF8 byte caps and digest") {
@@ -241,4 +235,15 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     skeleton.game_frames[0].scene = "scene"
     skeleton.game_draw_events[0].function.source.file = ""
     assert(jettrace_test_error(skeleton).contains("source.file is empty"))
+    skeleton.game_draw_events[0].function.source.file = "scene.jet"
+    // A draw names its frame and carries that frame's identity.
+    skeleton.game_draw_events[0].frame_id = U64{8}
+    assert(jettrace_test_error(skeleton).contains("names no captured frame"))
+    skeleton.game_draw_events[0].frame_id = U64{7}
+    skeleton.game_draw_events[0].revision = "other"
+    assert(jettrace_test_error(skeleton).contains("does not carry the identity of frame 7"))
+    skeleton.game_draw_events[0].revision = "rev"
+    repeated := project_game_devtools_bodies(bodies) ?? panic(err.message)
+    loop frame in repeated.frames.move() -> skeleton.game_frames.push(frame)
+    assert(jettrace_test_error(skeleton).contains("repeats a frame"))
 }

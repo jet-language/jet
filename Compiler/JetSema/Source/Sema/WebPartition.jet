@@ -546,10 +546,10 @@ sema_web_push: fn(function: Func, owner: String?, file_ceiling: WebBucket?, modu
     name := ""
     key := ""
     if active {
-        name = if owner == .Val(owner_name) -> "{owner_name}::{function.name}" else -> function.name
+        name = if owner == .Val(owner_name) -> "{owner_name}.{function.name}" else -> function.name
         key = name
-        if module_prefix == .Val(module_name) -> key = "{module_name}::{name}" else if file_prefix == .Val(alias) {
-            key = "{alias}::{name}"
+        if module_prefix == .Val(module_name) -> key = "{module_name}.{name}" else if file_prefix == .Val(alias) {
+            key = "{alias}.{name}"
         }
     }
     // Only a `#Export(wasm)` signature is checked for ABI safety.

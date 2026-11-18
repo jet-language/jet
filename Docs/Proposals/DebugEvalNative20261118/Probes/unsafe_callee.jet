@@ -1,0 +1,18 @@
+// Probe N3: does `!Unsafe` refuse a raw write that a package callee outside
+// the denying rung makes, as it refuses one written in the rung itself?
+use mem: core.mem
+
+poke: fn(total: Int) -> Int {
+    cell := total
+    #Unsafe("probe: a raw write in a callee") {
+        p: mem.Ptr<Int>.from_addr(mem.address_of(cell))
+        mem.volatile_write(p, 42)
+    }
+    cell
+}
+
+#FX(!Unsafe) probe: module {
+    peek_callee: fn(total: Int) -[]> Int { poke(total) }
+}
+
+run: fn() { print(probe.peek_callee(1)) }

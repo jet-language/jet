@@ -1,0 +1,21 @@
+// Probe P1 (revision 4): where sema's final walk places each take of the
+// chain. Both arguments are used again, so each take is reported with the
+// origin sema records for it.
+Builder: struct {
+    items: [Int],
+
+    add: fn(self, xs: &&[Int]) -> Builder {
+        items := xs
+        items.push(self.items.len())
+        Builder{items: items}
+    }
+}
+
+run: fn() {
+    xs := [Int]{1, 2}
+    ys := [Int]{3, 4, 5}
+    start: Builder{items: [Int]{}}
+    out: start.add(xs).add(ys)
+    print(xs.len() + ys.len())
+    print(out.items.len())
+}

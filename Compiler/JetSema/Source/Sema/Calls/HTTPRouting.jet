@@ -773,7 +773,7 @@ sema_http_route_response_adapter_returns_response: fn(method: String, args: [Cal
     if program.registration_graph == .Val(graph) {
         response_row: sema_type_resolve_nominal_row(graph, Type.Named{name: "HTTPResponse"}, module_identity) ?? return false
         response_nominal: graph.modules[response_row.module_index].nominals[response_row.row]
-        routed: core_source_receiver_method("{module_text(graph.module_table, response_nominal.symbol.module_identity)}::{response_nominal.symbol.name}", method, updated_args.len())
+        routed: core_source_receiver_method("{module_text(graph.module_table, response_nominal.symbol.module_identity)}.{response_nominal.symbol.name}", method, updated_args.len())
         probe_diagnostics := [Diagnostic]{}
         candidates := sema_expr_registration_method_candidates(graph, module_identity, response_nominal.ty, routed, [Type]{}, type_args, span, environment, program, probe_diagnostics)
         if candidates.len() == 0 -> return false
@@ -1055,7 +1055,7 @@ sema_http_route_stage_token_check: fn(token: String, argument: CallArg, environm
     key: sema_symbol_key(program, context, target.symbol.id)
     evaluation := SemaCheckedTextEvaluation{
         module_identity: environment.module_identity,
-        key: "{sema_scope_environment_module_text(environment, program)}::http-method::{span.start}:{span.end}",
+        key: "{sema_scope_environment_module_text(environment, program)}.http-method.{span.start}:{span.end}",
         type_name: "HTTP route method",
         source_file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span),
         source_expression: argument.expr,

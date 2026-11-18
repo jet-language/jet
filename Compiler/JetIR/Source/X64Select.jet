@@ -4380,7 +4380,7 @@ ir_x64_inline_ranges: fn(f: IRFunction, positions: [Int]) -> [X64InlineRange] Ne
 // with no line, site 1, own code, site 1 again: one run of site 1 holds the
 // run of site 2 and the lineless code, and site 1's second run is apart.
 #Test("Inline runs nest by site and pass over code with no line") {
-    f := ir_function_new("f", "test:inline.jet::f", "", "inline.jet", 1)
+    f := ir_function_new("f", "test:inline.jet.f", "", "inline.jet", 1)
     f.inline_sites = [Int]{7, 0, 3, 8, 1, 4}
     one: ir_code_line_at(10, 1)
     two: ir_code_line_at(20, 2)
@@ -5253,7 +5253,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
 #Test("A frame over sema's frame bound is a selection error") {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    f := ir_function_new("twice", "test:frame.jet::twice", "", "frame.jet", 1)
+    f := ir_function_new("twice", "test:frame.jet.twice", "", "frame.jet", 1)
     x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     f.result = word
     sum: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
@@ -5277,7 +5277,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
 #Test("A body with a stack check compares rsp with the thread's limit first and grows onto a segment") {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    f := ir_function_new("twice", "test:grow.jet::twice", "", "grow.jet", 1)
+    f := ir_function_new("twice", "test:grow.jet.twice", "", "grow.jet", 1)
     x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     f.result = word
     sum: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
@@ -5308,7 +5308,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
 #Test("An element address folds into the Load that reads it") {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    f := ir_function_new("load", "test:index.jet::load", "", "index.jet", 1)
+    f := ir_function_new("load", "test:index.jet.load", "", "index.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     i: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "i"), 1)
     f.result = word
@@ -5356,7 +5356,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     pointer_row: ir_pointer_row(m)
-    f := ir_function_new("load", "test:step.jet::load", "", "step.jet", 1)
+    f := ir_function_new("load", "test:step.jet.load", "", "step.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     i: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "i"), 1)
     f.result = word
@@ -5405,7 +5405,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
 #Test("A constant offset folds into the displacement of the Load that reads it") {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    f := ir_function_new("load", "test:offset.jet::load", "", "offset.jet", 1)
+    f := ir_function_new("load", "test:offset.jet.load", "", "offset.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     f.result = word
     sixteen: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
@@ -5451,7 +5451,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     factors: [Int]{24, 3}
     loop signed in signs {
         word: ir_type_row(m, Type.IntN{signed: signed, bits: 64}) ?? panic("no 64-bit row")
-        f := ir_function_new("scale", "test:scale.jet::scale{signed}", "", "scale.jet", 1)
+        f := ir_function_new("scale", "test:scale.jet.scale{signed}", "", "scale.jet", 1)
         x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         f.result = word
         three: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
@@ -5508,7 +5508,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     byte: ir_type_row(m, Type.IntN{signed: false, bits: 8}) ?? panic("no U8 row")
-    f := ir_function_new("store", "test:store.jet::store", "", "store.jet", 1)
+    f := ir_function_new("store", "test:store.jet.store", "", "store.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     f.result = word
     zero: ir_slot(f, byte, IRSlotKind.Temp, -1, 0)
@@ -5576,7 +5576,7 @@ ir_x64_code_find: fn(code: [U8], want: [U8], from: Int) -> Int Never! {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     half: ir_type_row(m, Type.IntN{signed: false, bits: 16}) ?? panic("no U16 row")
-    f := ir_function_new("stream", "test:stream.jet::stream", "", "stream.jet", 1)
+    f := ir_function_new("stream", "test:stream.jet.stream", "", "stream.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     value: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "value"), 1)
     f.result = word
@@ -5715,7 +5715,7 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-    f := ir_function_new("count", "test:head.jet::count", "", "head.jet", 1)
+    f := ir_function_new("count", "test:head.jet.count", "", "head.jet", 1)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = word
     i: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "i"), 2)
@@ -5752,7 +5752,7 @@ ir_x64_test_sha_line: fn(line: String) -> [U8] Never! {
         m := ir_module_new()
         word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
         truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-        f := ir_function_new("step", "test:select.jet::step", "", "select.jet", 1)
+        f := ir_function_new("step", "test:select.jet.step", "", "select.jet", 1)
         x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         f.result = word
         y: ir_slot(f, word, IRSlotKind.Local, ir_intern_name(m, "y"), 2)
@@ -5853,7 +5853,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     loop calls in [false, true] {
         m := ir_module_new()
         float: ir_type_row(m, Type.Float) ?? panic("no Float row")
-        f := ir_function_new("fused", "test:fma.jet::fused", "", "fma.jet", 1)
+        f := ir_function_new("fused", "test:fma.jet.fused", "", "fma.jet", 1)
         a: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "a"), 1)
         b: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "b"), 1)
         c: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "c"), 1)
@@ -5914,7 +5914,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-    f := ir_function_new("early", "test:wrap.jet::early", "", "wrap.jet", 1)
+    f := ir_function_new("early", "test:wrap.jet.early", "", "wrap.jet", 1)
     data: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "data"), 1)
     f.result = word
     value: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
@@ -5975,7 +5975,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 #Test("A leaf keeps its values in caller-saved registers") {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    f := ir_function_new("square", "test:leaf.jet::square", "", "leaf.jet", 1)
+    f := ir_function_new("square", "test:leaf.jet.square", "", "leaf.jet", 1)
     x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     f.result = word
     one: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
@@ -6003,7 +6003,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-    f := ir_function_new("atomics", "test:atomics.jet::atomics", "", "atomics.jet", 1)
+    f := ir_function_new("atomics", "test:atomics.jet.atomics", "", "atomics.jet", 1)
     place: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "place"), 1)
     delta: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "delta"), 1)
     f.result = flag
@@ -6062,7 +6062,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     truth: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-    f := ir_function_new("claim", "test:atomics.jet::claim", "", "atomics.jet", 1)
+    f := ir_function_new("claim", "test:atomics.jet.claim", "", "atomics.jet", 1)
     place: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "place"), 1)
     seen: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "seen"), 1)
     next: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "next"), 1)
@@ -6101,20 +6101,20 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     assert(!x64_assemble_template("call {{target}}", [String]{"target"}, false, false).quiet)
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    tls := ir_function_new("tls", "test:quiet.jet::tls#asm", "tls__asm", "quiet.jet", 1)
+    tls := ir_function_new("tls", "test:quiet.jet.tls#asm", "tls__asm", "quiet.jet", 1)
     tls.result = word
     tls.asm = Val(ir_x64_test_leaf("mov rax, qword ptr gs:[0] ; -> return", [String]{}, true))
     m.functions.push(tls)
-    load := ir_function_new("load", "test:quiet.jet::load#asm", "load__asm", "quiet.jet", 2)
+    load := ir_function_new("load", "test:quiet.jet.load#asm", "load__asm", "quiet.jet", 2)
     _ := ir_slot(load, word, IRSlotKind.Param, ir_intern_name(m, "address"), 2)
     load.result = word
     load.asm = Val(ir_x64_test_leaf("mov rax, qword ptr [{{address}}] ; -> return", [String]{"address"}, true))
     m.functions.push(load)
-    slow := ir_function_new("slow", "test:quiet.jet::slow", "", "quiet.jet", 3)
+    slow := ir_function_new("slow", "test:quiet.jet.slow", "", "quiet.jet", 3)
     _ := ir_slot(slow, word, IRSlotKind.Param, ir_intern_name(m, "word"), 3)
     _ := ir_emit(slow, IROp.Return, -1, -1, -1, -1, 3)
     m.functions.push(slow)
-    f := ir_function_new("release", "test:quiet.jet::release", "", "quiet.jet", 4)
+    f := ir_function_new("release", "test:quiet.jet.release", "", "quiet.jet", 4)
     pointer: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "pointer"), 4)
     base: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
     row: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
@@ -6152,7 +6152,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 #Test("A small leaf keeps its values in rsi and rdi too") {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    spill := ir_function_new("spill", "test:open.jet::spill", "", "open.jet", 1)
+    spill := ir_function_new("spill", "test:open.jet.spill", "", "open.jet", 1)
     x: ir_slot(spill, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     spill.result = word
     doubled: ir_slot(spill, word, IRSlotKind.Temp, -1, 0)
@@ -6178,12 +6178,12 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     }
     assert(wide)
 
-    slow := ir_function_new("slow", "test:open.jet::slow", "", "open.jet", 3)
+    slow := ir_function_new("slow", "test:open.jet.slow", "", "open.jet", 3)
     _ := ir_slot(slow, word, IRSlotKind.Param, ir_intern_name(m, "first"), 3)
     _ := ir_slot(slow, word, IRSlotKind.Param, ir_intern_name(m, "second"), 3)
     _ := ir_emit(slow, IROp.Return, -1, -1, -1, -1, 3)
     m.functions.push(slow)
-    pass := ir_function_new("pass", "test:open.jet::pass", "", "open.jet", 4)
+    pass := ir_function_new("pass", "test:open.jet.pass", "", "open.jet", 4)
     y: ir_slot(pass, word, IRSlotKind.Param, ir_intern_name(m, "y"), 4)
     a: ir_slot(pass, word, IRSlotKind.Temp, -1, 0)
     b: ir_slot(pass, word, IRSlotKind.Temp, -1, 0)
@@ -6222,13 +6222,13 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 #Test("A tail call moves a source passed twice aside once") {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    slow := ir_function_new("slow", "test:twice.jet::slow", "", "twice.jet", 1)
+    slow := ir_function_new("slow", "test:twice.jet.slow", "", "twice.jet", 1)
     loop name in ([String]{"first", "second", "third", "fourth"}) {
         _ := ir_slot(slow, word, IRSlotKind.Param, ir_intern_name(m, name), 1)
     }
     _ := ir_emit(slow, IROp.Return, -1, -1, -1, -1, 1)
     m.functions.push(slow)
-    f := ir_function_new("twice", "test:twice.jet::twice", "", "twice.jet", 2)
+    f := ir_function_new("twice", "test:twice.jet.twice", "", "twice.jet", 2)
     y: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "y"), 2)
     a: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
     b: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
@@ -6266,7 +6266,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     loop op in ([IROp]{IROp.Add, IROp.Mul}) {
         m := ir_module_new()
         word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-        f := ir_function_new("sum", "test:sum.jet::sum", "", "sum.jet", 1)
+        f := ir_function_new("sum", "test:sum.jet.sum", "", "sum.jet", 1)
         x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         f.result = word
         a: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
@@ -6307,7 +6307,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 #Test("Values live across exact Int routes take r8 and r9") {
     m := ir_module_new()
     int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    f := ir_function_new("spread", "test:spread.jet::spread", "", "spread.jet", 1)
+    f := ir_function_new("spread", "test:spread.jet.spread", "", "spread.jet", 1)
     n: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
     f.result = int_row
     parts := [Int]{}
@@ -6365,7 +6365,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 #Test("A big-integer constant is a static exact Int") {
     m := ir_module_new()
     int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    f := ir_function_new("big", "test:big.jet::big", "", "big.jet", 1)
+    f := ir_function_new("big", "test:big.jet.big", "", "big.jet", 1)
     f.result = int_row
     texts: [String]{"-123456789012345678901234567890", "4611686018427387904", "4611686018427387903", "-4611686018427387904", "-4611686018427387905"}
     loop text in texts {
@@ -6403,7 +6403,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
 #Test("A module carries only the numeric stop texts its code can name") {
     plain := ir_module_new()
     int_row: ir_type_row(plain, Type.Int) ?? panic("no Int row")
-    sum := ir_function_new("sum", "test:stop.jet::sum", "", "stop.jet", 1)
+    sum := ir_function_new("sum", "test:stop.jet.sum", "", "stop.jet", 1)
     a: ir_slot(sum, int_row, IRSlotKind.Param, ir_intern_name(plain, "a"), 1)
     b: ir_slot(sum, int_row, IRSlotKind.Param, ir_intern_name(plain, "b"), 1)
     sum.result = int_row
@@ -6418,7 +6418,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
     }
     fixed := ir_module_new()
     word: ir_type_row(fixed, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    quotient := ir_function_new("quotient", "test:stop.jet::quotient", "", "stop.jet", 1)
+    quotient := ir_function_new("quotient", "test:stop.jet.quotient", "", "stop.jet", 1)
     x: ir_slot(quotient, word, IRSlotKind.Param, ir_intern_name(fixed, "x"), 1)
     y: ir_slot(quotient, word, IRSlotKind.Param, ir_intern_name(fixed, "y"), 1)
     quotient.result = word
@@ -6444,7 +6444,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
         route: ir_intern_name(m, "jet_int_owned_to_i64")
         poll: ir_stop_poll(m, key)
-        f := ir_function_new("at", "test:route.jet::at", "", "route.jet", 1)
+        f := ir_function_new("at", "test:route.jet.at", "", "route.jet", 1)
         x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         f.result = word
         w: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
@@ -6498,7 +6498,7 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         word: ir_word_row(m)
         enter: ir_intern_name(m, "jet_rt_cleanup_enter")
         leave: ir_intern_name(m, "jet_rt_cleanup_leave")
-        f := ir_function_new("f", "test:share.jet::f", "", "share.jet", 2)
+        f := ir_function_new("f", "test:share.jet.f", "", "share.jet", 2)
         p: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "p"), 1)
         c: ir_slot(f, flag, IRSlotKind.Param, ir_intern_name(m, "c"), 1)
         f.result = float

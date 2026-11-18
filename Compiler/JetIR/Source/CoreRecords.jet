@@ -6,7 +6,8 @@ use {
     ]
 }
 
-// The method leaf of an impl method key, without an operator `<Rhs>` suffix.
+// The method leaf of an impl method key, without an operator `<Rhs>` suffix:
+// what follows the key's last `.` or `:` (symbol_key_text).
 ir_impl_method_leaf: fn(key: String) -> String Never! {
     bytes: key.bytes()
     end := bytes.len()
@@ -26,14 +27,11 @@ ir_impl_method_leaf: fn(key: String) -> String Never! {
             position -= 1
         }
     }
-    start := 0
-    position := end - 2
-    loop position >= 0 {
-        if (Int{bytes[position]}) == 58 && (Int{bytes[position + 1]}) == 58 {
-            start = position + 2
-            break
-        }
-        position -= 1
+    start := end
+    loop start > 0 {
+        byte: Int{bytes[start - 1]}
+        if byte == 46 || byte == 58 -> break
+        start -= 1
     }
     String.from_bytes(bytes[start..<end].copy()) ?? ""
 }
@@ -219,7 +217,7 @@ ir_comptime_item_function: fn(request: SemaComptimeItemRequest, module_name: Str
 // The key of the item function of comptime item `key` in module
 // `module_name` (ir_comptime_item_function).
 ir_comptime_item_key: fn(module_name: String, key: String) -> String Never! {
-    "{module_name}::__comptime_item::{key}"
+    "{module_name}.__comptime_item.{key}"
 }
 
 // The next unclaimed part of a dynamically scheduled lowering: a claiming

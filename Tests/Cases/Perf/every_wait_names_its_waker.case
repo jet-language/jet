@@ -1,0 +1,18 @@
+# `jet perf run` records every wait of a task: its name, the line it waited
+# at, what it waited for, and what ended it: the task that woke it, at the
+# line that did, or its own timeout. A channel receive, a Shared lock and a
+# join each name the task that woke them; a sleep names its timeout.
+requires: os-name:linux
+fixture: EveryWaitNamesItsWaker.fixture
+env: NO_COLOR=1
+step: jet perf run main.jet --out {work}/waits.jettrace
+exit: 0
+stdout: = "total=5\n"
+step: jet perf view {work}/waits.jettrace
+exit: 0
+stdout: ~ "waits count=" # the summary counts the waits and names the longest
+stdout: ~ "] task 1 in channel receive at main.jet:11 for channel " # the receive, by its line and channel
+stdout: ~ ", woken by task 2 at main.jet:28" # the send that woke it, by its task and line
+stdout: ~ "] task 1 in shared lock at main.jet:12, woken by task 2" # the write that waited for the lock, woken by its holder
+stdout: ~ "] task 1 in task join at main.jet:13 for task 2 spawned at main.jet:10, woken by task 2" # the join, woken by the task it awaited
+stdout: ~ "] task 2 in time sleep at main.jet:19, woken by its timeout" # a sleep has no waker but its timeout

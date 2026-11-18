@@ -33,7 +33,7 @@ TYPE_ROW_EFFECTS: "IO: struct {{\n    impl Effect {{}}\n}}\nNet: struct {{\n    
 
 TYPE_ROW_SOURCE: "Logger: struct {{\n    prefix: String,\n\n    say: fn(self, text: String) {{ print(\"{{self.prefix}}{{text}}\") }}\n}}\n\nFetcher: struct {{\n    get: fn(String) -[Net]> String,\n}}\n\nService: struct {{\n    log: Logger,\n    fetch: Fetcher,\n}}\n\nTree: struct {{\n    children: [Tree],\n    hook: fn() -[Env]> Int,\n}}\n\nForest: struct {{\n    trees: [Tree],\n}}\n\nPing: struct {{\n    pongs: [Pong],\n\n    ping: fn(self) {{ print(\"ping\") }}\n}}\n\nPong: struct {{\n    pings: [Ping],\n    send: fn() -[Net]> Int,\n}}\n\nShape: trait {{\n    draw: fn(self),\n}}\n\nSquare: struct {{\n    side: Int,\n}}\n\nimpl Square.Shape {{\n    draw: fn(self) {{ print(\"square {{self.side}}\") }}\n}}\n\nCanvas: struct {{\n    shapes: [Shape],\n}}\n\nrun: fn() {{\n    Logger{{prefix: \"> \"}}.say(\"hi\")\n}}\n"
 
-TYPE_ROW_MODULE: "type-rows::main"
+TYPE_ROW_MODULE: "type-rows.main"
 
 effect_type_row_graph: fn(failures: &[String]) -> SemaRegistrationGraph? {
     parsed := parse_source(TYPE_ROW_SOURCE.bytes())

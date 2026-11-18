@@ -945,7 +945,7 @@ sema_core_module_nominal: fn(program: SemaProgramTables, module_name: String, le
                     if graph.modules[module_index].nominals[nominal_index].compiler_owned {
                         return leaf.copy()
                     }
-                    return "{module_text(graph.module_table, graph.modules[module_index].nominals[nominal_index].symbol.module_identity)}::{leaf}"
+                    return "{module_text(graph.module_table, graph.modules[module_index].nominals[nominal_index].symbol.module_identity)}.{leaf}"
                 }
             }
         }
@@ -993,7 +993,7 @@ sema_call_try_job_queue_method: fn(receiver: Expr, receiver_value: TExpr, method
             return unhandled
         }
     }
-    if queue_name != "JobQueue" && !(core_source_owns_type(queue_name) && queue_name.ends_with("::JobQueue")) {
+    if queue_name != "JobQueue" && !(core_source_owns_type(queue_name) && queue_name.ends_with(".JobQueue")) {
         return unhandled
     }
     if !sema_ownership_check_call_receiver(state, receiver, AccessConvention.Write, scopes, span, diagnostics) {

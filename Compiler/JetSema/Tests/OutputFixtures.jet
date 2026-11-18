@@ -57,7 +57,7 @@ output_fixture_graph: fn(label: String, source: String, effects_source: String, 
         return None
     }
     table := module_table()
-    main_id: module_intern(table, "output-fixture::main")
+    main_id: module_intern(table, "output-fixture.main")
     canonical: jet_driver_canonical_effect_module(effect_vocabulary_module(effects_source), table) ?? {
         failures.push("{label}: canonical effect module declares no effects")
         return None
@@ -126,7 +126,7 @@ output_fixture_solved_effects: fn(effects_source: String, failures: &[String]) {
         failures.push("solved effect publication: real body/effect check failed {checked.diagnostics:Debug}")
         return
     }
-    key: symbol_key_text(SymbolKind.Function, "output-fixture::main", "", "launch")
+    key: symbol_key_text(SymbolKind.Function, "output-fixture.main", "", "launch")
     solved := [String]?{None}
     settled_return := Type?{None}
     loop function in checked.modules[0].functions {
@@ -234,7 +234,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
             failures.push("{label}: real module {names[index]} did not parse {parsed.diagnostics:Debug}")
             return
         }
-        identity: module_intern(table, "{packages[index]}::{names[index]}")
+        identity: module_intern(table, "{packages[index]}.{names[index]}")
         loop declaration in parsed.program.imports {
             target := Int?{None}
             if declaration.kind == .File(path, _) {
@@ -247,7 +247,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
                 failures.push("{label}: fixture has no authenticated file target for {declaration:Debug}")
                 return
             }
-            edges.push(SemaRegistrationImportEdge{source_module_identity: identity, target_module_identity: module_intern(table, "{packages[target_index]}::{names[target_index]}"), target_package_identity: packages[target_index].copy(), foreign_binding: None, declaration: declaration.copy()})
+            edges.push(SemaRegistrationImportEdge{source_module_identity: identity, target_module_identity: module_intern(table, "{packages[target_index]}.{names[target_index]}"), target_package_identity: packages[target_index].copy(), foreign_binding: None, declaration: declaration.copy()})
         }
         inputs.push(SemaRegistrationModuleInput{package_identity: packages[index].copy(), module_identity: identity, module_name: names[index].copy(), core_source_alias: "", module_path: "{names[index]}.jet", source_file: "{names[index]}.jet", source_segments: [SemaSourceSegment]{}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program.move(), foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()})
     }
@@ -258,7 +258,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
     effect_identity: canonical.module_identity.copy()
     inputs.push(canonical)
     facts: SemaBuildFacts{package_name: main_package.copy(), package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
-    main_id: module_intern(table, "{main_package}::main")
+    main_id: module_intern(table, "{main_package}.main")
     graph := sema_registration_prepare_graph(inputs, edges, main_package, main_id, effect_identity, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, compiler_threads_single())
     if !graph.complete || graph.internal_problem != None || sema_has_error_since(graph.diagnostics, 0) {
         failures.push("{label}: ordinary registration failed {graph.diagnostics:Debug}")
@@ -279,7 +279,7 @@ output_fixture_visibility: fn(label: String, main_source: String, bank_source: S
             }
         }
         if !found -> failures.push("{label}: checked Output fact is missing")
-        expected_key: symbol_key_text(SymbolKind.Function, "{bank_package}::bank", "", function_name)
+        expected_key: symbol_key_text(SymbolKind.Function, "{bank_package}.bank", "", function_name)
         function_references := 0
         loop reference in graph.output_name_references {
             if reference.kind == Val(SymbolKind.Function) {

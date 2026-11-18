@@ -1,0 +1,16 @@
+// Probe N2: after the call, sema's final walk holds `xs` as moved into
+// `consume` (implicit_take). A read placed after the call's arguments is
+// refused with that origin.
+consume: fn(xs: &&[Int]) -> Int {
+    items := xs
+    items.push(9)
+    items.len()
+}
+
+run: fn() {
+    xs := [Int]{1, 2}
+    xs.push(3)
+    n: consume(xs)
+    print(xs.len())
+    print(n)
+}

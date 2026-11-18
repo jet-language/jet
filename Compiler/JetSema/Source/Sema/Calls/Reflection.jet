@@ -17,15 +17,13 @@ use jet_foundation.[
     Type,
     TypeParam,
     core_identity_in_module,
+    symbol_key_leaf,
     type_carrier_identity,
     type_name,
 ]
 
 sema_call_reflection_leaf_name: fn(name: String) -> String Never! {
-    parts := name.split("::").to_list()
-    canonical := if parts.len() > 0 -> parts[parts.len() - 1] else -> name
-    dotted := canonical.split(".").to_list()
-    if dotted.len() > 0 -> dotted[dotted.len() - 1] else -> canonical
+    symbol_key_leaf(name)
 }
 
 // `reflect.of(x)` carries its checked names to the IR as text after the
@@ -344,7 +342,7 @@ sema_call_reflection_secret_leaf: fn(name: String) -> Bool Never! {
 }
 
 // A Core crypto secret: tagged by a registry signature, or named by its
-// canonical source identity (`core.crypto::Secret`).
+// canonical source identity (`core.crypto.Secret`).
 sema_call_reflection_secret_bearing: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(marker, inner) -> {

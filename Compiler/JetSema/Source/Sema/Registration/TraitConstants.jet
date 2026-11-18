@@ -585,9 +585,9 @@ sema_trait_constant_head: fn(ty: Type) -> String? Never! {
     }
 }
 
-// What follows the last `::` or `.` of a type name.
+// What follows the last `.` or `.` of a type name.
 sema_trait_constant_leaf: fn(name: String) -> String Never! {
-    if name.cut_last("::") == .Val(parts) -> return sema_trait_constant_leaf(parts.after)
+    if name.cut_last(".") == .Val(parts) -> return sema_trait_constant_leaf(parts.after)
     if name.cut_last(".") == .Val(parts) -> return parts.after.copy()
     name.copy()
 }

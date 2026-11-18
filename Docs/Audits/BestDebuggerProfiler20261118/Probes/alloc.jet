@@ -1,0 +1,26 @@
+// Allocation in a loop: each turn builds a list and keeps a few of them, so
+// an allocation profile has one hot site and live blocks at exit.
+use core.process
+
+build: fn(n: Int) -> [Int] {
+    xs := [Int]{}
+    loop i in 0..<n {
+        xs.push(i)
+    }
+    xs
+}
+
+run: fn() {
+    args: process.args()
+    turns: if args.len() > 0 -> Int.parse(args[args.len() - 1]) ?? 2000 else -> 2000
+    kept := [[Int]]{}
+    total := 0
+    loop t in 0..<turns {
+        xs: build(64)
+        total = total + xs.len()
+        if t % 100 == 0 {
+            kept.push(xs)
+        }
+    }
+    print("total={total} kept={kept.len()}")
+}

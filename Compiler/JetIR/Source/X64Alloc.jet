@@ -1218,7 +1218,7 @@ ir_x64_allocate: fn(m: IRModule, f: IRFunction) -> IRX64Allocation Never! {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     pointer: ir_pointer_row(m)
-    f := ir_function_new("words", "test:words.jet::words", "", "words.jet", 1)
+    f := ir_function_new("words", "test:words.jet.words", "", "words.jet", 1)
     delta: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "delta"), 1)
     f.result = word
     wide: ir_slot(f, pointer, IRSlotKind.Temp, -1, 0)
@@ -1667,14 +1667,14 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
 #Test("A result takes a register its instruction reads for the last time") {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
-    g := ir_function_new("g", "test:share.jet::g", "", "share.jet", 1)
+    g := ir_function_new("g", "test:share.jet.g", "", "share.jet", 1)
     v: ir_slot(g, word, IRSlotKind.Param, ir_intern_name(m, "v"), 1)
     g.result = word
     _ := ir_emit(g, IROp.Return, -1, v, -1, -1, 1)
     g_row: m.functions.len()
     name_rows_set(m.function_rows, g.key, g_row)
     m.functions.push(g)
-    f := ir_function_new("f", "test:share.jet::f", "", "share.jet", 3)
+    f := ir_function_new("f", "test:share.jet.f", "", "share.jet", 3)
     x: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "x"), 3)
     f.result = word
     one: ir_slot(f, word, IRSlotKind.Temp, -1, 0)
@@ -1701,7 +1701,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     m := ir_module_new()
     int_row: ir_type_row(m, Type.Int) ?? panic("no Int row")
     loop k in 0..<16 {
-        filler := ir_function_new("g{k}", "test:route.jet::g{k}", "", "route.jet", 1)
+        filler := ir_function_new("g{k}", "test:route.jet.g{k}", "", "route.jet", 1)
         n: ir_slot(filler, int_row, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
         filler.result = int_row
         _ := ir_emit(filler, IROp.Return, -1, n, -1, -1, 1)
@@ -1709,7 +1709,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
         m.functions.push(filler)
     }
     callee: m.functions.len() - 1
-    f := ir_function_new("f", "test:route.jet::f", "", "route.jet", 2)
+    f := ir_function_new("f", "test:route.jet.f", "", "route.jet", 2)
     x: ir_slot(f, int_row, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
     f.result = int_row
     one: ir_slot(f, int_row, IRSlotKind.Temp, -1, 0)
@@ -1734,7 +1734,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
 #Test("A Float result takes the xmm register its instruction reads for the last time") {
     m := ir_module_new()
     float: ir_type_row(m, Type.Float) ?? panic("no Float row")
-    f := ir_function_new("f", "test:share.jet::f", "", "share.jet", 2)
+    f := ir_function_new("f", "test:share.jet.f", "", "share.jet", 2)
     x: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
     y: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "y"), 2)
     f.result = float
@@ -1763,7 +1763,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
         crowded: round == 1
         m := ir_module_new()
         float: ir_type_row(m, Type.Float) ?? panic("no Float row")
-        f := ir_function_new("f", "test:low.jet::f", "", "low.jet", 1)
+        f := ir_function_new("f", "test:low.jet.f", "", "low.jet", 1)
         x: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "x"), 2)
         f.result = float
         squares := [Int]{}
@@ -1804,7 +1804,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
     loop calls in [1, 3] {
         m := ir_module_new()
         float: ir_type_row(m, Type.Float) ?? panic("no Float row")
-        f := ir_function_new("f", "test:keep.jet::f", "", "keep.jet", 1)
+        f := ir_function_new("f", "test:keep.jet.f", "", "keep.jet", 1)
         x: ir_slot(f, float, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         f.result = float
         square: ir_slot(f, float, IRSlotKind.Temp, -1, 0)
@@ -1835,7 +1835,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
         word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
         flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
         tick: ir_intern_name(m, "tick")
-        f := ir_function_new("f", "test:cold.jet::f", "", "cold.jet", 1)
+        f := ir_function_new("f", "test:cold.jet.f", "", "cold.jet", 1)
         rare: ir_slot(f, flag, IRSlotKind.Param, ir_intern_name(m, "rare"), 1)
         f.result = float
         total: ir_slot(f, float, IRSlotKind.Local, ir_intern_name(m, "total"), 2)
@@ -1882,7 +1882,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
         m := ir_module_new()
         word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
         pair: ir_intern_type(m, "Pair", IRType{ty: Type.Named{name: "Pair"}, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""})
-        make := ir_function_new("make", "test:pair.jet::make", "", "pair.jet", 1)
+        make := ir_function_new("make", "test:pair.jet.make", "", "pair.jet", 1)
         x: ir_slot(make, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
         make.result = pair
         built: ir_slot(make, pair, IRSlotKind.Temp, -1, 0)
@@ -1893,7 +1893,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
         make_row: m.functions.len()
         name_rows_set(m.function_rows, make.key, make_row)
         m.functions.push(make)
-        swap := ir_function_new("swap", "test:pair.jet::swap", "", "pair.jet", 4)
+        swap := ir_function_new("swap", "test:pair.jet.swap", "", "pair.jet", 4)
         p: ir_slot(swap, pair, IRSlotKind.Param, ir_intern_name(m, "p"), 4)
         swap.result = pair
         left: ir_slot(swap, word, IRSlotKind.Temp, -1, 0)
@@ -1908,7 +1908,7 @@ ir_x64_lighter: fn(a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
         swap_row: m.functions.len()
         name_rows_set(m.function_rows, swap.key, swap_row)
         m.functions.push(swap)
-        run := ir_function_new("run", "test:pair.jet::run", "", "pair.jet", 7)
+        run := ir_function_new("run", "test:pair.jet.run", "", "pair.jet", 7)
         seed: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
         _ := ir_emit(run, IROp.Const, seed, 3, -1, -1, 8)
         made: ir_slot(run, pair, IRSlotKind.Local, ir_intern_name(m, "a"), 8)

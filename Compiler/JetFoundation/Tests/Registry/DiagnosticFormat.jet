@@ -77,9 +77,16 @@ diagnostic_format_any_part_contains: fn(needle: String) -> Bool Never! {
 }
 
 #Test("a type prints by its plain name beside a quoted literal of itself") {
-    shown: diagnostic_from_registry("E0112", None, "`module:7:fixture:main.jet::NoDebug` can't be shown with :Debug yet", "debug interpolation needs a debuggable value", "show its `Display` text with `{{NoDebug{{ value: 2 }}}}`, or implement `Debug` for `module:7:fixture:main.jet::NoDebug`")
+    shown: diagnostic_from_registry("E0112", None, "`module:7:fixture:main.jet.NoDebug` can't be shown with :Debug yet", "debug interpolation needs a debuggable value", "show its `Display` text with `{{NoDebug{{ value: 2 }}}}`, or implement `Debug` for `module:7:fixture:main.jet.NoDebug`")
     assert_eq(shown.what, "`NoDebug` can't be shown with :Debug yet")
     assert_eq(shown.fix, "Show its `Display` text with `{{NoDebug{{ value: 2 }}}}`, or implement `Debug` for `NoDebug`")
-    clash: diagnostic_from_registry("E0112", None, "`print` wants `NoDebug`, but this is `module:7:fixture:main.jet::NoDebug`", "every argument must match its parameter's type", "convert the value")
+    clash: diagnostic_from_registry("E0112", None, "`print` wants `NoDebug`, but this is `module:7:fixture:main.jet.NoDebug`", "every argument must match its parameter's type", "convert the value")
     assert_eq(clash.what, "`print` wants `NoDebug`, but this is `main.NoDebug`")
+}
+
+#Test("a Core type and a source type with one name each print with their module") {
+    shown: diagnostic_from_registry("E0112", None, "`<corelib>/core.crypto.Secret` is not `module:3:app:src/vault.jet.Secret`", "every argument must match its parameter's type", "convert the value")
+    assert_eq(shown.what, "`crypto.Secret` is not `vault.Secret`")
+    alone: diagnostic_from_registry("E0112", None, "`<corelib>/core.crypto.Secret` can't be shown", "debug interpolation needs a debuggable value", "convert the value")
+    assert_eq(alone.what, "`Secret` can't be shown")
 }

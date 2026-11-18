@@ -544,12 +544,12 @@ sema_expr_float_literal_fits: fn(value: TExpr, target: Type, span: Span, diagnos
 
 // The exact number a type is, by identity: the root name a literal carries
 // (`Decimal`) and the canonical Core identity a `core.math` hook returns
-// (`core.math::Decimal`) are one type.
+// (`core.math.Decimal`) are one type.
 sema_expr_precise_name: fn(ty: Type) -> String? {
     if ty == {
         .Named(name) -> {
             leaf := name
-            if name.cut_last("::") == .Val(parts) && core_source_owns_type(name) {
+            if name.cut_last(".") == .Val(parts) && core_source_owns_type(name) {
                 leaf = parts.after
             }
             if leaf == "Decimal" || leaf == "Fraction" || leaf == "Complex" -> return Val(leaf)
@@ -633,14 +633,14 @@ sema_expr_operator_candidate_from_function: fn(function: SemaRegistrationFunctio
     // declaration names it. A missing owner silently dropped every user
     // operator hook (E0360 on `impl R.Mul(Int)`, Core `impl Float.Mul(Vec3)`).
     trait_symbol_value: trait_symbol ?? sema_type_builtin_trait_symbol(trait_name) ?? return None
-    method_ref := TMethodRef{symbol: function.symbol.id, name: method, mangled: false, trait_owner: Val(trait_symbol_value.id), operator_identity: Val("{type_name(owner_type)}::{trait_name}::{method}<{type_name(rhs)}>")}
+    method_ref: TMethodRef{symbol: function.symbol.id, name: method, mangled: false, trait_owner: Val(trait_symbol_value.id), operator_identity: Val("{type_name(owner_type)}.{trait_name}.{method}<{type_name(rhs)}>")}
     sema_call_method_candidate_from_registration(signature, function.generic_params, graph, caller_module, caller_package, lexical_generic_params, Val(receiver_type), function.parameters[0].convention, 1, method_ref, [Type]{}, span, diagnostics)
 }
 
 // Rust `owner_type_for_reader`: a hook's owner and signature name types as
 // the owner's module sees them, with the owner's and the method's type
 // parameters kept, so a receiver from another module that carries the
-// canonical `module::Name` identity matches its own declaration.
+// canonical `module.Name` identity matches its own declaration.
 sema_expr_operator_reader_type: fn(graph: SemaRegistrationGraph, ty: Type, owner_module: ModuleID, owner_generics: [SemaRegistrationGenericParam], function_generics: [SemaRegistrationGenericParam]) -> Type Never! {
     generics := [TGenericParam]{}
     loop param in owner_generics {
@@ -799,7 +799,7 @@ sema_expr_operator_rhs_matches: fn(rhs: Type?, expected: Type) -> Bool Never! {
 }
 
 sema_expr_operator_row_name: fn(name: String) -> String Never! {
-    parts: name.split("::").to_list()
+    parts: name.split(".").to_list()
     parts[parts.len() - 1]
 }
 
@@ -820,9 +820,9 @@ sema_expr_registration_operator_candidates: fn(graph: SemaRegistrationGraph, rec
     // Only the nominals and impls registered under the receiver's base name,
     // in the module/row order of the whole-graph scans these rows replace.
     // The rows are keyed by the declared spelling (`Vec2`); a resolved
-    // receiver carries its canonical identity (`module::Vec2`), so the row key
+    // receiver carries its canonical identity (`module.Vec2`), so the row key
     // is the canonical leaf. Owner inference below still checks the identity.
-    receiver_canonical: receiver_name.contains("::")
+    receiver_canonical: receiver_name.contains(".")
     receiver_name = sema_expr_operator_row_name(receiver_name)
     nominal_rows: sema_registration_nominal_rows_named(graph, receiver_name)
     // Each registered row is passed as a place to a read parameter, which
@@ -841,7 +841,7 @@ sema_expr_registration_operator_candidates: fn(graph: SemaRegistrationGraph, rec
 // The operator candidates one registered nominal declares: its matching impl
 // rows, then the trait blocks of its source declaration.
 sema_expr_operator_nominal_candidates: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, module_index: Int, receiver_canonical: Bool, receiver_type: Type, rhs_type: Type, trait_name: String, method: String, require_commutative: Bool, span: Span, caller_module: ModuleID, caller_package: String, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic], candidates: &[SemaExprOperatorResolution]) Never! {
-    // A resolved receiver carries the canonical identity (`module::Vec2`)
+    // A resolved receiver carries the canonical identity (`module.Vec2`)
     // while the registered row keeps the declared spelling; infer such a
     // receiver against the declaration resolved in its own module.
     owner_module: graph.modules[module_index].module_identity
@@ -860,7 +860,7 @@ sema_expr_operator_nominal_candidates: fn(graph: SemaRegistrationGraph, nominal:
     owner_type: sema_inference_substitute_type_bindings(nominal.ty, owner_inference.substitutions)
     receiver_owner: sema_inference_substitute_type_bindings(sema_expr_operator_reader_type(graph, nominal.ty, owner_module, nominal.generic_params, [SemaRegistrationGenericParam]{}), owner_inference.substitutions)
     // An impl with no authored right-hand type takes the owner itself as the
-    // receiver spells it: a canonical receiver (`core.math::Point2<Float,
+    // receiver spells it: a canonical receiver (`core.math.Point2<Float,
     // World>`) meets the owner resolved in its module, like an authored
     // `Delta2<T, Space>`.
     self_rhs: sema_inference_substitute_type_bindings(inference_ty, owner_inference.substitutions)
@@ -897,7 +897,7 @@ sema_expr_operator_nominal_impl_candidates: fn(graph: SemaRegistrationGraph, imp
     }
     // The authored right-hand type resolves in the impl's module, like the
     // source blocks' (`impl Point2.Add(Delta2<T, Space>)` matched against a
-    // canonical `core.math::Delta2<Float, World>` operand).
+    // canonical `core.math.Delta2<Float, World>` operand).
     qualified_rhs: if implementation.operator_rhs == .Val(authored) -> sema_inference_substitute_type_bindings(sema_type_resolve_declared(graph, authored, implementation.source_module_identity), substitutions) else -> self_rhs
     if !sema_expr_operator_rhs_matches(Val(qualified_rhs), rhs_type) {
         return
@@ -1630,12 +1630,12 @@ sema_expr_is_math_type_name: fn(name: String) -> Bool Never! {
 
 // The math type a value of `ty` is: its bare name (`Vec3`), also when the
 // type carries the Core declaration's canonical identity
-// (`<corelib>/core.math::Vec3`), as an operator hook's return does.
+// (`<corelib>/core.math.Vec3`), as an operator hook's return does.
 sema_expr_math_leaf_name: fn(ty: Type) -> String? {
     name: sema_expr_type_base_name(ty) ?? return None
     if sema_expr_is_math_type_name(name) -> return Val(name)
     if !name.starts_with("<corelib>/") -> return None
-    parts: name.split("::").to_list()
+    parts: name.split(".").to_list()
     leaf: parts[parts.len() - 1]
     if sema_expr_is_math_type_name(leaf) -> return Val(leaf)
     None
@@ -3231,8 +3231,9 @@ sema_expr_call_foreign_opaque: fn(program: SemaProgramTables, callee: SymbolID?)
 // (`core.db.open` is `-[DB]>`), so their calls are not open-world.
 sema_expr_call_core_binding: fn(graph: SemaRegistrationGraph, symbol: SymbolID) -> Bool Never! {
     if symbol_is_local(symbol) -> return false
-    parts: symbol_table_key(graph.symbols, symbol).split(":").to_list()
-    parts.len() > 1 && sema_module_is_core_source(parts[1])
+    // The module identity follows the key's kind (symbol_key_text).
+    path: symbol_table_key(graph.symbols, symbol).split_once(":") ?? return false
+    sema_module_is_core_source(path.after)
 }
 
 // Whether `callee` is an extern body (`#FFI(<lang>)` function or foreign
@@ -3360,10 +3361,10 @@ sema_expr_registration_method_candidates: fn(graph: SemaRegistrationGraph, calle
     }
     if candidates.len() > 0 -> return candidates
     // The rows are keyed by the declared spelling (`Rect`); a resolved
-    // receiver carries its canonical identity (`module::Rect`), so the row key
+    // receiver carries its canonical identity (`module.Rect`), so the row key
     // is the canonical leaf, and such a receiver is inferred against the
     // declaration resolved in its own module (as operator lookup does).
-    receiver_canonical: receiver_name.contains("::")
+    receiver_canonical: receiver_name.contains(".")
     // The nominal the caller's scope names wins: a user type shadows a
     // same-named type of another module (the prelude's `Severity`), so the
     // other rows never offer their methods to this receiver.
@@ -3525,14 +3526,14 @@ sema_expr_receiver_nominal_identity: fn(environment: SemaScopeEnvironment, progr
     if program.registration_graph == .Val(graph) {
         if sema_type_resolve_nominal_row_at(graph, receiver_type, sema_scope_caller_row(environment, graph)) == .Val(row) {
             nominal: graph.modules[row.module_index].nominals[row.row]
-            return "{module_text(graph.module_table, nominal.symbol.module_identity)}::{nominal.symbol.name}"
+            return "{module_text(graph.module_table, nominal.symbol.module_identity)}.{nominal.symbol.name}"
         }
         found := String?{None}
         loop row in sema_registration_nominal_rows_named(graph, sema_expr_operator_row_name(base_name)) {
             nominal: graph.modules[row.module_index].nominals[row.row]
             if nominal.kind == SemaRegistrationNominalKind.TypeAlias -> next
-            identity: "{module_text(graph.module_table, nominal.symbol.module_identity)}::{nominal.symbol.name}"
-            if base_name.contains("::") && base_name != identity -> next
+            identity: "{module_text(graph.module_table, nominal.symbol.module_identity)}.{nominal.symbol.name}"
+            if base_name.contains(".") && base_name != identity -> next
             if found != None -> return base_name
             found = Val(identity)
         }
@@ -3547,7 +3548,7 @@ sema_expr_receiver_nominal_identity: fn(environment: SemaScopeEnvironment, progr
 // special routes, as in the Rust reference lowering's handle_method_op gate.
 sema_expr_declares_nominal_method: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, receiver_type: Type, method: String, needs_receiver: Bool) -> Bool Never! {
     if program.registration_graph == .Val(graph) {
-        // A resolved receiver carries its canonical identity (`module::URL`).
+        // A resolved receiver carries its canonical identity (`module.URL`).
         base_name: sema_expr_type_base_name(sema_expr_unwrap_tag(receiver_type)) ?? return false
         // A builtin handle declares no methods; a program type of its name is
         // spelled by its owner (sema_type_is_builtin_handle).
@@ -3940,7 +3941,7 @@ sema_expr_try_explicit_unit_method: fn(receiver: Expr, method: String, method_sp
 // Whether a `take_pattern` receiver is the `Cursor` handle (Val(true)) or the
 // `Reader` handle (Val(false)), by the runtime handle its type names. A
 // constructor gives the bare `Reader`; a written `Reader` annotation names its
-// Core declaration `<corelib>/core.term::Reader`. Both are one handle.
+// Core declaration `<corelib>/core.term.Reader`. Both are one handle.
 sema_expr_take_pattern_cursor: fn(ty: Type) -> Bool? {
     if ty == .Named(name) {
         row: ir_runtime_handle_row(name) ?? return None
@@ -5423,7 +5424,7 @@ sema_expr_check_unary: fn(op: UnOp, operand: Expr, expected: Type?, span: Span, 
             return sema_expr_expected_owned(negated, expected, environment, program, diagnostics)
         }
         if !sema_expr_is_numeric(value.ty) {
-            // UnOp::Neg: no user or Core type has a negation hook (Duration has
+            // UnOp.Neg: no user or Core type has a negation hook (Duration has
             // `.negated()`), so every other operand is this report, never an
             // unreported incomplete check.
             diagnostics.push(sema_error("E0109", span, "`-` needs a number, but this is {sema_type_show(value.ty)}", "only Int, Float and Decimal values can be negated", "use a number here"))
@@ -5470,7 +5471,7 @@ sema_expr_paren_decimal_spelling: fn(expr: Expr) -> String? Never! {
 
 // An untyped decimal literal is exact Decimal by default
 // and adopts the machine carrier only where Float or F32 is expected (Rust
-// `Expr::Float` inference), a union slot included when it has no Decimal
+// `Expr.Float` inference), a union slot included when it has no Decimal
 // member.
 sema_expr_expects_machine_float: fn(expected: Type?) -> Bool Never! {
     if expected == .Val(.Union(members)) -> return sema_expr_union_machine_float(members) != None
@@ -6311,11 +6312,11 @@ sema_expr_check_binary_operands: fn(op: BinOp, left: Expr, right: Expr, span: Sp
         return sema_expr_expected_owned(value, expected, environment, program, diagnostics)
     }
     left_point: if lhs.ty == {
-        .Named(name) -> name.ends_with("::Instant") && core_source_owns_type(name)
+        .Named(name) -> name.ends_with(".Instant") && core_source_owns_type(name)
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     right_point: if rhs.ty == {
-        .Named(name) -> name.ends_with("::Instant") && core_source_owns_type(name)
+        .Named(name) -> name.ends_with(".Instant") && core_source_owns_type(name)
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
     left_delta: lhs.ty == Type.Named{name: "Duration"}
@@ -8074,12 +8075,12 @@ sema_check_expression_with_lambda_escapes: fn(expr: Expr, expected: Type?, envir
 }
 
 #Test("Source coordinates preserve the existing same-space binary oracle") {
-    point: Type.Named{name: "<corelib>/core.math::ScreenPoint"}
-    delta: Type.Named{name: "<corelib>/core.math::ScreenDelta"}
-    world: Type.Named{name: "<corelib>/core.math::WorldDelta"}
+    point: Type.Named{name: "<corelib>/core.math.ScreenPoint"}
+    delta: Type.Named{name: "<corelib>/core.math.ScreenDelta"}
+    world: Type.Named{name: "<corelib>/core.math.WorldDelta"}
     assert(sema_expr_geometry_is_point(point))
     assert_eq(sema_expr_geometry_space(point), Val(Type.Named{name: "Screen"}))
     assert_eq(sema_expr_geometry_result(BinOp.Add, point, delta), Val(point))
     assert_eq(sema_expr_geometry_result(BinOp.Add, point, world), Val(Type.Named{name: "__GeometrySpaceMismatch"}))
-    assert(!sema_expr_geometry_is_point(Type.Named{name: "user::ScreenPoint"}))
+    assert(!sema_expr_geometry_is_point(Type.Named{name: "user.ScreenPoint"}))
 }

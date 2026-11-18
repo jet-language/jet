@@ -5,6 +5,8 @@ use jet_foundation.[
     ModuleID,
     core_identity_in_module,
     module_is_none,
+    symbol_key_leaf,
+    symbol_key_names,
 ]
 
 SemaSerdeDirection: enum {
@@ -17,12 +19,8 @@ sema_serde_codec_name: fn(direction: SemaSerdeDirection) -> String Never! {
 }
 
 sema_serde_named_leaf: fn(name: String) -> String Never! {
-    // A plain name (no `::` or `.` path, "" included) is its own leaf.
-    if !name.contains(":") && !name.contains(".") -> return name.copy()
-    path := name.split("::").to_list()
-    leaf: if path.len() > 0 -> path[path.len() - 1] else -> name
-    parts := leaf.split(".").to_list()
-    if parts.len() > 0 -> parts[parts.len() - 1] else -> leaf
+    // A plain name (no `.` path, "" included) is its own leaf.
+    symbol_key_leaf(name)
 }
 
 sema_serde_type_definition: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, name: String) -> TTypeDef? {
@@ -32,7 +30,7 @@ sema_serde_type_definition: fn(environment: SemaScopeEnvironment, program: SemaP
 // The checked declaration `name` names as module `module_identity` reads it.
 sema_serde_type_definition_in: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, module_identity: ModuleID, name: String) -> TTypeDef? {
     if program.registration_graph == .Val(graph) {
-        // A resolved type carries its canonical identity (`module::Name`),
+        // A resolved type carries its canonical identity (`module.Name`),
         // which the graph lookup resolves in its declaring module.
         resolved: sema_type_graph_lookup_symbol(graph, module_identity, name) ?? return None
         row: sema_scope_checked_type_row(environment, program, resolved.target_module_identity, sema_resolved_name(graph, resolved)) ?? return None
@@ -40,7 +38,7 @@ sema_serde_type_definition_in: fn(environment: SemaScopeEnvironment, program: Se
     }
     leaf := sema_serde_named_leaf(name)
     loop definition in program.checked_types {
-        // A checked key is the qualified `module::Name` spelling.
+        // A checked key is the qualified `module.Name` spelling.
         if definition.key == name || (definition.name == leaf && name == leaf) {
             return Val(definition)
         }
@@ -164,7 +162,7 @@ sema_serde_generic_bound: fn(environment: SemaScopeEnvironment, program: SemaPro
         codec := sema_serde_codec_name(direction)
         if parameter.bounds.len() > 0 {
             loop bound in parameter.bounds {
-                if sema_program_symbol_key(program, bound).ends_with(":{codec}") -> return true
+                if symbol_key_names(sema_program_symbol_key(program, bound), codec) -> return true
             }
         }
     }

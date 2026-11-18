@@ -1,0 +1,14 @@
+# A CPU-time sample in a helper the compiler emits into the program's code,
+# such as the stop poll at a recursive body's entry, counts at the Jet line
+# that called it, and the receipt counts those samples: an -O2 fib names no
+# helper outside Jet functions, where about a third of its samples used to
+# land under `jet_ir_stop_turn`.
+requires: os-name:linux
+fixture: RecursiveInclusiveTime.fixture
+env: NO_COLOR=1
+step: jet perf run -O2 fib.jet --out {work}/fib.jettrace -- 35
+exit: 0
+stdout: = "fib=9227465\n"
+json: file fib.jettrace doc $.content.profile.reason ~ " samples in compiler-emitted helpers, such as stop polls, count at the line that called them" # the receipt counts the helper samples
+json: file fib.jettrace doc $.content.profile.reason !~ "jet_ir_" # and names no helper outside Jet functions
+json: file fib.jettrace doc $.content.profile.rows[0].symbol.name = "fib" # the helper samples count at fib's lines

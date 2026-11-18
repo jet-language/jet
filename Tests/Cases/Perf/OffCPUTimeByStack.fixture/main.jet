@@ -1,0 +1,12 @@
+use time: core.time
+
+run: fn() {
+    loop _ in 0..<3 -> nap(30ms)
+    pause()
+    print("napped")
+}
+
+// Every nap blocks at this one line; each path that calls it is its own stack.
+nap: fn(span: Duration) -[Time.Wait]> { time.sleep(span) }
+
+pause: fn() -[Time.Wait]> { nap(150ms) }

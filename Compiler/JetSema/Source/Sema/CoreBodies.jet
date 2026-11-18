@@ -75,6 +75,7 @@ use jet_foundation.[
     compiler_threads_limit,
     decl_table_find,
     decl_table_key,
+    foundation_byte_text,
     module_find,
     module_is_core,
     module_text,
@@ -263,10 +264,13 @@ sema_core_body_capture_key: fn(graph: SemaRegistrationGraph, key: &&String, entr
 }
 
 // The name of the nominal `key` names in the module spelled `holder`: the
-// text after `holder` and `::`, up to the next `:`.
+// text after `holder` and `.`, up to the next `.` or `:`.
 sema_core_body_builtin_name: fn(key: String, holder: String) -> String? Never! {
-    parts: key.split_once("{holder}::") ?? return None
-    if parts.after.split_once(":") == .Val(rest) -> return Val(rest.before)
+    parts: key.split_once("{holder}.") ?? return None
+    bytes: parts.after.bytes()
+    loop at in 0..<bytes.len() {
+        if bytes[at] == (U8{46}) || bytes[at] == (U8{58}) -> return Val(foundation_byte_text(bytes, 0, at))
+    }
     Val(parts.after)
 }
 

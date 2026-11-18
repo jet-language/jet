@@ -1,0 +1,291 @@
+P1: two takes of one method in one statement
+$ jet debug --break chain.jet:9 chain.jet  <<< 'f; locals; c; f; locals; c'
+Breakpoint set  chain.jet:9
+Breakpoint hit  chain.jet:9  in add()
+9 |         items.push(self.items.len())        <- here
+Locals:  items = [1, 2]   xs = [1, 2]
+(Jet) f
+18 |     out: start.add(xs).add(ys)        <- here
+Locals:  start = Builder{items: []}   xs = [1, 2]   ys = [3, 4, 5]
+(Jet) locals
+start: Builder = Builder{items: []}
+xs: [Int] = [1, 2]
+ys: [Int] = [3, 4, 5]
+(Jet) c
+Breakpoint hit  chain.jet:9  in add()
+9 |         items.push(self.items.len())        <- here
+Locals:  items = [3, 4, 5]   xs = [3, 4, 5]
+(Jet) f
+18 |     out: start.add(xs).add(ys)        <- here
+Locals:  start = Builder{items: []}   xs = [3, 4]   ys = [3, 4, 5]
+(Jet) locals
+start: Builder = Builder{items: []}
+xs: [Int] = [3, 4]
+ys: [Int] = [3, 4, 5]
+(Jet) c
+4
+Program finished
+
+$ jet check chain_later.jet
+Error [jet.MoveWithoutMarker]: `add` takes `xs`, but `xs` is used again later
+  --> chain_later.jet:18:20
+    |
+ 18 |     out: start.add(xs).add(ys)
+    |                    ^^
+  --> chain_later.jet:19:11
+    |
+ 19 |     print(xs.len() + ys.len())
+    |           ^^ `xs` is used again here
+ Why: `add` takes ownership of this argument, and a call never copies on its own, so `xs` has no value after this call
+ Fix: Write `xs.copy()` to pass a copy and keep `xs`, or reorder so this call is the last use of `xs`
+More: jet-lang.dev/e/E0209
+
+1 problem found
+Run `jet explain E0209` to learn more
+
+P2: a take at O2, where the callee is inlined
+$ jet build -O2 take_arg.jet  (in the scratch directory)
+required effects: IO, Mem; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+
+$ jet debug --break take_arg.jet:5 .jet/build/take_arg  <<< 'bt; locals; f; locals; c'
+Breakpoint set  take_arg.jet:5
+Breakpoint hit  take_arg.jet:5  in run()
+5 |     items.push(9)        <- here
+Locals:  items = [1, 2, 3]   n = <Unavailable>   xs = <Unavailable>
+(Jet) bt
+#0  run()  at take_arg.jet:5
+(Jet) locals
+items: [Int] = [1, 2, 3]
+n: Int = <Unavailable>
+xs: [Int] = <Unavailable>
+(Jet) f
+4
+Program finished
+
+P3, P5, P7 and P4: the link checks over the runtime, and the entry points journey.jet's peeks reach
+$ jet emit --ir journey.jet > journey.ir
+(an IR listing of 857 lines; stderr: '')
+
+$ jet run journey.jet
+16
+6
+
+$ python3 linkchecks.py <repo> journey.ir 'peek|parse_twice|add_parsed'
+runtime functions: 7369, exported entry points: 3270, module globals: 147
+asm bodies in OS/Linux.jet: 95
+
+P5: asm bodies that transfer to an address not fixed at assembly
+  os_call0_unit (Linux.jet:2492): call through a register or memory; runtime callers in RawWords.jet
+  os_call1_i64 (Linux.jet:2282): call through a register or memory; runtime callers in RawWords.jet
+  os_call1_unit_i64 (Linux.jet:2240): call through a register or memory; runtime callers in RawWords.jet
+  os_call2_i64 (Linux.jet:2295): call through a register or memory; runtime callers in RawWords.jet
+  os_call2_unit_i64 (Linux.jet:2252): call through a register or memory; runtime callers in RawWords.jet
+  os_call3_i64 (Linux.jet:2310): call through a register or memory; runtime callers in RawWords.jet
+  os_call3_unit_i64 (Linux.jet:2266): call through a register or memory; runtime callers in RawWords.jet
+  os_call4_i64 (Linux.jet:2327): call through a register or memory; runtime callers in RawWords.jet
+  os_call5_i64 (Linux.jet:2346): call through a register or memory; runtime callers in RawWords.jet
+  os_call_address (Linux.jet:294): call through a register or memory; runtime callers in none
+  os_call_address_four_i64 (Linux.jet:2172): call through a register or memory; runtime callers in Thread.jet
+  os_call_address_i64 (Linux.jet:2141): call through a register or memory; runtime callers in Alloc.jet, Fault.jet, RawWords.jet, Thread.jet
+  os_call_address_one_unit (Linux.jet:348): call through a register or memory; runtime callers in none
+  os_call_address_three (Linux.jet:2604): call through a register or memory; runtime callers in none
+  os_call_address_three_unit (Linux.jet:332): call through a register or memory; runtime callers in none
+  os_call_address_two (Linux.jet:307): call through a register or memory; runtime callers in none
+  os_call_address_two_i64 (Linux.jet:2154): call through a register or memory; runtime callers in RawWords.jet, Sync.jet, Thread.jet
+  os_call_address_two_unit (Linux.jet:360): call through a register or memory; runtime callers in none
+  os_call_address_unit (Linux.jet:322): call through a register or memory; runtime callers in none
+  os_clone_i64 (Linux.jet:2199): call through a register or memory; runtime callers in HostSpawn.jet, Thread.jet
+  os_fiber_switch_i64 (Linux.jet:2090): ret on a stack loaded into rsp; runtime callers in Fiber.jet
+  os_gs_base_write_i64 (Linux.jet:2058): wrgsbase; runtime callers in Fiber.jet
+
+P3: futex waits issued directly, and the runtime functions that issue a syscall outside the §6.2 allow-list directly
+  Alloc.jet:alloc_lock (FUTEX_WAIT); no runtime state, no loaded address
+  Sync.jet:sync_futex_wait (FUTEX_WAIT); touches state
+  Sync.jet:sync_futex_wait (FUTEX_WAIT_BITSET); touches state
+  Sync.jet:sync_futex_wait_shared (FUTEX_WAIT); no runtime state, no loaded address
+  outside the allow-list: 110 functions
+today: 2 runtime functions pass the first two checks and reach a futex wait: alloc_lock, sync_futex_wait_shared
+  exported entry points passing the first two checks: 836; reaching a futex wait: 0; reaching a syscall outside the allow-list: 2
+    jet_fd_created_raw -> os_statx_created_i64 (syscall 332)
+    jet_term_write_stdout_line_direct -> os_write_line_i64 (syscall 20)
+with sync_futex_wait's timed scratch moved off the TCB: 9 runtime functions pass the first two checks and reach a futex wait: alloc_lock, compiler_mapped_close_slot, sync_futex_wait, sync_futex_wait_shared, sync_thread_lock, thread_fork_gate_hold, …
+  exported entry points passing the first two checks: 836; reaching a futex wait: 0; reaching a syscall outside the allow-list: 2
+    jet_fd_created_raw -> os_statx_created_i64 (syscall 332)
+    jet_term_write_stdout_line_direct -> os_write_line_i64 (syscall 20)
+the third check, no blocking syscall, refuses each of them by the path above
+
+P7: what the first three checks admit that writes memory
+exported entry points passing the three checks: 834; of them, reaching a store: 63; storing directly through a parameter: 2
+  RawWords.jet:jet_rt_mem_fill stores through a parameter with os_copy_ascending_i64, os_fill_words_i64, os_store_u8
+  RawWords.jet:jet_rt_mem_fill_bytes stores through a parameter with os_fill_16_32_i64, os_fill_1_3_i64, os_fill_32_64_i64, os_fill_4_7_i64, os_fill_64_128_i64, os_fill_64_i64, os_fill_8_16_i64, os_fill_string_i64
+  jet_char_len (r7scan.py's READERS): writes memory: jet_char_len -> rt_text_cache_store -> rt_text_store -> os_store_i64
+  jet_rt_atomic_bool_load (r7scan.py's READERS): writes no memory
+
+P4: the runtime entry points the eval functions of journey.ir call, by the three checks, under each stub table
+revision 3's stub table (260 runtime functions stubbed):
+  jet_int_owned_to_i64: state: jet_int_owned_to_i64 -> int_stop -> jet_rt_unreachable -> jet_rt_stdout_flush -> global host_root; loaded: jet_int_owned_to_i64 -> int_stop -> jet_rt_unreachable -> trap_defect_exit -> secret_scrub -> coll_call1; blocks: jet_int_owned_to_i64 -> int_stop -> jet_rt_unreachable -> jet_rt_stdout_flush -> host_stdout_flush_locked -> host_stdout_flush_locked (syscall 1)
+  jet_int_parse: state: jet_int_parse -> numeric_int_parse -> int_copy -> int_new -> rt_trap_invalid_box_layout -> jet_rt_stdout_flush -> global host_root; loaded: jet_int_parse -> numeric_int_parse -> int_copy -> int_new -> rt_trap_invalid_box_layout -> trap_footer -> trap_exit -> scheduler_report_domain -> scheduler_report_base -> trap_gs_failure -> trap_defect_exit -> secret_scrub -> coll_call1; blocks: jet_int_parse -> numeric_int_parse -> int_copy -> int_new -> rt_trap_invalid_box_layout -> jet_rt_stdout_flush -> host_stdout_flush_locked -> host_stdout_flush_locked (syscall 1)
+  jet_journey_frame_text: state: jet_journey_frame_text -> jet_rt_native_journey_frame -> err_rows_append -> rt_seq_capacity_overflow_stop -> jet_rt_stdout_flush -> global host_root; loaded: jet_journey_frame_text -> jet_rt_native_journey_frame -> err_rows_append -> rt_seq_capacity_overflow_stop -> trap_defect_exit -> secret_scrub -> coll_call1; blocks: jet_journey_frame_text -> jet_rt_native_journey_frame -> err_rows_append -> rt_seq_capacity_overflow_stop -> jet_rt_stdout_flush -> host_stdout_flush_locked -> host_stdout_flush_locked (syscall 1)
+  jet_journey_origin: state: jet_journey_origin -> journey_tls_value -> global journey_tls_key; loaded: jet_journey_origin -> journey_tls_value -> jet_rt_tls_set -> jet_rt_unreachable -> trap_defect_exit -> secret_scrub -> coll_call1; blocks: jet_journey_origin -> journey_tls_value -> jet_rt_tls_set -> jet_rt_unreachable -> jet_rt_stdout_flush -> host_stdout_flush_locked -> host_stdout_flush_locked (syscall 1)
+  jet_journey_reset: state: jet_journey_reset -> global journey_tls_key
+  jet_rt_alloc_value: stubbed
+  jet_rt_block_unique: stubbed
+  jet_rt_cleanup_enter: state: jet_rt_cleanup_enter -> jet_rt_session_cleanup_enter -> thread_base -> os_tls_base_i64 (gs:)
+  jet_rt_cleanup_leave: state: jet_rt_cleanup_leave -> jet_scheduler_shield_leave -> jet_deadline_remaining_ms -> jet_std_time_now -> global time_host_root; loaded: jet_rt_cleanup_leave -> jet_scheduler_shield_leave -> jet_deadline_remaining_ms -> jet_std_time_now -> deadline_wall_now_ms -> sync_clock_read -> os_call_address_two_i64; blocks: jet_rt_cleanup_leave -> jet_scheduler_shield_leave -> jet_deadline_remaining_ms -> jet_std_time_now -> deadline_wall_now_ms -> sync_clock_read -> sync_clock_read (syscall 228)
+  jet_rt_free: stubbed
+  jet_rt_handle_clone_jet_err: state: jet_rt_handle_clone_jet_err -> err_payload_retain -> jet_rt_native_closure_retain -> rt_seq_capacity_overflow_stop -> jet_rt_stdout_flush -> global host_root; loaded: jet_rt_handle_clone_jet_err -> err_payload_retain -> jet_rt_native_closure_retain -> rt_seq_capacity_overflow_stop -> trap_defect_exit -> secret_scrub -> coll_call1; blocks: jet_rt_handle_clone_jet_err -> err_payload_retain -> jet_rt_native_closure_retain -> rt_seq_capacity_overflow_stop -> jet_rt_stdout_flush -> host_stdout_flush_locked -> host_stdout_flush_locked (syscall 1)
+  jet_rt_int_clone: state: jet_rt_int_clone -> jet_rt_unreachable -> jet_rt_stdout_flush -> global host_root; loaded: jet_rt_int_clone -> jet_rt_unreachable -> trap_defect_exit -> secret_scrub -> coll_call1; blocks: jet_rt_int_clone -> jet_rt_unreachable -> jet_rt_stdout_flush -> host_stdout_flush_locked -> host_stdout_flush_locked (syscall 1)
+  jet_rt_record_new_jet_err: passes
+  jet_rt_string_builder_finish: passes
+  jet_rt_string_builder_push: state: jet_rt_string_builder_push -> rt_text_append -> rt_text_reserve_extra -> rt_seq_capacity_overflow_stop -> jet_rt_stdout_flush -> global host_root; loaded: jet_rt_string_builder_push -> rt_text_append -> rt_text_reserve_extra -> rt_seq_capacity_overflow_stop -> trap_defect_exit -> secret_scrub -> coll_call1; blocks: jet_rt_string_builder_push -> rt_text_append -> rt_text_reserve_extra -> rt_seq_capacity_overflow_stop -> jet_rt_stdout_flush -> host_stdout_flush_locked -> host_stdout_flush_locked (syscall 1)
+  jet_rt_string_builder_push_static: state: jet_rt_string_builder_push_static -> rt_text_append -> rt_text_reserve_extra -> rt_seq_capacity_overflow_stop -> jet_rt_stdout_flush -> global host_root; loaded: jet_rt_string_builder_push_static -> rt_text_append -> rt_text_reserve_extra -> rt_seq_capacity_overflow_stop -> trap_defect_exit -> secret_scrub -> coll_call1; blocks: jet_rt_string_builder_push_static -> rt_text_append -> rt_text_reserve_extra -> rt_seq_capacity_overflow_stop -> jet_rt_stdout_flush -> host_stdout_flush_locked -> host_stdout_flush_locked (syscall 1)
+  jet_rt_string_builder_value: passes
+  the link refuses 11 of the 17 entry points
+revision 4's stub table (554 runtime functions stubbed):
+  jet_int_owned_to_i64: passes
+  jet_int_parse: passes
+  jet_journey_frame_text: stubbed
+  jet_journey_origin: stubbed
+  jet_journey_reset: stubbed
+  jet_rt_alloc_value: stubbed
+  jet_rt_block_unique: stubbed
+  jet_rt_cleanup_enter: stubbed
+  jet_rt_cleanup_leave: stubbed
+  jet_rt_free: stubbed
+  jet_rt_handle_clone_jet_err: passes
+  jet_rt_int_clone: passes
+  jet_rt_record_new_jet_err: passes
+  jet_rt_string_builder_finish: passes
+  jet_rt_string_builder_push: passes
+  jet_rt_string_builder_push_static: passes
+  jet_rt_string_builder_value: passes
+  the link refuses 0 of the 17 entry points
+
+$ jet emit --ir r7_scan.jet > r7_scan.ir
+(an IR listing of 1408 lines; stderr: '')
+
+$ python3 r7scan.py r7_scan.ir --readers jet_rt_atomic_bool_load
+run.lambda@539 placeable: allocates its result only
+run.lambda@588 fork per hit: run.lambda@588: runtime jet_char_len
+run.lambda@665 placeable: allocates its result only
+run.lambda@716 fork per hit: run.lambda@716: call s20 <- 19 2 2 (s4, s18); run.lambda@716: call s21 <- 19 4 0 () ; jet_ir_stop_poll#asm; run.lambda@716: runtime jet_rt_alloc; run.lambda@716: runtime jet_rt_block_release; run.lambda@716: runtime jet_rt_free; run.lambda@716: runtime jet_rt_mem_move; run.lambda@716: store through s4; run.lambda@716: store through s46; run.lambda@716: store through s8
+run.lambda@796 fork per hit: run.lambda@796: runtime jet_rt_atomic_bool_store
+run.lambda@892 placeable: allocates its result only
+
+P6: one source, two images
+source sha256: e056b6ab32d21633
+
+$ jet build bounds.jet  (in the scratch directory)
+required effects: IO; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+
+image sha256: 789a73872f4cd3ec
+
+$ .jet/build/bounds  (built with the stock options)
+2
+Stop [E3010]: `the list has 3 items, so position 5 doesn't exist`
+  --> bounds.jet:4:43 in peek
+    |
+4 | peek: fn(xs: [Int], at: Int) -[]> Int { xs[at] }
+    |                                           ^^^^
+locals: at = 5
+ Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.
+ Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.
+More: jet-lang.dev/e/E3010
+
+$ jet build --bounds=report bounds.jet  (in the scratch directory)
+note: `--bounds=report` removes bounds checks from this package's code (check_removal gate)
+required effects: IO; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+
+image sha256: 2c6c1d4adc175d9d
+
+$ .jet/build/bounds  (built with --bounds=report)
+2
+1
+went on
+bounds report: the list has 3 items, so position 5 doesn't exist (bounds.jet:4)
+
+P8: two instances of one generic module, and a top-level Shared global
+$ jet run genmod.jet
+9
+65
+2
+
+$ jet debug --break genmod.jet:6 genmod.jet  <<< 'bt; c'
+Breakpoint set  genmod.jet:6
+9
+65
+2
+Program finished
+
+$ jet debug --break genmod.jet:16 genmod.jet  <<< 's; bt; c'
+Breakpoint set  genmod.jet:16
+Breakpoint hit  genmod.jet:16  in run()
+16 |     print(small.bump())        <- here
+Locals:  (none)
+(Jet) s
+17 |     print(large.bump())        <- here
+Locals:  (none)
+(Jet) bt
+#0  run()  at genmod.jet:17
+(Jet) c
+9
+65
+2
+Program finished
+
+$ jet emit --ir genmod.jet > genmod.ir
+(an IR listing of 124 lines; stderr: '')
+
+the instance functions of genmod.ir, and the body of one:
+  run: 35: call 6 7 0 () ; #storage.start<module:14:source-root:0::genmod.jet::tally>
+  fn __jet_large_dbump [function:module:14:source-root:0::genmod.jet::__jet_large_dbump]
+  fn __jet_small_dbump [function:module:14:source-root:0::genmod.jet::__jet_small_dbump]
+    s0 temp _: Bool/1
+    s1 temp _: Int/8
+    s2 temp _: Int/8
+    s3 temp _: Int/8
+    0: const s1 <- 8 -1 -1
+    1: const s2 <- 1 -1 -1
+    2: add s3 <- 1 2 0
+    3: return 3 -1 -1
+    4: unreachable -1 -1 -1
+
+$ jet check genmod_mutable.jet
+Error [jet.InvalidStatement]: Expected a function, struct, enum, or other item inside a module, found the name `hits`
+  --> genmod_mutable.jet:4:5
+    |
+  4 |     hits := start
+    |     ^^^^
+ Why: An inline code module body may only contain top-level items
+ Fix: Example: `double: fn(n: Int) -> Int { return n * 2 }`
+More: jet-lang.dev/e/E0003
+
+1 problem found
+Run `jet explain E0003` to learn more
+
+the control: a breakpoint on a one-line function outside a generic module
+$ jet debug --break bounds.jet:4 bounds.jet  <<< 'bt; c; c'
+Breakpoint set  bounds.jet:4
+Breakpoint hit  bounds.jet:4  in peek()
+4 | peek: fn(xs: [Int], at: Int) -[]> Int { xs[at] }        <- here
+Locals:  at = 1   xs = [1, 2, 3]
+(Jet) bt
+#0  peek()  at bounds.jet:4
+#1  run()  at bounds.jet:8
+(Jet) c
+2
+Breakpoint hit  bounds.jet:4  in peek()
+4 | peek: fn(xs: [Int], at: Int) -[]> Int { xs[at] }        <- here
+Locals:  at = 5   xs = [1, 2, 3]
+(Jet) c
+Stop [E3010]: `the list has 3 items, so position 5 doesn't exist`
+  --> bounds.jet:4:43 in peek
+    |
+4 | peek: fn(xs: [Int], at: Int) -[]> Int { xs[at] }
+    |                                           ^^^^
+locals: at = 5
+ Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.
+ Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.
+More: jet-lang.dev/e/E3010
+Program finished with exit status 70
+

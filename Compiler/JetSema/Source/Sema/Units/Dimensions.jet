@@ -144,7 +144,7 @@ sema_units_dimension_reads: fn(expression: Expr, visible: SemaUnitDimensionVisib
 // identity joined with the package-root-relative module path. Never derive
 // package identity from cwd, display labels or root text.
 sema_units_owner: fn(input: SemaRegistrationModuleInput) -> {package: String, module_identity: String} Never! {
-    {module_identity: "{input.package_identity}::{input.module_path}", package: input.package_identity}
+    {module_identity: "{input.package_identity}.{input.module_path}", package: input.package_identity}
 }
 
 sema_units_resolve_standard: fn(prelude: &[UnitFamilyDef]) Never! {
@@ -153,7 +153,7 @@ sema_units_resolve_standard: fn(prelude: &[UnitFamilyDef]) Never! {
     loop (index, family) in prelude {
         local[family.family] = index
         if family.dimension == .Val(claim) {
-            if claim == .Base(_) -> known[index] = dimension_base("core.units::{family.family}")
+            if claim == .Base(_) -> known[index] = dimension_base("core.units.{family.family}")
         }
     }
     visible: SemaUnitDimensionVisibility{local: local, imported: [String:[Int]]{}, qualified: [String:Int]{}, aliases: [String:Int]{}}
@@ -218,7 +218,7 @@ sema_units_resolve: fn(inputs: &[SemaRegistrationModuleInput], edges: [SemaRegis
     }
     loop (index, declaration) in declarations {
         if declaration.preset == .Val(value) -> known[index] = value else if declaration.claim == .Base(_) {
-            known[index] = dimension_base("{sema_units_owner(inputs[declaration.module_index]).module_identity}::{declaration.family}")
+            known[index] = dimension_base("{sema_units_owner(inputs[declaration.module_index]).module_identity}.{declaration.family}")
         }
     }
     loop (index, declaration) in declarations {

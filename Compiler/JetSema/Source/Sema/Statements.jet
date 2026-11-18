@@ -2124,7 +2124,7 @@ sema_stmt_for_in_named_type_name: fn(ty: Type) -> String? {
 
 sema_stmt_for_in_type_is_named: fn(ty: Type, name: String) -> Bool Never! {
     actual: sema_stmt_for_in_named_type_name(ty) ?? return false
-    actual == name || actual.ends_with("::{name}")
+    actual == name || actual.ends_with(".{name}")
 }
 
 sema_stmt_for_in_type_requires_owned_iteration: fn(ty: Type) -> Bool Never! {
@@ -6168,7 +6168,7 @@ sema_stmt_check_binding: fn(binding: Binding, lambda_escapes: Bool?, environment
     }
     if binding.arena_view -> return None
     // A lambda is already its value, and a function is no compile-time data:
-    // `name :: #run { () -> … }` binds the lambda as a runtime binding does.
+    // `name: #run { () -> … }` binds the lambda as a runtime binding does.
     if binding.is_comptime && !(binding.init == .Lambda(_, _)) {
         return sema_stmt_check_prepared_binding(binding, environment, program, scopes, state, tail_store, context, diagnostics)
     }
@@ -9551,7 +9551,7 @@ sema_stmt_is_written_carrier: fn(value: Expr, expected: Type?, scopes: SemaScope
 }
 
 // An optional, or a Result whose failure is reachable (the Rust reference's
-// `Type::is_fallible`).
+// `Type.is_fallible`).
 sema_stmt_type_is_fallible: fn(ty: Type) -> Bool Never! {
     if sema_expr_unwrap_tag(ty) == {
         .Option(_) -> true
@@ -10915,11 +10915,11 @@ sema_stmt_deadline_guard: fn(limit: &&TExpr, span: Span) -> TContextGuard Never!
 }
 
 // Whether a `#Deadline` bound is an `Instant`: the built-in time point or
-// Core/Time's source struct (`<corelib>/...::Instant`), which `time.instant()`
+// Core/Time's source struct (`<corelib>/....Instant`), which `time.instant()`
 // returns.
 sema_stmt_deadline_instant: fn(ty: Type) -> Bool Never! {
     if ty == .Named(name) {
-        return name == "Instant" || (name.ends_with("::Instant") && core_source_owns_type(name))
+        return name == "Instant" || (name.ends_with(".Instant") && core_source_owns_type(name))
     }
     false
 }
@@ -11531,7 +11531,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                     }
                 }
                 // Rust checks any other switched marker's body as a plain
-                // block (`Stmt::Switched` fallback).
+                // block (`Stmt.Switched` fallback).
                 else -> {
                     nested: sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "switched@{span.start}", loop_depth)
                     if {

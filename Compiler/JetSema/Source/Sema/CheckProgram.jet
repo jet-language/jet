@@ -30,6 +30,7 @@ use jet_foundation.[
     SemaNameCase,
     sema_casing_has_case,
     core_module_export,
+    core_path_parts,
     module_index,
     module_is_core,
     module_is_none,
@@ -135,22 +136,22 @@ use jet_foundation.[
 // pins this list against Rust TargetSurface and rejects unknown Core members.
 sema_web_host_unsupported_core_apis: fn() -> [String] Never! {
     [String]{
-        "core.auth::magic_link_consume",
-        "core.auth::magic_link_issue",
-        "core.auth::oauth_begin",
-        "core.auth::oauth_finish",
-        "core.auth::password_login",
-        "core.auth::register_user",
-        "core.auth::session_validate",
-        "core.sys::decode",
-        "core.sys::expand",
-        "core.sys::get",
-        "core.sys::getenv",
-        "core.sys::home_dir",
-        "core.sys::set",
-        "core.sys::temp_dir",
-        "core.sys::unset",
-        "core.sys::vars",
+        "core.auth.magic_link_consume",
+        "core.auth.magic_link_issue",
+        "core.auth.oauth_begin",
+        "core.auth.oauth_finish",
+        "core.auth.password_login",
+        "core.auth.register_user",
+        "core.auth.session_validate",
+        "core.sys.decode",
+        "core.sys.expand",
+        "core.sys.get",
+        "core.sys.getenv",
+        "core.sys.home_dir",
+        "core.sys.set",
+        "core.sys.temp_dir",
+        "core.sys.unset",
+        "core.sys.vars",
     }
 }
 
@@ -160,7 +161,7 @@ sema_web_host_check_core_usage: fn(target_name: String, used_core: [String], dia
     complete := true
     loop usage in used_core {
         if !unsupported.contains(usage) -> next
-        operation: usage.replace("::", ".")
+        operation: usage.replace(".", ".")
         diagnostics.push(
             sema_error_optional(
                 "E-WEB-UNSUPPORTED",
@@ -195,7 +196,7 @@ sema_target_socket_surface: fn(path: String) -> String? Never! {
 sema_target_wasip2_unsupported_operations: fn(used_core: [String]) -> [String] Never! {
     operations := [String]{}
     loop usage in used_core {
-        separator: usage.find("::")
+        separator: usage.find(".")
         if separator < 0 -> next
         module_name: foundation_byte_text(usage.bytes(), 0, separator)
         member: foundation_byte_text(usage.bytes(), separator + 2, usage.count_bytes())
@@ -1691,7 +1692,7 @@ sema_function_is_consuming_close_body: fn(func: Func, module_identity: ModuleID,
 }
 
 sema_function_close_trait_leaf: fn(trait_name: String) -> Bool Never! {
-    parts: trait_name.split("::").to_list()
+    parts: trait_name.split(".").to_list()
     parts[parts.len() - 1] == "Close"
 }
 
@@ -3733,7 +3734,7 @@ sema_check_registration_module_program: fn(environment: SemaScopeEnvironment, pr
                 // methods before registration (sema_protocols_expand); the
                 // declaration itself has no checked body.
                 .ProtocolDecl(_) -> {}
-                // `Item::Module(_) => {}`: a role module (`env.*`, `perf.*`,
+                // `Item.Module(_) => {}`: a role module (`env.*`, `perf.*`,
                 // `dev`, `workspace`) carries no checked body; its
                 // contributions are validated by their own passes.
                 .Module(_) -> {}
@@ -5941,10 +5942,11 @@ sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, g
             if symbol_is_local(callee) -> next
             leaf: sema_soft_public_written_leaf(raw, call.span) ?? next
             callee_key: sema_program_symbol_key(program, callee)
-            owner_and_rest: callee_key.split_once(":") ?? next
-            module_and_rest: owner_and_rest.after.split_once(":") ?? next
-            owner: module_and_rest.before
-            if owner == "" || owner == module_identity -> next
+            // The callee's module identity follows its key's kind
+            // (symbol_key_text); a builtin, which no module registers, has
+            // none.
+            path: callee_key.split_once(":") ?? next
+            if path.after.starts_with("{module_identity}.") || sema_registration_callable_row(graph, callee_key) == None -> next
             sema_soft_public_warn(leaf, seen, module_result.diagnostics)
         }
         sema_check_soft_public_signatures(graph.modules[module_index], raw, seen, module_result.diagnostics)
@@ -9439,8 +9441,8 @@ sema_comptime_add_marker_source: fn(sources: &SemaComptimeSourceList, graph: Sem
     }
     if marker.args[0] == {
         .Expr(expression) -> {
-            destination_key := "{owner_key}::marker::{marker.name}::{marker.name_span.start}"
-            key := "{module_text(graph.module_table, module_identity)}::{destination_key}"
+            destination_key: "{owner_key}.marker.{marker.name}.{marker.name_span.start}"
+            key: "{module_text(graph.module_table, module_identity)}.{destination_key}"
             sema_comptime_add_source(sources, graph, module_identity, key, destination_key, marker.name, SemaComptimeItemKind.MarkerArgument, expression, expected_type)
         }
         .EffectRow(_, _) -> {}
@@ -9455,13 +9457,13 @@ sema_comptime_add_meta_sources: fn(sources: &SemaComptimeSourceList, graph: Sema
     loop field in value.fields {
         if field == {
             .Category(expression, span) -> {
-                destination_key := "{owner_key}::meta::category::{span.start}"
-                sema_comptime_add_source(sources, graph, module_identity, "{module_text(graph.module_table, module_identity)}::{destination_key}", destination_key, "category", SemaComptimeItemKind.MarkerArgument, expression, Val(Type.String))
+                destination_key: "{owner_key}.meta.category.{span.start}"
+                sema_comptime_add_source(sources, graph, module_identity, "{module_text(graph.module_table, module_identity)}.{destination_key}", destination_key, "category", SemaComptimeItemKind.MarkerArgument, expression, Val(Type.String))
             }
             .Unknown(name, expression, span) -> {
                 if expression == .Val(source_expression) {
-                    destination_key := "{owner_key}::meta::{name}::{span.start}"
-                    sema_comptime_add_source(sources, graph, module_identity, "{module_text(graph.module_table, module_identity)}::{destination_key}", destination_key, name, SemaComptimeItemKind.MarkerArgument, source_expression, None)
+                    destination_key: "{owner_key}.meta.{name}.{span.start}"
+                    sema_comptime_add_source(sources, graph, module_identity, "{module_text(graph.module_table, module_identity)}.{destination_key}", destination_key, name, SemaComptimeItemKind.MarkerArgument, source_expression, None)
                 }
             }
             // `maturity:` names the parser's closed documentation scale, read
@@ -9475,7 +9477,7 @@ sema_comptime_add_meta_sources: fn(sources: &SemaComptimeSourceList, graph: Sema
 // owner key of a function with a `#Meta` alone (sema_comptime_function_has_sources).
 sema_comptime_add_function_sources: fn(sources: &SemaComptimeSourceList, graph: SemaRegistrationGraph, source_module: SemaRegistrationModule, function: Func, owner_key: String) {
     // A function or method marker sits on a dynamic site: Rust
-    // `CheckerMarkers::resolve_static_rule_products` (`static_product_site`)
+    // `CheckerMarkers.resolve_static_rule_products` (`static_product_site`)
     // stages no value for it and discards its evaluation errors, because its
     // arguments may be menu words (`#Inline(Always)`, `#Job(.Dev)`) or name
     // locals; ordinary marker validation reads those arguments instead.
@@ -9524,7 +9526,7 @@ sema_comptime_add_module_item_sources: fn(sources: &SemaComptimeSourceList, grap
                     if field.default != None && field.default_ct == None {
                         expression: field.default ?? Expr.Unit{span: field.name_span, id: AST_NODE_GENERATED}
                         destination_key := symbol_table_key(graph.symbols, symbol.id)
-                        key := "{destination_key}::default"
+                        key: "{destination_key}.default"
                         added: sources.items.len()
                         sema_comptime_add_source(sources, graph, source_module.module_identity, key, destination_key, "{definition.name}.{field.name}", SemaComptimeItemKind.FieldDefault, expression, Val(field.ty))
                         if sources.items.len() > added {
@@ -9540,13 +9542,13 @@ sema_comptime_add_module_item_sources: fn(sources: &SemaComptimeSourceList, grap
             }
             loop function in definition.methods {
                 if sema_comptime_function_has_sources(function) {
-                    sema_comptime_add_function_sources(sources, graph, source_module, function, "{nominal_key}::{function.name}")
+                    sema_comptime_add_function_sources(sources, graph, source_module, function, "{nominal_key}.{function.name}")
                 }
             }
             loop block in definition.trait_impls {
                 loop function in block.methods {
                     if sema_comptime_function_has_sources(function) {
-                        sema_comptime_add_function_sources(sources, graph, source_module, function, "{nominal_key}::{function.name}")
+                        sema_comptime_add_function_sources(sources, graph, source_module, function, "{nominal_key}.{function.name}")
                     }
                 }
             }
@@ -9573,23 +9575,23 @@ sema_comptime_add_module_item_sources: fn(sources: &SemaComptimeSourceList, grap
                         symbol: registered_symbol ?? return
                         expression: variant.discriminant_expr ?? Expr.Unit{span: variant.name_span, id: AST_NODE_GENERATED}
                         destination_key := symbol_table_key(graph.symbols, symbol.id)
-                        key := "{destination_key}::discriminant"
+                        key: "{destination_key}.discriminant"
                         sema_comptime_add_source(sources, graph, source_module.module_identity, key, destination_key, "{definition.name}.{variant.name}", SemaComptimeItemKind.TypeLevel, expression, Val(Type.Int))
                     }
                 }
                 loop marker in variant.serde_markers {
-                    sema_comptime_add_marker_source(sources, graph, source_module.module_identity, "{nominal_key}::{variant.name}", marker, None)
+                    sema_comptime_add_marker_source(sources, graph, source_module.module_identity, "{nominal_key}.{variant.name}", marker, None)
                 }
             }
             loop function in definition.methods {
                 if sema_comptime_function_has_sources(function) {
-                    sema_comptime_add_function_sources(sources, graph, source_module, function, "{nominal_key}::{function.name}")
+                    sema_comptime_add_function_sources(sources, graph, source_module, function, "{nominal_key}.{function.name}")
                 }
             }
             loop block in definition.trait_impls {
                 loop function in block.methods {
                     if sema_comptime_function_has_sources(function) {
-                        sema_comptime_add_function_sources(sources, graph, source_module, function, "{nominal_key}::{function.name}")
+                        sema_comptime_add_function_sources(sources, graph, source_module, function, "{nominal_key}.{function.name}")
                     }
                 }
             }
@@ -10500,12 +10502,12 @@ sema_runtime_ceiling_import_alias: fn(declaration: ImportDecl, module_name: Stri
 // How a written usage reaches its Core helper: the ambient `input` helper,
 // an import of the helper's module, or the prelude itself.
 sema_runtime_ceiling_helper_chain: fn(usage: String, imports: [ImportDecl]) -> String Never! {
-    if usage == "core.term::__input_lines" -> return "ambient `input` (helper `{usage}`)"
-    parts: usage.split("::").to_list()
-    if parts.len() > 1 {
+    if usage == "core.term.__input_lines" -> return "ambient `input` (helper `{usage}`)"
+    parts: core_path_parts(usage)
+    if parts.member != "" {
         loop declaration in imports {
             loop module_name in sema_runtime_ceiling_import_modules(declaration) {
-                if module_name == parts[0] {
+                if module_name == parts.module_name {
                     return "`use {sema_runtime_ceiling_import_alias(declaration, module_name)}: {module_name}` → `{usage}`"
                 }
             }

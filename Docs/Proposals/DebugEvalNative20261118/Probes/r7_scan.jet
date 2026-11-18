@@ -1,0 +1,30 @@
+// Probe G13/N6: the conditions R7 would place, as eval lambdas with their
+// concrete result types. Which ones reach a runtime call other than the
+// result's allocation, an atomic operation, or a store outside memory the
+// lambda allocated itself?
+jet_debug_bool: fn(body: fn() -[]> Bool) -[]> Bool { body() }
+
+Stats: struct {
+    hits: Int,
+    name: String,
+}
+
+run: fn() {
+    xs := [Int]{1, 2}
+    xs.push(3)
+    flag: Atomic<Bool>.try_new(false) ?? panic("no flag")
+    stats: Stats{hits: 3, name: "probe"}
+    print(jet_debug_bool(fn() { xs.len() > 2 }))
+    print(jet_debug_bool(fn() { stats.hits == 3 && stats.name.len() == 5 }))
+    print(jet_debug_bool(fn() { xs.contains(2) }))
+    print(jet_debug_bool(fn() { xs.map(fn(x) { x * 2 }).sum() > 10 }))
+    print(
+        jet_debug_bool(fn() {
+            flag.store(true)
+            true
+        }),
+    )
+    print(jet_debug_bool(fn() { flag.load() }))
+    xs.push(4)
+    print(xs.len())
+}

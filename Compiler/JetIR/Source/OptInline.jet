@@ -553,7 +553,7 @@ ir_opt_emit_mapped: fn(f: &IRFunction, callee: IRFunction, k: Int, map: [Int], l
     name_rows_set(m.name_rows, IR_STOP_POLL_KEY, poll)
     int: ir_type_row(m, Type.Int) ?? panic("no Int row")
     flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-    f := ir_function_new("f", "test:cost.jet::f", "", "cost.jet", 1)
+    f := ir_function_new("f", "test:cost.jet.f", "", "cost.jet", 1)
     n: ir_slot(f, int, IRSlotKind.Param, -1, 1)
     f.result = int
     bad: ir_slot(f, flag, IRSlotKind.Temp, -1, 0)
@@ -589,13 +589,13 @@ ir_opt_inline_test_calls_left: fn(op: IROp) -> Int Never! {
     name_rows_set(m.name_rows, IR_STOP_POLL_KEY, poll)
     int: ir_type_row(m, Type.Int) ?? panic("no Int row")
     flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
-    g := ir_function_new("g", "test:quiet.jet::g", "", "quiet.jet", 1)
+    g := ir_function_new("g", "test:quiet.jet.g", "", "quiet.jet", 1)
     n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
     g.result = int
     v: ir_slot(g, int, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(g, op, v, n, n, -1, 2)
     _ := ir_emit(g, IROp.Return, -1, v, -1, -1, 2)
-    f := ir_function_new("f", "test:quiet.jet::f", "", "quiet.jet", 4)
+    f := ir_function_new("f", "test:quiet.jet.f", "", "quiet.jet", 4)
     x: ir_slot(f, int, IRSlotKind.Param, -1, 4)
     f.result = int
     r: ir_slot(f, int, IRSlotKind.Temp, -1, 0)
@@ -628,7 +628,7 @@ ir_opt_inline_test_calls_left: fn(op: IROp) -> Int Never! {
 // Function `name` of marked.jet, marked `#Inline(Always)`: its Int
 // parameter passed to function `callee`, whose result it returns.
 ir_opt_inline_test_caller: fn(name: String, callee: Int, int: Int) -> IRFunction Never! {
-    f := ir_function_new(name, "test:marked.jet::{name}", "", "marked.jet", 4)
+    f := ir_function_new(name, "test:marked.jet.{name}", "", "marked.jet", 4)
     f.inline_always = true
     x: ir_slot(f, int, IRSlotKind.Param, -1, 4)
     f.result = int
@@ -650,7 +650,7 @@ ir_opt_inline_test_calls: fn(f: IRFunction) -> Int Never! {
 #Test("Every marked call is inlined, each marked callee first; a cycle of marked calls stays a call") {
     m := ir_module_new()
     int: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    g := ir_function_new("g", "test:marked.jet::g", "", "marked.jet", 1)
+    g := ir_function_new("g", "test:marked.jet.g", "", "marked.jet", 1)
     g.inline_always = true
     n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
     g.result = int
@@ -744,7 +744,7 @@ ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param
     m := ir_module_new()
     row: ir_type_row(m, param) ?? panic("no parameter row")
     passed: ir_type_row(m, arg) ?? panic("no argument row")
-    g := ir_function_new("g", "test:{file}::g", "", file, 1)
+    g := ir_function_new("g", "test:{file}.g", "", file, 1)
     n: ir_slot(g, row, IRSlotKind.Param, -1, 1)
     g.result = row
     v: ir_slot(g, row, IRSlotKind.Temp, -1, 0)
@@ -825,7 +825,7 @@ ir_opt_inline_test_module: fn(file: String, body: IROp, write_param: Bool, param
 ir_opt_inline_test_located: fn(divisor: Int?) -> Bool Never! {
     m := ir_module_new()
     int: ir_type_row(m, Type.Int) ?? panic("no Int row")
-    g := ir_function_new("g", "test:kernel.jet::g", "", "kernel.jet", 1)
+    g := ir_function_new("g", "test:kernel.jet.g", "", "kernel.jet", 1)
     n: ir_slot(g, int, IRSlotKind.Param, -1, 1)
     g.result = int
     by := n

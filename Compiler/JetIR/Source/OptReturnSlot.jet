@@ -488,7 +488,7 @@ ir_opt_slot_test_module: fn(forward: Bool, bytes: Int) -> IRModule Never! {
     alloc: ir_intern_name(m, "jet_rt_alloc")
     unique: ir_intern_name(m, "jet_rt_block_unique")
     free: ir_intern_name(m, "jet_rt_free")
-    make := ir_function_new("make", "test:slot.jet::make", "", "slot.jet", 1)
+    make := ir_function_new("make", "test:slot.jet.make", "", "slot.jet", 1)
     x: ir_slot(make, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     make.result = boxed
     size: ir_slot(make, word, IRSlotKind.Temp, -1, 0)
@@ -508,7 +508,7 @@ ir_opt_slot_test_module: fn(forward: Bool, bytes: Int) -> IRModule Never! {
     m.functions.push(make)
     callee := 0
     if forward {
-        pass := ir_function_new("pass", "test:slot.jet::pass", "", "slot.jet", 4)
+        pass := ir_function_new("pass", "test:slot.jet.pass", "", "slot.jet", 4)
         y: ir_slot(pass, word, IRSlotKind.Param, ir_intern_name(m, "y"), 4)
         pass.result = boxed
         got: ir_slot(pass, boxed, IRSlotKind.Temp, -1, 0)
@@ -520,7 +520,7 @@ ir_opt_slot_test_module: fn(forward: Bool, bytes: Int) -> IRModule Never! {
         name_rows_set(m.function_rows, pass.key, callee)
         m.functions.push(pass)
     }
-    run := ir_function_new("run", "test:slot.jet::run", "", "slot.jet", 7)
+    run := ir_function_new("run", "test:slot.jet.run", "", "slot.jet", 7)
     run.result = word
     seed: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(run, IROp.Const, seed, 3, -1, -1, 8)
@@ -586,7 +586,7 @@ ir_opt_slot_test_wide: fn(users: Int, leak: Bool) -> IRModule Never! {
 // box.
 ir_opt_slot_test_use: fn(m: &IRModule, word: Int, boxed: Int, k: Int, leaks: Bool) -> IRFunction Never! {
     line: 20 + k
-    f := ir_function_new("use{k}", "test:slot.jet::use{k}", "", "slot.jet", line)
+    f := ir_function_new("use{k}", "test:slot.jet.use{k}", "", "slot.jet", line)
     n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), line)
     got: ir_slot(f, boxed, IRSlotKind.Temp, -1, 0)
     passed: ir_args(f, [Int]{n})
@@ -624,7 +624,7 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
     alloc: ir_intern_name(m, "jet_rt_alloc")
     unique: ir_intern_name(m, "jet_rt_block_unique")
     free: ir_intern_name(m, "jet_rt_free")
-    make := ir_function_new("make", "test:quad.jet::make", "", "quad.jet", 1)
+    make := ir_function_new("make", "test:quad.jet.make", "", "quad.jet", 1)
     x: ir_slot(make, word, IRSlotKind.Param, ir_intern_name(m, "x"), 1)
     make.result = boxed
     size: ir_slot(make, word, IRSlotKind.Temp, -1, 0)
@@ -647,7 +647,7 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
     ir_opt_compact(make)
     name_rows_set(m.function_rows, make.key, 0)
     m.functions.push(make)
-    run := ir_function_new("run", "test:quad.jet::run", "", "quad.jet", 7)
+    run := ir_function_new("run", "test:quad.jet.run", "", "quad.jet", 7)
     run.result = word
     seed: ir_slot(run, word, IRSlotKind.Temp, -1, 0)
     _ := ir_emit(run, IROp.Const, seed, 3, -1, -1, 8)
@@ -764,7 +764,7 @@ ir_opt_slot_test_quad: fn(glue: String) -> IRModule Never! {
         }
         assert_eq(eight.functions[0].param_count, if leak -> 1 else -> 2)
         assert_eq(eight.types.len(), one.types.len())
-        assert_eq(name_rows_value(eight.function_rows, "test:slot.jet::use3") ?? -1, 5)
+        assert_eq(name_rows_value(eight.function_rows, "test:slot.jet.use3") ?? -1, 5)
         assert_eq(name_rows_value(eight.name_rows, "jet_rt_free") ?? -1, name_rows_value(one.name_rows, "jet_rt_free") ?? -2)
     }
 }

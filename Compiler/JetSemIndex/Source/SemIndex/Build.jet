@@ -42,6 +42,9 @@ use {
         ast_stmt,
         authority_covers,
         core_identity_module,
+        core_path_module,
+        foundation_byte_text,
+        symbol_key_leaf_start,
         derivation_identity,
         derivation_record,
         failure_contract_shown_return,
@@ -1653,25 +1656,43 @@ semindex_sorted_unique: fn(values: [String]) -> [String] Never! {
     output
 }
 
-// sema `symbol_id` keys are `kind:{identity: module}:{owner}:{name}`; the
+// sema keys are `kind:{module}.{owner}.{name}`, with no owner segment for a
+// free function and no module one for a builtin (symbol_key_text); the
 // effect graph keys a function by its dotted source path, `alias.name` or
-// `alias.Owner.name`. A module identity holds `:` itself (its source root and
-// path), so the owner and name are the last two fields and the identity is
-// everything between.
+// `alias.Owner.name`. A module identity holds `.` and `:` itself (its source
+// root and path), so the module of a key is found, not cut.
 SemFunctionKey: struct {
     module_identity: String,
     local: String,
 }
 
-semindex_function_key: fn(key: String) -> SemFunctionKey? Never! {
-    parts: key.split(":").to_list()
-    if parts.len() < 4 -> return None
-    name: parts[parts.len() - 1]
-    owner: parts[parts.len() - 2]
-    identity_parts := [String]{}
-    loop index in 1..<parts.len() - 2 -> identity_parts.push(parts[index])
-    local: if owner == "" -> name else -> "{owner}.{name}"
-    Val(SemFunctionKey{module_identity: identity_parts.join(":"), local: local})
+// `key` cut into its module and its local key: the module is the longest
+// prefix, cut at a `.` before the name, that `modules` holds (by module
+// identity) or that is a Core module; a key with neither is a free function
+// of the text before its name.
+semindex_function_key: fn(key: String, modules: [String:String]) -> SemFunctionKey? Never! {
+    path: key.split_once(":") ?? return None
+    name_start: symbol_key_leaf_start(path.after)
+    if name_start == 0 -> return Val(SemFunctionKey{module_identity: "", local: path.after.move()})
+    bytes: path.after.bytes()
+    at := name_start - 1
+    loop at > 0 {
+        if bytes[at] == (U8{46}) {
+            module_identity: foundation_byte_text(bytes, 0, at)
+            if modules.has_key(module_identity) || semindex_core_module_identity(module_identity) {
+                return Val(SemFunctionKey{module_identity: module_identity, local: foundation_byte_text(bytes, at + 1, bytes.len())})
+            }
+        }
+        at -= 1
+    }
+    Val(SemFunctionKey{module_identity: foundation_byte_text(bytes, 0, name_start - 1), local: foundation_byte_text(bytes, name_start, bytes.len())})
+}
+
+// Whether `identity` is a Core module's (`<corelib>/core.files`).
+semindex_core_module_identity: fn(identity: String) -> Bool Never! {
+    if !identity.starts_with("<corelib>/") -> return false
+    module_name: identity.slice(10, identity.len())
+    (core_path_module(module_name) ?? return false) == module_name
 }
 
 // An edge into a callee no indexed module defines: a Core callee under its
@@ -1699,7 +1720,7 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
         permit: storage.guard_read()
         loop fact in doc_module.call_facts {
             target: jet_driver_doc_callee_key(permit.value.symbols, fact) ?? next
-            callee_key: semindex_function_key(target) ?? next
+            callee_key: semindex_function_key(target, module_aliases) ?? next
             if module_aliases.get(callee_key.module_identity) != None -> next
             row: fact.facts.effect_bound ?? next
             group := boundary_by_caller.get(fact.caller_key) ?? -1
@@ -1715,7 +1736,7 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
         alias: semindex_module_alias(doc_module)
         loop function in doc_module.functions {
             if function.synthetic -> next
-            local: (semindex_function_key(function.key) ?? next).local
+            local: (semindex_function_key(function.key, module_aliases) ?? next).local
             direct: semindex_sorted_unique(function.effects.direct)
             spans := [Span]{}
             loop effect_name in direct {
@@ -1736,7 +1757,7 @@ semindex_summaries: fn(modules: [JetDriverDocModule]) -> [SemSummary] {
                     edge_locals.push("")
                     next
                 }
-                edge_key: semindex_function_key(edge) ?? {
+                edge_key: semindex_function_key(edge, module_aliases) ?? {
                     edges.push(edge.copy())
                     edge_locals.push("")
                     next

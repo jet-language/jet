@@ -1,6 +1,6 @@
 // the failure law's declaration side. The Rust reference is
-// `TraitRegistry::register_error_conv` (jet-foundation),
-// `Sema::Prelude::inject_exercised_error_conversions` and the arm.
+// `TraitRegistry.register_error_conv` (jet-foundation),
+// `Sema.Prelude.inject_exercised_error_conversions` and the arm.
 use {
     jet_foundation.[
         AST_NODE_GENERATED,
@@ -135,10 +135,10 @@ sema_compiler_error_record: fn(name: String) -> Bool {
     false
 }
 
-// A canonical owner identity (`<corelib>/core.crypto.uuid::UUIDError`)
-// reduces to its `::` leaf; a qualified spelling to its `.` leaf.
+// A canonical owner identity (`<corelib>/core.crypto.uuid.UUIDError`)
+// reduces to its `.` leaf; a qualified spelling to its `.` leaf.
 sema_error_conversion_leaf: fn(name: String) -> String Never! {
-    owned: name.split("::").to_list()
+    owned: name.split(".").to_list()
     parts: owned[owned.len() - 1].split(".").to_list()
     parts[parts.len() - 1]
 }
@@ -936,7 +936,7 @@ sema_error_conversion_routine: fn(definition: ErrorConvDef, param_name: String, 
 // The canonical Prelude conversion of one family member into
 // the default `Err`, identical to its Prelude/Errors.jet declaration. The
 // declaration names the family leaf; the routine binds the exercised source
-// identity (`<corelib>/core.files::IOError`), as the
+// identity (`<corelib>/core.files.IOError`), as the
 // Rust reference binds `from_ty` to the exercised source, so the routine key
 // is the one the propagation site recorded. The routine keeps the declaration's
 // own spans, as Rust keeps the Prelude/Errors.jet spans: its `self` parameter
@@ -1190,7 +1190,7 @@ sema_failure_items_nominal_is_error: fn(items: [Item], module_identity: ModuleID
             .TypeAlias(definition) -> {
                 if definition.name == leaf {
                     if definition.type_params.len() != 0 -> return Val(false)
-                    seen_key: "{module_identity.id}::{leaf}"
+                    seen_key: "{module_identity.id}.{leaf}"
                     loop name in seen {
                         if name == seen_key -> return Val(false)
                     }
@@ -1199,7 +1199,7 @@ sema_failure_items_nominal_is_error: fn(items: [Item], module_identity: ModuleID
                     // Rust `resolve_type`: a re-export alias
                     // (`HexError: encoding.HexError`) names its target
                     // from the alias's own module, never this module's leaf.
-                    if definition.target == .Named(target_name) && (target_name.contains("::") || target_name.contains(".")) {
+                    if definition.target == .Named(target_name) && (target_name.contains(".") || target_name.contains(".")) {
                         home: sema_failure_alias_target_is_error(target_name, module_identity, inner, environment, program)
                         if home != None -> return home
                     }
@@ -1419,7 +1419,7 @@ sema_failure_union_names_generic: fn(members: [Type], generic_names: [String]) -
 // declaration `alias` keeps private.
 sema_check_private_module_type: fn(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     qualified: name.split_once(".") ?? return
-    if name.contains("::") {
+    if name.contains(".") {
         return
     }
     if program.registration_graph == .Val(graph) {
@@ -1471,7 +1471,7 @@ sema_expiring_secret_declared_by: fn(graph: SemaRegistrationGraph, caller: Int) 
     if caller < 0 -> return false
     loop row in 0..<graph.modules[caller].nominals.len() {
         if graph.modules[caller].nominals[row].symbol.name != "ExpiringSecret" -> next
-        if sema_is_expiring_secret_name("{module_text(graph.module_table, graph.modules[caller].nominals[row].symbol.module_identity)}::ExpiringSecret") {
+        if sema_is_expiring_secret_name("{module_text(graph.module_table, graph.modules[caller].nominals[row].symbol.module_identity)}.ExpiringSecret") {
             return true
         }
     }

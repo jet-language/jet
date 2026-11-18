@@ -591,7 +591,7 @@ ir_tx_snapshot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: TTransac
     if ir_failed(b) -> return None
     if rollback == .Val(owner) {
         method: snapshot.snapshot_method ?? {
-            ir_fail(b, span, "transaction rollback of {snapshot.local.name} without Rollback::snapshot")
+            ir_fail(b, span, "transaction rollback of {snapshot.local.name} without Rollback.snapshot")
             return None
         }
         call: ir_tx_method_expr(p, b, snapshot.local, owner, method, [BodyCallArg]{}, span)
@@ -635,7 +635,7 @@ ir_tx_method_expr: fn(p: IRProgram, b: &IRBuilder, local: TLocal, owner: Type, m
 ir_tx_restore: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, snapshot: IRTxSnapshot, span: Span) Never! {
     saved: ir_node(b, snapshot.saved_ty, NodeKind.Local{local: snapshot.saved}, span)
     if snapshot.rollback == .Val(owner) {
-        method: snapshot.restore ?? return ir_fail(b, span, "transaction rollback of {snapshot.local.name} without Rollback::restore")
+        method: snapshot.restore ?? return ir_fail(b, span, "transaction rollback of {snapshot.local.name} without Rollback.restore")
         argument: BodyCallArg{value: saved, template_items: [SymbolID]{}, borrow: false, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
         call: ir_tx_method_expr(p, b, snapshot.local, owner, method, [BodyCallArg]{argument}, span)
         result: ir_expr(m, p, b, call)

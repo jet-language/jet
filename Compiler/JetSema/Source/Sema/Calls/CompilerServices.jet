@@ -19,6 +19,7 @@ use jet_foundation.[
     TFailureCarrier,
     Type,
     expr_span,
+    symbol_key_leaf,
 ]
 
 SemaCompilerServicesCallContract: struct {
@@ -154,7 +155,7 @@ sema_compiler_services_compile_time_gate: fn(module_name: String, member: String
 // A `core.compiler` query result or one of its records. The compiler answers
 // its fields and methods while it serves comptime and build code (JetIR
 // ir_host_method); no runtime layout holds one, so a running program can't
-// read it. A declared type resolves to its canonical `module::Name`, so a
+// read it. A declared type resolves to its canonical `module.Name`, so a
 // bare name here is the compiler's own.
 sema_compiler_host_value_name: fn(name: String) -> Bool Never! {
     if name == {
@@ -290,10 +291,7 @@ sema_call_compiler_value_owner: fn(ty: Type) -> String? {
     if ty == {
         .Tagged(_, inner) -> return sema_call_compiler_value_owner(inner)
         .Named(name) | .Apply(name, _) -> {
-            parts := name.split("::").to_list()
-            canonical := if parts.len() > 0 -> parts[parts.len() - 1] else -> name
-            dotted := canonical.split(".").to_list()
-            return Val(if dotted.len() > 0 -> dotted[dotted.len() - 1] else -> canonical)
+            return Val(symbol_key_leaf(name))
         }
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> {}
     }

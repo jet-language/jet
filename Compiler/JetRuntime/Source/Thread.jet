@@ -31,11 +31,12 @@
 // [mapping][bytes] (Alloc.jet ALLOC_LARGE_ROWS); @632 + 8 per class, thirteen
 // Alloc window run stacks (Alloc.jet ALLOC_WINDOW_ROWS); @736 exact-Int
 // hazard record (IntHazard.jet INT_HAZARD_TCB_RECORD; a fiber borrows its
-// carrier's). @744 to @1016 stay unused, so the stack segment words start at
-// an offset where the allocator state page, an unattached thread's GS
-// target, reads zero: @1024 stack limit, @1032 running segment, @1040 spare
-// segment, @1048 segment room, @1056 probe size (StackSegment.jet
-// STACK_TCB_LIMIT).
+// carrier's); @744/@752 the sampler handler's clock timespec (PerfSamples.jet
+// PERF_SAMPLES_TCB_CLOCK). @760 to @1016 stay unused, so the stack segment
+// words start at an offset where the allocator state page, an unattached
+// thread's GS target, reads zero: @1024 stack limit, @1032 running segment,
+// @1040 spare segment, @1048 segment room, @1056 probe size
+// (StackSegment.jet STACK_TCB_LIMIT).
 // Slot200 provenance: before this append, the 26b5c5911 source map reserves
 // 192/200. Searching I64{192}/I64{200} across Thread, Scheduler, Task,
 // TaskGroup, Deadline, World, TestCapture and Sync finds no TCB access:
@@ -439,6 +440,9 @@ rt_thread_entry_address: fn() -> I64 {
     thread_spawn_settled()
     // This thread's alternate signal stack, for the fault report (Fault.jet).
     fault_stack: fault_stack_start()
+    // Under `jet perf run`, this thread's own CPU-time sampling timer
+    // (PerfSamples.jet).
+    perf_timer: perf_samples_thread_start()
     #Unsafe("rt_sigprocmask reads the spawner's mask from the live start record and retains no pointer") {
         _ := os_syscall_i64(I64{14}, I64{2}, wrapping(start + I64{24}), I64{0}, I64{8}, I64{0}, I64{0})
     }
@@ -457,6 +461,7 @@ rt_thread_entry_address: fn() -> I64 {
     #Unsafe("the caller transferred a System V I64->I64 code address and one argument to this thread") {
         result = os_call_address_i64(entry, argument)
     }
+    perf_samples_thread_end(perf_timer)
     fault_stack_end(fault_stack)
     jet_rt_thread_detach()
     thread_finish(handle, result)

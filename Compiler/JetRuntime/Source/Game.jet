@@ -652,7 +652,11 @@ game_pairs_line: fn(target: I64, label: I64, left: I64, right: I64, joiner: I64)
 // then per issued frame its replayed input, every callback in registration
 // order with the frame lent, and the frame line; the transcript hash closes a
 // run with an explicit `frames` budget. `replay` and `backend` are Option
-// boxes (null when absent), `frames` an Option<Int> word.
+// boxes (null when absent), `frames` an Option<Int> word. An observed run
+// relays each callback's wall time and each frame's thread CPU to its live
+// snapshot (ObserveLive.jet observe_game_record), a callback by the code
+// address its closure box holds at 8 and that code's function line
+// (game_callback_name).
 #Export(c) jet_game_run: fn(scene: I64, replay: I64, backend: I64, frames: I64) -> I64 {
     requested: frames != GAME_OPTION_INT_NONE
     count: if requested -> jet_int_owned_to_i64(frames) else -> I64{0}
@@ -683,9 +687,20 @@ game_pairs_line: fn(target: I64, label: I64, left: I64, right: I64, joiner: I64)
     callbacks: wrapping(scene + I64{32})
     slot: jet_rt_alloc(I64{8}, I64{8})
     scratch: jet_rt_alloc(I64{16}, I64{8})
+    // The callbacks' function lines, read once per observed run.
+    names := I64{0}
+    named := I64{0}
     loop {
         index: game_backend_next(plan)
         if (index < I64{0}) { break }
+        observed: observe_game_live()
+        frame_start: if observed -> sync_now_ns() else -> I64{0}
+        frame_cpu: if observed -> sync_thread_cpu_ns() else -> I64{0}
+        if (observed && names == I64{0} && game_word(callbacks) > I64{0}) {
+            named = game_word(callbacks) /% I64{3}
+            names = jet_rt_alloc(named * I64{8}, I64{8})
+            coll_zero(names, named * I64{8})
+        }
         snapshot: jet_rt_alloc(I64{32}, I64{8})
         coll_zero(snapshot, I64{32})
         game_store(snapshot, I64{1})
@@ -710,12 +725,23 @@ game_pairs_line: fn(target: I64, label: I64, left: I64, right: I64, joiner: I64)
         at := I64{0}
         loop at < game_word(callbacks) {
             coll_zero(scratch, I64{16})
-            _ := coll_call3(game_word(wrapping(data + (at + I64{1}) * I64{8})), game_word(wrapping(data + at * I64{8})), slot, scratch)
+            env: game_word(wrapping(data + at * I64{8}))
+            started: if observed -> sync_now_ns() else -> I64{0}
+            _ := coll_call3(game_word(wrapping(data + (at + I64{1}) * I64{8})), env, slot, scratch)
+            if observed {
+                invoke: game_word(wrapping(data + (at + I64{1}) * I64{8}))
+                code: if (env == I64{0}) -> invoke else -> game_word(wrapping(env + I64{8}))
+                observe_game_record(I64{1}, index, started, sync_now_ns() - started, code, at /% I64{3}, game_callback_name(names, named, at /% I64{3}, code))
+            }
             if (jet_rt_session_propagate() != I64{0}) {
                 stopped = true
                 break
             }
             at += I64{3}
+        }
+        if observed {
+            ran: if stopped -> at /% I64{3} + I64{1} else -> at /% I64{3}
+            observe_game_record(I64{0}, index, frame_start, sync_thread_cpu_ns() - frame_cpu, I64{0}, ran, jet_rt_string_clone(game_word(wrapping(scene + I64{24}))))
         }
         game_line(out, rt_static_text("frame:"))
         rt_text_push_number(out, index)
@@ -728,6 +754,15 @@ game_pairs_line: fn(target: I64, label: I64, left: I64, right: I64, joiner: I64)
         jet_game_backend_present(plan)
     }
     jet_rt_free(scratch, I64{16}, I64{8})
+    if (names != I64{0}) {
+        kept := I64{0}
+        loop kept < named {
+            text: game_word(wrapping(names + kept * I64{8}))
+            if (text != I64{0}) { jet_rt_string_drop(text) }
+            kept += I64{1}
+        }
+        jet_rt_free(names, named * I64{8}, I64{8})
+    }
     jet_rt_free(slot, I64{8}, I64{8})
     jet_rt_handle_drop_jet_game_backend(plan)
     if requested {
@@ -735,4 +770,18 @@ game_pairs_line: fn(target: I64, label: I64, left: I64, right: I64, joiner: I64)
         game_push_hex(out, hash)
     }
     jet_rt_string_builder_finish(out)
+}
+
+// The function line (Fault.jet trace_address_text: `function\tfile\tline\n`)
+// of the callback at `ordinal` whose closure code is `code`, as a text the
+// relay record takes; 0 when none was made. The image's table is read once
+// per callback of the run: `names` keeps `named` lines, one word each, 0
+// until read; a callback registered later is read each time.
+game_callback_name: fn(names: I64, named: I64, ordinal: I64, code: I64) -> I64 {
+    if (ordinal >= named) { return trace_address_text(code) }
+    cell: wrapping(names + ordinal * I64{8})
+    if (game_word(cell) == I64{0}) { game_store(cell, trace_address_text(code)) }
+    kept: game_word(cell)
+    if (kept == I64{0}) { return I64{0} }
+    jet_rt_string_clone(kept)
 }

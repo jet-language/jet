@@ -1180,10 +1180,10 @@ sema_call_core_tree_checked: fn(record: CoreCallRecord, args: [TExpr], span: Spa
             source == Type.Float32 -> {
                 widened = sema_expr_numeric_conversion(args[0].copy(), Type.Float, span, 0)
             }
-            nominal == "Fraction" || nominal.ends_with("::Fraction") -> {
+            nominal == "Fraction" || nominal.ends_with(".Fraction") -> {
                 widened = sema_call_core_source("core.math", "__fraction_to_float", [TExpr]{args[0].copy()}, Type.Float, true, span, environment, program, diagnostics)
             }
-            nominal == "Decimal" || nominal.ends_with("::Decimal") -> {
+            nominal == "Decimal" || nominal.ends_with(".Decimal") -> {
                 widened = sema_call_core_source("core.math", "__decimal_to_float", [TExpr]{args[0].copy()}, Type.Float, true, span, environment, program, diagnostics)
             }
             else -> widened = None
@@ -1614,7 +1614,7 @@ sema_call_core_check_fixed_record: fn(record: CoreCallRecord, args: [CallArg], t
     }
     result_type: sema_call_core_plugin_load_type(canonical_record, values, declared_result, program)
     // Rust `core_call_expr` / `checked_core_type_args`: the CoreCall carrier is
-    // derived from the checked result type (`TFailureCarrier::from_checked_type`:
+    // derived from the checked result type (`TFailureCarrier.from_checked_type`:
     // only a Result or Option result can fail), and its type arguments are the
     // call's written ones. The inferred signature arguments check constraints
     // and record the call fact; the native kernel takes no inferred generic.

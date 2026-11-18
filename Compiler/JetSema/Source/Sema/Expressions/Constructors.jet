@@ -77,7 +77,7 @@ use {
 
 // A type named by a local binding, through a module alias
 // (`types.Kind`), or by the canonical identity a declared type resolves to
-// (`module::Kind`, the form declared types carry after resolution) is the
+// (`module.Kind`, the form declared types carry after resolution) is the
 // declared type itself, so constructors, leading-dot variants and field reads
 // resolve it through the registration graph when no local type binding has
 // that name.
@@ -306,7 +306,7 @@ sema_expression_enum_declares_variant: fn(enum_name: String, variant: String, en
 }
 
 // Rust `canonical_nominal_name`: two spellings of one declared nominal
-// (`Box`, `types.Box`, `module::Box`) name the same head.
+// (`Box`, `types.Box`, `module.Box`) name the same head.
 sema_expression_same_nominal_head: fn(left: String, right: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if left == right -> return true
     if program.registration_graph == .Val(graph) {
@@ -2157,7 +2157,7 @@ sema_expression_checked_text_literal: fn(head: Type, source_head: Type?, body: T
                 }
             }
             source_file := sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, span)
-            key := "{module_text(graph.module_table, environment.module_identity)}::checked-text::{symbol_table_key(graph.symbols, target.owner.id)}::{span.start}:{span.end}:{type_identity_key(head)}"
+            key: "{module_text(graph.module_table, environment.module_identity)}.checked-text.{symbol_table_key(graph.symbols, target.owner.id)}.{span.start}:{span.end}:{type_identity_key(head)}"
             evaluation := SemaCheckedTextEvaluation{
                 module_identity: environment.module_identity,
                 key: key,
@@ -2605,7 +2605,7 @@ sema_expression_builtin_conversion_value: fn(head: Type, body: TypedLitBody, env
 }
 
 // The last segment of a written or resolved type name: `Celsius` for
-// `units.Celsius` and for a resolved `units::Celsius`.
+// `units.Celsius` and for a resolved `units.Celsius`.
 sema_expression_type_leaf: fn(text: String) -> String Never! {
     dot: text.rfind(".")
     colon: text.rfind(":")
@@ -2998,7 +2998,7 @@ sema_expression_typed_literal_float_exact_applies: fn(head: Type, offered: Type)
 
 // The exact number type (`Decimal`, `Fraction`) whose whole value `Int{x}`
 // converts (sema_expression_typed_literal_precise_int), or None. The root
-// name and Core's `core.math::Fraction` identity are one type.
+// name and Core's `core.math.Fraction` identity are one type.
 sema_expression_typed_literal_precise_source: fn(head: Type, offered: Type) -> String? {
     if head != Type.Int -> return None
     name: sema_expr_precise_name(sema_expr_unwrap_tag(offered)) ?? return None

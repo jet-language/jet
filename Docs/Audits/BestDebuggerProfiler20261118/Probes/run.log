@@ -1,0 +1,186 @@
+== Tools: nothing but jet
+
+on the probes' PATH: lldb absent, gdb absent, perf absent, go absent, pprof absent, otelcol absent, rr absent
+on the host's PATH: lldb absent, gdb absent, perf absent, go absent, pprof absent, otelcol absent, rr absent
+
+== F1, D8: a two-task wait cycle
+
+$ jet run deadlock.jet
+(exit 124)
+
+$ jet run --observe deadlock.jet  (in the background)
+(the observed process, `jet`, found; it has run 2 s)
+
+$ jet inspect live --attach 1471315 --once
+jet inspect live · pid 1471315
+protocol=jet.live.v1 session=jet-observe-1471315-1795007899948846184 source=deadlock.jet build=runtime revision=runtime world=game
+
+Task Tree
+  Task 1     parent 0     blocked  wait=task join deadline=- canceled=false label=root
+  Task 2     parent 1     blocked  wait=channel receive deadline=- canceled=false label=ping
+  Task 3     parent 1     blocked  wait=channel receive deadline=- canceled=false label=ping
+
+Channels
+  Channel 1     depth 0/1 blocked send=0 recv=1 closed=false
+  Channel 2     depth 0/1 blocked send=0 recv=1 closed=false
+
+Effects: compute=0 waiting=3 channel=2 time=0 io=0
+Resources: workers=8 running=0 queued=0 canceled=0 arenas=0 arena_allocations=0 arena_bytes=0
+
+Values
+  (no live value decisions)
+
+Events
+  (no runtime event observations)
+(exit 0)
+
+
+== F2-F5, P1: the sampler on one busy thread and on four
+
+$ jet perf run -O2 fib.jet -- 34
+fib=5702887
+Trace: <scratch>/.jet/perf/1795007902-2f912c89.jettrace
+(exit 0)
+
+process CPU 42.3 ms, so 42 samples at the stated 1 kHz; kept 38 (90%); outside fib.jet's functions: 9 (24% of kept)
+reason: one CPU-time sample per 1000 microseconds of process CPU, at the function and source line its program counter is in and, inclusive, once at each line on its stack; 9 of 38 samples are outside fib.jet; outside Jet functions: jet_ir_stop_turn 9
+overhead_status: not_measured; overhead_reason: a matched unprofiled run was not captured; coverage: partial
+  fib.jet#fib line 7: samples 17, inclusive 38
+  fib.jet#fib line 5: samples 10, inclusive 10
+  fib.jet#fib line 6: samples 2, inclusive 2
+  fib.jet#entry line 13: samples 0, inclusive 38
+
+$ jet perf run -O2 fib4.jet -- 32
+sum=8713236
+Trace: <scratch>/.jet/perf/1795007902-313ed44b.jettrace
+(exit 0)
+
+process CPU 94.1 ms, so 94 samples at the stated 1 kHz; kept 64 (68%); outside fib4.jet's functions: 20 (31% of kept)
+reason: one CPU-time sample per 1000 microseconds of process CPU, at the function and source line its program counter is in and, inclusive, once at each line on its stack; 20 of 64 samples are outside fib4.jet; outside Jet functions: jet_ir_stop_turn 19, unit_os_syscall_i64__asm 1
+overhead_status: not_measured; overhead_reason: a matched unprofiled run was not captured; coverage: partial
+  fib4.jet#fib line 7: samples 29, inclusive 61
+  fib4.jet#fib line 5: samples 13, inclusive 13
+  fib4.jet#fib line 6: samples 2, inclusive 2
+  fib4.jet#run.lambda@394 line 10: samples 0, inclusive 22
+  fib4.jet#run.lambda@374 line 10: samples 0, inclusive 13
+  fib4.jet#run.lambda@414 line 10: samples 0, inclusive 13
+  fib4.jet#run.lambda@434 line 10: samples 0, inclusive 13
+
+== P8: compare two captures of different work
+
+$ jet perf compare <scratch>/.jet/perf/1795007902-ca7b348f.jettrace <scratch>/.jet/perf/1795007902-2f912c89.jettrace
+Compare OK · schema jet.trace v1 · base ca7b348f4987574fd800ac2a697554647417f9e9fec163eaa96c503212522118 · head 2f912c890c3f46ca3683a897f446b633be38e45f91a78f313a9e896d3adab123
+Deltas: wall 126217858->153986251 ns · cpu 25695000->42330000 ns
+budgets: wall RelativeTo(trace-baseline) regression=2200bp · base=126217858ns head=153986251ns
+(exit 0)
+
+== c11: the HTML view needs nothing but a browser
+
+$ jet perf view --html <fib trace>
+(exit 0) 1320 bytes; starts '<!doctype html>'; external references: []
+
+== P4: allocations
+
+$ jet perf run alloc.jet -- 2000
+total=128000 kept=20
+Trace: <scratch>/.jet/perf/1795007902-1ede9b30.jettrace
+(exit 0)
+
+allocation rows: 0
+
+== P5: hardware counters
+
+$ jet perf run --lens=memory fib.jet -- 30
+Error [jet.UnknownFlag]: `--lens` is only valid with `jet prove`
+ Why: Jet ignores no flags silently, so a typo cannot quietly change a command
+ Fix: Drop `--lens` from `jet run`, or run `jet prove --lens`
+More: jet-lang.dev/e/E2102
+Trace: <scratch>/.jet/perf/1795010679-b2ec52eb.jettrace
+(exit 2)
+
+== F6-F8, D1, D4: jet debug's console
+
+$ jet debug --break fib.jet:6 fib.jet -- 20  <<< 'p n\np n + 1\nwatch n\nbt\nq\n'
+Breakpoint set  fib.jet:6
+Breakpoint hit  fib.jet:6  in fib()
+6 |     if n < 2 -> return n        <- here
+Locals:  n = 30
+(Jet) p n
+n = 30
+(Jet) p n + 1
+`n + 1` is not a local here
+(Jet) watch n
+Unknown command `watch`. Commands: step (s), next (n), continue (c), finish (f), break N (b N), locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)
+(Jet) bt
+#0  fib()  at fib.jet:6
+#1  run()  at fib.jet:13
+(Jet) q
+Error [jet.DebugSessionQuit]: The `jet debug` session ended before the program finished — you typed `quit` at the `(Jet)` prompt.
+ Why: Quitting the debugger stops the debugged program; it did not run to completion.
+ Fix: Run `jet debug <file>` again and use `continue` (or `c`) to run to the end, or `jet run <file>` to run it without the debugger.
+More: jet-lang.dev/e/E2204
+(exit 1)
+
+$ jet debug --break fib.jet:6 fib.jet  <<< 8 x 'c', then 'q'
+wall 106 ms, its warm O0 build included
+
+$ jet debug --break fib.jet:6 fib.jet  <<< 'help\nq\n'
+Breakpoint set  fib.jet:6
+Breakpoint hit  fib.jet:6  in fib()
+6 |     if n < 2 -> return n        <- here
+Locals:  n = 30
+(Jet) help
+Commands: step (s), next (n), continue (c), finish (f), break N (b N), locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)
+(Jet) q
+Error [jet.DebugSessionQuit]: The `jet debug` session ended before the program finished — you typed `quit` at the `(Jet)` prompt.
+ Why: Quitting the debugger stops the debugged program; it did not run to completion.
+ Fix: Run `jet debug <file>` again and use `continue` (or `c`) to run to the end, or `jet run <file>` to run it without the debugger.
+More: jet-lang.dev/e/E2204
+(exit 1)
+
+== F9, D3: an O2 image
+
+$ jet debug -O2 --break fib.jet:6 fib.jet  <<< 'q\n'
+Error [jet.UnknownFlag]: `-O2` is only valid with `jet build`, `jet run`, `jet dev`, `jet test` or `jet inspect`
+ Why: Jet ignores no flags silently, so a typo cannot quietly change a command
+ Fix: Drop `-O2` from `jet debug`, or run `jet build -O2`
+More: jet-lang.dev/e/E2102
+(exit 2)
+
+$ jet build -O2 fib.jet
+required effects: Exec.Args, IO; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+(exit 0)
+
+$ jet debug --break fib.jet:6 .jet/build/fib  <<< 'locals\nbt\nq\n'
+Breakpoint set  fib.jet:6
+Breakpoint hit  fib.jet:6  in fib()
+6 |     if n < 2 -> return n        <- here
+Locals:  n = 30
+(Jet) locals
+n: Int = 30
+(Jet) bt
+#0  fib()  at fib.jet:6
+#1  run()  at fib.jet:13
+(Jet) q
+Error [jet.DebugSessionQuit]: The `jet debug` session ended before the program finished — you typed `quit` at the `(Jet)` prompt.
+ Why: Quitting the debugger stops the debugged program; it did not run to completion.
+ Fix: Run `jet debug <file>` again and use `continue` (or `c`) to run to the end, or `jet run <file>` to run it without the debugger.
+More: jet-lang.dev/e/E2204
+(exit 1)
+
+== F10, D2: record and replay
+
+$ jet debug --record=r1 fib.jet  <<< 'q\n'
+Error [jet.InvalidCommandInput]: `jet debug --record` is not built yet
+ Why: This `jet` has no implementation of this command form yet, and no other `jet` can run it.
+ Fix: Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first (card #6418).
+More: jet-lang.dev/e/E2104
+(exit 2)
+
+$ jet run --record=r1 fib.jet -- 10
+Error [jet.InvalidCommandInput]: `jet run --record` is not built yet
+ Why: This `jet` has no implementation of this command form yet, and no other `jet` can run it.
+ Fix: Use a form this `jet` supports (`jet help` lists them); this one needs its Jet implementation first (card #6418).
+More: jet-lang.dev/e/E2104
+(exit 2)
+

@@ -36,7 +36,8 @@ output and audits unique provider ownership.
 `jet perf export <trace.jettrace> --chrome` writes Chrome Trace Event JSON.
 Open it in Perfetto UI or `chrome://tracing`. Captured wall/CPU, allocation,
 browser, task-span, I/O, lock, and native rows become complete (`X`) events;
-process, domain, and task lanes use metadata (`M`) events. Unavailable states,
+process, domain, and task lanes use metadata (`M`) events, and a transfer
+outside every task has its own `I/O outside tasks` lane. Unavailable states,
 async flows, counters, screenshots, and source-map events remain outside this
 projection.
 
@@ -61,10 +62,10 @@ the trace's captured spans and browser rows, then an
 `jet.profile.samples` with a point for each row named by its
 `code.file.path`, `code.line.number` and `code.function.name`. Its trace id
 is the first 32 hex digits of the trace's id. A task span's parent is its
-parent task's span, and each span's kind, task, awaited task and spawn line
-are `jet.*` attributes. Span times count from the session's start, since a
-trace records no wall-clock origin. `--out <path>` writes any export to a
-file instead of stdout.
+parent task's span, and each span's kind and task, and a wait's awaited task,
+spawn line, channel, stack and waker, are `jet.*` attributes. Span times count
+from the session's start, since a trace records no wall-clock origin.
+`--out <path>` writes any export to a file instead of stdout.
 
 Both exports are interop for other tools; jet reads them back itself.
 `jet perf view <profile.pb.gz>` (or `.pb`) and `jet perf view
@@ -95,19 +96,28 @@ starts in a child process is reaped by jet first, so its window is the last
 periodic one (`live`). A program that links no task, channel, live value or
 event publishes nothing: its trace keeps the source identity and map, and its
 profile is `no_samples` with no window.
-`jet perf run` samples the program's CPU time: the runtime arms the process's
-profiling timer (`setitimer` `ITIMER_PROF`, one sample per millisecond of
-CPU) and records the program counter each `SIGPROF` interrupted with the call
-site of each caller. A frame without a frame pointer (code before a
-function's prologue sets one, a frameless runtime routine, a C library
-function) is stepped out of by the image's own call frame information
-(`.eh_frame`), read by the runtime's unwinder, up to the first frame that
-keeps one; the frame-pointer chain gives the rest. `jet run` writes the
+`jet perf run` samples the program's CPU time: the runtime arms a timer on
+each thread's own CPU clock (`timer_create` on `CLOCK_THREAD_CPUTIME_ID`,
+delivered to that thread, one sample per millisecond of its CPU), so threads
+that run at once each keep their samples, and records the program counter
+each `SIGPROF` interrupted with the call site of each caller, each handler in
+a record buffer of its own so no sample loses its stack to another thread's.
+A frame without a frame pointer (code before a function's prologue sets one,
+a compiler-emitted helper such as the stop poll, a frameless runtime
+routine, a C library function) is stepped out of by the image's own call
+frame information (`.eh_frame`), read by the runtime's unwinder, up to the
+first frame that keeps one; the frame-pointer chain gives the rest. At exit
+the runtime records the CPU time it sampled, and `jet run` writes the
 program's image beside the samples. The session names each sample's Jet
 function and source line from that image's `.debug_jetline` location table, as
-Linux perf names the same image's samples from its line tables, so `-O2` code
-inlined into a caller counts at that caller, at the line the table gives the
-code. The rows are `cpu` rows, one per function and line of the checked
+Linux perf names the same image's samples from its line tables, and code
+the optimizer inlined from the image's DWARF inlined subroutines: a sample in
+`-O2` code inlined into a caller counts at the inlined function's line under
+that function's name, and inclusive at each call it was inlined for, as the
+debugger's inlined frames show it; a line of an inlined function from another
+file counts outside the checked source. A caller's frame is looked up at its
+call, the byte before its return address. The rows are `cpu` rows, one per
+function and line of the checked
 source, hottest first. A row's `sample_count` is its exclusive time, the
 samples whose program counter is on it; its `inclusive_count` is its inclusive
 time, the samples that hold it anywhere on the stack, each once however often
@@ -117,12 +127,20 @@ passes through has a row with no exclusive samples. A row's
 of the checked source's lines, from the allocation records the runtime
 writes with the samples, so an allocation in the runtime or a core module
 counts at the line of the source that called into it; a run whose runtime
-recorded no allocation site leaves it null. `coverage`
-is `complete` when every sample landed in that source and `partial` when some
-ran in the runtime or another file, which the `reason` counts and, for samples
-outside every Jet function, names by the image's `.symtab` function, hottest
-first, as `perf report` names them (the compiler's stop poll `jet_ir_stop_turn`
-is the usual one). `jet perf view` sums them per function with its share of the
+recorded no allocation site leaves it null. A sample in a compiler-emitted
+helper (a `jet_ir_` symbol, such as the stop poll `jet_ir_stop_turn`) counts
+at the Jet line that called it, and the `reason` counts those samples.
+`coverage` is `complete` when every sample landed in that source and
+`partial` when some ran in the runtime or another file, which the `reason`
+counts and, for samples outside every Jet function, names by the image's
+`.symtab` function, hottest first, as `perf report` names them. The `reason`
+also gives how many samples the CPU time sampled should give beside how many
+the session kept, and counts any sample in Jet code that kept no stack. The
+profile's overhead is `measured`: `overhead_ns` is the time the sampler's
+handlers ran plus, for each sample's signal, the kernel's delivery and
+return, which the runtime times as sampling starts by sending its own thread
+64 signals; `overhead_reason` gives it as a share of the CPU time sampled.
+`jet perf view` sums the rows per function with its share of the
 samples, then its hottest lines with their exclusive and inclusive samples and
 allocations (`line 7 samples=12 inclusive=40 allocations=300`). A run whose
 samples never reach the checked source (a short program, `jet perf test`, `jet
@@ -131,8 +149,11 @@ fn` declaration (`fn` through its closing brace) and do not separate the
 functions that `run` calls; their `inclusive_count` and `allocation_count` are
 null.
 
-`jet perf run --method=memory` samples the program's memory behavior beside
-its CPU time. The runtime opens four counters of the program's main thread
+`jet perf run` takes `--lens=<lenses>`, comma-separated: `cpu`, the
+program's CPU time and the default, and `memory`, its memory behavior;
+`--lens=cpu,memory` takes both in one run. `jet perf test` takes only `cpu`,
+and any other lens is refused with the two it may name. Under `memory` the
+runtime opens four counters of the program's main thread
 with `perf_event_open`, in user mode only: L1D read misses (one sample per
 10007 events), LLC and dTLB read misses (one per 1009) and page faults (one
 per fault). The kernel has no generic LLC read-miss event for AMD's cores; on
@@ -142,10 +163,13 @@ another CCX's cache or from DRAM, each a demand read that missed the L3.
 Lines the hardware prefetcher fetched ahead of the reads count in neither
 event. Each counter's overflow signals that thread, and the handler
 records the program counter and the Jet call sites as it does for a CPU-time
-sample, marked with the counter. The profile's `method` is `memory` and its
-`counters` lists the four in that order, each `captured` with its `period`
-or `unavailable` with the `errno` the kernel refused it with (0 when the
-program opened none). A counter's sample counts its period of events at the
+sample, marked with the counter. The profile's `method` stays `sampling`,
+and its `counters` lists the four in that order, each `captured` with its
+`period` or `unavailable` with the `errno` the kernel refused it with (0
+when the program opened none); without the memory lens it lists none. Under
+`memory` alone the runtime arms no profiling timer, so no row holds a
+CPU-time sample, only its counters' events, and the profile's `reason`
+says so. A counter's sample counts its period of events at the
 innermost line of the checked source on its stack, into the row's
 `l1d_miss_count`, `llc_miss_count`, `dtlb_miss_count` or `page_fault_count`;
 every per-line row has the count of each captured counter, and no row has a
@@ -165,23 +189,105 @@ left L1D, `llc_misses` were served from RAM, and `page_faults` fell to the
 page cache or disk. A counter the profile did not capture shows
 `unavailable`. Tests/Run/Perf/CacheVisualization is the worked example.
 
-`jet perf run` records each join's wait too. When a task spawns another, the
-runtime writes the new task's id with the Jet call sites of the spawning
-stack. When a join finds its task not yet done, the runtime writes the joining
-task, the awaited task and the wait's start and end on the monotonic clock.
-Each wait becomes a `task_join` row of the trace's `spans`. Its `task_id` is
-the joining task and its `awaited_task_id` the awaited one, both by the ids
-their `tasks` rows carry. Its `spawn_line` is the line of the checked source
-that spawned the awaited task, from the innermost call site on such a line,
-or null when no call site was in that source. Its start and end are measured
-from the session's start, on the same clock as the task and log spans, so the
-wait lines up with them with no manual alignment. A join of a task no
-observation saw has no task id to name and records no row. `jet perf view`
-prints `joins count=1 · task 1 waited 400212345ns for task 2 spawned at
-main.jet:4`. Its timeline shows each wait as `[start..end] join task 1 awaits
-task 2 spawned at main.jet:4`, beside the task spans.
+`jet perf run` records every wait of a task too, and what ended it. When a
+task spawns another, the runtime writes the new task's id with the Jet call
+sites of the spawning stack. When a task parks (a join, a channel's receive
+or send, a sleep, an I/O wait) or blocks on a `Shared` value's lock, the
+runtime writes the waiting task, the wait's name as the task's state shows
+it, what it waits for (the awaited task or the channel), its start and end
+on the monotonic clock and the Jet call sites of its stack. Whatever wakes a
+parked task writes a wake: the waking task and the call sites of its stack,
+or the runtime outside every task. A lock's release writes a wake only while
+a recorded wait is blocked on some lock, so an uncontended lock costs
+nothing more. Each wait becomes a `task_wait` row of the trace's `spans`.
+Its `task_id` is the waiting task, by the id its `tasks` row carries, its
+symbol's name the wait's name (`task join`, `channel receive`, `time sleep`,
+`shared lock`, ...) and its `wait_stack` the functions and lines of the
+checked source on its stack, innermost first, so the first is the line it
+waited at. A join's `awaited_task_id` is the awaited task and its
+`spawn_line` the line that spawned it; a channel wait's `channel_id` is the
+channel's. Its `waker` is `task` when a task's wake ended it, with that
+task's `waker_task_id` and the line it woke it from as `waker_line`,
+`runtime` when the runtime's did, and `timeout` when no wake did: a sleep,
+or a wait that gave up. The wake that ended a wait is the last one on the
+same park slot at or before its end, and after the task's previous wait on
+that slot. Its start and end are measured from the session's start, on the
+same clock as the task and log spans, so the wait lines up with them with no
+manual alignment. A wait of a task no observation saw has no task id to name
+and records no row. Each record is one write; a run that waits a million
+times writes a million records. `jet perf view` prints `waits count=3 ·
+longest 400212345ns: task 1 in task join at main.jet:5 for task 2 spawned at
+main.jet:4, woken by task 2`. Its timeline shows up to 8 waits as
+`[start..end] task 1 in channel receive at main.jet:11 for channel 1, woken
+by task 2 at main.jet:28`, beside the task spans.
+Tests/Cases/Perf/every_wait_names_its_waker.case is the worked example.
 
-A `jet perf run` or `jet perf test` trace records one receipt section, `perf`
+The same waits give off-CPU time by stack, as an off-CPU flame graph does.
+`jet perf view` sums the waits' time by stack, outermost frame first, ending
+with the wait the stack blocked in, and lists the 16 longest under `off-cpu
+by stack`: `150212345ns waits=1 · run main.jet:5 > pause main.jet:12 > nap
+main.jet:10 > time sleep`. A stack holds the checked source's frames only,
+as the CPU-time profile's lines do; a wait whose stack holds none counts
+under its name alone. Tests/Cases/Perf/off_cpu_time_by_stack.case is the
+worked example.
+
+`jet perf run` puts the program's file and network I/O on the timeline too,
+with no instrumentation in the program. Each file and socket transfer passes
+through the runtime's I/O leaves after the effect chokepoint admitted its
+path or host, and while sampling the leaf that makes the kernel's read or
+write records it: the task, read or write, its start and end on the
+monotonic clock, the bytes it moved or the errno that refused it, its target
+and the Jet call sites of its stack. A file's target is the path the
+program opened it by (`fd 3` for a descriptor the runtime holds no path
+for); a socket's is its peer's address, as the kernel's `getpeername` gives
+it (`127.0.0.1:4000`, `[::1]:4000`, a Unix socket's path, `@name` for an
+abstract one). A try the kernel turned away as not ready or interrupted
+moved nothing and records nothing; the task's wait for readiness is its own
+`task_wait` row. Each transfer becomes a row of the trace's `io`: `kind`
+`file` or `network`, `operation` `read` or `write`, `bytes`, `error` (null,
+or the errno, with 0 bytes), `target`, `task_id` (null outside every
+observed task), its `stack` the functions and lines of the checked source,
+innermost first, and its symbol's name `read notes.txt`. At most 4096 rows
+are kept (`io_rows_truncated`). `jet perf view` prints `io count=4
+read_bytes=15 write_bytes=15 errors=0 · main.jet#write notes.txt`, and its
+timeline shows up to 8 transfers as `[start..end] task 1 wrote 11 bytes to
+file notes.txt at main.jet:11` or `task 1 read 4 bytes from peer
+127.0.0.1:4000 at main.jet:18`. The leaves recorded are a whole file's read
+or write (`core.files.read`, `write`, `append`), a file or pipe stream's
+reads and writes, and a stream or datagram socket's sends and receives (TCP,
+Unix sockets, UDP, DNS). A buffered file writer's writes are recorded when
+its buffer reaches the kernel, with the flushing stack; a read its buffer
+serves records nothing. SQLite's page reads and writes, file copies and
+directory walks, raw descriptors and the terminal are not recorded. An
+attach records no transfers. Tests/Cases/Perf/io_on_timeline_without_instrumentation.case
+is the worked example.
+
+A `core.game` run under `jet run --observe` relays its frames through its live
+snapshots: each frame callback records the frame's index, its start and wall
+time on the monotonic clock and its code's function, as the program's location
+table names it (`name`, file and the line its code starts at), and each frame
+then records its scene, its index, its CPU time and how many callbacks it ran.
+The runtime keeps the latest 512 records, each with a sequence number.
+`jet perf run` merges every observation's records and `jet perf attach` reads
+the one it takes; a record two observations hold must be the same record. Each
+frame becomes a `game_frames` row and each of its callbacks a
+`game_draw_events` row (`phase` `frame_callback`, `domain` `cpu`), keyed by the
+frame's sequence and carrying its scene, index, build, revision and trace id;
+the frame's `responsible_function` is its slowest callback, and a callback in
+the checked source has that source's identity. A callback whose frame no
+observation holds, or whose code no function names, becomes no row. The trace
+then records the `game` receipt section (type `JetPerfGameRelay`): the first
+and last sequence read, the records the relay retired before any observation
+read them (`records_retired`), the frames and draw events kept, the frames that
+ran more callbacks than were read (`frames_missing_callbacks`), the callbacks
+kept nowhere (`callbacks_without_frame`, `callbacks_without_function`) and
+whether rows past the trace's 4096-row limits were dropped (`rows_truncated`).
+`jet perf view` prints `game frames=40 draw_events=80 scene=arena cpu=812345ns
+slowest_frame=40123ns · <function> main.jet:13`, then each callback function's
+draw events, the most time first (`game draw <function> main.jet:13 count=40
+ns=82000000`). Tests/Cases/Perf/game_frame_events.case is the worked example.
+
+A `jet perf run` or `jet perf test` trace records the receipt section `perf`
 (type `JetPerfReceipt`). Its `build` names the build the program compiled
 under: `profile`, the profile the run's words select (null for none), and
 `options`, every build option's value as `jet run` resolves the words over the
@@ -190,11 +296,12 @@ resolves its build through its settings layers as well, which the session does
 not, so its `build` is null, as it is for words the run refuses. Its `capture`
 names the capture's settings: `allowlist`, the privacy fields the trace keeps
 (comma-separated, null for none), and `sampling`, null unless the program
-sampled, else `clock` `cpu`, `interval_us` 1000, `allocations`
-`call-sites` and `method`, `sampling` or `memory`. `jet perf view` prints it
+sampled, else its `lenses` (`["cpu"]`, `["memory"]` or `["cpu","memory"]`),
+`allocations` `call-sites`, and under the `cpu` lens `clock` `cpu` and
+`interval_us` 1000, which are null without it. `jet perf view` prints it
 as `receipt perf <canonical JSON>`, and `jet perf compare` lists each field
 that differs between two traces' receipts (`perf.build.options.optimize: "O0"
--> "O2"`). `jet perf attach` records none.
+-> "O2"`). `jet perf attach` records no `perf` section.
 
 ## Canonical devtools protocol
 

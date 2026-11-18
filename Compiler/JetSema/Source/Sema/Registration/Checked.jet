@@ -127,7 +127,7 @@ use {
 }
 
 sema_checked_module_key: fn(module_name: String, name: String) -> String Never! {
-    if module_name == "" -> name else -> "{module_name}::{name}"
+    if module_name == "" -> name else -> "{module_name}.{name}"
 }
 
 // The checked key (TTypeDef.key) of `nominal`, declared in `module_row`: its
@@ -812,7 +812,7 @@ SemaCheckedForeignFunction: struct {
 sema_checked_foreign_key: fn(module_identity: String, name: String) -> String Never! {
     if module_identity == "" -> return name.copy()
     if name == "" -> return module_identity.copy()
-    "{module_identity}::{name}"
+    "{module_identity}.{name}"
 }
 
 sema_checked_foreign_parameter_type: fn(parameter: SemaRegistrationParameter) -> Type Never! {
@@ -1701,7 +1701,7 @@ sema_checked_foreign_handle_key_for_type: fn(graph: SemaRegistrationGraph, modul
     nominal_row: sema_type_resolve_nominal_row(graph, qualified, module_identity) ?? return None
     nominal: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
     if nominal.source == {
-        .ForeignHandle(facts) -> if sema_checked_foreign_handle_source_matches(provider.handles, facts) -> Val("c::{provider.module_library}::{facts.jet_name}") else -> None
+        .ForeignHandle(facts) -> if sema_checked_foreign_handle_source_matches(provider.handles, facts) -> Val("c.{provider.module_library}.{facts.jet_name}") else -> None
         .SourceAST(_) | .CompilerBuiltinTrait(_) -> None
     }
 }
@@ -1807,7 +1807,7 @@ sema_checked_foreign_row: fn(graph: SemaRegistrationGraph, module_row: SemaRegis
     symbol: if rust_owner -> key else -> registered.declaration.rust_path
     // An `extern rust` crate is resolved by the foreign-crate build, not by an
     // IR link unit; only C providers own link rows.
-    link_key: if rust_owner -> None else -> Val("c::{registered.foreign_library}")
+    link_key: if rust_owner -> None else -> Val("c.{registered.foreign_library}")
     close_key: sema_checked_foreign_registered_close_key(graph, module_row, registered.declaration.close)
     undo_key: sema_checked_foreign_named_key(module_name, registered.declaration.undo)
     params: sema_checked_foreign_params(graph, module_identity, registered.parameters)
@@ -2012,7 +2012,7 @@ sema_checked_trait_method_key: fn(module_name: String, trait_name: String, metho
     // Trait defaults are registered under their source callable key, matching
     // the canonical checked-tree producer.  Implementations use the owner-qualified
     // key below and never infer this from a parameter name.
-    "{module_name}::{method.name}"
+    "{module_name}.{method.name}"
 }
 
 sema_checked_trait_method: fn(graph: SemaRegistrationGraph, method: SemaRegistrationTraitMethod, module_row: SemaRegistrationModule, trait_name: String) -> TTraitMethod Never! {
@@ -3184,20 +3184,20 @@ sema_checked_computed_alias: fn(graph: SemaRegistrationGraph, module_row: SemaRe
 }
 
 sema_checked_impl_key: fn(module_name: String, type_name: String, trait_name: String?) -> String Never! {
-    if trait_name == .Val(trait_name_value) -> "{module_name}::{type_name}::{trait_name_value}" else -> "{module_name}::{type_name}"
+    if trait_name == .Val(trait_name_value) -> "{module_name}.{type_name}.{trait_name_value}" else -> "{module_name}.{type_name}"
 }
 
 sema_checked_impl_method_key: fn(module_name: String, definition: ImplDef, method: Func) -> String Never! {
-    trait_name_value: definition.trait_name ?? return "{module_name}::{definition.type_name}::{method.name}"
+    trait_name_value: definition.trait_name ?? return "{module_name}.{definition.type_name}.{method.name}"
     if owned_trait_keyed_by_argument(trait_name_value) {
         rhs: definition.operator_rhs ?? Type.Named{name: definition.type_name}
-        return "{module_name}::{definition.type_name}::{trait_name_value}::{method.name}<{type_name(rhs)}>"
+        return "{module_name}.{definition.type_name}.{trait_name_value}.{method.name}<{type_name(rhs)}>"
     }
-    "{module_name}::{definition.type_name}::{trait_name_value}::{method.name}"
+    "{module_name}.{definition.type_name}.{trait_name_value}.{method.name}"
 }
 
 sema_checked_nested_impl_key: fn(module_name: String, type_name: String, block: TraitImplBlock) -> String Never! {
-    "{module_name}::{type_name}::{block.trait_name}"
+    "{module_name}.{type_name}.{block.trait_name}"
 }
 
 sema_checked_target_os: fn(target: String?) -> TTargetOS? { target_os_parse(target ?? return None) }
@@ -3439,9 +3439,9 @@ SemaCheckedOperatorImpl: struct {
 }
 
 SemaCheckedCoherence: struct {
-    // Registered `{owner}::{trait}` pairs (Rust `trait_impls`).
+    // Registered `{owner}.{trait}` pairs (Rust `trait_impls`).
     trait_keys: [String:Bool],
-    // `{left}::{trait}` -> the right-hand types of its valid operator impls.
+    // `{left}.{trait}` -> the right-hand types of its valid operator impls.
     operator_slots: [String:Int],
     operator_rhs: [[Type]],
     // The module's declarations, indexed once per check (Rust `local_types`,
@@ -3451,7 +3451,7 @@ SemaCheckedCoherence: struct {
     owner_types: [String:Type],
     tags: [String:Bool],
     traits: [String:Bool],
-    // `{owner}::{trait}` -> the associated types that impl binds, read by an
+    // `{owner}.{trait}` -> the associated types that impl binds, read by an
     // owned trait whose contract shares them (IndexMut reads Index's).
     associated: [String:[NamedType]],
     // A `distinct` type's base, by name.
@@ -3505,7 +3505,7 @@ sema_checked_coherence_state: fn(module_row: SemaRegistrationModule) -> SemaChec
     loop implementation in module_row.impls {
         trait_name: implementation.declaration.trait_name ?? next
         if implementation.declaration.assoc_type_impls.len() > 0 {
-            state.associated["{implementation.declaration.type_name}::{trait_name}"] = implementation.declaration.assoc_type_impls.copy()
+            state.associated["{implementation.declaration.type_name}.{trait_name}"] = implementation.declaration.assoc_type_impls.copy()
         }
     }
     state
@@ -3514,7 +3514,7 @@ sema_checked_coherence_state: fn(module_row: SemaRegistrationModule) -> SemaChec
 sema_checked_coherence_note_associated: fn(state: &SemaCheckedCoherence, owner_name: String, blocks: [TraitImplBlock]) Never! {
     loop block in blocks {
         if block.assoc_type_impls.len() > 0 {
-            state.associated["{owner_name}::{block.trait_name}"] = block.assoc_type_impls.copy()
+            state.associated["{owner_name}.{block.trait_name}"] = block.assoc_type_impls.copy()
         }
     }
 }
@@ -3585,7 +3585,7 @@ sema_checked_coherence_register: fn(graph: SemaRegistrationGraph, module_row: Se
     owner_type: sema_checked_coherence_owner_type(state, owner_name)
     rhs: operator_rhs ?? owner_type
     rhs_name: type_name(rhs)
-    key: "{owner_name}::{trait_name}"
+    key: "{owner_name}.{trait_name}"
     if keyed {
         if state.operator_slots.get(key) == .Val(operator_slot) {
             loop existing in state.operator_rhs[operator_slot] {
@@ -3616,7 +3616,7 @@ sema_checked_coherence_register: fn(graph: SemaRegistrationGraph, module_row: Se
     sibling := [NamedType]{}
     if owned.contract == .Methods(_, _, shares) {
         if shares == .Val(other) {
-            sibling = state.associated.get("{owner_name}::{other}") ?? [NamedType]{}
+            sibling = state.associated.get("{owner_name}.{other}") ?? [NamedType]{}
         }
     }
     key_by: trait_name == "KeyBy"
@@ -3685,7 +3685,7 @@ sema_checked_coherence_core_trait: fn(graph: SemaRegistrationGraph, owner_module
 
 // Operator identity is the left owner, the trait and the right-hand type.
 sema_checked_coherence_add_operator: fn(state: &SemaCheckedCoherence, left: String, trait_name: String, rhs: Type) Never! {
-    operator_key: "{left}::{trait_name}"
+    operator_key: "{left}.{trait_name}"
     if state.operator_slots.get(operator_key) == .Val(slot) {
         state.operator_rhs[slot].push(rhs.copy())
     } else {
@@ -3705,7 +3705,7 @@ sema_checked_coherence_impl: fn(graph: SemaRegistrationGraph, module_row: SemaRe
     trait_name: definition.trait_name ?? return
     literal_capability: owned_trait_literal(trait_name)
     if definition.delegation_field != None && !literal_capability {
-        key: "{definition.type_name}::{trait_name}"
+        key: "{definition.type_name}.{trait_name}"
         state.trait_keys[key] = true
         if owned_trait_arithmetic(trait_name) {
             rhs: definition.operator_rhs ?? sema_checked_coherence_owner_type(state, definition.type_name)
@@ -3728,7 +3728,7 @@ sema_checked_coherence_derives: fn(state: SemaCheckedCoherence, derives: [NamedS
 sema_checked_coherence_blocks: fn(graph: SemaRegistrationGraph, module_row: SemaRegistrationModule, owner_name: String, blocks: [TraitImplBlock], state: &SemaCheckedCoherence, diagnostics: &[Diagnostic]) {
     loop block in blocks {
         if block.delegation_field != None {
-            state.trait_keys["{owner_name}::{block.trait_name}"] = true
+            state.trait_keys["{owner_name}.{block.trait_name}"] = true
             if owned_trait_arithmetic(block.trait_name) {
                 rhs: block.operator_rhs ?? sema_checked_coherence_owner_type(state, owner_name)
                 sema_checked_coherence_add_operator(state, owner_name, block.trait_name, rhs)
@@ -3793,7 +3793,7 @@ sema_checked_member_names: fn(graph: SemaRegistrationGraph, module_row: SemaRegi
     loop nominal_index in 0..<module_row.nominals.len() {
         owner: symbol_table_key(graph.symbols, module_row.nominals[nominal_index].symbol.id)
         loop method in module_row.nominals[nominal_index].methods {
-            key: "{owner}::{method.symbol.name}"
+            key: "{owner}.{method.symbol.name}"
             hook: method.symbol.owner != Val(owner)
             previous: names.get(key)
             if previous != None && !(hook && previous == (Val(true))) && !sema_checked_generated_helper(method) {
@@ -3818,7 +3818,7 @@ sema_checked_member_names: fn(graph: SemaRegistrationGraph, module_row: SemaRegi
         owner_name: if row == .Val(value) -> graph.modules[value.module_index].nominals[value.row].symbol.name else -> type_name(module_row.impls[implementation_index].target_type)
         hook: owned_trait_keyed_by_argument(module_row.impls[implementation_index].trait_name ?? "")
         loop method in module_row.impls[implementation_index].methods {
-            key: "{owner}::{method.symbol.name}"
+            key: "{owner}.{method.symbol.name}"
             previous: names.get(key)
             if previous != None && !(hook && previous == (Val(true))) && !sema_checked_generated_helper(method) {
                 diagnostics.push(sema_method_defined_twice(method.symbol.name, owner_name, method.symbol.span))
@@ -3892,10 +3892,10 @@ sema_checked_nested_impl_row: fn(graph: SemaRegistrationGraph, module_row: SemaR
         if {
             owned_trait_keyed_by_argument(block.trait_name) -> {
                 rhs: block.operator_rhs ?? Type.Named{name: owner_name}
-                methods.push("{module_name}::{owner_name}::{block.trait_name}::{method.name}<{type_name(rhs)}>")
+                methods.push("{module_name}.{owner_name}.{block.trait_name}.{method.name}<{type_name(rhs)}>")
             }
             else -> {
-                methods.push("{module_name}::{owner_name}::{block.trait_name}::{method.name}")
+                methods.push("{module_name}.{owner_name}.{block.trait_name}.{method.name}")
             }
         }
     }

@@ -5,6 +5,7 @@
 // string-view fact; it does not read a mutable scope singleton or guess
 // nominal capabilities from a successful lowering.
 use jet_foundation.[
+    symbol_key_names,
     symbol_table_key,
     Diagnostic,
     InternalTag,
@@ -487,7 +488,7 @@ sema_copy_nominal_has_impl: fn(
 sema_copy_generic_bound: fn(param: TGenericParam, bound_name: String, graph: SemaRegistrationGraph?) -> Bool Never! {
     if graph == .Val(registered) {
         loop bound in param.bounds {
-            if symbol_table_key(registered.symbols, bound).ends_with(":{bound_name}") -> return true
+            if symbol_key_names(symbol_table_key(registered.symbols, bound), bound_name) -> return true
         }
     }
     false
@@ -627,13 +628,13 @@ sema_copy_named_facts: fn(
         // symbols only) never returns, so it is tested first. One lookup
         // serves both.
         resolved: sema_type_graph_lookup_symbol_at(registered, caller, name)
-        // Only a canonical `module::Name` that resolves names one symbol from
+        // Only a canonical `module.Name` that resolves names one symbol from
         // every caller; any other name is the caller's scope's reading. The
         // table's walk has no caller: it reads the parts of a nominal, which
         // resolved in the nominal's own module. Only a compiler-owned, Core or
         // unresolved name stays bare there, and it means the same from no
         // caller as it did in that module.
-        if !walk.table && (resolved == None || !name.contains("::")) -> walk.tainted = true
+        if !walk.table && (resolved == None || !name.contains(".")) -> walk.tainted = true
         if resolved == .Val(found) {
             if sema_resolved_kind(registered, found) == SymbolKind.Trait {
                 return sema_copy_type_facts_known(false, false, true, false, false, false, true)
@@ -699,7 +700,7 @@ sema_copy_core_row_facts: fn(
             loop part in typed -> parts.push(part)
         }
     }
-    key: "<core-row>::{name}"
+    key: "<core-row>.{name}"
     if walk.active.contains(key) {
         return Val(sema_copy_type_facts_known(false, true, false, false, false, false, true))
     }
@@ -1001,7 +1002,7 @@ sema_copy_apply_facts: fn(
     }
     if graph == .Val(registered) {
         // A bare head taints a query, not the table's walk (sema_copy_named_facts).
-        if !walk.table && !name.contains("::") -> walk.tainted = true
+        if !walk.table && !name.contains(".") -> walk.tainted = true
         if !task_handle && sema_type_resolve_nominal_row_at(registered, ty, caller) == .Val(row) {
             nested: sema_copy_stored_nested_facts(registered.modules[row.module_index].nominals[row.row], args, graph, table, caller, generic_params, walk)
             nominal_facts: sema_copy_nominal_facts(registered.modules[row.module_index].nominals[row.row], row, ty, graph, table, caller, generic_params, walk)
@@ -1311,7 +1312,7 @@ sema_copy_acts_when_dropped: fn(ty: Type, env: SemaScopeEnvironment, program: Se
     if ty == {
         .Int | .Float | .Bool | .IntN(_, _) | .Float32 | .Char | .String | .Fn(_, _, _, _, _, _) -> return false
         .Named(name) | .Apply(name, _) -> {
-            if name == "SharedGuard" || name == "ProcessChild" || name == "TempDir" || name.ends_with("::TempDir") {
+            if name == "SharedGuard" || name == "ProcessChild" || name == "TempDir" || name.ends_with(".TempDir") {
                 return true
             }
         }

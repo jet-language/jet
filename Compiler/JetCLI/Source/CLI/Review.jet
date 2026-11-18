@@ -1452,7 +1452,7 @@ jet_cli_failure_functions: fn(modules: [JetDriverDocModule], entry: String) -> [
         alias: aliases.get(doc_module.module_identity) ?? ""
         loop function in doc_module.functions {
             if function.synthetic -> next
-            key: semindex_function_key(function.key) ?? next
+            key: semindex_function_key(function.key, aliases) ?? next
             can_fail: jet_cli_failure_carrier_fails(function.failure_carrier)
             points := [JetCLIFailurePoint]{}
             if can_fail -> jet_cli_failure_points(doc_module, function, aliases, infallible, points)
@@ -1525,7 +1525,7 @@ jet_cli_failure_callee: fn(doc_module: JetDriverDocModule, caller: String, span:
     }
     target: (if best < 0 -> None else -> jet_cli_failure_callee_key(doc_module, best)) ?? return Val(semindex_doc_text(doc_module.source.bytes(), span.start, span.end).trim())
     if infallible.has_key(target) -> return None
-    key: semindex_function_key(target) ?? return Val(target)
+    key: semindex_function_key(target, aliases) ?? return Val(target)
     alias: aliases.get(key.module_identity) ?? return Val(semindex_outside_edge(key))
     Val(jet_cli_failure_name(alias, key.local))
 }

@@ -341,7 +341,8 @@ task_run: fn(child: I64) {
     sync_store(wrapping(base + I64{64}), saved_body)
     scheduler_completion_order(wrapping(child + I64{112}))
     sync_store(wrapping(child + I64{24}), I64{1})
-    sync_park_wake(sync_load(wrapping(child + I64{104})))
+    // The joiner's wake is this task's, though its carrier's control is back.
+    sync_park_wake_as(sync_load(wrapping(child + I64{104})), sync_load(wrapping(control + I64{56})))
     sync_wake(child + I64{24}, I64{2147483647})
     task_drop(child)
 }
@@ -457,23 +458,18 @@ task_join_bounded: fn(child: I64) -> Bool {
 
 // Core Task is move-only (Sema/Ownership/Copy.jet:132-143); Rust's has no Clone
 // and join(self):717 consumes the sole handle. Lexical group cleanup is a
-// separate retained drain, using done@24 wake-all. Under `jet perf run` a
-// join of a child not yet done records its wait (PerfSamples.jet
-// perf_samples_join).
+// separate retained drain, using done@24 wake-all. Under `jet perf run` each
+// wait names the awaited task (PerfSamples.jet perf_samples_wait).
 task_join_wait: fn(child: I64) -> I64 {
     kind: scheduler_msg_join()
     typed: sync_load(wrapping(child + I64{184})) != I64{0}
     bounded: task_join_bounded(child)
     if !typed -> _ := scheduler_deadline_check(kind)
-    recorded: perf_samples_fd >= I64{0} && sync_load(wrapping(child + I64{24})) == I64{0}
-    start: if recorded -> time_host_monotonic_i64() else -> I64{0}
+    awaited: perf_samples_object(PERF_SAMPLES_OBJECT_TASK, sync_load(wrapping(sync_load(wrapping(child + I64{8})) + I64{56})))
     loop jet_scheduler_native_propagate() == (I64{0}) {
         if (scheduler_wait_point_cancel_check() != I64{0}) { break }
         if (sync_load(wrapping(child + I64{24})) != I64{0}) { break }
-        _ := scheduler_yield_policy(kind, sync_load(wrapping(child + I64{104})), I64{-1}, !bounded)
-    }
-    if recorded {
-        perf_samples_join(observe_current_task(), sync_load(wrapping(sync_load(wrapping(child + I64{8})) + I64{56})), start)
+        _ := scheduler_yield_policy(kind, sync_load(wrapping(child + I64{104})), I64{-1}, !bounded, awaited)
     }
     if !typed -> _ := scheduler_deadline_check(kind)
     jet_rt_string_drop(kind)

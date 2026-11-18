@@ -1,0 +1,15 @@
+// Probe N3: which spelling puts the deny-only rights under the empty ceiling?
+peek_arrow: fn(rx: Receiver<Int>) -[!Time.Wait, !Unsafe]> Int { rx.receive() ?? 0 }
+
+peek_arrow_print: fn() -[!Time.Wait, !Unsafe]> Int {
+    print("side effect")
+    1
+}
+
+run: fn() {
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 8)
+    tx.send(1)
+    tx.send(2)
+    tx.send(3)
+    print(peek_arrow(rx) + peek_arrow_print())
+}

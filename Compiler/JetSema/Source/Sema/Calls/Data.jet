@@ -42,7 +42,7 @@ sema_data_decode_error: fn() -> Type Never! { Type.List{element: Type.Named{name
 sema_data_result: fn(ok: Type, err: Type) -> Type Never! { Type.Result{ok: ok, err: err} }
 
 sema_data_nominal_is: fn(name: String, leaf: String) -> Bool Never! {
-    name == leaf || (core_identity_in_module(name, "core.data") && name.ends_with("::{leaf}"))
+    name == leaf || (core_identity_in_module(name, "core.data") && name.ends_with(".{leaf}"))
 }
 
 sema_data_source_type_name: fn(environment: SemaScopeEnvironment, program: SemaProgramTables, leaf: String) -> String Never! {
@@ -50,7 +50,7 @@ sema_data_source_type_name: fn(environment: SemaScopeEnvironment, program: SemaP
 }
 
 // The checked name of the type `leaf` that Core module `module_name`
-// declares (the identity of `core.data::DataJoin`); just `leaf` for a
+// declares (the identity of `core.data.DataJoin`); just `leaf` for a
 // compiler-owned row, or when the load holds no such declaration.
 sema_core_source_type_name: fn(program: SemaProgramTables, module_name: String, leaf: String) -> String Never! {
     if program.registration_graph == .Val(graph) {
@@ -61,7 +61,7 @@ sema_core_source_type_name: fn(program: SemaProgramTables, module_name: String, 
                     if graph.modules[module_row_index].nominals[nominal_index].compiler_owned {
                         return "{leaf}"
                     }
-                    return "{module_text(graph.module_table, graph.modules[module_row_index].nominals[nominal_index].symbol.module_identity)}::{leaf}"
+                    return "{module_text(graph.module_table, graph.modules[module_row_index].nominals[nominal_index].symbol.module_identity)}.{leaf}"
                 }
             }
         }
@@ -684,7 +684,7 @@ sema_data_event_time_callback: fn(method: String, element: Type, argument: CallA
 
 sema_data_event_time_is_datetime: fn(ty: Type) -> Bool Never! {
     if ty == {
-        .Named(name) -> return name == "DateTime" || (core_identity_in_module(name, "core.time") && name.ends_with("::DateTime"))
+        .Named(name) -> return name == "DateTime" || (core_identity_in_module(name, "core.time") && name.ends_with(".DateTime"))
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> return false
     }
 }

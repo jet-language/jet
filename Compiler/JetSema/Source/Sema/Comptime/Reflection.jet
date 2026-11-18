@@ -1183,7 +1183,7 @@ sema_comptime_reflection_layout_engine: fn(graph: SemaRegistrationGraph) -> Targ
         module_name: module_text(graph.module_table, module_identity)
         loop item_index in 0..<graph.modules[registration_module_index].program.items.len() {
             name: sema_comptime_reflection_layout_item_name(graph.modules[registration_module_index].program.items[item_index]) ?? next
-            qualified_name: if module_name == "" -> name else -> "{module_name}::{name}"
+            qualified_name: if module_name == "" -> name else -> "{module_name}.{name}"
             qualified_items.push(TargetLayoutQualifiedItem{qualified_name: qualified_name, core: module_is_core(module_identity), item: graph.modules[registration_module_index].program.items[item_index]})
             sema_comptime_reflection_layout_item_resolutions(graph, module_identity, qualified_name, graph.modules[registration_module_index].program.items[item_index], resolutions)
         }
@@ -1481,7 +1481,7 @@ sema_comptime_reflection_setting_value: fn(graph: SemaRegistrationGraph, ty: Str
 // TypeInfo.identity does (`shapes.Point`, `[shapes.Point]`), so two
 // reflected types are one type exactly when their identities are equal; its
 // `name` is the type as the checker prints it (`Point`, `[Point]`), with no
-// declaring module's internal `module::` qualifier (a Core type a corelib
+// declaring module's internal `module.` qualifier (a Core type a corelib
 // signature names reads `SourceLocation`); its `signature` is a function
 // type's CallableSignature, each type in it a TypeId named the same way
 // (sema_comptime_reflection_type_signature), and None for any other type.

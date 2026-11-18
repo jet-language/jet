@@ -1,0 +1,13 @@
+// Probe P8 (revision 4): spec.md "Generic modules" lets a generic module's
+// body hold module-global values, each instance its own. A mutable one.
+counter: module<T>(start: Int) {
+    hits := start
+
+    count: fn() -> Int { hits }
+}
+
+small: counter<Int>(8)
+
+run: fn() {
+    print(small.count())
+}

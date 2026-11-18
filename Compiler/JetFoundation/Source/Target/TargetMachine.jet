@@ -1,5 +1,5 @@
 // Driver-owned target selection and dossier construction ported and
-// Driver::target_machine_for_facts.
+// Driver.target_machine_for_facts.
 
 // The one target capability vocabulary. A capability's name is its Target
 // build fact row (Prelude/Facts.jet), and the provider dossier writes one fact
@@ -781,18 +781,15 @@ jet_target_capability_name: fn(capability: TargetCapability) -> String Never! {
 
 // Rust capabilities_for_core_usage.
 jet_target_capabilities_for_core_usage: fn(api: String) -> [TargetCapability] Never! {
-    bytes: api.bytes()
-    separator := 0
-    loop separator + 1 < bytes.len() {
-        if (Int{bytes[separator]}) == 58 && (Int{bytes[separator + 1]}) == 58 -> break
-        separator += 1
+    // The module is the longest one this table reads that `api` names or
+    // starts with, cut at a `.`; the helper is the member path after it
+    // (`core.time.sleep` -> `core.time`, `sleep`).
+    module_name := ""
+    loop name in ([String]{"core.mem", "core.term", "core.concurrency", "core.tasks", "core.time", "core.crypto.random", "core.crypto.uuid", "core.hardware"}) {
+        if name.len() > module_name.len() && (api == name || api.starts_with("{name}.")) -> module_name = name
     }
-    module_name := api
-    helper := ""
-    if separator + 1 < bytes.len() {
-        module_name = String.from_bytes(bytes[0..<separator]) ?? ""
-        helper = String.from_bytes(bytes[separator + 2..<bytes.len()]) ?? ""
-    }
+    if module_name == "" -> return [TargetCapability]{}
+    helper: if module_name.len() == api.len() -> "" else -> api.slice(module_name.len() + 1, api.len())
     result := [TargetCapability]{}
     if module_name == {
         "core.mem" -> {

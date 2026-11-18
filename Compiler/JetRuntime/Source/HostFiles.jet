@@ -118,6 +118,7 @@ fd_flush_locked: fn(state: I64) -> I64 {
     buffer: fd_word(state, I64{32})
     at := I64{0}
     failure := I64{0}
+    began: if (filled > I64{0}) -> perf_samples_io_start() else -> I64{0}
     loop at < filled {
         count: host_call(I64{1}, fd_word(state, I64{8}), wrapping(buffer + at), wrapping(filled - at))
         if (count == I64{-4}) { next }
@@ -127,6 +128,7 @@ fd_flush_locked: fn(state: I64) -> I64 {
         }
         at = wrapping(at + count)
     }
+    perf_samples_io_file(began, PERF_SAMPLES_IO_WRITE, if (failure < I64{0} && failure != HOST_WRITE_ZERO) -> failure else -> at, state)
     remaining: wrapping(filled - at)
     // Text.jet rt_text_bytes_copy advances at from 0 upward; dst < src overlap
     // is therefore safe and preserves exactly the unwritten suffix.
@@ -160,7 +162,11 @@ fd_read_error: fn(result: I64, error: I64) -> I64 {
             result = if (requested < unread) -> requested else -> unread
             rt_text_bytes_copy(bytes, wrapping(fd_word(state, I64{32}) + fd_word(state, I64{56})), result)
             fd_put(state, I64{56}, fd_word(state, I64{56}) + result)
-        } else { result = host_call(I64{0}, fd_word(state, I64{8}), bytes, requested) }
+        } else {
+            began: perf_samples_io_start()
+            result = host_call(I64{0}, fd_word(state, I64{8}), bytes, requested)
+            perf_samples_io_file(began, PERF_SAMPLES_IO_READ, result, state)
+        }
     }
     fd_unlock(state)
     fd_read_error(result, error)
@@ -174,7 +180,9 @@ fd_read_error: fn(result: I64, error: I64) -> I64 {
     if (fd_word(state, I64{16}) == I64{0}) {
         if (fd_word(state, I64{40}) >= I64{0}) {
             // A retained reader alias cannot overwrite shared refill bytes.
+            began: perf_samples_io_start()
             result = host_call(I64{1}, fd_word(state, I64{8}), bytes, requested)
+            perf_samples_io_file(began, PERF_SAMPLES_IO_WRITE, result, state)
             fd_unlock(state)
             fd_zero(result, zero)
             return fd_error(result, errno)
@@ -184,10 +192,12 @@ fd_read_error: fn(result: I64, error: I64) -> I64 {
         if (requested > wrapping(I64{8192} - filled)) { result = fd_flush_locked(state) }
         if (result == I64{0} && requested != I64{0}) {
             if (requested >= I64{8192}) {
+                began: perf_samples_io_start()
                 loop {
                     result = host_call(I64{1}, fd_word(state, I64{8}), bytes, requested)
                     if (result != I64{-4}) { break }
                 }
+                perf_samples_io_file(began, PERF_SAMPLES_IO_WRITE, result, state)
             } else {
                 buffer: fd_buffer(state)
                 used: fd_word(state, I64{48})
@@ -531,10 +541,12 @@ fd_created_finish: fn(result: I64, output: I64, errno: I64) {
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
+        began: perf_samples_io_start()
         loop {
             result = host_call(I64{1}, fd_word(state, I64{8}), bytes, requested)
             if (result != I64{-4}) { break }
         }
+        perf_samples_io_file(began, PERF_SAMPLES_IO_WRITE, result, state)
     }
     fd_unlock(state)
     fd_error(result, error)

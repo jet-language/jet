@@ -33,13 +33,13 @@ sema_type_value_type: fn(expected: Type?, environment: SemaScopeEnvironment, pro
 }
 
 // The prelude's `Type`, resolved, when `wanted` is it. A resolved Core
-// nominal is spelled `<module>::<leaf>`; only a name ending in the leaf is
+// nominal is spelled `<module>.<leaf>`; only a name ending in the leaf is
 // resolved, which keeps the test off every other type.
 sema_type_value_resolved: fn(wanted: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
     if wanted == .Named(written) && written.ends_with("Type") {
         resolved: sema_expr_expected_type(wanted, environment, program)
         if resolved == .Named(name) {
-            if name.ends_with("::Type") && core_identity_in_module(name, "core.prelude") {
+            if name.ends_with(".Type") && core_identity_in_module(name, "core.prelude") {
                 return Val(resolved)
             }
         }

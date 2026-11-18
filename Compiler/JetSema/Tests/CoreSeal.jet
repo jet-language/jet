@@ -36,22 +36,22 @@ use {
     stopping_line: SemaCoreSealLine{flags: "SPWI", effects: [String]{"IO", "Net"}}
     quiet_line: SemaCoreSealLine{flags: "SG", effects: [String]{}}
     span: Span{start: 2, end: 7}
-    stopping: sema_core_seal_stand_in_effects(stopping_line, "core.a::f", span)
+    stopping: sema_core_seal_stand_in_effects(stopping_line, "core.a.f", span)
     if stopping.direct != ([String]{"IO", "Net"}) || stopping.call_edges != ([String]{"__jet_panic__"}) || stopping.maximal {
         panic("a stand-in's direct row is its effects, and it reaches a stop")
     }
     if stopping.module_writes.len() != 1 || stopping.direct_spans.len() != 2 || stopping.solved.len() != 0 {
         panic("a stand-in that writes module state has one write")
     }
-    infallible: sema_core_seal_stand_in_failure(stopping_line, "core.a::f")
-    if infallible.direct || infallible.edges.len() != 0 || infallible.union_general || infallible.function_key != "core.a::f" {
+    infallible: sema_core_seal_stand_in_failure(stopping_line, "core.a.f")
+    if infallible.direct || infallible.edges.len() != 0 || infallible.union_general || infallible.function_key != "core.a.f" {
         panic("an infallible stand-in has no failure source")
     }
-    quiet: sema_core_seal_stand_in_effects(quiet_line, "core.a::g", span)
+    quiet: sema_core_seal_stand_in_effects(quiet_line, "core.a.g", span)
     if quiet.direct.len() != 0 || quiet.call_edges.len() != 0 || quiet.module_writes.len() != 0 {
         panic("a stand-in with no effects names none")
     }
-    general: sema_core_seal_stand_in_failure(quiet_line, "core.a::g")
+    general: sema_core_seal_stand_in_failure(quiet_line, "core.a.g")
     if !general.direct || !general.union_general {
         panic("a fallible stand-in keeps its failure source and its general union")
     }
@@ -68,57 +68,57 @@ core_seal_of: fn(lines: &&[String]) -> SemaCoreSeal {
     // Keys that share prefixes, differ in case, punctuation and digits, and
     // one line with no flags column, so every probe order is crossed.
     keys: [String]{
-        "function:<corelib>/core.a::f",
-        "function:<corelib>/core.a::f2",
-        "function:<corelib>/core.a::f<Int>",
-        "function:<corelib>/core.a::F",
-        "function:<corelib>/core.a::f_b",
-        "function:<corelib>/core.a.b::g",
-        "function:<corelib>/core.ab::g",
-        "function:<corelib>/__core_x::h",
-        "method:<corelib>/core.a::T.m",
-        "function:<corelib>/core.é::k",
-        "function:<corelib>/core.z::last",
+        "function:<corelib>/core.a.f",
+        "function:<corelib>/core.a.f2",
+        "function:<corelib>/core.a.f<Int>",
+        "function:<corelib>/core.a.F",
+        "function:<corelib>/core.a.f_b",
+        "function:<corelib>/core.a.b.g",
+        "function:<corelib>/core.ab.g",
+        "function:<corelib>/__core_x.h",
+        "method:<corelib>/core.a.T.m",
+        "function:<corelib>/core.é.k",
+        "function:<corelib>/core.z.last",
     }
     lines := [String]{}
     loop (index, key) in keys -> lines.push("{key}\tSP\tIO{index}")
-    lines.push("function:<corelib>/core.m::bare")
+    lines.push("function:<corelib>/core.m.bare")
     seal: core_seal_of(lines.move())
     loop (index, key) in keys {
         line: sema_core_seal_line(seal, key) ?? panic("{key} has a seal line")
         assert_eq(line.effects, [String]{"IO{index}"})
     }
-    if sema_core_seal_line(seal, "function:<corelib>/core.m::bare") != None {
+    if sema_core_seal_line(seal, "function:<corelib>/core.m.bare") != None {
         panic("a line with no flags is no line")
     }
-    if sema_core_seal_line(seal, "function:<corelib>/core.a::") != None {
+    if sema_core_seal_line(seal, "function:<corelib>/core.a.") != None {
         panic("a key's prefix has no line")
     }
-    if sema_core_seal_line(seal, "function:<corelib>/core.zz::after") != None {
+    if sema_core_seal_line(seal, "function:<corelib>/core.zz.after") != None {
         panic("a key past the last line has none")
     }
     if sema_core_seal_line(seal, "a") != None -> panic("a key before the first line has none")
-    if sema_core_seal_line(SemaCoreSeal{bytes: [U8]{}}, "function:<corelib>/core.a::f") != None {
+    if sema_core_seal_line(SemaCoreSeal{bytes: [U8]{}}, "function:<corelib>/core.a.f") != None {
         panic("an empty seal has no line")
     }
 }
 
 #Test("core_seal_stand_in and core_seal_valued read the flags of a key's line") {
-    seal: core_seal_of([String]{"core.a::f\tSPWI\tIO", "core.a::g\tPG", "core.a::h\tI"})
-    if sema_core_seal_stand_in(seal, "core.a::f") == None -> panic("a key with an S line stands in")
-    if sema_core_seal_stand_in(seal, "core.a::g") != None {
+    seal: core_seal_of([String]{"core.a.f\tSPWI\tIO", "core.a.g\tPG", "core.a.h\tI"})
+    if sema_core_seal_stand_in(seal, "core.a.f") == None -> panic("a key with an S line stands in")
+    if sema_core_seal_stand_in(seal, "core.a.g") != None {
         panic("a key with no S line never stands in")
     }
-    if sema_core_seal_stand_in(seal, "core.a::x") != None {
+    if sema_core_seal_stand_in(seal, "core.a.x") != None {
         panic("a key the seal does not hold never stands in")
     }
-    assert(sema_core_seal_valued(seal, "core.a::f"))
-    assert(sema_core_seal_valued(seal, "core.a::h"))
-    assert(!sema_core_seal_valued(seal, "core.a::g"))
-    assert(!sema_core_seal_valued(seal, "core.a::x"))
+    assert(sema_core_seal_valued(seal, "core.a.f"))
+    assert(sema_core_seal_valued(seal, "core.a.h"))
+    assert(!sema_core_seal_valued(seal, "core.a.g"))
+    assert(!sema_core_seal_valued(seal, "core.a.x"))
 }
 
 #Test("core_seal_bound drops the S of a key the library does not seal") {
-    bound: sema_core_seal_bound([String]{"core.a::f\tSP\tIO", "core.a::g\tSI", "core.a::h\tS", "core.a::i\tI", "core.a::j\tSW"}, [String]{"core.a::f", "core.a::j", "core.b::x"})
-    assert_eq(bound, [String]{"core.a::f\tSP\tIO", "core.a::g\tI", "core.a::i\tI", "core.a::j\tSW"})
+    bound: sema_core_seal_bound([String]{"core.a.f\tSP\tIO", "core.a.g\tSI", "core.a.h\tS", "core.a.i\tI", "core.a.j\tSW"}, [String]{"core.a.f", "core.a.j", "core.b.x"})
+    assert_eq(bound, [String]{"core.a.f\tSP\tIO", "core.a.g\tI", "core.a.i\tI", "core.a.j\tSW"})
 }

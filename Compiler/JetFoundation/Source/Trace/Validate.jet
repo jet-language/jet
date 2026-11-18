@@ -295,6 +295,48 @@ jettrace_validate_game_draw_events: fn(value: CanonicalJSON) JetTraceError! {
     return
 }
 
+// One relay's identity: each frame's id is its own, and each draw event's
+// id is its own and names a frame whose scene, frame index, build, revision
+// and trace id it carries. A draw is never kept without its frame.
+jettrace_validate_game_identity: fn(frames_value: CanonicalJSON, draws_value: CanonicalJSON) JetTraceError! {
+    frames: jettrace_array(frames_value, "content.game_frames")
+    keys: [String]{"scene", "build", "revision", "trace_id"}
+    identities := [U64:String]{}
+    loop index in 0..<frames.len() {
+        fields: jettrace_object_view(frames[index], "content.game_frames[{index}]")
+        frame_id: jettrace_unsigned(fields[jettrace_get(fields, "frame_id")].value, "content.game_frames[{index}].frame_id")
+        if identities.has_key(frame_id) {
+            return Err(jettrace_error("content.game_frames[{index}].frame_id {frame_id} repeats a frame"))
+        }
+        identity := "{jettrace_unsigned(fields[jettrace_get(fields, "frame_index")].value, "content.game_frames[{index}].frame_index")}"
+        loop key in keys {
+            identity = "{identity}\n{jettrace_text(fields[jettrace_get(fields, key)].value, "content.game_frames[{index}].{key}")}"
+        }
+        identities[frame_id] = identity
+    }
+    draws: jettrace_array(draws_value, "content.game_draw_events")
+    events := [U64:Bool]{}
+    loop index in 0..<draws.len() {
+        label: "content.game_draw_events[{index}]"
+        fields: jettrace_object_view(draws[index], label)
+        event_id: jettrace_unsigned(fields[jettrace_get(fields, "event_id")].value, "{label}.event_id")
+        if events.has_key(event_id) {
+            return Err(jettrace_error("{label}.event_id {event_id} repeats an event"))
+        }
+        events[event_id] = true
+        frame_id: jettrace_unsigned(fields[jettrace_get(fields, "frame_id")].value, "{label}.frame_id")
+        frame: identities.get(frame_id) ?? return Err(jettrace_error("{label}.frame_id {frame_id} names no captured frame"))
+        identity := "{jettrace_unsigned(fields[jettrace_get(fields, "frame_index")].value, "{label}.frame_index")}"
+        loop key in keys {
+            identity = "{identity}\n{jettrace_text(fields[jettrace_get(fields, key)].value, "{label}.{key}")}"
+        }
+        if identity != frame {
+            return Err(jettrace_error("{label} does not carry the identity of frame {frame_id}"))
+        }
+    }
+    return
+}
+
 jettrace_validate_samples: fn(value: CanonicalJSON) JetTraceError! {
     items: jettrace_array(value, "content.samples")
     loop index in 0..<items.len() {
@@ -498,6 +540,7 @@ jettrace_validate_content: fn(value: CanonicalJSON) JetTraceError! {
     jettrace_validate_browser(fields[jettrace_get(fields, "browser")].value, limits.browser_rows)
     jettrace_validate_game_frames(fields[jettrace_get(fields, "game_frames")].value)
     jettrace_validate_game_draw_events(fields[jettrace_get(fields, "game_draw_events")].value)
+    jettrace_validate_game_identity(fields[jettrace_get(fields, "game_frames")].value, fields[jettrace_get(fields, "game_draw_events")].value)
     jettrace_validate_samples(fields[jettrace_get(fields, "samples")].value)
     jettrace_validate_allocations(fields[jettrace_get(fields, "allocations")].value)
     jettrace_validate_receipt_sections(fields[jettrace_get(fields, "receipt_sections")].value)

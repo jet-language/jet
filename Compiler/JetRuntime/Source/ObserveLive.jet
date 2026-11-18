@@ -17,18 +17,22 @@
 //   spawn site, state, deadline present, deadline, canceled, open spans,
 //   arena allocations; label and wait texts), 2 channels (id, depth,
 //   bounded, capacity, send and receive waiters, closed), 3 values (five
-//   texts), 4 events (the fifteen fields, five of them texts). Tag 0 ends
-//   the snapshot.
+//   texts), 4 events (the fifteen fields, five of them texts), 5 game
+//   records (sequence, kind, frame index, start, ns, code, ordinal; a
+//   frame's scene or a callback's function line). Tag 0 ends the snapshot.
 //   A text is its byte length (-1 when absent) and the bytes of at most its
 //   first 160 scalars.
 // Tasks are written by every writer (the run's root task is one). The
-// channel, value and event sections are written through code words their
-// producers install, so a program pays for a section only with its feature.
+// channel, value, event and game sections are written through code words
+// their producers install, so a program pays for a section only with its
+// feature.
 OBSERVE_RAW_MAGIC: I64{3622396348102624586}
 
 observe_values_code := I64{0}
 
 observe_events_code := I64{0}
+
+observe_games_code := I64{0}
 
 observe_text_clone: fn(value: I64) -> I64 {
     if value == (I64{0}) -> return I64{0}
@@ -158,6 +162,64 @@ observe_event_drop: fn(node: I64) {
     if retired != (I64{0}) -> observe_event_drop(retired)
 }
 
+// The most records Game.jet's relay keeps; past it the oldest retires first,
+// which a reader sees as a gap in the sequences.
+OBSERVE_GAME_RECORDS: I64{512}
+
+// Whether the run publishes live snapshots, the only reader of the game
+// relay: an unobserved game records nothing.
+observe_game_live: fn() -> Bool {
+    observe_root != (I64{0}) && sync_load(wrapping(observe_root + I64{72})) != (I64{0})
+}
+
+observe_game_drop: fn(node: I64) {
+    text: sync_load(wrapping(node + I64{64}))
+    if text != (I64{0}) -> jet_rt_string_drop(text)
+    jet_rt_free(node, I64{72}, I64{8})
+}
+
+// One record of the game relay. GameRecord72: next0, sequence8, kind16 (0 an
+// issued frame, 1 one of its callbacks), frame-index24, start-ns32 (the
+// monotonic clock), ns40 (a frame's thread CPU, a callback's wall time),
+// code48 (a callback's code address, 0 for a frame), ordinal56 (a callback's
+// place in registration order, a frame's count of callbacks run), text64
+// (owned, which the record takes: a frame's scene name, a callback's
+// function line from Game.jet game_callback_name or 0). The sequence is
+// assigned under the lock of the append, from 1.
+observe_game_record: fn(kind: I64, index: I64, start: I64, ns: I64, code: I64, ordinal: I64, text: I64) {
+    if observe_games_code == (I64{0}) {
+        #Unsafe("an idempotent install: every writer stores the same code address") {
+            observe_games_code = rt_observe_raw_games_address()
+        }
+    }
+    node: jet_rt_alloc(I64{72}, I64{8})
+    sync_store(node, I64{0})
+    sync_store(wrapping(node + I64{16}), kind)
+    sync_store(wrapping(node + I64{24}), index)
+    sync_store(wrapping(node + I64{32}), start)
+    sync_store(wrapping(node + I64{40}), ns)
+    sync_store(wrapping(node + I64{48}), code)
+    sync_store(wrapping(node + I64{56}), ordinal)
+    sync_store(wrapping(node + I64{64}), text)
+    sync_mutex_lock(observe_root)
+    sync_store(wrapping(node + I64{8}), wrapping(sync_add(wrapping(observe_root + I64{136}), I64{1}) + I64{1}))
+    tail: sync_load(wrapping(observe_root + I64{152}))
+    if tail == (I64{0}) -> sync_store(wrapping(observe_root + I64{144}), node) else {
+        sync_store(tail, node)
+    }
+    sync_store(wrapping(observe_root + I64{152}), node)
+    retired := I64{0}
+    if {
+        sync_load(wrapping(observe_root + I64{160})) == OBSERVE_GAME_RECORDS -> {
+            retired = sync_load(wrapping(observe_root + I64{144}))
+            sync_store(wrapping(observe_root + I64{144}), sync_load(retired))
+        }
+        else -> _ := sync_add(wrapping(observe_root + I64{160}), I64{1})
+    }
+    sync_mutex_unlock(observe_root)
+    if retired != (I64{0}) -> observe_game_drop(retired)
+}
+
 observe_raw_word: fn(builder: I64, word: I64) { rt_text_append_raw_word(builder, word, I64{8}) }
 
 observe_raw_text: fn(builder: I64, value: I64) {
@@ -208,6 +270,10 @@ rt_observe_raw_values_address: fn() -> I64 {
 }
 
 rt_observe_raw_events_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+rt_observe_raw_games_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
@@ -264,6 +330,22 @@ rt_observe_raw_events_address: fn() -> I64 {
     I64{0}
 }
 
+#Export(c) jet_rt_observe_raw_games: fn(builder: I64) -> I64 {
+    observe_raw_word(builder, I64{5})
+    observe_raw_word(builder, sync_load(wrapping(observe_root + I64{160})))
+    node := sync_load(wrapping(observe_root + I64{144}))
+    loop node != (I64{0}) {
+        at := I64{8}
+        loop at <= (I64{56}) {
+            observe_raw_word(builder, sync_load(wrapping(node + at)))
+            at += I64{8}
+        }
+        observe_raw_text(builder, sync_load(wrapping(node + I64{64})))
+        node = sync_load(node)
+    }
+    I64{0}
+}
+
 observe_cstring: fn(text: I64) -> I64 {
     length: rt_text_len(text)
     buffer: jet_rt_alloc(length + I64{1}, I64{1})
@@ -315,6 +397,7 @@ observe_snapshot: fn(writer: I64, exit: I64) -> I64 {
     if observe_channels_code != (I64{0}) -> _ := coll_call1(observe_channels_code, text)
     if observe_values_code != (I64{0}) -> _ := coll_call1(observe_values_code, text)
     if observe_events_code != (I64{0}) -> _ := coll_call1(observe_events_code, text)
+    if observe_games_code != (I64{0}) -> _ := coll_call1(observe_games_code, text)
     sync_mutex_unlock(observe_root)
     observe_raw_word(text, I64{0})
     text
@@ -556,7 +639,7 @@ observe_env_key: fn(index: I64) -> I64 {
 // writer, no thread spawn and no environment read for it.
 observe_start_code := I64{0}
 
-// runtime-init: 4 when observe_task_linked,observe_channels_code,observe_values_code,observe_events_code
+// runtime-init: 4 when observe_task_linked,observe_channels_code,observe_values_code,observe_events_code,observe_games_code
 #Export(c) jet_rt_observe_start_init: fn() {
     #Unsafe("runtime-init runs before any other thread exists") {
         observe_start_code = rt_observe_start_address()

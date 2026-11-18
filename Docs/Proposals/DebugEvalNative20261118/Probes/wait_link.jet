@@ -1,0 +1,23 @@
+// Probe N3: with `!Time.Wait` out of the row (shared_denied.jet), a wait
+// must be refused at the eval link. Which runtime entry points does each
+// wait reach, and which does a `Shared` read reach?
+Stats: struct {
+    hits: Int,
+}
+
+#FX(!Unsafe) probe: module {
+    peek_receive: fn(rx: Receiver<Int>) -[]> Int { rx.receive() ?? 0 }
+
+    peek_send: fn(tx: Sender<Int>) -[]> Int {
+        tx.send(7)
+        1
+    }
+
+    peek_shared: fn(cell: Shared<Stats>) -[]> Int { cell.hits }
+}
+
+run: fn() {
+    cell: Shared{Stats{hits: 1}}
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 8)
+    print(probe.peek_send(tx) + probe.peek_receive(rx) + probe.peek_shared(cell))
+}

@@ -851,7 +851,7 @@ ir_program_declared: fn(type_defs: &&[TTypeDef], impl_defs: &&[TImplDef], consta
     // compiler-owned row claims a name before a program type of that name. A
     // unit type a program's unit family mints (`Meter`) is the exception: unit
     // literals spell it bare, so it claims its name ahead of the Prelude's.
-    builtins: "{MODULE_CORE_PREFIX}{CORE_BUILTINS_MODULE}::"
+    builtins: "{MODULE_CORE_PREFIX}{CORE_BUILTINS_MODULE}."
     families: ir_unit_family_rows(types)
     type_keys := [{key: String, at: Int, row: Int}]{}
     loop (index, definition) in types {
@@ -1159,7 +1159,7 @@ ir_decl_foreign: fn(p: IRProgram, id: DeclID) -> Int Never! {
 
 // A method's owner arrives spelled as its module names it (`Parser`), while
 // every other type the checked program names is its declaration key
-// (`<module>::Parser`). Each owner becomes the key of the type of that name
+// (`<module>.Parser`). Each owner becomes the key of the type of that name
 // declared in the method's own module, so same-named types of two modules
 // keep their own methods, layouts and Display, Close and codec rows. An owner
 // declared elsewhere (an implementation of another module's type) is already
@@ -1368,7 +1368,7 @@ ir_trait_methods: fn(functions: [FnBody], symbols: SymbolTable, type_rows: [Stri
     methods
 }
 
-// The last segment of a qualified key (`trait:<m>::Display` is `Display`):
+// The last segment of a qualified key (`trait:<m>.Display` is `Display`):
 // what follows its last `.` or `:`.
 ir_short_name: fn(key: String) -> String Never! {
     bytes: key.bytes()
@@ -3219,7 +3219,7 @@ ir_recursion_entry: fn(f: &IRFunction, recursive: [Bool], id: Int, stacks: Bool)
             m := ir_module_new()
             m.stop_points = stops
             loop id in 0..<5 {
-                f := ir_function_new("f{id}", "test:recursion.jet::f{id}", "f{id}", "recursion.jet", 1)
+                f := ir_function_new("f{id}", "test:recursion.jet.f{id}", "f{id}", "recursion.jet", 1)
                 if id < 4 {
                     f.entry_check = ir_emit(f, IROp.Call, 0, 4, -1, 0, 1)
                     _: ir_emit(f, IROp.If, -1, 0, -1, 2, 1)
@@ -3254,11 +3254,11 @@ ir_recursion_entry: fn(f: &IRFunction, recursive: [Bool], id: Int, stacks: Bool)
 #Test("a call through a function value takes the stack check only on a cycle") {
     m := ir_module_new()
     m.stop_points = true
-    caller := ir_function_new("apply", "test:apply.jet::apply", "apply", "apply.jet", 1)
+    caller := ir_function_new("apply", "test:apply.jet.apply", "apply", "apply.jet", 1)
     _: ir_emit(caller, IROp.FunctionAddress, 0, 1, -1, -1, 1)
     _: ir_emit(caller, IROp.CallIndirect, -1, 0, -1, 0, 1)
     m.functions.push(caller)
-    m.functions.push(ir_function_new("leaf", "test:apply.jet::leaf", "leaf", "apply.jet", 1))
+    m.functions.push(ir_function_new("leaf", "test:apply.jet.leaf", "leaf", "apply.jet", 1))
     ir_recursion_checks_parted(m, 1)
     assert(!m.functions[0].stack_check)
     assert(!m.functions[1].stack_check)

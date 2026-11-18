@@ -1789,7 +1789,7 @@ sema_type_graph_lookup_symbol_at: fn(graph: SemaRegistrationGraph, caller: Int, 
         }
     }
     // The name is cut in place; no part list is built per lookup.
-    if name.cut_last("::") == .Val(canonical) {
+    if name.cut_last(".") == .Val(canonical) {
         if sema_registration_module_index_text(graph, canonical.before) == .Val(owner_index) {
             return sema_registration_lookup_name_at(graph, owner_index, graph.modules[owner_index].module_identity, canonical.after)
         }
@@ -1865,7 +1865,7 @@ sema_type_graph_bare_rename: fn(graph: SemaRegistrationGraph, declared: String, 
 // imports user code, so a Core caller sees only Core owners. A builtin type
 // no module declares (SYMBOL_BUILTIN_TYPES: `Task`, `Event`, …) has no owner
 // here, so a loaded same-named type (a user module's `Task`,
-// `core.compiler::Event`) never captures its bare spelling: only a caller
+// `core.compiler.Event`) never captures its bare spelling: only a caller
 // that declares or imports that name means its own type.
 sema_type_graph_unique_type_owner: fn(graph: SemaRegistrationGraph, caller_index: Int, name: String) -> SemaRegistrationResolvedSymbol? {
     if symbol_builtin(SymbolKind.Type, name) != None -> return None
@@ -1925,7 +1925,7 @@ sema_type_graph_scan_type_owners: fn(graph: SemaRegistrationGraph, caller_index:
             item: sema_registration_nominal_source_item(alias.source) ?? next
             if item == .TypeAlias(definition) {
                 if definition.target == .Named(target_name) {
-                    if (target_name.contains("::") || target_name.contains(".")) && sema_type_graph_leaf(target_name) == name {
+                    if (target_name.contains(".") || target_name.contains(".")) && sema_type_graph_leaf(target_name) == name {
                         home: sema_type_graph_lookup_symbol(graph, alias_row.module_identity, target_name)
                         if home == .Val(resolved) {
                             if sema_type_graph_resolved_nominal_row(graph, resolved) == .Val(home_row) {
@@ -1967,9 +1967,9 @@ sema_type_graph_scan_type_owners: fn(graph: SemaRegistrationGraph, caller_index:
     SemaTypeOwnerScan{found: found, ambiguous: false}
 }
 
-// Rust `split_type_name`'s leaf: after the last `::`, else after the last `.`.
+// Rust `split_type_name`'s leaf: after the last `.`, else after the last `.`.
 sema_type_graph_leaf: fn(name: String) -> String Never! {
-    separator: if name.contains("::") -> "::" else -> "."
+    separator: if name.contains(".") -> "." else -> "."
     parts: name.split(separator).to_list()
     parts[parts.len() - 1]
 }
@@ -1986,7 +1986,7 @@ sema_type_graph_base_name: fn(ty: Type) -> String? {
 // Whether the checked type `ty` is the builtin type `name`, one of
 // SYMBOL_BUILTIN_TYPES (symbol_builtin), which no module declares.
 // The spelling is its owner: sema spells every resolved source nominal
-// `module::Leaf` (sema_registration_nominal_spelling), so a program's own
+// `module.Leaf` (sema_registration_nominal_spelling), so a program's own
 // `Task` or `Task<T>`, local, aliased or imported, is never spelled bare, and
 // a bare `Task` is the handle. This never looks `name` up in a caller's
 // scope, where a program type of that name would answer.
@@ -2059,7 +2059,7 @@ sema_type_scan_unscoped_rows: fn(graph: SemaRegistrationGraph, name: String, cal
 sema_type_source_owns_nominal: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> Bool Never! {
     row: sema_type_resolve_nominal_row_at(graph, Type.Named{name: name}, caller) ?? return false
     nominal: graph.modules[row.module_index].nominals[row.row]
-    core_source_owns_type("{module_text(graph.module_table, nominal.symbol.module_identity)}::{nominal.symbol.name}")
+    core_source_owns_type("{module_text(graph.module_table, nominal.symbol.module_identity)}.{nominal.symbol.name}")
 }
 
 sema_type_graph_trait_symbol: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, bound_name: String) -> Symbol? {
@@ -2363,7 +2363,7 @@ sema_type_provider_close_owner: fn(graph: SemaRegistrationGraph, nominal: SemaRe
 }
 
 // Rust `TraitRegistry.type_implements_trait`/`implements_trait` for a bound
-// that names an undeclared builtin trait (Generics::BUILTIN_TRAITS): scalars
+// that names an undeclared builtin trait (Generics.BUILTIN_TRAITS): scalars
 // satisfy the builtin family, containers recurse, and a nominal needs an impl,
 // trait block or derive of that trait name.
 sema_type_builtin_bound_satisfied: fn(graph: SemaRegistrationGraph, actual_resolved: Type, bound_name: String, caller: Int, generic_params: [TGenericParam]) -> Bool? {
@@ -2704,13 +2704,13 @@ sema_type_core_leaf_form: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int
 // The bare leaf a canonical Core nominal `name` meets, if any (see above).
 sema_type_core_leaf_name: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> String? {
     if !name.starts_with(MODULE_CORE_PREFIX) -> return None
-    parts: name.split("::").to_list()
+    parts: name.split(".").to_list()
     if parts.len() < 2 -> return None
     last: parts.len() - 1
     leaf: parts[last]
     owner_parts := [String]{}
     loop index in 0..<last -> owner_parts.push(parts[index])
-    module_name: sema_registration_module_name(graph, sema_registration_module_id(graph, owner_parts.join("::"))) ?? return None
+    module_name: sema_registration_module_name(graph, sema_registration_module_id(graph, owner_parts.join("."))) ?? return None
     if module_name == "core.crypto" -> return None
     if boundary_head_owner_module(leaf) != None && boundary_head_carrier_module(leaf) != Val(module_name) {
         return None
@@ -2752,7 +2752,7 @@ sema_type_core_row_form: fn(graph: SemaRegistrationGraph, ty: Type, caller: Int)
 // exports it. None when the caller's own resolution already names Core's type.
 sema_type_core_row_owner: fn(graph: SemaRegistrationGraph, name: String, caller: Int) -> Int? {
     if caller < 0 || module_is_core(graph.modules[caller].module_identity) -> return None
-    if name.contains("::") || name.contains(".") -> return None
+    if name.contains(".") || name.contains(".") -> return None
     resolved: sema_type_graph_lookup_symbol_at(graph, caller, name) ?? return None
     nominal: sema_type_graph_resolved_nominal_row(graph, resolved) ?? return None
     if module_is_core(graph.modules[nominal.module_index].module_identity) || graph.modules[nominal.module_index].nominals[nominal.row].compiler_owned {

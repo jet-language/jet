@@ -241,7 +241,7 @@ ComptimeNameSite: struct {
 
 // Rust jet-comptime `walk_calls`: every direct `Call` name in an expression
 // tree, in visit order (shallow over lambda and `#Impure` bodies, crossing
-// `#run` blocks; `WalkOpts::PLAIN`).
+// `#run` blocks; `WalkOpts.PLAIN`).
 comptime_walk_calls: fn(expr: Expr) -> [ComptimeNameSite] Never! {
     sites := [ComptimeNameSite]{}
     ast_comptime_walk_expr(expr, true, sites)
@@ -389,7 +389,7 @@ ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) 
             loop step in steps -> ast_comptime_walk_expr(step.value, calls, sites)
         }
         .Lambda(lambda, _) -> {
-            // Call names stay shallow over a lambda body (`WalkOpts::PLAIN`).
+            // Call names stay shallow over a lambda body (`WalkOpts.PLAIN`).
             if calls {
                 return
             }

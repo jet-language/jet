@@ -57,7 +57,7 @@ sema_comparability_query: fn() -> SemaComparabilityQuery Never! {
 }
 
 sema_comparability_definition_key: fn(definition: TTypeDef) -> String Never! {
-    "{definition.module_identity.id}::{definition.name}"
+    "{definition.module_identity.id}.{definition.name}"
 }
 
 // Shared encoding value types compare by value.
@@ -618,7 +618,7 @@ sema_comparability_check_binary: fn(op: BinOp, lhs: TExpr, rhs: TExpr, span: Spa
     equality := op == BinOp.Eq || op == BinOp.Ne
     ordering := op == BinOp.Compare || op == BinOp.Lt || op == BinOp.Gt || op == BinOp.Le || op == BinOp.Ge
     if !equality && !ordering -> return skipped
-    // A declared type names a nominal by its canonical `module::Name` while a
+    // A declared type names a nominal by its canonical `module.Name` while a
     // literal keeps the written `Name`; the operands compare by the identity
     // both spellings resolve to.
     if !type_identity_equal(sema_expr_expected_type(lhs.ty, environment, program), sema_expr_expected_type(rhs.ty, environment, program)) || sema_comparability_scalar_operand(lhs.ty) {

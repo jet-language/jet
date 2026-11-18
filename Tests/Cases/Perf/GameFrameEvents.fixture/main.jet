@@ -1,0 +1,25 @@
+use {
+    game: core.game
+    time: core.time
+}
+
+World: struct {
+    ticks: Int,
+}
+
+run: fn() {
+    scene := game.Scene.new("arena")
+    world := World{ticks: 0}
+    scene.on_frame(fn(frame) { physics(world, frame.index) ?? panic("physics") })
+    scene.on_frame(fn(frame) { render() })
+    game.run(scene, frames: 40).drop("the frames are the record under test")
+    print("frames=40")
+}
+
+// The frame's slower callback.
+physics: fn(world: &World, index: Int) -[Time.Wait]> {
+    world.ticks += index
+    time.sleep(2ms)
+}
+
+render: fn() -[Time.Wait]> { time.sleep(1ms) }

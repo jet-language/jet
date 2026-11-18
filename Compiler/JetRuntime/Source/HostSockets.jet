@@ -156,6 +156,7 @@ net_copy_packed: fn(data: I64, length: I64, output: I64) {
 }
 
 net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error: I64) -> I64 {
+    began: perf_samples_io_start()
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
@@ -177,6 +178,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
         if temporary -> jet_rt_free(packed, length, I64{8})
     }
     fd_unlock(state)
+    perf_samples_io_peer(began, if reading -> PERF_SAMPLES_IO_READ else -> PERF_SAMPLES_IO_WRITE, result, state)
     fd_error(result, error)
 }
 
@@ -191,6 +193,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
 }
 
 #Export(c) jet_socket_send_to_raw: fn(state: I64, data: I64, length: I64, address: I64, error: I64) -> I64 {
+    began: perf_samples_io_start()
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
@@ -204,6 +207,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
         #Unsafe("the FD72 lock retains the socket; private scratch lends sockaddr bytes; packed lends length bytes; sendto retains no pointers") {
             result = os_syscall_i64(I64{44}, fd_word(state, I64{8}), packed, length, I64{16384}, scratch, address_length)
         }
+        perf_samples_io(began, PERF_SAMPLES_IO_WRITE, result, PERF_SAMPLES_TARGET_SOCKET, scratch, address_length)
         jet_rt_free(scratch, size, I64{8})
     }
     fd_unlock(state)
@@ -211,6 +215,7 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
 }
 
 #Export(c) jet_socket_receive_from_raw: fn(state: I64, data: I64, length: I64, address_out: I64, error: I64) -> I64 {
+    began: perf_samples_io_start()
     fd_lock(state)
     result := I64{-9}
     if (fd_word(state, I64{16}) == I64{0}) {
@@ -236,6 +241,10 @@ net_socket_transfer: fn(state: I64, data: I64, length: I64, reading: Bool, error
                 }
             }
         }
+        // MSG_TRUNC's result is the whole datagram's length; the record
+        // keeps the bytes read.
+        moved: if (result > length) -> length else -> result
+        perf_samples_io(began, PERF_SAMPLES_IO_READ, moved, PERF_SAMPLES_TARGET_SOCKET, scratch, if (result >= I64{0}) -> net_load_uint(address_length, I64{4}) else -> I64{0})
         jet_rt_free(scratch, size, I64{8})
     }
     fd_unlock(state)

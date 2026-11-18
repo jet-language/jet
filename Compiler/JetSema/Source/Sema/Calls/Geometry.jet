@@ -28,7 +28,7 @@ SemaCallGeometryTransformParts: struct {
 // Same declaration-identity predicate as Rust's geometry_nominal_leaf.
 sema_geometry_nominal_leaf: fn(name: String) -> String Never! {
     if !core_source_owns_type(name) -> return name.copy()
-    parts: name.split("::").to_list()
+    parts: name.split(".").to_list()
     if parts.len() >= 2 && core_identity_module(name) == (Val("core.math")) {
         return parts[parts.len() - 1].copy()
     }
@@ -48,22 +48,22 @@ sema_geometry_restore_owner: fn(ty: Type, source: Type) -> Type Never! {
     // copy: the restored type is a new owned Type. When the leaf already matches it equals `ty`,
     // the caller's checked type (a read parameter), which stays on its node.
     if leaf == name -> return ty.copy()
-    parts := name.split("::").to_list()
+    parts := name.split(".").to_list()
     if ty == {
         .Result(ok, error) -> return Type.Result{ok: sema_geometry_restore_owner(ok, source), err: sema_geometry_restore_owner(error, source)}
         .Named(result) -> {
             // copy: the restored type is a new owned Type. When already qualified it equals `ty`,
             // the caller's checked type (a read parameter), which stays on its node.
-            if result.contains("::") -> return ty.copy()
+            if result.contains(".") -> return ty.copy()
             parts[parts.len() - 1] = result.copy()
-            return Type.Named{name: parts.join("::")}
+            return Type.Named{name: parts.join(".")}
         }
         .Apply(result, args) -> {
             // copy: the restored type is a new owned Type. When already qualified it equals `ty`,
             // the caller's checked type (a read parameter), which stays on its node.
-            if result.contains("::") -> return ty.copy()
+            if result.contains(".") -> return ty.copy()
             parts[parts.len() - 1] = result.copy()
-            return Type.Apply{name: parts.join("::"), args: args.copy()}
+            return Type.Apply{name: parts.join("."), args: args.copy()}
         }
         // copy: the restored type is a new owned Type. For other kinds it equals `ty`, the caller's
         // checked type (a read parameter), which stays on its node.
@@ -341,9 +341,9 @@ sema_call_try_geometry: fn(receiver: Expr, receiver_value: TExpr, method: String
 }
 
 #Test("Geometry declaration identity matches only source-owned Core nominals") {
-    owner: "{MODULE_CORE_PREFIX}core.math::ScreenPoint"
+    owner: "{MODULE_CORE_PREFIX}core.math.ScreenPoint"
     assert_eq(sema_geometry_nominal_leaf(owner), "ScreenPoint")
-    assert_eq(sema_geometry_nominal_leaf("user::ScreenPoint"), "user::ScreenPoint")
+    assert_eq(sema_geometry_nominal_leaf("user.ScreenPoint"), "user.ScreenPoint")
     restored: sema_geometry_restore_owner(Type.Result{ok: Type.Apply{name: "Transform", args: [Type]{Type.Named{name: "World"}, Type.Named{name: "Screen"}}}, err: Type.Named{name: "TransformError"}}, Type.Named{name: owner})
-    assert_eq(restored, Type.Result{ok: Type.Apply{name: "{MODULE_CORE_PREFIX}core.math::Transform", args: [Type]{Type.Named{name: "World"}, Type.Named{name: "Screen"}}}, err: Type.Named{name: "{MODULE_CORE_PREFIX}core.math::TransformError"}})
+    assert_eq(restored, Type.Result{ok: Type.Apply{name: "{MODULE_CORE_PREFIX}core.math.Transform", args: [Type]{Type.Named{name: "World"}, Type.Named{name: "Screen"}}}, err: Type.Named{name: "{MODULE_CORE_PREFIX}core.math.TransformError"}})
 }

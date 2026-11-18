@@ -89,8 +89,8 @@ TOutputCheckFact: struct {
 // its name and span.
 checked_test_artifact_key: fn(module_text: String, test: TestDef) -> String Never! {
     name := test.name ?? "anonymous"
-    local := "test::{name}@{test.span.start}..{test.span.end}"
-    if module_text == "" -> local else -> "{module_text}::{local}"
+    local: "test.{name}@{test.span.start}..{test.span.end}"
+    if module_text == "" -> local else -> "{module_text}.{local}"
 }
 
 checked_test_artifact_function_ref: fn(module_identity: ModuleID, module_text: String, test: TestDef) -> TFunctionRef Never! {

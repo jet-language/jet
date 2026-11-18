@@ -761,35 +761,35 @@ ir_trait_arm_instance: fn(p: IRProgram, ty: Type) -> String Never! {
 }
 
 #Test("two types whose first payload keys collide each get a key of their own, whatever order they are declared in") {
-    forward := [{identity: String, first: Int}]{{identity: "main::Point", first: 7}, {identity: "main::Line", first: 7}, {identity: "main::Point", first: 7}}
-    backward := [{identity: String, first: Int}]{{identity: "main::Line", first: 7}, {identity: "main::Point", first: 7}}
+    forward := [{identity: String, first: Int}]{{identity: "main.Point", first: 7}, {identity: "main.Line", first: 7}, {identity: "main.Point", first: 7}}
+    backward := [{identity: String, first: Int}]{{identity: "main.Line", first: 7}, {identity: "main.Point", first: 7}}
     tables := [IRTraitKeys]{ir_trait_key_table(forward), ir_trait_key_table(backward)}
     loop table in tables {
-        line: table.keys.get("main::Line") ?? -1
-        point: table.keys.get("main::Point") ?? -1
+        line: table.keys.get("main.Line") ?? -1
+        point: table.keys.get("main.Point") ?? -1
         assert_eq(line, 7)
-        assert_eq(point, ir_trait_key_hash("main::Point", 1))
+        assert_eq(point, ir_trait_key_hash("main.Point", 1))
         assert(point != line, "the colliding types hold distinct keys")
         assert_eq(table.keys.len(), 2)
         // An implementer's key is its own from any candidate on.
-        assert_eq(ir_trait_key_free(table, "main::Point", 7), point)
+        assert_eq(ir_trait_key_free(table, "main.Point", 7), point)
         // A type no implementation is declared for passes the keys the
         // implementers hold.
-        assert_eq(ir_trait_key_free(table, "main::Circle", 7), ir_trait_key_hash("main::Circle", 1))
+        assert_eq(ir_trait_key_free(table, "main.Circle", 7), ir_trait_key_hash("main.Circle", 1))
     }
 }
 
 // `impl <owner>.Bare {}`: an implementation that declares no method.
 ir_test_empty_impl: fn(owner: Type) -> TImplDef Never! {
-    TImplDef{module_identity: module_none(), key: "", span: Span{start: 0, end: 0}, self_type: owner, trait_name: Val("main::Bare"), trait_ref: None, associated_types: [TAssociatedTypeValue]{}, constants: [TTraitConstantValue]{}, methods: [String]{}, delegation_field: None, compiler_generated: false, serde: None, operator_rhs: None, operator_marker: None, target_os: None}
+    TImplDef{module_identity: module_none(), key: "", span: Span{start: 0, end: 0}, self_type: owner, trait_name: Val("main.Bare"), trait_ref: None, associated_types: [TAssociatedTypeValue]{}, constants: [TTraitConstantValue]{}, methods: [String]{}, delegation_field: None, compiler_generated: false, serde: None, operator_rhs: None, operator_marker: None, target_os: None}
 }
 
 #Test("an implementation that declares no method makes its owner an implementer of its trait, once") {
     impls := [TImplDef]{ir_test_empty_impl(Type.Int), ir_test_empty_impl(Type.String), ir_test_empty_impl(Type.Int)}
     p := ir_program_declared([TTypeDef]{}, impls, [TConstantDef]{}, [FnBody]{}, symbol_table())
-    owners: ir_trait_implementers(p, "main::Bare")
+    owners: ir_trait_implementers(p, "main.Bare")
     assert(owners.len() == 2)
     assert(owners[0] == Type.Int)
     assert(owners[1] == Type.String)
-    assert(ir_trait_implementers(p, "main::Shown").len() == 0)
+    assert(ir_trait_implementers(p, "main.Shown").len() == 0)
 }

@@ -14,6 +14,7 @@ use jet_foundation.[
     Span,
     TargetMachineError,
     authority_own_process_leaf,
+    core_path_parts,
     foundation_byte_text,
     jet_target_machine_denied_effects,
     jet_target_machine_error_diagnostic,
@@ -280,9 +281,10 @@ sema_target_capability_check: fn(graph: SemaRegistrationGraph, core_usage: SemaC
         found := [Diagnostic]{}
         reported := [TargetMachineError]{}
         loop site in module_usage.usage_spans {
-            parts: site.usage.split("::").to_list()
-            if parts.len() < 2 || parts[1] == "__type__" || parts[1] == "typed_head" -> next
-            if sema_call_core_no_os_hint(parts[0]) != None -> next
+            parts: core_path_parts(site.usage)
+            member_head: if parts.member.split_once(".") == .Val(cut) -> cut.before else -> parts.member
+            if member_head == "" || member_head == "__type__" || member_head == "typed_head" -> next
+            if sema_call_core_no_os_hint(parts.module_name) != None -> next
             loop error in jet_target_machine_validate(machine, jet_target_machine_use_from_core_apis([String]{site.usage})) {
                 if declared.contains(error) || reported.contains(error) -> next
                 diagnostic := jet_target_machine_error_diagnostic(machine, error)

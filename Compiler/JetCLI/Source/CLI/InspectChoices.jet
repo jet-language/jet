@@ -46,7 +46,7 @@
 //   live query re-runs for every write to it.
 use {
     jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, jet_driver_present_diagnostics]
-    jet_foundation.[CompilerThreads, DeclTable, FnBody, SymbolTable, body_node, build_options_stock, decl_table_key, module_is_core]
+    jet_foundation.[CompilerThreads, DeclTable, FnBody, SymbolTable, body_node, build_options_stock, decl_table_key, module_is_core, symbol_key_leaf]
     jet_ir.[IROptInlined]
 }
 
@@ -243,10 +243,9 @@ jet_cli_context_choices: fn(functions: [FnBody], out: &[JetCLIChoice]) Never! {
 }
 
 // The name a context key is declared under, quoted: the last part of its
-// symbol key (`{kind}:{module}:{owner}:{name}`, or `context:on_stop`).
+// symbol key (`{kind}:{module}.{owner}.{name}`, or `context:on_stop`).
 jet_cli_context_key_name: fn(key: String) -> String Never! {
-    parts: key.split(":").to_list()
-    "`{parts[parts.len() - 1]}`"
+    "`{symbol_key_leaf(key)}`"
 }
 
 // The live read choices of the program's own `functions`, at the function's

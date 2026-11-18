@@ -27,6 +27,7 @@ use jet_foundation.[
     owned_trait,
     OwnedMethod,
     symbol_builtin_method,
+    symbol_key_leaf,
     symbol_table_key,
     ModuleID,
     type_name,
@@ -505,7 +506,7 @@ sema_call_trait_row_for_bound: fn(graph: SemaRegistrationGraph, bound: String) -
     loop (module_index, graph_module) in graph.modules {
         loop (row, nominal) in graph_module.nominals {
             if nominal.kind != SemaRegistrationNominalKind.Trait -> next
-            canonical: "{module_text(graph.module_table, nominal.symbol.module_identity)}::{nominal.symbol.name}"
+            canonical: "{module_text(graph.module_table, nominal.symbol.module_identity)}.{nominal.symbol.name}"
             if bound == canonical {
                 return Val(SemaRegistrationRowRef{module_index: module_index, row: row})
             }
@@ -684,8 +685,7 @@ sema_call_trait_method_candidates: fn(graph: SemaRegistrationGraph, receiver_typ
 sema_call_owned_trait_method_candidate: fn(graph: SemaRegistrationGraph, bound: SymbolID, receiver_type: Type, method: String, type_args: [Type], caller_module: ModuleID, generic_params: [TGenericParam], span: Span, diagnostics: &[Diagnostic]) -> SemaCallMethodCandidate? {
     // A builtin bound is a row of the builtin range; its key ends in the
     // trait's name.
-    segments: symbol_table_key(graph.symbols, bound).split(":").to_list()
-    trait_name: segments[segments.len() - 1]
+    trait_name: symbol_key_leaf(symbol_table_key(graph.symbols, bound))
     builtin := sema_type_builtin_trait_symbol(trait_name) ?? return None
     if builtin.id != bound -> return None
     owned: owned_trait(trait_name) ?? return None

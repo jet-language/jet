@@ -1,0 +1,25 @@
+// Probe N3: the spec's body-level `#FX` forms (spec.md "Effects": "as an
+// `#FX: (...)` line in a body, or around a block as `#FX(...) { ... }`.
+// Inside the list, `!E` denies"). Which of them does the compiler accept?
+positive_block: fn() {
+    #FX(IO) {
+        print("a positive block")
+    }
+}
+
+denial_block: fn() {
+    #FX(!Time.Wait) {
+        print("a denial block")
+    }
+}
+
+denial_line: fn() {
+    #FX: (!Time.Wait)
+    print("a denial line")
+}
+
+run: fn() {
+    positive_block()
+    denial_block()
+    denial_line()
+}

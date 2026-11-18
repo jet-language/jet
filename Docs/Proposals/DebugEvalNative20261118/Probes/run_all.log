@@ -1,0 +1,430 @@
+$ jet debug --break place_moved.jet:11 place_moved.jet  <<< 'locals; print xs; print box; c'
+Breakpoint set  place_moved.jet:11
+Breakpoint hit  place_moved.jet:11  in run()
+11 |     print(box.items.len())        <- here
+Locals:  box = Box{items: [1, 2, 3, 4]}   xs = [1, 2, 3]
+(Jet) locals
+box: Box = Box{items: [1, 2, 3, 4]}
+xs: [Int] = [1, 2, 3]
+(Jet) print xs
+xs = [1, 2, 3]
+(Jet) print box
+box = Box{items: [1, 2, 3, 4]}
+(Jet) c
+4
+Program finished
+
+$ jet debug --break take_arg.jet:5 take_arg.jet  <<< 'locals; f; locals; c'
+Breakpoint set  take_arg.jet:5
+Breakpoint hit  take_arg.jet:5  in consume()
+5 |     items.push(9)        <- here
+Locals:  items = [1, 2, 3]   xs = [1, 2, 3]
+(Jet) locals
+items: [Int] = [1, 2, 3]
+xs: [Int] = [1, 2, 3]
+(Jet) f
+12 |     n: consume(xs)        <- here
+Locals:  xs = [1, 2, 3]
+(Jet) locals
+xs: [Int] = [1, 2, 3]
+(Jet) c
+4
+Program finished
+
+$ jet check take_arg_later.jet
+Error [jet.MoveWithoutMarker]: `consume` takes `xs`, but `xs` is used again later
+  --> take_arg_later.jet:13:16
+    |
+ 13 |     n: consume(xs)
+    |                ^^
+  --> take_arg_later.jet:14:11
+    |
+ 14 |     print(xs.len())
+    |           ^^ `xs` is used again here
+ Why: `consume` takes ownership of this argument, and a call never copies on its own, so `xs` has no value after this call
+ Fix: Write `xs.copy()` to pass a copy and keep `xs`, or reorder so this call is the last use of `xs`
+More: jet-lang.dev/e/E0209
+
+1 problem found
+Run `jet explain E0209` to learn more
+
+$ jet check moved_read.jet
+Error [jet.UseAfterMove]: `xs` was consumed by `xs.move()`, so it can't be used here
+  --> moved_read.jet:11:11
+    |
+ 11 |     print(xs.len())
+    |           ^^
+  --> moved_read.jet:9:23
+    |
+  9 |     box := Box{items: xs.move()}
+    |                       ^^^^^^^ `xs` moved to `xs.move()` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `xs` after the move, or give `xs.move()` a copy with `xs.copy()` where it moved.
+More: jet-lang.dev/e/E0121
+
+1 problem found
+Run `jet explain E0121` to learn more
+
+$ jet debug --break move_then_share.jet:10 move_then_share.jet  <<< 'locals; c'
+Breakpoint set  move_then_share.jet:10
+Breakpoint hit  move_then_share.jet:10  in run()
+10 |     box.items.push(4)        <- here
+Locals:  box = Box{items: [1, 2]}   xs = [1, 2]
+(Jet) locals
+box: Box = Box{items: [1, 2]}
+xs: [Int] = [1, 2]
+(Jet) c
+2
+3
+Program finished
+
+$ jet check row_compose.jet
+Error [jet.ProhibitedEffectReached]: `peek_receive` reaches the `Time.Wait` effect, which module `probe` denies
+  --> row_compose.jet:7:5
+    |
+  7 |     peek_receive: fn(rx: Receiver<Int>) -[]> Int { rx.receive() ?? 0 }
+    |     ^^^^^^^^^^^^
+  --> row_compose.jet:6:1
+    |
+  6 | #FX(!Time.Wait, !Unsafe) probe: module {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^ module `probe` is capped here
+ Why: The module's `#FX(…)` cap denies `Time.Wait` to every function inside it and every callee it can reach
+ Fix: Remove the call that introduces `Time.Wait`, move `peek_receive` out of module `probe`, or drop `!Time.Wait` from the module's `#FX(…)` cap
+ Denial: invocation
+ Call chain: peek_receive
+ Scope chain: module probe
+More: jet-lang.dev/e/E0749
+
+Error [jet.ProhibitedEffectReached]: `peek_send` reaches the `Time.Wait` effect, which module `probe` denies
+  --> row_compose.jet:9:5
+    |
+  9 |     peek_send: fn(tx: Sender<Int>) -[]> Int {
+    |     ^^^^^^^^^
+  --> row_compose.jet:6:1
+    |
+  6 | #FX(!Time.Wait, !Unsafe) probe: module {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^ module `probe` is capped here
+ Why: The module's `#FX(…)` cap denies `Time.Wait` to every function inside it and every callee it can reach
+ Fix: Remove the call that introduces `Time.Wait`, move `peek_send` out of module `probe`, or drop `!Time.Wait` from the module's `#FX(…)` cap
+ Denial: invocation
+ Call chain: peek_send
+ Scope chain: module probe
+More: jet-lang.dev/e/E0749
+
+Error [jet.ProhibitedEffectReached]: `peek_raw` reaches `#Unsafe` code, but module `probe` denies Unsafe
+  --> row_compose.jet:19:5
+    |
+ 19 |     peek_raw: fn(total: Int) -[]> Int {
+    |     ^^^^^^^^
+  --> row_compose.jet:6:1
+    |
+  6 | #FX(!Time.Wait, !Unsafe) probe: module {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^ module `probe` is capped here
+ Why: `probe.peek_raw` opens the `#Unsafe` gate at row_compose.jet:21; the module's `#FX(!Unsafe)` cap means every function inside it and every callee it can reach must stay out of `#Unsafe` code
+ Fix: Remove the `#Unsafe` gate from `probe.peek_raw` or stop calling it, move `peek_raw` out of module `probe`, or drop `!Unsafe` from the module's `#FX(…)` cap
+ Denial: invocation
+ Call chain: peek_raw
+ Scope chain: module probe
+More: jet-lang.dev/e/E0749
+
+Error [jet.ImpureCallInPureContext]: `probe.peek_print` calls the impure function `print`
+  --> row_compose.jet:29:9
+    |
+ 29 |         print("side effect")
+    |         ^^^^^
+ Why: `print` is impure, but `probe.peek_print` declares `-[]>`
+ Fix: Remove the call from `probe.peek_print`, or drop the `-[]>` bound from `probe.peek_print` so its effects are inferred
+ Denial: pure
+ Call chain: probe.peek_print → print
+More: jet-lang.dev/e/E3401
+
+4 problems found
+Run `jet explain E0749` to learn more
+
+$ jet check unsafe_callee.jet
+Error [jet.ProhibitedEffectReached]: `peek_callee` reaches `#Unsafe` code, but module `probe` denies Unsafe
+  --> unsafe_callee.jet:15:5
+    |
+ 15 |     peek_callee: fn(total: Int) -[]> Int { poke(total) }
+    |     ^^^^^^^^^^^
+  --> unsafe_callee.jet:14:1
+    |
+ 14 | #FX(!Unsafe) probe: module {
+    | ^^^^^^^^^^^^ module `probe` is capped here
+ Why: `poke` opens the `#Unsafe` gate at unsafe_callee.jet:7; the module's `#FX(!Unsafe)` cap means every function inside it and every callee it can reach must stay out of `#Unsafe` code
+ Fix: Remove the `#Unsafe` gate from `poke` or stop calling it, move `peek_callee` out of module `probe`, or drop `!Unsafe` from the module's `#FX(…)` cap
+ Denial: invocation
+ Call chain: peek_callee → poke
+ Scope chain: module probe
+More: jet-lang.dev/e/E0749
+
+1 problem found
+Run `jet explain E0749` to learn more
+
+$ jet check row_forms3.jet
+Error [jet.ProhibitedEffectReached]: `peek_arrow` reaches the `Time.Wait` effect, which it prohibits with `-[!Time.Wait, Unsafe]>`
+  --> row_forms3.jet:2:38
+    |
+  2 | peek_arrow: fn(rx: Receiver<Int>) -[!Time.Wait, !Unsafe]> Int { rx.receive() ?? 0 }
+    |                                      ^^^^^^^^^
+ Why: A `-[!Time.Wait, Unsafe]>` row means the function and every callee it can reach must not use `Time.Wait`
+ Fix: Remove the call that introduces `Time.Wait`, or drop the `-[!Time.Wait, Unsafe]>` prohibition
+ Denial: invocation
+ Call chain: peek_arrow
+More: jet-lang.dev/e/E0749
+
+1 problem found
+Run `jet explain E0749` to learn more
+
+$ jet check fx_forms.jet
+Error [jet.MarkerArgumentMismatch]: `#FX` arguments do not match `FX(Effect...)`
+  --> fx_forms.jet:11:6
+    |
+ 11 |     #FX(!Time.Wait) {
+    |      ^^^^^^^^^^^^^^
+ Why: Marker arguments use the same call grammar and typed signature as function arguments
+ Fix: Match the registered signature `FX(Effect...)`
+More: jet-lang.dev/e/E0930
+
+1 problem found
+Run `jet explain E0930` to learn more
+
+$ jet check fx_line.jet
+Error [jet.InvalidScopedPolicy]: `#FX` cannot attach to a function
+  --> fx_line.jet:6:5
+    |
+  6 |     #FX: (!Time.Wait, !Unsafe)
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: `#FX(…)` caps a block, a module, a type or a trait; a function states its limit in its effect row
+ Fix: Write the limit in the function's row, such as `show: fn() -[IO]> { … }`, or put `#FX(…)` on a block inside it
+More: jet-lang.dev/e/E0355
+
+Error [jet.InvalidScopedPolicy]: `#FX` cannot attach to a function
+  --> fx_line.jet:11:5
+    |
+ 11 |     #FX: (!Time.Wait, !Unsafe)
+    |     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: `#FX(…)` caps a block, a module, a type or a trait; a function states its limit in its effect row
+ Fix: Write the limit in the function's row, such as `show: fn() -[IO]> { … }`, or put `#FX(…)` on a block inside it
+More: jet-lang.dev/e/E0355
+
+2 problems found
+Run `jet explain E0355` to learn more
+
+$ jet check shared_denied.jet
+Error [jet.ProhibitedEffectReached]: `peek_shared` reaches the `Time.Wait` effect, which module `both` denies
+  --> shared_denied.jet:9:5
+    |
+  9 |     peek_shared: fn(cell: Shared<Stats>) -[]> Int { cell.hits }
+    |     ^^^^^^^^^^^
+  --> shared_denied.jet:8:1
+    |
+  8 | #FX(!Time.Wait, !Unsafe) both: module {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^ module `both` is capped here
+ Why: The module's `#FX(…)` cap denies `Time.Wait` to every function inside it and every callee it can reach
+ Fix: Remove the call that introduces `Time.Wait`, move `peek_shared` out of module `both`, or drop `!Time.Wait` from the module's `#FX(…)` cap
+ Denial: invocation
+ Call chain: peek_shared
+ Scope chain: module both
+More: jet-lang.dev/e/E0749
+
+1 problem found
+Run `jet explain E0749` to learn more
+
+$ jet check unsafe_reach.jet
+Warning [jet.MutableNeverReassigned]: `xs` never changes, so declare it with `:`
+  --> unsafe_reach.jet:29:5
+    |
+ 29 |     xs := [Int]{3, 1, 2}
+    |     ^^
+ Why: `:=` tells the reader the value changes later, but nothing in its scope writes it
+ Fix: Write `xs: …` instead of `xs := …`
+More: jet-lang.dev/e/E0514
+
+OK: `unsafe_reach.jet` has no errors (1 warning)
+Run `jet explain E0514` to learn more
+
+$ jet run unsafe_reach.jet
+20
+3 items, first 3
+true
+
+$ jet emit --ir wait_link.jet > wait_link.ir
+(an IR listing of 609 lines; stderr: '')
+
+runtime calls of the peek functions in wait_link.ir:
+  __jet_probe_dpeek_ureceive -> jet_rt_alloc_value
+  __jet_probe_dpeek_ureceive -> jet_rt_native_receiver_receive
+  __jet_probe_dpeek_ureceive -> jet_rt_block_unique
+  __jet_probe_dpeek_ureceive -> jet_rt_free
+  __jet_probe_dpeek_ureceive -> jet_rt_int_clone
+  __jet_probe_dpeek_ureceive -> jet_journey_reset
+  __jet_probe_dpeek_ureceive -> jet_rt_int_clone
+  __jet_probe_dpeek_usend -> jet_rt_int_clone
+  __jet_probe_dpeek_usend -> jet_rt_alloc_value
+  __jet_probe_dpeek_usend -> jet_rt_native_sender_send
+  __jet_probe_dpeek_usend -> jet_rt_int_clone
+  __jet_probe_dpeek_usend -> jet_rt_alloc
+  __jet_probe_dpeek_usend -> jet_rt_int_clone
+  __jet_probe_dpeek_usend -> jet_err_apply_conversion
+  __jet_probe_dpeek_usend -> jet_journey_frame_text
+  __jet_probe_dpeek_usend -> jet_rt_alloc_value
+  __jet_probe_dpeek_usend -> jet_rt_alloc_value
+  __jet_probe_dpeek_usend -> jet_rt_int_clone
+  __jet_probe_dpeek_ushared -> jet_rt_alloc
+  __jet_probe_dpeek_ushared -> jet_rt_native_shared_read
+  __jet_probe_dpeek_ushared.lambda@475 -> jet_rt_int_clone
+
+$ jet run wait_link.jet
+9
+
+$ jet emit --ir r7_scan.jet > r7_scan.ir
+(an IR listing of 1408 lines; stderr: '')
+
+$ python3 r7scan.py r7_scan.ir
+run.lambda@539 placeable: allocates its result only
+run.lambda@588 placeable: allocates its result only
+run.lambda@665 placeable: allocates its result only
+run.lambda@716 fork per hit: run.lambda@716: call s20 <- 19 2 2 (s4, s18); run.lambda@716: call s21 <- 19 4 0 () ; jet_ir_stop_poll#asm; run.lambda@716: runtime jet_rt_alloc; run.lambda@716: runtime jet_rt_block_release; run.lambda@716: runtime jet_rt_free; run.lambda@716: runtime jet_rt_mem_move; run.lambda@716: store through s4; run.lambda@716: store through s46; run.lambda@716: store through s8
+run.lambda@796 fork per hit: run.lambda@796: runtime jet_rt_atomic_bool_store
+run.lambda@892 placeable: allocates its result only
+
+$ jet run r7_scan.jet
+true
+true
+true
+true
+true
+true
+4
+
+$ python3 asmcalls.py <repo>
+asm functions with a register call: 20
+  os_call0_unit (Linux.jet:2496): RawWords.jet:268
+  os_call1_i64 (Linux.jet:2288): RawWords.jet:227
+  os_call1_unit_i64 (Linux.jet:2246): RawWords.jet:251
+  os_call2_i64 (Linux.jet:2303): RawWords.jet:233
+  os_call2_unit_i64 (Linux.jet:2260): RawWords.jet:257
+  os_call3_i64 (Linux.jet:2320): RawWords.jet:239
+  os_call3_unit_i64 (Linux.jet:2276): RawWords.jet:273
+  os_call4_i64 (Linux.jet:2339): RawWords.jet:245
+  os_call5_i64 (Linux.jet:2360): RawWords.jet:263
+  os_call_address (Linux.jet:300): no runtime caller
+  os_call_address_four_i64 (Linux.jet:2184): Thread.jet:670
+  os_call_address_i64 (Linux.jet:2147): Alloc.jet:2807, Fault.jet:212, RawWords.jet:281, Thread.jet:462
+  os_call_address_one_unit (Linux.jet:354): no runtime caller
+  os_call_address_three (Linux.jet:2614): no runtime caller
+  os_call_address_three_unit (Linux.jet:342): no runtime caller
+  os_call_address_two (Linux.jet:315): no runtime caller
+  os_call_address_two_i64 (Linux.jet:2162): RawWords.jet:287, Sync.jet:225, Thread.jet:341
+  os_call_address_two_unit (Linux.jet:368): no runtime caller
+  os_call_address_unit (Linux.jet:326): no runtime caller
+  os_clone_i64 (Linux.jet:2223): HostSpawn.jet:507, Thread.jet:622
+
+$ python3 rtindirect.py <repo>/Compiler/JetRuntime/Source
+runtime functions: 7274
+call a loaded code address (coll_callN): 61
+  Alloc.jet: alloc_check_sweep, alloc_user_call
+  CABISession.jet: session_slot_drop
+  CodecCSV.jet: csv_invoke
+  ComptimeServe.jet: comptime_serve_loop
+  Condition.jet: jet_rt_native_shared_guard_wait
+  CryptoEntropy.jet: rt_crypto_entropy_step
+  Events.jet: event_listener_call
+  FaultAllocation.jet: jet_fault_should_fail_allocation
+  FaultSchedule.jet: jet_fault_should_fail
+  Game.jet: jet_game_run
+  Host.jet: jet_term_write_stdout_line
+  HostStartup.jet: host_arguments_register
+  Iter.jet: iter_binary, iter_equal, iter_order, iter_pull_kernel, iter_unary, jet_rt_native_iter_join
+  IterSources.jet: iter_source_node, iter_source_pull
+  Main.jet: jet_rt_main, main_call_stopped, main_exit_cleanup
+  MemStorage.jet: storage_drop_at
+  ObserveLive.jet: observe_snapshot
+  PluginHost.jet: pg_call
+  ProcessSignal.jet: jet_rt_process_signal_dispatcher
+  Reactive.jet: jet_reactive_derived_new, reactive_observer_run
+  Realtime.jet: jet_rt_native_realtime_start, jet_rt_native_realtime_worker
+  Scheduler.jet: rt_task_panic_publish_recorded, scheduler_check_loops, scheduler_control_cancel
+  Secret.jet: secret_scrub
+  Shared.jet: jet_rt_native_cell_guard_with, jet_rt_native_shared_edit, jet_rt_native_shared_read, jet_rt_native_shared_try_replace, shared_count_release
+  SharedTransactions.jet: jet_rt_native_shared_edit_txn, jet_rt_native_shared_read_txn
+  Sync.jet: sync_park, sync_park_wake_as, sync_wait, sync_wake
+  Task.jet: task_run, task_take_outcome
+  TestHarness.jet: jet_rt_test_spawn, jet_rt_test_unit
+  TestProperty.jet: property_case
+  TestScope.jet: test_scope_record_raw_stop
+  Trap.jet: trap_root, trap_root_prepare, trap_stop
+  UIBackends.jet: jet_ui_click, ui_change_run, ui_drop_run
+  VaultTestHooks.jet: jet_rt_vault_test_authorize
+  World.jet: jet_testing_world
+reach one through runtime calls: 4112
+exported entry points that reach one: 2175 of 3253
+
+$ jet build main.jet  (in Inputs/)
+required effects: IO; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+
+$ jet run main.jet  (in Inputs/)
+7
+
+$ python3 files.py .jet/build/main  (in Inputs/)
+.debug_info: main.jet, module:14:source-root:0::shapes.jet
+.debug_line: main.jet
+.debug_jetline: main.jet
+
+$ jet build sleeper.jet  (in Sleep/)
+required effects: IO, Mem, Time.Wait; granted effects: Exec.Args, IO, Mem.Alloc; denied effects: none; authority: application default
+
+$ python3 ../tcb.py .jet/build/sleeper  (in Sleep/)
+fs_base = 0x0: unset
+gs_base = 0x75ad86248840: 75ad86218000-75ad86318000 rw-p 00000000 00:00 0 
+
+$ python3 seccomp_args.py
+mprotect PROT_READ: allowed
+mprotect PROT_READ|PROT_WRITE: refused (EPERM)
+mmap MAP_PRIVATE|MAP_ANONYMOUS fd -1: allowed
+mmap MAP_SHARED of an inherited fd: refused (EPERM)
+madvise MADV_DONTNEED: allowed
+madvise MADV_REMOVE: refused (EPERM)
+futex FUTEX_WAKE|FUTEX_PRIVATE_FLAG: allowed
+futex FUTEX_WAKE (shared): refused (EPERM)
+
+$ python3 dontfork.py
+target: 0x7d7165300000 holds 0x5a bytes, MADV_DONTFORK
+fork, reserve=False
+  the arena's mmap (hinted at the hole) landed in it: True
+  the debugger's process_vm_readv gives: bytes b'\x00', no fault
+  the debugger's /proc/<pid>/mem read gives: bytes b'\x00', no fault
+  the debugger's PTRACE_PEEKDATA gives: word 0x0, no fault
+  the eval code's own read gives: bytes b'\x00', no fault
+fork, reserve=True
+  reserved the hole PROT_NONE: True
+  the arena's mmap (hinted at the hole) landed in it: False
+  the debugger's process_vm_readv gives: EFAULT, a fault
+  the debugger's /proc/<pid>/mem read gives: bytes b'\x00', no fault
+  the debugger's PTRACE_PEEKDATA gives: word 0x0, no fault
+  the eval code's own read gives: SIGSEGV, a fault
+
+$ python3 globals.py <repo>/Compiler <repo>/Core
+mutable globals: 166 names, 1 shared by more than one file (2 bindings)
+  ScriptHelperFixtures.words x2: Compiler/JetSema/Tests/ScriptHelperFixtures.jet, Compiler/JetSema/Tests/ScriptHelperFixtures.jet
+all globals: 283 names, 12 shared by more than one file (479 bindings)
+  package.name x112: Compiler/JetBackend/Tests/Fragments.fixture/package.jet, Compiler/JetBackend/Tests/LinkIndexes.fixture/package.jet, Compiler/JetBackend/Tests/LinkPackRoots.fixture/package.jet
+  package.version x112: Compiler/JetBackend/Tests/Fragments.fixture/package.jet, Compiler/JetBackend/Tests/LinkIndexes.fixture/package.jet, Compiler/JetBackend/Tests/LinkPackRoots.fixture/package.jet
+  package.edition x110: Compiler/JetBackend/Tests/Fragments.fixture/package.jet, Compiler/JetBackend/Tests/LinkIndexes.fixture/package.jet, Compiler/JetBackend/Tests/LinkPackRoots.fixture/package.jet
+
+$ python3 fork_cost.py 64 512 2048  (run 1 of 3)
+64 MiB resident (64 MiB in huge pages): fork + exit + wait median 3.00 ms, min 1.21 ms
+512 MiB resident (512 MiB in huge pages): fork + exit + wait median 4.87 ms, min 2.75 ms
+2048 MiB resident (1268 MiB in huge pages): fork + exit + wait median 324.66 ms, min 54.56 ms
+
+$ python3 fork_cost.py 64 512 2048  (run 2 of 3)
+64 MiB resident (64 MiB in huge pages): fork + exit + wait median 1.59 ms, min 0.65 ms
+512 MiB resident (512 MiB in huge pages): fork + exit + wait median 3.42 ms, min 2.11 ms
+2048 MiB resident (1290 MiB in huge pages): fork + exit + wait median 400.11 ms, min 112.92 ms
+
+$ python3 fork_cost.py 64 512 2048  (run 3 of 3)
+64 MiB resident (64 MiB in huge pages): fork + exit + wait median 2.14 ms, min 1.55 ms
+512 MiB resident (512 MiB in huge pages): fork + exit + wait median 3.82 ms, min 2.08 ms
+2048 MiB resident (2048 MiB in huge pages): fork + exit + wait median 13.74 ms, min 9.02 ms
+

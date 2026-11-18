@@ -37,6 +37,7 @@ use {
         diagnostic_from_registry,
         jet_config_data_value,
         jet_config_eval_diagnostic,
+        symbol_key_names,
     ]
     jet_sema.[
         SemaComptimeItemKind,
@@ -47,7 +48,7 @@ use {
 jet_config_evaluate_program: fn(program: String, base_dir: String) -> JetConfigOutcome {
     result: jet_config_checked(program, base_dir, false) ?? return JetConfigOutcome.Refused{diagnostic: err.diagnostic}
     loop value in result.comptime_values {
-        if value.kind != SemaComptimeItemKind.Constant || !value.key.ends_with(":{JET_CONFIG_VALUE_NAME}") {
+        if value.kind != SemaComptimeItemKind.Constant || !symbol_key_names(value.key, JET_CONFIG_VALUE_NAME) {
             next
         }
         converted: sema_user_template_ct_value(value.value) ?? return JetConfigOutcome.Refused{diagnostic: jet_config_eval_diagnostic(None, "this config value's result has a shape a config value can't hold")}
@@ -66,7 +67,7 @@ jet_config_module_values: fn(program: String, base_dir: String) -> JetModuleValu
     result: jet_config_checked(program, base_dir, true) ?? return JetModuleValuesOutcome.Refused{diagnostic: err.diagnostic}
     owner := ""
     loop value in result.comptime_values {
-        if value.kind == SemaComptimeItemKind.Constant && value.key.ends_with(":{JET_CONFIG_VALUE_NAME}") {
+        if value.kind == SemaComptimeItemKind.Constant && symbol_key_names(value.key, JET_CONFIG_VALUE_NAME) {
             owner = value.key.slice(0..<(value.key.len() - JET_CONFIG_VALUE_NAME.len()))
         }
     }
@@ -78,7 +79,7 @@ jet_config_module_values: fn(program: String, base_dir: String) -> JetModuleValu
     loop value in result.comptime_values {
         if value.kind != SemaComptimeItemKind.Constant || !value.key.starts_with(owner) -> next
         name: value.key.slice(owner.len()..<value.key.len())
-        if name == JET_CONFIG_VALUE_NAME || name.contains(":") -> next
+        if name == JET_CONFIG_VALUE_NAME || name.contains(".") -> next
         if sema_user_template_ct_value(value.value) == {
             .Val(converted) -> {
                 values.push(NamedCtValue{name: name, value: jet_config_data_value(converted)})

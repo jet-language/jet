@@ -1192,7 +1192,7 @@ sema_call_argument_mismatch: fn(callee: String, index: Int, required: Type, requ
     if required == .TraitObject(bounds) {
         if bounds.len() == 1 && !(offered == .TraitObject(_)) {
             bound := bounds[0]
-            if bound.cut_last("::") == .Val(parts) -> bound = parts.after
+            if bound.cut_last(".") == .Val(parts) -> bound = parts.after
             name: type_name(offered)
             row: diagnostic_registry_row("E0905") ?? panic("E0905 must have a registry row")
             return sema_error("E0905", span, row.what.replace("{{type}}", name).replace("{{bound}}", bound), row.why.replace("{{why_text}}", "`{name}` would need to implement `{bound}` before it can be used here"), row.fix.replace("{{fix_text}}", "write `impl {name}.{bound} {{ … }}` with every required method"))

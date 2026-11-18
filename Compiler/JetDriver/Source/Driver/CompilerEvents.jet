@@ -34,6 +34,7 @@ use {
         module_is_core,
         symbol_is_local,
         symbol_is_none,
+        symbol_key_leaf,
         symbol_table_key,
     ]
     jet_sema.[JET_CANONICAL_EFFECT_PACKAGE_IDENTITY, SemaGraphResult]
@@ -137,10 +138,9 @@ jet_driver_checked_events: fn(graph: SemaGraphResult, symbols: SymbolTable) -> [
         loop fact in graph_module.call_facts {
             callee: fact.callee ?? next
             if symbol_is_none(callee) || symbol_is_local(callee) -> next
-            parts: symbol_table_key(symbols, callee).rpartition(":")
-            if parts.sep == "" -> next
+            called: symbol_key_leaf(symbol_table_key(symbols, callee))
             at: places.get(fact.caller_key) ?? next
-            if !declared[at].calls.contains(parts.tail) -> declared[at].calls.push(parts.tail)
+            if !declared[at].calls.contains(called) -> declared[at].calls.push(called)
         }
         loop at in first..<declared.len() {
             events.push(CompilerEventRecord{name: COMPILER_EVENT_DECLARED, data: jet_driver_declaration_value(declared[at])})
