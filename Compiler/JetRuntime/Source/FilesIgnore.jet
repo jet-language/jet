@@ -71,7 +71,7 @@ ignore_backslashes_before: fn(data: I64, index: I64) -> I64 {
     count
 }
 
-// JetFsIgnoreRule::parse on one `lines()` item; 0 for no rule.
+// JetFsIgnoreRule.parse on one `lines()` item; 0 for no rule.
 ignore_rule_parse: fn(data: I64, length: I64, base: I64) -> I64 {
     end := length
     if (end > I64{0} && rt_text_byte(wrapping(wrapping(data + end) - I64{1})) == I64{13}) {
@@ -130,7 +130,7 @@ ignore_rule_parse: fn(data: I64, length: I64, base: I64) -> I64 {
 }
 
 // with_directory_rules after the file is read: inherited rules, then each
-// `str::lines()` item of the lossy text parsed against `base`.
+// `str.lines()` item of the lossy text parsed against `base`.
 ignore_matcher_extend: fn(matcher: I64, base: I64, text: I64) -> I64 {
     rules: files_words_new()
     inherited: rt_text_word(wrapping(matcher + I64{8}))
@@ -338,7 +338,7 @@ ignore_path_matches: fn(pattern: I64, pattern_parts: I64, limit: I64, path: I64,
     matched
 }
 
-// JetFsIgnoreRule::matches.
+// JetFsIgnoreRule.matches.
 ignore_rule_matches: fn(rule: I64, relative: I64, length: I64, is_dir: Bool) -> Bool {
     base: rt_text_word(wrapping(rule + I64{8}))
     base_length: rt_text_len(base)
@@ -389,7 +389,7 @@ ignore_rules_answer: fn(matcher: I64, relative: I64, length: I64, is_dir: Bool) 
     ignored
 }
 
-// JetFsIgnoreMatcher::is_ignored: every parent prefix is first a directory
+// JetFsIgnoreMatcher.is_ignored: every parent prefix is first a directory
 // candidate (so `foo/` blocks `foo/bar`), then the whole relative path.
 ignore_matcher_ignored: fn(matcher: I64, relative: I64, is_dir: Bool) -> Bool {
     length: rt_text_len(relative)

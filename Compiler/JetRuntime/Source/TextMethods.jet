@@ -4,7 +4,7 @@
 // UnicodeText<n>.jet and the frozen CompilerNeededText Alphabetic/Numeric
 // tables that match Rust char).
 
-// JetInt::to_i64(): an exact Int carrier word fits a native i64.
+// JetInt.to_i64(): an exact Int carrier word fits a native i64.
 text_route_fits: fn(value: I64) -> Bool {
     if int_inline(value) -> return true
     int_fits(value, if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807})
@@ -42,8 +42,8 @@ text_scalar_start: fn(data: I64, floor: I64, end: I64) -> I64 {
     at
 }
 
-// jet_unicode_trim_start/_end (and str::trim_start/_end, whose
-// char::is_whitespace is the same White_Space property).
+// jet_unicode_trim_start/_end (and str.trim_start/_end, whose
+// char.is_whitespace is the same White_Space property).
 text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
     data: rt_text_data(value)
     start := I64{0}
@@ -113,7 +113,7 @@ text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
     true
 }
 
-// str::find: the byte offset of the first match, or -1.
+// str.find: the byte offset of the first match, or -1.
 #Export(c) jet_text_parse_find: fn(value: I64, needle: I64) -> I64 {
     jet_int_owned_from_i64(rt_text_find(value, needle, I64{0}, false))
 }
@@ -131,7 +131,7 @@ text_trim_side: fn(value: I64, leading: Bool, trailing: Bool) -> I64 {
     rt_text_store(item2, rt_text_slice(value, found + rt_text_len(separator), rt_text_len(value)))
 }
 
-// str::rfind: the byte offset of the last match, or -1 (an empty needle
+// str.rfind: the byte offset of the last match, or -1 (an empty needle
 // matches at the end).
 #Export(c) jet_text_parse_rfind: fn(value: I64, needle: I64) -> I64 {
     jet_int_owned_from_i64(rt_text_find(value, needle, I64{0}, true))

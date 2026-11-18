@@ -29,7 +29,7 @@ VAULT_GET_LINES: I64{40}
 
 VAULT_GET_COMMAS: I64{48}
 
-// char::is_control over valid UTF-8: C0 controls, DEL and the C1 controls
+// char.is_control over valid UTF-8: C0 controls, DEL and the C1 controls
 // U+0080..U+009F (encoded 0xC2 0x80..0x9F).
 vault_get_has_control: fn(data: I64, length: I64) -> Bool {
     at := I64{0}
@@ -59,7 +59,7 @@ vault_get_less: fn(left: I64, left_length: I64, right: I64, right_length: I64) -
     left_length < right_length
 }
 
-// The bytes of `.jet/secrets-plan` (fs::read_to_string: symlinks followed,
+// The bytes of `.jet/secrets-plan` (fs.read_to_string: symlinks followed,
 // UTF-8 required) as an owned byte list, else 0.
 vault_get_plan_text: fn() -> I64 {
     path: vault_linux_path(rt_static_text(".jet/secrets-plan"))
@@ -160,7 +160,7 @@ vault_get_plan_line: fn(context: I64, data: I64, start: I64, end: I64, input_cou
     input_count + distinct
 }
 
-// The plan rows of `text` (str::lines: `\n` or `\r\n` endings, the last
+// The plan rows of `text` (str.lines: `\n` or `\r\n` endings, the last
 // optional), whose first line must be `JSEC1`. The rows are sized by the
 // line and comma counts, which bound the plans and the inputs.
 vault_get_plans: fn(context: I64, text: I64) {
@@ -312,7 +312,7 @@ vault_get_resolve: fn(context: I64, data: I64, length: I64, depth: I64) -> I64 {
 }
 
 // The first non-empty of JET_TEST_SCRATCH_DIR and JET_STORE_DIR, else
-// env::temp_dir (TMPDIR, else /tmp), appended to `line` as raw bytes.
+// env.temp_dir (TMPDIR, else /tmp), appended to `line` as raw bytes.
 vault_get_audit_root: fn(line: I64) {
     value := host_environment_value(env_name_jet_test_scratch_dir())
     if (value == I64{0} || host_startup_byte_length(value) == I64{0}) {
@@ -329,7 +329,7 @@ vault_get_audit_root: fn(line: I64) {
 }
 
 // Appends `read output={name} from=[inputs]` to `<root>/.jet/secrets-audit`,
-// creating its directories (fs::create_dir_all, mode 0777), unless a name
+// creating its directories (fs.create_dir_all, mode 0777), unless a name
 // holds a control character. Every failure is silent.
 vault_get_audit: fn(context: I64, name: I64, plan: I64) {
     if vault_get_has_control(rt_text_data(name), rt_text_len(name)) {

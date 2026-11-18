@@ -149,7 +149,7 @@ storage_reset_entries: fn(handle: I64) {
 
 // b0ce72d64 Alloc.jet:381's alloc_try ALREADY probes. Only the validated
 // alloc_try_reserved primitive is unprobed; using it preserves budget tracking
-// without injecting a second fault during RawBlock::try_new growth.
+// without injecting a second fault during RawBlock.try_new growth.
 storage_heap: fn(bytes: I64, alignment: I64, fallible: Bool) -> I64 {
     if !fallible -> return jet_rt_alloc(bytes, alignment)
     if !alloc_layout_valid(bytes, alignment) -> return I64{0}
@@ -468,7 +468,7 @@ storage_fixed_reserve: fn(handle: I64, bytes: I64, alignment: I64, drop_fn: I64,
     base: storage_word(handle)
     used: storage_word(wrapping(handle + I64{16}))
     boundary: storage_word(wrapping(handle + I64{24}))
-    value_offset := alignment  // Fixed ZST pointer = NonNull<T>::dangling().
+    value_offset := alignment  // Fixed ZST pointer = NonNull<T>.dangling().
     end := used + I64{1}
     if (bytes != I64{0}) {
         address: base + used

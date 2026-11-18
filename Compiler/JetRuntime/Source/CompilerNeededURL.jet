@@ -1,4 +1,4 @@
-// Rust-free compiler route: JetURLParts::parse (no typed marker).
+// Rust-free compiler route: JetURLParts.parse (no typed marker).
 // Core/Net/URL.jet has no raw parse export and its URLError/normalization policy
 // is not the Rust kernel's Text error contract. This port deliberately retains
 // that kernel's permissive ASCII hosts, bracket handling and dot-path fast path.
@@ -282,7 +282,7 @@ compiler_url_port: fn(value: I64, start: I64, end: I64, output: I64, err: I64) -
             break
         }
         digit: byte - I64{48}
-        // Accumulate negative to admit i64::MIN just like Rust parse::<i64>.
+        // Accumulate negative to admit i64.MIN just like Rust parse<i64>.
         limit: if negative -> I64{-9223372036854775808} else -> I64{-9223372036854775807}
         // n * 10 - digit >= limit needs n >= ceil((limit + digit) / 10); `/%` floors.
         if (n < -((limit + digit) /% I64{-10})) {
@@ -575,7 +575,7 @@ compiler_url_parse_body: fn(input: I64, value: I64, err: I64) -> Bool {
     true
 }
 
-// Rust str::trim uses Unicode White_Space. A trimmed input is its own owned
+// Rust str.trim uses Unicode White_Space. A trimmed input is its own owned
 // text: under shared text storage a clone of it must not alias a borrow.
 compiler_url_trim_view: fn(value: I64) -> I64 {
     data: rt_text_data(value)

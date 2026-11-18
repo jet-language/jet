@@ -45,7 +45,7 @@ rt_host_env_capture_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
-// Rust 1.90.0 library/std/src/sys/env/unix.rs, env()::parse:
+// Rust 1.90.0 library/std/src/sys/env/unix.rs, env().parse:
 // search '=' AFTER byte zero, permit names starting '=', skip malformed rows.
 // https://github.com/rust-lang/rust/blob/1.90.0/library/std/src/sys/env/unix.rs
 host_environment_split: fn(bytes: I64) -> I64 {
@@ -351,9 +351,9 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
     jet_rt_entry_error_exit(text)
 }
 
-// jet_std_io_args: std::env::args().collect(), argv[0] first, through the
+// jet_std_io_args: every process argument, argv[0] first, through the
 // generated list-out ABI (an exact count*8 buffer of owned Text words, 0 when
-// empty). Args::next unwraps into_string, so a non-UTF-8 argument panics.
+// empty). A non-UTF-8 argument panics.
 #Export(c) jet_std_io_args: fn(output: I64) -> I64 {
     host_arguments_require()
     count: host_argc
@@ -365,7 +365,7 @@ host_startup_list: fn(bytes: I64, length: I64, output: I64) {
         loop at < length {
             width: rt_text_valid_width(wrapping(bytes + at), wrapping(length - at), I64{1})
             if (width < I64{0}) {
-                message: rt_static_text("called `Result::unwrap()` on an `Err` value: invalid UTF-8 process argument")
+                message: rt_static_text("invalid UTF-8 process argument")
                 jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
                 rt_text_store(output, I64{0})
                 return I64{0}
@@ -475,7 +475,7 @@ host_envp_value: fn(envp: I64, key_data: I64, key_length: I64) -> I64 {
     }
 }
 
-// std::env::var parity for internal runtime flags: invalid UTF-8 is absent.
+// std.env.var parity for internal runtime flags: invalid UTF-8 is absent.
 rt_env_get: fn(key: I64) -> I64 {
     value: host_environment_value(key)
     if (value == I64{0}) { return I64{0} }
@@ -489,7 +489,7 @@ rt_env_get: fn(key: I64) -> I64 {
     rt_text_copy(value, length)
 }
 
-// std::env::var_os(...).to_string_lossy parity for private time-zone lookup.
+// std.env.var_os(...).to_string_lossy parity for private time-zone lookup.
 rt_env_get_lossy: fn(key: I64) -> I64 {
     value: host_environment_value(key)
     if (value == I64{0}) -> I64{0} else -> rt_text_lossy(value, host_startup_byte_length(value))

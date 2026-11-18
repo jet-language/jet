@@ -186,7 +186,7 @@ walk_stream_close: fn(stream: I64) {
     jet_rt_free(stream, WALK_STREAM_BYTES, I64{8})
 }
 
-// PathBuf::join(name) on raw bytes: a separator only after a non-empty path
+// PathBuf.join(name) on raw bytes: a separator only after a non-empty path
 // not already ending in '/', and an absolute name replaces the path.
 walk_join: fn(data: I64, length: I64, name: I64, name_length: I64, output: I64) -> I64 {
     if (name_length > I64{0} && rt_text_byte(name) == I64{47}) {
@@ -204,7 +204,7 @@ walk_join: fn(data: I64, length: I64, name: I64, name_length: I64, output: I64) 
     total
 }
 
-// std Path::components on Unix as (kind, start, end) word triples: RootDir,
+// std Path.components on Unix as (kind, start, end) word triples: RootDir,
 // a leading CurDir only for a relative "." prefix, ParentDir, Normal; empty
 // and other "." parts are skipped.
 walk_components: fn(data: I64, length: I64) -> I64 {
@@ -327,7 +327,7 @@ walk_back_real: fn(data: I64, before: I64, end: I64) -> Bool {
     size > I64{0} && !(size == I64{1} && rt_text_byte(wrapping(data + start)) == I64{46})
 }
 
-// Path::parent as a byte-prefix length, or -1 for None: the last real part
+// Path.parent as a byte-prefix length, or -1 for None: the last real part
 // is removed and then trailing "" / "." parts are trimmed; a lone CurDir
 // leaves "", RootDir has no parent.
 walk_parent_length: fn(data: I64, length: I64) -> I64 {
@@ -415,7 +415,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     jet_int_owned_from_i64(key)
 }
 
-// HashMap::remove: a key that is not live is a no-op; the context itself is
+// HashMap.remove: a key that is not live is a no-op; the context itself is
 // freed by whichever of the table and in-flight operations releases it last.
 #Export(c) jet_walk8_close: fn(key: I64) {
     root: walk_root
@@ -452,7 +452,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     jet_int_owned_from_i64(result)
 }
 
-// Path::ancestors without empty paths, each as a new slot.
+// Path.ancestors without empty paths, each as a new slot.
 #Export(c) jet_walk8_ancestors: fn(key: I64, slot: I64, output: I64) -> I64 {
     context: walk_enter(key)
     if (context == I64{0}) { return I64{0} }
@@ -532,7 +532,7 @@ walk_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_tag:
     walk_leave(context)
 }
 
-// std::fs::read: open O_RDONLY|O_CLOEXEC and read to the end, EINTR retried.
+// std.fs.read: open O_RDONLY|O_CLOEXEC and read to the end, EINTR retried.
 // Returns 0 with the bytes/length/capacity in `output`, or -errno.
 walk_read_file: fn(name: I64, output: I64) -> I64 {
     fd := I64{-4}
@@ -573,7 +573,7 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
     I64{0}
 }
 
-// JetFsIgnoreMatcher::with_directory_rules(slot path, filename): a missing or
+// JetFsIgnoreMatcher.with_directory_rules(slot path, filename): a missing or
 // non-regular (including symlink) ignore file keeps the inherited rules.
 #Export(c) jet_walk8_rules: fn(key: I64, slot: I64, filename: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
     context: walk_enter(key)
@@ -655,7 +655,7 @@ walk_read_file: fn(name: I64, output: I64) -> I64 {
     walk_leave(context)
 }
 
-// std::fs::read_dir (opendir: O_RDONLY|O_DIRECTORY|O_CLOEXEC) into the slot.
+// std.fs.read_dir (opendir: O_RDONLY|O_DIRECTORY|O_CLOEXEC) into the slot.
 #Export(c) jet_walk8_read_dir: fn(key: I64, slot: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
     context: walk_enter(key)
     if (context == I64{0}) {
@@ -710,7 +710,7 @@ walk_stream_next: fn(stream: I64) -> I64 {
     }
 }
 
-// ReadDir::next for the slot: (end, child, directory, file, path, relative,
+// ReadDir.next for the slot: (end, child, directory, file, path, relative,
 // ignore_file, kind, code?, cause?). file_type comes from d_type, with
 // std's no-follow metadata fallback for any other d_type value; a fallback
 // failure is neither a directory nor a file. Only a directory gets a child
@@ -861,7 +861,7 @@ path_walk_canonical: fn(data: I64, size: I64) -> I64 {
 // never followed, a directory reached twice (by its canonical path) is
 // walked once, and an unreadable directory is skipped. A root that fails
 // path_walk_valid walks nothing. Each entry is the lossy rendering of
-// PathBuf::join(directory, name).
+// PathBuf.join(directory, name).
 #Export(c) jet_path_walk: fn(path: I64, output: I64) -> I64 {
     results: files_words_new()
     root: path_handle_render(path)

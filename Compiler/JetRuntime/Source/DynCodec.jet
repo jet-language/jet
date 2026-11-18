@@ -107,7 +107,7 @@ codec_under_path: fn(segment: I64, path: I64) -> I64 {
     codec_fail(reason, errors, count)
 }
 
-// FieldError::one(reason): one owned FieldError at the empty path, as the owned
+// FieldError.one(reason): one owned FieldError at the empty path, as the owned
 // List payload `err` with its length in `err_len`. Consumes `reason`; returns
 // the failure status 0.
 codec_fail: fn(reason: I64, err: I64, err_len: I64) -> I64 {
@@ -215,7 +215,7 @@ codec_etf_string: fn(tree: I64, mode: I64, ok: I64, err: I64, err_len: I64) -> I
     I64{1}
 }
 
-// `text.trim() == literal` (Unicode White_Space trim, as str::trim).
+// `text.trim() == literal` (Unicode White_Space trim, as str.trim).
 codec_trimmed_is: fn(text: I64, literal: I64) -> Bool {
     start: numeric_trim_start(text)
     end: numeric_trim_end(text, start)
@@ -481,7 +481,7 @@ codec_decode_integer: fn(tree: I64, kind: I64, range: I64, ok: I64, err: I64, er
             return codec_fail(codec_framed(rt_static_text("expected Int, found number "), payload, rt_static_text("")), err, err_len)
         }
     } else if (kind_tag == DYN_TEXT && codec_text_cells()) {
-        // A text cell is the exact Int (CtBigInt::from_str) or i128 FromStr
+        // A text cell is the exact Int (CtBigInt.from_str) or i128 FromStr
         // of the trimmed text; any failure names the original text.
         if (jet_int_parse(payload, ok, err) == I64{0}) {
             jet_rt_string_drop(dyn_word(err))
@@ -546,7 +546,7 @@ codec_decode_integer: fn(tree: I64, kind: I64, range: I64, ok: I64, err: I64, er
 codec_finite: fn(bits: I64) -> Bool { ((bits >> I64{52}) & I64{2047}) != I64{2047} }
 
 // A Number lexeme is :570-580 decode_finite_lexeme. Lexemes carry no
-// whitespace, so jet_float_parse's trim is Rust's untrimmed str::parse::<f64>
+// whitespace, so jet_float_parse's trim is Rust's untrimmed str.parse<f64>
 // here.
 #Export(c) jet_rt_codec_decode_float: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     kind_tag: dyn_word(wrapping(tree + DYN_TAG))

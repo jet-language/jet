@@ -14,7 +14,7 @@ compiler_fs_error: fn(kind: I64, operation: I64, path: I64, code: I64, cause: I6
     I64{0}
 }
 
-// jet_std::io_error_at: only these std ErrorKinds have their own IOError arm.
+// jet_std.io_error_at: only these std ErrorKinds have their own IOError arm.
 // AlreadyExists, Unsupported and the rest are Other.
 compiler_fs_errno: fn(operation: I64, path: I64, code: I64, error: I64) -> I64 {
     kind: if {
@@ -431,7 +431,7 @@ compiler_fs_mkdir_prefix: fn(name: I64, at: I64, scratch: I64) -> I64 {
     I64{1}
 }
 
-// FileReader.seek(position): std Seek::seek(SeekFrom::Start(position)) on
+// FileReader.seek(position): std Seek.seek(SeekFrom.Start(position)) on
 // the reader's descriptor. jet_fd_seek_raw drops buffered read-ahead, so the
 // next read, read_line or lines starts at `position`.
 #Export(c) jet_std_file_reader_seek: fn(reader: I64, position: I64, error: I64) -> I64 {

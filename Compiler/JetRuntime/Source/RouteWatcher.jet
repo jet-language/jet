@@ -2,7 +2,7 @@
 // publication has no native sink registry; a process without devtools sinks
 // publishes to none. WatchState64: refs0 target8 (0 files, 1 process, 2 port)
 // owned text16 (root or host) number24 (pid or port) snapshot32 seenReady40
-// active48 event56 (the handle's own Event<WatchEvent> core, JetEvent::new).
+// active48 event56 (the handle's own Event<WatchEvent> core, JetEvent.new).
 // Snapshot: a native header [length0 capacity8 data16] of Row32 (owned path
 // text0, modified ms8, len16, isDir24), sorted by path bytes (the Rust BTreeMap
 // order). WatchSet32: refs0 and a native handle List header @8 [length,
@@ -102,7 +102,7 @@ watch_snapshot_push: fn(snapshot: I64, path: I64, modified: I64, length: I64, di
     trap_store(snapshot, count + I64{1})
 }
 
-// Path::join for a directory entry name (NUL-terminated at `name`).
+// Path.join for a directory entry name (NUL-terminated at `name`).
 watch_join: fn(parent: I64, name: I64) -> I64 {
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, parent)
@@ -238,7 +238,7 @@ watch_snapshot_sort: fn(snapshot: I64) {
     trap_store(wrapping(snapshot + I64{16}), source)
 }
 
-// WatchHandle::files: Err(IOError) when the initial snapshot fails.
+// WatchHandle.files: Err(IOError) when the initial snapshot fails.
 #Export(c) jet_watcher_files: fn(path: I64, output: I64, error: I64) -> I64 {
     snapshot: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(snapshot, I64{24})
@@ -258,7 +258,7 @@ watch_process_alive: fn(pid: I64) -> Bool {
     result == I64{0} || result == I64{-1}
 }
 
-// WatchHandle::process_pid: seen_ready starts as the first liveness probe.
+// WatchHandle.process_pid: seen_ready starts as the first liveness probe.
 #Export(c) jet_watcher_process_pid: fn(pid: I64) -> I64 {
     native: jet_int_owned_to_i64(pid)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
@@ -266,14 +266,14 @@ watch_process_alive: fn(pid: I64) -> Bool {
     watch_state_new(I64{1}, jet_rt_string_builder_new(), native, I64{0}, if ready -> I64{1} else -> I64{0})
 }
 
-// WatchHandle::port: not ready until a later poll connects.
+// WatchHandle.port: not ready until a later poll connects.
 #Export(c) jet_watcher_port: fn(host: I64, port: I64) -> I64 {
     native: jet_int_owned_to_i64(port)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     watch_state_new(I64{2}, jet_rt_string_clone(host), native, I64{0}, I64{0})
 }
 
-// WatchSet::new: an empty shared handle list.
+// WatchSet.new: an empty shared handle list.
 #Export(c) jet_watcher_set: fn() -> I64 {
     value: jet_rt_alloc(I64{32}, I64{8})
     thread_zero(value, I64{32})
@@ -397,7 +397,7 @@ watch_poll_process: fn(state: I64, events: I64) {
     }
 }
 
-// TcpStream::connect((host, port)).is_ok() for a port in 0..=65535; the
+// TcpStream.connect((host, port)).is_ok() for a port in 0..=65535; the
 // connected stream or the failure is dropped at once.
 watch_port_ready: fn(host: I64, port: I64) -> Bool {
     if (port < I64{0} || port > I64{65535}) { return false }
@@ -427,7 +427,7 @@ watch_poll_port: fn(state: I64, events: I64) {
     } else if (!ready && seen) { sync_store(wrapping(state + I64{40}), I64{0}) }
 }
 
-// WatchHandle::poll: an inactive watch answers no events.
+// WatchHandle.poll: an inactive watch answers no events.
 #Export(c) jet_watcher_poll: fn(state: I64, out_data: I64) -> I64 {
     events: jet_rt_alloc(I64{24}, I64{8})
     thread_zero(events, I64{24})
@@ -472,7 +472,7 @@ watch_poll_port: fn(state: I64, events: I64) {
     jet_rt_handle_clone_jet_event(sync_load(wrapping(state + I64{56})))
 }
 
-// WatchSet::add keeps its own count of the handle.
+// WatchSet.add keeps its own count of the handle.
 #Export(c) jet_watcher_set_add: fn(set: I64, handle: I64) {
     watch_words_push(wrapping(set + I64{8}), jet_rt_handle_clone_watch_handle(handle))
 }

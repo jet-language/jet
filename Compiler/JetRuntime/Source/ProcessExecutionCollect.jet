@@ -471,7 +471,7 @@ process_stdin_failure: fn(errno: I64, err: I64) -> I64 {
 #Export(c) jet_rt_handle_drop_process_stdin: fn(stdin: I64) { jet_process_drop_raw(stdin) }
 
 // Borrowed: each field lends the child's own Pipe40 cell for the place's
-// lifetime, made on first use. Like Rust's ProcessReader::Shared, the cell
+// lifetime, made on first use. Like Rust's ProcessReader.Shared, the cell
 // reads the collector's capture of its stream rather than the pipe itself, so
 // the receipt keeps every byte and the child never blocks on an unread pipe.
 #Export(c) jet_rt_handle_field_process_child_stdout: fn(child: I64) -> I64 {
@@ -603,7 +603,7 @@ process_stdin_write_bytes: fn(stdin: I64, data: I64, length: I64, err: I64) -> I
     I64{1}
 }
 
-// ProcessStdin.write(bytes): one ChildStdin::write of a native U8 list on a
+// ProcessStdin.write(bytes): one ChildStdin.write of a native U8 list on a
 // private dup; Ok is the count the pipe took, EINTR retries.
 #Export(c) jet_process_stdin_write: fn(stdin: I64, data: I64, length: I64, ok: I64, err: I64) -> I64 {
     packed: spawn_stream_dup(stdin, I64{0})
@@ -622,13 +622,13 @@ process_stdin_write_bytes: fn(stdin: I64, data: I64, length: I64, err: I64) -> I
     process_stdin_write_bytes(stdin, rt_text_data(text), rt_text_len(text), err)
 }
 
-// ProcessStdin.write_bytes(bytes): ChildStdin::write_all of a native U8 list
+// ProcessStdin.write_bytes(bytes): ChildStdin.write_all of a native U8 list
 // (RT_HOST_U8_STRIDE is 1: the list data is the bytes).
 #Export(c) jet_process_stdin_write_all: fn(stdin: I64, data: I64, length: I64, err: I64) -> I64 {
     process_stdin_write_bytes(stdin, data, length, err)
 }
 
-// Option::take: closing sends EOF once; repeated close is harmless. A terminal
+// Option.take: closing sends EOF once; repeated close is harmless. A terminal
 // child's input shares the PTY master with its output, which stays open.
 #Export(c) jet_process_stdin_close: fn(stdin: I64) {
     sync_mutex_lock(stdin)

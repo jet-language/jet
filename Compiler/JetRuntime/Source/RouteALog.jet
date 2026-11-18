@@ -355,7 +355,7 @@ log_text_cell_store: fn(cell: I64, value: I64) {
     log_text_cell_store(wrapping(log_state() + LOG_STATE_TRACE), id)
 }
 
-// std::process::exit(code as i32): rt::cleanup flushes stdout, then exit.
+// std.process.exit(code as i32): rt.cleanup flushes stdout, then exit.
 #Export(c) jet_log_process_exit: fn(code: I64) {
     native: host_i32(code)
     if (jet_scheduler_native_propagate() != I64{0}) {
@@ -370,7 +370,7 @@ log_text_cell_store: fn(cell: I64, value: I64) {
 // exact-Int narrowing of the value.
 #Export(c) jet_log_publish_metric: fn(_name: I64, value: I64) { _ := jet_int_owned_to_i64(value) }
 
-// OpenOptions::new().create(true).append(true).open(path), EINTR retried:
+// OpenOptions.new().create(true).append(true).open(path), EINTR retried:
 // the descriptor, or a negative errno (a NUL-bearing path never opens).
 log_sink_open: fn(path: I64) -> I64 {
     length: rt_text_len(path)

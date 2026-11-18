@@ -4,7 +4,7 @@
 // BufWriter<File>'s drop does. Held-directory and path opens both go through
 // HostHeldDirectory.jet fs_open_at (jet_fs_open_at).
 
-// "fault injected: FS.Write" checkpoint (IOError::other).
+// "fault injected: FS.Write" checkpoint (IOError.other).
 files_write_fault: fn(path: I64, operation: I64, error: I64) -> Bool {
     if !jet_fault_should_fail(rt_static_text("FS.Write")) -> return false
     _ := host_io_other_take(operation, jet_rt_string_clone(path), jet_rt_string_clone(rt_static_text("fault injected: FS.Write")), error)
@@ -103,7 +103,7 @@ FILES_WRITE_WHOLE_ZERO: I64{-4097}
 
 FILES_WRITE_BUFFERED_ZERO: I64{-4098}
 
-// BufWriter::write_all over FD72: retry Interrupted, a zero-byte direct write
+// BufWriter.write_all over FD72: retry Interrupted, a zero-byte direct write
 // is WriteZero "failed to write whole buffer", a zero-byte buffer flush is
 // WriteZero "failed to write the buffered data". Returns 0, -errno or a
 // FILES_WRITE_*_ZERO fact. `bytes` are packed (stride 1).
@@ -197,7 +197,7 @@ files_writer_hostile_write: fn(hostile: I64, writer: I64, path: I64, data: I64, 
     I64{1}
 }
 
-// BufWriter::flush: drain the buffer (EINTR retried inside FD72); errors
+// BufWriter.flush: drain the buffer (EINTR retried inside FD72); errors
 // are Flush. Returns 0, -errno or FILES_WRITE_BUFFERED_ZERO.
 files_writer_flush: fn(writer: I64) -> I64 {
     scratch: jet_rt_alloc(I64{40}, I64{8})

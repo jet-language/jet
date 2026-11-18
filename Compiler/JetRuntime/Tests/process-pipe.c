@@ -183,7 +183,7 @@ int main(void) {
         first = clones[family](holder);
         jet_process_pipe_close_raw(first);
         line(holder, NULL, 0); // Shared None is visible through the other clone.
-        jet_process_pipe_close_raw(holder); // Idempotent Option::take.
+        jet_process_pipe_close_raw(holder); // Idempotent Option.take.
         drops[family](first); drops[family](holder);
         closed(fd);
         drops[family](0);

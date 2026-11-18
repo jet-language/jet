@@ -68,7 +68,7 @@ session_slot_drop: fn(slot: I64) {
 
 session_drop: fn(session: I64) {
     slot := sync_load(wrapping(session + I64{40}))
-    // Reverse lexical owners, matching Session::drop/pop_last, not ID guessing
+    // Reverse lexical owners, matching Session.drop/pop_last, not ID guessing
     // inside an executing frame (in-turn retirement remains explicit).
     loop slot != (I64{0}) {
         following: sync_load(slot)
@@ -102,7 +102,7 @@ session_drop: fn(session: I64) {
 #Export(c) jet_rt_session_create: fn() -> I64 {
     id := sync_load(session_counter)
     loop {
-        // Rust fetch_update refuses u64::MAX before issuing that ID.
+        // Rust fetch_update refuses u64.MAX before issuing that ID.
         if (id == I64{-1}) { return I64{0} }
         observed: sync_cas(session_counter, id, wrapping(id + I64{1}))
         if (observed == id) { break }

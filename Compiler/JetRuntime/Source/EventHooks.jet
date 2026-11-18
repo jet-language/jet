@@ -27,7 +27,7 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
     coll_slot_clone(source, target, meta)
 }
 
-// JetHook::new :1643-1648: the hook takes over the moved fallback's bytes.
+// JetHook.new :1643-1648: the hook takes over the moved fallback's bytes.
 #Export(c) jet_hook_new: fn(fallback: I64, meta: I64) -> I64 {
     owned: coll_meta_copy(meta)
     slot: coll_slot_new(owned)
@@ -35,7 +35,7 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
     hook_new(slot, owned)
 }
 
-// JetDecisionHook::new :1788-1794 borrows its policy; FirstCancelElseTransform
+// JetDecisionHook.new :1788-1794 borrows its policy; FirstCancelElseTransform
 // is the sole ordinal.
 #Export(c) jet_decision_hook_new: fn(_policy: I64) -> I64 { hook_new(I64{0}, I64{0}) }
 
@@ -62,7 +62,7 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
     jet_rt_free(hook, I64{32}, I64{8})
 }
 
-// on / once / on_priority (JetHook::add :1669-1692, JetDecisionHook::add
+// on / once / on_priority (JetHook.add :1669-1692, JetDecisionHook.add
 // :1814-1830): the Event registration over the hook's listener cell.
 #Export(c) jet_hook_listen: fn(hook: I64, scope: I64, priority: I64, once: I64, env: I64, invoke: I64, release: I64) -> I64 {
     jet_event_listen(event_word(wrapping(hook + I64{8})), scope, priority, once, env, invoke, release)
@@ -72,7 +72,7 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
     jet_event_listener_count(event_word(wrapping(hook + I64{8})))
 }
 
-// JetHook::trace :1726-1728: `hook listeners={n}`.
+// JetHook.trace :1726-1728: `hook listeners={n}`.
 #Export(c) jet_hook_trace: fn(hook: I64) -> I64 {
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("hook listeners="))
@@ -80,7 +80,7 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
     jet_rt_string_builder_finish(text)
 }
 
-// JetHook::run :1694-1717: with no active listener the result is the moved
+// JetHook.run :1694-1717: with no active listener the result is the moved
 // `fallback`; otherwise it starts as a copy of the hook's own fallback and
 // each due listener's result replaces it. `payload` is lent to every
 // handler; the result is written to `out`. A stop ends the run with no
@@ -152,7 +152,7 @@ OUTCOME_FAIL: I64{96}
 
 OUTCOME_FAIL_AT: I64{104}
 
-// JetDecisionHook::run :1832-1882 under FirstCancelElseTransform: each due
+// JetDecisionHook.run :1832-1882 under FirstCancelElseTransform: each due
 // handler sees the current value (first a copy of `payload`, which is lent);
 // Continue keeps it, Transform replaces it, Cancel and Fail end the run. The
 // HookOutcome box is built in the lowering's enum layout: Continue moves the

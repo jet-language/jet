@@ -115,7 +115,7 @@ csv_finish_record: fn(state: I64) {
     csv_set(state, CSV_ENDED, true)
 }
 
-// CsvError::message: "E2701: CSV row R, line L, column C — reason"; owned.
+// CsvError.message: "E2701: CSV row R, line L, column C — reason"; owned.
 csv_error: fn(state: I64, line: I64, column: I64, reason: I64) -> I64 {
     target: jet_rt_string_builder_new()
     jet_rt_string_builder_push(target, rt_static_text("E2701: CSV row "))
@@ -129,7 +129,7 @@ csv_error: fn(state: I64, line: I64, column: I64, reason: I64) -> I64 {
     jet_rt_string_builder_finish(target)
 }
 
-// CsvParser::push for the scalar at `address` (`width` bytes); 0 on success,
+// CsvParser.push for the scalar at `address` (`width` bytes); 0 on success,
 // otherwise the owned error message.
 csv_push: fn(state: I64, address: I64, width: I64) -> I64 {
     ch: rt_text_decode(address)
@@ -208,7 +208,7 @@ csv_push: fn(state: I64, address: I64, width: I64) -> I64 {
     I64{0}
 }
 
-// CsvParser::finish; 0 on success, otherwise the owned error message.
+// CsvParser.finish; 0 on success, otherwise the owned error message.
 csv_finish: fn(state: I64) -> I64 {
     if csv_flag(state, CSV_PENDING_CR) {
         return csv_error(state, trap_word(wrapping(state + CSV_PENDING_LINE)), trap_word(wrapping(state + CSV_PENDING_COLUMN)), rt_static_text("bare CR is not a record ending"))

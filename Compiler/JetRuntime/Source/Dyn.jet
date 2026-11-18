@@ -241,7 +241,7 @@ dyn_render: fn(target: I64, tree: I64) {
     jet_rt_string_builder_finish(target)
 }
 
-// JetDynAccess::field: the first entry with this key is cloned out; a missing
+// JetDynAccess.field: the first entry with this key is cloned out; a missing
 // key or non-object tree is ONE FieldError at path `name`. The C adapter lends
 // tree and name; err receives an owned List payload of one owned FieldError
 // (CAbiRoutes list_out, length via err_len).
@@ -280,7 +280,7 @@ dyn_render: fn(target: I64, tree: I64) {
     I64{0}
 }
 
-// JetDynAccess::to_text: scalar leaves project exactly as Show does
+// JetDynAccess.to_text: scalar leaves project exactly as Show does
 // (jet_rt_handle_show_dyn); Null, Array and Object are None.
 #Export(c) jet_dyn_to_text: fn(tree: I64, some: I64) -> I64 {
     kind: dyn_word(wrapping(tree + DYN_TAG))
@@ -310,7 +310,7 @@ dyn_field_error: fn(path: I64, reason: I64, err: I64, err_len: I64) -> I64 {
     I64{0}
 }
 
-// JetDynAccess::at: Array item `index`, counted from the end when negative;
+// JetDynAccess.at: Array item `index`, counted from the end when negative;
 // every failure is one FieldError at path `[index]`.
 #Export(c) jet_dyn_at: fn(tree: I64, index: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     position: jet_int_owned_to_i64(index)
@@ -343,7 +343,7 @@ dyn_scalar_error: fn(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64 {
     dyn_field_error(jet_rt_string_clone(rt_static_text("")), dyn_got(prefix, tree), err, err_len)
 }
 
-// JetDynAccess::int: an Int, or a Number lexeme that is an exact integer
+// JetDynAccess.int: an Int, or a Number lexeme that is an exact integer
 // (json_exact_integer_text then the exact parse).
 #Export(c) jet_dyn_int: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     kind: dyn_word(wrapping(tree + DYN_TAG))
@@ -366,7 +366,7 @@ dyn_scalar_error: fn(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64 {
     dyn_scalar_error(rt_static_text("expected int, got "), tree, err, err_len)
 }
 
-// JetDynAccess::text: only a Text leaf.
+// JetDynAccess.text: only a Text leaf.
 #Export(c) jet_dyn_text: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     if dyn_word(wrapping(tree + DYN_TAG)) != DYN_TEXT {
         return dyn_scalar_error(rt_static_text("expected text, got "), tree, err, err_len)
@@ -375,7 +375,7 @@ dyn_scalar_error: fn(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64 {
     I64{1}
 }
 
-// JetDynAccess::bool: only a Bool leaf.
+// JetDynAccess.bool: only a Bool leaf.
 #Export(c) jet_dyn_bool: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     if dyn_word(wrapping(tree + DYN_TAG)) != DYN_BOOL {
         return dyn_scalar_error(rt_static_text("expected bool, got "), tree, err, err_len)
@@ -384,7 +384,7 @@ dyn_scalar_error: fn(prefix: I64, tree: I64, err: I64, err_len: I64) -> I64 {
     I64{1}
 }
 
-// JetDynAccess::float: a Float, a finite Int, or a finite trimmed Number
+// JetDynAccess.float: a Float, a finite Int, or a finite trimmed Number
 // lexeme.
 #Export(c) jet_dyn_float: fn(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
     kind: dyn_word(wrapping(tree + DYN_TAG))
@@ -494,7 +494,7 @@ dyn_number_equal: fn(left: I64, right: I64) -> Bool {
     same
 }
 
-// JetDynAccess::equal_unordered: structural equality where an Object's entries
+// JetDynAccess.equal_unordered: structural equality where an Object's entries
 // match in any order (each right entry used once), NaN equals nothing, and two
 // Number lexemes compare by decimal value.
 #Export(c) jet_dyn_equal_unordered: fn(left: I64, right: I64) -> Bool {
@@ -835,7 +835,7 @@ dyn_bytes_order: fn(left: I64, right: I64) -> I64 {
 }
 
 // Two DateTime leaves by instant: POSIX seconds, then the leap label, then
-// nanoseconds (DynDateTime::instant_key); the frozen offset does not count.
+// nanoseconds (DynDateTime.instant_key); the frozen offset does not count.
 dyn_datetime_order: fn(left: I64, right: I64) -> I64 {
     seconds: dyn_word_order(dyn_word(wrapping(left + DYN_DATETIME_SECS)), dyn_word(wrapping(right + DYN_DATETIME_SECS)))
     if (seconds != I64{0}) { return seconds }

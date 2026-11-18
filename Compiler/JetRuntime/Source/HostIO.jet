@@ -43,7 +43,7 @@
     result
 }
 
-// Match jet_stdio_error -> IOError::other: cause contains the OS description,
+// Match jet_stdio_error -> IOError.other: cause contains the OS description,
 // but os_code itself is absent. Resources and causes are owned only on error.
 host_stdio_result: fn(failure: I64, operation: I64, stderr: Bool, error: I64) -> I64 {
     if (failure == I64{0}) { return I64{1} }
@@ -55,7 +55,7 @@ host_stdio_result: fn(failure: I64, operation: I64, stderr: Bool, error: I64) ->
 }
 
 // The owned OS description of a nonzero stdio failure (0, -errno or
-// HOST_WRITE_ZERO): io::Error's Display, as IOError::other's cause carries it.
+// HOST_WRITE_ZERO): io.Error's Display, as IOError.other's cause carries it.
 host_stdio_cause: fn(failure: I64) -> I64 {
     if (failure == HOST_WRITE_ZERO) { return host_write_zero_text() }
     host_errno_cause(wrapping(I64{0} - failure))

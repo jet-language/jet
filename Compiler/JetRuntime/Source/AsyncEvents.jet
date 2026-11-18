@@ -12,7 +12,7 @@
 //   sequence is the futex word every state change bumps. e_meta describes
 //   the failure E and r_meta a handler's `Result<Unit, E>`.
 // AsyncListener: the Listener64 layout (Events.jet); its refs move under the
-//   core lock. Its subscription has no EventCore (Rust JetSubscription::shared:
+//   core lock. Its subscription has no EventCore (Rust JetSubscription.shared:
 //   the active flag is the state), so unsubscribe only clears the flag and
 //   the next registration or dispatch prunes the row.
 // AsyncEntry72: refs0 core8 phase16 payload24 meta32 report40 accepted48
@@ -261,7 +261,7 @@ async_failures_push: fn(failures: I64, kind: I64, value: I64) -> I64 {
 
 // ---- AsyncEvent ------------------------------------------------------------
 
-// JetAsyncEvent::new :1055-1072 borrows its validated policy (Core source
+// JetAsyncEvent.new :1055-1072 borrows its validated policy (Core source
 // rejects a capacity below 1 first); the FailurePolicy is its ordinal word.
 // It keeps copies of the failure E's and the handler result's descriptors.
 #Export(c) jet_async_event_new: fn(policy: I64, failures: I64, e_meta: I64, r_meta: I64) -> I64 {
@@ -445,7 +445,7 @@ async_prune_listeners: fn(core: I64) {
     event_store(base, kept)
 }
 
-// JetAsyncEvent::add :1086-1128 (on / once / on_priority): the scope tracks
+// JetAsyncEvent.add :1086-1128 (on / once / on_priority): the scope tracks
 // the subscription and the event's hard cancel; a canceled scope returns
 // the subscription inactive and the handler is released unregistered.
 #Export(c) jet_async_event_listen: fn(core: I64, scope: I64, priority: I64, once: I64, env: I64, invoke: I64, release: I64) -> I64 {

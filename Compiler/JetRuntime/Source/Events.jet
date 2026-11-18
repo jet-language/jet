@@ -7,7 +7,7 @@
 //
 // EventCore56: strong0 weak8 next_id16 listeners{len24 cap32 data40} policy48
 //   An Event handle is its core (Rust: Rc<RefCell<Vec<JetListener>>>); a
-//   subscription's cleanup holds a weak count (Rust: Rc::downgrade).
+//   subscription's cleanup holds a weak count (Rust: Rc.downgrade).
 // Listener64: refs0 id8 priority16 once24 sub32 env40 invoke48 release56
 //   One count for the core's list, one per dispatch snapshot holding it
 //   (Rust: the entry clones its handler Rc), so a handler that unsubscribes
@@ -105,9 +105,9 @@ event_sub_release: fn(sub: I64) {
 
 event_sub_active: fn(sub: I64) -> Bool { sync_load(wrapping(sub + I64{8})) != I64{0} }
 
-// JetSubscription::unsubscribe :578-590: the first call deactivates and runs
+// JetSubscription.unsubscribe :578-590: the first call deactivates and runs
 // the cleanup, which removes the listener while its event is still alive
-// (Weak::upgrade); a later call is a no-op.
+// (Weak.upgrade); a later call is a no-op.
 event_sub_unsubscribe: fn(sub: I64) {
     if !event_sub_active(sub) {
         return
@@ -168,7 +168,7 @@ event_listener_release: fn(listener: I64) {
     scope
 }
 
-// JetEventScope::track :625-634 and active_count :648-652 drop the
+// JetEventScope.track :625-634 and active_count :648-652 drop the
 // subscriptions no longer active before they count or append.
 event_scope_prune: fn(scope: I64) {
     base: wrapping(scope + I64{16})
@@ -197,7 +197,7 @@ event_scope_track: fn(scope: I64, sub: I64) {
     event_words_push(wrapping(scope + I64{16}), event_sub_retain(sub))
 }
 
-// JetEventScope::track_hard_cancel :616-624: a canceled scope tracks
+// JetEventScope.track_hard_cancel :616-624: a canceled scope tracks
 // nothing; an event is tracked once.
 event_scope_track_hard_cancel: fn(scope: I64, core: I64) {
     if (event_word(wrapping(scope + I64{8})) != I64{0}) {
@@ -233,7 +233,7 @@ event_scope_release_hard: fn(scope: I64, cancel: Bool) {
     event_words_free(data, capacity)
 }
 
-// JetEventScope::cancel :635-647: once; every tracked subscription is
+// JetEventScope.cancel :635-647: once; every tracked subscription is
 // unsubscribed in registration order, then every tracked async event is
 // hard-canceled, and the scope keeps none.
 #Export(c) jet_event_scope_cancel: fn(scope: I64) {
@@ -295,7 +295,7 @@ event_scope_release_hard: fn(scope: I64, cancel: Bool) {
 
 // ---- EventPolicy / EventTrace ----------------------------------------------
 
-// JetEventPolicy::sync :522-528: the sole AllowDepthFirst ordinal (0); its
+// JetEventPolicy.sync :522-528: the sole AllowDepthFirst ordinal (0); its
 // box is EncodingABI's enum owner (EventEnumHandles.jet clone/drop).
 #Export(c) jet_event_policy_sync: fn() -> I64 {
     policy: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
@@ -361,14 +361,14 @@ event_trace_with_summary: fn(delivered: I64, queued: I64, dropped: I64, summary:
 
 // ---- Event -----------------------------------------------------------------
 
-// JetEvent::with_policy :692-698 borrows the policy ordinal; the caller keeps
+// JetEvent.with_policy :692-698 borrows the policy ordinal; the caller keeps
 // and releases its policy value.
 #Export(c) jet_event_with_policy: fn(policy: I64) -> I64 {
     event_core_new(encoding_word(wrapping(policy + ENCODING_ENUM_TAG)))
 }
 
 // A fresh EventCore with one strong count and policy ordinal `ordinal` (0 is
-// EventPolicy.Sync, JetEvent::new).
+// EventPolicy.Sync, JetEvent.new).
 event_core_new: fn(ordinal: I64) -> I64 {
     core: jet_rt_alloc(I64{56}, I64{8})
     coll_zero(core, I64{56})
@@ -420,7 +420,7 @@ event_core_weak_release: fn(core: I64) {
     event_core_weak_release(core)
 }
 
-// JetEvent::add :717-754 (on / once / on_priority). The subscription is
+// JetEvent.add :717-754 (on / once / on_priority). The subscription is
 // tracked by `scope` first; a canceled scope returns it inactive and the
 // handler is released unregistered.
 #Export(c) jet_event_listen: fn(core: I64, scope: I64, priority: I64, once: I64, env: I64, invoke: I64, release: I64) -> I64 {
@@ -515,7 +515,7 @@ event_listener_call: fn(listener: I64, payload: I64, out: I64) {
     _ := coll_call3(event_word(wrapping(listener + I64{48})), event_word(wrapping(listener + I64{40})), payload, out)
 }
 
-// JetEvent::dispatch :758-806 under the sole AllowDepthFirst policy: nested
+// JetEvent.dispatch :758-806 under the sole AllowDepthFirst policy: nested
 // emits dispatch immediately. Every active listener's handler runs in
 // snapshot order (event_listener_take_turn).
 // A stop delivered by a handler ends the dispatch and returns no trace.
@@ -609,7 +609,7 @@ event_active_listeners: fn(core: I64) -> I64 {
     jet_int_owned_from_i64(event_active_listeners(core))
 }
 
-// JetEvent::trace :814-816.
+// JetEvent.trace :814-816.
 #Export(c) jet_event_trace: fn(core: I64) -> I64 {
     text: jet_rt_string_builder_new()
     jet_rt_string_builder_push(text, rt_static_text("listeners="))

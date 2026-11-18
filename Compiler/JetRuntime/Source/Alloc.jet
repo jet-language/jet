@@ -115,8 +115,8 @@ alloc_check_take_observer := I64{0}
 
 alloc_check_give_observer := I64{0}
 
-// Layout::from_size_align(size.max(1), align): alignment must be a nonzero
-// power of two, and rounding the size to alignment must fit isize::MAX.
+// Layout.from_size_align(size.max(1), align): alignment must be a nonzero
+// power of two, and rounding the size to alignment must fit isize.MAX.
 alloc_layout_valid: fn(size: I64, align: I64) -> Bool Never! {
     if (size < I64{0} || align <= I64{0}) { return false }
     if ((align & wrapping(align - I64{1})) != I64{0}) { return false }
@@ -1615,7 +1615,7 @@ priv alloc_try_validated: fn(size: I64, align: I64) -> I64 {
 
 // The independent policy lock is never held over heap allocation/deallocation.
 // A failed reservation has made no changes, matching reserve's None rail.
-// Machine words carry usize bits, including caps/counters above isize::MAX.
+// Machine words carry usize bits, including caps/counters above isize.MAX.
 alloc_unsigned_less: fn(left: I64, right: I64) -> Bool Never! {
     sign: I64{-9223372036854775808}
     (left ~ sign) < (right ~ sign)
@@ -3281,7 +3281,7 @@ alloc_write_size: fn(size: I64) {
 }
 
 alloc_out_of_memory: fn(size: I64) {
-    // std::alloc::handle_alloc_error: \"memory allocation of N bytes failed\\n\"
+    // std.alloc.handle_alloc_error: \"memory allocation of N bytes failed\\n\"
     // followed by SIGABRT, not a Jet program-stop exit status.
     alloc_write_word(I64{6998727353336423789}, I64{8})
     alloc_write_word(I64{8028075772393516140}, I64{8})

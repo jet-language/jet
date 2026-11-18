@@ -67,7 +67,7 @@ testing_evidence_new: fn(ok: I64, text: I64, missing: I64) -> I64 {
     rt_text_word(left) == rt_text_word(right) && rt_text_word(wrapping(left + I64{16})) == rt_text_word(wrapping(right + I64{16})) && jet_rt_string_eq(rt_text_word(wrapping(left + I64{8})), rt_text_word(wrapping(right + I64{8})))
 }
 
-// std::fs::read_to_string: NotFound is `missing`; every other failure
+// std.fs.read_to_string: NotFound is `missing`; every other failure
 // (including invalid UTF-8 and std's NUL refusal) is not.
 #Export(c) jet_testing_evidence_read_raw: fn(path: I64) -> I64 {
     if testing_has_nul(path) {
@@ -118,7 +118,7 @@ testing_facts_new: fn(pid: I64, thread: I64) -> I64 {
     rt_text_word(left) == rt_text_word(right) && jet_rt_string_eq(rt_text_word(wrapping(left + I64{8})), rt_text_word(wrapping(right + I64{8})))
 }
 
-// std::thread::ThreadId: a process-unique counter, assigned to a thread the
+// std.thread.ThreadId: a process-unique counter, assigned to a thread the
 // first time it is asked for and kept for its lifetime.
 testing_thread_key := I64{0}
 
@@ -145,7 +145,7 @@ testing_thread_id: fn() -> I64 {
     id
 }
 
-// std::process::id() and format!("{:?}", ThreadId).
+// std.process.id() and format!("{:?}", ThreadId).
 #Export(c) jet_testing_temp_facts_raw: fn() -> I64 {
     thread: jet_rt_string_builder_new()
     jet_rt_string_builder_push(thread, rt_static_text("ThreadId("))
@@ -194,8 +194,8 @@ testing_thread_id: fn() -> I64 {
     jet_rt_string_eq(rt_text_word(wrapping(left + I64{24})), rt_text_word(wrapping(right + I64{24})))
 }
 
-// std::env::temp_dir() (TMPDIR from the process environment, else /tmp) joined
-// with `name` (Path::push: an absolute name replaces; otherwise one separator
+// std.env.temp_dir() (TMPDIR from the process environment, else /tmp) joined
+// with `name` (Path.push: an absolute name replaces; otherwise one separator
 // unless the base is empty or ends in /).
 #Export(c) jet_testing_temp_join_raw: fn(name: I64) -> I64 {
     host_arguments_require()
@@ -266,7 +266,7 @@ testing_remove_new: fn(ok: I64, missing: I64, cause: I64) -> I64 {
     rt_text_word(left) == rt_text_word(right) && rt_text_word(wrapping(left + I64{8})) == rt_text_word(wrapping(right + I64{8})) && jet_rt_string_eq(rt_text_word(wrapping(left + I64{16})), rt_text_word(wrapping(right + I64{16})))
 }
 
-// std::fs::remove_dir_all over the opaque path bytes.
+// std.fs.remove_dir_all over the opaque path bytes.
 #Export(c) jet_testing_temp_remove_raw: fn(data: I64, length: I64) -> I64 {
     path: rt_text_copy(data, length)
     result: if testing_has_nul(path) -> I64{-2147483648} else -> files_remove_dir_all(path)
@@ -338,7 +338,7 @@ testing_mkdir: fn(path: I64, length: I64) -> I64 {
     if (result < I64{0}) -> result else -> I64{0}
 }
 
-// Path::parent's byte length: drop trailing separators, the last component,
+// Path.parent's byte length: drop trailing separators, the last component,
 // then its separators (a root keeps its "/"); -1 when there is no parent.
 testing_parent_length: fn(path: I64, length: I64) -> I64 {
     end := length
@@ -355,7 +355,7 @@ testing_parent_length: fn(path: I64, length: I64) -> I64 {
     end
 }
 
-// std DirBuilder::create_dir_all (mode 0o777). Returns 0 or -errno; -1 with
+// std DirBuilder.create_dir_all (mode 0o777). Returns 0 or -errno; -1 with
 // errno 0 is std's "failed to create whole tree".
 testing_create_dir_all: fn(path: I64, length: I64) -> I64 {
     if (length == I64{0}) { return I64{0} }
@@ -374,7 +374,7 @@ testing_create_dir_all: fn(path: I64, length: I64) -> I64 {
     second
 }
 
-// std::fs::create_dir_all over the opaque path bytes.
+// std.fs.create_dir_all over the opaque path bytes.
 #Export(c) jet_testing_temp_create_raw: fn(data: I64, length: I64) -> I64 {
     owned: rt_text_copy(data, length)
     nul: testing_has_nul(owned)
