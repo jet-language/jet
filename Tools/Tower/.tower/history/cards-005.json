@@ -3035,6 +3035,506 @@
       "completedAt": "2026-11-15T05:21:38.678Z",
       "questions": [],
       "retiredAt": "2026-11-18T05:23:05.391Z"
+    },
+    {
+      "id": "c0xb6zik",
+      "num": 3132,
+      "title": "Enums: the value catalog, checked from_int, case constructors as values and repairable diagnostics",
+      "body": "Destination: payload-free enums have one typed value catalog (`T.$values`, D-ENUM-CASEVALUES1=A, D-COMPILER-NS1=A), numbered enums convert from numbers through a generated checked `from_int` (D-ENUM-INGRESS1=A), payload cases pass as callable values (D-ENUM-CONSTRUCTORCALL1=A), and enum mistakes carry structured repairs. Why: enums are the most common closed data in Jet programs; every manual case list or parser is a place for drift.\n\nThe value catalog is built (Examples/Types/EnumValues.jet, criteria 1-8 met). Spec: Docs/spec/spec.md (enums); the research for each item is in Docs/research/mine-for-jet-2026-09-12.md and Docs/research/evidence-2026-09-29/.\n\nCriteria 9-14 carry the enum surface items absorbed from #3140, #3146, #3159, #3161 and #3389, restated 2026-11-14.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m20-enum-language-reflection",
+      "phase": "done",
+      "priority": "P2",
+      "plan": "## Goal\nDeliver D-ENUM-CASEVALUES1=A (ratified): `T.$values` is a registered compile-time fact that reads as ordinary `[T#N]` data. It lists every accessible payload-free leaf once, in declaration order, as a stock compiler/Core addition. It adds no `T.cases()`, no alias, no enum-collection wrapper and no runtime registry.\n\nRatified example:\n```jet\nDirection: enum { North South }\nchoices: Direction.$values // ordinary [Direction#2]\ncount: choices.len()\nrun: fn() {\n    print(count) // 2; adding East makes 3.\n}\n```\n\n## Current state\n- Nothing implements `$values` in Compiler/JetParser, Compiler/JetSema, crates/jet-sema, Examples or Core (grep, 2026-09-28). The Rust recovery 0732a643 was never integrated.\n- The `T.$name` compiler-fact namespace (D-COMPILER-NS1=A: `$` marks every compiler fact, as in `T.$layout` and `$build.os`) already exists for other facts: Comptime/Reflection.jet builds the range fact rows. Enum variant metadata is at `:1102-1156` and `:1395` `sema_comptime_reflection_enum_type_info`.\n- Payload-free versus payload variants: `VariantPayload.Unit` (`Reflection.jet:1103-1104`). Groups (D-TAG1) add paths; sparse discriminants do not create gaps.\n\n## Changes\n1. JetParser/JetSema: resolve `T.$values` through the same registered `$` compiler-fact path as the range fact. Do not reserve an unmarked method.\n2. JetSema `Comptime/Reflection.jet`: add `sema_comptime_reflection_enum_values(definition)`. It returns a `TComptimeValue.List` of the payload-free leaves in declaration order (group leaves included once, by full path), typed `[T#N]` with the nominal `T` kept.\n3. Rejections (registered, with snapshots): a payload-bearing enum (E-row: \"`Shape.$values` needs every case to be payload-free; `Circle` carries a Float\"), a non-enum type, and an enum whose leaves are not all accessible from the use site. Do no filtering, no fabricated payloads, and no integer casts.\n4. JetCodegen: materialize the constant like any other `[T#N]` constant, with no mandatory heap collection. Independent iterations share no cursor state.\n5. (Rust mirror retired: the native compiler is the only implementation.)\n6. Add `Examples/features/types/enum_values.jet` + `.out` (count, order, a group path, sparse codes, two independent loops) and `tests/ui/enum_values_payload.jet` / `enum_values_non_enum.jet`.\n\n## Proof\n- `Tools/agent/jet-env bash Compiler/Bootstrap/check.sh` exits 0.\n- `jet test Compiler --profile golden types/enum_values` passes on O0, O1 and O2.\n- `jet test Compiler --profile ui enum_values_` passes.\n\n## Batch\nbatch-jetc-sema: the fact is resolved in JetSema's comptime reflection. The codegen and Rust mirror land in the same build.\n\n## Dependencies\nNone; D-ENUM-CASEVALUES1=A is ratified. D-ENUM-CASEMETA1 descriptions stay separate but share the declaration owner.\n",
+      "checkSteps": "1. Owner decides the complete draft D-ENUM-CASEVALUES1 before any public method is implemented. Main first checks decision-ID uniqueness and whether an uncaptured existing API already satisfies the workload.\n2. If chosen, T.cases() yields each payload-free leaf exactly once in declaration order; groups are not values and sparse external codes do not create gaps.\n3. The iterator's items retain nominal type T. Payload-bearing or non-enum receivers receive a Jet diagnostic explaining why explicit supplied values are required.\n4. No payload values are fabricated and no implicit heap collection is required. Ordinary iterator adapters are reused.\n5. Adding a payload-free case updates the generated catalog without a second user-maintained list. Reordering deliberately changes presentation order, not a wire protocol code.\n6. Existing user methods named cases require a coherent declaration conflict diagnostic, not hidden replacement or dispatch ambiguity.",
+      "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-enum-f03-finite-case-values. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: retitled to the enum surface it now holds; c9-c14 restated from their absorbed-card pointers to full outcomes with one proof each. c15's case landed on dev 510ae6b7e8 but fails on the gate-p136 jet (E0108); proof queued for Main on a newer jet."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Examples concept-area cutover (2c3e68a70b) moved paths this card's criteria cite. Read each cited path as its new home: c7: Examples/features/types/enum_values.jet -> Examples/Types/EnumValues.jet [new path does not exist yet: the criterion still has to create it]."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Main: the `@` fact sigil did not survive; D-COMPILER-NS1=A makes `$` mark every compiler fact, so the catalog is `T.$values` (T.@layout is a plain E0302 today). The Rust mirror step is gone with crates/. Answer from the syntax owner, CardCleanup."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources); proof on the admitted `jet` (no jetc0, compiler-diff or frozen-Rust evidence)."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3139, #3140, #3146, #3159, #3161, #3167, #3389; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3139, #3140, #3146, #3159, #3161, #3167, #3389; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed ; their criteria are carried here verbatim as [#n] rows."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Retargeted to the Jet compiler under the Rust freeze, 2026-10-01 (owner): the Rust compiler only gets stage-zero blockers, deletions and C-ABI runtime exports."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-jetc-sema."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (types1a, Opus 5.5): E_BUILD. D-ENUM-CASEVALUES1=A is ratified: `T.@values` becomes compile-time [T#N] data. It is unimplemented in both compilers; the Rust recovery 0732a643 was never integrated. Evidence: No `@values` in Compiler/JetParser, Compiler/JetSema, crates/jet-sema, Examples or Core (grep); @-fact reflection home Compiler/JetSema/Source/Sema/Comptime/Reflection.jet"
+        },
+        {
+          "at": "2026-09-21",
+          "by": "Main",
+          "text": "Recovery 0732a643 adds enum values/reflection/constructor source work, but core_types.rs is owner-dirty and numeric ingress/Value.case remain incomplete; no partial patch was integrated."
+        },
+        {
+          "at": "2026-09-12",
+          "text": "All decisions ratified; advanced out of deciding."
+        },
+        {
+          "at": "2026-09-12",
+          "by": "Main",
+          "text": "#3396: aligned this open-ballot handoff with the published revision; no outcome or implementation criterion marked complete."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Owner chooses D-ENUM-CASEVALUES1 before a new reader or method is implemented. Use the complete current ballot; add no alias beside the selected design.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-ENUM-CASEVALUES1 is ratified (outcome A, 2026-09-12) on the board; this criterion asked for the ruling, and the reader it describes is built and proved under c9-c14 (constructor values 9e1ace6c5e, typed selection on p147-p150).",
+          "at": "2026-11-15T05:32:40.407Z",
+          "closure": "decision"
+        },
+        {
+          "n": 3,
+          "text": "T.reflect().values preserves nominal T and lists every accessible payload-free leaf once in declaration order; groups add paths and sparse discriminants create no gaps (a golden EnumValues example; `jet test Compiler --profile golden EnumValues` passes on O0, O1 and O2).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 69e5069bd1 (GoalsA-1-3-enum-values, stack136): T.reflect().values reads an enum's cases as a typed list in declaration order through the compiler-fact projection, and refuses payload, non-enum, builtin and generic types with E0949. Proof on gate-p136 (built from c76cea49dd): golden Examples/Types/EnumValues, the E0949 UI snapshot and the enum_values cases all PASS, and DiagnosticRows --check, CompilerData --check and copy_ratchet pass (6 of 6 proof lines rc 0).",
+          "at": "2026-11-15T01:05:57.168Z"
+        },
+        {
+          "n": 4,
+          "text": "T.reflect().values on a payload-bearing, non-enum or inaccessible type is a registered compile error with a UI snapshot, without filtering, fabricated payloads, integer casts or a heap collection.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 69e5069bd1 (GoalsA-1-3-enum-values, stack136): T.reflect().values reads an enum's cases as a typed list in declaration order through the compiler-fact projection, and refuses payload, non-enum, builtin and generic types with E0949. Proof on gate-p136 (built from c76cea49dd): golden Examples/Types/EnumValues, the E0949 UI snapshot and the enum_values cases all PASS, and DiagnosticRows --check, CompilerData --check and copy_ratchet pass (6 of 6 proof lines rc 0).",
+          "at": "2026-11-15T01:05:58.179Z"
+        },
+        {
+          "n": 5,
+          "text": "Under D-ENUM-CASEVALUES1=A, T.reflect().values automatically includes a newly declared case, and proves compile-time count and normal runtime collection use; independent iterations do not share cursor state.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 69e5069bd1 (GoalsA-1-3-enum-values, stack136): T.reflect().values reads an enum's cases as a typed list in declaration order through the compiler-fact projection, and refuses payload, non-enum, builtin and generic types with E0949. Proof on gate-p136 (built from c76cea49dd): golden Examples/Types/EnumValues, the E0949 UI snapshot and the enum_values cases all PASS, and DiagnosticRows --check, CompilerData --check and copy_ratchet pass (6 of 6 proof lines rc 0).",
+          "at": "2026-11-15T01:05:59.128Z"
+        },
+        {
+          "n": 6,
+          "text": "T.reflect().values reads through the compiler-fact projection T.reflect() and reserves no unmarked method; a user `cases` or `values` method is unaffected (UI or golden proof).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 69e5069bd1 (GoalsA-1-3-enum-values, stack136): T.reflect().values reads an enum's cases as a typed list in declaration order through the compiler-fact projection, and refuses payload, non-enum, builtin and generic types with E0949. Proof on gate-p136 (built from c76cea49dd): golden Examples/Types/EnumValues, the E0949 UI snapshot and the enum_values cases all PASS, and DiagnosticRows --check, CompilerData --check and copy_ratchet pass (6 of 6 proof lines rc 0).",
+          "at": "2026-11-15T01:06:00.091Z"
+        },
+        {
+          "n": 7,
+          "text": "Proof with the admitted `jet` (stage-2 output of `jet build Compiler`): `Examples/features/types/enum_values.jet` prints the count, order and names from `Direction.reflect().values`, and grows by one when a case is added: `jet test Compiler --profile golden types/enum_values` passes, and `jet test Compiler --profile ui enum_values_payload` passes. Goldens pass on O0, O1 and O2; UI fixtures match their snapshots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 69e5069bd1 (enum values) with the example at its current path Examples/Types/EnumValues.jet, which prints the count, order and names from Direction.reflect().values. On gate-p136: jet test Compiler --profile golden --filter Types/EnumValues gives 3 PASS (O0, O1, O2); jet test Compiler --profile ui --filter enum_values gives 1 PASS (tests/ui/e0949_enum_values_payload). Growth with a new case was proven under c5.",
+          "at": "2026-11-15T01:40:57.432Z"
+        },
+        {
+          "n": 8,
+          "text": "[#3139]  • Nested matching binds payloads correctly and selects the right arm. • Stale or escaped borrows and inconsistent bindings are rejected. • Current guard and alternative syntax is recorded. • JP: `patterns/nested_payload_safety`; `tests/ui/pattern_*`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile golden --filter tests/run/PatternsAndFields/NestedPayloadSafety: 3 PASS (o0/o1/o2); --profile ui --filter tests/ui/pattern_: 38 PASS, 1 known-failing (pattern_ratified_map_alias_duplicate, a map-alias duplicate check owned by #6425, outside nested payload matching) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev be3614fae2",
+          "at": "2026-11-14T23:05:27.259Z"
+        },
+        {
+          "n": 9,
+          "text": "Enum mistakes report stable codes and spans with UI snapshots: a missing case, wrong payload arity or labels, an ambiguous relative case name, an invalid raw code and an illegal payload key; each carries a structured (JSON) repair that applies cleanly and gives a program that checks with unchanged values.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0984e40d80 (GoalsA-1-3-enum-repair). Batch compiler p147 (built from dev 8882451d5b), 2026-11-14 23:52: jet test Compiler --profile ui --filter enum_repair_ PASS 24; --filter enum_dot_value_needs_context PASS 1; --filter named_pattern_ PASS 5; --filter enum_backing_refusals PASS 1; --filter pattern_binding_count PASS 4; CompilerData --check ok; guards 171 passed.",
+          "at": "2026-11-15T04:53:51.164Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "enum_repair_"
+          }
+        },
+        {
+          "n": 10,
+          "text": "An explicitly numbered payload-free enum gets a generated `from_int` (D-ENUM-INGRESS1=A): sparse and negative case numbers work, a number that is not a case returns the registered refusal (\"7 is not a case number of `Mode`\"), a payload enum is refused with a UI snapshot, and the hand-written number-to-case parsers in Core, Compiler and Examples call it instead.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 834e4b14fa (GoalsA-1-3-enum-from-int: Core number-to-case parsers call the generated from_int). batch compiler p148 (built from dev 1b65b28007), 2026-11-15 00:03: jet test Compiler --profile golden --filter Types/EnumFromInt PASS 3 (O0/O1/O2); --profile ui --filter enum_from_int_payload PASS 1; jet test Core/Image/Image.jet 17, Core/Ui/Dbus.jet 7, Core/Net/Tls.jet 6, Core/Files/Files.jet 27 passed.",
+          "at": "2026-11-15T05:03:52.463Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Types/EnumFromInt"
+          }
+        },
+        {
+          "n": 11,
+          "text": "An ill-typed node in the typed expression tree of Examples/Metaprogramming/Generics/TypedAST.jet (an Int node where a Bool is required) is refused at compile time with a registered code and UI snapshot; the peer comparison is Docs/research/evidence-2026-09-29/3159-typed-ast.md.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev a652c3674b (GoalsA-1-3 typed-ast-ill-typed). p141 batch compiler (dev 6aaa5c8879), 2026-11-14 22:24: jet test Compiler --profile ui --filter typed_ast_ill_typed -> PASS 1 FAIL 0. Both encodings of TypedAST.jet are refused: per-type enums with E0108 BindingTypeMismatch (IntExpr where BoolExpr is required), and phantom Expr<T> with ValueTypeMismatch (Expr<Int> where Expr<Bool> is required), both registered codes with snapshot tests/ui/typed_ast_ill_typed.stderr.",
+          "at": "2026-11-15T03:22:31.230Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "typed_ast_ill_typed"
+          }
+        },
+        {
+          "n": 12,
+          "text": "A qualified payload case such as `Message.Text` passes as a callable value wherever the equivalent lambda would (D-ENUM-CONSTRUCTORCALL1=A): labels and effects are kept, an unrepresentable signature is refused with a UI snapshot, and unit cases stay values.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p150 (dev cb824d0276; GoalsA-1-3-constructor-values landed 9e1ace6c5e): jet test Compiler --profile golden --filter Types/ConstructorValues: PASS 3 FAIL 0.",
+          "at": "2026-11-15T05:32:08.283Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Types/ConstructorValues"
+          }
+        },
+        {
+          "n": 13,
+          "text": "[#3167]  • Counts, absent removal and group `any` (golden `types/nested_enum_groups` on every applicable tier). • Owned and generic eligibility are documented.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev c95c96fc94: Docs/spec/reference/core-library.md Tally row documents owned and generic eligibility; jet test Compiler --profile golden --filter NestedEnumGroups: 3 PASS on batch compiler gate-p131 (dev 8d83659ef3)",
+          "at": "2026-11-14T23:06:04.691Z"
+        },
+        {
+          "n": 14,
+          "text": "Selecting one case from a list of enum values uses a case pattern or `filter_map` and keeps the payload's ownership; letting a borrowed payload escape the selection is refused with a UI snapshot, and the spec states that a checked downcast of a foreign value is not Jet syntax.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev b367bfcdc8 (GoalsA-1-3 typed-selection). p144 batch compiler (built from dev 95dc5c6aef), 2026-11-14 23:15: jet test Compiler --profile golden --filter Patterns/TypedSelection -> PASS 3; jet test Compiler --profile ui --filter typed_selection_payload_escape -> PASS 1.",
+          "at": "2026-11-15T04:19:55.666Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Patterns/TypedSelection"
+          }
+        },
+        {
+          "n": 15,
+          "text": "A user enum whose cases are named Ok/Err: `.Ok(x) -> x` on a subject of that enum resolves to the enum's own case (p134 gave E0108). Proof: jet test Compiler --profile cases --filter a_user_enum_ok_names_its_own_case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev ec4109f022 (GoalsA-1-3 user-ok-variant-r3). p141 batch compiler (built from dev 6aaa5c8879), 2026-11-14 22:10: jet test Compiler --profile cases --filter a_user_enum_ok_names_its_own_case -> PASS 1 FAIL 0. The census of 79184b9e61 (self-check of the compiler with the change) was clean, so the r2 E2404 at JetDebug Expression.jet:68 is gone.",
+          "at": "2026-11-15T03:08:39.768Z"
+        }
+      ],
+      "refs": [
+        "docs/research/mine-for-jet-2026-09-12.md#finding-enum-f03-finite-case-values",
+        "crates/jet-sema/src/Sema/mod.rs:210-225",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs:1204-1227",
+        "crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs:1888-1960",
+        "crates/jet-foundation/src/Collections.rs:560-587",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/data_reflect.rs:81-103",
+        "https://developer.apple.com/documentation/swift/caseiterable",
+        "https://docs.oracle.com/javase/specs/jls/se25/html/jls-8.html#jls-8.9.3",
+        "https://odin-lang.org/docs/overview/#enumerations",
+        "D-METAREFLECT1"
+      ],
+      "tags": [
+        "mining-20260912",
+        "enums",
+        "mine-playlist-20260911",
+        "cluster-jetsema-enum-surface",
+        "batch-jetc-sema",
+        "retargeted",
+        "wayfinder:task"
+      ],
+      "parentId": "c0w9o2sz",
+      "needsAcceptance": false,
+      "created": "2026-09-12T13:26:35.846Z",
+      "updated": "2026-11-15T05:32:42.614Z",
+      "updatedBy": "Main",
+      "workOrder": 128,
+      "criteriaLastN": 15,
+      "completedAt": "2026-11-15T05:32:42.614Z",
+      "questions": [
+        {
+          "id": "qgu3pklf",
+          "cardId": "c0xb6zik",
+          "decisionId": "D-ENUM-CASEVALUES1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Should this use an @ field as metadata for the enum?",
+          "status": "answered",
+          "answer": "Updated D-ENUM-CASEVALUES1. Recommended A now reads T.@values as ordinary compile-time [T#N] data, generated from the same checked enum case rows. It is not an erased reflection description or a mutable iterator. It replaces, rather than aliases, the proposed cases() method; C shows that original iterator alternative. Payload-bearing and inaccessible complete domains are rejected, not filtered. The ballot remains open for your choice.",
+          "created": "2026-09-12T19:09:54.543Z",
+          "answeredAt": "2026-09-12",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-18T05:45:11.345Z"
+    },
+    {
+      "id": "c0vc9b8r",
+      "num": 6824,
+      "title": "Language: a method passes as a function value where a function type is expected (D-BOUND-METHOD1=A)",
+      "body": "Gap card N1 from the #6792 r3 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md, section 7.12 interim forms; 3.9). Its language surface needs ballot D-BOUND-METHOD1 (drafted in the r3 gap file; posted with D-WEBAPP-SHAPE1 after review).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Correction to the previous entry: ... IS Jet syntax, the spread sigil (SIGIL_SPREAD, D-VARIADIC1: name: ...T variadic parameters, f(...xs) call spread, [...a, x] list spread). So option D's crew.tell(..) is one dot from crew.tell(...xs): a typo risk the owner named. The owner ruled the options not good enough; D-BOUND-METHOD1 is being redesigned as v2."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "D-BOUND-METHOD1 option D corrected (2026-11-14): its text called crew.tell(..) a free spelling, but .. is the inclusive range operator (OP_RANGE, 1..10), so D gives .. a second meaning (I8 cost). ... is not Jet syntax. The ballot's review missed this; D's detail now states it. The owner's <> question was answered: <> keeps its one pipe meaning."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "D-BOUND-METHOD1 is withdrawn in #6792 r4: the closure is the target form for app.live, keyed by its one call. #6824 is no longer a dependency of the proposal and stays a language gap without a ballot."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`self.tell_assignee` and `crew.my_projects` are values of function type with the receiver bound, usable wherever a fn value is (app.enqueue(self.tell_assignee(id)) form aside).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile cases --filter lang/bound_method_value_passes_as_fn: PASS 1 FAIL 0 (the ICE from the receiver binding being declared at the member span is fixed in Places.jet).",
+          "at": "2026-11-15T05:31:55.599Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "lang/bound_method_value_passes_as_fn"
+          }
+        },
+        {
+          "n": 2,
+          "text": "A bound method value that captures a receiver it cannot keep (a borrowed view past its scope) is a compile error naming the receiver.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile cases --filter lang/bound_method_value_refuses_escaping_borrow: PASS 1 FAIL 0.",
+          "at": "2026-11-15T05:31:57.460Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "lang/bound_method_value_refuses_escaping_borrow"
+          }
+        },
+        {
+          "n": 3,
+          "text": "A closure or a method passed where an optional function type is expected (a `(fn(Int) -> String)?` slot) type-checks (D-BOUND-METHOD1=A); today it gets E0108. Proof: `jet test Compiler --profile cases --filter lang/optional_fn_slot_accepts_closure_and_method` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile cases --filter lang/optional_fn_slot_accepts_closure_and_method: PASS 1 FAIL 0 (the case runs O0, O1 and O2).",
+          "at": "2026-11-15T05:31:59.224Z"
+        },
+        {
+          "n": 4,
+          "text": "A read of a method without parentheses where a union with a function member is expected (`Int | fn() -> Int`) is the registered error that suggests the call (D-BOUND-METHOD1=A), with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile ui --filter bound_method_union_suggests_call: PASS 1 FAIL 0.",
+          "at": "2026-11-15T05:32:00.894Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "bound_method_union_suggests_call"
+          }
+        },
+        {
+          "n": 5,
+          "text": "Where a function type is expected and the type has both a field and a method of that name, the read is an error naming both and offering the closure for each (D-BOUND-METHOD1=A); `each([1, 2], crew.tell)` with a `tell` field beside the method no longer compiles.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile ui --filter bound_method_field_method_clash: PASS 1 FAIL 0.",
+          "at": "2026-11-15T05:32:02.623Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "bound_method_field_method_clash"
+          }
+        },
+        {
+          "n": 6,
+          "text": "The bound-method rule has its syntax registry row, its syntax-decisions.md entry, regenerated editor grammars (`jet self devtools grammars`) and re-blessed snapshots. Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e), in the dev worktree at b42504dfe6: jet self devtools grammars regenerated the editor grammar sections; git status --short Tools/editors is empty; jet test tests/guards --filter grammar: 13 passed 0 failed; --filter syntax_reconciliation: 15 passed 0 failed.",
+          "at": "2026-11-15T05:32:04.393Z"
+        },
+        {
+          "n": 7,
+          "text": "syntax-decisions.md log entry",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6824 c6: one documentation criterion",
+          "at": "2026-11-15T02:55:48.599Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 8,
+          "text": "editor grammars regenerated (jet self devtools grammars)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6824 c6: one documentation criterion",
+          "at": "2026-11-15T02:55:49.588Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 9,
+          "text": "snapshots re-blessed",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6824 c6: one documentation criterion",
+          "at": "2026-11-15T02:55:50.514Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T17:08:03.329Z",
+      "updated": "2026-11-15T05:32:21.057Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-15T05:32:21.057Z",
+      "questions": [
+        {
+          "id": "q0sbyy4n",
+          "cardId": "c0vc9b8r",
+          "decisionId": "D-BOUND-METHOD1",
+          "by": "owner",
+          "kind": "question",
+          "text": "What about using the pipe “hole” syntax <> inside the method parenthesis, crew.tell(<>)? Would that be better? Then it shows it is clearly a method and that it has a hole? I would say just include parenthesis but keep them empty but then that may make people think it is a call with no args",
+          "status": "answered",
+          "answer": "Good idea to check, but <> cannot take this job. In Jet, <> is the value of the enclosing |> step. Inside a step, crew.tell(<>) is already a call: 7 |> crew.tell(<>) prints \"Lin tells 7\" on dev 03d5f7b309. So crew.tell(<>) would be a call inside a pipe and a bound value outside one: one spelling, two meanings. One hole also reads as one argument, so a two-parameter method would need crew.tell(<>, <>), and crew.tell(<>, 3) is partial application, a larger feature. Empty parentheses would read as a call, as you say. Option D, crew.tell(..), keeps your goal (it clearly marks a method value with a hole for the rest) with a mark that is free everywhere and never means a call. I added this to option D on the ballot. If you want partial application with holes, that is its own ballot.",
+          "created": "2026-11-14T14:22:20.354Z",
+          "answeredAt": "2026-11-14",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-18T05:45:11.346Z"
+    },
+    {
+      "id": "c0pwde2g",
+      "num": 6829,
+      "title": "app: request rate limits",
+      "body": "Gap card N6 from the #6792 r3 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md, section 8.1 rate limiting row). This build card waits on the D-WEBAPP-SHAPE1 ratification.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Dependency (Main, 2026-11-13, from G5DevX-2): c1 proof needs served #App.SignedIn/#App.Public endpoints, the session/401 layer and app.Remote<S> with the client app.CallError mapping, all unbuilt on dev 499cff84c2. Order: #6445 c3 (markers, registry rows) and #6445 c4 (sessions) first, then this card. G5DevX-2 owns the stream."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An #App.SignedIn or #App.Public method may carry limit: (calls per window per account, or per network for Public); a call past it gets 429 with Retry-After, and the client maps it to app.CallError.Unreachable with a retry time.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 6f82527b17. p143 batch compiler (built from dev 6f82527b17), 2026-11-14 22:50: jet test Compiler --profile cases --filter web_app/method_rate_limit_answers_429 -> PASS 1.",
+          "at": "2026-11-15T03:57:27.157Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "web_app/method_rate_limit_answers_429"
+          }
+        },
+        {
+          "n": 2,
+          "text": "When a marker's arguments don't match its signature (`#App.Public(limit: \"many\")`), `jet check` reports that MarkerArgumentMismatch and nothing else. No error is reported against any <corelib> file. Proof: `jet test tests/ui --filter app_marker_argument_mismatch_reports_alone` passes, and its .stderr snapshot holds exactly one error, at the marker.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p150 (batch compiler from dev cb824d0276, 2026-11-15 00:30; GoalsB-5-12r3 landed da1c53a05e): jet test Compiler --profile ui --filter app_marker_argument_mismatch_reports_alone: PASS 1 FAIL 0; tests/ui/app_marker_argument_mismatch_reports_alone.stderr holds exactly one Error line, at the marker. The marker filter also passes 88 of 88.",
+          "at": "2026-11-15T05:32:06.115Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T17:08:29.121Z",
+      "updated": "2026-11-15T05:32:22.592Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-15T05:32:22.592Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T05:45:11.346Z"
     }
   ]
 }
