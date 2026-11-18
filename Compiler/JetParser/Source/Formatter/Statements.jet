@@ -488,6 +488,7 @@ jfmt_stmt_gap_next: fn(stmt: Stmt) -> Int Never! {
 // A block's statements and, for a function body, its `#X: value` marker
 // lines, each printed where it was written.
 jfmt_fmt_block_lines: fn(f: &JetFmt, body: [Stmt], markers: [Marker]) {
+    if f.simplify && markers.len() == 0 -> jfmt_note_inline_temporaries(f, body)
     index := 0
     marker_index := 0
     previous_end := Int?{None}

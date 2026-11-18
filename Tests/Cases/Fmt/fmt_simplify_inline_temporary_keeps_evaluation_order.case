@@ -1,0 +1,24 @@
+# Claim: `jet fmt --simplify` inlines an immutable binding used once, on the next line, when that use is the first thing the line evaluates
+# Claim: a chain of such bindings inlines to its fixed point, and a second simplify pass changes nothing
+# Claim: the program prints the same before and after the rewrite
+# Claim: a use after another call, a second use, a blank line, a comment or a mutable binding is left as written
+fixture: FmtSimplifyInlineTemporary.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet fmt --simplify --check one/order.jet
+exit: 0 # inlining any binding there would change what runs first, or what the block reads
+step: jet run one/order.jet
+exit: 0
+stdout: = "a\nb\n2\nc\n2\nd\n1\ne\n1\nf\n1\n"
+step: jet run one/inline.jet
+exit: 0
+stdout: = "4\n3\n2\nbig\n"
+step: jet fmt --simplify one/inline.jet
+exit: 0
+file: one/inline.jet = "total: fn(prices: [Int]) -> Int {\n    sum := 0\n    loop price in prices -> sum += price\n    sum\n}\n\nspread: fn(prices: [Int]) -> Int { return total(prices) - prices.len() }\n\nrun: fn() {\n    words: \"a b c\".split(\" \").to_list()\n    print(spread([2, 4]))\n    print(words.len())\n    print(total([1]) * 2)\n    if total([5]) > 4 -> print(\"big\")\n}\n"
+step: jet fmt --simplify --check one/inline.jet
+exit: 0 # a second pass keeps it
+step: jet run one/inline.jet
+exit: 0
+stdout: = "4\n3\n2\nbig\n"
