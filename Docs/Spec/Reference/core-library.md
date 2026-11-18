@@ -5569,7 +5569,9 @@ available. `clipboard.read_text` answers the clipboard text the page last
 observed (a paste, copy or cut, or its own `write_text`), because a browser
 lends the live clipboard only to a user gesture; before any is observed it
 fails with `HostFailure`. The core.ui.host file dialogs, which answer a path,
-and font shaping are absent there. The provider also answers the app's device
+and font shaping are absent there. A provider's dialog result is a record
+whose first field is `selected`, followed by the selected paths, or
+`canceled`. The provider also answers the app's device
 requests (`app.ask`, `app.take_photo`, `app.location`, `app.open_file`, the
 files dropped on an `app.drop_files` body, a page's file's bytes, and the
 sensor streams' readings); one whose
@@ -8102,7 +8104,7 @@ inferred from its Core source body like any other call. `service.tree` stays
 `-[]>`; `start` and the workflow waits reach `FS.Read`, `FS.Write` and
 `Time.Wait`. A canceled or deadline-blown
 `workflow.sleep` ends its wait without unwinding, so the workflow records
-`sleep-cancelled` or `sleep-deadline` before the call fails.
+`sleep-canceled` or `sleep-deadline` before the call fails.
 
 Restart/delivery policy constructors and runtime retention projection are Jet
 policy. `state_store` requires `FS.Read`: it inspects the target and lexical
@@ -8117,9 +8119,14 @@ All ten error cases carry a String; their service display is the message alone.
 Receipts retain every original field, including authority and signature, and
 their service display preserves the existing field order and labels.
 `TaskOutcome` is `Finished` or `Failed(TaskFailure)`, the prelude's one task
-failure enum. Its display is `Finished` or the failure's text (`Cancelled`,
+failure enum. Its display is `Finished` or the failure's text (`Canceled`,
 `DeadlineBlown`, or `Panicked(reason)` with the raw reason), while Debug quotes
-and escapes that reason.
+and escapes that reason. A canceled delivery's state shows as `Canceled`.
+Service state stores are `JET-SERVICE-STATE/2`, and delivery events and
+receipts are signed as `jet-service-delivery-event-v2` and
+`jet-service-delivery-receipt-v2`; version 1 spelled the canceled tokens the
+British way, and the `american-tokens1` migration converts its stores and
+authority logs.
 `core.rt.RealtimeReceipt` preserves the eight scalar provider facts in their
 original positional order. `Delivery` shows exactly `Delivery(` + its ID + `)`.
 `Delivery.show()` and `DeliveryReceipt.show()` return that same display text.

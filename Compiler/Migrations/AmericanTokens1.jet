@@ -29,6 +29,23 @@
 //   stamp must be that stamp. The cache identities that hash a stamp (a
 //   binding's `.hash` and `.provenance`) are not converted: `jet inspect
 //   bind` regenerates them.
+// - A service state store (`JET-SERVICE-STATE/1` to `/2`, its first line):
+//   in a workflow log (`{store}.workflows`) a canceled sleep record is
+//   `workflow-wait-sleep-canceled:` and an activity's canceled outcome is
+//   `Canceled`. Written by state_encode and state_append (Core
+//   Service/Service.jet) and read by state_decode, which refuses version 1
+//   by name, and workflow_apply. Other stores only take the new first line.
+// - A service authority log (lines `S|`, `K|` and `E|` of length-prefixed
+//   hex fields): a delivery event's canceled state is `Canceled`, signed as
+//   `jet-service-delivery-event-v2`. Written by authority_append_event and
+//   read by authority_entries (Core Service/Service.jet), which validates
+//   every event's signature. The converter checks each version 1 event's
+//   signature before it re-signs it, with the key the log's acceptance
+//   record names, so a log that does not validate is reported, not signed.
+//   A delivery receipt (`jet-service-delivery-receipt-v2`) is answered to its
+//   caller and never stored, and the file dialog's canceled answer
+//   (`canceled`, Core UI/Host.jet) is a provider's live reply: neither has a
+//   file to convert.
 //
 // Only the members the format names are rewritten: an observation, a
 // reason or any other text keeps its words, and a file in no known format
@@ -36,6 +53,8 @@
 use {
     jet_foundation.[ComparisonStatus, TEST_COMPARISON_SCHEMA_VERSION, canonical_json_parse, comparison_parse_status, comparison_record_from_json, comparison_status_as_str]
     jet_pkg_model.[FOREIGN_ADAPTER_CONTRACT_VERSION, pkg_binder_descriptor, pkg_foreign_binders]
+    tokens_crypto: core.crypto
+    tokens_encoding: core.encoding
 }
 
 // One word of an old comparison status vocabulary and the status it named.
@@ -66,6 +85,53 @@ AMERICAN_TOKENS1_MARSHALED: "AdapterMarshaled"
 // The start of a generated binding's first line, its descriptor stamp.
 AMERICAN_TOKENS1_DESCRIPTOR_LINE: "// jet-ffi-descriptor="
 
+// The first line of a version 1 service state store.
+AMERICAN_TOKENS1_SERVICE_STATE_V1: "JET-SERVICE-STATE/1"
+
+// The first line of a version 2 one.
+AMERICAN_TOKENS1_SERVICE_STATE: "JET-SERVICE-STATE/2"
+
+// Version 1's start of a workflow log's canceled sleep record.
+AMERICAN_TOKENS1_SLEEP_CANCELED_V1: "workflow-wait-sleep-cancelled:"
+
+// Version 2's start of it.
+AMERICAN_TOKENS1_SLEEP_CANCELED: "workflow-wait-sleep-canceled:"
+
+// Version 1's canceled task outcome and delivery state.
+AMERICAN_TOKENS1_OUTCOME_CANCELED_V1: "Cancelled"
+
+// Version 2's.
+AMERICAN_TOKENS1_OUTCOME_CANCELED: "Canceled"
+
+// The label a version 1 delivery event is signed under.
+AMERICAN_TOKENS1_DELIVERY_EVENT_V1: "jet-service-delivery-event-v1"
+
+// The label a version 2 one is.
+AMERICAN_TOKENS1_DELIVERY_EVENT: "jet-service-delivery-event-v2"
+
+// The label of a delivery generation's signing key, in both versions.
+AMERICAN_TOKENS1_DELIVERY_GENERATION: "jet-service-delivery-generation-v1"
+
+// A service state store: its five header lines and its records.
+AmericanTokensStore: struct {
+    header: [String],
+    records: [String],
+}
+
+// One length-prefixed field and the text after it.
+AmericanTokensField: struct {
+    value: String,
+    rest: String,
+}
+
+// One line of a service authority log, without its line break: its
+// operation and its decoded fields.
+AmericanTokensRecord: struct {
+    line: String,
+    op: String,
+    fields: [String],
+}
+
 // One member of a JSON document's top-level object: its key and the byte
 // range of its value's text.
 AmericanTokensMember: struct {
@@ -86,6 +152,11 @@ american_tokens1_file: fn(path: String, text: String) -[]> MigrationOutcome {
     if text.starts_with(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
         return american_tokens1_binding(path, text)
     }
+    if text.starts_with(AMERICAN_TOKENS1_SERVICE_STATE_V1) || text.starts_with(AMERICAN_TOKENS1_SERVICE_STATE) {
+        return american_tokens1_store(path, text)
+    }
+    log: american_tokens1_log_parse(text) ?? [AmericanTokensRecord]{}
+    if log.len() > 0 -> return american_tokens1_log(path, text, log)
     bytes: text.bytes()
     members: american_tokens1_members(bytes) ?? return american_tokens1_unknown(path, text)
     edits := [AmericanTokensEdit]{}
@@ -119,12 +190,18 @@ american_tokens1_file: fn(path: String, text: String) -[]> MigrationOutcome {
 // Why `after`, the plan's rewrite of `before`, does not mean what `before`
 // meant, or None when it does. Every member but the rewritten ones keeps
 // its text, the old status word names the status the current reader reads
-// from the new one, and a record is one the current reader accepts.
+// from the new one, and a record, a store or a log is one the current
+// reader accepts.
 american_tokens1_same_meaning: fn(path: String, before: String, after: String) -[]> String? {
     if before == after -> return None
     if before.starts_with(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
         return american_tokens1_binding_same_meaning(before, after)
     }
+    if before.starts_with(AMERICAN_TOKENS1_SERVICE_STATE_V1) {
+        return american_tokens1_store_same_meaning(path, before, after)
+    }
+    old_log: american_tokens1_log_parse(before) ?? [AmericanTokensRecord]{}
+    if old_log.len() > 0 -> return american_tokens1_log_same_meaning(old_log, after)
     old_bytes: before.bytes()
     new_bytes: after.bytes()
     old: american_tokens1_members(old_bytes) ?? return Val("{path} was in no format this plan converts")
@@ -235,6 +312,278 @@ american_tokens1_current_stamp: fn(stamp: String) -[]> Bool {
 american_tokens1_first_line: fn(text: String) -[]> String {
     parts: text.split_once("\n") ?? return text
     parts.before
+}
+
+// Converts a version 1 service state store: its first line is version 2's
+// and, in a workflow log, each canceled sleep record and canceled activity
+// outcome takes the new spelling.
+american_tokens1_store: fn(path: String, text: String) -[]> MigrationOutcome {
+    store: american_tokens1_store_parse(text) ?? {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: a service state store whose records do not parse; not converted"}}
+    }
+    if store.header[0] == AMERICAN_TOKENS1_SERVICE_STATE {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    renamed := 0
+    moved: american_tokens1_store_text(store, path.ends_with(".workflows"), AMERICAN_TOKENS1_SERVICE_STATE, AMERICAN_TOKENS1_SLEEP_CANCELED_V1, AMERICAN_TOKENS1_SLEEP_CANCELED, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED, renamed) ?? {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: a workflow record that does not parse; not converted"}}
+    }
+    MigrationOutcome{text: moved, rewritten: renamed + 1, skipped: [String]{}}
+}
+
+// Whether a converted store means what its version 1 source meant: the
+// rewrite is a version 2 store holding no version 1 token, and with the old
+// first line and spellings restored it is the source.
+american_tokens1_store_same_meaning: fn(path: String, before: String, after: String) -[]> String? {
+    old: american_tokens1_store_parse(before) ?? return Val("the old store's records do not parse")
+    if old.header[0] != AMERICAN_TOKENS1_SERVICE_STATE_V1 {
+        return Val("the old store is not version 1")
+    }
+    new: american_tokens1_store_parse(after) ?? return Val("the rewrite is not a service state store")
+    if new.header[0] != AMERICAN_TOKENS1_SERVICE_STATE {
+        return Val("the rewrite is not a version 2 store")
+    }
+    workflows: path.ends_with(".workflows")
+    left := 0
+    _: american_tokens1_store_text(new, workflows, AMERICAN_TOKENS1_SERVICE_STATE, AMERICAN_TOKENS1_SLEEP_CANCELED_V1, AMERICAN_TOKENS1_SLEEP_CANCELED, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED, left) ?? return Val("a record of the rewrite does not parse")
+    if left > 0 -> return Val("the rewrite still holds {left} version 1 tokens")
+    restored := 0
+    back: american_tokens1_store_text(new, workflows, AMERICAN_TOKENS1_SERVICE_STATE_V1, AMERICAN_TOKENS1_SLEEP_CANCELED, AMERICAN_TOKENS1_SLEEP_CANCELED_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1, restored) ?? return Val("a record of the rewrite does not parse")
+    if back != before -> return Val("the store changed beyond its first line and canceled tokens")
+    None
+}
+
+// The header lines and records of a service state store, or None when a
+// header line or a record's frame is cut short.
+american_tokens1_store_parse: fn(text: String) -[]> AmericanTokensStore? {
+    bytes: text.bytes()
+    header := [String]{}
+    at := 0
+    loop header.len() < 5 {
+        end := at
+        loop end < bytes.len() && bytes[end] != 10 -> end += 1
+        if end == bytes.len() -> return None
+        header.push(String.from_bytes(bytes[at..<end]) ?? return None)
+        at = end + 1
+    }
+    records := [String]{}
+    loop at < bytes.len() {
+        colon := at
+        loop colon < bytes.len() && bytes[colon] != 58 -> colon += 1
+        if colon == bytes.len() -> return None
+        length: american_tokens1_count(String.from_bytes(bytes[at..<colon]) ?? return None) ?? return None
+        end: colon + 1 + length
+        if end > bytes.len() -> return None
+        records.push(String.from_bytes(bytes[colon + 1..<end]) ?? return None)
+        at = end
+    }
+    Val(AmericanTokensStore{header: header, records: records})
+}
+
+// `store`'s text with `magic` its first line and, in a workflow log, each
+// record's `sleep_from` sleep and `wire_from` outcome spelled `sleep_to`
+// and `wire_to`, counting them in `renamed`; None when a record does not
+// parse.
+american_tokens1_store_text: fn(store: AmericanTokensStore, workflows: Bool, magic: String, sleep_from: String, sleep_to: String, wire_from: String, wire_to: String, renamed: &Int) -[]> String? {
+    parts := [String]{"{magic}\n"}
+    loop index in 1..<store.header.len() -> parts.push("{store.header[index]}\n")
+    version: store.header[3].removeprefix("version:")
+    prefix: "v{version}:"
+    loop record in store.records {
+        if !record.starts_with(prefix) -> return None
+        field: american_tokens1_take(record.removeprefix(prefix)) ?? return None
+        if field.rest.len() > 0 -> return None
+        payload: american_tokens1_workflow(field.value, workflows, sleep_from, sleep_to, wire_from, wire_to, renamed) ?? return None
+        parts.push(american_tokens1_frame("{prefix}{american_tokens1_frame(payload)}"))
+    }
+    Val(parts.join(""))
+}
+
+// A record's payload, in a workflow log with its `sleep_from` sleep or its
+// activity's `wire_from` outcome spelled `sleep_to` or `wire_to`, counting
+// them in `renamed`; None when an activity record's fields do not parse.
+american_tokens1_workflow: fn(payload: String, workflows: Bool, sleep_from: String, sleep_to: String, wire_from: String, wire_to: String, renamed: &Int) -[]> String? {
+    if !workflows -> return Val(payload)
+    if payload.starts_with(sleep_from) {
+        renamed += 1
+        return Val("{sleep_to}{payload.removeprefix(sleep_from)}")
+    }
+    retry: "workflow-activity-retry:"
+    done: "workflow-activity-done:"
+    head := ""
+    rest := ""
+    if payload.starts_with(retry) {
+        run: payload.removeprefix(retry).split_once(":") ?? return None
+        attempt: run.after.split_once(":") ?? return None
+        head = "{retry}{run.before}:{attempt.before}:"
+        rest = attempt.after
+    } else if payload.starts_with(done) {
+        run: payload.removeprefix(done).split_once(":") ?? return None
+        head = "{done}{run.before}:"
+        rest = run.after
+    } else { return Val(payload) }
+    key: american_tokens1_take(rest) ?? return None
+    wire: american_tokens1_take(key.rest) ?? return None
+    if wire.value != wire_from -> return Val(payload)
+    renamed += 1
+    Val("{head}{american_tokens1_frame(key.value)}{american_tokens1_frame(wire_to)}{wire.rest}")
+}
+
+// The field `{length}:{value}` that starts `text`, the length in bytes,
+// and the text after it.
+american_tokens1_take: fn(text: String) -[]> AmericanTokensField? {
+    parts: text.split_once(":") ?? return None
+    length: american_tokens1_count(parts.before) ?? return None
+    raw: parts.after.bytes()
+    if length > raw.len() -> return None
+    value: String.from_bytes(raw[0..<length]) ?? return None
+    rest: String.from_bytes(raw[length..<raw.len()]) ?? return None
+    Val(AmericanTokensField{value: value, rest: rest})
+}
+
+// `text` framed as `{length}:{text}`, the length in bytes.
+american_tokens1_frame: fn(text: String) -[]> String { "{text.bytes().len()}:{text}" }
+
+// A count written in decimal digits.
+american_tokens1_count: fn(text: String) -[]> Int? {
+    digits: text.bytes()
+    if digits.len() == 0 || digits.len() > 18 -> return None
+    count := 0
+    loop digit in digits {
+        if digit < 48 || digit > 57 -> return None
+        count = count * 10 + Int{digit} - 48
+    }
+    Val(count)
+}
+
+// Converts a version 1 authority log: each delivery event's canceled state
+// takes the new spelling and the event is signed under version 2's label,
+// once its version 1 signature validates. An event already signed under
+// version 2's label is kept, and one that validates under neither leaves
+// the log alone.
+american_tokens1_log: fn(path: String, text: String, records: [AmericanTokensRecord]) -[]> MigrationOutcome {
+    out := [String]{}
+    renamed := 0
+    loop (index, record) in records {
+        if record.op != "E" {
+            out.push("{record.line}\n")
+            next
+        }
+        line: american_tokens1_event(records, record, AMERICAN_TOKENS1_DELIVERY_EVENT_V1, AMERICAN_TOKENS1_DELIVERY_EVENT, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED) ?? {
+            return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: line {index + 1}, a delivery event, is signed under neither version's label; not converted"}}
+        }
+        if line != record.line -> renamed += 1
+        out.push("{line}\n")
+    }
+    if renamed == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    MigrationOutcome{text: out.join(""), rewritten: renamed, skipped: [String]{}}
+}
+
+// Whether a converted authority log means what its version 1 source meant:
+// every line but a delivery event's is unchanged, and each event, signed
+// under version 2's label, is its source once its state's old spelling and
+// version 1's signature are restored.
+american_tokens1_log_same_meaning: fn(old: [AmericanTokensRecord], after: String) -[]> String? {
+    new: american_tokens1_log_parse(after) ?? return Val("the rewrite is not a service authority log")
+    if new.len() != old.len() -> return Val("the rewrite has {new.len()} lines, not {old.len()}")
+    loop (index, record) in old {
+        if record.op != "E" {
+            if new[index].line != record.line -> return Val("line {index + 1} changed")
+            next
+        }
+        restored: american_tokens1_event(new, new[index], AMERICAN_TOKENS1_DELIVERY_EVENT, AMERICAN_TOKENS1_DELIVERY_EVENT_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1) ?? {
+            return Val("line {index + 1}, a delivery event, is not signed under version 2's label")
+        }
+        if restored != record.line {
+            return Val("line {index + 1}, a delivery event, changed beyond its state's spelling and its signature")
+        }
+    }
+    None
+}
+
+// The lines of a service authority log, or None when `text` is not one:
+// each line is an `S`, `K` or `E` operation and its `|{length}:{hex}`
+// fields, the first is an acceptance, and the last is complete.
+american_tokens1_log_parse: fn(text: String) -[]> [AmericanTokensRecord]? {
+    if !text.starts_with("S|") || !text.ends_with("\n") -> return None
+    records := [AmericanTokensRecord]{}
+    loop line in text.removesuffix("\n").split("\n") {
+        parts: line.split("|").to_list()
+        op: "{parts[0]}"
+        if op != "S" && op != "K" && op != "E" -> return None
+        fields := [String]{}
+        loop at in 1..<parts.len() {
+            field: parts[at].split_once(":") ?? return None
+            length: american_tokens1_count(field.before) ?? return None
+            bytes: tokens_encoding.hex_to_bytes(field.after) ?? return None
+            if bytes.len() != length -> return None
+            fields.push(String.from_bytes(bytes) ?? return None)
+        }
+        records.push(AmericanTokensRecord{line: "{line}", op: op, fields: fields})
+    }
+    Val(records)
+}
+
+// A delivery event's line with a `from_state` state spelled `to_state` and
+// signed under `to_label`, when its signature validates under
+// `from_label`; the line itself when it validates under `to_label`; None
+// otherwise.
+american_tokens1_event: fn(records: [AmericanTokensRecord], event: AmericanTokensRecord, from_label: String, to_label: String, from_state: String, to_state: String) -[]> String? {
+    if event.fields.len() != 6 -> return None
+    key: american_tokens1_delivery_key(records, event.fields[0]) ?? return None
+    signature: tokens_encoding.hex_to_bytes(event.fields[5]) ?? return None
+    if signature == american_tokens1_event_signature(key, to_label, event.fields) {
+        return Val("{event.line}")
+    }
+    if signature != american_tokens1_event_signature(key, from_label, event.fields) -> return None
+    state: if event.fields[2] == from_state -> "{to_state}" else -> "{event.fields[2]}"
+    fields := [String]{"{event.fields[0]}", "{event.fields[1]}", state, "{event.fields[3]}", "{event.fields[4]}"}
+    fields.push(tokens_encoding.bytes_to_hex(american_tokens1_event_signature(key, to_label, fields)))
+    Val(american_tokens1_record("E", fields))
+}
+
+// An authority log line, without its line break: `op`, then each field as
+// `|{length}:{hex}`.
+american_tokens1_record: fn(op: String, fields: [String]) -[]> String {
+    parts := [String]{"{op}"}
+    loop field in fields {
+        bytes: field.bytes()
+        parts.push("|{bytes.len()}:{tokens_encoding.bytes_to_hex(bytes)}")
+    }
+    parts.join("")
+}
+
+// The signing key of delivery `id`'s generation, named by its acceptance
+// record: the authority token's 32 key bytes signing the generation.
+american_tokens1_delivery_key: fn(records: [AmericanTokensRecord], id: String) -[]> [U8]? {
+    loop record in records {
+        if record.op == "S" && record.fields.len() == 10 && record.fields[0] == id {
+            authority: record.fields[2]
+            if !authority.starts_with("sa-") -> return None
+            key: tokens_encoding.hex_to_bytes(authority.removeprefix("sa-")) ?? return None
+            if key.len() != 32 -> return None
+            return Val(tokens_crypto.hmac_sha256(key, american_tokens1_signed([String]{AMERICAN_TOKENS1_DELIVERY_GENERATION, "{record.fields[5]}"})))
+        }
+    }
+    None
+}
+
+// The signature of a delivery event's first five fields under `label`.
+american_tokens1_event_signature: fn(key: [U8], label: String, fields: [String]) -[]> [U8] {
+    tokens_crypto.hmac_sha256(key, american_tokens1_signed([String]{"{label}", "{fields[0]}", "{fields[1]}", "{fields[2]}", "{fields[3]}", "{fields[4]}"}))
+}
+
+// The signed bytes of `fields`: each one's length in bytes as a big-endian
+// 64-bit count, then its bytes.
+american_tokens1_signed: fn(fields: [String]) -[]> [U8] {
+    signed := [U8]{}
+    loop field in fields {
+        bytes: field.bytes()
+        length: bytes.len()
+        loop shift in 0..<8 -> signed.push(U8{(length >> ((7 - shift) * 8)) & 255})
+        loop byte in bytes -> signed.push(byte)
+    }
+    signed
 }
 
 // A comparison record: the members its canonical payload always has.
@@ -402,4 +751,48 @@ american_tokens1_blank: fn(byte: U8) -[]> Bool {
     outcome: american_tokens1_file("old.jet", stale)
     assert_eq(outcome.text, stale)
     assert_eq(outcome.skipped, [String]{"old.jet: a descriptor stamp no current binder writes, even converted; `jet inspect bind` regenerates the binding"})
+}
+
+#Test("a version 1 workflow log takes version 2's first line and canceled tokens") {
+    header: "adapter:event-log\nschema:15:workflow-events\nversion:1\nmigration:10:reversible\n"
+    start: american_tokens1_test_record("workflow-start:1:1:8:checkout")
+    old: "JET-SERVICE-STATE/1\n{header}{start}{american_tokens1_test_record("workflow-wait-sleep-cancelled:1")}{american_tokens1_test_record("workflow-activity-retry:1:2:6:charge9:Cancelled")}{american_tokens1_test_record("workflow-activity-done:1:6:charge9:Cancelled")}"
+    new: "JET-SERVICE-STATE/2\n{header}{start}{american_tokens1_test_record("workflow-wait-sleep-canceled:1")}{american_tokens1_test_record("workflow-activity-retry:1:2:6:charge8:Canceled")}{american_tokens1_test_record("workflow-activity-done:1:6:charge8:Canceled")}"
+    outcome: american_tokens1_file("state.workflows", old)
+    assert_eq(outcome.text, new)
+    assert_eq(outcome.rewritten, 4)
+    assert_eq(american_tokens1_file("state.workflows", new).rewritten, 0)
+    assert_eq(american_tokens1_same_meaning("state.workflows", old, new), None)
+    refund: new.replace("charge", "refund")
+    assert_eq(american_tokens1_same_meaning("state.workflows", old, refund), Val("the store changed beyond its first line and canceled tokens"))
+    other: american_tokens1_file("state", old)
+    assert_eq(other.text, "JET-SERVICE-STATE/2\n{old.removeprefix("JET-SERVICE-STATE/1\n")}")
+    assert_eq(other.rewritten, 1)
+    assert_eq(american_tokens1_file("cut.workflows", "JET-SERVICE-STATE/1\n{header}9:v1:2").skipped, [String]{"cut.workflows: a service state store whose records do not parse; not converted"})
+}
+
+#Test("a version 1 authority log's delivery events are re-signed under version 2's label") {
+    authority: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    accept: american_tokens1_record("S", [String]{"d1", "k1", authority, "tree", "worker", "7", "payload", "0", "1700000000999", "00"})
+    key: american_tokens1_delivery_key([AmericanTokensRecord]{AmericanTokensRecord{line: "", op: "S", fields: [String]{"d1", "k1", authority, "tree", "worker", "7", "payload", "0", "1700000000999", "00"}}}, "d1") ?? panic("the generation key")
+    delivered: american_tokens1_record("E", [String]{"d1", "4", "Delivered", "3", "1700000000123", "b26b530c1223a26a44476d6d44df66905c6cf02eaf51f440790b5ee153140aa6"})
+    canceled := [String]{"d1", "5", "Cancelled", "3", "1700000000200"}
+    canceled.push(tokens_encoding.bytes_to_hex(american_tokens1_event_signature(key, AMERICAN_TOKENS1_DELIVERY_EVENT_V1, canceled)))
+    old: "{accept}\n{delivered}\n{american_tokens1_record("E", canceled)}\n"
+    outcome: american_tokens1_file("authority.log", old)
+    assert_eq(outcome.rewritten, 2)
+    records: american_tokens1_log_parse(outcome.text) ?? panic("the converted log")
+    assert_eq(records[0].line, accept)
+    assert_eq(records[1].fields[5], "cc9a4e99bc0965d18e25288b0eafcce74a83e0c4736aa823e2db4ab6ad6152d7")
+    assert_eq(records[2].fields[2], "Canceled")
+    assert_eq(american_tokens1_file("authority.log", outcome.text).rewritten, 0)
+    assert_eq(american_tokens1_same_meaning("authority.log", old, outcome.text), None)
+    unsigned: american_tokens1_record("E", [String]{"d1", "4", "Delivered", "3", "1700000000123", "0000000000000000000000000000000000000000000000000000000000000000"})
+    forged: "{accept}\n{unsigned}\n"
+    assert_eq(american_tokens1_file("authority.log", forged).skipped, [String]{"authority.log: line 2, a delivery event, is signed under neither version's label; not converted"})
+}
+
+// A version 1 state store record framing `payload`.
+american_tokens1_test_record: fn(payload: String) -[]> String {
+    american_tokens1_frame("v1:{american_tokens1_frame(payload)}")
 }

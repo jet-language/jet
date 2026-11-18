@@ -6,31 +6,51 @@
 # theirs. A generated binding's descriptor stamp with a version 1 adapter
 # contract takes the stamp its binder writes now: the marshaled models are
 # `AdapterMarshaled` and the contract is version 2, while the binding's code
-# is untouched. A file in no known format is reported and left alone. A
-# second run finds nothing left to convert. Checked `--against` the
-# untouched copies in `Old/`, every conversion means what its source meant,
-# read by version 1's rules beside the current reader, while a hand rewrite
-# that also changed the status, `swapped.json`, is reported as changed and
-# fails the check. The current `jet test-compare` reads the converted corpus
-# and refuses the old one's status word.
+# is untouched. A version 1 service authority log, written by the version 1
+# runtime, has its canceled delivery's event take `Canceled` and the version
+# 2 signature, and a version 1 workflow log takes `JET-SERVICE-STATE/2` and
+# its canceled sleep `workflow-wait-sleep-canceled:`. A file in no known
+# format is reported and left alone. A second run finds nothing left to
+# convert. Checked `--against` the untouched copies in `Old/`, every
+# conversion means what its source meant, read by version 1's rules beside
+# the current reader, while a hand rewrite that also changed the status,
+# `swapped.json`, is reported as changed and fails the check. The current
+# service runtime reads the converted workflow log's history and refuses
+# the old log by its version. (An authority log names its store's absolute
+# path in each delivery's identity, so only the directory it was written in
+# can replay it; the runtime replaying a converted one is shown where it was
+# written, not here.) The current `jet test-compare` reads the converted
+# corpus and refuses the old one's status word.
 fixture: AmericanTokens1MovesBritishTokensToNewVersions/Input
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
-step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json plotly.jet notes.txt
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json plotly.jet canceled.log workflow.log.workflows notes.txt
 exit: 0
-stdout: = "EDIT record.json 2\nEDIT corpus.json 1\nEDIT plotly.jet 4\nSKIP notes.txt: in no format this plan converts\nTOTAL 7 sites in 3 files\n"
+stdout: = "EDIT record.json 2\nEDIT corpus.json 1\nEDIT plotly.jet 4\nEDIT canceled.log 1\nEDIT workflow.log.workflows 2\nSKIP notes.txt: in no format this plan converts\nTOTAL 10 sites in 5 files\n"
 file: record.json = AmericanTokens1MovesBritishTokensToNewVersions/record.out
 file: corpus.json = AmericanTokens1MovesBritishTokensToNewVersions/corpus.out
 file: plotly.jet = AmericanTokens1MovesBritishTokensToNewVersions/plotly.out
-step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json plotly.jet notes.txt
+file: canceled.log = AmericanTokens1MovesBritishTokensToNewVersions/canceled.out
+file: workflow.log.workflows = AmericanTokens1MovesBritishTokensToNewVersions/workflow.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json plotly.jet canceled.log workflow.log.workflows notes.txt
 exit: 0
 stdout: = "SKIP notes.txt: in no format this plan converts\nTOTAL 0 sites in 0 files\n"
 file: record.json = AmericanTokens1MovesBritishTokensToNewVersions/record.out
 file: corpus.json = AmericanTokens1MovesBritishTokensToNewVersions/corpus.out
 file: plotly.jet = AmericanTokens1MovesBritishTokensToNewVersions/plotly.out
-step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --against Old record.json corpus.json plotly.jet
+file: canceled.log = AmericanTokens1MovesBritishTokensToNewVersions/canceled.out
+file: workflow.log.workflows = AmericanTokens1MovesBritishTokensToNewVersions/workflow.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --against Old record.json corpus.json plotly.jet canceled.log workflow.log.workflows
 exit: 0
-stdout: = "SAME 3 of 3 files\n"
+stdout: = "SAME 5 of 5 files\n"
+step: jet run Reader/main.jet
+env: JET_STORE_UNDER=.
+exit: 0
+stdout: = "history:start@v1|sleep:10000000000|sleep-canceled\n"
+step: jet run Reader/main.jet
+env: JET_STORE_UNDER=Old
+exit: 70
+stderr: ~ "service state store is version 1, an older format this runtime no longer reads; the american-tokens1 migration converts it" # the refusal names the version and the converter
 step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --against Old swapped.json
 exit: 1
 stdout: = "CHANGED swapped.json: version 1's `cancelled` became `timeout`\nSAME 0 of 1 files\n"

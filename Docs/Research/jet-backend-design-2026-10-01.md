@@ -1607,7 +1607,7 @@ panic is fatal: the child flushes output, writes its stop record and exits
 (81 runtime panic, 101 foreign/host panic). `stop_write()` writes a budget
 stop's record. Records travel on private descriptor 3 as the body's decimal
 byte length, a newline, then the body: one JSON object with `kind`
-(`Cancelled`, `Deadline`, `BudgetFuel`, `BudgetDepth`, `Panic`, `HostFault`, `Trap`),
+(`Canceled`, `Deadline`, `BudgetFuel`, `BudgetDepth`, `Panic`, `HostFault`, `Trap`),
 `jct_status` (1 runtime panic, 2 fuel, 3 depth, 4 foreign/host panic),
 `owner`, `start`, `end` (null when absent) and the exact UTF-8 `message`. A
 parent controller must concurrently drain stdout/stderr and enforce a wall

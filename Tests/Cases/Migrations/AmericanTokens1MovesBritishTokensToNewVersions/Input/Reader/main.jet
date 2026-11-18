@@ -1,0 +1,18 @@
+// The current service runtime reading a workflow store holding a canceled
+// sleep: `workflow.log` under the directory JET_STORE_UNDER names.
+use {
+    service: core.service
+    sys: core.sys
+}
+
+worker: fn() {}
+
+run: fn() {
+    dir: sys.get("JET_STORE_UNDER") ?? panic("the store directory")
+    tree := service.tree("checkout")
+    store: service.state_store("{dir}/workflow.log") ?? panic("state store")
+    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    tree.worker("activities", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("{err}")
+    print("history:{tree.workflow_history(1) ?? panic("history")}")
+}
