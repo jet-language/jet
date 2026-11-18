@@ -5787,9 +5787,11 @@ A hook point's fallback and a decision point's policy are literal data the
 build keeps. `NAME: event.new<T>()` as a module binding's whole value still
 declares an event point while Core's own `app.LIFECYCLE` is written that way.
 Any other module value that holds an event is refused as one the build cannot
-compute. A hook point that the program reads only to `run` it can have no
-handler, so it costs nothing: each `run` evaluates its payload and returns its
-fallback, with no call, no hook and no carrier.
+compute. A hook or decision point that the program reads only to `run` it
+can have no handler, so it costs nothing: a hook point's `run` evaluates its
+payload and returns its fallback, and a decision point's `run` is
+`HookOutcome.Continue` of its payload, with no dispatch, no hook and no
+carrier. `web.requests` is such a decision point.
 
 Provider event handles expose `.on`, `.emit`, `.listener_count`, and `.close`;
 subscriptions expose `.is_active`. Async events expose `.emit_async` and a
@@ -6976,6 +6978,8 @@ route list.
 | `bind<Settings: Decode>(address: String, prefix: String, build: fn(Settings) -> App, tls:, deadline:) -> HTTPServer HTTPError!` | server | Decode the typed settings, then bind the app `build` makes on `address`. |
 | `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
 | `openapi(routes: App or HTTPRouter) -> String OpenAPIError!` | text | Render OpenAPI from the checked facts of the same route value that is served. |
+| `requests: DecisionHook<HTTPRequest, HTTPResponse>` | point | The decision point every request an app serves passes before its routes; see below. |
+| `under(prefix: String, handler: fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse>) -> fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse>` | handler | Scope a `web.requests` handler to the paths under `prefix`. |
 | `storage() -> String` | text | Select the local storage namespace. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
 
@@ -7022,6 +7026,21 @@ server functions and static files are not API operations. `jet explain
 with its method, address, what answers it, how it was registered (`page`,
 `action`, `handler`, `mount`, `marked` or `static`) and its file:line;
 `--json` gives the same rows.
+
+`web.requests` is a declared decision point
+(`event.decision_point<HTTPRequest, HTTPResponse>(HookPolicy.FirstCancelElseTransform)`),
+the same point mechanism as any library's. Every App's outermost layer runs
+it before the app's own layers and rows. A handler attached with
+`web.requests.on(scope, handler)` lets the request on (`.Continue`), hands
+on a changed one (`.Transform(request)`), refuses it (`.Cancel`, answered
+`403`) or answers it itself (`.Fail(response)`), so the rows never run.
+`web.under(prefix, handler)` scopes a handler to one path prefix, segment by
+segment: under `"/admin"` it hears `/admin` and `/admin/users`, not
+`/administrator`, and every other request continues unchanged. A program
+that attaches no handler pays nothing for the point: each run is the
+request itself, continued, with no dispatch, no hook and no process cell.
+`Tests/Cases/Hooks/web_request_decision_scoped_by_prefix.case` is the
+executable proof.
 
 A page row takes a loader (`.loader(page, loader, preload)`), a pending
 boundary (`.pending(view)`) and an error boundary (`.error(view)`), and the

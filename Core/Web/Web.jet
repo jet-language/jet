@@ -751,9 +751,11 @@ App: struct {
 // A new app. Each time the handler of a request its routes upgraded to a
 // WebSocket returns, app hears the live hub's leave signal
 // (`app.__live_left_settle`), so a closed connection's presence ends then.
+// Its first, outermost layer runs `web.requests` (app_request_layer).
 app: fn() -> App Never! {
     table: http_server.mux_new()
     http_server.__on_upgraded(table, fn() { calls.__live_left_settle() })
+    http_server.layer_add(table, fn(next: HTTPHandler) { app_request_layer(next) })
     App{
         __state: Shared{AppState{
             routes: [AppRoute]{},
@@ -780,6 +782,48 @@ app: fn() -> App Never! {
             services: Shared{[AppService]{}},
             navigation: AppNavigation{path: "", request: None, route: None, screen: None, loaded: None, shown: "", settled: ""},
         }},
+    }
+}
+
+// `web.requests`: the decision point each request a web app serves passes
+// before the app's own layers and routes (app_request_layer). A handler lets
+// the request on (`.Continue`), hands on a changed one (`.Transform`),
+// refuses it (`.Cancel`, answered 403) or answers it itself
+// (`.Fail(response)`), and `web.under(prefix, handler)` scopes a handler to
+// one path prefix. A program that attaches no handler pays nothing for the
+// point: each run is the request itself, continued. The name is plural
+// because no local may reuse a module binding's name, and this file's
+// handlers each name their parameter `request`.
+requests: core.event.decision_point<HTTPRequest, HTTPResponse>(HookPolicy.FirstCancelElseTransform)
+
+// `web.under(prefix, handler)`: `handler`, heard only for a request whose path
+// is `prefix` or below it, segment by segment: "/admin" holds "/admin" and
+// "/admin/users", not "/administrator", and "/" holds every path. Any other
+// request continues unchanged:
+// `web.requests.on(scope, web.under("/admin", require_login))`.
+under: fn(prefix: String, handler: &&fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> Never!) -[]> fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> Never! {
+    root: app_trim_slashes(if prefix.starts_with("/") -> prefix else -> "/{prefix}")
+    fn(asked: HTTPRequest) { if app_path_under(asked.path, root) -> handler(asked) else -> HookDecision.Continue }
+}
+
+// Whether request path `path` is `root` or below it; `root` has no trailing
+// slash, so "" holds every path.
+priv app_path_under: fn(path: String, root: String) -[]> Bool Never! {
+    path == root || path.starts_with("{root}/")
+}
+
+// The layer that runs `web.requests` on each request, then answers it as the
+// handlers decided: the next layer or route gets the request they hand on, a
+// `.Cancel` is 403 and a `.Fail` is its own response.
+priv app_request_layer: fn(next: HTTPHandler) -[Net, FS.Read]> HTTPHandler Never! {
+    http_server.__handler(fn(asked: HTTPRequest) { app_request_answer(next, asked.copy()) })
+}
+
+priv app_request_answer: fn(next: HTTPHandler, asked: &&HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
+    if requests.run(asked) == {
+        .Continue(kept) -> next.handle(kept)
+        .Cancel -> Ok(http_server.response(403, "Forbidden"))
+        .Fail(reply) -> Ok(reply)
     }
 }
 

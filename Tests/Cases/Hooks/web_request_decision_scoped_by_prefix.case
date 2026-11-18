@@ -1,0 +1,13 @@
+# web.requests is a declared decision point that every request a web app
+# serves passes before its routes, through the same point mechanism as
+# hook_runtime_zero_cost. A handler scoped with web.under("/admin", ...)
+# answers /admin and /admin/users itself (401) and leaves /about and
+# /administrator to their routes, at -O0 and -O2.
+fixture: WebRequestDecisionScopedByPrefix.fixture
+env: NO_COLOR=1
+step default: jet run -O0 main.jet
+exit: 0
+stdout: = "/about: 200 page /about\n/admin: 401 sign in for /admin\n/admin/users: 401 sign in for /admin/users\n/administrator: 200 page /administrator\n"
+step release: jet run -O2 main.jet
+exit: 0
+stdout: == default

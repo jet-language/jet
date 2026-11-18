@@ -1,7 +1,10 @@
 # A run-time typed hook point costs nothing when no handler is attached: a
 # run of a declared hook point that no code can attach to is its fallback,
-# with no call, no hook and no process cell in the generated IR. A point a
+# and a run of such a decision point is its payload, continued, with no
+# dispatch, no hook and no process cell in the generated IR. A point a
 # handler is attached to keeps its dispatch, and every tier prints the same.
+# The web side of the same point, web.requests scoped by path prefix, is
+# web_request_decision_scoped_by_prefix.
 fixture: HookRuntimeZeroCost.fixture
 env: NO_COLOR=1
 step: jet emit --ir main.jet --fn size
@@ -10,12 +13,17 @@ stdout: !~ "call_runtime" # no call at all: the run is its fallback
 stdout: !~ "jet_hook_run" # no dispatch
 stdout: !~ "jet_hook_new" # no hook is made
 stdout: !~ "jet_rt_move_enter" # no process cell is opened for the point
+step: jet emit --ir main.jet --fn checked
+exit: 0
+stdout: !~ "jet_decision_hook_run" # no dispatch: the run is the payload, continued
+stdout: !~ "jet_decision_hook_new" # no decision hook is made
+stdout: !~ "jet_rt_move_enter" # no process cell is opened for the point
 step: jet emit --ir main.jet --fn double
 exit: 0
 stdout: ~ "call_runtime jet_hook_run" # an attached point dispatches
 step: jet run -O0 main.jet
 exit: 0
-stdout: = "60 8\n"
+stdout: = "60 8 5\n"
 step: jet run -O2 main.jet
 exit: 0
-stdout: = "60 8\n"
+stdout: = "60 8 5\n"

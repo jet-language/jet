@@ -605,10 +605,11 @@ IRProgram: struct {
     // (FnBody.role), in row order, found once by ir_program_bind: a precise
     // operation finds its helper among them (ir_core_role_row).
     core_roles: [Int]{[Int]{}},
-    // The declared hook points that no handler can reach, found once by
-    // ir_program_bind (ir_quiet_points): every read of one is the receiver
-    // of a `run`, so no code attaches a handler, and each run is its
-    // fallback (ir_hook_run).
+    // The declared hook and decision points that no handler can reach, found
+    // once by ir_program_bind (ir_quiet_points): every read of one is the
+    // receiver of a `run`, so no code attaches a handler, and each run is its
+    // fallback (ir_hook_run) or its own payload, continued
+    // (ir_decision_hook_run).
     quiet_points: [String:Bool]{[String:Bool]{}},
     // Whether this program's code computes compile-time values (comptime
     // items, not a build invocation): outside an `#Impure` block, a Core
@@ -1223,11 +1224,12 @@ ir_declared_owner: fn(declared: [String:String], module_identity: ModuleID, owne
     }
 }
 
-// IRProgram.quiet_points of `p`: the immutable declared hook points
-// (ir_point_type) that the program reads only as the receiver of a Hook
-// `run`. No read of such a point reaches an `on`, a `once` or an
-// `on_priority`, nor passes it along to code that could, so no handler is
-// ever attached, and each run returns its own fallback.
+// IRProgram.quiet_points of `p`: the immutable declared hook and decision
+// points (ir_point_type) that the program reads only as the receiver of a
+// Hook or DecisionHook `run`. No read of such a point reaches an `on`, a
+// `once` or an `on_priority`, nor passes it along to code that could, so no
+// handler is ever attached: each Hook run returns its own fallback, and each
+// DecisionHook run continues with its own payload.
 ir_quiet_points: fn(p: IRProgram) -[]> [String:Bool] {
     run := [String:Bool]{}
     other := [String:Bool]{}
@@ -1235,7 +1237,7 @@ ir_quiet_points: fn(p: IRProgram) -[]> [String:Bool] {
         receivers := [Int:Bool]{}
         loop node in function.tree.nodes {
             if node.kind == .HandleMethod(receiver, operation, _) {
-                if operation == .EventMethod(route) && route == "jet_std.JetHook.run" {
+                if operation == .EventMethod(route) && (route == "jet_std.JetHook.run" || route == "jet_std.JetDecisionHook.run") {
                     receivers[receiver] = true
                 }
             }
