@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112225,
+    "rev": 112242,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -82457,76 +82457,6 @@
       "completedAt": "2026-11-18T00:38:10.030Z"
     },
     {
-      "id": "c0awq7vy",
-      "num": 6790,
-      "title": "FmtCorpus red on dev: 11,959 of 18,883 sources are not in jet fmt form",
-      "body": "Found 2026-11-13 by Lander5 (bare-dev baseline on 78d3db56d8 with the g6-cut3b jet, which is built from 78d3db56d8 plus a few unrelated SUBs): `jet Tools/agent/FmtCorpus.jet --check` gives rc 1 with 11959 of 18883 sources not in fmt form, and the guard fmt_is_lossless_on_supported_source_corpus FAILs. Most likely root: the lambda-shape1 cutover 78d3db56d8 wrote a lambda spelling the formatter prints differently. The cutover commit message and a fmt diff of a few files will tell.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-15",
-          "by": "Main",
-          "text": "c1 cutover attempt 2 (Main, 2026-11-15, batch compiler p181 at a6743a860b). The regen script formatted 13398 of 19891 sources; FmtCorpus --check was ok, FmtLossless passed and the fmt_corpus case passed. The commit was held unpushed because the census of the formatted tree failed on layout-sensitive tools: closed_lists (6 lists flagged once multi-line), memory_kernel_single_home (#Unsafe precondition scan), CompilerData payload-enum counts (6 rises), and agent_workloads production-path strings plus its frozen SHA256SUMS. There is also a formatter defect: `use net: jet.runtime.net` became the retired `use jet.runtime.net` (8 runtime_interface fixtures). Attempt 1 failed earlier on two meaning-changing formatter defects (priv dropped, struct-literal owner type arguments), fixed in 1cd3e72378. Fix owner: MemKernel-6 (formatter alias, layout-independent detectors, tests/agent_workloads left out of the corpus as frozen). Rerun once that lands."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "Root (G5DevX-2, 2026-11-13): the guard fmt_is_lossless fails only on one old-form lambda the lambda-shape1 sweep missed (Examples/Basics/Functions/ReturnedFunctionCall.jet and its copy in the returned_function_call case fixture, E0003). The 11,959 FmtCorpus sources are a separate cause: the corpus was never formatted (seed-b14 pre-cutover fmt gives the same diffs). Fix: a small SUB for the lambda, plus a command SUB that runs jet fmt over the corpus as one cutover."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "FmtCorpus --check rc 0 and the fmt_is_lossless_on_supported_source_corpus guard passes on dev with the batch jet. The root (formatter or source) is fixed once: either jet fmt prints the ratified lambda form, or the sources are reformatted by `jet fmt` in one cutover commit.",
-          "status": "met",
-          "metBy": "TowerKeeper-2",
-          "verifiedBy": null,
-          "evidence": "Merged into #6898 c12: #6898 c12 owns the whole-corpus jet fmt --check guard; the corpus cutover 1c687e2e63 and the empty-lambda stability fix 3dd55d97db are on dev.",
-          "at": "2026-11-15T11:38:37.092Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 2,
-          "text": "jet fmt is idempotent on every corpus source: a second pass changes nothing. G5DevX-2 (2026-11-13) found 3 unstable sources, now left out of the corpus: Jetpack/Store/Tests/StoreIngestLate.jet and two tests/conformance/corpus/core/web files. Proof: they rejoin the corpus, and FmtCorpus --check rc 0.",
-          "status": "met",
-          "metBy": "TowerKeeper-2",
-          "verifiedBy": null,
-          "evidence": "Moved to #6898 c15: fmt idempotency and the three excluded sources belong with the formatter corpus card.",
-          "at": "2026-11-15T11:38:37.987Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 3,
-          "text": "A malformed package.jet in a multi-file jet fmt run is reported with its location and skipped; the rest of the run still formats. Today the whole run is refused with an unlocated InvalidPackageManifest that lists nothing. Proof: a ui case with two files, one under a malformed package.jet.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "29ef007f5e (behavior: a located E1215 at bad/package.jet:1:1, the rest formats, the manifest is left as written) plus 21a89ef8eb (light29, the case`s partial assertions now carry reasons). Case fmt_reports_an_unreadable_package_manifest_and_formats_the_rest 1/0 on Lander`s light29 run.",
-          "at": "2026-11-14T04:04:13.306Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-13T12:55:59.987Z",
-      "updated": "2026-11-15T13:15:59.342Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-15T11:39:47.405Z"
-    },
-    {
       "id": "c0x3j5om",
       "num": 6793,
       "title": "Data-oriented compiler core: interned u32 ids, flat columns, per-phase arenas, no RC, under 1 GB",
@@ -86523,6 +86453,11 @@
         {
           "at": "2026-11-18",
           "by": "Main",
+          "text": "p295 lands DeclTypes c14-c16.r4/c15.r2/c13.r2 as a whole chain; their memory mode is spelled --method=memory, against D-PERF-MEMORY1=A (--lens=memory). Recorded as a defect on c14 (reworded); Lens cuts the --lens cutover SUB for p296, removing --method=memory in one cutover. c13-c16 are not met until it lands."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
           "text": "Main: Lens takes over DeclTypes' unlanded #6841 SUB chain (c38-cfi-unwind.r2 stacked on c11.r4, c17a, c9.r3, c19.r4, c14-c16.r3, c7.r2, c15.r2, c13.r2; c17b.r2 held to land alone after p295). It reviews each SUB statically against its proof, sends fixes as .rN, and owns their p295 failures. Next for Lens: c39 best-in-existence review. Lens r3 of the debug-eval design (SUB Lens-6841-debug-eval-proposal.r3) awaits IfHole's review 3 for c40."
         },
         {
@@ -86680,12 +86615,12 @@
         },
         {
           "n": 14,
-          "text": "`jet perf run` with the memory method reports L1D, LLC and dTLB misses and page faults per source line on Linux x86-64. Proof: `jet test Compiler --profile cases --filter PerfRun/memory_counters_per_line`. (was #6312 c6)",
+          "text": "`jet perf run --lens=memory` (combinable as `--lens=cpu,memory`, per D-PERF-MEMORY1=A; no `--method=memory` spelling) reports L1D, LLC and dTLB misses and page faults per source line on Linux x86-64. Proof: `jet test Compiler --profile cases --filter PerfRun/memory_counters_per_line`. (was #6312 c6)",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:06:26.087Z"
+          "at": "2026-11-18T13:35:15.710Z"
         },
         {
           "n": 15,
@@ -86976,6 +86911,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-18T10:45:00.111Z"
+        },
+        {
+          "n": 41,
+          "text": "A breakpoint on a member of a generic-module instance hits, and `s` steps into the call (Lens probe genmod.jet:6 in SUB Lens-6841-debug-eval-proposal.r4; the control bounds.jet:4 hits today). Proof: `jet test Compiler --profile cases --filter Debug/breakpoint_in_generic_module_instance` at O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T13:09:33.334Z"
+        },
+        {
+          "n": 42,
+          "text": "The native debugger evaluator build answers review 4 (Docs/Audits/2026-11-18-debug-eval-native-review-4.md) Q1-Q4, each with a proof case: Q1 lowering-made calls carry their source node's call-site index (`loop_pull` case); Q2 the no-blocking-syscall link check follows wrappers and the stack4 primitive and refuses non-constant syscall numbers (thread_synccall_run, HostSockets, Alloc sites refused); Q3 the stop-report stub is chosen per function, not per Trap.jet file, so raw word helpers and the debug text escape table stay live; Q4 the R7 arena is keyed per fiber (or per carrier), with its cost measured. Proof: `jet test Compiler --profile cases --filter DebugEval/` lists one passing case per Q.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T13:44:01.492Z"
         }
       ],
       "refs": [],
@@ -86983,9 +86936,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-18T12:07:43.513Z",
+      "updated": "2026-11-18T13:48:49.035Z",
       "updatedBy": "Main",
-      "criteriaLastN": 40
+      "criteriaLastN": 42
     },
     {
       "id": "c0in2dft",
@@ -89651,6 +89604,19 @@
             "profile": "ui",
             "filter": "module_var_borrow_across_call"
           }
+        },
+        {
+          "n": 5,
+          "text": "A mutable module variable in a generic module body checks and runs as spec.md 'Generic modules' allows; today it is refused with E0003 (Lens probe in SUB Lens-6841-debug-eval-proposal.r4).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T13:09:34.486Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Modules/generic_module_mutable_global"
+          }
         }
       ],
       "refs": [],
@@ -89662,8 +89628,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T02:29:42.821Z",
-      "updated": "2026-11-17T01:48:21.273Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-18T13:09:34.486Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5
     },
     {
       "id": "c09qojqz",
@@ -95000,7 +94967,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:50:53.787Z",
-      "updated": "2026-11-18T12:50:54.427Z",
+      "updated": "2026-11-18T13:48:33.042Z",
       "updatedBy": "Main"
     },
     {
@@ -98230,12 +98197,16 @@
         },
         {
           "n": 13,
-          "text": "`assert_eq(x, None)` gets its registered error, and L0528 does not fire on generated bodies (#3903). Proof: `jet test Compiler --profile ui --filter assert_eq_none` and `--filter L0528_generated`. (was #6425 c11)",
+          "text": "`assert_eq(x, None)` on an optional checks and runs and fails with the assertion report when x holds a value (#3857), and the retired L0528 never fires on generated bodies (#3903).",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T01:17:26.528Z"
+          "at": "2026-11-18T12:57:28.658Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "assert_eq_none"
+          }
         },
         {
           "n": 14,
@@ -98294,6 +98265,20 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-18T12:57:25.719Z"
+        },
+        {
+          "n": 20,
+          "text": "L0302 takes the form the state-machine design gate on #6326 c4 decides (a tidy error, a jet fmt rewrite or a jet lint report), with paired fixtures.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T12:57:27.807Z",
+          "blockedBy": "#6326",
+          "proof": {
+            "profile": "ui",
+            "filter": "UILint/L0302"
+          }
         }
       ],
       "refs": [],
@@ -98304,9 +98289,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:11:42.636Z",
-      "updated": "2026-11-18T12:57:26.569Z",
+      "updated": "2026-11-18T12:57:28.658Z",
       "updatedBy": "Main",
-      "criteriaLastN": 19
+      "criteriaLastN": 20
     },
     {
       "id": "c0ozqnbt",
@@ -173999,6 +173984,1899 @@
       "created": "2026-11-18T01:24:54.560Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-18"
+    },
+    {
+      "id": "D-LOOP-PAIRS1",
+      "cardId": "c0jt78qz",
+      "group": "language",
+      "title": "What a two-name loop over a list of records binds",
+      "situation": "A loop with two names, `loop (a, b) in xs`, binds the index and the item. A record here is a value written in braces with named members, such as `{package: \"a\", name: \"b\"}`. Over a list of records with members called a and b, a reader may expect each name to get its member. Since 2026-11-11 the compiler does that whenever either name is a member, although the ratified rule said two-name loops stay index and item. You decide the rule. We recommend writing the destructure in braces, as every other record destructure is written.",
+      "gist": "Should `loop {a, b} in pairs` destructure each record, with `loop (a, b)` always meaning index and item?",
+      "lesson": "Destructuring takes a record apart into named bindings. In Jet a record is written in braces, and a binding destructures it with braces too: `{x, y}: pair`. A loop with two names in parentheses binds the index and the item.",
+      "explainer": "Beginner path: `loop (i, row) in rows` gives the index and the row, as today. To take each record apart, write `loop {name, price} in items`, the same braces a binding uses. A paren loop whose first name is a member of the record is an error that shows the brace spelling, because that name would only ever hold the index.\n\nExpert path: renames work as in a binding, `loop {name: n, price: p} in items`. Struct items use the struct pattern a binding writes, `loop Item{name, price} in items`. Maps keep `loop (key, value) in map`. The brace head lowers to an ordinary loop plus a destructure binding, so every tier runs the same code.",
+      "story": "Ana loops `loop (package, name) in deps` over records with package and name members. Under the ratified rule `package` silently held the index, and her printed list showed numbers. Under the recommendation she gets an error at `(package, name)` that shows `loop {package, name} in deps`, and her program is right on the first run.",
+      "inWild": "// JavaScript: braces destructure an object in a loop head\nfor (const {pkg, name} of deps) { console.log(pkg, name) }\n\n// Rust: parens destructure a tuple; the index needs enumerate()\nfor (i, (pkg, name)) in deps.iter().enumerate() {}",
+      "detail": "Today: sema destructures when either name is a member of the item's named-tuple type. The code is at Compiler/JetSema/Source/Sema/Statements.jet:3458-3488 and 10257-10265. It came in commit d3c7589954, for #6281 c185.\n\nStruct items never destructure: the trigger reads only `Type.Tuple` items (Statements.jet:3463). Names that name no member keep the index and item. A wrong member name is E0313, so `loop (i, name)` over records with a `name` member is an error today. A wrong count is E0315. The spec states the current rule (Docs/Spec/spec.md:708-714).\n\nRatified around it: S73 named records only, and D-RECORD-BRACE1=A writes records in braces. S74 destructuring reuses bracket conventions. It says two-binding loops such as `loop (i, item) in xs` are unchanged (Docs/Spec/syntax-decisions.md:1384-1387). D-RANGE-EXCL1=C makes `loop (i, item) in xs` yield index then item (syntax-decisions.md:2150-2151). The shipped rule overrode those two lines without a ballot.\n\nParser: `loop {` opens the infinite loop (Compiler/JetParser/Source/Parser/Statements.jet:1285), and the brace binding patterns live at Statements.jet:1581-1615.\n\nRow: #6895 c7 (TowerKeeper ballot list, 2026-11-15).",
+      "options": [
+        {
+          "key": "A",
+          "name": "Braces destructure, parens bind index and item",
+          "detail": "`loop {a, b} in xs` destructures each record by member name, with renames as in a binding; struct items take the struct pattern, `loop Dep{a, b} in xs`. `loop (a, b) in xs` always binds index and item. A paren head whose first name is a member of the item record is an error that offers the brace spelling. `loop (i, name) in deps` stays index and item, with no error.",
+          "technical": "The parser accepts a binding's brace or struct pattern in a loop head. `loop {` opens an infinite loop today. The parser tells the two apart by an `in` after the matching `}`. A loop body is never followed by `in`, because `in` cannot start a statement. Sema lowers the head to the hidden-row loop plus the existing destructure binding. The name-trigger in Statements.jet becomes the first-name error check.",
+          "code": "loop {package, name} in deps {\n    print(\"{package}/{name}\")\n}\nloop (i, dep) in deps {\n    print(\"{i}: {dep.name}\")\n}"
+        },
+        {
+          "key": "B",
+          "name": "Names decide (the current behavior)",
+          "detail": "`loop (a, b) in xs` destructures named-tuple items when either name is a member; otherwise it binds index and item. Struct items always bind index and item.",
+          "technical": "Shipped in d3c7589954, against the S74 line that keeps two-binding loops unchanged. One spelling, whose meaning depends on the record's member names.",
+          "code": "loop (package, name) in deps {\n    print(\"{package}/{name}\")\n}"
+        },
+        {
+          "key": "C",
+          "name": "Refuse the ambiguous loop",
+          "detail": "A paren loop whose first name is a member of the record is an error. Destructuring takes two lines: `loop dep in deps` then `{package, name}: dep`.",
+          "technical": "No new loop form. The name-trigger becomes an error.",
+          "code": "loop dep in deps {\n    {package, name}: dep\n    print(\"{package}/{name}\")\n}"
+        },
+        {
+          "key": "D",
+          "name": "Always index and item",
+          "detail": "Return to the ratified rule: two names in parentheses always bind index and item, with no diagnostic.",
+          "technical": "Remove the destructure path from Statements.jet. This is the S74 and D-RANGE-EXCL1=C rule as written before d3c7589954.",
+          "code": "loop (package, name) in deps {\n    // package is the index, name is the whole record\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript",
+          "note": "Braces in the loop head destructure an object by property name, which is A's spelling.",
+          "code": "for (const {pkg, name} of deps) {}"
+        },
+        {
+          "lang": "Python",
+          "note": "Parens destructure a tuple by position; the index needs enumerate(). Records by name need attribute access.",
+          "code": "for i, (pkg, name) in enumerate(deps): ..."
+        },
+        {
+          "lang": "Swift",
+          "note": "Parens destructure a tuple; the index needs enumerated().",
+          "code": "for (i, dep) in deps.enumerated() {}"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "One mark should mean one thing. Braces already mean a record in Jet, so braces in a loop head destructure one, and parens keep their single meaning, index and item, whatever the member names are.",
+        "gains": [
+          "A loop's meaning never depends on the record's member names.",
+          "Destructuring is spelled the same in a loop and in a binding.",
+          "The old trap becomes an error with the fix in it."
+        ],
+        "losses": [
+          {
+            "loss": "A loop head gains a second pattern, the brace form.",
+            "mitigation": "It is the same brace pattern a binding already writes, so there is nothing new to learn."
+          },
+          {
+            "loss": "`loop {` no longer always opens an infinite loop; the parser and editor grammars must look past the closing brace for `in`.",
+            "mitigation": "A loop body is never followed by `in`, so one lookahead decides it, and the infinite loop keeps its spelling."
+          },
+          {
+            "loss": "The index and a destructure together still take two lines.",
+            "mitigation": "Write `loop (i, row) in rows` and then `{a, b}: row`, the same binding the loop uses."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Renaming a member can silently change what the loop binds, and it overrides the ratified index-and-item rule."
+          },
+          {
+            "key": "C",
+            "reason": "Every destructuring loop needs an extra line and an extra name."
+          },
+          {
+            "key": "D",
+            "reason": "It brings back the trap #6281 found, which stays silent whenever both names still type-check, as in string interpolation."
+          }
+        ],
+        "tradeoff": "A brace loop head, and one parser lookahead after `loop {`, for loops whose meaning is visible in the source."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: Speed-3-3-2. The recommendation holds after repair: the ballot now says the shipped rule overrode the ratified index-and-item line, and names the `loop {` parse clash and its lookahead. A's error now fires on the first name only, so `loop (i, name)` stays legal."
+      },
+      "checkInstructions": "Under A, four checks pass at O0, O1 and O2. `jet test Compiler --profile ui --filter loop_two_bindings_over_pairs` shows the first-name error with the brace fix. `--profile cases --filter Loops/brace_destructure_head` runs a brace loop with and without renames, and a struct-pattern loop. An infinite `loop {` and an index loop `loop (i, name)` over records stay quiet. Under B, the shipped destructure gains a fixture. Under C, only the error fixture. Under D, an index-and-item fixture over records.\n\nEvidence labels: B is shipped; A, C and D are not built.",
+      "surface": {
+        "gist": "Should braces destructure records in a loop head, with parens always meaning index and item?",
+        "lesson": "Destructuring takes a record apart into named bindings. Jet writes records and their destructures in braces. Two names in parentheses in a loop are the index and the item.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Braces destructure",
+            "gist": "`loop {a, b} in xs` destructures; `(a, b)` is always index and item.",
+            "gains": [
+              "Meaning never depends on member names.",
+              "Same spelling as a binding."
+            ],
+            "losses": [
+              "A second loop-head pattern.",
+              "The parser looks past `}` for `in`."
+            ],
+            "proposed": {
+              "code": "loop {package, name} in deps {}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Names decide",
+            "gist": "Parens destructure when a name is a member (today).",
+            "gains": [
+              "No new spelling."
+            ],
+            "losses": [
+              "A rename can change the loop silently.",
+              "Overrides the ratified index-and-item rule."
+            ],
+            "proposed": {
+              "code": "loop (package, name) in deps {}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Refuse it",
+            "gist": "Error; destructure on its own line.",
+            "gains": [
+              "No new spelling."
+            ],
+            "losses": [
+              "An extra line in every such loop."
+            ],
+            "proposed": {
+              "code": "loop dep in deps {\n    {package, name}: dep\n}"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Index and item",
+            "gist": "Parens always bind index and item, silently, as first ratified.",
+            "gains": [
+              "Simplest rule."
+            ],
+            "losses": [
+              "The silent trap returns."
+            ],
+            "proposed": {
+              "code": "loop (i, dep) in deps {}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Braces already mean a record in Jet, so the loop head uses them too.",
+          "gains": [
+            "One meaning per mark.",
+            "The trap becomes a fixable error."
+          ],
+          "losses": [
+            {
+              "loss": "A second loop-head pattern.",
+              "mitigation": "The same braces a binding writes."
+            },
+            {
+              "loss": "A lookahead after `loop {`.",
+              "mitigation": "A body is never followed by `in`, so one look decides."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Meaning depends on member names."
+            },
+            {
+              "key": "C",
+              "reason": "Extra line per loop."
+            },
+            {
+              "key": "D",
+              "reason": "Silent trap."
+            }
+          ],
+          "tradeoff": "A brace head, for a loop meaning you can see."
+        },
+        "trio": {
+          "current": {
+            "note": "Today the member names decide whether the loop destructures.",
+            "code": "loop (package, name) in deps {}  // destructures\nloop (i, dep) in deps {}         // index and item"
+          },
+          "wild": {
+            "lang": "JavaScript",
+            "note": "Braces destructure an object in a for-of head.",
+            "code": "for (const {pkg, name} of deps) {}"
+          }
+        }
+      },
+      "designAway": [],
+      "draftedBy": "Main",
+      "reviewedBy": "Speed-3-3-2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-18T13:48:33.042Z"
+    },
+    {
+      "id": "D-DBG-DEADLOCK1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "A wait cycle among tasks stops the program and names the cycle",
+      "situation": "Two tasks that each wait for the other hang forever. Today a Jet program in that state prints nothing and never exits; a probe of two tasks receiving from each other's channel ran until it was killed. The runtime owns every channel, lock and join, so it can see a cycle of waiting tasks the moment the last one blocks. You decide what happens then. We recommend that each task in the cycle fails as a panicking task does, with a message naming each task, what it waits on and where. Other tasks keep running.",
+      "gist": "When tasks wait on each other in a cycle, should those tasks fail and name the cycle?",
+      "lesson": "A deadlock is a set of tasks where each waits for another in the set, so none can ever move. Go reports one only when every goroutine is stuck. Java finds lock cycles when asked. Jet's runtime sees every wait, so it can find a cycle as soon as it forms.",
+      "explainer": "Beginner path: if two tasks wait on each other, each one fails the way a task that panics does. Whoever joins them gets the failure, with a message listing each task, what it waits for, and the line where it waits. If the main task is in the cycle, the program stops. Under jet debug, the failure is a breakpoint, and `tasks` shows the cycle.\n\nExpert path: the scheduler keeps a wait-for edge for each blocked task: the lock's holder, the joined task, or the tasks that still hold a sender for an empty channel. A sender held outside any task, such as in module storage, gives no edge. When a task blocks, the scheduler walks edges from it, bounded by the number of blocked tasks.\n\nA wait under a deadline is never in a cycle, since it can still end. Neither is a wait on I/O, a timer or an FFI call, so there are no false failures.",
+      "story": "Sam's pipeline has a reader task and a writer task joined by two channels. Under load, the writer waits for the reader's reply while the reader waits for room on the writer's channel. Today the service just stops answering. With A, both tasks fail, and the log shows both tasks, both channel lines and both stacks, and the test fails at once instead of timing out.",
+      "inWild": "// Go: only when every goroutine is blocked\nfatal error: all goroutines are asleep - deadlock!\n\ngoroutine 1 [chan receive]:\nmain.main()\n\t/app/main.go:12 +0x5c",
+      "detail": "Probe deadlock.jet on the p294 compiler (dev 3c593a7f16): two tasks each receive from the other's channel; `jet run` printed nothing and was killed by `timeout 45` (exit 124). Fact F1 in the review.\n\nCode: Compiler/JetRuntime/Source/Channel.jet:181 (channel_receive), Sync.jet:419 (sync_park) and Fiber.jet:134 (fiber_park) park tasks without recording what they wait on. #6841 c7 already records the awaited task for joins.\n\nA task that panics fails its join with `.Panicked(reason)` and does not stop other tasks (Docs/Spec/spec.md:4603-4604), so A delivers a deadlock the same way. Knowing which tasks hold a channel's senders means counting sender handles per task when they move. The cited review Docs/Audits/2026-11-18-best-debugger-profiler.md (axis D8) is not on dev.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Fail the tasks of any wait cycle, in every build",
+          "detail": "When the last task of a cycle blocks, each task in it fails as a panicking task does: its join returns `.Panicked` with the cycle, and its scope unwinds. The message names each task, its wait and its line. If the main task is in the cycle, the program stops. Partial cycles are found while other tasks run.",
+          "technical": "Wait-for edges kept by the scheduler for locks, joins and channels; a bounded walk on each block. Channel edges need a per-task count of sender handles, updated when a sender moves between tasks. Waits under a deadline give no edge. The failure goes through the task panic path, so `context.trace`, `.Panicked` and jet debug's stop all apply.",
+          "code": "deadlock: tasks wait on each other\n  task 2 (reader)  waits to send on `replies`   pipeline.jet:41\n  task 3 (writer)  waits to receive on `jobs`   pipeline.jet:58\n  task 2 holds the only sender of `jobs`\n  task 3 holds the only receiver of `replies`"
+        },
+        {
+          "key": "B",
+          "name": "Report only when every task is stuck",
+          "detail": "Like Go: when no task can run, the program stops with a deadlock message. A cycle among some tasks while others run is not reported.",
+          "technical": "A check when the run queue empties and no timer or I/O wait is pending.",
+          "code": "deadlock: no task can run\n  task 1 waits to receive on `done`  main.jet:12"
+        },
+        {
+          "key": "C",
+          "name": "Show cycles in the debugger only",
+          "detail": "The program behaves as today. `jet debug` and `jet inspect live` show waits and mark cycles when asked.",
+          "technical": "The same edges, read only by tools.",
+          "code": "(Jet) tasks\n  2 reader  blocked  on send `replies`  (cycle with 3)\n  3 writer  blocked  on receive `jobs`  (cycle with 2)"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "Fatal error only when all goroutines block; partial deadlocks hang. This is option B's shape.",
+          "code": "fatal error: all goroutines are asleep - deadlock!"
+        },
+        {
+          "lang": "Java",
+          "note": "ThreadMXBean finds monitor and lock cycles when called; nothing stops on its own. This is option C's shape.",
+          "code": "long[] ids = ManagementFactory.getThreadMXBean().findDeadlockedThreads();"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A wait cycle with no deadline never ends by itself, so failing its tasks loses nothing and turns a silent hang into a named bug. Servers usually deadlock in part while other tasks keep running, which only A catches, and the rest of the server keeps serving.",
+        "gains": [
+          "A hang becomes a stop that names the tasks and lines.",
+          "Partial deadlocks in servers are caught, not only whole-program ones.",
+          "Tests fail at once instead of timing out."
+        ],
+        "losses": [
+          {
+            "loss": "Every sender move updates a per-task count, a small cost on channel-heavy code.",
+            "mitigation": "c6's gauntlet measures it; a sender that never leaves its task costs nothing."
+          },
+          {
+            "loss": "A cycle hidden behind a sender kept in module storage is not caught.",
+            "mitigation": "`jet inspect live` still shows every blocked task and its wait."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A server with one idle listener never has every task stuck, so its deadlocks still hang silently."
+          },
+          {
+            "key": "C",
+            "reason": "Production hangs stay silent until someone attaches a tool."
+          }
+        ],
+        "tradeoff": "A short walk of wait edges on each block, for named deadlocks instead of hangs."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: `jet test Compiler --profile cases --filter Tasks/wait_cycle_stops_with_the_cycle` covers a channel cycle, a lock cycle and a join cycle at O0, O1 and O2. Each fails both tasks with `.Panicked` naming both, while a third task keeps running and finishes.\n\nA task waiting on a timer, or a receive under a deadline, is never reported. A cycle that includes the main task stops the program. Under B: the same program with the third task hangs, and without it stops. Under C: the program hangs and `tasks` marks the cycle.\n\nEvidence labels: the hang is measured (probe deadlock.jet). The walk's cost is inferred, bounded by the number of blocked tasks; c6's gauntlet measures it.",
+      "surface": {
+        "lesson": "A deadlock is tasks waiting on each other forever. Today a Jet program in one hangs silently. The runtime sees every wait, so it can spot the cycle when it forms.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Fail the cycle's tasks",
+            "gist": "Each task in the cycle fails like a panicking task, naming its wait and line.",
+            "gains": [
+              "Hangs become named failures.",
+              "Catches deadlocks while other tasks still run."
+            ],
+            "losses": [
+              "A small cost when a sender moves between tasks."
+            ],
+            "proposed": {
+              "code": "deadlock: tasks wait on each other\n  task 2 (reader)  waits to send on `replies`  pipeline.jet:41\n  task 3 (writer)  waits to receive on `jobs`  pipeline.jet:58"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Only when all are stuck",
+            "gist": "Stop only when no task at all can run, as Go does.",
+            "gains": [
+              "The simplest check."
+            ],
+            "losses": [
+              "Servers with an idle listener still hang."
+            ],
+            "proposed": {
+              "code": "deadlock: no task can run"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Debugger only",
+            "gist": "The program hangs as today; tools mark the cycle.",
+            "gains": [
+              "No change to running programs."
+            ],
+            "losses": [
+              "Production hangs stay silent."
+            ],
+            "proposed": {
+              "code": "(Jet) tasks\n  2 reader  blocked  (cycle with 3)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A wait cycle with no deadline never ends, so failing its tasks costs nothing and names the bug. Only A catches partial deadlocks, and the rest keeps serving.",
+          "gains": [
+            "Named failures instead of silent hangs.",
+            "Partial deadlocks caught."
+          ],
+          "losses": [
+            {
+              "loss": "A small cost when senders move.",
+              "mitigation": "The overhead gauntlet measures it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Misses deadlocks while any task still runs."
+            },
+            {
+              "key": "C",
+              "reason": "Production hangs stay silent."
+            }
+          ],
+          "tradeoff": "A short check on each wait, for named deadlocks."
+        },
+        "trio": {
+          "current": {
+            "note": "Two tasks waiting on each other hang until killed, with no output.",
+            "code": "$ timeout 45 jet run deadlock.jet\n$ echo $?\n124"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Reported only when every goroutine is blocked.",
+            "code": "fatal error: all goroutines are asleep - deadlock!"
+          }
+        },
+        "gist": "When tasks wait on each other in a cycle, should those tasks fail and name the cycle?"
+      },
+      "designAway": [],
+      "draftedBy": "Main",
+      "reviewedBy": "Speed-3-3-2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-18T13:48:41.212Z"
+    },
+    {
+      "id": "D-DBG-UI1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "The debugger and profiler window is Canvas, grown to RemedyBG's panels and one timeline",
+      "situation": "The best native debuggers show source, stack, locals, watches and threads at once, and the best profilers draw a timeline you can zoom. Jet already has one graphical surface, Canvas, opened with jet dev --canvas in a browser. Its debugger view can step, show locals, evaluate named watches, print and list up to 32 stack frames. It has no task list, no replay controls and no profile timeline. You decide where the full debugger and profiler window lives. We recommend growing Canvas, so Jet keeps one graphical tool. The other paths are a separate native window or a terminal interface.",
+      "gist": "Should the full debugger and profiler window be Canvas, grown, rather than a second graphical tool?",
+      "lesson": "RemedyBG and the RAD Debugger show every debugger panel at once in a fast native window. Tracy and Superluminal draw a zoomable timeline of every thread. Jet's Canvas already shares one live session between its editor, preview and debugger views, so a debugger panel there sees the same source and edits.",
+      "explainer": "Beginner path: run `jet dev --canvas app.jet`. The Debug view shows source with breakpoints, the call stack, locals, watches and the task list together. The Profile view opens a trace and draws samples, zones, waits and I/O on one zoomable timeline. A crash dump or a recording opens in the Debug view.\n\nExpert path: the views read the existing Canvas session and debug documents, extended with watches, tasks, frames and replay positions. The Profile view reads the canonical trace. The console and DAP stay for terminals and other editors. Canvas sends source edits through its checked transactions, so a fix made while stopped goes through the same path as any edit.",
+      "story": "Noor stops her game at a breakpoint in Canvas. The stack, locals and the task list sit beside the source. She opens last night's trace in the Profile view and sees one task's waits line up with the long frames. She edits the function in the same window and the preview picks it up.",
+      "inWild": "# RAD Debugger: one native window, every panel docked\n$ raddbg --auto_run game.exe\n# source, watch, call stack, threads, disassembly, memory panels",
+      "detail": "Today: `jet dev --canvas` serves Canvas to a browser (Docs/Spec/Reference/canvas-protocol.md). Its debug session (canvas-protocol.md:288-330) runs under Jet's own native debugger. It takes step, next, continue, finish, locals, print and backtrace, plus named watches evaluated at the stopped frame. Each command is one HTTP request.\n\nThe bounded limits are 32 live sessions, 64 commands, 128 breakpoints, 32 watches, 32 call-stack frames and 128 trace entries (canvas-protocol.md:326-327).\n\nD-PERF-MEMORY1=A already adds a Memory metric to Canvas's code map from a saved trace. D-PROGRAM-FORM1=A makes Canvas a co-editor of the program. Core also has a native UI stack (Core/UI, with a Wayland backend) and a terminal UI library (Core/TUI).\n\nThe cited review Docs/Audits/2026-11-18-best-debugger-profiler.md (axis D11) is not on dev.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Grow Canvas",
+          "detail": "Canvas's Debug view gains every panel at once: source, stack, locals, watches, tasks, and replay controls. A Profile view draws the trace timeline. Dumps, recordings and traces open there. No new command.",
+          "technical": "Extends the Canvas debug document with tasks, frames and replay positions, and raises its watch and stack bounds or pages them. Adds a profile document over the canonical trace, which the server reduces to the zoom level shown, so a large trace never ships whole to the browser. The console and DAP remain.",
+          "code": "$ jet dev --canvas game.jet\n# Debug view: source | stack | locals | watches | tasks\n# Profile view: open game.jettrace, zoom the timeline"
+        },
+        {
+          "key": "B",
+          "name": "A separate native window",
+          "detail": "`jet debug --ui` and `jet perf view --ui` open a native window built on Core/UI, with no browser. Canvas keeps its smaller debug view.",
+          "technical": "A second graphical client with its own panels, beside Canvas.",
+          "code": "$ jet debug --ui game.jet\n$ jet perf view --ui game.jettrace"
+        },
+        {
+          "key": "C",
+          "name": "A terminal interface",
+          "detail": "`jet debug --tui` shows panels in the terminal with Core/TUI; the profile timeline is drawn in text.",
+          "technical": "A text client over the same documents.",
+          "code": "$ jet debug --tui game.jet"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C++ (RemedyBG, RAD Debugger)",
+          "note": "Native windows with every panel docked, separate from any editor.",
+          "code": "$ raddbg --auto_run game.exe"
+        },
+        {
+          "lang": "C++ (Tracy)",
+          "note": "A native profiler window with a zoomable timeline, separate from the debugger.",
+          "code": "$ tracy-profiler"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Jet already has one graphical tool that shares a live session between editor, preview and debugger. Growing it gives the debugger and profiler the same source and edits, with no second window to keep in step.",
+        "gains": [
+          "One graphical tool for editing, debugging and profiling.",
+          "Debugger and profiler share one session and one timeline.",
+          "No new command; Canvas already exists."
+        ],
+        "losses": [
+          {
+            "loss": "The window runs in a browser, not a native window.",
+            "mitigation": "The console and DAP need no browser; a native Canvas client could be added later on the same documents."
+          },
+          {
+            "loss": "Each step is an HTTP round trip, slower than a native debugger's in-process redraw.",
+            "mitigation": "Canvas is served from the same machine, so each round trip stays local and short."
+          },
+          {
+            "loss": "Today's bounds cut a deep stack at 32 frames and watches at 32.",
+            "mitigation": "The grown document pages frames and watches instead of cutting them."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Two graphical tools would show the same session in two ways and drift apart."
+          },
+          {
+            "key": "C",
+            "reason": "A terminal cannot draw a zoomable timeline well, and the console already covers terminal use."
+          }
+        ],
+        "tradeoff": "A browser-hosted window, for one graphical tool that edits, debugs and profiles."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: a Canvas scenario (Tools/CanvasTest) stops at a breakpoint and shows stack, locals, a watch and the task list together. It shows a 40-frame stack without cutting it, opens a trace and checks one zone and one wait on the timeline, then opens a dump. Under B: `jet test Compiler --profile golden --filter Tooling/Debugging/NativeWindow` renders the same panels. Under C: a terminal snapshot shows them.\n\nEvidence labels: Canvas's current debug commands and bounds are read from canvas-protocol.md; none of the new panels is built.",
+      "surface": {
+        "gist": "Should the full debugger and profiler window be Canvas, grown, rather than a second graphical tool?",
+        "lesson": "The best debuggers show source, stack, locals and threads at once. The best profilers draw a zoomable timeline. Jet's Canvas already has a small debugger view and shares one live session with the editor.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Grow Canvas",
+            "gist": "Every debugger panel and a profile timeline inside jet dev --canvas.",
+            "gains": [
+              "One graphical tool for edit, debug and profile.",
+              "No new command."
+            ],
+            "losses": [
+              "Runs in a browser.",
+              "Each step is a local web request."
+            ],
+            "proposed": {
+              "code": "$ jet dev --canvas game.jet\n# Debug: source | stack | locals | watches | tasks\n# Profile: open game.jettrace"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Native window",
+            "gist": "A separate window on Core/UI, with no browser.",
+            "gains": [
+              "No browser needed."
+            ],
+            "losses": [
+              "A second graphical tool beside Canvas."
+            ],
+            "proposed": {
+              "code": "$ jet debug --ui game.jet"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Terminal panels",
+            "gist": "Debugger panels drawn in the terminal.",
+            "gains": [
+              "Works over SSH."
+            ],
+            "losses": [
+              "A poor timeline."
+            ],
+            "proposed": {
+              "code": "$ jet debug --tui game.jet"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Canvas already shares a live session between editor and debugger. Growing it keeps one graphical tool.",
+          "gains": [
+            "One window to edit, debug and profile.",
+            "Shared session and timeline."
+          ],
+          "losses": [
+            {
+              "loss": "It runs in a browser.",
+              "mitigation": "The console and DAP need no browser."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Two graphical tools drift apart."
+            },
+            {
+              "key": "C",
+              "reason": "Timelines need pixels."
+            }
+          ],
+          "tradeoff": "A browser window, for one graphical tool."
+        },
+        "trio": {
+          "current": {
+            "note": "Canvas's debugger view steps, shows locals and watches, prints, and lists up to 32 frames.",
+            "code": "$ jet dev --canvas game.jet\n# Debug: step, next, continue, finish, locals, print, backtrace, watches"
+          },
+          "wild": {
+            "lang": "C++ (RAD Debugger)",
+            "note": "A native window with every panel docked.",
+            "code": "$ raddbg --auto_run game.exe"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "The window runs in a browser.",
+          "attempts": [
+            "Keep the console and DAP as the browser-free paths: kept.",
+            "Build a native Canvas client on Core/UI over the same documents: possible later without a new design, since the documents are the contract."
+          ],
+          "result": "Browser-free debugging stays available; the graphical tool stays one."
+        }
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": "Speed-3-3-2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-18T13:48:42.158Z"
+    },
+    {
+      "id": "D-DBG-VERBS1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "The jet debug console words for conditions, logpoints, watches, frames, tasks, attach and fix",
+      "situation": "The jet debug console has step, next, continue, finish, break by line number, locals, print, backtrace, help and quit, most with one-letter short forms. The everyday workflow also needs conditional breakpoints, logpoints, watches, a breakpoint list, frame selection, a task list, attach and a fix command. Each new word is a user surface and needs a ballot before it is built. You decide how the words look. We recommend gdb's short words where gdb has one, plain new words where it has none, and Jet expressions after them.",
+      "gist": "What words should the jet debug console use for conditions, logpoints, watches, frames, tasks, attach and fix?",
+      "lesson": "A debugger console reads one command per line. Most people who use one learned gdb or lldb. gdb uses short words such as `break`, `watch` and `frame`. lldb uses longer noun-then-verb commands, with short aliases. Jet's console already uses gdb's words and one-letter forms for stepping, so the question is whether the new commands follow them.",
+      "explainer": "Beginner path: `break cart.jet:88 if total < 0` stops only when the condition holds, and `break 88` still means line 88 of the current file. `log cart.jet:88 \"total={total}\"` prints and keeps going. `watch order.total` stops when that value changes. `breaks` lists breakpoints and watches with their numbers, and `delete 2` removes one. `tasks` lists every task, and `frame 2` selects a caller.\n\nExpert path: every expression is a Jet expression, checked by the compiler in the stopped scope. Expressions must be effect-free, so evaluating one cannot change the program. Conditions run inside the program as compiled code, so a false condition costs a call, not a debugger stop.\n\nOn x86-64, `watch` uses the CPU's four debug registers first, then page protection. `jet debug --attach PID` attaches to a process the user owns. `fix` applies an edited function, under the checks #6919 sets. `jet debug -O2 app.jet` builds at the level the user ships.",
+      "story": "Leo's game loses health points at random. He types `watch player.hp` and continues. The debugger stops at a line in the poison system, shows 40 becoming 35, and names the task. He edits the poison rate, types `fix`, and the running game picks up the new code on the next frame.",
+      "inWild": "# gdb\n(gdb) break cart.c:88 if total < 0\n(gdb) dprintf cart.c:88,\"total=%d\\n\",total\n(gdb) watch order->total\n(gdb) info breakpoints\n(gdb) frame 2\n(gdb) info threads",
+      "detail": "Ratified: D-DBG2/3 names step, next, continue and finish with s, n, c and f, and the locals dump (Docs/Spec/syntax-decisions.md:7514-7516). break, print, backtrace and help ship in the console without a recorded decision. D-DBG-DAP1=A ships the full DAP profile: conditions, hit counts, logpoints, attach and read-only bounded Jet expression evaluation (syntax-decisions.md:7519-7533).\n\nThe #6841 c36 criterion lists the workflow: break by line and by function, conditions, logpoints, step in, over and out, finish, backtrace, frame select, print and watch expressions, and attach. #6919 c5 plans a checked transactional fix. #6841 c40 holds native expression evaluation unbuilt until a redesign answers a failed review. So `print`, conditions and watch expressions under every option wait on it. That proposal and its review are not on dev yet.\n\nCode at dev 3c593a7f16, unchanged on dev since: the console words live in Compiler/JetDebug/Source/Native.jet:405-441. They are s/step, n/next, c/continue, f/finish, b/break, locals, p/print, bt/backtrace and h/help. `break` takes a line number of the current file only (Native.jet:411-425). `print` reads locals only (Native.jet:1153-1158). `jet debug` always builds at -O0 (Native.jet:1066-1067).\n\nA second argument is refused with E2104, so program arguments cannot be passed (Compiler/JetCLI/Source/CLI/Debug.jet:39-42). The cited review Docs/Audits/2026-11-18-best-debugger-profiler.md is not on dev; the landed reviews are Docs/Audits/2026-11-14-debugging-profiling-review.md and 2026-11-17-debug-latency-vs-lldb.md.",
+      "options": [
+        {
+          "key": "A",
+          "name": "gdb's short words with Jet expressions",
+          "detail": "gdb's words where gdb has one: `break <line|file:line|function> [if <expr>]`, `watch <expr>`, `delete <n>`, `frame <n>`, `up`, `down`. Plain new words where gdb has none: `log <file:line> \"<text with {expr}>\"` for gdb's `dprintf`, `breaks` for `info breakpoints`, `tasks` and `task <n>` for `info threads` and `thread <n>`, and `fix`.\n\n`break 12` keeps meaning line 12 of the current file. The existing one-letter forms stay; new words get none. `jet debug --attach PID` attaches. `jet debug` takes `jet build`'s `-O` level and passes the words after `--` to the program.",
+          "technical": "One parser for every command's expression: the compiler's, in the stopped scope, effect-free only, as DAP's read-only evaluation already is. The same words run live, on a dump and in a replay. DAP maps each to its standard request, including hit counts.",
+          "code": "(Jet) break cart.jet:88 if total < 0\n(Jet) log cart.jet:90 \"total={total} items={items.len()}\"\n(Jet) watch order.total\n(Jet) breaks\n  1 break cart.jet:88 if total < 0\n  2 watch order.total\n(Jet) tasks\n  1 run       running   main.jet:20\n  3 discount  blocked   on lock cart.jet:60\n(Jet) frame 2\n(Jet) fix"
+        },
+        {
+          "key": "B",
+          "name": "lldb's noun-then-verb commands",
+          "detail": "`breakpoint set --file cart.jet --line 88 --condition 'total < 0'`, `breakpoint list`, `watchpoint set expression order.total`, `thread list`, `frame select 2`, with short aliases such as `b` and `w`.",
+          "technical": "Each command has a long form with flags and a short alias. The existing stepping words stay as they are, so the console mixes two styles.",
+          "code": "(Jet) breakpoint set --file cart.jet --line 88 --condition 'total < 0'\n(Jet) watchpoint set expression order.total\n(Jet) breakpoint list\n(Jet) frame select 2"
+        },
+        {
+          "key": "C",
+          "name": "Keep the console small; editors get the rest",
+          "detail": "The console keeps its current words and adds only `frame`, `up` and `down`. Conditions, logpoints, watches, tasks and fix are reached through an editor over the ratified DAP profile.",
+          "technical": "No new console parser. DAP already carries conditions, hit counts and logpoints; watch, tasks and fix are built as DAP requests only.",
+          "code": "(Jet) frame 2\n(Jet) up\n// conditions and logpoints: set them in the editor"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C (gdb)",
+          "note": "Short words; `dprintf` is the logpoint and `info breakpoints` the list.",
+          "code": "(gdb) break cart.c:88 if total < 0\n(gdb) watch order->total\n(gdb) info breakpoints"
+        },
+        {
+          "lang": "C (lldb)",
+          "note": "Noun-then-verb, with aliases such as `b` and `w`.",
+          "code": "(lldb) breakpoint set -f cart.c -l 88 -c 'total < 0'\n(lldb) watchpoint set variable total"
+        },
+        {
+          "lang": "Go (Delve)",
+          "note": "gdb-like words with Go expressions; `goroutines` lists tasks.",
+          "code": "(dlv) break cart.go:88\n(dlv) condition 1 total < 0\n(dlv) goroutines"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The console already speaks gdb for stepping. Keeping gdb's words where gdb has them, and plain words where it does not, gives one style and short commands. People who know gdb or Delve learn only `log`, `breaks`, `tasks` and `fix`.",
+        "gains": [
+          "One style, consistent with step and next and their short forms.",
+          "Conditions and logpoints are ordinary Jet expressions.",
+          "The same words work live, on dumps and in replays, without an editor."
+        ],
+        "losses": [
+          {
+            "loss": "`log`, `breaks`, `tasks` and `fix` are new words a gdb user must learn.",
+            "mitigation": "`help` lists them, and an unknown gdb word such as `dprintf` or `info threads` answers with its Jet word."
+          },
+          {
+            "loss": "Short words describe themselves less than lldb's long forms.",
+            "mitigation": "Each word is a common English word, and `help <word>` shows its form and an example."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Its long forms with flags read differently from the existing stepping words, so the console mixes two styles."
+          },
+          {
+            "key": "C",
+            "reason": "A user without an editor, on a server or a crash dump, cannot set a condition, a logpoint or a watch."
+          }
+        ],
+        "tradeoff": "Four new plain words, listed by `help`, for one terse style that works without an editor."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: one Debug case per command (#6841 c36), each running jet debug with no other debugger on PATH. `--filter Debug/watch_stops_at_the_changing_write` shows old and new values. `--filter Debug/conditional_breakpoint_runs_in_process` finishes a million false conditions in under a second. `--filter Debug/tasks_lists_every_task` lists state, wait and stack. A further case shows `break 12` still sets line 12 and `breaks` numbers what `delete` removes.\n\nUnder B: the same cases with the long spellings and their aliases. Under C: the frame cases in the console and the rest as DAP cases.\n\nEvidence labels: the words are not built; the console's current words are read from Native.jet.",
+      "surface": {
+        "gist": "What words should the jet debug console use for conditions, logpoints, watches, frames, tasks and fix?",
+        "lesson": "The console reads one command per line. It already uses gdb's short words and one-letter forms for stepping. The new commands can follow gdb's style, use lldb's longer noun-then-verb style, or stay in the editor.",
+        "options": [
+          {
+            "key": "A",
+            "name": "gdb's short words",
+            "gist": "`break … if`, `watch`, `frame`, plus plain `log`, `breaks`, `tasks`, `fix`.",
+            "gains": [
+              "Matches the console's stepping words.",
+              "Familiar to gdb and Delve users."
+            ],
+            "losses": [
+              "Four words gdb does not have.",
+              "Short words describe themselves less."
+            ],
+            "proposed": {
+              "code": "(Jet) break cart.jet:88 if total < 0\n(Jet) log cart.jet:90 \"total={total}\"\n(Jet) watch order.total\n(Jet) breaks\n(Jet) tasks\n(Jet) frame 2\n(Jet) fix"
+            }
+          },
+          {
+            "key": "B",
+            "name": "lldb's long commands",
+            "gist": "Noun-then-verb commands with flags and short aliases.",
+            "gains": [
+              "Long forms describe themselves."
+            ],
+            "losses": [
+              "Long forms with flags to type.",
+              "Mixes two styles with the stepping words."
+            ],
+            "proposed": {
+              "code": "(Jet) breakpoint set --file cart.jet --line 88\n(Jet) watchpoint set expression order.total"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Editor only",
+            "gist": "The console adds frame words; the rest goes through an editor.",
+            "gains": [
+              "No new console words to learn."
+            ],
+            "losses": [
+              "No conditions or watches without an editor."
+            ],
+            "proposed": {
+              "code": "(Jet) frame 2\n(Jet) up"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The console already uses gdb's words. Keeping that style gives one short spelling per command, with or without an editor.",
+          "gains": [
+            "One style for every command.",
+            "Same words live, on dumps and in replays."
+          ],
+          "losses": [
+            {
+              "loss": "Four new words for gdb users.",
+              "mitigation": "`help` lists them, and gdb's words answer with the Jet word."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Long flagged commands in a second style."
+            },
+            {
+              "key": "C",
+              "reason": "Servers and crash dumps have no editor."
+            }
+          ],
+          "tradeoff": "Four plain new words for one terse style."
+        },
+        "trio": {
+          "current": {
+            "note": "Today the console breaks by line number and prints locals by name only.",
+            "code": "(Jet) b 6\n(Jet) p n + 1\n`n + 1` is not a local here"
+          },
+          "wild": {
+            "lang": "C (gdb)",
+            "note": "Short words with the language's own expressions.",
+            "code": "(gdb) break cart.c:88 if total < 0\n(gdb) watch order->total"
+          }
+        }
+      },
+      "designAway": [],
+      "draftedBy": "Main",
+      "reviewedBy": "Speed-3-3-2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-18T13:48:43.074Z"
+    },
+    {
+      "id": "D-OBSERVE-FLIGHT1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "An always-on flight recorder and typed crash dumps that jet debug opens",
+      "situation": "When a Jet program stops on a panic in production, it prints a trace and exits. Nothing is left to open in a debugger, and nobody knows what the program did in its last seconds. The runtime could keep a small ring of recent events, such as samples, task waits and file or network results. On a stop it could write a dump with every task's stack and typed values. You decide whether that recorder is on by default and where dumps go. We recommend it on in every build, with a measured cost and a build setting to turn it off.",
+      "gist": "Should every Jet program keep a small flight recorder and write a typed dump that jet debug opens when it stops?",
+      "lesson": "A crash dump is a snapshot of a program at the moment it failed, opened later in a debugger. A flight recorder keeps the last few seconds of events in a fixed-size ring, so the dump also shows what led up to the failure. Windows minidumps and Go's flight recorder each do half of this.",
+      "explainer": "Beginner path: when your program panics, it writes a dump file and prints its path. Run `jet debug crash-2026-11-18T10-04-12.jetdump` to see every task's stack and values, with the same commands as a live session. `jet perf attach PID` reads the same recent events from a running program.\n\nExpert path: each thread keeps a ring of recent samples at a low rate, sync events and chokepoint results, in memory reserved at start. On a stop, the panic path writes the dump from reserved memory: every task's stack, values reachable from those frames to a byte budget, and the rings. Values tagged #Secret or #PII are written as redacted, by the same rules the log uses. The default rate must fit the profile-overhead budget, which the gauntlet measures.",
+      "story": "Priya's service panics once a week in production. Today she gets a trace and a guess. With the recorder, the panic leaves a dump. She opens it with jet debug on her laptop, walks the failing task's frames, and reads the last twenty file and network results before the panic. The cause is a truncated reply from one upstream server.",
+      "inWild": "// Go 1.25 flight recorder\nfr := trace.NewFlightRecorder(trace.FlightRecorderConfig{MinAge: 5 * time.Second})\nfr.Start()\n// on trouble:\nfr.WriteTo(file)",
+      "detail": "Today: a stop prints context.trace (Docs/Spec/spec.md:4473) and exits; there is no dump file and no way to open one. `jet perf attach` and `jet inspect live --attach PID` (Compiler/JetCLI/Source/CLI/Inspect.jet:115-136) work only on a process started with observe enabled (#6841 c18-c20).\n\nRatified around it: D-OBSERVE-LIVE1=A defines `jet inspect live` (Docs/Spec/syntax-decisions.md:5990). D-DENY-COST1=A lets code forbid hidden costs such as allocation and locks with a compile error, so a recorder event written from such code must allocate nothing and take no lock. The value tags `#Secret` and `PII` are in spec.md:1145-1205.\n\nThe cited review Docs/Audits/2026-11-18-best-debugger-profiler.md (axes D9 and P10) is not on dev.",
+      "options": [
+        {
+          "key": "A",
+          "name": "On in every build; dumps on every stop",
+          "detail": "Every program keeps the recorder at a low default rate. A stop, a panic or a fatal signal, writes a typed dump and prints its path. Dumps go to `.jet/dumps/` under the working directory, or to a directory a setting names when that one is not writable.\n\nThe directory keeps the newest few dumps, so a crash loop cannot fill the disk, and each file is readable by its owner only. `jet debug <dump>` opens it; `jet perf attach` drains the rings live. A build setting turns the recorder off, or keeps stacks and drops values.",
+          "technical": "Per-thread rings in memory reserved at start; an event write allocates nothing and takes no lock, so code under D-DENY-COST1 denials stays legal. The dump writer runs on the panic and signal paths from reserved memory. Redaction follows the value tags. The overhead gauntlet measures the default rate against c6's budget.",
+          "code": "$ ./orders\npanic: index 12 out of range for a list of 12 (cart.jet:71)\ndump written: .jet/dumps/orders-2026-11-18T10-04-12.jetdump\n$ jet debug .jet/dumps/orders-2026-11-18T10-04-12.jetdump\n(Jet) backtrace\n(Jet) events --last 20"
+        },
+        {
+          "key": "B",
+          "name": "Only for programs started with observe",
+          "detail": "The recorder and dumps exist only when the program was started with observation on, as attach requires today. Other programs print a trace and exit.",
+          "technical": "The same rings and dump writer, enabled by the observe setting at start.",
+          "code": "$ ./orders        # started without observation\npanic: index 12 out of range (cart.jet:71)\n# no dump; only a program started with observation on leaves one"
+        },
+        {
+          "key": "C",
+          "name": "Dumps on request only",
+          "detail": "No ring. A user attaches jet debug to a running or stopped process and writes a dump by command.",
+          "technical": "A `dump` console command; no runtime change.",
+          "code": "$ jet debug --attach 4242\n(Jet) dump orders.jetdump"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C++ (Crashpad + WinDbg)",
+          "note": "A crash writes a minidump that a debugger opens with full types; there is no event history.",
+          "code": "0:000> .ecxr\n0:000> k"
+        },
+        {
+          "lang": "Go (flight recorder)",
+          "note": "Keeps the last seconds of the execution trace in memory and writes it on demand; no dump of values.",
+          "code": "fr.WriteTo(file)"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "The failures that need a dump are the ones nobody expected, so the recorder must already be running. A measured low rate and redaction by value tags make it safe to keep on.",
+        "gains": [
+          "Every production panic leaves a dump jet debug can open.",
+          "The dump shows the last events, not just the final state.",
+          "Secrets and personal data are redacted automatically."
+        ],
+        "losses": [
+          {
+            "loss": "Every program spends a little memory and CPU on the ring.",
+            "mitigation": "The overhead gauntlet measures the default rate against c6's budget; a build setting turns it off."
+          },
+          {
+            "loss": "A dump holds values that were never tagged secret, such as customer records.",
+            "mitigation": "Dumps are owner-only files with a byte budget, and a setting keeps stacks and events but drops values."
+          },
+          {
+            "loss": "A crash loop or a read-only working directory could lose or flood dumps.",
+            "mitigation": "Only the newest few dumps are kept, and a setting names another directory."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Programs are rarely started with observation on, so the surprise failure leaves nothing behind."
+          },
+          {
+            "key": "C",
+            "reason": "A crashed process is gone before anyone can attach, and there is no history."
+          }
+        ],
+        "tradeoff": "A small measured cost in every program, for a dump of every failure."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: `jet test Compiler --profile cases --filter Debug/crash_dump_opens_typed` panics a program with three tasks and opens the dump with backtrace, print and events. A #Secret value shows as redacted, the file is owner-only, and a fourth crash in a row keeps only the newest dumps.\n\n`--filter Perf/attach_drains_flight_ring` attaches to a running program started without flags. A function under `!Mem.Alloc` and `!Lock` still compiles with the recorder on. `node Tools/Gauntlet/Harness/run.mjs --entry profile-overhead` reports the default cost. Under B: the same cases pass only with observation on. Under C: the dump case attaches before the stop.\n\nEvidence labels: nothing here is built; the cost is to be measured.",
+      "surface": {
+        "gist": "Should every Jet program keep a small flight recorder and write a dump jet debug can open when it fails?",
+        "lesson": "A crash dump is a snapshot of a failed program that a debugger opens later. A flight recorder keeps the last few seconds of events, so the dump shows what led to the failure.",
+        "options": [
+          {
+            "key": "A",
+            "name": "On in every build",
+            "gist": "Every stop writes a typed dump with recent events; a setting turns it off.",
+            "gains": [
+              "Every panic leaves a dump to open.",
+              "Secrets are redacted automatically."
+            ],
+            "losses": [
+              "A small measured cost in every program.",
+              "Untagged private values can land in a dump."
+            ],
+            "proposed": {
+              "code": "panic: index 12 out of range (cart.jet:71)\ndump written: .jet/dumps/orders-2026-11-18T10-04-12.jetdump\n$ jet debug .jet/dumps/orders-2026-11-18T10-04-12.jetdump"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Only with observe on",
+            "gist": "Dumps only for programs started with observation on.",
+            "gains": [
+              "No cost unless asked for."
+            ],
+            "losses": [
+              "Surprise failures leave nothing."
+            ],
+            "proposed": {
+              "code": "panic: index 12 out of range (cart.jet:71)\n# no dump unless observation was on at start"
+            }
+          },
+          {
+            "key": "C",
+            "name": "On request only",
+            "gist": "Attach the debugger and write a dump by command.",
+            "gains": [
+              "No runtime change."
+            ],
+            "losses": [
+              "A crashed process can't be reached.",
+              "No event history."
+            ],
+            "proposed": {
+              "code": "(Jet) dump orders.jetdump"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The failures that need a dump are the unexpected ones, so the recorder must already be running.",
+          "gains": [
+            "A dump for every production panic.",
+            "Recent events show the cause."
+          ],
+          "losses": [
+            {
+              "loss": "A small measured cost in every program.",
+              "mitigation": "The overhead gauntlet measures it; a build setting turns it off."
+            },
+            {
+              "loss": "Untagged values in dumps.",
+              "mitigation": "Owner-only files, and a setting keeps stacks but drops values."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Surprise failures leave nothing behind."
+            },
+            {
+              "key": "C",
+              "reason": "Crashed processes can't be reached."
+            }
+          ],
+          "tradeoff": "A small cost everywhere, for a dump of every failure."
+        },
+        "trio": {
+          "current": {
+            "note": "A panic prints a trace and exits; nothing is left to open.",
+            "code": "panic: index 12 out of range (cart.jet:71)\n  at apply_discount (cart.jet:71)"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "The flight recorder keeps recent trace events and writes them on demand.",
+            "code": "fr := trace.NewFlightRecorder(cfg)\nfr.Start()\nfr.WriteTo(file)"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A small measured cost in every program.",
+          "attempts": [
+            "Sample at a low default rate into memory reserved at start: kept, it allocates nothing after start.",
+            "A build setting that turns the recorder off for size- or cost-critical targets: kept."
+          ],
+          "result": "The cost is bounded, measured by the gauntlet, and can be turned off."
+        }
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": "Speed-3-3-2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-18T13:48:44.076Z"
+    },
+    {
+      "id": "D-PERF-CAUSAL1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "A causal profile lens that predicts which line is worth speeding up",
+      "situation": "A sampling profiler shows where time is spent, but not what would get faster if that code got faster. In a program with many tasks, speeding up the hottest line often changes nothing, because another task is the real bottleneck. Causal profiling answers the right question. It briefly slows everything else down to simulate speeding up one line, then measures the effect on throughput. Jet's scheduler owns every pause, and its capability chokepoint sees every finished request. So it can run these experiments without source changes. You decide whether jet perf gets a causal lens. We recommend it.",
+      "gist": "Should jet perf predict how much faster the whole program gets if one line gets faster?",
+      "lesson": "A causal profiler pretends a line is faster by pausing the other tasks a little each time that line runs. If throughput rises, speeding up that line for real would help. The answer is a ranked list of lines with their predicted gain. Coz introduced the method in 2015; it needs a marked progress point.",
+      "explainer": "Beginner path: run `jet perf run --lens=causal server.jet` under a realistic load. `jet perf view` lists lines with their predicted gain, such as \"speed this line up 20%, the program gets 9% faster\", each with a confidence range. Lines with no effect are listed too, so you know what to leave alone.\n\nExpert path: during the run, the profiler picks a line and a virtual speedup. Each time a sample lands on that line, the scheduler delays every other task at its next pause point. Progress points are found automatically: every zone that closes, every request the capability chokepoint answers, and every task that finishes.\n\nA `perf.progress(\"name\")` call adds one by hand. Each progress point is ranked on its own, so cheap health checks never stand in for real requests. A task running foreign code cannot be delayed until it returns to Jet, so its delay is charged when it does, as Coz charges a blocked thread. The lens refuses to rank when the run was too short for the experiments to be significant.",
+      "story": "Lena's image service has a hot resize function at 40% of samples. She is about to rewrite it. The causal lens says making resize 30% faster gains 1%, while the upload parser, at 8% of samples, gains 12% if made 30% faster, because every worker waits on it. She fixes the parser instead.",
+      "inWild": "// Coz (C): one progress point written by hand, then run under coz\n#include <coz.h>\nvoid handle(req_t *r) {\n    ...\n    COZ_PROGRESS;\n}\n$ coz run --- ./server",
+      "detail": "Today: jet perf has cpu, alloc and tasks lenses (D-PERFSESSION1) and a memory lens (D-PERF-MEMORY1=A); none predicts the effect of a speedup. Peer: Coz (SOSP 2015, dl.acm.org/doi/10.1145/2815400.2815409), which also measures latency between a begin and an end point; this ballot covers throughput only.\n\nThe scheduler's pause points are its stop polls, placed after calls, at loop turns and at recursive entries (Compiler/JetIR/Source/IR.jet:184-194). Zones and `perf.progress` belong to the Core perf API that D-PERF-ZONES1 proposes, so the zone progress points of A exist only if that ballot passes.\n\nThe cited review Docs/Audits/2026-11-18-best-debugger-profiler.md (axis P6) is not on dev.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A causal lens with automatic progress points",
+          "detail": "`jet perf run --lens=causal` runs the experiments. Progress points are found automatically: closed zones, answered requests and finished tasks. `perf.progress(name)` adds one by hand. The view ranks lines by predicted gain with confidence ranges.",
+          "technical": "The scheduler inserts the delays at its pause points. The lens changes timing, so it runs alone and refuses to combine with other lenses. The view refuses to rank lines whose interval is too wide.",
+          "code": "$ jet perf run --lens=causal images.jet -- --port 8080\n$ jet perf view images.jettrace\nIf this line were 30% faster:\n  upload.jet:52  parse_part     +12%  (9% to 15%)\n  resize.jet:118 resize_rows     +1%  (0% to 2%)\n  progress: 41,200 answered requests"
+        },
+        {
+          "key": "B",
+          "name": "A causal lens with hand-written progress points only",
+          "detail": "The same experiments, but the program must call `perf.progress(name)` where a unit of work ends, as Coz requires.",
+          "technical": "As A, with no automatic progress points.",
+          "code": "handle: fn(req: Request) -[Net]> {\n    ...\n    perf.progress(\"request\")\n}"
+        },
+        {
+          "key": "C",
+          "name": "No causal profiling",
+          "detail": "Users read samples and wait times and judge the bottleneck themselves.",
+          "technical": "No change.",
+          "code": "$ jet perf view images.jettrace   // samples and waits only"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C (Coz)",
+          "note": "Virtual speedups by pausing other threads; progress points by hand. This is option B's shape.",
+          "code": "COZ_PROGRESS;\n$ coz run --- ./server"
+        },
+        {
+          "lang": "Go (pprof)",
+          "note": "Samples and blocking profiles only; the bottleneck is inferred by the reader. This is option C.",
+          "code": "$ go tool pprof -top cpu.pprof"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It answers the question profiles are opened for: what to fix. Automatic progress points remove Coz's main setup step, because the runtime already sees every finished request and task.",
+        "gains": [
+          "Ranks lines by real predicted gain, not by time spent.",
+          "No source change needed to get a first answer.",
+          "Shows which hot lines are not worth fixing."
+        ],
+        "losses": [
+          {
+            "loss": "A useful run needs realistic load for minutes, and runs alone.",
+            "mitigation": "The lens refuses to rank a short run and says how long it needs."
+          },
+          {
+            "loss": "Tasks inside foreign code are delayed late, which skews results.",
+            "mitigation": "Their delay is charged when they return, and the view marks lines that ran mostly in foreign code."
+          },
+          {
+            "loss": "Zone progress points depend on D-PERF-ZONES1.",
+            "mitigation": "Answered requests, finished tasks and `perf.progress` still work without zones."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Most users never add a progress point, so the lens would sit unused."
+          },
+          {
+            "key": "C",
+            "reason": "Users keep optimizing hot lines that do not move throughput."
+          }
+        ],
+        "tradeoff": "One more lens that runs alone, for predictions of what to fix."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: `jet test Compiler --profile cases --filter Perf/causal_profile_predicts_speedup` runs a fixture where a less-hot line is the real bottleneck. The lens ranks it first, and a hand-sped version of that line lands within the predicted interval. The case passes at O0, O1 and O2. A short run is refused with the reason, and two progress points are ranked apart. Under B: the same fixture needs `perf.progress` added. Under C: no case.\n\nEvidence labels: nothing here is built; prediction quality is inferred from the Coz paper's results.",
+      "surface": {
+        "gist": "Should jet perf predict how much faster the whole program gets if one line gets faster?",
+        "lesson": "A causal profiler pretends one line is faster by briefly pausing other tasks whenever it runs. If throughput rises, that line is worth fixing. It ranks lines by predicted gain.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Causal lens, automatic",
+            "gist": "Predicts gains with progress points found from requests, zones and tasks.",
+            "gains": [
+              "Ranks lines by real predicted gain.",
+              "No source change needed."
+            ],
+            "losses": [
+              "Needs minutes of realistic load, run alone."
+            ],
+            "proposed": {
+              "code": "$ jet perf run --lens=causal images.jet\nIf this line were 30% faster:\n  upload.jet:52  parse_part     +12%  (9% to 15%)\n  resize.jet:118 resize_rows     +1%  (0% to 2%)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Causal lens, by hand",
+            "gist": "The same, but the program marks where work ends.",
+            "gains": [
+              "Progress is exactly what you mark."
+            ],
+            "losses": [
+              "Needs source changes before first use."
+            ],
+            "proposed": {
+              "code": "perf.progress(\"request\")"
+            }
+          },
+          {
+            "key": "C",
+            "name": "None",
+            "gist": "Read samples and waits; judge the bottleneck yourself.",
+            "gains": [
+              "Nothing new."
+            ],
+            "losses": [
+              "Hot but harmless lines get optimized."
+            ],
+            "proposed": {
+              "code": "$ jet perf view images.jettrace"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It tells you what to fix, not just where time goes, and needs no setup because the runtime sees finished work.",
+          "gains": [
+            "Predicted gain per line.",
+            "Works without source changes."
+          ],
+          "losses": [
+            {
+              "loss": "Needs minutes of realistic load.",
+              "mitigation": "Short runs are refused with the time needed."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Setup most users never do."
+            },
+            {
+              "key": "C",
+              "reason": "Effort goes to the wrong lines."
+            }
+          ],
+          "tradeoff": "A lens that runs alone, for predictions of what to fix."
+        },
+        "trio": {
+          "current": {
+            "note": "Today the view ranks lines by time spent, not by what fixing them would gain.",
+            "code": "$ jet perf view images.jettrace\n  resize.jet:118  40%\n  upload.jet:52    8%"
+          },
+          "wild": {
+            "lang": "C (Coz)",
+            "note": "A progress point by hand, then a run under coz.",
+            "code": "COZ_PROGRESS;\n$ coz run --- ./server"
+          }
+        }
+      },
+      "designAway": [],
+      "draftedBy": "Main",
+      "reviewedBy": "Speed-3-3-2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-18T13:48:45.066Z"
+    },
+    {
+      "id": "D-PERF-HEAP1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "Typed heap snapshots, their diffs and retention paths, inside the existing alloc lens",
+      "situation": "When a Jet program's memory keeps growing, the tools today show only how much it allocated in total. They cannot say which types are alive, which line made them, or what keeps them alive. The allocator counts blocks and bytes but does not record a block's type, so the compiler would add a type and line record for each allocation while a profiler is recording. You decide where heap snapshots live in the tool. We recommend adding them to the existing alloc lens of jet perf, with a Core call to mark a moment and a diff in jet perf compare.",
+      "gist": "Should the alloc lens of jet perf take typed heap snapshots, diff them, and show what keeps a block alive?",
+      "lesson": "A heap snapshot lists every block of memory still in use at one moment. Comparing two snapshots shows what grew between them, which is how leaks are found. A retention path is the chain of references from a global or a task's stack to a block, which shows why it was not freed.",
+      "explainer": "Beginner path: run `jet perf run --lens=alloc app.jet`. At exit, and wherever the program calls `perf.heap_mark(\"after-load\")`, the trace keeps a snapshot. `jet perf view` lists live memory by type and by the line that allocated it. `jet perf compare` shows what grew between two snapshots, and `jet perf view --retained-by <type>` shows the shortest chain keeping one alive.\n\nExpert path: under the alloc lens, each allocation also records its type and line in a side table through the allocator's existing observe hook; other runs pay nothing. Retention paths walk references using a layout table the compiler emits for each type. The snapshot is taken in a forked copy-on-write child on Linux, so the program keeps running; pages the program writes meanwhile are copied, so memory can briefly grow.\n\nArena, bump and pool storage is expanded through the same records or marked opaque. `jet perf attach PID --lens=alloc` sees only allocations made after it attached. Memory held only through FFI pointers is reported as unreachable from Jet roots, never guessed.",
+      "story": "Omar's chat server grows by 200 MB a day. He adds `perf.heap_mark` after each hourly cleanup and runs a day of traffic under the alloc lens. The compare shows 1.9 million live Message values allocated at room.jet:88. The retention path runs from the room list through a history ring that is never trimmed.",
+      "inWild": "// Go heap profile: sampled live bytes by allocation stack, no types or retainers\n$ go tool pprof -sample_index=inuse_space http://localhost:6060/debug/pprof/heap\n(pprof) top\n      flat  flat%   sum%\n  180.5MB 62.1% 62.1%  main.(*Room).append",
+      "detail": "Today: `.jettrace` carries an allocation total, shown as the alloc delta in `jet perf compare` (Compiler/JetCLI/Source/CLI/Perf/Command.jet:243-322). The heap allocator takes a size and an alignment, never a type (Compiler/JetRuntime/Source/Alloc.jet:2585). Its facts are six counters: allocations, requested, live, high-water, cap and mode (Alloc.jet:1706-1707).\n\nIt has an observe hook for each allocation and free (Alloc.jet:2910). Arena, bump, pool and fixed storage live beside it (Compiler/JetRuntime/Source/MemStorage.jet). #6841 c17 adds allocation counts per line. There is no snapshot, retention path or diff.\n\nRatified around it: D-PERFSESSION1 defines the lens list (cpu, alloc, tasks); D-PERF-MEMORY1=A adds the memory lens the same way. `perf.heap_mark` joins the Core perf API that D-PERF-ZONES1 proposes.\n\nThe cited review Docs/Audits/2026-11-18-best-debugger-profiler.md (axis P4) is not on dev.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Snapshots in the alloc lens",
+          "detail": "`--lens=alloc` keeps a typed snapshot at exit and at each `perf.heap_mark(name)`. `jet perf view` shows live memory by type and line, `--retained-by <type>` shows retention paths, and `jet perf compare` diffs snapshots. `jet perf attach PID --lens=alloc` snapshots a running program.",
+          "technical": "Under the lens, the compiler passes each allocation site's type and line to the allocator's observe hook, which fills a side table; a per-type layout table lets the snapshot follow references. Snapshots are taken in a forked copy-on-write child and stored in the canonical trace. No new command; one Core call and one view flag.",
+          "code": "use perf: core.perf\n\nloop {\n    serve_hour(rooms)\n    cleanup(rooms)\n    perf.heap_mark(\"after-cleanup\")\n}\n\n$ jet perf run --lens=alloc chat.jet\n$ jet perf view chat.jettrace\nlive at after-cleanup #24   1.9M Message  412 MB  room.jet:88\n$ jet perf view chat.jettrace --retained-by Message\nrooms -> Room.history -> Ring<Message>.items[17]"
+        },
+        {
+          "key": "B",
+          "name": "A separate jet heap command",
+          "detail": "`jet heap snapshot PID`, `jet heap diff a b` and `jet heap retain` form their own family with their own file format.",
+          "technical": "A second artifact beside the trace, with its own reader and viewer.",
+          "code": "$ jet heap snapshot 4242 -o a.jetheap\n$ jet heap diff a.jetheap b.jetheap"
+        },
+        {
+          "key": "C",
+          "name": "Sampled allocation profile only",
+          "detail": "Like Go: sample live bytes by allocation stack at a fixed byte interval. No types, no retention paths.",
+          "technical": "A sampled counter in the allocator, shown in `jet perf view`.",
+          "code": "$ jet perf run --lens=alloc chat.jet\nlive (sampled)  412 MB  room.jet:88"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "JavaScript (Chrome DevTools)",
+          "note": "Heap snapshots show typed objects, comparisons between snapshots and retainer paths. This is A's view, for a garbage-collected heap.",
+          "code": "// Memory panel: Take snapshot, then Comparison view, then Retainers"
+        },
+        {
+          "lang": "Swift (Instruments)",
+          "note": "Allocations marks generations and shows growth between them by allocation stack; sizes, not Swift types, for raw allocations.",
+          "code": "// Allocations instrument: Mark Generation, then compare generations"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Leaks are found by asking which type grew, where it was made and what holds it. A answers all three inside the tool users already run, with one trace format.",
+        "gains": [
+          "Live memory by type and allocation line, with no guessing.",
+          "Snapshot diffs and retention paths find leaks directly.",
+          "No new command or file format."
+        ],
+        "losses": [
+          {
+            "loss": "Every build carries a layout table for its types, so retention paths can be followed.",
+            "mitigation": "The table is emitted beside the debug information and stripped with it."
+          },
+          {
+            "loss": "Recording type and line per allocation slows allocation-heavy code under the lens.",
+            "mitigation": "Only lens runs pay; c6's gauntlet reports the cost, and other runs use the hook-free path."
+          },
+          {
+            "loss": "Attach sees only allocations made after it attached, and a fork can briefly grow memory.",
+            "mitigation": "`perf.heap_mark` under `jet perf run` covers the whole run, and the view says when a snapshot is partial."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A second command family and file format for what is one more view of the alloc lens."
+          },
+          {
+            "key": "C",
+            "reason": "It says where memory was allocated but never why it is still alive, which is the leak question."
+          }
+        ],
+        "tradeoff": "One Core call and one view flag, for typed leak hunting inside jet perf."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: `jet test Compiler --profile cases --filter Perf/heap_snapshot_types_retention_and_diff` leaks a typed list at a known line between two marks. The view names the type and line, the compare shows the growth, and the retention path names the holding field, at O0, O1 and O2. A run without the lens shows the same allocation speed as today. Under B: the same checks through the jet heap commands. Under C: the view shows sampled bytes at the line, with no type or path.\n\nEvidence labels: nothing here is built; today the allocator records counts, not types.",
+      "surface": {
+        "gist": "Should jet perf take typed heap snapshots, compare them, and show what keeps memory alive?",
+        "lesson": "A heap snapshot lists every block still in use. Comparing two shows what grew. A retention path shows the chain of references that keeps a block from being freed.",
+        "options": [
+          {
+            "key": "A",
+            "name": "In the alloc lens",
+            "gist": "Snapshots at exit and at marks, viewed and compared in jet perf.",
+            "gains": [
+              "Live memory by type and line.",
+              "Diffs and retention paths find leaks.",
+              "No new command or file format."
+            ],
+            "losses": [
+              "Allocation is slower while the lens records.",
+              "Attach sees only later allocations."
+            ],
+            "proposed": {
+              "code": "perf.heap_mark(\"after-cleanup\")\n\n$ jet perf run --lens=alloc chat.jet\n$ jet perf view chat.jettrace --retained-by Message\nrooms -> Room.history -> Ring<Message>.items[17]"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A jet heap command",
+            "gist": "Its own commands and file format for snapshots.",
+            "gains": [
+              "Heap tools in one place."
+            ],
+            "losses": [
+              "A second file format and viewer."
+            ],
+            "proposed": {
+              "code": "$ jet heap diff a.jetheap b.jetheap"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Sampled bytes only",
+            "gist": "Live bytes by allocation line, as Go reports them.",
+            "gains": [
+              "Cheapest to collect."
+            ],
+            "losses": [
+              "No types or retention paths."
+            ],
+            "proposed": {
+              "code": "live (sampled)  412 MB  room.jet:88"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Finding a leak means knowing which type grew, where it was made and what holds it. A answers all three in the existing tool.",
+          "gains": [
+            "Typed leak hunting in jet perf.",
+            "One trace format."
+          ],
+          "losses": [
+            {
+              "loss": "Slower allocation under the lens.",
+              "mitigation": "Only lens runs pay, and the gauntlet measures it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A second format for one more view."
+            },
+            {
+              "key": "C",
+              "reason": "Never says why memory stays alive."
+            }
+          ],
+          "tradeoff": "One call and one flag, for typed snapshots."
+        },
+        "trio": {
+          "current": {
+            "note": "Today compare shows only the total allocated in each run.",
+            "code": "$ jet perf compare a.jettrace b.jettrace\nalloc  +212 MB"
+          },
+          "wild": {
+            "lang": "JavaScript (Chrome DevTools)",
+            "note": "Snapshots, comparisons and retainer paths for the JavaScript heap.",
+            "code": "// Memory: Take snapshot, Comparison, Retainers"
+          }
+        }
+      },
+      "designAway": [],
+      "draftedBy": "Main",
+      "reviewedBy": "Speed-3-3-2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-18T13:48:46.057Z"
+    },
+    {
+      "id": "D-PERF-TOPDOWN1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "A topdown lens that says why each hot line is slow on the CPU",
+      "situation": "A profile says which lines take the time, but not why the processor is slow on them. Modern processors can split their cycles into four causes: useful work, wrong branch guesses, waiting for instructions, and waiting for data. Intel's VTune made this method standard, and AMD and Arm chips now publish the same split. It tells a programmer which kind of fix to try. You decide whether jet perf reports it and how it is asked for. We recommend a topdown lens beside the memory lens, which works the same way and says unavailable, with the reason, where counters are refused.",
+      "gist": "Should jet perf say why each hot line is slow on the CPU, using the processor's own counters?",
+      "lesson": "The top-down method sorts every cycle into one of four buckets. They are retiring (useful work), bad speculation (wrong branch guesses), front-end bound (waiting for instructions) and back-end bound (waiting for data or execution units). Level 2 splits each bucket once more. The biggest bucket tells you which kind of change helps.",
+      "explainer": "Beginner path: run `jet perf run --lens=cpu,topdown app.jet`. `jet perf view` adds four columns to each hot function and line. If back-end bound is high, the code is waiting on memory; if bad speculation is high, a branch is unpredictable. Where the machine refuses counters, the lens prints why.\n\nExpert path: the lens reads the CPU's published top-down events through perf_event_open, per thread, in user mode, on the same path as the memory lens. Per function the split comes from counts; per line it comes from samples, so a line with few samples is marked low confidence rather than shown as exact.\n\nLevels 1 and 2 use the formulas for the detected CPU model, stored in the trace. On a chip with two core types, each type has its own formulas and its rows say which type ran. An unknown model, or a virtual machine without counters, reports unavailable rather than guessing. Rows are attributed through the compiler's own line table at -O2, with no symbol step.",
+      "story": "Kai's parser spends 35% of its time on one loop. The topdown lens shows that line 62% bad speculation. A branch on each byte's class is mispredicted. He replaces the branch with a table lookup, and the loop runs twice as fast.",
+      "inWild": "# Linux perf, which needs the perf tool and gives whole-program numbers\n$ perf stat --topdown ./parser\n retiring  bad speculation  frontend bound  backend bound\n   31.2%        38.5%            9.1%          21.2%",
+      "detail": "Today: no perf_event_open path is on dev (no Compiler or Core source names it). #6841 c13-c16 (owned by another lane) add cache, TLB and page-fault counters per line under the memory lens (D-PERF-MEMORY1=A), and c16 requires \"unavailable with a reason\", never zeros. D-PERFSESSION1 defines the lens list. This ballot adds one lens on the same counter path.\n\nThe example machine, Raptor Lake, mixes performance and efficiency cores whose top-down events differ, so per-core-type formulas are part of the design, not an extra. The cited review Docs/Audits/2026-11-18-best-debugger-profiler.md (axis P5) is not on dev.",
+      "options": [
+        {
+          "key": "A",
+          "name": "A topdown lens",
+          "detail": "`--lens=topdown` adds levels 1 and 2 per function and line. It combines with cpu and memory in one run and is off unless asked for. Unsupported machines print unavailable with the reason.",
+          "technical": "Adds `topdown` to D-PERFSESSION1's lens list, sharing the memory lens's counter path. Formulas per CPU model and core type; unknown models report unavailable. Per-line rows come from sampled events and carry a confidence mark below a sample floor.",
+          "code": "$ jet perf run --lens=cpu,topdown parser.jet\nWhy hot lines are slow (Intel Raptor Lake, level 1)\n  line          time  retiring  bad spec  front end  back end\n  lex.jet:62    35%     18%       62%        6%        14%\n  lex.jet:40    12%     71%        3%        9%        17%"
+        },
+        {
+          "key": "B",
+          "name": "Always in the cpu lens",
+          "detail": "The cpu lens adds the topdown columns whenever counters are available. There is no separate lens.",
+          "technical": "The cpu lens opens counters on every run where the kernel allows them.",
+          "code": "$ jet perf run parser.jet\n  lex.jet:62  35%  retiring 18%  bad spec 62%  ..."
+        },
+        {
+          "key": "C",
+          "name": "No topdown view",
+          "detail": "Only the memory lens's cache and page-fault counters exist.",
+          "technical": "No change.",
+          "code": "$ jet perf run --lens=memory parser.jet"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C++ (Intel VTune)",
+          "note": "Top-down analysis per function, several levels deep, Intel CPUs, in its own tool.",
+          "code": "$ vtune -collect uarch-exploration ./parser"
+        },
+        {
+          "lang": "C (Linux perf)",
+          "note": "Whole-program or per-core top-down level 1 and 2 numbers, not per line.",
+          "code": "$ perf stat --topdown ./parser"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "It matches how the memory lens was ratified, so counters are asked for in one way. Keeping it off by default avoids slowing every cpu run with counter multiplexing.",
+        "gains": [
+          "Each hot line says which kind of fix helps.",
+          "Per line at -O2, with no other tool installed.",
+          "Asked for exactly like the memory lens."
+        ],
+        "losses": [
+          {
+            "loss": "Per-line splits are sampled estimates, noisy on lines with few samples.",
+            "mitigation": "Rows below a sample floor are marked low confidence, and per-function totals come from exact counts."
+          },
+          {
+            "loss": "Formulas must be kept for each CPU model and core type.",
+            "mitigation": "Unknown models say unavailable; the trace stores the formulas it used."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Opening counters on every cpu run adds cost and refusal messages to people who did not ask."
+          },
+          {
+            "key": "C",
+            "reason": "Users still need VTune or perf to learn why a line is slow."
+          }
+        ],
+        "tradeoff": "One more lens name, for per-line reasons from the processor."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: `jet test Compiler --profile cases --filter PerfRun/topdown_levels_per_function` runs a branchy fixture and a memory-bound fixture. On a supported core, bad speculation and back-end bound lead on the right lines at O0, O1 and O2. On a refused host or virtual machine, the lens prints unavailable and the reason. On a two-core-type host, each row names its core type. Under B: the same columns appear in the cpu lens. Under C: no case.\n\nEvidence labels: nothing here is built; the four-bucket split follows Intel's published method.",
+      "surface": {
+        "gist": "Should jet perf say why each hot line is slow on the CPU, using the processor's own counters?",
+        "lesson": "The processor can sort each line's cycles into four causes: useful work, wrong branch guesses, waiting for instructions and waiting for data. The biggest cause says which kind of fix helps.",
+        "options": [
+          {
+            "key": "A",
+            "name": "A topdown lens",
+            "gist": "Asked for like the memory lens; four causes per hot line.",
+            "gains": [
+              "Each hot line names its kind of fix.",
+              "No other tool needed."
+            ],
+            "losses": [
+              "Per-line numbers are sampled estimates."
+            ],
+            "proposed": {
+              "code": "$ jet perf run --lens=cpu,topdown parser.jet\n  line          time  retiring  bad spec  front end  back end\n  lex.jet:62    35%     18%       62%        6%        14%"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Always in cpu",
+            "gist": "The cpu lens shows the four causes whenever it can.",
+            "gains": [
+              "Nothing to ask for."
+            ],
+            "losses": [
+              "Counter cost on every cpu run."
+            ],
+            "proposed": {
+              "code": "$ jet perf run parser.jet"
+            }
+          },
+          {
+            "key": "C",
+            "name": "None",
+            "gist": "Only cache and page-fault counters.",
+            "gains": [
+              "Nothing new."
+            ],
+            "losses": [
+              "Needs VTune or perf for the why."
+            ],
+            "proposed": {
+              "code": "$ jet perf run --lens=memory parser.jet"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "It works like the ratified memory lens and stays off unless asked for, so ordinary runs pay nothing.",
+          "gains": [
+            "Per-line reasons from the processor.",
+            "One way to ask for counters."
+          ],
+          "losses": [
+            {
+              "loss": "Per-line numbers are sampled estimates.",
+              "mitigation": "Low-sample rows are marked; function totals are exact counts."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Every cpu run pays for counters."
+            },
+            {
+              "key": "C",
+              "reason": "Another tool is still needed."
+            }
+          ],
+          "tradeoff": "One more lens name, for per-line reasons."
+        },
+        "trio": {
+          "current": {
+            "note": "Today the view says how much time a line takes, not why.",
+            "code": "$ jet perf view parser.jettrace\n  lex.jet:62  35%"
+          },
+          "wild": {
+            "lang": "C (Linux perf)",
+            "note": "Whole-program numbers from a separate tool.",
+            "code": "$ perf stat --topdown ./parser"
+          }
+        }
+      },
+      "designAway": [],
+      "draftedBy": "Main",
+      "reviewedBy": "Speed-3-3-2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-18T13:48:46.987Z"
+    },
+    {
+      "id": "D-PERF-ZONES1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "Profiler zones, frame marks and plots, and one marker that profiles every function",
+      "situation": "The sampling profiler shows where time goes, but a game or server also wants named regions: this frame, this request, this physics step. Jet's only timed region today is a log span. It needs the Log effect, so a pure function cannot use it, and it allocates its name. You decide how programs mark profiler regions, frames and plotted values. You also decide how one line profiles every function. We recommend a small Core API that needs no effect, plus a marker built from the compile-time program kit. The regions cost nothing until a profiler turns them on.",
+      "gist": "How should a program mark profiler regions, frames and plotted values, and profile every function in one line?",
+      "lesson": "A zone is a named region of code whose start and end the profiler records, like a stopwatch around a block. A frame mark tells the profiler where one frame or request ends, so it can line frames up. A plot records a number over time, such as entity count. Instrumenting every function means adding a zone to each one without editing them.",
+      "explainer": "Beginner path: write `_z: perf.zone(\"physics\")` at the top of a block. The zone closes when the block ends. Call `perf.frame()` once per frame and `perf.plot(\"entities\", n)` for a number. Put `#Profiled` on a function, or on a package to profile every function in it. Then `jet perf run game.jet` shows the zones on the timeline with the samples.\n\nExpert path: the API carries no effect, as `debug(value)` carries none. A zone writes only to the profiler's per-thread ring, which the program cannot read. A zone name is a string literal kept in the site table, so nothing allocates. Each site compiles to a short patchable no-op until `jet perf run` or `jet perf attach` turns zones on.\n\nBecause zones are not effects, the optimizer may still fold, merge or memoize a pure call, and that call's zone then appears once or not at all. `#Profiled` is a compile-time program over the compiler's events that wraps each body in a zone; users can write their own. `core.log.span` writes the same ring, so there is one timing mechanism.",
+      "story": "Ana's game drops a frame every few seconds. She adds `#Profiled` to the physics package and runs `jet perf run`. The timeline shows each frame mark, and the long frames all contain one `broadphase` zone that takes 9 ms when the entity plot passes 4000. She never edited a physics function.",
+      "inWild": "// Tracy (C++)\nvoid physics_step() {\n    ZoneScopedN(\"physics\");\n    TracyPlot(\"entities\", (int64_t)count);\n    ...\n}\nFrameMark;",
+      "detail": "Ratified around it: D-PERFSESSION1=D defines the `jet perf` family and its one `.jettrace` timeline (Docs/Spec/syntax-decisions.md:8210). D-DBG1=A makes `debug(value)` an observation that adds no effect, the precedent for an effect-free zone (syntax-decisions.md:9053-9061). That precedent also rejects any remaining `debug` in a shipped artifact or release compile (E3405), which is option B's shape. So option A departs from it on purpose: a zone is off and silent until a profiler attaches.\n\n#6841 c2 requires a ratified ballot for the instrumentation hook and marker. c3 proves a user-written compile-time program instruments every function. c6 measures the cost when off and when on.\n\nCode at dev 3c593a7f16: Core/Perf/Perf.jet has only a fidelity knob. Core/Log/Log.jet:141 makes `span` need the Log effect and allocate its name. Compiler/JetRuntime/Source/PerfSamples.jet writes closed log spans for the profiler. `meta.events` and `meta.rewrite_body` exist in Compiler/JetBuildSession/Source/Session.jet. The cited review Docs/Audits/2026-11-18-best-debugger-profiler.md (axis P2) is not on dev.",
+      "options": [
+        {
+          "key": "A",
+          "name": "An effect-free zone API and a #Profiled marker, off until attached",
+          "detail": "`perf.zone(name)` opens a zone that closes at the end of its block; `perf.frame()` marks a frame; `perf.plot(name, value)` records a number. Names are string literals. None needs an effect. `#Profiled` on a function or package wraps each body in a zone. Every site is a patchable no-op until `jet perf run` or `jet perf attach` turns zones on, in any build, including shipped ones.",
+          "technical": "The compiler emits a short patchable sequence at each site and a table of sites. The runtime patches them on attach; where the system forbids rewriting code pages, a site tests one flag instead. Zones write a per-thread ring; `core.log.span` writes the same ring. A zone site is not an effect, so it never blocks folding or memoizing a pure call. `#Profiled` is a Core compile-time program using meta.events and meta.rewrite_body.",
+          "code": "use perf: core.perf\n\n#Profiled\nstep: fn(world: &World) {\n    _z: perf.zone(\"broadphase\")\n    world.broadphase()\n    perf.plot(\"entities\", world.count())\n}\n\nloop {\n    step(world)\n    perf.frame()\n}"
+        },
+        {
+          "key": "B",
+          "name": "The same API, compiled in only for profiling builds",
+          "detail": "The API and marker are the same. Zones exist only in builds `jet perf run` makes; other builds drop them entirely. A running production program cannot turn zones on.",
+          "technical": "The compiler removes zone sites unless the build is a profiling build. Attach sees samples only.",
+          "code": "#Profiled\nstep: fn(world: &World) {\n    _z: perf.zone(\"broadphase\")\n    world.broadphase()\n}"
+        },
+        {
+          "key": "C",
+          "name": "Use log spans",
+          "detail": "No new API. Programs time regions with `core.log.span`, which needs the Log effect and allocates its name. Pure functions cannot be timed. There are no frame marks or plots.",
+          "technical": "No change.",
+          "code": "step: fn(world: &World) -[Log]> {\n    _s: log.span(\"broadphase\")\n    world.broadphase()\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C++ (Tracy)",
+          "note": "Macros for zones, frame marks and plots; compiled out unless TRACY_ENABLE is set. This is option B's shape.",
+          "code": "ZoneScopedN(\"physics\");\nFrameMark;\nTracyPlot(\"entities\", n);"
+        },
+        {
+          "lang": "C++ (LLVM XRay)",
+          "note": "The compiler emits patchable no-op sleds at function entry and exit, enabled at run time. This is option A's attach mechanism.",
+          "code": "// clang -fxray-instrument app.cc\n// XRAY_OPTIONS=\"patch_premain=true\" ./a.out"
+        },
+        {
+          "lang": "Jai (Iprof)",
+          "note": "A compile-time metaprogram inserts a zone into every procedure. This is #Profiled's shape.",
+          "code": "#import \"Iprof\";\n// the metaprogram instruments every procedure in the build"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Zones in every build mean a slow production run can be profiled without rebuilding. The off cost is expected to be a few bytes and well under a nanosecond per site, and c6's gauntlet must measure it. No effect means pure code can be profiled too.",
+        "gains": [
+          "Profile a running program's zones without a rebuild.",
+          "Pure functions can be timed.",
+          "One line profiles a whole package."
+        ],
+        "losses": [
+          {
+            "loss": "Each zone site keeps a few bytes of no-op code in every build.",
+            "mitigation": "The profile-overhead gauntlet measures the cost; a build setting can strip zones for size-critical targets."
+          },
+          {
+            "loss": "Unlike `debug(value)`, zones may stay in shipped artifacts.",
+            "mitigation": "They are off, write nothing and cannot change behavior until a profiler attaches, which needs the same user and permission as a debugger."
+          },
+          {
+            "loss": "A pure call the optimizer folds or memoizes shows its zone once or not at all.",
+            "mitigation": "Impure code, where most zones sit, is never folded; an `-O0` build keeps every pure call when exact counts matter."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A production slowdown needs a rebuild and redeploy before its zones can be seen."
+          },
+          {
+            "key": "C",
+            "reason": "Pure code cannot be timed, names allocate, and there are no frame marks or plots."
+          }
+        ],
+        "tradeoff": "A few bytes per zone site in every build, for zones you can turn on in production."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: `jet test Compiler --profile golden --filter Tooling/Performance/InstrumentEveryFunction` passes on O0, O1 and O2 (#6841 c3). `node Tools/Gauntlet/Harness/run.mjs --entry profile-overhead` reports the off and on costs (c6). `jet test Compiler --profile cases --filter Perf/zones_frames_plots_share_the_timeline` shows zones, frames and plots beside samples. A further case shows a zone in a `-[]>` function and a non-literal zone name refused. Under B: the same cases, and attach shows no zones.\n\nEvidence labels: the API is not built; the no-op cost is inferred from XRay's published design, not measured in Jet.",
+      "surface": {
+        "gist": "How should a program mark profiler regions, frames and values, and profile every function in one line?",
+        "lesson": "A zone is a named stopwatch around a block that the profiler records. A frame mark says where one frame ends. A plot records a number over time. A marker can add a zone to every function without editing them.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Zone API and marker, attachable",
+            "gist": "Effect-free zones, frames and plots, off until a profiler turns them on.",
+            "gains": [
+              "Turn zones on in a running program.",
+              "Pure functions can be timed.",
+              "`#Profiled` covers a whole package."
+            ],
+            "losses": [
+              "A few bytes of no-op per zone site.",
+              "Zones stay in shipped builds, switched off."
+            ],
+            "proposed": {
+              "code": "#Profiled\nstep: fn(world: &World) {\n    _z: perf.zone(\"broadphase\")\n    world.broadphase()\n    perf.plot(\"entities\", world.count())\n}\nloop { step(world); perf.frame() }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Profiling builds only",
+            "gist": "The same API, removed from builds that are not for profiling.",
+            "gains": [
+              "Zero bytes in ordinary builds."
+            ],
+            "losses": [
+              "Production needs a rebuild to see zones."
+            ],
+            "proposed": {
+              "code": "_z: perf.zone(\"broadphase\")  // gone unless built by jet perf"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Log spans only",
+            "gist": "Time regions with log spans; no frames or plots.",
+            "gains": [
+              "Nothing new to learn."
+            ],
+            "losses": [
+              "Pure functions can't be timed.",
+              "No frame marks or plots."
+            ],
+            "proposed": {
+              "code": "_s: log.span(\"broadphase\")  // needs -[Log]>"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Zones in every build let a slow production run be profiled without a rebuild; each site costs a few bytes.",
+          "gains": [
+            "Zones on demand in production.",
+            "Pure code can be profiled."
+          ],
+          "losses": [
+            {
+              "loss": "A few bytes of no-op per zone site.",
+              "mitigation": "The overhead gauntlet measures it; a build setting strips zones where size matters."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Production slowdowns need a rebuild first."
+            },
+            {
+              "key": "C",
+              "reason": "No pure code, frames or plots."
+            }
+          ],
+          "tradeoff": "A few bytes per site, for zones you can switch on live."
+        },
+        "trio": {
+          "current": {
+            "note": "Today only a log span times a region, and it needs the Log effect.",
+            "code": "step: fn(world: &World) -[Log]> {\n    _s: log.span(\"broadphase\")\n}"
+          },
+          "wild": {
+            "lang": "C++ (Tracy)",
+            "note": "Zone, frame and plot macros, compiled out unless enabled.",
+            "code": "ZoneScopedN(\"physics\");\nFrameMark;\nTracyPlot(\"entities\", n);"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A few bytes of no-op per zone site in every build.",
+          "attempts": [
+            "Compile zones out of ordinary builds: rejected as the default, since it is option B and loses production attach.",
+            "Keep a build setting that strips zone sites for size-critical targets: kept."
+          ],
+          "result": "The default keeps attach; size-critical builds can opt out."
+        }
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": "Speed-3-3-2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-18T13:48:47.997Z"
+    },
+    {
+      "id": "D-TIMETRAVEL3",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "Step backward by line through any recorded run, threads included, and ask where a value came from",
+      "situation": "A recorded run can be replayed in the debugger. The ratified plan steps backward only between recorded events, refuses programs that use threads, and defers asking where a value came from. Safe Jet code has no data races. So a run is fixed by what its inputs returned and the order its tasks used shared things: channels, locks, shared values, joins and atomic cells. Recording just those lets a replay run on real threads, at any optimization level. Stepping backward then works by line, as forward stepping does. You decide whether to widen the ratified plan this way. We recommend it: it would put the debugger ahead of rr and Pernosco.",
+      "gist": "Should the debugger step backward by line through any recorded run and say where a value came from?",
+      "lesson": "A recording keeps what the program could not compute itself: clock readings, random numbers, file and network results, and the order tasks met at channels and locks. Replaying runs the program again and feeds it those answers, so it does the same thing. Going backward means replaying from a saved point to just before where you are. Asking where a value came from means replaying a short stretch while watching that value's memory.",
+      "explainer": "Beginner path: run `jet run --record=r1 app.jet`, then `jet debug --replay=r1`. Stop where the value is wrong and type `why total`. The debugger names the line that wrote it and the value it replaced. `reverse-next` goes back one line.\n\nExpert path: the recording logs every result the capability chokepoint returns and the order of every synchronization: channels, locks, `Shared` values, joins and `Atomic` operations. Safe code is data-race free, so this fixes every shared read. Replay enforces the order on real threads.\n\nThe log has no instruction counts, so a recording made at -O2 replays at -O0, where every local is visible. A deadline is replayed where it was delivered, by source position and count. Reverse moves re-run from the nearest checkpoint. Unsafe code that writes shared memory outside the order is caught by a digest at each sync event, and replay names the first divergence.",
+      "story": "Mia's order service sometimes charges a negative total. It runs eight tasks and the bug shows once in fifty runs. She records runs with `--record` until one fails, opens it in jet debug, stops at the charge and types `why total`. The answer is a discount line in another task that ran before the cart was locked. Under the ratified plan she could not have recorded the run at all, because it uses tasks.",
+      "inWild": "# rr with gdb: record once, then step backward and watch a value\n$ rr record ./server\n$ rr replay\n(rr) break charge\n(rr) continue\n(rr) watch -l order->total\n(rr) reverse-continue\n# stops at the write that set total",
+      "detail": "Ratified today: D-RUN-RECORD1=A adds `--record=` on run, dev and test and `jet debug --replay=`. Two of its clauses are reopened here: \"Refused programs stay refused; they are Epoch 6 scope\" and \"Reverse-step stays deferred per D-TIMETRAVEL1=C\". D-TIMETRAVEL1=C defers per-variable history to Epoch 6; it is reopened.\n\nD-TIMETRAVEL2=B ships jump with the recorder. It makes `back N` a thin verb counting recorded events (\"back 3 from event 11 is jump 8\"). Its event granularity is reopened; its re-execution from recorded values is kept. #Track (D-TRACK-ORIGIN1=A) is a compile-time origin fact and stays. #6919 c3-c4 plan retained write transitions and say replay \"never re-executes\"; option C is that plan.\n\nSafe Core has lock-free `Atomic<T>` cells with sequentially consistent operations (D-ATOMIC-WIDTH1=A, Docs/Spec/syntax-decisions.md:4773-4782). Their order is not fixed by channels or locks, so A logs each atomic operation as a sync event.\n\nCode at dev 3c593a7f16: Compiler/JetCLI/Source/CLI/Debug.jet:27-28 returns not-ported for --record and --replay. Stop polls deliver deadlines (Compiler/JetIR/Source/IR.jet:184-194), so the recording keys them by source position and count. That works across tiers only where the recording tier's poll sites are also poll sites at the replay tier. The cited review Docs/Audits/2026-11-18-best-debugger-profiler.md (axis D2) is not on dev.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Record inputs and order; step back by line; ask why",
+          "detail": "The recording logs every capability result and the order tasks met at channels, locks, `Shared` values, joins and `Atomic` cells. Any safe program records, threads included. Replay runs on real threads at any optimization level. In replay the debugger adds reverse-step, reverse-next, reverse-finish and reverse-continue, plus `why <expr>`, which names the write that set a value. `jump` stays; `back N` becomes `reverse-next N`.",
+          "technical": "The runtime appends chokepoint results and sync order, including each `Atomic` operation, to the recording. Replay enforces sync order and forks checkpoints every N sync events. Reverse moves re-run from the nearest checkpoint. `why` re-runs the window with write tracking on the value's place. DAP gets stepBack and reverseContinue. A digest per sync event detects divergence from unsafe code, and replay at another tier runs on a stack large enough for that tier's frames.",
+          "code": "$ jet run --record=r1 orders.jet\n$ jet debug --replay=r1\n(Jet) break cart.jet:88\n(Jet) continue\n(Jet) why total\ntotal = -4, set at cart.jet:71 in apply_discount (task 3)\n  before: 12\n(Jet) reverse-next\n71 |     total -= discount        <- here"
+        },
+        {
+          "key": "B",
+          "name": "Keep the ratified event jumps",
+          "detail": "Replay jumps between recorded events and `back N` counts events. Programs the recorder refuses, including those with threads, stay refused until Epoch 6. There is no `why`.",
+          "technical": "As D-TIMETRAVEL2=B and D-RUN-RECORD1=A stand. Time is the only safe input recorded.",
+          "code": "$ jet debug --replay=r1\n(Jet) jump 11\n(Jet) back 3     // event 8"
+        },
+        {
+          "key": "C",
+          "name": "Record every write",
+          "detail": "The recording keeps every write to memory, as WinDbg's time travel does. Replay never re-runs the program; it reads the log. Stepping back and `why` are lookups.",
+          "technical": "Every store goes to a per-thread log with its sequence number. This is #6919's plan of retained write transitions.",
+          "code": "$ jet run --record=r1 orders.jet   // runs many times slower\n$ jet debug --replay=r1\n(Jet) why total"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "C (rr + gdb)",
+          "note": "rr records system calls and timing on one core, then replays; gdb steps backward. Threads run one at a time while recording.",
+          "code": "(rr) reverse-next\n(rr) reverse-continue"
+        },
+        {
+          "lang": "C++ (WinDbg time travel)",
+          "note": "Records every instruction's effects into a large trace; stepping back is a lookup. This is option C's shape.",
+          "code": "0:000> p-\n0:000> g-"
+        },
+        {
+          "lang": "JavaScript (Replay.io)",
+          "note": "Records a browser run's inputs; print statements are added to the past and run against the recording.",
+          "code": "// add a print at cart.js:71 in the recording\n// and see every value it would have printed"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Safe Jet has no data races, so inputs plus the order of syncs and atomic operations fix a run. That makes recording cheap, threads included, and lets replay run where every value is visible. Stepping backward by line and asking why answer the question users actually ask.",
+        "gains": [
+          "Programs with tasks can be recorded and replayed.",
+          "Step back by line and ask where a value came from.",
+          "A value optimized away at -O2 is shown from the -O0 replay."
+        ],
+        "losses": [
+          {
+            "loss": "Unsafe code that races replays only up to the point where the run diverges.",
+            "mitigation": "Replay names the first divergence and the unsafe block; the recording stays usable up to there."
+          },
+          {
+            "loss": "Recording logs every `Atomic` operation, so lock-free code slows while recording.",
+            "mitigation": "Only recording runs pay; a normal run keeps its lock-free atomics untouched."
+          },
+          {
+            "loss": "Replay at another tier holds only where the poll sites line up.",
+            "mitigation": "A deadline whose site the replay tier lacks is reported as a divergence, with both tiers named."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It refuses programs with tasks, the ones whose bugs need recording most, and has no way to ask where a value came from."
+          },
+          {
+            "key": "C",
+            "reason": "Logging every write slows recording many times over and makes huge files, so people stop recording the runs that fail."
+          }
+        ],
+        "tradeoff": "A replay re-runs code to step back, in exchange for small recordings of any safe program."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: `jet test Compiler --profile cases --filter Debug/replay_threads_across_tiers_` records an -O2 program with tasks that share channels, a lock and an `Atomic<Int>` counter they race on. It replays at -O0, -O1 and -O2 with the same output and order. A deep recursion that fits at -O2 replays at -O0 without overflowing. `--filter Debug/replay_reverse_` covers the four reverse moves over the console and DAP. `--filter Debug/replay_why_` names the last write and shows an optimized-away local.\n\nUnder B: the recorder refuses the task program with its existing refusal, and `back 3` from event 11 lands on event 8. Under C: the same cases as A pass, and the recording size and slowdown are reported.\n\nEvidence labels: replay is not built (Debug.jet:27-28 returns not-ported). The costs of A and C are inferred from the published designs of rr and WinDbg, not measured in Jet.",
+      "surface": {
+        "gist": "Should the debugger step backward by line through any recorded run and say where a value came from?",
+        "lesson": "A recording keeps what a program could not compute itself: clock readings, file and network results, and the order tasks met. Replay feeds those back, so the run repeats. Going backward replays from a saved point to just before where you are.",
+        "options": [
+          {
+            "key": "A",
+            "name": "Inputs and order; back by line; why",
+            "gist": "Any safe program records, threads included, and replay steps back by line.",
+            "gains": [
+              "Programs with tasks record and replay.",
+              "`why total` names the line that set it.",
+              "Values optimized away show from an -O0 replay."
+            ],
+            "losses": [
+              "Racing unsafe code replays only up to its divergence.",
+              "Atomic-heavy code slows while recording."
+            ],
+            "proposed": {
+              "code": "$ jet run --record=r1 orders.jet\n$ jet debug --replay=r1\n(Jet) why total\ntotal = -4, set at cart.jet:71 (task 3)\n(Jet) reverse-next"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep event jumps",
+            "gist": "Replay jumps between recorded events; programs with threads stay refused.",
+            "gains": [
+              "Nothing ratified changes."
+            ],
+            "losses": [
+              "Programs with tasks can't be recorded.",
+              "No way to ask where a value came from."
+            ],
+            "proposed": {
+              "code": "(Jet) jump 11\n(Jet) back 3     // event 8"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Record every write",
+            "gist": "The recording keeps every memory write, so stepping back is a lookup.",
+            "gains": [
+              "Stepping back never re-runs code."
+            ],
+            "losses": [
+              "Recording runs many times slower.",
+              "Recordings grow huge."
+            ],
+            "proposed": {
+              "code": "$ jet run --record=r1 orders.jet  // much slower\n(Jet) why total"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Safe Jet has no data races, so inputs plus task order fix a run. Recording stays cheap with threads, and replay can show every value.",
+          "gains": [
+            "Record and replay programs with tasks.",
+            "Step back by line and ask why."
+          ],
+          "losses": [
+            {
+              "loss": "Racing unsafe code replays only to its divergence.",
+              "mitigation": "Replay names the divergence point and the unsafe block."
+            },
+            {
+              "loss": "Atomic-heavy code slows while recording.",
+              "mitigation": "Normal runs keep lock-free atomics untouched."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "It refuses the programs that need recording most."
+            },
+            {
+              "key": "C",
+              "reason": "Slow recording means failing runs go unrecorded."
+            }
+          ],
+          "tradeoff": "Re-running code to step back, for small recordings of any safe program."
+        },
+        "trio": {
+          "current": {
+            "note": "Recording and replay are not built; the flags report that they are not ported.",
+            "code": "$ jet debug --replay=r1 app.jet\nerror: `jet debug --replay` is not ported yet"
+          },
+          "wild": {
+            "lang": "C (rr + gdb)",
+            "note": "Record once, then watch a value and run backward to the write.",
+            "code": "(rr) watch -l order->total\n(rr) reverse-continue"
+          }
+        }
+      },
+      "designAway": [
+        {
+          "loss": "Racing unsafe code replays only up to its divergence.",
+          "attempts": [
+            "Log every write inside unsafe blocks: kept for FFI calls that write Jet memory; rejected for all unsafe code, since it would slow the runtime's own unsafe paths everywhere.",
+            "Check a digest at each sync event and stop at the first difference: kept, it turns silent wrong answers into a named divergence."
+          ],
+          "result": "Safe code replays exactly; unsafe races are detected and located, never replayed wrongly."
+        }
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": "Speed-3-3-2",
+      "draft": false,
+      "status": "open",
+      "created": "2026-11-18T13:48:49.035Z"
     }
   ],
   "questions": [
@@ -176670,6 +178548,146 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T13:48:49.035Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-TIMETRAVEL3",
+      "note": "Step backward by line through any recorded run, threads included, and ask where a value came from"
+    },
+    {
+      "at": "2026-11-18T13:48:47.997Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PERF-ZONES1",
+      "note": "Profiler zones, frame marks and plots, and one marker that profiles every function"
+    },
+    {
+      "at": "2026-11-18T13:48:46.987Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PERF-TOPDOWN1",
+      "note": "A topdown lens that says why each hot line is slow on the CPU"
+    },
+    {
+      "at": "2026-11-18T13:48:46.057Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PERF-HEAP1",
+      "note": "Typed heap snapshots, their diffs and retention paths, inside the existing alloc lens"
+    },
+    {
+      "at": "2026-11-18T13:48:45.066Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-PERF-CAUSAL1",
+      "note": "A causal profile lens that predicts which line is worth speeding up"
+    },
+    {
+      "at": "2026-11-18T13:48:44.076Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-OBSERVE-FLIGHT1",
+      "note": "An always-on flight recorder and typed crash dumps that jet debug opens"
+    },
+    {
+      "at": "2026-11-18T13:48:43.074Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DBG-VERBS1",
+      "note": "The jet debug console words for conditions, logpoints, watches, frames, tasks, attach and fix"
+    },
+    {
+      "at": "2026-11-18T13:48:42.158Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DBG-UI1",
+      "note": "The debugger and profiler window is Canvas, grown to RemedyBG's panels and one timeline"
+    },
+    {
+      "at": "2026-11-18T13:48:41.212Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DBG-DEADLOCK1",
+      "note": "A wait cycle among tasks stops the program and names the cycle"
+    },
+    {
+      "at": "2026-11-18T13:48:33.042Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-LOOP-PAIRS1",
+      "note": "What a two-name loop over a list of records binds"
+    },
+    {
+      "at": "2026-11-18T13:44:01.492Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "42 criteria, soft limit 6: review 4 findings belong to the c40 redesign they review; one criterion keeps them together"
+    },
+    {
+      "at": "2026-11-18T13:44:01.492Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#42 The native debugger evaluator build answers review 4 (Docs/A"
+    },
+    {
+      "at": "2026-11-18T13:35:18.476Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-18T13:35:15.710Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c0nwrfck",
+      "note": "#14: D-PERF-MEMORY1=A: memory is a lens (--lens=memory, combinable --lens=cpu,memory), not a method; p295's c14-c16.r4 ships --method=memory, a defect against the ratified surface; was: `jet perf run` with the memory method reports L1D, LLC and dTLB misses and page faults per source line on Linux x86-64. Proof: `jet test Compiler --profile cases --filter PerfRun/memory_counters_per_l"
+    },
+    {
+      "at": "2026-11-18T13:09:34.486Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0uxxmpm",
+      "note": "#5 A mutable module variable in a generic module body checks an"
+    },
+    {
+      "at": "2026-11-18T13:09:33.334Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "41 criteria, soft limit 6: defect found by the debug-eval r4 probes; the debugger owns breakpoint placement"
+    },
+    {
+      "at": "2026-11-18T13:09:33.334Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#41 A breakpoint on a member of a generic-module instance hits, "
+    },
+    {
+      "at": "2026-11-18T12:57:28.658Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c09hk13a",
+      "note": "#13: #3857 (39b713f09a) made assert_eq(x, None) check and run; there is no error to register, and L0528 is Retired; was: `assert_eq(x, None)` gets its registered error, and L0528 does not fire on generated bodies (#3903). Proof: `jet test Compiler --profile ui --filter assert_eq_none` and `--filter L0528_generated`. (wa"
+    },
+    {
+      "at": "2026-11-18T12:57:27.807Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c09hk13a",
+      "note": "20 criteria, soft limit 6: split from c5: the L0302 half waits on the #6326 c4 gate"
+    },
+    {
+      "at": "2026-11-18T12:57:27.807Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c09hk13a",
+      "note": "#20 L0302 takes the form the state-machine design gate on #6326  (blocked by #6326)"
+    },
     {
       "at": "2026-11-18T12:57:26.569Z",
       "by": "Main",
@@ -180091,713 +182109,6 @@
       "by": "Main",
       "action": "card.criteria-meet",
       "ref": "c0cnf5w8",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T11:19:03.542Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0reo0hk",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T11:16:40.432Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ARRAY-SHUFFLE1",
-      "note": "B"
-    },
-    {
-      "at": "2026-11-17T11:16:36.399Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q4f453bp",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T11:15:49.192Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q3qejlb0",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T11:09:57.169Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ARRAY-LANEBCAST1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-17T11:09:53.898Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q2ihn3ot",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T11:07:44.573Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q13p1rdp",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T11:01:42.868Z",
-      "by": "owner",
-      "action": "question.add",
-      "ref": "q0xqu5fn",
-      "note": ""
-    },
-    {
-      "at": "2026-11-17T10:59:56.775Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ARRAY-CONJ1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-17T10:59:56.775Z",
-      "by": "owner",
-      "action": "decision.ratify",
-      "ref": "D-ARRAY-COMPLEXT1",
-      "note": "A"
-    },
-    {
-      "at": "2026-11-17T10:59:56.775Z",
-      "by": "owner",
-      "action": "card.over-limit",
-      "ref": "c05gn07n",
-      "note": "9 criteria, soft limit 6: the standard syntax ratification chores"
-    },
-    {
-      "at": "2026-11-17T10:59:56.775Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c05gn07n",
-      "note": "#11 snapshots re-blessed"
-    },
-    {
-      "at": "2026-11-17T10:59:56.775Z",
-      "by": "owner",
-      "action": "card.over-limit",
-      "ref": "c05gn07n",
-      "note": "8 criteria, soft limit 6: the standard syntax ratification chores"
-    },
-    {
-      "at": "2026-11-17T10:59:56.775Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c05gn07n",
-      "note": "#10 editor grammars regenerated (jet self devtools grammars)"
-    },
-    {
-      "at": "2026-11-17T10:59:56.775Z",
-      "by": "owner",
-      "action": "card.over-limit",
-      "ref": "c05gn07n",
-      "note": "7 criteria, soft limit 6: the standard syntax ratification chores"
-    },
-    {
-      "at": "2026-11-17T10:59:56.775Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c05gn07n",
-      "note": "#9 syntax-decisions.md log entry"
-    },
-    {
-      "at": "2026-11-17T10:59:56.774Z",
-      "by": "owner",
-      "action": "card.criteria-add",
-      "ref": "c05gn07n",
-      "note": "#8 Data/Syntax registry entry updated"
-    },
-    {
-      "at": "2026-11-17T10:50:52.552Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c01gyy9b",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T10:50:51.591Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fqrrpk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T10:50:50.607Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c051j6ab",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T10:50:49.648Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0cnf5w8",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T10:50:48.674Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gmf0y4",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T10:50:47.689Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gmf0y4",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T10:28:47.385Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c07k91t6",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T10:23:23.566Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fqrrpk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T10:23:22.062Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0gmf0y4",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-17T10:20:03.933Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0heplig",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T10:17:43.399Z",
-      "by": "Main",
-      "action": "card.over-limit",
-      "ref": "c0t5gnhs",
-      "note": "19 criteria, soft limit 6: the formatter-safety card owns every fmt meaning defect; a gap is a criterion on its owning card (owner order)"
-    },
-    {
-      "at": "2026-11-17T10:17:43.399Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0t5gnhs",
-      "note": "#19 jet fmt keeps meaning on every source, generated ones includ"
-    },
-    {
-      "at": "2026-11-17T10:16:48.344Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fqrrpk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T10:08:04.016Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fqrrpk",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T10:00:35.291Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0prey1k",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T10:00:00.589Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07k91t6",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T09:49:27.267Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c051j6ab",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T09:34:01.130Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0prey1k",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-17T09:09:42.554Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07k91t6",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-17T09:06:14.441Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c07k91t6",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-17T09:04:40.675Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c06r6neu",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T09:01:29.389Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gmf0y4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T08:55:31.410Z",
-      "by": "owner",
-      "action": "done.clear",
-      "ref": null,
-      "note": "2026-11-17T08:55:31.410Z"
-    },
-    {
-      "at": "2026-11-17T08:55:08.079Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0reo0hk",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-17T08:44:21.394Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gmf0y4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T08:42:43.825Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0mq8xwu",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T08:42:31.782Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mq8xwu",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T08:42:30.621Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0prey1k",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T08:40:13.127Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06r6neu",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-17T08:40:11.743Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06r6neu",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T08:40:10.247Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c06r6neu",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T08:17:43.823Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gmf0y4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T07:54:32.438Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0429qak",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T07:54:14.583Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0reo0hk",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-17T07:45:45.273Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T07:29:21.139Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T07:28:06.028Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0sdz4q0",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T07:25:58.476Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lidgow",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T07:25:48.873Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0lidgow",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T07:25:46.373Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mq8xwu",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T06:58:39.181Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0prey1k",
-      "note": "#5 The Linux app window redraws when a live binding its current"
-    },
-    {
-      "at": "2026-11-17T06:34:39.156Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fymc7l",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-17T06:34:32.362Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0fymc7l",
-      "note": "#8: The UI folder was renamed to PackageMarkerOwnDiagnostic (dev 732af2563f) for the path-case guard; it passes under the new filter on the p249 batch compiler. (reopened); was: A package marker refuses code with its own declared diagnostic, and `jet explain package.Name` prints that diagnostic's what/why/fix text. Proof: `jet test Compiler --profile ui --filter package_marke"
-    },
-    {
-      "at": "2026-11-17T06:31:43.038Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gmf0y4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T06:31:14.615Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c04pd50v",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T06:31:06.379Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mq8xwu",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T06:31:05.068Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04pd50v",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T06:29:47.212Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0gmf0y4",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T06:25:52.386Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fymc7l",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-17T06:24:25.147Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fymc7l",
-      "note": "#7"
-    },
-    {
-      "at": "2026-11-17T06:24:22.565Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fymc7l",
-      "note": "#8"
-    },
-    {
-      "at": "2026-11-17T06:24:20.169Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fymc7l",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T06:24:17.866Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0fymc7l",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-17T06:15:36.806Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0prey1k",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T06:11:50.793Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mq8xwu",
-      "note": "#4: The host dependency is #6799 c4, not the folded #4951.; was: On the Linux desktop, native.drop_files delivers files dropped on its body to on_drop as path-backed native.PickedFile values (Wayland wl_data_device drag and drop, text/uri-list), once a native host "
-    },
-    {
-      "at": "2026-11-17T06:11:44.706Z",
-      "by": "Main",
-      "action": "card.criteria-unblock",
-      "ref": "c0mq8xwu",
-      "note": "#4: was blocked by #4951; #4951 is folded and done; the host is #6799 c5."
-    },
-    {
-      "at": "2026-11-17T06:11:43.006Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0prey1k",
-      "note": "#4 The Linux native app host: an app's native.app opens a Wayla"
-    },
-    {
-      "at": "2026-11-17T06:09:27.667Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0fymc7l",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T06:02:20.664Z",
-      "by": "Main",
-      "action": "card.criteria-add",
-      "ref": "c0mq8xwu",
-      "note": "#4 On the Linux desktop, native.drop_files delivers files dropp (blocked by #4951)"
-    },
-    {
-      "at": "2026-11-17T06:02:17.850Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mq8xwu",
-      "note": "#1: Native drop delivery needs a Linux host that renders ui.Node screens, which doesn't exist yet; it moves to its own criterion on this card, blocked by #4951.; was: native.open_file and native.drop_files give native.PickedFile values, never String paths. A PickedFile has a name, a size, a media type, read and stream. On the Linux desktop it is backed by a path th"
-    },
-    {
-      "at": "2026-11-17T05:59:14.583Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0mq8xwu",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T05:55:25.022Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0prey1k",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T05:28:49.600Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0reo0hk",
-      "note": "#3: D-PRIM-ANY1 was ratified C: there is no Any value, so c3's Any subject is a union or trait-value subject.; was: Under the ratified D-PRIM-ANY1 option: member arms over an Any accept generic arguments (.Pair<Int, String>(p); today E0003). A value whose type has no arm spelling ([Int], Int?, function types) reach"
-    },
-    {
-      "at": "2026-11-17T05:23:36.643Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0tjjr66",
-      "note": "#9: Takes the browser halves of #6802 c1 and c3, which need a promise-waiting page runtime.; was: Device APIs reach the browser once the page runtime can wait on a promise: native.ask and native.open_settings through the Permissions API (moved from #6806 c2), native.take_photo and native.location "
-    },
-    {
-      "at": "2026-11-17T05:23:35.685Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mq8xwu",
-      "note": "#3: The stored FileSystemDirectoryHandle permission request is promise-based; it moves to #6556 c9.; was: Access to a chosen folder survives a restart: on Linux through its path, or its document portal ID inside a sandbox; in the browser through a stored FileSystemDirectoryHandle that asks for permission "
-    },
-    {
-      "at": "2026-11-17T05:23:34.735Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0mq8xwu",
-      "note": "#1: The browser half needs the page runtime to wait on a promise (a file input, File.arrayBuffer); the synchronous wasm seam can't. That belongs to #6556 c9, like the moved #6806 and #6803 browser halves.; was: native.open_file and native.drop_files give native.PickedFile values, never String paths. A PickedFile has a name, a size, a media type, read and stream. It is backed by a path on the Linux desktop (t"
-    },
-    {
-      "at": "2026-11-17T05:18:33.641Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0reo0hk",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T05:18:31.951Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04pd50v",
-      "note": "#5"
-    },
-    {
-      "at": "2026-11-17T05:18:30.798Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0lidgow",
-      "note": "#3"
-    },
-    {
-      "at": "2026-11-17T05:18:28.734Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0f4o904",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T04:57:40.133Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0lidgow",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T04:56:18.074Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0lidgow",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T04:55:28.855Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c0lidgow",
-      "note": "logEntry"
-    },
-    {
-      "at": "2026-11-17T04:28:16.904Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04pd50v",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T04:28:15.899Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c097myt8",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T04:28:14.099Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c097myt8",
-      "note": "#2"
-    },
-    {
-      "at": "2026-11-17T04:28:13.040Z",
-      "by": "Main",
-      "action": "card.update",
-      "ref": "c02inyar",
-      "note": "phase,logEntry"
-    },
-    {
-      "at": "2026-11-17T04:28:11.150Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c02inyar",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T04:28:07.740Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c05gn07n",
-      "note": "#6"
-    },
-    {
-      "at": "2026-11-17T04:25:02.905Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0reo0hk",
-      "note": "#4"
-    },
-    {
-      "at": "2026-11-17T04:25:00.489Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c0reo0hk",
-      "note": "#1"
-    },
-    {
-      "at": "2026-11-17T04:24:38.211Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c0sg79an",
-      "note": "#9: Takes the per-scope check_removal gate half of #5022 c5, which needs this block to exist.; was: D-UB-BOUNDARY1=A: expert code skips a check only inside a written `#Unchecked(<check>)` block (bounds first); today `#Unchecked(bounds)` is E0927 on compiler 0ccdff27ea. The block removes the check on"
-    },
-    {
-      "at": "2026-11-17T04:24:35.292Z",
-      "by": "Main",
-      "action": "card.criteria-edit",
-      "ref": "c04pd50v",
-      "note": "#5: The per-scope half (#Unchecked inside #Unsafe) is D-UB-BOUNDARY1=A work owned by #6323 c9 (E22), where the gate requirement moves; the build-wide setting itself is retired by #6323 c10.; was: Removing checks build-wide or per scope (audit rows E12-E17: a check field set to `off`, or `#Unchecked` inside `#Unsafe`) is the audited `check_removal` gate, which any package or organization may fo"
-    },
-    {
-      "at": "2026-11-17T04:07:23.577Z",
-      "by": "Main",
-      "action": "card.criteria-meet",
-      "ref": "c04pd50v",
       "note": "#4"
     }
   ],
