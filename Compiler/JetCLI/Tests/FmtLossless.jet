@@ -517,9 +517,7 @@ fl_flatten_use_groups: fn(tokens: [FmtTok]) -> [FmtTok] {
 fl_use_row_start: fn(tokens: [FmtTok], open: Int, cursor: Int) -> Bool {
     kind: tokens[cursor].kind
     if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> return false
-    if kind != TOKEN_IDENT && kind != TOKEN_STRING && kind != TOKEN_HASH {
-        return false
-    }
+    if kind != TOKEN_IDENT && kind != TOKEN_STRING && kind != TOKEN_HASH -> return false
     if kind == TOKEN_IDENT && tokens[cursor].text == FL_KW_AS -> return false
     if cursor == open + 1 -> return true
     previous: tokens[cursor - 1]

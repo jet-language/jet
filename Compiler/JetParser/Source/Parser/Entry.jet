@@ -1638,9 +1638,7 @@ parser_hash_leads_to_item: fn(state: &JetParserState) -> Bool Never! {
 parser_hash_leads_to_function_or_module: fn(state: &JetParserState) -> Bool Never! {
     offset := parser_hash_item_offset(state)
     if offset < 0 -> return false
-    if parser_kind_at(state, offset) == TOKEN_KW_PRIV {
-        offset += 1
-    }
+    if parser_kind_at(state, offset) == TOKEN_KW_PRIV -> offset += 1
     kind: parser_kind_at(state, offset)
     kind == TOKEN_KW_FN || kind == TOKEN_KW_MODULE || parser_prep_verb_ahead(state, offset, TOKEN_KW_FN)
 }
