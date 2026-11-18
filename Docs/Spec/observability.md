@@ -95,14 +95,18 @@ starts in a child process is reaped by jet first, so its window is the last
 periodic one (`live`). A program that links no task, channel, live value or
 event publishes nothing: its trace keeps the source identity and map, and its
 profile is `no_samples` with no window.
-`jet perf run` samples the program's CPU time: the runtime arms the process's
-profiling timer (`setitimer` `ITIMER_PROF`, one sample per millisecond of
-CPU) and records the program counter each `SIGPROF` interrupted with the call
-site of each caller. A frame without a frame pointer (code before a
-function's prologue sets one, a frameless runtime routine, a C library
-function) is stepped out of by the image's own call frame information
-(`.eh_frame`), read by the runtime's unwinder, up to the first frame that
-keeps one; the frame-pointer chain gives the rest. `jet run` writes the
+`jet perf run` samples the program's CPU time: the runtime arms a timer on
+each thread's own CPU clock (`timer_create` on `CLOCK_THREAD_CPUTIME_ID`,
+delivered to that thread, one sample per millisecond of its CPU), so threads
+that run at once each keep their samples, and records the program counter
+each `SIGPROF` interrupted with the call site of each caller, each handler in
+a record buffer of its own so no sample loses its stack to another thread's.
+A frame without a frame pointer (code before a function's prologue sets one,
+a compiler-emitted helper such as the stop poll, a frameless runtime
+routine, a C library function) is stepped out of by the image's own call
+frame information (`.eh_frame`), read by the runtime's unwinder, up to the
+first frame that keeps one; the frame-pointer chain gives the rest. At exit
+the runtime records the CPU time it sampled, and `jet run` writes the
 program's image beside the samples. The session names each sample's Jet
 function and source line from that image's `.debug_jetline` location table, as
 Linux perf names the same image's samples from its line tables, so `-O2` code
@@ -117,12 +121,16 @@ passes through has a row with no exclusive samples. A row's
 of the checked source's lines, from the allocation records the runtime
 writes with the samples, so an allocation in the runtime or a core module
 counts at the line of the source that called into it; a run whose runtime
-recorded no allocation site leaves it null. `coverage`
-is `complete` when every sample landed in that source and `partial` when some
-ran in the runtime or another file, which the `reason` counts and, for samples
-outside every Jet function, names by the image's `.symtab` function, hottest
-first, as `perf report` names them (the compiler's stop poll `jet_ir_stop_turn`
-is the usual one). `jet perf view` sums them per function with its share of the
+recorded no allocation site leaves it null. A sample in a compiler-emitted
+helper (a `jet_ir_` symbol, such as the stop poll `jet_ir_stop_turn`) counts
+at the Jet line that called it, and the `reason` counts those samples.
+`coverage` is `complete` when every sample landed in that source and
+`partial` when some ran in the runtime or another file, which the `reason`
+counts and, for samples outside every Jet function, names by the image's
+`.symtab` function, hottest first, as `perf report` names them. The `reason`
+also gives how many samples the CPU time sampled should give beside how many
+the session kept, and counts any sample in Jet code that kept no stack. `jet
+perf view` sums them per function with its share of the
 samples, then its hottest lines with their exclusive and inclusive samples and
 allocations (`line 7 samples=12 inclusive=40 allocations=300`). A run whose
 samples never reach the checked source (a short program, `jet perf test`, `jet

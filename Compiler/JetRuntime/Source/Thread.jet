@@ -439,6 +439,9 @@ rt_thread_entry_address: fn() -> I64 {
     thread_spawn_settled()
     // This thread's alternate signal stack, for the fault report (Fault.jet).
     fault_stack: fault_stack_start()
+    // Under `jet perf run`, this thread's own CPU-time sampling timer
+    // (PerfSamples.jet).
+    perf_timer: perf_samples_thread_start()
     #Unsafe("rt_sigprocmask reads the spawner's mask from the live start record and retains no pointer") {
         _ := os_syscall_i64(I64{14}, I64{2}, wrapping(start + I64{24}), I64{0}, I64{8}, I64{0}, I64{0})
     }
@@ -457,6 +460,7 @@ rt_thread_entry_address: fn() -> I64 {
     #Unsafe("the caller transferred a System V I64->I64 code address and one argument to this thread") {
         result = os_call_address_i64(entry, argument)
     }
+    perf_samples_thread_end(perf_timer)
     fault_stack_end(fault_stack)
     jet_rt_thread_detach()
     thread_finish(handle, result)

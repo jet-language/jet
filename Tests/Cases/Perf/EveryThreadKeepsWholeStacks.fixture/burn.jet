@@ -1,0 +1,28 @@
+// Four tasks call fib at once until the program has used two seconds of CPU
+// time, so CPU-time samples land on four threads at the same moments.
+use os: core.sys
+
+fib: fn(n: Int) -> Int {
+    if n < 2 -> return n
+    fib(n - 1) + fib(n - 2)
+}
+
+// The program's CPU time in nanoseconds.
+spent: fn() -> Int { (os.cpu_time() ?? panic("cpu_time")).in(.Nanoseconds) }
+
+// fib's calls until the program's CPU time reaches `until` nanoseconds.
+burn: fn(until: Int) -> Int {
+    calls := 0
+    loop spent() < until -> calls += fib(25)
+    calls
+}
+
+run: fn() {
+    until: spent() + 2000000000
+    a: task burn(until)
+    b: task burn(until)
+    c: task burn(until)
+    d: task burn(until)
+    calls: (a.join() ?? 0) + (b.join() ?? 0) + (c.join() ?? 0) + (d.join() ?? 0)
+    print("burned={calls > 0}")
+}

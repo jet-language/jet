@@ -399,8 +399,11 @@ observe_cancel_live_tasks: fn() {
     jet_rt_free(controls, capacity * I64{8}, I64{8})
 }
 
-// Publishes the writer's exit snapshot, once per process run.
+// Publishes the writer's exit snapshot, once per process run, after
+// writing the record of the CPU time `jet perf run` sampled (PerfSamples.jet
+// perf_samples_exit).
 #Export(c) jet_rt_observe_exit: fn(_unused: I64) -> I64 {
+    perf_samples_exit()
     if observe_root == (I64{0}) -> return I64{0}
     if sync_swap(wrapping(observe_root + I64{64}), I64{1}) != (I64{0}) -> return I64{0}
     observe_publish_exit()
