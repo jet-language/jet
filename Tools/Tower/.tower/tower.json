@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112168,
+    "rev": 112169,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74686,11 +74686,11 @@
         {
           "n": 2,
           "text": "Readers split a dotted path at the longest prefix that names a module in the program's module graph; a case proves `jet inspect impact <file> core.process.spawn`-style selectors and an ambiguous or unknown prefix gives a registered diagnostic with a UI snapshot. Proof: `jet test Compiler --profile cases --filter Inspect/impact_dotted_selector` and `jet test Compiler --profile ui --filter dotted_path_unknown_prefix`.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:02:09.939Z"
+          "evidence": "p293 full suite (dev 4171547dc0): cases Inspect/impact_dotted_selector PASS and ui dotted_path_unknown_prefix PASS (also IfHole on its worktree at 4171547dc0)",
+          "at": "2026-11-18T07:24:49.008Z"
         },
         {
           "n": 3,
@@ -74728,7 +74728,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-06T19:42:47.719Z",
-      "updated": "2026-11-18T06:36:33.637Z",
+      "updated": "2026-11-18T07:24:49.008Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -82282,83 +82282,6 @@
       "updated": "2026-11-17T01:45:11.469Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
-    },
-    {
-      "id": "c0d72itt",
-      "num": 6758,
-      "title": "Compile-time folding bakes vDSO reads: rt.clock_mono_ns() in a local became one build's constant",
-      "body": "Found by G4Ports-1, 2026-11-11, root of the run-cold-context parity failure. sema's comptime-local folding treated an initializer as pure when the seccomp filter saw no syscall. vDSO reads such as clock_gettime never trap, so 'now: rt.clock_mono_ns()' in Core/Http/Client.jet __client_until held one build's reading: every 500 ms HTTP send failed at once in a process older than that. The same latent bake sits in the Tls, Db, Server, Web and Wayland deadlines. Fix: G4Ports-clock.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c2 amended (Main, 2026-11-13). G10Safe-runtime-reads2 gave the live cell IO, and IO then spread into every Db write signature (Core/Db/Db.jet execute and rollback), which broke corelib. An effect row is the wrong tool for a read whose effect is invisible to the caller. Such reads are now run-time-only (RUNTIME_ONLY_READS), which already exists and is consulted by the same never-fold rule, so this adds no second mechanism. Bindings whose effect is real to the caller (watcher poll IO, task_cpu_ns Time) still carry rows. A keep-going sweep over Core, Compiler, Jetpack, Tools, Examples and tests found 0 IO and 0 Time violations."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "Main ruling 2026-11-12 (c2 scope): the goal is that no ambient read is baked into the image; an effect row is one means. task_identity keeps an empty row (context is an implicit input, D-CONTEXT-EFFECT1=F) but joins a sema run-time-only set (the c3 never-computed-while-compiling rule), avoiding a Context row cascade into Compiler trace functions. os_family may stay reviewed-pure only if a case shows a cross-target fold yields the target family; otherwise it joins the run-time-only set. The census names each reviewed entry with its reason."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Sema folds a local at compile time only when the solved effect row of its initializer is empty. An initializer that reaches Time, Rand or any other effect is never folded, whatever syscall path it takes (vDSO included), and seccomp is only a backstop. Proof: a #Test that fails on the base compiler (two clock reads in one process equal) and passes on the fix, a second test for another vDSO-backed read, and the run-cold-context PortBars parity cases 2, 5, 6 and 7 passing.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "32cf234624: jet test Core/Http/Client.jet -> 1 passed 0 failed; jet test Core/Net/Tls.jet -> 6 passed 0 failed (Lander holdsweep $JET_SCRATCH_ROOT/lanes/Lander/holds/7-6758-c1.out)",
-          "at": "2026-11-13T02:24:33.029Z"
-        },
-        {
-          "n": 2,
-          "text": "Every runtime binding that reads ambient state is never computed while compiling. It either declares the effect it reads (so the empty-row rule refuses to fold it, as clock_mono_ns does), or it is a run-time-only read (RUNTIME_ONLY_READS) when an effect row would spread into user signatures that never perform that effect. live_load and replace reach every Db write, so they are run-time-only reads. Found by G4Ports-1, 2026-11-12: live_load, task_identity, simd_lanes, os and os_family, clipboard_get and event_pop had empty rows. Proof: a census #Test lists every jet.runtime binding with an empty row and no run-time-only listing, and fails unless that list matches the reviewed pure list. A comptime case shows each read runs at run time on O0, O1 and O2 as a local, and is E0643 as a module value.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Holds on dev since 591822c267 (no read of ambient state is computed while building). `jet test Compiler/JetFoundation/Tests/Registry/RuntimeInterfacePurity.jet`: 255 passed, 0 failed, including \"every jet.runtime binding with no effect row is on the reviewed pure list or run-time only\"; `jet test Compiler --profile cases --filter runtime_interface/runtime_reads_are_never_computed_while_building` (E0643 per module value, runs at -O0/-O1/-O2 as locals): PASS, on the gate-p136 batch jet.",
-          "at": "2026-11-15T01:10:46.143Z"
-        },
-        {
-          "n": 3,
-          "text": "A computation whose result carries a raw address or a pointer (RawOf, RawAddressOf, PtrFromAddr), or a local value whose body runs #Unsafe code, is never computed while compiling, whatever its effect row says: a compile-time address has no runtime frame. Module values take the raw rule only, because Core has 171 #Unsafe blocks and a refused module value is an E0643 build error. Found 2026-11-12: a1e1b740f6 folded addr: leak(), so the expired-stack sentry reported R0801 instead of R0802. Proof: jet test Compiler --profile cases tests/cases/custom/sentry_fault_kinds_hold_at_every_tier.case (expired-stack R0802, provenance R0801, quarantine R0802, at O0, O1 and O2), and tests/cases/custom/sentry_faults_are_tier_parity.case, both PASS.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "21b423faed: jet test Compiler --profile cases --filter custom/sentry_fault -> PASS 2/2 (Lander holdsweep $JET_SCRATCH_ROOT/lanes/Lander/holds/8-6758-c3.out)",
-          "at": "2026-11-13T02:24:34.482Z"
-        },
-        {
-          "n": 4,
-          "text": "A call to a function that reads a mutable global (or any other state a call can change) is never folded at compile time, even when every argument is a constant. Found by CardCloser-3 on 2026-11-15: a Never! runtime function reading a mutable global folded (alloc_window_stack(I64{0}) read alloc_root as 0). Proof: a tests/cases case where such a function's result changes after the global is written, printing the run-time values on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "CardCloser-3-mutable-read-not-folded landed 3c5ca99bad (fold purity refuses a local value reading module state through callee bodies or its own initializer). on batch compiler p157 (dev 058d3b0303), 2026-11-15 02:21: jet test Compiler --profile cases --filter comptime_diff/a_local_value_over_module_state_is_computed_when_it_runs PASS 1 (O0/O1/O2 print the run-time values; p152 printed 1 20 0 against the expected 6 70 10); JET_RECHECK_VERIFY=1 comptime_diff PASS 155 KF 3.",
-          "at": "2026-11-15T07:22:45.045Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-12T03:48:27.281Z",
-      "updated": "2026-11-15T07:22:45.045Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 4,
-      "completedAt": "2026-11-15T01:10:55.274Z"
     },
     {
       "id": "c0ssy5wy",
@@ -178641,6 +178564,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T07:24:49.009Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0a8z3u0",
+      "note": "#2"
+    },
     {
       "at": "2026-11-18T06:54:21.451Z",
       "by": "Main",
