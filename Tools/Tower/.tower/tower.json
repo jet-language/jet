@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112009,
+    "rev": 112013,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65131,6 +65131,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Main decision (c2, durable half; within D-SERVICE-WORKER1=A, which removes tree.receive, and D-SERVICE-DELIVERY1=D): durable receipts reach a typed worker by push. send_durable needs a message type that is Encode + Decode, and the authority log stores its JSON. The tree pushes the decoded pending receipts into the worker's mailbox at start(), on each send_durable and on retry. A handler that succeeds marks the receipt Delivered; one that fails leaves it Accepted for retry. The existing retry entry point keeps its current name and spelling, and only its effect changes (push instead of re-queue for receive), so no new public name is added. The ServicesRuntime fixtures are rewritten to observe through handlers."
+        },
+        {
           "at": "2026-11-13",
           "by": "Main",
           "text": "Decision (Main, within D-SERVICE-IDENTITY1): directory resolution is tree.directory_resolve<T>(name) -> Endpoint<T>. Sema passes T identity as it already passes handler_name, and Core refuses a mismatch with the registered worker message type (ServiceError.Unknown). The ratified rule that directories hand out typed endpoints already covers this. B (an untyped identity) contradicts that rule, and C (a new key value) would add a second mechanism (I8), so no ballot."
@@ -65199,6 +65204,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-17T23:46:36.120Z"
+        },
+        {
+          "n": 7,
+          "text": "The typed-worker cutover gives back the compile memory and time step 1 added: with the String forms deleted, the rcc measurement (rssmeasure) is at or below its p283 values (331 MB peak, sema.finalize 270 ms). p284 (59f4925f35, additive typed core) moved it to 355 MB and 303 ms.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T00:37:35.758Z"
         }
       ],
       "refs": [],
@@ -65209,9 +65223,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-17T23:46:36.120Z",
+      "updated": "2026-11-18T00:37:35.758Z",
       "updatedBy": "Main",
-      "criteriaLastN": 6
+      "criteriaLastN": 7
     },
     {
       "id": "c0fvnyiq",
@@ -116790,7 +116804,7 @@
       "track": "epoch",
       "epoch": "e24",
       "milestoneId": null,
-      "phase": "done",
+      "phase": "ready",
       "priority": "P1",
       "plan": null,
       "checkSteps": null,
@@ -116799,6 +116813,11 @@
       "blockedBy": [],
       "assignee": null,
       "log": [
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "Reopened for c4: the ConformanceCapsule O2 shield breach first appeared with 443a0e13e5 and recurred in p284."
+        },
         {
           "at": "2026-11-17",
           "by": "Main",
@@ -116841,6 +116860,15 @@
           "verifiedBy": null,
           "evidence": "Landed in 443a0e13e5 (p281). A join runs a child inline only when no carrier is left, so children keep their own thread, CPU clock and carrier kind. On the p281 batch compiler: golden Concurrency/TaskCPUClock 3/3 (o0, o1, o2), cases Context/ 14/14, TaskControlTiers/carriers_come_from_the_runtime_or_from_the_c_closures_libc 1/1, FFICallbacksTasks/programs_without_c_start_raw_clones_and_programs_with_c_start_musl_threads 1/1, Runtime/nested_join_more_tasks_than_workers 1/1 (runs, not REFUSED).",
           "at": "2026-11-17T23:23:45.471Z"
+        },
+        {
+          "n": 4,
+          "text": "A cancel never reaches code after a shield: Tests/Run/Concurrency/ConformanceCapsule.jet passes on O2 in every suite. Since 443a0e13e5 (a join runs a queued child inline only when no carrier is left) it printed 'shield: after shield (must not print)' on O2 in the p281 and p284 suites; it passed on O0 and O1. Proof: 20 consecutive runs of PASS\tTests/Run/Concurrency/ConformanceCapsule.jet\to0\t\nPASS\tTests/Run/Concurrency/ConformanceCapsule.jet\to1\t\nPASS\tTests/Run/Concurrency/ConformanceCapsule.jet\to2\t\n{\"PASS\":3,\"FAIL\":0,\"KNOWN-FAILING\":0,\"UNEXPECTED-PASS\":0,\"UNSUPPORTED\":0,\"SKIP-HOST\":0,\"OPT-IN\":0,\"REFUSED\":0,\"ERROR\":0,\"TIMEOUT\":0,\"suites\":[\"golden\"]} pass on O0, O1 and O2 under suite load.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T00:37:23.984Z"
         }
       ],
       "refs": [],
@@ -116852,10 +116880,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:29:07.249Z",
-      "updated": "2026-11-17T23:23:48.005Z",
+      "updated": "2026-11-18T00:37:25.530Z",
       "updatedBy": "Main",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-17T23:23:48.005Z"
+      "criteriaLastN": 4
     },
     {
       "id": "c0oymlrt",
@@ -214783,6 +214810,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T00:37:35.758Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0mhdm27",
+      "note": "7 criteria, soft limit 6: a measured regression from c2 step 1"
+    },
+    {
+      "at": "2026-11-18T00:37:35.758Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0mhdm27",
+      "note": "#7 The typed-worker cutover gives back the compile memory and t"
+    },
+    {
+      "at": "2026-11-18T00:37:25.531Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ywczn1",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-18T00:37:23.984Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0ywczn1",
+      "note": "#4 A cancel never reaches code after a shield: Tests/Run/Concur"
+    },
+    {
+      "at": "2026-11-18T00:13:01.644Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mhdm27",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-18T00:08:50.202Z",
       "by": "Main",
