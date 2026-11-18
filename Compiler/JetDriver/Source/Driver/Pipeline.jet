@@ -660,7 +660,7 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
                 module_identity: module_text(registration.module_table, graph_module.module_identity),
                 module_id: graph_module.module_identity,
                 target_triple: registration.target_machine.triple,
-                target_layout: Val(target_layout),
+                target_layout: Val(target_layout.copy()),
                 layout_facts: sema_checked_layout_projections(registration, registered_index, graph.programs[index].items, layout_engine, module_text(registration.module_table, graph_module.module_identity)),
                 app_route_roots: graph.programs[index].app_route_roots,
                 file_cap: graph.programs[index].file_cap,
@@ -3831,7 +3831,7 @@ jet_driver_comptime_run: fn(
                     // A wait on a body site is checked again next pass: a
                     // site's value never joins the available constants.
                     if checked_item.diagnostics.len() == 0 && diagnostics.len() == item_diagnostic_start && !closure.site_waits {
-                        settled_waits[source_key] = dependencies
+                        settled_waits[source_key] = dependencies.copy()
                     } else { _ := settled_waits.remove(source_key) }
                     wait_rows.push(
                         JetDriverComptimeWaitRow{
@@ -4875,7 +4875,7 @@ jet_driver_keep_going_diagnostics: fn(kg: &JetDriverKeepGoingLog, phase: String,
         message := diagnostic.what
         if diagnostic.detail == .Val(detail) -> message = "{message}: {detail}"
         path: diagnostic.source_path ?? "-"
-        site := path
+        site := path.copy()
         if diagnostic.span == .Val(span) -> site = "{path}:{span.start}..{span.end}"
         jet_driver_keep_going_row(kg, phase, path, diagnostic.code, message, site)
     }
@@ -5597,7 +5597,7 @@ jet_driver_expert_policies: fn(policies: &[SemaRegistrationPackagePolicy], load:
         }
         if dependency_roots.len() == 0 -> next
         name: names.get(package.identity) ?? next
-        policies[index].grant_name = name
+        policies[index].grant_name = name.copy()
         loop grant in root.authority_grants {
             if grant.package == name -> policies[index].expert_held = grant.rights
         }

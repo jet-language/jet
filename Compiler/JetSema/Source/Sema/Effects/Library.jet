@@ -547,7 +547,7 @@ sema_library_effect_check_denials: fn(node: SemaEffectNode, reached: [String], s
         }
     }
     loop denied in node.prohibited {
-        if sema_effect_covered(solved, [String]{denied}).len() > 0 -> next
+        if sema_effect_covered(solved, [String]{denied.copy()}).len() > 0 -> next
         loop entry in reached {
             if entry.contains("/") || !sema_effect_covers(denied, entry) -> next
             span: node.prohibition_span ?? node.name_span

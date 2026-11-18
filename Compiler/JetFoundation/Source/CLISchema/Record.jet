@@ -322,7 +322,7 @@ cli_schema_decode_job: fn(cursor: &CLIRecordCursor) -> JobFact RecordDecodeError
     }
     names := limit_map.keys().to_list()
     names.sort()
-    limits: loop key in names -> StringMapEntry{key: key, value: limit_map[key]}
+    limits: loop key in names -> StringMapEntry{key: key.copy(), value: limit_map[key]}
     Ok(JobFact{name: name, scope: scope, doc: doc, arguments: arguments.move(), after: after, packages: packages, cwd: cwd, inputs: inputs, outputs: outputs, skip: skip, cache: cache, parallel: parallel, limits: limits, schedule: schedule})
 }
 

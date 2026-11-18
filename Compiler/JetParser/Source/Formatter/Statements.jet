@@ -2253,7 +2253,7 @@ jfmt_resugar_layout_stmt: fn(layout_name: String, stmt: Stmt) -> Stmt Never! {
 jfmt_resugar_layout_args: fn(layout_name: String, args: [CallArg]) -> [CallArg] Never! {
     out := [CallArg]{}
     loop arg in args {
-        a2 := arg
+        a2 := arg.copy()
         a2.expr = jfmt_resugar_layout_expr(layout_name, arg.expr)
         out.push(a2)
     }

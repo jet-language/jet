@@ -337,6 +337,11 @@ SemaGraphModuleResult: struct {
     // module whose body checked, in declaration order; the checked synthetic
     // function is in `functions` and its key in `injected_function_keys`.
     tests: [TTestFact]{[TTestFact]{}},
+    // Outside test mode (`jet check`, a build's root tests): the fields this
+    // module's checked `#Test` bodies read and the cases they build. The
+    // bodies are dropped, so liveness reads a test's member uses from here
+    // (sema_liveness_member_uses).
+    test_member_uses: SemaLivenessMemberUses{SemaLivenessMemberUses.empty()},
     // Under a per-function trace: each Core body a demand wave checked into
     // this module, as its position in `functions`, and the task CPU time
     // (ns) its check took at the same position of `core_check_ns`
@@ -1138,7 +1143,10 @@ sema_check_sort_view_summary_jobs: fn(jobs: &[Int], environment: SemaScopeEnviro
             }
             start = end
         }
-        order = merged
+        // Swap the buffers: the next pass rewrites every slot of `merged`.
+        spent: order.move()
+        order = merged.move()
+        merged = spent
         width *= 2
     }
     sorted: loop position in order -> jobs[position]
@@ -1879,7 +1887,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
         if func.params[param_index].default != None && !func.params[param_index].script_variable && !forward_defaults.contains(param_index) {
             default_context := sema_check_context_init()
             default_context.unsafe_depth = context.unsafe_depth
-            default_context.generic_params = generic_params
+            default_context.generic_params = generic_params.copy()
             default_context.host_hooks = context.host_hooks
             // The default's node ids are the function's ids.
             default_context.next_expr_id = context.next_expr_id
@@ -2276,7 +2284,7 @@ check_program: fn(input: Program, module_name: String, source_file: String, sour
                 function_comptime_requests := [SemaComptimeRequest]{}
                 function_name_references := [SemaNameReferenceFact]{}
                 memory_row := sema_function_memory_position(memory_plan, module_none(), "", func.name, func.span)
-                memory_func := func
+                memory_func := func.copy()
                 if memory_row == {
                     .Val(position) -> {
                         if memory_plan.functions[position].function == .Val(planned) {
@@ -3899,6 +3907,7 @@ sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, progr
                     module_result.diagnostics.push(diagnostic)
                 }
                 if !graph.test_mode {
+                    if checked_test.function == .Val(function) -> sema_liveness_member_body_uses(function, module_result.test_member_uses)
                     return
                 }
                 loop fact in checked_test.call_facts -> module_result.call_facts.push(fact)
@@ -10041,7 +10050,7 @@ sema_comptime_staged_constant_rows: fn(resolved_graph: SemaRegistrationGraph, va
         }
         constant_index := available.declaration_heads[module_index].get(value.key) ?? next
         staged_values := [String:SemaComptimeItemValue]{}
-        staged_values[value.key] = value
+        staged_values[value.key] = value.copy()
         loop constant_index >= 0 {
             matched_index: constant_index
             constant_index = available.declaration_next[module_index][matched_index]
@@ -10155,7 +10164,7 @@ sema_comptime_declare_prepared_locals: fn(source: SemaComptimeItemSource, module
     loop local in source.prepared {
         key: symbol_key_text(SymbolKind.Local, module_name, owner, local.name)
         id: sema_symbol_id_of(program, context, key)
-        symbol := Symbol{id: id, kind: SymbolKind.Local, name: local.name, module_identity: module_identity, owner: Val(owner), span: local.span, ty: Val(local.ty), visibility: 0}
+        symbol := Symbol{id: id, kind: SymbolKind.Local, name: local.name, module_identity: module_identity, owner: Val(owner.copy()), span: local.span, ty: Val(local.ty), visibility: 0}
         if !sema_scope_declare_local(table, symbol, key, false, AccessConvention.Read, None, false) {
             next
         }
@@ -10426,7 +10435,7 @@ sema_effect_owned_trait_hooks: fn(graph: SemaRegistrationGraph, source: SemaRegi
         trait_name: implementation.trait_name ?? next
         if implementation.trait_symbol != None || !owned_trait_bounds_pure(trait_name) -> next
         loop function in implementation.methods {
-            hooks[symbol_table_key(graph.symbols, function.symbol.id)] = trait_name
+            hooks[symbol_table_key(graph.symbols, function.symbol.id)] = trait_name.copy()
         }
     }
     loop nominal in source.nominals {
@@ -11873,6 +11882,7 @@ sema_stage_declaration_modules: fn(modules: &&[SemaGraphModuleResult]) -> [SemaG
         kept[index].diagnostics = [Diagnostic]{}
         kept[index].failure_facts = [SemaFunctionFailureFacts]{}
         kept[index].tests = [TTestFact]{}
+        kept[index].test_member_uses = SemaLivenessMemberUses.empty()
     }
     kept
 }

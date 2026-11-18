@@ -74,7 +74,8 @@ parser_state_list: fn(state: &JetParserState) -> ParsedStateList {
                 parser_bump(state)
                 members.push(parser_state_name(state, "after `|` in a state group"))
             }
-            list.groups.push(StateGroup{name: head, members: members, span: parser_cover(head.span, members[members.len() - 1].span)})
+            span: parser_cover(head.span, members[members.len() - 1].span)
+            list.groups.push(StateGroup{name: head, members: members, span: span})
         } else {
             targets := [NamedSpan]{}
             if parser_current_kind(state) == TOKEN_UNIFIED_ARROW {

@@ -222,12 +222,12 @@ jet_cli_doc_leading_summary: fn(source: String) -> String Never! {
     summary := ""
     loop raw in semindex_doc_lines(source) {
         line: raw.trim()
-        doc: semindex_doc_strip_prefix(line, DOC_COMMENT_PREFIX) ?? {
+        doc: semindex_doc_strip_prefix(line.copy(), DOC_COMMENT_PREFIX) ?? {
             if line != "" -> break
             next
         }
         text: doc.trim()
-        if summary == "" && text != "" && !text.starts_with("```") -> summary = text
+        if summary == "" && text != "" && !text.starts_with("```") -> summary = text.copy()
     }
     summary
 }
@@ -605,7 +605,7 @@ jet_cli_doc_discover_doctests: fn(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never!
         }
         doc_line: doc_text.trim()
         if !in_fence {
-            if doc_line.starts_with("```") && jet_cli_doc_fence_is_jet(doc_line) {
+            if doc_line.starts_with("```") && jet_cli_doc_fence_is_jet(doc_line.copy()) {
                 in_fence = true
                 fence_line = line_number
                 setup = [String]{}
@@ -629,7 +629,7 @@ jet_cli_doc_discover_doctests: fn(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never!
             in_fence = false
             next
         }
-        if jet_cli_doc_expect_marker(doc_line) == .Val(marker) {
+        if jet_cli_doc_expect_marker(doc_line.copy()) == .Val(marker) {
             bytes: doc_line.bytes()
             expectations.push(
                 JetCLIDocExpectation{
@@ -638,7 +638,7 @@ jet_cli_doc_discover_doctests: fn(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never!
                     line: line_number,
                 },
             )
-        } else if doc_line != "" { setup.push(doc_line) }
+        } else if doc_line != "" { setup.push(doc_line.copy()) }
     }
     tests
 }

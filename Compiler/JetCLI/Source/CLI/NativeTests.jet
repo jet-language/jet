@@ -612,7 +612,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
                 fault = Val(JetNativeTestRecordsFault{path: path.copy(), cause: jet_cli_io_error_text(err)})
                 return Err("couldn't create selected native test records: {err}")
             }
-            receipt: jet_native_test_alone_run(alone.env(ENV_JET_NATIVE_TEST_ID, "{test.id}").env(ENV_JET_NATIVE_TEST_RECORDS_PATH, path)) ?? {
+            receipt: jet_native_test_alone_run(alone.copy().env(ENV_JET_NATIVE_TEST_ID, "{test.id}").env(ENV_JET_NATIVE_TEST_RECORDS_PATH, path)) ?? {
                 native_test_files.remove(path).drop("selected native test spawn already failed")
                 return Err("couldn't run native test {test.name}: {err}")
             }
@@ -644,7 +644,7 @@ jet_cli_native_test_run: fn(spec: ProcessSpec, tests: [JetNativeTestCase], check
                     spawn_error = Val("couldn't create selected native test records: {err}")
                     break
                 }
-                child: alone.env(ENV_JET_NATIVE_TEST_ID, "{test.id}").env(ENV_JET_NATIVE_TEST_RECORDS_PATH, path).spawn() ?? {
+                child: alone.copy().env(ENV_JET_NATIVE_TEST_ID, "{test.id}").env(ENV_JET_NATIVE_TEST_RECORDS_PATH, path).spawn() ?? {
                     native_test_files.remove(path).drop("selected native test spawn already failed")
                     spawn_error = Val("couldn't run native test {test.name}: {err}")
                     break

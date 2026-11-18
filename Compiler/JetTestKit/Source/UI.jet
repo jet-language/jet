@@ -92,7 +92,7 @@ kit_ui_directives: fn() -> [KitUIDirective] {
         {name: "programmable_build", argv: [], parent: false, exit: "any", streams: "", capability: ""},
     }
     loop name in ["parent_control_cancel", "jetpack_retired_store_verbs"] {
-        rows.push(KitUIDirective{name: name, argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
+        rows.push(KitUIDirective{name: name.copy(), argv: [], parent: false, exit: "any", streams: "", capability: "missing CLI fixture API: {name}"})
     }
     rows
 }
@@ -189,7 +189,7 @@ kit_ui_invocation: fn(source: String, file: String, lint: Bool) -> KitUICall {
         if call.check_core {
             // FILE, or FILE after "LINE": the anchor keeps its quotes, which
             // staging checks (kit_ui_core_insert).
-            call.core_top = argument
+            call.core_top = argument.copy()
             after: kit_steps_byte_index(argument, " after ") ?? -1
             if after >= 0 {
                 call.core_top = kit_steps_byte_slice(argument, 0, after).trim()
@@ -365,7 +365,7 @@ kit_ui_fixed: fn(entry: KitEntry, ctx: KitCtx, source: String, overlay: [KitEnvV
     loop tier in ctx.options.tiers {
         row := kit_golden_tier(tier)
         direct: row.direct
-        args := [String]{ctx.env.jet, if direct -> "run" else -> "build", fixed}
+        args := [String]{ctx.env.jet, if direct -> "run" else -> "build", fixed.copy()}
         loop flag in row.flags.move() -> args.push(flag.move())
         built: kit_exec_invoke_with_env(ctx.env, args, source, ctx.scratch, [U8]{}, overlay)
         failure: kit_exec_process_failure(built) ?? kit_expect_verdict(if built.code == 0 -> "PASS" else -> "FAIL", "fixed companion build/run exit {built.code}")

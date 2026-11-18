@@ -138,7 +138,7 @@ jet_cli_post_link_steps: fn(file: String, options: BuildOptions, result: JetDriv
     setting: build_option_place(options.values[build_option_index("post_link")])
     output: cli_files.relative(binary, root)
     loop (index, hook) in hooks {
-        step: JetCLILinkStep{kind: "post-link step", doing: "finish", hook: hook, setting: setting, output: output, root: root, binary: binary, makes: "artifact.next", fix: "fix the hook or the command its step runs, or drop `{hook}` from `post_link`", color: color}
+        step: JetCLILinkStep{kind: "post-link step", doing: "finish", hook: hook, setting: setting, output: output, root: root.copy(), binary: binary, makes: "artifact.next", fix: "fix the hook or the command its step runs, or drop `{hook}` from `post_link`", color: color}
         if jet_cli_link_step_undeclared(snapshot, step, COMPILER_EVENT_BUILD_BEFORE_WRITE) == .Val(failed) {
             return failed
         }

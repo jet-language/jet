@@ -462,7 +462,7 @@ jet_cli_prove_identity: fn(target: JetCLIProveTarget, members: [JetCLIProveMembe
     }
     loop group in groups {
         loop file in group.files {
-            observed: jet_cli_receipt_observe_input(JetDriverRunReceiptInput{path: file, digest: ""}) ?? return Err(jet_cli_prove_target_refusal("couldn't read proof input `{file}`: {err.message}"))
+            observed: jet_cli_receipt_observe_input(JetDriverRunReceiptInput{path: file.copy(), digest: ""}) ?? return Err(jet_cli_prove_target_refusal("couldn't read proof input `{file}`: {err.message}"))
             inputs.push(observed)
         }
     }

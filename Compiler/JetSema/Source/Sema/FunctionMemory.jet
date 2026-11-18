@@ -763,7 +763,7 @@ sema_function_memory_annotate_scope: fn(stmts: &[Stmt], chain: [PolicyDeclaratio
                     promoted_return = sema_function_memory_annotate_scope(arm_body, chain, diagnostics, complete) || promoted_return
                     updated_arms[arm_index].body = arm_body
                 }
-                updated_else_body := else_body
+                updated_else_body := else_body.copy()
                 if else_body == .Val(else_statements) {
                     body := else_statements.copy()
                     promoted_return = sema_function_memory_annotate_scope(body, chain, diagnostics, complete) || promoted_return

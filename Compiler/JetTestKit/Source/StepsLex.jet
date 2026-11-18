@@ -52,7 +52,7 @@ kit_steps_tokens: fn(text: String) -> [KitWord]? {
         if quote != 0 || escape -> return None
         if quoted && i < bytes.len() && bytes[i] != (U8{32}) && bytes[i] != (U8{9}) -> return None
         raw: kit_steps_byte_slice(text, start, i)
-        decoded := raw
+        decoded := raw.copy()
         if first == 34 {
             tree: json.parse(raw) ?? return None
             if tree == {
@@ -61,7 +61,7 @@ kit_steps_tokens: fn(text: String) -> [KitWord]? {
             }
         } else if first == 39 {
             interior: kit_steps_byte_slice(text, start + 1, i - 1)
-            decoded = interior
+            decoded = interior.copy()
             if interior.contains("\\") {
                 buffer := [U8]{}
                 at := start + 1

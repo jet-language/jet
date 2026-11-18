@@ -135,7 +135,7 @@ sema_marker_module_items: fn(items: [Item], listed: [Int]?, segments: [String], 
             .MarkerDecl(declaration) -> {
                 if position + 1 == segments.len() && declaration.name == segments[position] {
                     if rows.candidate != None -> rows.ambiguous = true else {
-                        rows.candidate = Val(SemaMarkerModuleCandidate{declaration: declaration, exported: exported && declaration.is_pub})
+                        rows.candidate = Val(SemaMarkerModuleCandidate{declaration: declaration.copy(), exported: exported && declaration.is_pub})
                     }
                 }
             }
@@ -204,7 +204,7 @@ sema_marker_module_declaration_by_span: fn(items: [Item], span: Span) -> MarkerD
 sema_marker_module_candidate_by_span: fn(items: [Item], span: Span, exported: Bool) -> SemaMarkerModuleCandidate? Never! {
     loop item in items {
         if item == .MarkerDecl(declaration) && declaration.name_span.start == span.start && declaration.name_span.end == span.end {
-            return Val(SemaMarkerModuleCandidate{declaration: declaration, exported: exported && declaration.is_pub})
+            return Val(SemaMarkerModuleCandidate{declaration: declaration.copy(), exported: exported && declaration.is_pub})
         }
         if item == .CodeModule(code_module) && code_module.body == .Val(body) {
             candidate: sema_marker_module_candidate_by_span(body, span, exported && code_module.is_pub)
@@ -286,7 +286,7 @@ sema_marker_module_declarations: fn(items: [Item], prefix: String, exported_only
         if item == {
             .MarkerDecl(declaration) -> {
                 if exported_only && !declaration.is_pub -> next
-                row := declaration
+                row := declaration.copy()
                 if prefix != "" -> row.name = "{prefix}.{declaration.name}"
                 declarations.push(row)
             }
@@ -351,7 +351,7 @@ sema_marker_module_bind_markers: fn(markers: [Marker], bindings: [SemaMarkerModu
 sema_marker_module_bind_functions: fn(functions: [Func], bindings: [SemaMarkerModuleBinding]) -> [Func] Never! {
     bound := [Func]{}
     loop function in functions {
-        value := function
+        value := function.copy()
         value.markers = sema_marker_module_bind_markers(function.markers, bindings)
         bound.push(value)
     }
@@ -361,15 +361,15 @@ sema_marker_module_bind_functions: fn(functions: [Func], bindings: [SemaMarkerMo
 sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBinding]) -> [Item] Never! {
     bound := [Item]{}
     loop item in items {
-        value := item
+        value := item.copy()
         if item == {
             .Func(function) -> {
-                row := function
+                row := function.copy()
                 row.markers = sema_marker_module_bind_markers(function.markers, bindings)
                 value = Item.Func{value: row}
             }
             .Struct(definition) -> {
-                row := definition
+                row := definition.copy()
                 row.type_markers = sema_marker_module_bind_markers(definition.type_markers, bindings)
                 row.serde_markers = sema_marker_module_bind_markers(definition.serde_markers, bindings)
                 loop field_index in 0..<row.fields.len() {
@@ -384,7 +384,7 @@ sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBind
                 next
             }
             .Enum(definition) -> {
-                row := definition
+                row := definition.copy()
                 row.type_markers = sema_marker_module_bind_markers(definition.type_markers, bindings)
                 row.serde_markers = sema_marker_module_bind_markers(definition.serde_markers, bindings)
                 loop variant_index in 0..<row.variants.len() {
@@ -398,23 +398,23 @@ sema_marker_module_bind_items: fn(items: [Item], bindings: [SemaMarkerModuleBind
                 value = Item.Enum{value: row}
             }
             .Distinct(definition) -> {
-                row := definition
+                row := definition.copy()
                 row.type_markers = sema_marker_module_bind_markers(definition.type_markers, bindings)
                 value = Item.Distinct{value: row}
             }
             .Impl(implementation) -> {
-                row := implementation
+                row := implementation.copy()
                 row.markers = sema_marker_module_bind_markers(implementation.markers, bindings)
                 row.methods = sema_marker_module_bind_functions(implementation.methods, bindings)
                 value = Item.Impl{value: row}
             }
             .ErrorConv(conversion) -> {
-                row := conversion
+                row := conversion.copy()
                 row.markers = sema_marker_module_bind_markers(conversion.markers, bindings)
                 value = Item.ErrorConv{value: row}
             }
             .CodeModule(code_module) -> {
-                row := code_module
+                row := code_module.copy()
                 if code_module.body == .Val(body) {
                     row.body = Val(sema_marker_module_bind_items(body, bindings))
                 }
@@ -452,7 +452,7 @@ sema_marker_module_bindings: fn(inputs: [SemaRegistrationModuleInput], edges: [S
     loop marker in sema_marker_rules_collect_program(input.program) {
         if marker.declaration_module != None -> next
         scope := sema_marker_module_scope_in(input.program.items, own, marker.name_span)
-        lexical_scope: scope
+        lexical_scope: scope.copy()
         resolved := SemaMarkerModuleResolution{status: "unknown", declaring_module_identity: input.module_identity, declaration: None}
         loop {
             name: sema_marker_module_scoped_name(scope, marker.name)
@@ -673,7 +673,7 @@ sema_marker_package_check: fn(graph: SemaRegistrationGraph, applied: TAppliedRul
     entry_identity: graph.entry_module_identity
     site := ast_program()
     loop written in graph.build_facts.package_markers {
-        marker := written
+        marker := written.copy()
         if sema_marker_rules_catalog_rule_index(catalog.applied_rules, written.name) == None {
             if sema_marker_module_case_error(written.name, written.name_span) == .Val(error) {
                 diagnostics.push(error)

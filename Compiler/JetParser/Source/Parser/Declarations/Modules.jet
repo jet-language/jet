@@ -405,7 +405,7 @@ parser_module_fx_cap: fn(state: &JetParserState, marker: Marker, owner: String) 
             return None
         }
         prefix := ""
-        path := expr
+        path := expr.copy()
         if expr == .Unary(op, operand, _, _) {
             if op == UnOp.Not {
                 prefix = "!"
@@ -440,36 +440,36 @@ parser_module_body_caps: fn(body: [Item], cap: ModuleCap) -> [Item] Never! {
                 capped.push(Item.Func{value: parser_func_with_cap(definition, cap)})
             }
             .Impl(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.methods = parser_methods_with_cap(definition.methods, cap)
                 capped.push(Item.Impl{value: updated})
             }
             .Struct(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.methods = parser_methods_with_cap(definition.methods, cap)
                 updated.trait_impls = parser_trait_impls_with_cap(definition.trait_impls, cap)
                 capped.push(Item.Struct{value: updated})
             }
             .Enum(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.methods = parser_methods_with_cap(definition.methods, cap)
                 updated.trait_impls = parser_trait_impls_with_cap(definition.trait_impls, cap)
                 capped.push(Item.Enum{value: updated})
             }
             .Trait(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.methods = (loop method in definition.methods -> parser_trait_method_with_cap(method, cap))
                 capped.push(Item.Trait{value: updated})
             }
             .CodeModule(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 if definition.body == .Val(inner) {
                     updated.body = Val(parser_module_body_caps(inner.copy(), cap))
                 }
                 capped.push(Item.CodeModule{value: updated})
             }
             .GenericModule(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.body = parser_module_body_caps(definition.body, cap)
                 capped.push(Item.GenericModule{value: updated})
             }
@@ -488,7 +488,7 @@ parser_methods_with_cap: fn(methods: [Func], cap: ModuleCap) -> [Func] Never! {
 parser_trait_impls_with_cap: fn(blocks: [TraitImplBlock], cap: ModuleCap) -> [TraitImplBlock] Never! {
     capped := [TraitImplBlock]{}
     loop block in blocks {
-        updated := block
+        updated := block.copy()
         updated.methods = parser_methods_with_cap(block.methods, cap)
         capped.push(updated)
     }
@@ -524,7 +524,7 @@ parser_module_body_visibility: fn(body: &&[Item], is_pub: Bool, is_package_pub: 
     loop item in body {
         if item == {
             .CodeModule(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 package: parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 if definition.body == .Val(inner) {
                     updated.body = Val(parser_module_body_visibility(inner.copy(), false, package))
@@ -532,79 +532,79 @@ parser_module_body_visibility: fn(body: &&[Item], is_pub: Bool, is_package_pub: 
                 narrowed.push(Item.CodeModule{value: updated})
             }
             .GenericModule(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.body = parser_module_body_visibility(definition.body.copy(), false, parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub))
                 narrowed.push(Item.GenericModule{value: updated})
             }
             .ModuleAlias(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.is_pub = false
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 narrowed.push(Item.ModuleAlias{value: updated})
             }
             .Func(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.is_pub = is_pub
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 narrowed.push(Item.Func{value: updated})
             }
             .Struct(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.is_pub = is_pub
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 updated.methods = parser_methods_visibility(definition.methods, is_pub, is_package_pub)
                 narrowed.push(Item.Struct{value: updated})
             }
             .Enum(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.is_pub = is_pub
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 updated.methods = parser_methods_visibility(definition.methods, is_pub, is_package_pub)
                 narrowed.push(Item.Enum{value: updated})
             }
             .Impl(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.methods = parser_methods_visibility(definition.methods, is_pub, is_package_pub)
                 narrowed.push(Item.Impl{value: updated})
             }
             .Distinct(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.is_pub = is_pub
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 narrowed.push(Item.Distinct{value: updated})
             }
             .TypeAlias(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.is_pub = is_pub
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 narrowed.push(Item.TypeAlias{value: updated})
             }
             .UnitFamily(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.is_pub = is_pub
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 narrowed.push(Item.UnitFamily{value: updated})
             }
             .Trait(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.is_pub = is_pub
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 narrowed.push(Item.Trait{value: updated})
             }
             .Tag(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.is_pub = is_pub
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 narrowed.push(Item.Tag{value: updated})
             }
             .Const(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.is_pub = is_pub
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 narrowed.push(Item.Const{value: updated})
             }
             .ProtocolDecl(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.is_pub = is_pub
                 updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
                 narrowed.push(Item.ProtocolDecl{value: updated})

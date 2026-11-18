@@ -966,7 +966,7 @@ sema_core_derive_bodies: fn(graph: &SemaRegistrationGraph, bodies: &[SemaCoreBod
         key: "{SEMA_CORE_DERIVE_KEY}{module_text(graph.module_table, graph.modules[index].module_identity)}"
         loop capture in compiler_take_rows<SemaDeriveCapture>(graph.modules[index].derive_captures) {
             modules: loop id in capture.modules -> "{module_text(graph.module_table, id)}"
-            bodies.push(SemaCoreBody{key: key, bytes: capture.bytes.move(), symbols: [String]{}, decls: [String]{}, modules: modules, strings: capture.strings.move()})
+            bodies.push(SemaCoreBody{key: key.copy(), bytes: capture.bytes.move(), symbols: [String]{}, decls: [String]{}, modules: modules, strings: capture.strings.move()})
         }
     }
 }

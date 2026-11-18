@@ -1813,7 +1813,7 @@ jfmt_strip_redundant_optional_returns: fn(items: [Item]) -> [Item] Never! {
         if item == {
             .Func(function) -> { out.push(Item.Func{value: jfmt_strip_optional_func(function)}) }
             .Struct(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.methods = jfmt_strip_optional_funcs(definition.methods)
                 loop index in 0..<updated.trait_impls.len() {
                     updated.trait_impls[index].methods = jfmt_strip_optional_funcs(updated.trait_impls[index].methods)
@@ -1821,7 +1821,7 @@ jfmt_strip_redundant_optional_returns: fn(items: [Item]) -> [Item] Never! {
                 out.push(Item.Struct{value: updated})
             }
             .Enum(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.methods = jfmt_strip_optional_funcs(definition.methods)
                 loop index in 0..<updated.trait_impls.len() {
                     updated.trait_impls[index].methods = jfmt_strip_optional_funcs(updated.trait_impls[index].methods)
@@ -1829,19 +1829,19 @@ jfmt_strip_redundant_optional_returns: fn(items: [Item]) -> [Item] Never! {
                 out.push(Item.Enum{value: updated})
             }
             .Impl(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.methods = jfmt_strip_optional_funcs(definition.methods)
                 out.push(Item.Impl{value: updated})
             }
             .CodeModule(decl) -> {
-                updated := decl
+                updated := decl.copy()
                 if decl.body == .Val(body) {
                     updated.body = Val(jfmt_strip_redundant_optional_returns(body))
                 }
                 out.push(Item.CodeModule{value: updated})
             }
             .GenericModule(decl) -> {
-                updated := decl
+                updated := decl.copy()
                 updated.body = jfmt_strip_redundant_optional_returns(decl.body)
                 out.push(Item.GenericModule{value: updated})
             }

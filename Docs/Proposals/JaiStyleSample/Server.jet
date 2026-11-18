@@ -61,7 +61,7 @@ HTTPShutdownReport :: struct {
     accepted: Int
     overloaded: Int
     completed: Int
-    cancelled: Int
+    canceled: Int
 }
 
 __HTTPHandlerCell :: struct {
@@ -180,7 +180,7 @@ impl HTTPServer {
                 }
             }
         }
-        report :: HTTPShutdownReport{accepted: accepted, overloaded: 0, completed: completed, cancelled: 0}
+        report :: HTTPShutdownReport{accepted: accepted, overloaded: 0, completed: completed, canceled: 0}
         __server_finish(self, report)
         self.__done.send(1)
         if failure == .Val(error) -> return Err(error)
@@ -195,7 +195,7 @@ impl HTTPServer {
     // in-flight request left to cancel.
     shutdown :: fn(self, grace: Duration) -[Net]> HTTPShutdownReport HTTPError! {
         phase :: __server_request_stop(self)
-        if phase == 0 -> return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0})
+        if phase == 0 -> return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, canceled: 0})
         if phase == 1 {
             _ :: self.__finished.receive() ?? 0
             self.__done.send(1)
@@ -230,7 +230,7 @@ __server_request_stop :: fn(server: HTTPServer) -> Int Never! {
 
 __server_report :: fn(server: HTTPServer) -> HTTPShutdownReport Never! {
     guard :: server.__state.guard_read()
-    guard.value.report ?? HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0}
+    guard.value.report ?? HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, canceled: 0}
 }
 
 __accept_timed_out :: fn(error: NetError) -> Bool Never! {

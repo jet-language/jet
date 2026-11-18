@@ -516,7 +516,7 @@ ir_list_split_write: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lis
     left_member := members[0]
     right_member := members[1]
     loop member in members {
-        if member.name == "left" -> left_member = member
+        if member.name == "left" -> left_member = member.copy()
         if member.name == "right" -> right_member = member
     }
     pair_row: ir_value_type(m, p, ok_ty) ?? return ir_type_fail(b, span, ok_ty)
@@ -1699,7 +1699,7 @@ ir_cache_shape: fn(m: &IRModule, p: IRProgram, ty: Type) -> IRCacheShape? Never!
         shape.entry = ir_value_type(m, p, entry_ty) ?? return None
         members: ir_tuple_members(m, p, fields) ?? return None
         loop member in members {
-            if member.name == "key" -> shape.key = member
+            if member.name == "key" -> shape.key = member.copy()
             if member.name == "value" -> shape.value = member
         }
     }
@@ -1973,7 +1973,7 @@ ir_list_indexed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, iter_ty: Type, li
     index_member := members[0]
     item_member := members[1]
     loop member in members {
-        if member.name == "idx" -> index_member = member
+        if member.name == "idx" -> index_member = member.copy()
         if member.name == "item" -> item_member = member
     }
     pair_row: ir_value_type(m, p, pair_ty) ?? return ir_type_fail(b, span, pair_ty)
@@ -4750,7 +4750,7 @@ ir_list_min_max: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: I
     least_member := members[0]
     greatest_member := members[1]
     loop member in members {
-        if member.name == "min" -> least_member = member
+        if member.name == "min" -> least_member = member.copy()
         if member.name == "max" -> greatest_member = member
     }
     result_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
@@ -4815,7 +4815,7 @@ ir_list_split: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, list: Int
     left_member := members[0]
     right_member := members[1]
     loop member in members {
-        if member.name == "left" -> left_member = member
+        if member.name == "left" -> left_member = member.copy()
         if member.name == "right" -> right_member = member
     }
     pair_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)

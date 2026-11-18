@@ -359,7 +359,7 @@ marker_source_declaration: fn(name: String, body: String) -> TAppliedRule? Never
         colon: marker_source_byte_index(entry, 58) ?? panic("marker field without `:` in {context}: {entry}")
         label: foundation_byte_text(entry.bytes(), 0, colon).trim()
         value: foundation_byte_text(entry.bytes(), colon + 1, entry.count_bytes()).trim()
-        type_text := value
+        type_text := value.copy()
         default := String?{None}
         if marker_source_split_default(value) == .Val(split) {
             type_text = split.type_text

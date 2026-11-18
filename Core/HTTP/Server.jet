@@ -352,6 +352,12 @@ priv layer_add: fn(mux: HTTPMux, layer: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPH
     guard.value.layers.push(Shared{HTTPLayerCell{wrap: layer.move()}})
 }
 
+// A middleware layer outside every layer added so far.
+priv layer_add_outermost: fn(mux: HTTPMux, layer: &&fn(HTTPHandler) -[Net, FS.Read]> HTTPHandler) Never! {
+    guard := mux.__state.guard_edit()
+    guard.value.layers.insert(0, Shared{HTTPLayerCell{wrap: layer.move()}})
+}
+
 priv mux_register: fn(mux: HTTPMux, method: String, pattern: String, segments: [HTTPSegment], handler: HTTPHandler, contract: String, at: SourceLocation) Never! {
     shape: route_shape(segments)
     loop existing in mux_routes(mux) {

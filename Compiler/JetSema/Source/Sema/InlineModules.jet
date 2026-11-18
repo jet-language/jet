@@ -757,7 +757,7 @@ sema_inline_rewrite_optional_expr: fn(rewrite: &SemaInlineRewrite, expression: E
 sema_inline_rewrite_call_args: fn(rewrite: &SemaInlineRewrite, args: [CallArg]) -> [CallArg] Never! {
     mapped := [CallArg]{}
     loop arg in args {
-        updated := arg
+        updated := arg.copy()
         updated.expr = sema_inline_rewrite_expr(rewrite, arg.expr)
         mapped.push(updated)
     }
@@ -817,7 +817,7 @@ sema_inline_rewrite_lambda: fn(rewrite: &SemaInlineRewrite, lambda: Lambda) -> L
     saved: rewrite.locals.len()
     params := [LambdaParam]{}
     loop param in lambda.params {
-        mapped := param
+        mapped := param.copy()
         mapped.ty = sema_inline_rewrite_optional_type(rewrite, param.ty)
         params.push(mapped)
         rewrite.locals.push(param.name)
@@ -1501,7 +1501,7 @@ sema_inline_rewrite_stmt: fn(rewrite: &SemaInlineRewrite, stmt: Stmt) -> Stmt Ne
 sema_inline_rewrite_markers: fn(rewrite: &SemaInlineRewrite, markers: [Marker]) -> [Marker] Never! {
     mapped := [Marker]{}
     loop marker in markers {
-        updated := marker
+        updated := marker.copy()
         args := [MarkerCallArg]{}
         loop arg in marker.args {
             if arg == {
@@ -1544,7 +1544,7 @@ sema_inline_rewrite_meta: fn(rewrite: &SemaInlineRewrite, meta: MetaAttr?) -> Me
 sema_inline_rewrite_clauses: fn(rewrite: &SemaInlineRewrite, clauses: [ContractClause]) -> [ContractClause] Never! {
     mapped := [ContractClause]{}
     loop clause in clauses {
-        updated := clause
+        updated := clause.copy()
         updated.cond = sema_inline_rewrite_expr(rewrite, clause.cond)
         updated.message_expr = sema_inline_rewrite_expr(rewrite, clause.message_expr)
         mapped.push(updated)
@@ -1555,7 +1555,7 @@ sema_inline_rewrite_clauses: fn(rewrite: &SemaInlineRewrite, clauses: [ContractC
 sema_inline_rewrite_params: fn(rewrite: &SemaInlineRewrite, params: [Param]) -> [Param] Never! {
     mapped := [Param]{}
     loop param in params {
-        updated := param
+        updated := param.copy()
         sema_inline_private_types(rewrite, param.ty, param.ty_span)
         updated.ty = sema_inline_rewrite_type(rewrite, param.ty)
         updated.default = sema_inline_rewrite_optional_expr(rewrite, param.default)
@@ -1570,7 +1570,7 @@ sema_inline_rewrite_params: fn(rewrite: &SemaInlineRewrite, params: [Param]) -> 
 sema_inline_rewrite_type_params: fn(rewrite: SemaInlineRewrite, params: [TypeParam]) -> [TypeParam] Never! {
     mapped := [TypeParam]{}
     loop param in params {
-        updated := param
+        updated := param.copy()
         updated.bounds = loop bound in param.bounds -> sema_inline_mapped_name(rewrite, bound)
         mapped.push(updated)
     }
@@ -1607,7 +1607,7 @@ sema_inline_rewrite_funcs: fn(rewrite: &SemaInlineRewrite, functions: [Func]) ->
 sema_inline_rewrite_named_types: fn(rewrite: SemaInlineRewrite, types: [NamedType]) -> [NamedType] Never! {
     mapped := [NamedType]{}
     loop entry in types {
-        updated := entry
+        updated := entry.copy()
         updated.ty = sema_inline_rewrite_type(rewrite, entry.ty)
         mapped.push(updated)
     }
@@ -1617,7 +1617,7 @@ sema_inline_rewrite_named_types: fn(rewrite: SemaInlineRewrite, types: [NamedTyp
 sema_inline_rewrite_trait_blocks: fn(rewrite: &SemaInlineRewrite, blocks: [TraitImplBlock]) -> [TraitImplBlock] Never! {
     mapped := [TraitImplBlock]{}
     loop block in blocks {
-        updated := block
+        updated := block.copy()
         updated.trait_name = sema_inline_mapped_name(rewrite, block.trait_name)
         updated.methods = sema_inline_rewrite_funcs(rewrite, block.methods)
         updated.operator_rhs = sema_inline_rewrite_optional_type(rewrite, block.operator_rhs)
@@ -1762,12 +1762,12 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
             }
         }
         resolved: Type.Named{name: sema_inline_type_name(module_alias, name)}
-        direct_types[name] = resolved
-        direct_types["{module_name}.{name}"] = resolved
-        direct_types["{source_path}.{name}"] = resolved
+        direct_types[name] = resolved.copy()
+        direct_types["{module_name}.{name}"] = resolved.copy()
+        direct_types["{source_path}.{name}"] = resolved.copy()
         // A file imported under an alias can still carry the defining
         // module's compiler-owned spelling; normalize it to this identity.
-        direct_types[sema_inline_type_name(display_alias, name)] = resolved
+        direct_types[sema_inline_type_name(display_alias, name)] = resolved.copy()
         direct_names.push(name.copy())
         if !hides_members && sema_inline_private_type_span(inner) == .Val(declared) {
             hoist.private_types["{source_path}.{name}"] = declared
@@ -1805,7 +1805,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
     prefix: "{source_path}."
     loop full_path in descendant_paths {
         ty: descendant_types.get(full_path) ?? next
-        visible.types[full_path] = ty
+        visible.types[full_path] = ty.copy()
         if full_path.starts_with(prefix) {
             relative: String.from_bytes(full_path.bytes()[prefix.bytes().len()..<full_path.bytes().len()]) ?? full_path
             visible.types[relative] = ty
@@ -1818,7 +1818,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
                 kept_rewritten.push(Item.Func{value: sema_inline_rewrite_func(visible, definition)})
             }
             .Const(definition) -> {
-                mapped := definition
+                mapped := definition.copy()
                 mapped.value = sema_inline_rewrite_expr(visible, definition.value)
                 mapped.ty = sema_inline_rewrite_optional_type(visible, definition.ty)
                 mapped.markers = sema_inline_rewrite_markers(visible, definition.markers)
@@ -1844,7 +1844,7 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
                 hoist.declarations.push(Item.Trait{value: sema_inline_rewrite_trait(visible, definition)})
             }
             .Tag(definition) -> {
-                mapped := definition
+                mapped := definition.copy()
                 mapped.name = sema_inline_mapped_name(visible, definition.name)
                 hoist.declarations.push(Item.Tag{value: mapped})
             }
@@ -1852,13 +1852,13 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
                 hoist.declarations.push(Item.Impl{value: sema_inline_rewrite_impl(visible, definition)})
             }
             .Distinct(definition) -> {
-                mapped := definition
+                mapped := definition.copy()
                 mapped.name = sema_inline_mapped_name(visible, definition.name)
                 mapped.base = sema_inline_rewrite_type(visible, definition.base)
                 hoist.declarations.push(Item.Distinct{value: mapped})
             }
             .TypeAlias(definition) -> {
-                mapped := definition
+                mapped := definition.copy()
                 mapped.name = sema_inline_mapped_name(visible, definition.name)
                 mapped.target = sema_inline_rewrite_type(visible, definition.target)
                 loop index in 0..<definition.choices.len() {
@@ -1933,7 +1933,7 @@ sema_inline_rewrite_exported: fn(items: [Item], rewrite: &SemaInlineRewrite) -> 
             // module path (`impl inner.Loud.inner.Shout`), so it binds to the
             // hoisted declarations the module's own impls bind to.
             .Impl(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.type_name = sema_inline_mapped_name(rewrite, definition.type_name)
                 if definition.trait_name == .Val(trait_name) {
                     updated.trait_name = Val(sema_inline_mapped_name(rewrite, trait_name))
@@ -1943,7 +1943,7 @@ sema_inline_rewrite_exported: fn(items: [Item], rewrite: &SemaInlineRewrite) -> 
             }
             // A module's own bodies may name its `priv` member types.
             .CodeModule(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 if definition.body == .Val(body) {
                     // The body reads as its module's own; after it, the path
                     // drops that module's segment again.
@@ -2065,7 +2065,7 @@ sema_inline_bind_module_imports: fn(definition: CodeModule, surfaces: [SemaInlin
                 next
             }
             names[local] = true
-            if bound.qualified -> rewrite.qualified[local] = bound else {
+            if bound.qualified -> rewrite.qualified[local] = bound.copy() else {
                 rewrite.imported[local] = SemaInlineFunctionBinding{semantic_name: sema_inline_member_name(bound.module_alias, bound.member), module_alias: bound.module_alias, source_name: bound.member, span: declaration.alias_span, visibility: if declaration.is_pub -> 2 else if declaration.is_package_pub -> 1 else -> 0}
             }
             if declaration.is_pub -> reexports[local] = bound
@@ -2377,7 +2377,7 @@ sema_inline_scope_surfaces: fn(nested: [SemaInlineModuleSurface], context: Strin
     loop surface in nested {
         scope.push(surface.copy())
         if !surface.path.starts_with(prefix) -> next
-        relative := surface
+        relative := surface.copy()
         relative.name = String.from_bytes(surface.path.bytes()[prefix.bytes().len()..<surface.path.bytes().len()]) ?? next
         scope.push(relative)
     }
@@ -2450,7 +2450,7 @@ sema_inline_strip_members: fn(body: [Item]) -> [Item] Never! {
         if item == {
             .Func(_) | .Const(_) | .Test(_) -> { next }
             .CodeModule(child) -> {
-                updated := child
+                updated := child.copy()
                 if child.body == .Val(child_body) {
                     updated.body = Val(sema_inline_strip_members(child_body))
                 }

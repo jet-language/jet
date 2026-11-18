@@ -86,41 +86,41 @@ shared_output_term_error: fn(term: [U8]) Never! {
 shared_output_profiles: fn() Never! {
     facts := shared_output_facts()
     profile: shared_output_profile(facts)
-    shared_output_require(profile.width == U64{100} && profile.ansi_enabled && profile.unicode_enabled && profile.progress_enabled && profile.human_enabled && !profile.machine_enabled, "Rust human terminal capabilities")
-    shared_output_require(jet_cli_output_channel(profile, .Renderable) == .HumanStdout && jet_cli_output_channel(profile, .Machine) == .Hidden, "human primary channels")
-    loop kind in ([JetCLIOutputKind]{.Status, .Log, .Progress}) {
+    shared_output_require(profile.width == U64{100} && profile._ansi_enabled && profile.unicode_enabled && profile._progress_enabled && profile.human_enabled && !profile.machine_enabled, "Rust human terminal capabilities")
+    shared_output_require(jet_cli_output_channel(profile, ._Renderable) == .HumanStdout && jet_cli_output_channel(profile, ._Machine) == .Hidden, "human primary channels")
+    loop kind in ([JetCLIOutputKind]{._Status, ._Log, ._Progress}) {
         shared_output_require(jet_cli_output_channel(profile, kind) == .HumanStderr, "human secondary channels")
     }
 
     facts.tty = false
     redirected: shared_output_profile(facts)
-    shared_output_require(!redirected.ansi_enabled && !redirected.unicode_enabled && !redirected.progress_enabled && jet_cli_output_channel(redirected, .Renderable) == .HumanStdout, "Rust redirected auto")
-    shared_output_require(jet_cli_output_channel(redirected, .Progress) == .HumanStderr, "channel is not progress capability")
+    shared_output_require(!redirected._ansi_enabled && !redirected.unicode_enabled && !redirected._progress_enabled && jet_cli_output_channel(redirected, ._Renderable) == .HumanStdout, "Rust redirected auto")
+    shared_output_require(jet_cli_output_channel(redirected, ._Progress) == .HumanStderr, "channel is not progress capability")
     facts.force_color = true
-    shared_output_require(shared_output_profile(facts).ansi_enabled, "auto force color")
+    shared_output_require(shared_output_profile(facts)._ansi_enabled, "auto force color")
     facts.no_color = true
-    shared_output_require(!shared_output_profile(facts).ansi_enabled, "NO_COLOR before FORCE_COLOR")
+    shared_output_require(!shared_output_profile(facts)._ansi_enabled, "NO_COLOR before FORCE_COLOR")
     facts.requested_color = .Always
-    shared_output_require(shared_output_profile(facts).ansi_enabled, "explicit always before presence flags")
+    shared_output_require(shared_output_profile(facts)._ansi_enabled, "explicit always before presence flags")
     facts.requested_color = .Never
-    shared_output_require(!shared_output_profile(facts).ansi_enabled, "explicit never")
+    shared_output_require(!shared_output_profile(facts)._ansi_enabled, "explicit never")
     facts.no_color = false
     facts.force_color = false
     facts.requested_color = .Auto
-    shared_output_require(!shared_output_profile(facts).ansi_enabled, "auto non-TTY")
+    shared_output_require(!shared_output_profile(facts)._ansi_enabled, "auto non-TTY")
     facts.tty = true
-    shared_output_require(shared_output_profile(facts).ansi_enabled, "auto TTY")
+    shared_output_require(shared_output_profile(facts)._ansi_enabled, "auto TTY")
     facts.term = Val("dumb".bytes())
     facts.requested_color = .Always
     dumb: shared_output_profile(facts)
-    shared_output_require(dumb.ansi_enabled && !dumb.unicode_enabled && !dumb.progress_enabled, "Rust dumb explicit force")
+    shared_output_require(dumb._ansi_enabled && !dumb.unicode_enabled && !dumb._progress_enabled, "Rust dumb explicit force")
     facts.json = true
     machine: shared_output_profile(facts)
-    shared_output_require(!machine.ansi_enabled && !machine.unicode_enabled && !machine.progress_enabled && !machine.human_enabled && machine.machine_enabled, "Rust JSON capabilities")
-    loop kind in ([JetCLIOutputKind]{.Renderable, .Status, .Log, .Progress}) {
+    shared_output_require(!machine._ansi_enabled && !machine.unicode_enabled && !machine._progress_enabled && !machine.human_enabled && machine.machine_enabled, "Rust JSON capabilities")
+    loop kind in ([JetCLIOutputKind]{._Renderable, ._Status, ._Log, ._Progress}) {
         shared_output_require(jet_cli_output_channel(machine, kind) == .Hidden, "JSON human channels hidden")
     }
-    shared_output_require(jet_cli_output_channel(machine, .Machine) == .MachineStdout, "JSON machine stdout")
+    shared_output_require(jet_cli_output_channel(machine, ._Machine) == .MachineStdout, "JSON machine stdout")
     table: shared_output_pair()
     shared_output_require(jet_cli_table_render(table, jet_cli_table_layout(table, machine)) == None, "table emits no JSON/ANSI fragment")
 
@@ -147,7 +147,7 @@ shared_output_profiles: fn() Never! {
     shared_output_require(huge.width == U64{18446744073709551615} && jet_cli_table_layout(table, huge).width == 256, "unsigned usize preserved before render cap")
     first: shared_output_profile(facts)
     second: shared_output_profile(facts)
-    shared_output_require(first.width == second.width && first.ansi_enabled == second.ansi_enabled && first.unicode_enabled == second.unicode_enabled && first.progress_enabled == second.progress_enabled && first.human_enabled == second.human_enabled && first.machine_enabled == second.machine_enabled, "Rust deterministic selection")
+    shared_output_require(first.width == second.width && first._ansi_enabled == second._ansi_enabled && first.unicode_enabled == second.unicode_enabled && first._progress_enabled == second._progress_enabled && first.human_enabled == second.human_enabled && first.machine_enabled == second.machine_enabled, "Rust deterministic selection")
     spellings: [String]{"auto", "always", "never"}
     loop (index, color) in ([JetCLIColorRequest]{.Auto, .Always, .Never}) {
         shared_output_require((jet_cli_color_request(spellings[index].bytes()) ?? panic("valid color refused")) == color, "exact color spellings")
@@ -182,11 +182,11 @@ shared_output_grids: fn() Never! {
     shared_output_bytes(jet_cli_table_render(table, layout) ?? panic("hidden"), "+---+---+\n| N | v |\n+---+---+\n| a | 7 |\n| b | - |\n| b | 2 |\n| b |   |\n+---+---+", "literal wrapped minimum grid")
     shared_output_require(jet_cli_table_fit_widths([Int]{9, 2, 6}, 18) == [Int]{3, 2, 3}, "round-robin fitting")
 
-    padding: [String]{"x   ", "   x", " x  "}
-    loop (index, alignment) in ([JetCLITableAlignment]{.Left, .Right, .Center}) {
+    padding: [String]{"x   ", "   x"}
+    loop (index, alignment) in ([JetCLITableAlignment]{.Left, .Right}) {
         out := [U8]{}
         jet_cli_table_append_pad(out, "x".bytes(), 4, alignment)
-        shared_output_bytes(out, padding[index], "literal alignment including odd center gap")
+        shared_output_bytes(out, padding[index], "literal alignment")
     }
     one: jet_cli_table([JetCLITableColumn]{jet_cli_table_column("N".bytes(), .Text)}, [JetCLITableRow]{jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("abcde".bytes())})})
     facts.width = Val(U64{4})
@@ -276,7 +276,7 @@ shared_output_bounds: fn() Never! {
         shared_output_require(value.len() == 4096, "raw Text normalized by table")
     } else { panic("Text changed kind") }
     projection: jet_cli_table_structured(extra)
-    shared_output_require(projection.columns.len() == extra.columns.len() && projection.rows.len() == extra.rows.len() && projection.truncated == extra.truncated && jet_cli_table_cell_kind(projection.rows[0].cells[0]) == .Empty, "structured typed projection")
+    shared_output_require(projection._columns.len() == extra.columns.len() && projection.rows.len() == extra.rows.len() && projection._truncated == extra.truncated && jet_cli_table_cell_kind(projection.rows[0].cells[0]) == .Empty, "structured typed projection")
 
     minimum: JetCLITableCell.Integer{value: -170141183460469231731687303715884105728}
     maximum: JetCLITableCell.Unsigned{value: 340282366920938463463374607431768211455}

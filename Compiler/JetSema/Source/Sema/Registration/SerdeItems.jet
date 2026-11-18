@@ -1709,7 +1709,7 @@ sema_serde_items_enum_decode_value: fn(variant: Variant, source: Expr, prefix: S
     }
     loop (index, result) in results {
         error_name: "jet_serde_enum_{stem}_errors_{index}"
-        body.push(sema_serde_items_pattern_switch(sema_serde_items_copy(sema_serde_items_ident(result, span), span), "Err", [String]{error_name}, [Stmt]{sema_serde_items_push_all(errors_name, error_name, span)}, Val([Stmt]{}), span))
+        body.push(sema_serde_items_pattern_switch(sema_serde_items_copy(sema_serde_items_ident(result, span), span), "Err", [String]{error_name.copy()}, [Stmt]{sema_serde_items_push_all(errors_name, error_name, span)}, Val([Stmt]{}), span))
     }
     args := [EnumLitArg]{}
     loop field in fields {

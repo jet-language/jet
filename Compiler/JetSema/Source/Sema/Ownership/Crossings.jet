@@ -297,7 +297,7 @@ sema_ownership_crossing_core_row_parts: fn(name: String) -> [TypeTupleField]? Ne
         parts := [TypeTupleField]{}
         loop variant in variants {
             payload: core_enum_variant_payload(name, variant) ?? next
-            loop part in payload -> parts.push(TypeTupleField{name: variant, ty: part})
+            loop part in payload -> parts.push(TypeTupleField{name: variant.copy(), ty: part})
         }
         return Val(parts)
     }

@@ -2973,7 +2973,7 @@ sema_expr_comptime_method_target: fn(methods: [Func], owner_name: String, module
     owner: symbol_key_text(SymbolKind.Type, module_identity, "", owner_name)
     loop method in methods {
         if symbol_key_text(SymbolKind.Function, module_identity, owner, method.name) == symbol_key {
-            return Val(SemaExprComptimeTarget{module_identity: module_id, declaration: method, path: "{owner_name}.{method.name}", kind: "method"})
+            return Val(SemaExprComptimeTarget{module_identity: module_id, declaration: method.copy(), path: "{owner_name}.{method.name}", kind: "method"})
         }
     }
     None
@@ -4661,12 +4661,13 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     if outcome_read.handled -> return outcome_read.value
     scopes.ownership_call_depth += 1
     // Chaining `.trim()`/`.after()`/`.before()` onto a string view
-    // reads it as the `&str` those methods take, so the view read is allowed.
-    // (Rust `infer_method_call`): any other method but the
+    // reads it as the `&str` those methods take, and a builtin scalar read
+    // (`len`, `is_empty`, `index_of`, …) reads it in place, so the view read
+    // is allowed. (Rust `infer_method_call`): any other method but the
     // `&str` kernels (`starts_with`, `ends_with`, `contains`) reads the view
     // through a `String` receiver, so it takes the default owning copy.
     previous_string_view_read := context.allow_string_view_read
-    exempt_view_receiver: sema_string_view_exempt_receiver(receiver, method, scopes)
+    exempt_view_receiver: sema_string_view_exempt_receiver(receiver, method, args.len(), scopes)
     if exempt_view_receiver -> context.allow_string_view_read = true
     receiver_checked := TExpr?{None}
     if !exempt_view_receiver && method != "starts_with" && method != "ends_with" && method != "contains" && sema_string_view_owning_read(receiver, Type.String, scopes) && receiver == .Ident(view_name, view_span, _) {
@@ -5197,7 +5198,7 @@ sema_expr_check_string: fn(parts: [StrPart], span: Span, expected: Type?, enviro
                 if !debug_family && format != StrFormat.Display && !sema_expr_check_format_selector(checked, format, environment, program, diagnostics) {
                     return None
                 }
-                formatted: if format == StrFormat.Display && sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked}, Type.String, checked.span, environment, program) ?? return None else -> checked
+                formatted: if format == StrFormat.Display && sema_expr_measurement_type(checked.ty) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked.copy()}, Type.String, checked.span, environment, program) ?? return None else -> checked
                 tree_parts.push(TStrPart.Interpolation{value: formatted, format: sema_expr_string_format(format)})
             }
         }
@@ -7526,7 +7527,7 @@ sema_expr_check_list_type_static: fn(written: Type, method: String, method_span:
         span: Span{start: method_span.start, end: args[0].span.end}
         name: "__jet_filled_{method_span.start}"
         binding: Stmt.Val{binding: Binding{mutable: false, markers: [Marker]{}, reactive_upgrade: false, meta: None, name: name, name_span: method_span, sigil_span: None, pattern: None, ty: Val(element), ty_span: Val(method_span), init: args[0].expr.copy(), is_comptime: false, ct: None, uninit: false, arena_view: false, string_view: false, gc_promotion: None, gc_transferred: false}}
-        slots: loop _ in 0..<length -> Expr.Ident{name: name, span: method_span, id: AST_NODE_GENERATED}
+        slots: loop _ in 0..<length -> Expr.Ident{name: name.copy(), span: method_span, id: AST_NODE_GENERATED}
         filled: Expr.TypedLit{head: Val(written.copy()), body: TypedLitBody.Elements{elements: slots}, span: span, id: AST_NODE_GENERATED}
         return_type: scopes.return_type.copy()
         mark: sema_scope_mark(scopes)

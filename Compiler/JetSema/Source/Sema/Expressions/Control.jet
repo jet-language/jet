@@ -179,7 +179,7 @@ sema_expression_panic_locals: fn(scopes: SemaScopeTable, span: Span) -> [TPanicL
         local_ty: symbol.ty ?? {
             next
         }
-        locals.push(TPanicLocal{display_name: name, local: checked_symbol_local(name, symbol.span, symbol.id, local_ty)})
+        locals.push(TPanicLocal{display_name: name.copy(), local: checked_symbol_local(name, symbol.span, symbol.id, local_ty)})
     }
     locals
 }
@@ -2282,7 +2282,7 @@ sema_expression_pattern_binding_sources: fn(shape: TPatternShape, subject_ty: Ty
                         field = fields[index].name
                     }
                 }
-                projected: Expr.Field{base: variant_source, member: field, span: span, id: AST_NODE_GENERATED}
+                projected: Expr.Field{base: variant_source.copy(), member: field, span: span, id: AST_NODE_GENERATED}
                 ty: if index < payload.types.len() -> payload.types[index] else -> subject_ty
                 sema_expression_pattern_slot_sources(slot, ty, projected, name, environment, program, sources, diagnostics)
             }
@@ -2402,14 +2402,14 @@ sema_expression_check_pattern_condition: fn(subject: Expr, pattern: Pattern, spa
     facts := [TPatternBindingFact]{}
     bindings := [SemaConditionBinding]{}
     loop fact in checked.bindings {
-        updated := fact
+        updated := fact.copy()
         if fact.name != "" && fact.name != "_" {
             window: window_names.contains(fact.name)
             key: symbol_key_text(SymbolKind.Local, local_module, owner, fact.name)
             id: sema_symbol_id_of(program, context, key)
             updated.symbol_id = Val(id)
             if window -> updated.mutable = true
-            symbol: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_identity: environment.module_identity, owner: Val(owner), span: fact.span, ty: Val(fact.ty), visibility: 0}
+            symbol: Symbol{id: id, kind: SymbolKind.Local, name: fact.name, module_identity: environment.module_identity, owner: Val(owner.copy()), span: fact.span, ty: Val(fact.ty), visibility: 0}
             sources := [Expr]{}
             sema_expression_pattern_binding_sources(checked.pattern.shape, checked_subject.ty, source ?? subject, fact.name, environment, program, sources, diagnostics)
             if !window && !sema_expression_subject_moved(subject) {

@@ -196,7 +196,7 @@ sema_alias_collect_types: fn(inputs: [SemaRegistrationModuleInput], edges: [Sema
 sema_alias_rewrite_items: fn(items: [Item], keys: [String]) -> [Item] Never! {
     rewritten := [Item]{}
     loop item in items {
-        value := item
+        value := item.copy()
         if item == {
             .Const(definition) -> {
                 if keys.contains(sema_alias_key(definition)) {
@@ -205,7 +205,7 @@ sema_alias_rewrite_items: fn(items: [Item], keys: [String]) -> [Item] Never! {
                 }
             }
             .CodeModule(code_module) -> {
-                row := code_module
+                row := code_module.copy()
                 if code_module.body == .Val(body) {
                     row.body = Val(sema_alias_rewrite_items(body, keys))
                 }

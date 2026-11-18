@@ -229,7 +229,7 @@ semindex_symbol_index: fn(symbols: [SemSymbol]) -> [SemSymbol] Never! {
     positions := [String:Int]{}
     loop symbol in symbols {
         existing: positions.get(symbol.identity)
-        if existing == .Val(position) -> unique[position] = symbol
+        if existing == .Val(position) -> unique[position] = symbol.copy()
         if existing == None {
             positions[symbol.identity] = unique.len()
             unique.push(symbol.copy())
@@ -484,7 +484,7 @@ semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
     }
     module_nodes := [String:[SemNode]]{}
     loop node in index.nodes {
-        scopes.nodes_by_id["{node.module_path}\n{node.id}"] = node
+        scopes.nodes_by_id["{node.module_path}\n{node.id}"] = node.copy()
         if queries.get(node.module_path) == None -> next
         list := module_nodes.get(node.module_path) ?? [SemNode]{}
         list.push(node.copy())
@@ -801,7 +801,7 @@ semindex_symbol_collect_imports: fn(symbols: &[SemSymbol], modules: [JetDriverDo
                         }
                     }
                     symbol.identity = semindex_symbol_alias_identity(doc_module.path, local_span) ?? semindex_symbol_import_identity(doc_module.path, scope, "{module_alias}.{imported_item.original}.{local}")
-                    symbol.name = local
+                    symbol.name = local.copy()
                     symbol.qualified_name = local
                     symbol.owner = None
                     symbol.module_path = doc_module.path
@@ -816,8 +816,8 @@ semindex_symbol_collect_imports: fn(symbols: &[SemSymbol], modules: [JetDriverDo
                 symbols.push(
                     SemSymbol{
                         identity: semindex_symbol_alias_identity(doc_module.path, import.alias_span) ?? semindex_symbol_import_identity(doc_module.path, scope, alias_name),
-                        name: alias_name,
-                        qualified_name: alias_name,
+                        name: alias_name.copy(),
+                        qualified_name: alias_name.copy(),
                         owner: None,
                         module_path: doc_module.path,
                         kind: SemSymbolKind.Module,
@@ -910,7 +910,7 @@ semindex_build_symbols: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [S
             }
         }
         display_name: semindex_symbol_display(modules, def.module_path, def.name)
-        display_owner := owner
+        display_owner := owner.copy()
         if owner == .Val(value) {
             display_owner = Val(semindex_symbol_display(modules, def.module_path, value))
         }

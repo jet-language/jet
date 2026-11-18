@@ -328,7 +328,7 @@ sema_data_try_accessor: fn(receiver: Expr, receiver_value: TExpr, name: String, 
     }
     typed := [TExpr]{}
     loop (index, argument) in args {
-        sema_data_check_labels(method, [CallArg]{argument}, [String]{}, span, diagnostics)
+        sema_data_check_labels(method, [CallArg]{argument.copy()}, [String]{}, span, diagnostics)
         value: sema_data_check_argument(method, index, argument, contract.argument_types[index], environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
         typed.push(value)
     }

@@ -1077,7 +1077,7 @@ sema_call_core_math_exact_crossing: fn(module_name: String, member: String, args
     if !any -> return None
     crossed := [CallArg]{}
     loop (index, argument) in args {
-        updated := argument
+        updated := argument.copy()
         if exact[index] {
             updated.expr = Expr.MethodCall{receiver: argument.expr.copy(), method: "to_float", method_span: argument.span, owner_type_args: [Type]{}, type_args: [Type]{}, args: [CallArg]{}, id: AST_NODE_GENERATED}
         }
@@ -1127,7 +1127,7 @@ sema_call_core_source_arguments: fn(args: [TExpr], params: [SemaCallParam], envi
         param: params[index]
         result.push(
             TCallArg{
-                value: value,
+                value: value.copy(),
                 template_items: [SymbolID]{},
                 borrow: param.convention == AccessConvention.Read && !sema_call_is_scalar(value.ty),
                 mut_borrow: param.convention == AccessConvention.Write,

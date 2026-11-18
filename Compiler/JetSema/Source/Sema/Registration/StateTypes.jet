@@ -187,17 +187,17 @@ sema_state_types_rewrite_items: fn(items: [Item], owners: SemaStateTypeOwners) -
                 out.push(Item.Func{value: sema_state_types_rewrite_fn(function, owners)})
             }
             .Struct(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.methods = loop method in definition.methods -> sema_state_types_rewrite_fn(method, owners)
                 out.push(Item.Struct{value: updated})
             }
             .Enum(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.methods = loop method in definition.methods -> sema_state_types_rewrite_fn(method, owners)
                 out.push(Item.Enum{value: updated})
             }
             .Impl(implementation) -> {
-                updated := implementation
+                updated := implementation.copy()
                 updated.methods = loop method in implementation.methods -> sema_state_types_rewrite_fn(method, owners)
                 out.push(Item.Impl{value: updated})
             }

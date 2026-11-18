@@ -1,0 +1,11 @@
+# A named `-> HookDecision<T, E> Never!` function attached to a decision
+# point hands back its Result carrier; the point reads its decision from the
+# Ok payload, the same decision a lambda handler writes, at -O0 and -O2.
+fixture: DecisionHookNamedNeverHandler.fixture
+env: NO_COLOR=1
+step default: jet run -O0 main.jet
+exit: 0
+stdout: = "continue go-seen\ncancel stop\nfail denied save\n"
+step release: jet run -O2 main.jet
+exit: 0
+stdout: == default

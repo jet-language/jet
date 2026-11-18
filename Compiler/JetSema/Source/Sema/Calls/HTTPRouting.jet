@@ -1470,7 +1470,7 @@ sema_http_mux_route_handler: fn(handler: Expr, params: [SemaHTTPRouteParameter],
     args := [CallArg]{}
     loop parameter in params {
         name := parameter.name
-        if request_names.contains(parameter.name) -> name = request
+        if request_names.contains(parameter.name) -> name = request.copy()
         args.push(CallArg{convention: AccessConvention.Read, expr: sema_http_mux_ident(name, span), span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
     }
     body.push(Stmt.Expr{expr: Expr.Call{call: Call{name: callee, name_span: span, type_args: [Type]{}, args: args}, id: AST_NODE_GENERATED}})

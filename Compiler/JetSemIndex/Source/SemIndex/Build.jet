@@ -1585,7 +1585,7 @@ semindex_import_alias_defs: fn(db: &SemDB, modules: [JetDriverDocModule]) {
                 }
             }
             if !bound_elsewhere && import.alias_span.start < import.alias_span.end {
-                found.push(SemDef{identity: "import:{doc_module.path}@{import.alias_span.start}..{import.alias_span.end}", name: alias_name, qualified_name: alias_name, def_span: import.alias_span, module_path: doc_module.path, kind: SemKind.Module})
+                found.push(SemDef{identity: "import:{doc_module.path}@{import.alias_span.start}..{import.alias_span.end}", name: alias_name.copy(), qualified_name: alias_name, def_span: import.alias_span, module_path: doc_module.path, kind: SemKind.Module})
             }
             if import.kind == .Unqualified(_, _, items, _, _) {
                 loop (index, imported) in items {
@@ -1593,7 +1593,7 @@ semindex_import_alias_defs: fn(db: &SemDB, modules: [JetDriverDocModule]) {
                     span: import.local_spans[index]
                     if span.start >= span.end -> next
                     local: imported.alias ?? imported.original
-                    found.push(SemDef{identity: "import:{doc_module.path}@{span.start}..{span.end}", name: local, qualified_name: local, def_span: span, module_path: doc_module.path, kind: SemKind.Module})
+                    found.push(SemDef{identity: "import:{doc_module.path}@{span.start}..{span.end}", name: local.copy(), qualified_name: local, def_span: span, module_path: doc_module.path, kind: SemKind.Module})
                 }
             }
         }
@@ -2564,7 +2564,7 @@ semindex_collect_trait_contracts: fn(items: [Item], owner: String, members: [Sem
                 if parts[parts.len() - 1] != owner -> next
                 trait_name: implementation.trait_name ?? next
                 associated: loop entry in implementation.assoc_type_impls -> SemAssociatedType{name: entry.name, ty: Val(type_name(entry.ty))}
-                contracts.push(SemTraitContract{trait_name: trait_name, associated_types: associated, methods: semindex_member_signatures(members, owner, "trait_impl", trait_name)})
+                contracts.push(SemTraitContract{trait_name: trait_name.copy(), associated_types: associated, methods: semindex_member_signatures(members, owner, "trait_impl", trait_name)})
             }
             .Struct(structure) -> {
                 if structure.name == owner {
@@ -2658,7 +2658,7 @@ semindex_convert_defs: fn(db: SemDB, modules: [JetDriverDocModule]) -> [SemDefin
                 break
             }
         }
-        output.push(SemDefinition{def: def, view_provenance: db.view_provenance.get(def.identity), derives: derives, nominal_base: nominal_base, trait_contracts: contracts})
+        output.push(SemDefinition{def: def.copy(), view_provenance: db.view_provenance.get(def.identity), derives: derives, nominal_base: nominal_base, trait_contracts: contracts})
     }
     output
 }
@@ -2703,10 +2703,10 @@ semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectPr
             structural_parents: [Int]{},
             structural_slot: "root",
             structural_slot_kind: "list",
-            block_spans: block_spans,
+            block_spans: block_spans.copy(),
             block_next: loop index in 0..<block_spans.len() + 1 -> index,
             references: doc_module.name_references,
-            module_paths: module_paths,
+            module_paths: module_paths.copy(),
             written_returns: semindex_written_returns(doc_module),
             local_types: semindex_local_types(doc_module),
             local_stages: semindex_local_stages(doc_module, summaries),

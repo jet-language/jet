@@ -120,7 +120,7 @@ jet_cli_record_snapshot_query: fn(entries: [JetCLIRecordIndexEntry], authenticat
     rows := [JetCLIRecordIndexEntry]{}
     loop entry in entries {
         if !authenticated && entry.capture == "sensitive" -> next
-        row := entry
+        row := entry.copy()
         if !authenticated {
             consumed := [JetDriverRecordLink]{}
             produced := [JetDriverRecordLink]{}

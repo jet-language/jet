@@ -265,9 +265,9 @@ project_func: fn(index: SemIndex, tables: ASTTables, module_display: String, mod
     loop p in f.params {
         pin_id: "{entry_id}:out:{p.name}"
         ty: type_name(p.ty)
-        g.local_pins[p.name] = pin_id
-        g.local_types[p.name] = ty
-        g.pins.push(PinRec{id: pin_id, node_id: entry_id, name: p.name, direction: "output", ty: ty, role: None, pattern_source: None, ability: access_sigil(p.convention), fallible: false, effect_grant_need: None, span: p.name_span, pattern_source_span: None, append_op: None, element_index: None})
+        g.local_pins[p.name] = pin_id.copy()
+        g.local_types[p.name] = ty.copy()
+        g.pins.push(PinRec{id: pin_id, node_id: entry_id.copy(), name: p.name, direction: "output", ty: ty, role: None, pattern_source: None, ability: access_sigil(p.convention), fallible: false, effect_grant_need: None, span: p.name_span, pattern_source_span: None, append_op: None, element_index: None})
     }
     loop definition in index.definitions {
         if definition.def.kind == {

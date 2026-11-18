@@ -136,7 +136,7 @@ sema_services_bind_labels: fn(api: String, args: &[CallArg], labels: [String], s
         label := labels[index]
         params.push(
             SemaCallParam{
-                label: label,
+                label: label.copy(),
                 name: if label == "" -> "arg{index + 1}" else -> label,
                 zone: if label == "" -> ParamZone.PositionalOnly else -> ParamZone.LabelOnly,
                 default: None,
@@ -275,7 +275,7 @@ sema_services_check_core_method: fn(api: String, contract: SemaServiceCoreMethod
     core_arguments := [TExpr]{receiver_value}
     loop (at, value) in values {
         written.push(if typed[at] -> AccessConvention.Read else -> accesses[at])
-        core_arguments.push(if typed[at] && accesses[at] != AccessConvention.Read -> sema_tree_node(value.ty, TExprKind.Clone{value: value, fact: CopyFact.Materialize}, value.span) else -> value)
+        core_arguments.push(if typed[at] && accesses[at] != AccessConvention.Read -> sema_tree_node(value.ty, TExprKind.Clone{value: value.copy(), fact: CopyFact.Materialize}, value.span) else -> value)
     }
     params := sema_services_method_params(contract.parameters, written)
     sema_call_note_route_implicit_takes(params, updated_args, values, environment, program, scopes, state, context)
@@ -666,7 +666,7 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
     loop (index, argument) in updated_args {
         source_args.push(argument)
         if index == 1 {
-            source_args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: handler_name}}, span: handler_span, id: AST_NODE_GENERATED}, span: handler_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
+            source_args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: handler_name.copy()}}, span: handler_span, id: AST_NODE_GENERATED}, span: handler_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
         }
     }
     sema_services_source_call(api, member, [Type]{}, receiver, AccessConvention.Write, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)

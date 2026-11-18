@@ -2008,7 +2008,7 @@ sema_compiler_index_derivations: fn(registration: SemaRegistrationGraph, structu
             "jet-sema",
             DerivationMethod.StaticDerivation,
             "checked-definition",
-            [String]{signature_id, content_id},
+            [String]{signature_id.copy(), content_id.copy()},
             derivation_identity(content_id, signature_id, "", registered_module.module_path),
         )
         records.push(record)
@@ -2149,7 +2149,7 @@ sema_compiler_semantic_index_from_checked: fn(registration: SemaRegistrationGrap
         }
         loop constant_index in 0..<registration.modules[registered_module_index].constants.len() {
             if registration.modules[registered_module_index].constants[constant_index].declaration.resolved_output == .Val(output) {
-                solved := output
+                solved := output.copy()
                 loop fact in graph.outputs {
                     if fact.address == output.address && fact.module_id == output.module_id && fact.reference == output.reference {
                         solved = fact

@@ -96,7 +96,7 @@ jet_cli_gate_invocation_kind: fn(argument: String) -> GateKind? Never! {
 jet_cli_gate_append_invocation: fn(ledger: &GateLedger, args: [String]) Never! {
     loop (index, argument) in args {
         kind: jet_cli_gate_invocation_kind(argument) ?? next
-        subject := argument
+        subject := argument.copy()
         separate: argument == "--gate" || argument == "--allow" || argument == "--deny" || argument == "--target" || argument == "--profile"
         if separate && index + 1 < args.len() -> subject = "{argument} {args[index + 1]}"
         scope: if kind == GateKind.SessionFlag -> "session" else -> "build"

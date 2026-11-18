@@ -288,7 +288,7 @@ parser_derives_written: fn(items: [Item]) -> Bool Never! {
 parser_join_derive_visibility: fn(items: &[Item]) Never! {
     loop index in 0..<items.len() {
         if items[index] == .MarkerDecl(declaration) && declaration.is_derive {
-            updated := declaration
+            updated := declaration.copy()
             loop other in items {
                 if other == .Trait(definition) && definition.name == declaration.name {
                     updated.is_pub = definition.is_pub

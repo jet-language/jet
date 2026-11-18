@@ -21,8 +21,8 @@ json: file walk.jettrace doc $.content.profile.rows[?l1d_miss_count!=null] #= 0 
 json: file walk.jettrace doc $.content.profile.rows[?llc_miss_count!=null] #= 0
 json: file walk.jettrace doc $.content.profile.rows[?dtlb_miss_count!=null] #= 0
 json: file walk.jettrace doc $.content.profile.rows[?page_fault_count!=null] #= 0
-json: file walk.jettrace doc $.content.profile.reason ~ "l1d_misses unavailable: the kernel refused the counter (errno 2)"
+json: file walk.jettrace doc $.content.profile.reason ~ "l1d_misses unavailable: the kernel refused the counter (errno 2)" # the reason names the kernel's refusal
 step: jet perf view {work}/walk.jettrace
 exit: 0
-stdout: ~ "counter l1d_misses unavailable errno=2"
-stdout: !~ " l1d_misses="
+stdout: ~ "counter l1d_misses unavailable errno=2" # the view names each refused counter and its errno
+stdout: !~ " l1d_misses=" # and gives no line a count of it

@@ -892,3 +892,28 @@ D-RUN-RECORD1=A and D-TIMETRAVEL2=B), D-DBG-VERBS1, D-PERF-ZONES1,
 D-DBG-DEADLOCK1, D-OBSERVE-FLIGHT1, D-PERF-HEAP1, D-PERF-CAUSAL1,
 D-PERF-TOPDOWN1 and D-DBG-UI1. The steps marked "no" change behavior behind
 existing surfaces only.
+
+## Finding dispositions
+
+Main has since added R1-R16 to #6841 as c43-c58, in rank order.
+
+<!-- audit-dispositions:v1 -->
+| finding | disposition | target or reason |
+| --- | --- | --- |
+| R1 | card | #6841 c43 |
+| R2 | card | #6841 c44 |
+| R3 | card | #6841 c45 |
+| R4 | card | #6841 c46 |
+| R5 | card | #6841 c47 |
+| R6 | card | #6841 c48 |
+| R7 | card | #6841 c49 |
+| R8 | card | #6841 c50 |
+| R9 | card | #6841 c51 |
+| R10 | card | #6841 c52 |
+| R11 | card | #6841 c53 |
+| R12 | card | #6841 c54 |
+| R13 | card | #6841 c55 |
+| R14 | card | #6841 c56 |
+| R15 | card | #6841 c57 |
+| R16 | card | #6841 c58 |
+<!-- /audit-dispositions -->

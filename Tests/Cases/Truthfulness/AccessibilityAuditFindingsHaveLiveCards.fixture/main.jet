@@ -2,7 +2,6 @@ use {
     audit_files: core.files
     audit_parse: core.text.parse
     audit_process: core.process
-    audit_sys: core.sys
     audit_json: core.encoding.json
 }
 
@@ -88,8 +87,32 @@ audit_card_number: fn(card: String) -> Int {
     number
 }
 
-// Exact table and real Node Tower predicates from tests/truthfulness.rs:1771-1908.
+// The Tower cards on the board, in the board's own shape (`cards: [{num}]`). The
+// case passes the fixture's board.json: every card the audit names that the live
+// board holds. A dev checkout's Tools/Tower/.tower is not the live board.
+audit_board_cards: fn(path: String) -> [Int] {
+    raw: audit_files.read(path) ?? panic("read board {path}")
+    board: audit_json.parse(raw) ?? panic("parse board {path}: {err.reason}")
+    entries: audit_json.pointer(board, "/cards") ?? panic("board {path} must list cards")
+    nums := [Int]{}
+    if entries == .Array(cards) {
+        loop card in cards {
+            value: audit_json.pointer(card, "/num") ?? panic("board card must contain a numeric num")
+            resolved: if value == {
+                .Int(number) -> number
+                .Float(number) -> checked(Int{number}) ?? panic("board card num is not an integer")
+                .Number(number) -> Int.parse(number) ?? panic("board card num is not an integer: {number}")
+                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("board card must contain a numeric num")
+            }
+            nums.push(resolved)
+        }
+    }
+    nums
+}
+
+// Exact table predicates from tests/truthfulness.rs:1771-1908; the argument is the board.
 run: fn() {
+    board: audit_board_cards(audit_process.args()[0])
     text: audit_files.read("Docs/Audits/cli-diagnostics-accessibility.md") ?? panic("CLI accessibility audit is readable")
     lines: text.lines()
     expected: [String]{"id", "surface", "screen_reader", "state", "card"}
@@ -134,23 +157,7 @@ run: fn() {
         loop card in cards {
             assert(!unique_cards.contains(card), "accessibility finding {row[0]} must list each Tower card once: {card}")
             unique_cards.push(card.copy())
-            // TOWER_DATA pins the lookup to this tree's board; left to itself,
-            // the board reader follows a linked worktree to the main checkout's
-            // live board. JET is the jet under test (the case sets it).
-            jet: audit_sys.get("JET") ?? panic("JET names the jet that runs Tools/Tower/Board.jet")
-            output: audit_process.cmd([String]{jet, "Tools/Tower/Board.jet", "card", "show", card, "--json"}).env("TOWER_DATA", "Tools/Tower/.tower/tower.json").run() ?? panic("Tower card lookup must run")
-            assert(output.success, "accessibility finding {row[0]} names missing Tower card {card}:\n{output.errors}")
-            report: audit_json.parse(output.output.trim()) ?? panic("Tower lookup for {row[0]} returned invalid JSON: {output.output}")
-            value: audit_json.pointer(report, "/num") ?? panic("Tower card JSON must contain a numeric num")
-            // The original JSON::json_int also truncates Float with an i64 cast.
-            resolved: if value == {
-                .Int(number) -> number
-                .Float(number) -> checked(Int{number}) ?? panic("Tower card JSON num is not an integer")
-                .Number(number) -> Int.parse(number) ?? panic("Tower card JSON num is not an integer: {number}")
-                .Null | .Bool(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> panic("Tower card JSON must contain a numeric num")
-            }
-            expected_num: audit_card_number(card)
-            assert(resolved == expected_num, "Tower lookup for {row[0]} resolved {card} as card {resolved}, not {expected_num}: {output.output}")
+            assert(board.contains(audit_card_number(card)), "accessibility finding {row[0]} names missing Tower card {card}")
         }
     }
     // The dated audit names the schema of its day, `jet.report/v1`; the 2026-09-11

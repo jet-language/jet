@@ -7029,8 +7029,10 @@ with its method, address, what answers it, how it was registered (`page`,
 
 `web.requests` is a declared decision point
 (`event.decision_point<HTTPRequest, HTTPResponse>(HookPolicy.FirstCancelElseTransform)`),
-the same point mechanism as any library's. Every App's outermost layer runs
-it before the app's own layers and rows. A handler attached with
+the same point mechanism as any library's. Serving an App (`serve`,
+`bind`, `serve_once`) puts a layer that runs it outermost in the app's table,
+before the app's own layers and rows; an App that is only built runs no
+layer. A handler attached with
 `web.requests.on(scope, handler)` lets the request on (`.Continue`), hands
 on a changed one (`.Transform(request)`), refuses it (`.Cancel`, answered
 `403`) or answers it itself (`.Fail(response)`), so the rows never run.

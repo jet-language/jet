@@ -37,7 +37,6 @@ JET_CLI_SHAPE_PROJECTIONS: [String]{"json", "cbor", "csv", "toml", "yaml", "xml"
 
 // `Object` names the shape identity's type in the same source.
 JetCLIShapeType: enum {
-    Null,
     Bool,
     Int,
     Float,
@@ -119,7 +118,6 @@ jet_cli_shape_type: fn(source: String, ty: Type) -> JetCLIShapeType Never! {
 // `shape_encoding`, as `ShapeEncoding.as_str`.
 jet_cli_shape_encoding: fn(ty: JetCLIShapeType) -> String Never! {
     if ty == {
-        .Null -> "Null"
         .Bool -> "Bool"
         .Int -> "Int"
         .Float -> "Float"
@@ -133,7 +131,6 @@ jet_cli_shape_encoding: fn(ty: JetCLIShapeType) -> String Never! {
 
 jet_cli_shape_type_label: fn(ty: JetCLIShapeType) -> String Never! {
     if ty == {
-        .Null -> "Null"
         .Bool -> "Bool"
         .Int -> "Int"
         .Float -> "Float"
@@ -285,7 +282,7 @@ jet_cli_shape_fact: fn(tables: ASTTables, source: String, structure: StructDef) 
         default: if field.default_ct == .Val(value) -> jet_cli_shape_default(value) else -> None
         short: sema_registration_cli_arg_text(field.serde_markers, "short")
         skip: field.computed != None || sema_serde_items_skips(field)
-        fields.push(JetCLIShapeField{name: field.name, ty: ty, order: order, names: jet_cli_shape_field_names(tables, structure, field), encoding: jet_cli_shape_encoding(ty), default: default, skip: skip, short: short})
+        fields.push(JetCLIShapeField{name: field.name, ty: ty.copy(), order: order, names: jet_cli_shape_field_names(tables, structure, field), encoding: jet_cli_shape_encoding(ty), default: default, skip: skip, short: short})
     }
     seen := [String]{}
     loop field in fields {

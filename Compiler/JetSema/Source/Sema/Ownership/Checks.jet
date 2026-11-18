@@ -3738,7 +3738,7 @@ sema_ownership_mark_move_as: fn(state: &SemaOwnershipState, expr: Expr, scopes: 
         // A `#SingleUse` value keeps its exact move; it never copies.
         if sema_single_use_key(state, places[0].root_id) -> origin.share_ty = None
         loop place in sema_ownership_moved_record_places(expr, places, scopes, unmarked) {
-            state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin})
+            state.moved.push(SemaOwnershipMovedPlace{place: place, origin: origin.copy()})
         }
     }
     loop place in places {
@@ -4450,7 +4450,7 @@ sema_ownership_call_once_lambda: fn(state: &SemaOwnershipState, callee: Expr, sc
             }
         }
         loop place in places {
-            state.moved.push(SemaOwnershipMovedPlace{place: place, origin: SemaOwnershipMoveOrigin{span: span, consumer: "its first call", share_ty: None, once_capture: capture}})
+            state.moved.push(SemaOwnershipMovedPlace{place: place, origin: SemaOwnershipMoveOrigin{span: span, consumer: "its first call", share_ty: None, once_capture: capture.copy()}})
         }
     }
 }
@@ -5035,7 +5035,7 @@ sema_ownership_call_result_views: fn(state: SemaOwnershipState, expr: Expr) -> [
                     .Named(_, named) -> named
                 }
                 loop fact in sema_ownership_call_result_views(state, value) {
-                    sources.push(sema_ownership_call_view_prefixed(fact, [String]{variant, slot}))
+                    sources.push(sema_ownership_call_view_prefixed(fact, [String]{variant.copy(), slot.copy()}))
                 }
             }
             return sources

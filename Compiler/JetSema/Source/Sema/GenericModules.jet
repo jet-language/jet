@@ -149,7 +149,7 @@ sema_genmod_collect_templates: fn(written: [Item], check: &SemaGenericModuleChec
     templates := [SemaGenericModuleTemplate]{}
     loop item in written {
         if item == .GenericModule(definition) {
-            templates.push(SemaGenericModuleTemplate{name: definition.name, definition: definition, params: sema_genmod_resolve_params(definition, enums, check), values: values})
+            templates.push(SemaGenericModuleTemplate{name: definition.name, definition: definition.copy(), params: sema_genmod_resolve_params(definition, enums, check), values: values.copy()})
         }
     }
     templates
@@ -664,7 +664,7 @@ sema_genmod_instantiate: fn(graph: SemaRegistrationGraph, alias: ModuleAliasDef,
     nested_enums: sema_genmod_enums([Item]{}, nested_defs)
     nested_templates := [SemaGenericModuleTemplate]{}
     loop nested in nested_defs {
-        nested_templates.push(SemaGenericModuleTemplate{name: nested.name, definition: nested, params: sema_genmod_resolve_params(nested, nested_enums, check), values: values})
+        nested_templates.push(SemaGenericModuleTemplate{name: nested.name, definition: nested.copy(), params: sema_genmod_resolve_params(nested, nested_enums, check), values: values})
     }
     nested_aliases := [ModuleAliasDef]{}
     loop item in definition.body {
@@ -712,7 +712,7 @@ sema_genmod_check_code_module: fn(graph: SemaRegistrationGraph, body: [Item], ty
     values: sema_genmod_const_values(body, inherited, enums)
     templates := [SemaGenericModuleTemplate]{}
     loop nested in nested_defs {
-        templates.push(SemaGenericModuleTemplate{name: nested.name, definition: nested, params: sema_genmod_resolve_params(nested, enums, check), values: values})
+        templates.push(SemaGenericModuleTemplate{name: nested.name, definition: nested.copy(), params: sema_genmod_resolve_params(nested, enums, check), values: values})
     }
     sema_genmod_check_aliases(graph, aliases, templates, values, enums, [String:Bool]{}, false, check)
 }
@@ -926,7 +926,7 @@ sema_generic_modules_imported: fn(inputs: [SemaRegistrationModuleInput], edges: 
                     loop item in items {
                         if item == .GenericModule(definition) {
                             if definition.name == entry.original && (definition.is_pub || definition.is_package_pub) {
-                                sources.push(SemaGenericModuleSource{local: sema_genmod_import_local(entry), key: "{module_text(table, input.module_identity)}:{definition.name}", definition: definition, source_items: sema_genmod_definition_items(items), source_values: values})
+                                sources.push(SemaGenericModuleSource{local: sema_genmod_import_local(entry), key: "{module_text(table, input.module_identity)}:{definition.name}", definition: definition, source_items: sema_genmod_definition_items(items), source_values: values.copy()})
                             }
                         }
                     }
@@ -978,7 +978,7 @@ sema_genmod_resolve_test_names: fn(items: &[Item], inherited: [String:Expr], enu
                 expression: definition.name_expr ?? next
                 folded: sema_genmod_fold(expression, values, enums) ?? next
                 text: sema_genmod_text(folded) ?? next
-                updated := definition
+                updated := definition.copy()
                 updated.name = Val(if definition.name_prefix == .Val(prefix) -> sema_genmod_value_name(prefix, text) else -> text)
                 items[index] = Item.Test{value: updated}
             }
@@ -1176,7 +1176,7 @@ sema_genmod_with_applications: fn(instance: CodeModule, aliases: [ModuleAliasDef
     applications := [ModuleInstanceApplication]{ModuleInstanceApplication{name: sema_genmod_application_name(nesting.path, instance.name), source_module: nesting.module_text, semantic_identity: semantic, span: instance.name_span}}
     loop alias in aliases {
         if alias.name == instance.name || canonical.get(alias.name) != Val(instance.name) -> next
-        applications.push(ModuleInstanceApplication{name: sema_genmod_application_name(nesting.path, alias.name), source_module: nesting.module_text, semantic_identity: semantic, span: alias.name_span})
+        applications.push(ModuleInstanceApplication{name: sema_genmod_application_name(nesting.path, alias.name), source_module: nesting.module_text, semantic_identity: semantic.copy(), span: alias.name_span})
     }
     identity.applications = applications
     updated := instance
@@ -1370,17 +1370,17 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
     loop item in template.body {
         if item == .Const(definition) {
             value: sema_inline_rewrite_expr(rewrite, definition.value)
-            mapped := definition
+            mapped := definition.copy()
             mapped.name = sema_genmod_value_name(alias.name, definition.name)
-            mapped.value = value
+            mapped.value = value.copy()
             mapped.ty = sema_inline_rewrite_optional_type(rewrite, definition.ty)
             mapped.markers = sema_inline_rewrite_markers(rewrite, definition.markers)
             mapped.meta = sema_inline_rewrite_meta(rewrite, definition.meta)
             mapped.ct = None
             folded: sema_genmod_fold(value, rewrite.values, enums)
             if folded == .Val(literal) {
-                rewrite.values[definition.name] = literal
-                mapped.value = literal
+                rewrite.values[definition.name] = literal.copy()
+                mapped.value = literal.copy()
                 if mapped.ty == None -> mapped.ty = sema_genmod_literal_type(literal)
             }
             declarations.push(Item.Const{value: mapped})
@@ -1424,7 +1424,7 @@ sema_genmod_expand_alias: fn(alias: ModuleAliasDef, source: SemaGenericModuleSou
                 declarations.push(Item.Test{value: sema_genmod_specialize_test(rewrite, definition, alias.name)})
             }
             .CodeModule(nested) -> {
-                mapped := nested
+                mapped := nested.copy()
                 mapped.name = sema_genmod_value_name(alias.name, nested.name)
                 nested_path: SemaGenericModuleNesting{module_identity: nesting.module_identity, module_text: nesting.module_text, key_prefix: "{binding.key}#{nested.name}.", path: sema_genmod_application_name(nesting.path, mapped.name)}
                 if nested.body == .Val(nested_body) {
@@ -1504,14 +1504,14 @@ sema_genmod_rewrite_body: fn(rewrite: &SemaInlineRewrite, body: [Item]) -> [Item
     mapped := [Item]{}
     loop item in body {
         if item == .Const(definition) {
-            updated := definition
+            updated := definition.copy()
             updated.value = sema_inline_rewrite_expr(rewrite, definition.value)
             updated.ty = sema_inline_rewrite_optional_type(rewrite, definition.ty)
             updated.markers = sema_inline_rewrite_markers(rewrite, definition.markers)
             updated.meta = sema_inline_rewrite_meta(rewrite, definition.meta)
             mapped.push(Item.Const{value: updated})
         } else if item == .CodeModule(child) {
-            updated := child
+            updated := child.copy()
             if child.body == .Val(child_body) {
                 updated.body = Val(sema_genmod_rewrite_body(rewrite, child_body))
             }
@@ -1595,7 +1595,7 @@ sema_genmod_specialize_nested: fn(rewrite: &SemaInlineRewrite, body: [Item], mod
                 mapped.push(Item.Enum{value: sema_inline_rewrite_enum(rewrite, definition, "")})
             }
             .Const(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.value = sema_inline_rewrite_expr(rewrite, definition.value)
                 updated.ty = sema_inline_rewrite_optional_type(rewrite, definition.ty)
                 updated.markers = sema_inline_rewrite_markers(rewrite, definition.markers)
@@ -1603,7 +1603,7 @@ sema_genmod_specialize_nested: fn(rewrite: &SemaInlineRewrite, body: [Item], mod
                 mapped.push(Item.Const{value: updated})
             }
             .CodeModule(child) -> {
-                updated := child
+                updated := child.copy()
                 child_nesting: SemaGenericModuleNesting{module_identity: nesting.module_identity, module_text: nesting.module_text, key_prefix: "{nesting.key_prefix}{child.name}.", path: sema_genmod_value_name(nesting.path, child.name)}
                 if child.body == .Val(child_body) {
                     updated.body = Val(sema_genmod_specialize_nested(rewrite, child_body, child.name, enums, child_nesting))
@@ -1620,7 +1620,7 @@ sema_genmod_specialize_nested: fn(rewrite: &SemaInlineRewrite, body: [Item], mod
                 mapped.push(Item.Trait{value: sema_inline_rewrite_trait(rewrite, definition)})
             }
             .Tag(definition) -> {
-                updated := definition
+                updated := definition.copy()
                 updated.name = sema_inline_mapped_name(rewrite, definition.name)
                 mapped.push(Item.Tag{value: updated})
             }

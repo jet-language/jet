@@ -2313,7 +2313,7 @@ sema_scope_bind_definition_site: fn(table: &SemaScopeTable, graph: SemaRegistrat
     module_index: sema_registration_module_index_text(graph, func.definition_module) ?? return
     loop symbol in graph.modules[module_index].symbols {
         if !func.site_names.contains(symbol.name) {
-            sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: symbol, key: symbol_table_key(graph.symbols, symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
+            sema_scope_push_binding(table, SemaScopeBinding{frame: 0, symbol: symbol.copy(), key: symbol_table_key(graph.symbols, symbol.id), mutable: false, access: AccessConvention.Read, integer_bounds: None, string_view: false, compiler_builtin: false})
         }
     }
     loop import in graph.modules[module_index].imports {
@@ -2680,7 +2680,7 @@ sema_scope_light_copy: fn(source: SemaScopeTable) -> SemaScopeTable Never! {
                 SemaScopeBinding{
                     frame: binding.frame,
                     // Every light row shares the one empty function type.
-                    symbol: Symbol{id: binding.symbol.id, kind: binding.symbol.kind, name: binding.symbol.name, module_identity: binding.symbol.module_identity, owner: binding.symbol.owner, span: binding.symbol.span, ty: Val(light_type), visibility: binding.symbol.visibility},
+                    symbol: Symbol{id: binding.symbol.id, kind: binding.symbol.kind, name: binding.symbol.name, module_identity: binding.symbol.module_identity, owner: binding.symbol.owner, span: binding.symbol.span, ty: Val(light_type.copy()), visibility: binding.symbol.visibility},
                     key: binding.key,
                     mutable: binding.mutable,
                     access: binding.access,

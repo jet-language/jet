@@ -11,7 +11,7 @@ use {
     web: core.web
 }
 
-signed_out: fn(asked: HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> {
+signed_out: fn(asked: HTTPRequest) -[]> HookDecision<HTTPRequest, HTTPResponse> Never! {
     HookDecision.Fail(server.response(401, "sign in for {asked.path}"))
 }
 
@@ -19,7 +19,7 @@ page: fn(asked: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
     Ok(server.response(200, "page {asked.path}"))
 }
 
-run: fn() -[Net, FS.Read, Time]> (HTTPError | NetError | TaskFailure)! {
+run: fn() -[IO, Net, FS.Read, Time]> (HTTPError | NetError | TaskFailure)! {
     scope: event.scope()
     _: web.requests.on(scope, web.under("/admin", signed_out))
     served: web.app().get("/about", page).get("/admin", page).get("/admin/users", page).get("/administrator", page)

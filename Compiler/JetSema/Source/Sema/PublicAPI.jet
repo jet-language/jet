@@ -114,13 +114,13 @@ sema_public_api_scope: fn(items: [Item], functions: [FnBody], prefix: String, mo
                 if definition.is_pub {
                     name: sema_public_api_row_name(definition.name, prefix, modules) ?? next
                     range: if definition.range == .Val(bounds) -> " in {bounds.lo}..={bounds.hi}" else -> ""
-                    rows.push(PublicAPIItem{kind: "distinct", name: name, signature: "distinct {name}: {sema_public_api_type(definition.base, spellings)}{range}"})
+                    rows.push(PublicAPIItem{kind: "distinct", name: name.copy(), signature: "distinct {name}: {sema_public_api_type(definition.base, spellings)}{range}"})
                 }
             }
             .TypeAlias(definition) -> {
                 if definition.is_pub {
                     name: sema_public_api_row_name(definition.name, prefix, modules) ?? next
-                    rows.push(PublicAPIItem{kind: "type", name: name, signature: "type {name}{sema_public_api_type_params(definition.type_params, spellings)} = {sema_public_api_type(definition.target, spellings)}"})
+                    rows.push(PublicAPIItem{kind: "type", name: name.copy(), signature: "type {name}{sema_public_api_type_params(definition.type_params, spellings)} = {sema_public_api_type(definition.target, spellings)}"})
                 }
             }
             .UnitFamily(definition) -> {
@@ -136,7 +136,7 @@ sema_public_api_scope: fn(items: [Item], functions: [FnBody], prefix: String, mo
                 if definition.is_pub && sema_public_api_named(definition.name) {
                     name: "{prefix}{definition.name}"
                     ty: if definition.ty == .Val(value) -> ": {sema_public_api_type(value, spellings)}" else -> ""
-                    rows.push(PublicAPIItem{kind: "const", name: name, signature: "const {name}{ty}"})
+                    rows.push(PublicAPIItem{kind: "const", name: name.copy(), signature: "const {name}{ty}"})
                 }
             }
             .CodeModule(module_value) -> {
@@ -547,6 +547,6 @@ sema_public_api_reexport_rows: fn(reexports: [SemaPublicAPIReexport], prefix: St
     loop reexport in reexports {
         if !sema_public_api_named(reexport.name) -> next
         name: "{prefix}{reexport.name}"
-        rows.push(PublicAPIItem{kind: "reexport", name: name, signature: "reexport {name} = {reexport.signature}"})
+        rows.push(PublicAPIItem{kind: "reexport", name: name.copy(), signature: "reexport {name} = {reexport.signature}"})
     }
 }

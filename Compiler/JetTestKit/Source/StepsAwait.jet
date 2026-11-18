@@ -173,7 +173,7 @@ kit_steps_await: fn(step: KitStep, context: KitStepCtx, previous: KitStepState) 
             success = files.exists(path)
         } else {
             assertion := if kind == "process" -> kit_steps_process_form(kit_steps_byte_slice(text, tokens[2].start, tokens[boundary - 1].end)) ?? return kit_steps_action_error(state, "invalid process await") else -> kit_steps_stream_assertion("file", "{kit_steps_byte_slice(text, tokens[1].start, tokens[boundary - 1].end)} {kit_steps_byte_slice(text, kit_steps_comment(text), text.count_bytes())}") ?? return kit_steps_action_error(state, "invalid file await")
-            assertion.path = path
+            assertion.path = path.copy()
             verdict: if kind == "process" -> kit_steps_process_check(assertion, context, state) else -> kit_steps_check_assertion(assertion, context, state, "", false)
             if verdict.status == "ERROR" || verdict.status == "REFUSED" {
                 return KitStepResult{state: state, verdict: verdict}

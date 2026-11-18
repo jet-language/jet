@@ -384,6 +384,8 @@ jet_driver_cost_function_sites: fn(function: FnBody, name: String, nodes: [Int],
         view := ""
         if node.kind == .MaterializeView(value) -> view = type_name(body_type(tree, value)) else if node.kind == .Clone(value, _) {
             view = type_name(body_type(tree, value))
+        } else if node.kind == .BuiltinMethod(receiver, _, _) && fact.kind == TCostKind.ViewMaterialization {
+            view = type_name(body_type(tree, receiver))
         }
         sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(id) ?? 0, kind: fact.kind, state: state, view: view})
     }

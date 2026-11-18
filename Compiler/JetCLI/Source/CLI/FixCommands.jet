@@ -424,7 +424,7 @@ jet_cli_fix_run: fn(file: String, dry_run: Bool, all: Bool, markers: String, mod
     skips := [JetCLIFixSkip]{}
     if !all && suggestions {
         loop fix in all_fixes {
-            if jet_cli_safe_fixes([JetCLIFix]{fix}).len() == 0 {
+            if jet_cli_safe_fixes([JetCLIFix]{fix.copy()}).len() == 0 {
                 jet_cli_fix_skip(skips, fix, "needs review: `jet fix --all` applies it")
             }
         }

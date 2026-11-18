@@ -69,15 +69,15 @@ build_session_add_action: fn(state: &BuildSessionState, args: [BuildSessionValue
         return step
     }
     loop arg in run.slice(1, run.len()) {
-        reply: build_session_step_call(state, "arg", [BuildSessionValue]{handle, BuildSessionValue.Text{value: arg}})
+        reply: build_session_step_call(state, "arg", [BuildSessionValue]{handle.copy(), BuildSessionValue.Text{value: arg}})
         if reply != .Value(value: .Unit) -> return reply
     }
     loop path in inputs {
-        reply: build_session_step_call(state, "reads", [BuildSessionValue]{handle, BuildSessionValue.Text{value: path}})
+        reply: build_session_step_call(state, "reads", [BuildSessionValue]{handle.copy(), BuildSessionValue.Text{value: path}})
         if reply != .Value(value: .Unit) -> return reply
     }
     loop path in outputs {
-        reply: build_session_step_call(state, "writes", [BuildSessionValue]{handle, BuildSessionValue.Text{value: path}})
+        reply: build_session_step_call(state, "writes", [BuildSessionValue]{handle.copy(), BuildSessionValue.Text{value: path}})
         if reply != .Value(value: .Unit) -> return reply
     }
     step

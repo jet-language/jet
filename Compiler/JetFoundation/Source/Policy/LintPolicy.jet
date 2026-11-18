@@ -148,7 +148,7 @@ lint_parse_name_list: fn(value: String) -> [String] LintPolicyError! {
     loop item in lint_top_level_commas(foundation_byte_text(text.bytes(), 1, text.bytes().len() - 1)) {
         entry: item.trim()
         if entry == "" -> next
-        name: lint_unquote(entry)
+        name: lint_unquote(entry.copy())
         if lint_code_for_name(name) == None {
             if lint_name_for_code(name) == .Val(canonical) {
                 return Err(lint_policy_code_error("`{name}` is a diagnostic code; use `{canonical}` in `policy.lints.deny`", name, Val(canonical)))

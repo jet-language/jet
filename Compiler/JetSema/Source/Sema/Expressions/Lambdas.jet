@@ -2570,7 +2570,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
         call_index := call_fact_start
         loop call_index < lambda_context.call_facts.len() {
             if lambda_context.call_facts[call_index].caller_key == enclosing_owner {
-                lambda_context.call_facts[call_index].caller_key = lambda_owner
+                lambda_context.call_facts[call_index].caller_key = lambda_owner.copy()
             }
             call_index += 1
         }
@@ -3223,7 +3223,7 @@ sema_expression_lambda_lift_block: fn(statements: &[TStmt], carrier: Type) Never
             .If(condition, then_body, else_body, else_is_elseif, span) -> {
                 updated_then := then_body
                 sema_expression_lambda_lift_block(updated_then, carrier)
-                updated_else := else_body
+                updated_else := else_body.copy()
                 if else_body == .Val(else_statements) {
                     lifted := else_statements.copy()
                     sema_expression_lambda_lift_block(lifted, carrier)
@@ -3247,7 +3247,7 @@ sema_expression_lambda_lift_block: fn(statements: &[TStmt], carrier: Type) Never
                     sema_expression_lambda_lift_block(arm_body, carrier)
                     updated_arms[arm_index].body = arm_body
                 }
-                updated_else := else_body
+                updated_else := else_body.copy()
                 if else_body == .Val(else_statements) {
                     lifted := else_statements.copy()
                     sema_expression_lambda_lift_block(lifted, carrier)
@@ -3273,7 +3273,7 @@ sema_expression_lambda_lift_block: fn(statements: &[TStmt], carrier: Type) Never
                     sema_expression_lambda_lift_block(arm_body, carrier)
                     updated_arms[arm_index].body = arm_body
                 }
-                updated_else := else_body
+                updated_else := else_body.copy()
                 if else_body == .Val(else_statements) {
                     lifted := else_statements.copy()
                     sema_expression_lambda_lift_block(lifted, carrier)

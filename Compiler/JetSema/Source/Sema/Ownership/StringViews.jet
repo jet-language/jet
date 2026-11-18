@@ -23,6 +23,7 @@ use jet_foundation.[
     Type,
     ViewProvenanceEntry,
     ViewProvenanceMap,
+    builtin_method_row,
     diagnostic_with_edit_grade,
     expr_span,
     type_identity_equal,
@@ -149,13 +150,31 @@ sema_string_view_binding: fn(scopes: SemaScopeTable, name: String) -> Bool Never
     scopes.bindings[index].string_view
 }
 
-// `.trim()`/`.after()`/`.before()` take the view as the `&str` it is.
-sema_string_view_exempt_receiver: fn(receiver: Expr, method: String, scopes: SemaScopeTable) -> Bool Never! {
-    if method != "trim" && method != "after" && method != "before" -> return false
+// `.trim()`/`.after()`/`.before()` take the view as the `&str` it is, and a
+// scalar read (sema_string_view_read_method) reads it in place.
+sema_string_view_exempt_receiver: fn(receiver: Expr, method: String, argument_count: Int, scopes: SemaScopeTable) -> Bool Never! {
+    if method != "trim" && method != "after" && method != "before" && !sema_string_view_read_method(method, argument_count) -> return false
     if receiver == {
         .Ident(name, _, _) -> sema_string_view_binding(scopes, name)
         .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> false
     }
+}
+
+// A builtin `String` method that only reads its receiver and answers a
+// scalar (`len`, `is_empty`, `index_of`, `count`, …): its runtime routine
+// borrows the text and keeps none of it, so a view receiver is passed as the
+// view it is and never materialized.
+sema_string_view_read_method: fn(method: String, argument_count: Int) -> Bool Never! {
+    row: builtin_method_row(Type.String, method, argument_count) ?? return false
+    if row.access != AccessConvention.Read -> return false
+    if row.lowering == .Builtin(_) -> return sema_string_view_scalar(row.result)
+    false
+}
+
+// Int, Float, Bool or Char, or an Option of one.
+sema_string_view_scalar: fn(ty: Type) -> Bool Never! {
+    if ty == .Option(inner) -> return sema_string_view_scalar(inner)
+    ty == Type.Int || ty == Type.Float || ty == Type.Bool || ty == Type.Char
 }
 
 sema_string_view_owner: fn(scopes: SemaScopeTable, state: SemaOwnershipState, name: String) -> String Never! {

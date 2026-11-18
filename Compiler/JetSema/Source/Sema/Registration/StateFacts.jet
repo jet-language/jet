@@ -130,7 +130,7 @@ sema_state_graph_for_struct: fn(definition: StructDef, items: [Item]) -> SemaSta
     loop name in state_names {
         nodes.push(
             SemaStateGraphNode{
-                name: name,
+                name: name.copy(),
                 terminal: !sema_state_graph_contains(outgoing, name),
                 reachable: if entries.len() == 0 -> None else -> Val(sema_state_graph_contains(reachable_states, name)),
             },

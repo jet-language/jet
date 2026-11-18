@@ -98,7 +98,7 @@ sema_trait_instances_rewrite_items: fn(items: &&[Item], diagnostics: &[Diagnosti
                     sema_trait_instances_note(instances, supertrait, definition.name_span, scope, diagnostics)
                 }
                 loop method in definition.methods {
-                    method_scope := scope
+                    method_scope := scope.copy()
                     method_scope.extend(sema_trait_instances_param_names(method.type_params))
                     sema_trait_instances_params(instances, method.type_params, method_scope, diagnostics)
                 }

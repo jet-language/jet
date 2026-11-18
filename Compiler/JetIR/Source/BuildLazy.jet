@@ -399,7 +399,7 @@ ir_lazy_indexed_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, ty: Type, sp
     index_member := members[0]
     item_member := members[1]
     loop member in members {
-        if member.name == "idx" -> index_member = member
+        if member.name == "idx" -> index_member = member.copy()
         if member.name == "item" -> item_member = member
     }
     _: ir_new_slot(a, pointer_row, IRSlotKind.Param, ir_intern_name(m, "env"))

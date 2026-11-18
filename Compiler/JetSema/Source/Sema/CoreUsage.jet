@@ -882,7 +882,7 @@ sema_core_collect_ast_import: fn(imports: &[SemaCoreImport], declaration: Import
             sema_core_import_add(imports, SemaCoreImport{alias: module_alias, module_name: module_name, item: None, span: module_alias_span})
             loop item in items {
                 local := item.alias ?? item.original
-                sema_core_import_add(imports, SemaCoreImport{alias: local, module_name: module_name, item: Val(item.original), span: span})
+                sema_core_import_add(imports, SemaCoreImport{alias: local, module_name: module_name.copy(), item: Val(item.original), span: span})
             }
         }
         .File(_, _) -> {}
@@ -1708,14 +1708,14 @@ sema_core_registration_imports_into: fn(registration_module: SemaRegistrationMod
         target := module_text(table, registration.target_module_identity)
         if declaration.kind == {
             .Module(name, span) -> {
-                if target == "" -> target = name
+                if target == "" -> target = name.copy()
                 alias: if declaration.alias != "" -> declaration.alias else -> name
                 if sema_core_import_offer(imports, only, SemaCoreImport{alias: alias, module_name: target, item: None, span: span}) {
                     return
                 }
             }
             .Unqualified(module_alias, module_alias_span, _, _, span) -> {
-                if target == "" -> target = module_alias
+                if target == "" -> target = module_alias.copy()
                 if sema_core_import_offer(imports, only, SemaCoreImport{alias: module_alias, module_name: target, item: None, span: module_alias_span}) {
                     return
                 }

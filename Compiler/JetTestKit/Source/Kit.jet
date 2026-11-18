@@ -939,7 +939,7 @@ kit_execute_suites: fn(options: KitOptions, root: String, selected_suites: [Stri
     corpus := [KitSelected]{}
     loop suite in selected_suites {
         loop entry in kit_suite_discover(suite, discovery_ctx) {
-            corpus.push(KitSelected{entry: entry, suite: suite})
+            corpus.push(KitSelected{entry: entry, suite: suite.copy()})
         }
     }
     kit_execute_corpus_order(corpus)
@@ -1056,7 +1056,7 @@ kit_execute_finish: fn(jet: String, results: [KitCaseResult], ran_suites: [Strin
                 if failure.suite == suite -> reported = true
             }
             if suite_code != 0 && !reported {
-                failures.push(KitFailure{suite: suite, row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
+                failures.push(KitFailure{suite: suite.copy(), row: "ERROR\tresults\t\tthe {suite} report could not be written to {path}"})
             }
             if suite_code > code -> code = suite_code
         }

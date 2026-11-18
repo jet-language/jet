@@ -641,7 +641,7 @@ ir_dyn_union_decode: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
     b.fresh[tree] = false
     out: ir_temp(m, b, result_row)
     loop (index, member) in members {
-        tree_node: ir_node(b, tree_ty, NodeKind.Local{local: tree_local}, span)
+        tree_node: ir_node(b, tree_ty, NodeKind.Local{local: tree_local.copy()}, span)
         attempt_ty: Type.Result{ok: member.copy(), err: err_ty.copy()}
         attempt: ir_dyn_decode(m, p, b, attempt_ty, tree_node, member, false, [Int]{}, span)
         if ir_failed(b) || attempt < 0 {

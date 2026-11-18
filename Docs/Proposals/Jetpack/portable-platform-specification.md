@@ -1215,7 +1215,7 @@ Every JPH frame has this exactly packed 64-byte little-endian header. The parser
 | 56 | 4 | `attachment_count` | exact call-local entry count |
 | 60 | 4 | `reserved` | zero |
 
-Outcome values are `0=accepted/control`, `1=ok`, `2=error`, `3=cancelled`, `4=interrupted`, `5=revoked`, `6=closed`; values 7 are reserved and reject. Frame kinds are `0=request`, `1=reply`, `2=callback_event`, `3=callback_register`, `4=cancel`, `5=ack`, `6=completion`, and `7=capability`; 8..15 reject. Legal combinations are:
+Outcome values are `0=accepted/control`, `1=ok`, `2=error`, `3=canceled`, `4=interrupted`, `5=revoked`, `6=closed`; values 7 are reserved and reject. Frame kinds are `0=request`, `1=reply`, `2=callback_event`, `3=callback_register`, `4=cancel`, `5=ack`, `6=completion`, and `7=capability`; 8..15 reject. Legal combinations are:
 
 | kind | legal outcome | payload |
 |---|---|---|
@@ -1228,7 +1228,7 @@ Outcome values are `0=accepted/control`, `1=ok`, `2=error`, `3=cancelled`, `4=in
 | completion | `1..6` only | exact declared terminal `Result<T,Error>` value; header outcome must agree with its discriminant/error code |
 | capability | `0` only | capability record |
 
-`AcceptedReply` is exactly `{ call_id:u64 }` and has no function result. It is nonterminal. Every terminal reply/completion carries the function descriptor's exact declared `Result<T,Error>` wire value, including an `ok` case or an `error` case. The header outcome is a transport summary: `ok` requires variant case 0; `error`, `cancelled`, `interrupted`, `revoked`, and `closed` require variant case 1 and the corresponding stable Error domain/code. A mismatch between header outcome and Result discriminant/category is `protocol_error`. Callback delivery uses its declared callback `Result<T,Error>` type under the same rule. A synchronous function never emits `accepted` or a completion. A completion never emits `accepted`. Control frames never carry a result payload. `CancelPayload` is `{ target_call_id:u64, reason:u8, reserved:u8[7] }`, with reason `0=caller`, `1=deadline`, `2=revocation`, `3=owner_close`; `AckPayload` is `{ registration_id:u64, event_sequence:u64, callback_call_id:u64, reserved:u32 }`.
+`AcceptedReply` is exactly `{ call_id:u64 }` and has no function result. It is nonterminal. Every terminal reply/completion carries the function descriptor's exact declared `Result<T,Error>` wire value, including an `ok` case or an `error` case. The header outcome is a transport summary: `ok` requires variant case 0; `error`, `canceled`, `interrupted`, `revoked`, and `closed` require variant case 1 and the corresponding stable Error domain/code. A mismatch between header outcome and Result discriminant/category is `protocol_error`. Callback delivery uses its declared callback `Result<T,Error>` type under the same rule. A synchronous function never emits `accepted` or a completion. A completion never emits `accepted`. Control frames never carry a result payload. `CancelPayload` is `{ target_call_id:u64, reason:u8, reserved:u8[7] }`, with reason `0=caller`, `1=deadline`, `2=revocation`, `3=owner_close`; `AckPayload` is `{ registration_id:u64, event_sequence:u64, callback_call_id:u64, reserved:u32 }`.
 
 Call IDs increase from 1 and event sequences from 1. Neither wraps. The channel closes before `u64::MAX`; an ID remains reserved while its call, callback, completion, acknowledgment, or receipt is live. `payload_bytes` and `attachment_count` are checked before allocation. A frame is at most 16 MiB in the beginner profile and never over 64 MiB in JPH/1. Profile limits may be lower and are checked before activation for mandatory maxima.
 
@@ -1301,7 +1301,7 @@ The canonical error categories are:
 | 4 | 1 | `exhausted` | declared memory, time, byte, queue, handle, task, or device reservation cannot be made |
 | 4 | 2 | `timeout` | declared caller deadline expires before effect linearization |
 | 4 | 3 | `busy` | operation would wait and caller selected no-wait, or required queue/reentrancy state is busy |
-| 5 | 1 | `cancelled` | cancellation wins before effect linearization |
+| 5 | 1 | `canceled` | cancellation wins before effect linearization |
 | 5 | 2 | `interrupted` | host shutdown, device interruption, or external interruption occurs |
 | 5 | 3 | `revoked` | authority/resource is revoked before completion |
 | 6 | 1 | `closed` | resource/channel is closed before admission |
@@ -1310,7 +1310,7 @@ The canonical error categories are:
 | 7 | 2 | `validation_failed` | pinned driver/shader/tensor/protocol validator rejects the value |
 | 8 | 1 | `host_failure` | host failure has no more specific portable category |
 
-Classification precedence is deterministic: malformed frame/descriptor/attachment or noncanonical bytes are `protocol_error`; session/channel/transport or generation mismatches are `denied`, `stale`, `closed`, or `revoked` by their exact state; checked value failures are `invalid_argument`; scope failures are `denied`; profile absence is `unsupported`/`unavailable`; failed ancestor reservation is `exhausted`; affinity/reentrancy is `wrong_affinity`/`busy`; cancellation/deadline before linearization is `cancelled`/`timeout`; external interruption, revocation, closure, device loss, validation, and host failure use their corresponding category. Earlier phases always win, and a host typed result is never rewritten as a JPM verifier category.
+Classification precedence is deterministic: malformed frame/descriptor/attachment or noncanonical bytes are `protocol_error`; session/channel/transport or generation mismatches are `denied`, `stale`, `closed`, or `revoked` by their exact state; checked value failures are `invalid_argument`; scope failures are `denied`; profile absence is `unsupported`/`unavailable`; failed ancestor reservation is `exhausted`; affinity/reentrancy is `wrong_affinity`/`busy`; cancellation/deadline before linearization is `canceled`/`timeout`; external interruption, revocation, closure, device loss, validation, and host failure use their corresponding category. Earlier phases always win, and a host typed result is never rewritten as a JPM verifier category.
 
 Error flags are normative: bits 0..1 are effect phase (`00=not_started`, `01=accepted`, `10=completed`, `11=unknown`); bit 2 is `not_retractable`; bit 3 is `awaiting_quiescence`; bit 4 is `partial`; bit 5 is `retry_safe`; bit 6 is `receipt_present`; bits 7..31 are reserved zero. Detail text is non-authoritative.
 
