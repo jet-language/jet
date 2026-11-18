@@ -1,8 +1,7 @@
 use {
     net: core.net
     process: core.process
-    env: core.sys
-    dev: project.env.dev
+    sys: core.sys
 }
 
 system.http_ready: module { target: linux.x64 }
@@ -111,7 +110,7 @@ http_response: fn() -> [U8] {
 run: fn() (NetError | RangeError | TaskFailure)! {
     args: process.args()
     if args.len() > 0 && (args.get(0) ?? "") == "serve" {
-        port: env.get("JETPACK_SERVICE_PORT") ?? "18080"
+        port: sys.get("JETPACK_SERVICE_PORT") ?? "18080"
         listener: net.tcp_listen("127.0.0.1:{port}")
         budget: 10000ms
         print("ready")
@@ -236,6 +235,5 @@ run: fn() (NetError | RangeError | TaskFailure)! {
     response: client.read(8192, deadline: budget)
     print(response.starts_with("HTTP/1.1 200 OK"))
     print(response.ends_with("ok"))
-    completed: server.join() ?? return Err(err)
-    completed ?? return Err(err)
+    server.join() ?? return Err(err)
 }
