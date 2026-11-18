@@ -206,6 +206,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     loop summary in summaries {
         if summary == .Val(line) -> out = "{out}{line}\n"
     }
+    loop line in jet_cli_perf_receipt_lines(trace) -> out = "{out}{line}\n"
     if frames == "all" {
         out = "{out}generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)\n"
     }
@@ -398,6 +399,20 @@ jet_cli_perf_receipt_sections: fn(trace: CanonicalJSON) -> [JetDriverRunReceiptS
         sections.push(recorded)
     }
     Ok(sections)
+}
+
+// `receipt <name> <value>` for each receipt section the trace records, the
+// value as its canonical JSON.
+jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
+    lines := [String]{}
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        bytes: canonical_json_bytes(section.value)
+        text: String.from_bytes(bytes.slice(0, bytes.len() - 1)) ?? next
+        lines.push("receipt {section.name} {text}")
+    }
+    lines
 }
 
 // `sample_duration`: the first `domain` sample's duration.

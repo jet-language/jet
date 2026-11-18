@@ -127,6 +127,21 @@ fn` declaration (`fn` through its closing brace) and do not separate the
 functions that `run` calls; their `inclusive_count` and `allocation_count` are
 null.
 
+A `jet perf run` or `jet perf test` trace records one receipt section, `perf`
+(type `JetPerfReceipt`). Its `build` names the build the program compiled
+under: `profile`, the profile the run's words select (null for none), and
+`options`, every build option's value as `jet run` resolves the words over the
+source's declared profiles (`optimize`, `debug_info`, …). A `jet test` run
+resolves its build through its settings layers as well, which the session does
+not, so its `build` is null, as it is for words the run refuses. Its `capture`
+names the capture's settings: `allowlist`, the privacy fields the trace keeps
+(comma-separated, null for none), and `sampling`, null unless the program
+sampled, else `clock` `cpu`, `interval_us` 1000 and `allocations`
+`call-sites`. `jet perf view` prints it as `receipt perf <canonical JSON>`,
+and `jet perf compare` lists each field that differs between two traces'
+receipts (`perf.build.options.optimize: "O0" -> "O2"`). `jet perf attach`
+records none.
+
 ## Canonical devtools protocol
 
 `jet.devtools.v1` is the single observation envelope for development hosts.

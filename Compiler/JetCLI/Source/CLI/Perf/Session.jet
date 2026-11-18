@@ -10,13 +10,18 @@ use {
     perf_time: core.time
     jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE]
     jet_foundation.[
+        CanonicalJSON,
+        CanonicalJSONField,
         DEFAULT_EXCLUSIONS,
         ENV_JET_OBSERVE,
         ENV_JET_PERF_SAMPLES,
         SourceIdentity,
         TraceHardware,
+        TraceReceiptSection,
         TraceToolchain,
         artifact_extension,
+        canonical_json_object,
+        canonical_json_sha256,
         trace_id,
         trace_profile_unsupported,
         verify_jettrace,
@@ -187,6 +192,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
             }
         }
     }
+    // The receipt reads the allowlist before the policy takes it.
+    stamped: jet_cli_perf_session_receipt(action, argv, parsed.source, parsed.allowlist, samples != None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+    capture.receipts.push(stamped)
     capture.policy.allowlist = parsed.allowlist.move()
     // The core.log spans the program closed, which its runtime keeps beside
     // the samples, on the clock of `started`.
@@ -415,10 +423,51 @@ jet_cli_perf_session_target: fn() -[Env]> String Never! {
     jet_cli_host_triple(perf_sys.arch(), perf_sys.name())
 }
 
+// The session's `perf` receipt section: the build `jet run` compiled the
+// program under, its profile and every build option's resolved value, as
+// the run resolves its words and its source's profiles
+// (jet_cli_build_options), and the capture's settings: the privacy fields
+// it keeps, and, where the program `sampled`, its CPU-time sampling, every
+// JET_CLI_PERF_SAMPLE_US of CPU time, with each allocation's call sites. A
+// `jet test` resolves its build through its settings layers too
+// (jet_cli_test_file), which the session does not, so its build is null, as
+// is the build of words the run refused.
+jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?, allowlist: [String], sampled: Bool) -[FS, Env]> TraceReceiptSection JetCLIReadError! {
+    build := CanonicalJSON.Null
+    if action == "run" {
+        file: source ?? ""
+        text: perf_files.read(file) ?? ""
+        if jet_cli_build_options(argv, action, file, text, false, true) == .Selected(options, _) {
+            values := [CanonicalJSONField]{}
+            loop choice in options.values.move() {
+                values.push(CanonicalJSONField{key: choice.name.move(), value: CanonicalJSON.String(choice.value.move())})
+            }
+            resolved: canonical_json_object(values) ?? return Err(jet_cli_read_error(err.message))
+            profile: jet_cli_profile_name(argv)
+            named: if profile == "" -> CanonicalJSON.Null else -> CanonicalJSON.String(profile)
+            build = CanonicalJSON.Object([CanonicalJSONField]{{key: "options", value: resolved}, {key: "profile", value: named}})
+        }
+    }
+    sampling := CanonicalJSON.Null
+    if sampled {
+        sampling = CanonicalJSON.Object(
+            [CanonicalJSONField]{
+                {key: "allocations", value: CanonicalJSON.String("call-sites")},
+                {key: "clock", value: CanonicalJSON.String("cpu")},
+                {key: "interval_us", value: CanonicalJSON.Integer("{JET_CLI_PERF_SAMPLE_US}")},
+            },
+        )
+    }
+    kept: if allowlist.len() == 0 -> CanonicalJSON.Null else -> CanonicalJSON.String(allowlist.join(","))
+    capture: CanonicalJSON.Object([CanonicalJSONField]{{key: "allowlist", value: kept}, {key: "sampling", value: sampling}})
+    value: CanonicalJSON.Object([CanonicalJSONField]{{key: "build", value: build}, {key: "capture", value: capture}})
+    digest: canonical_json_sha256(value)
+    Ok(TraceReceiptSection{name: "perf", type_name: "JetPerfReceipt", value: value, digest: digest})
+}
+
 // `write_session_trace`: the trace goes to `out`, else to
 // `<project root>/.jet/perf/<unix seconds>-<trace id prefix>.jettrace`; it is
-// published owner-only and read back verified. `jet run` and `jet test`
-// record no receipts, so the trace carries no receipt sections.
+// published owner-only and read back verified.
 jet_cli_perf_session_write: fn(capture: JetCLIPerfCapture, action: String, argv: [String], out: String?) -[FS, Env, Time]> String JetCLIReadError! {
     toolchain: TraceToolchain{jet_version: JET_VERSION, compiler_build_id: jet_cli_compiler_identity() ?? JET_VERSION, stdlib_id: "jet-stdlib", runner_id: "jet-perf"}
     hardware: TraceHardware{cpu_arch: perf_sys.arch(), logical_cpus: checked(U64{perf_sys.cpu_count()}) ?? U64{1}, os: perf_sys.name(), target: jet_cli_perf_session_target()}

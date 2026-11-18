@@ -20,10 +20,11 @@ JetCLIPerfCapture: struct {
     source_identity: [SourceIdentity],
     source_maps: [TraceSourceMap],
     policy: CapturePolicy,
+    receipts: [TraceReceiptSection],
 }
 
 jet_cli_perf_capture_new: fn(profile: TraceProfile, sources: [SourceIdentity]) -> JetCLIPerfCapture Never! {
-    JetCLIPerfCapture{samples: [TraceSample]{}, profile: profile, allocations: [TraceAllocation]{}, browser: [TraceBrowser]{}, tasks: [TraceTask]{}, locks: [TraceLock]{}, io: [TraceIO]{}, native: [TraceNative]{}, spans: [TraceSpan]{}, source_identity: sources, source_maps: [TraceSourceMap]{}, policy: capture_policy_default_exclusions()}
+    JetCLIPerfCapture{samples: [TraceSample]{}, profile: profile, allocations: [TraceAllocation]{}, browser: [TraceBrowser]{}, tasks: [TraceTask]{}, locks: [TraceLock]{}, io: [TraceIO]{}, native: [TraceNative]{}, spans: [TraceSpan]{}, source_identity: sources, source_maps: [TraceSourceMap]{}, policy: capture_policy_default_exclusions(), receipts: [TraceReceiptSection]{}}
 }
 
 // `wall_ns` is the session's wall time on the observations' clock (`jet perf
@@ -220,7 +221,7 @@ jet_cli_perf_capture_browser: fn(browser: JetCLIPerfBrowser, observations: [JetC
 
 // Only the shared JetTrace codec writes bytes, then authenticates its own wire.
 jet_cli_perf_capture_bytes: fn(capture: JetCLIPerfCapture, command: String, argv: [String], toolchain: TraceToolchain, hardware: TraceHardware) -> [U8] JetCLIReadError! {
-    skeleton: TraceSkeleton{command: command, argv: argv, toolchain: toolchain, hardware: hardware, capture_policy: capture.policy, samples: capture.samples, profile: capture.profile, allocations: capture.allocations, browser: capture.browser, game_frames: [TraceGameFrame]{}, game_draw_events: [TraceGameDrawEvent]{}, tasks: capture.tasks, locks: capture.locks, io: capture.io, native: capture.native, spans: capture.spans, receipt_sections: [TraceReceiptSection]{}, source_identity: capture.source_identity, source_maps: capture.source_maps}
+    skeleton: TraceSkeleton{command: command, argv: argv, toolchain: toolchain, hardware: hardware, capture_policy: capture.policy, samples: capture.samples, profile: capture.profile, allocations: capture.allocations, browser: capture.browser, game_frames: [TraceGameFrame]{}, game_draw_events: [TraceGameDrawEvent]{}, tasks: capture.tasks, locks: capture.locks, io: capture.io, native: capture.native, spans: capture.spans, receipt_sections: capture.receipts, source_identity: capture.source_identity, source_maps: capture.source_maps}
     bytes: build_skeleton_bytes(skeleton) ?? return Err(jet_cli_read_error(err.message))
     _: verify_jettrace(bytes) ?? return Err(jet_cli_read_error(err.message))
     Ok(bytes)
