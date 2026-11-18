@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112286,
+    "rev": 112289,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -87067,7 +87067,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-18T21:37:23.625Z",
+      "updated": "2026-11-18T21:37:47.062Z",
       "updatedBy": "Main",
       "criteriaLastN": 58
     },
@@ -175899,7 +175899,7 @@
       "explainer": "Beginner path: run each build a few times, then compare. Under A, run `jet perf run prog.jet --out base/1.jettrace` four times, changing the number. Do the same into `head/`, then run `jet perf compare base/ head/`. Under B, make the same runs, then name each with `--base` or `--head`. Under C, run `jet perf run prog.jet --repeat=4 --out base.jettrace` once per side. Then run `jet perf compare base.jettrace head.jettrace`.\n\nExpert path: every option uses the same verdict test. The captures must share a toolchain and hardware fingerprint, or pass `--override-identity`. `--json` gives each function's and line's per-capture samples, means, delta and verdict. The two-trace form `jet perf compare base.jettrace head.jettrace` keeps working under every option. It prints the per-line deltas with `verdict: none (one capture each; capture each side at least 4 times)`.",
       "story": "Mia speeds up a parser's tokenizer and wants to know if `next_token` really got faster. Under A, she runs `jet perf run parse.jet --out before/$i.jettrace` in a loop of five on main. She runs the same loop into `after/` on her branch. Then `jet perf compare before/ after/` prints `parse.jet:88 next_token 412 -> 301 samples (-27%) faster (p=0.008)`.\n\nUnder B, she types ten paths, or a shell glob, after the repeated flags. Under C, she runs `jet perf run parse.jet --repeat=5` on each branch and compares the two files.",
       "inWild": "# Go benchstat: each side is one file holding repeated runs (go test -count=10).\n$ benchstat old.txt new.txt\n        │   old.txt   │              new.txt               │\n        │   sec/op    │   sec/op     vs base               │\nParse-8   412.0µ ± 2%   301.0µ ± 1%  -26.94% (p=0.000 n=10)",
-      "detail": "Code read on dev be8e6a353e. `jet_cli_perf_compare` (Compiler/JetCLI/Source/CLI/Perf/Command.jet:284) takes exactly two paths. It prints whole-run `wall`, `cpu` and `alloc` deltas, the receipt deltas and a #241 budget line, and always exits 0. The audit's F14 (Docs/Audits/2026-11-14-debugging-profiling-review.md) is that gap. A trace's per-line CPU samples are its `cpu` profile rows, the per-line table of `jet perf view`.\n\nThe verdict is the same under every option. Per function and per line, it is a two-sided Mann-Whitney U test over the per-capture sample counts, at p < 0.05, as benchstat does. It assumes nothing about the noise's shape, and one outlier capture moves it little. It can reach p < 0.05 only from 4 captures a side: 4 against 4 gives a smallest p of 0.029.\n\nSo with fewer than 4 a side, compare shows the deltas and refuses the verdict, naming the count. A file on one side and a folder of 4 on the other is 1 against 4, so it gets no verdict either. The 0.029 figure assumes no ties. Tied counts are ranked as halves and judged against the no-tie distribution, which only makes p larger. A line that a capture never sampled counts 0 samples in that capture.\n\nMany lines means many tests. At p < 0.05, about 1 in 20 unchanged lines would be flagged by chance. So compare judges only rows holding at least 1% of a side's samples. Colder rows show their deltas with `too few samples to judge`. Within each table it then applies Benjamini-Hochberg at a 5% false discovery rate.\n\nA row is called faster or slower only if it passes that. A program with one hot loop still gets its verdict at 4 a side. A program with 20 warm lines needs more captures, and the refusal says so.",
+      "detail": "Code read on dev be8e6a353e. `jet_cli_perf_compare` (Compiler/JetCLI/Source/CLI/Perf/Command.jet:284) takes exactly two paths. It prints whole-run `wall`, `cpu` and `alloc` deltas, the receipt deltas and a #241 budget line, and always exits 0. The audit's F14 (Docs/Audits/2026-11-14-debugging-profiling-review.md) is that gap. A trace's per-line CPU samples are its `cpu` profile rows, the per-line table of `jet perf view`.\n\nThe verdict is the same under every option. Per function and per line, it is a two-sided Mann-Whitney U test over the per-capture sample counts, at p < 0.05, as benchstat does. It assumes nothing about the noise's shape, and one outlier capture moves it little. It can reach p < 0.05 only from 4 captures a side: 4 against 4 gives a smallest p of 0.029.\n\nSo with fewer than 4 a side, compare shows the deltas and refuses the verdict, naming the count. A file on one side and a folder of 4 on the other is 1 against 4, so it gets no verdict either. The 0.029 figure assumes no ties. Tied counts are ranked as halves and judged against the no-tie distribution, which only makes p larger. A line that a capture never sampled counts 0 samples in that capture.\n\nMany lines means many tests. At p < 0.05, about 1 in 20 unchanged lines would be flagged by chance. So compare judges only rows holding at least 1% of a side's samples. Colder rows show their deltas with `too few samples to judge`. Within each table it then applies Benjamini-Hochberg at a 5% false discovery rate.\n\nA row is called faster or slower only if it passes that. At 4 a side the smallest p is 0.029, so a verdict holds when the changed row is the only judged row, or when most judged rows changed. A change confined to one of m judged rows needs more than 4 captures a side once m ≥ 2.",
       "options": [
         {
           "key": "A",
@@ -175980,7 +175980,7 @@
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": null,
-      "checkInstructions": "Under A, the case Perf/compare_per_line_with_significance captures the PerfView fixture 4 times at 20M rounds into `base/`. It captures it 4 times at 40M rounds into `head/`. Then `jet perf compare base/ head/` names `main.jet:11 spin_hot_loop` slower with p < 0.05. `jet perf compare base/1.jettrace head/1.jettrace` prints the same line's delta and `verdict: none (one capture each; capture each side at least 4 times)`.\n\nUnder B, the same case uses `--base` and `--head` flags. Under C, it uses `--repeat=4`.\n\nEvidence labels: the PerfView spread (581 to 598 samples on main.jet:11) is from five `jet perf run`s on this machine with the gate-p298 jet. No option's compare is built.",
+      "checkInstructions": "Under A, the case Perf/compare_per_line_with_significance captures the PerfView fixture 4 times at 20M rounds into `base/`. It captures it 4 times at 40M rounds into `head/`. Then `jet perf compare base/ head/` names `main.jet:11 spin_hot_loop` slower with BH-adjusted p < 0.05 (within the 5% FDR). `jet perf compare base/1.jettrace head/1.jettrace` prints the same line's delta and `verdict: none (one capture each; capture each side at least 4 times)`.\n\nUnder B, the same case uses `--base` and `--head` flags. Under C, it uses `--repeat=4`.\n\nEvidence labels: the PerfView spread (581 to 598 samples on main.jet:11) is from five `jet perf run`s on this machine with the gate-p298 jet. No option's compare is built.",
       "surface": {
         "gist": "How does a user give `jet perf compare` several captures of each side?",
         "lesson": "A verdict needs several captures a side. A takes folders, B repeats flags, C puts repeated runs in one trace.",
@@ -176095,8 +176095,8 @@
         }
       ],
       "draftedBy": "Main",
-      "reviewedBy": null,
-      "draft": true,
+      "reviewedBy": "IfHole-6-1-3",
+      "draft": false,
       "status": "open",
       "created": "2026-11-18T21:33:59.486Z"
     }
@@ -178796,6 +178796,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T21:37:47.062Z",
+      "by": "Main",
+      "action": "decision.post",
+      "ref": "D-PERF-COMPARE1",
+      "note": "reviewed by IfHole-6-1-3"
+    },
+    {
+      "at": "2026-11-18T21:37:46.154Z",
+      "by": "IfHole-6-1-3",
+      "action": "decision.review",
+      "ref": "D-PERF-COMPARE1",
+      "note": "passed"
+    },
+    {
+      "at": "2026-11-18T21:37:45.279Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PERF-COMPARE1",
+      "note": ""
+    },
     {
       "at": "2026-11-18T21:37:23.625Z",
       "by": "Main",
