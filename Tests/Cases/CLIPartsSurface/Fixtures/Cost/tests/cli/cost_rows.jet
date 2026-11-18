@@ -6,8 +6,12 @@ run: fn() {
     values := [Int]{1, 2, 3}
     reader: Reader.over([U8]{1, 2, 3})
     total := Int{0}
+    row: [Int]{1, 2}
     loop index in 0..<values.len() {
         out.push(view)
+        held := row
+        held.push(index)
+        print(held.len())
         print((counts.add("value", 1)) ?? 0)
         total += index
         print(values[index])
@@ -17,5 +21,6 @@ run: fn() {
         }
     }
     print(out.len())
+    print(row.len())
     print(total)
 }

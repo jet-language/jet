@@ -1,8 +1,8 @@
 // The typed cost projection (CostQueries.jet) over a checked program: the
 // sites of the program's own functions with their loop depths, a generic
 // function's once per specialization it is called at, the gap a reachable
-// callee without a checked body leaves, and a captured report's lines and
-// L2510 lints.
+// callee without a checked body leaves, a captured report's lines and L2510
+// lints, and the implicit copy a loop repeats.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -102,4 +102,42 @@ cost_projection_held: fn(source: String) -> JetDriverHeldState {
         if row.code == "L2510" -> lints.push(row.what)
     }
     assert_eq(lints, [String]{"An exact Int operation may spill to bigint inside a loop"})
+}
+
+// A loop that copies a list it reads again later: the binding takes a copy
+// of `row` on every turn, since `row` is still used after it.
+cost_projection_copy_source: fn() -> String {
+    [String]{
+        "keep: fn() -> Int {{",
+        "    row: [Int]{{1, 2}}",
+        "    count := Int{{0}}",
+        "    loop index in 0..<3 {{",
+        "        held := row",
+        "        held.push(index)",
+        "        count += held.len()",
+        "    }}",
+        "    count + row.len()",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+#Test("an implicit copy a loop repeats is a cost site and an L2510 lint") {
+    request := cost_projection_request(cost_projection_copy_source())
+    request.capture_cost_report = true
+    compiled := jet_driver_compile(request)
+    assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
+    report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
+    copies := [String]{}
+    loop site in report.sites {
+        if site.kind == .ImplicitCopy {
+            copies.push("{site.function} {site.view} {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}")
+        }
+    }
+    assert_eq(copies, [String]{"keep [Int] SemanticRemainder main.jet:5 depth 1"})
+    lints := [String]{}
+    loop row in compiled.diagnostics {
+        if row.code == "L2510" -> lints.push(row.what)
+    }
+    assert(lints.contains("Implicitly copying a `[Int]` inside a loop"), "the copy is linted: {lints}")
 }
