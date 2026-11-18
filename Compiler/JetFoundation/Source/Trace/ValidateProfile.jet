@@ -5,9 +5,40 @@ jettrace_optional_unsigned: fn(value: CanonicalJSON, label: String) -> U64? JetT
 }
 
 jettrace_validate_profile: fn(value: CanonicalJSON, source_identity: CanonicalJSON) JetTraceError! {
-    fields: jettrace_object_keys(value, "content.profile", [String]{"coverage", "method", "overhead_ns", "overhead_reason", "overhead_status", "reason", "row_limit", "rows", "rows_truncated", "status", "window_cpu_ns", "window_reason", "window_status", "window_wall_ns"})
+    fields: jettrace_object_keys(value, "content.profile", [String]{"counters", "coverage", "method", "overhead_ns", "overhead_reason", "overhead_status", "reason", "row_limit", "rows", "rows_truncated", "status", "window_cpu_ns", "window_reason", "window_status", "window_wall_ns"})
     method: jettrace_text(fields[jettrace_get(fields, "method")].value, "content.profile.method")
-    if method != "sampling" -> return Err(jettrace_error("content.profile.method must be sampling"))
+    if method != "sampling" && method != "memory" {
+        return Err(jettrace_error("content.profile.method must be sampling or memory"))
+    }
+    counters: jettrace_array(fields[jettrace_get(fields, "counters")].value, "content.profile.counters")
+    expected: if method == "memory" -> TRACE_COUNTERS.len() else -> 0
+    if counters.len() != expected {
+        return Err(jettrace_error("content.profile.counters must hold the {method} method's {expected} counters"))
+    }
+    // Which counters the profile captured: only their counts are in rows.
+    captured := [Bool]{}
+    loop _ in TRACE_COUNTERS -> captured.push(false)
+    loop index in 0..<counters.len() {
+        label: "content.profile.counters[{index}]"
+        counter: jettrace_object_keys(counters[index], label, [String]{"errno", "name", "period", "status"})
+        name: trace_counter_name(TRACE_COUNTERS[index])
+        if jettrace_text(counter[jettrace_get(counter, "name")].value, "{label}.name") != name {
+            return Err(jettrace_error("{label}.name must be {name}"))
+        }
+        state: jettrace_text(counter[jettrace_get(counter, "status")].value, "{label}.status")
+        period: jettrace_optional_unsigned(counter[jettrace_get(counter, "period")].value, "{label}.period")
+        errno: jettrace_optional_unsigned(counter[jettrace_get(counter, "errno")].value, "{label}.errno")
+        if state == "captured" {
+            if (period ?? U64{0}) == (U64{0}) || errno != None {
+                return Err(jettrace_error("{label}: a captured counter has a nonzero period and no errno"))
+            }
+            captured[index] = true
+        } else if state == "unavailable" {
+            if period != None || errno == None {
+                return Err(jettrace_error("{label}: an unavailable counter has an errno and no period"))
+            }
+        } else { return Err(jettrace_error("{label}.status must be captured or unavailable")) }
+    }
     status: jettrace_text(fields[jettrace_get(fields, "status")].value, "content.profile.status")
     if status != "captured" && status != "no_samples" && status != "unsupported" && status != "truncated" {
         return Err(jettrace_error("content.profile.status is not a supported state"))
@@ -75,7 +106,7 @@ jettrace_validate_profile: fn(value: CanonicalJSON, source_identity: CanonicalJS
     }
     loop index in 0..<rows.len() {
         label: "content.profile.rows[{index}]"
-        row: jettrace_object_keys(rows[index], label, [String]{"allocation_count", "clock", "execution_count", "inclusive_count", "sample_count", "sample_weight", "source", "symbol"})
+        row: jettrace_object_keys(rows[index], label, [String]{"allocation_count", "clock", "dtlb_miss_count", "execution_count", "inclusive_count", "l1d_miss_count", "llc_miss_count", "page_fault_count", "sample_count", "sample_weight", "source", "symbol"})
         clock: jettrace_text(row[jettrace_get(row, "clock")].value, "{label}.clock")
         if clock != "wall" && clock != "cpu" {
             return Err(jettrace_error("{label}.clock must be wall or cpu"))
@@ -86,6 +117,15 @@ jettrace_validate_profile: fn(value: CanonicalJSON, source_identity: CanonicalJS
         }
         _: jettrace_optional_unsigned(row[jettrace_get(row, "allocation_count")].value, "{label}.allocation_count")
         _: jettrace_optional_unsigned(row[jettrace_get(row, "inclusive_count")].value, "{label}.inclusive_count")
+        // A row the samples do not name, such as the run's entrypoint row
+        // when no sample landed in the source, has no count.
+        loop (at, counter) in TRACE_COUNTERS {
+            key: trace_counter_key(counter)
+            count: jettrace_optional_unsigned(row[jettrace_get(row, key)].value, "{label}.{key}")
+            if count != None && !captured[at] {
+                return Err(jettrace_error("{label}.{key} is present only when its counter is captured"))
+            }
+        }
         _: jettrace_unsigned(row[jettrace_get(row, "sample_count")].value, "{label}.sample_count")
         _: jettrace_unsigned(row[jettrace_get(row, "sample_weight")].value, "{label}.sample_weight")
         source: jettrace_object_keys(row[jettrace_get(row, "source")].value, "{label}.source", [String]{"end_column", "end_line", "path", "sha256", "start_column", "start_line"})

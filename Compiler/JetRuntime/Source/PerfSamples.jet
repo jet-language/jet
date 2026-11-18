@@ -9,10 +9,23 @@
 // a link-time address in the image `jet run` writes beside the file, where
 // the image's location table names its function and line, as Linux perf
 // names the same image's samples. A record is one write of little-endian
-// words; its first word holds the record's word count in its top 16 bits
-// above the program counter's low 48. The handler allocates nothing and
-// never waits. Beside the samples, `<samples>.spans` keeps a row for each
-// core.log span the program closes (RouteALog.jet log_span_row_write).
+// words; its first word holds the record's word count in bits 48..58 above
+// the program counter's low 48, and its kind in bits 59..62: 0 for a
+// CPU-time sample, a counter's index plus one for that counter's sample.
+// The handler allocates nothing and never waits. Beside the samples,
+// `<samples>.spans` keeps a row for each core.log span the program closes
+// (RouteALog.jet log_span_row_write).
+//
+// `jet perf run --method=memory` sets JET_PERF_COUNTERS too: the start
+// opens four counters of the thread that starts the observation, the
+// program's main thread, each with perf_event_open to count in user mode
+// only, and has each signal that thread with PERF_COUNTERS_SIGNAL, its
+// descriptor in the siginfo, once per its period of events. The same
+// handler appends a record like a CPU-time sample's for it, of the
+// counter's kind, then arms the counter for its next period
+// (PERF_EVENT_IOC_REFRESH). `<samples>.counters` keeps two words for each
+// counter in order: its period, or 0, and the errno the kernel refused it
+// with, or 0. Other threads' events are not counted.
 
 // O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC.
 PERF_SAMPLES_OPEN: I64{525377}
@@ -31,6 +44,16 @@ PERF_SAMPLES_ADDRESS_BITS: I64{48}
 
 PERF_SAMPLES_ADDRESS_MASK: I64{281474976710655}
 
+// A record's first word: its kind above bit 59, its word count below.
+PERF_SAMPLES_KIND_BITS: I64{59}
+
+// A realtime signal, so that each counter's overflow is queued with its
+// own siginfo, never merged with another's or with SIGPROF.
+PERF_COUNTERS_SIGNAL: I64{63}
+
+// L1D, LLC and dTLB read misses, and page faults.
+PERF_COUNTERS_COUNT: I64{4}
+
 // The samples file, -1 until the start opens it, and the bias its addresses
 // are taken less.
 perf_samples_fd := I64{-1}
@@ -45,6 +68,8 @@ perf_samples_code_high := I64{0}
 
 // The record buffer: its first word is 1 while a handler fills the
 // PERF_SAMPLES_DEPTH words after it; 0 when the start could not map it.
+// After them come the PERF_COUNTERS_COUNT counters' descriptors, -1 for
+// one that is not open.
 perf_samples_buffer := I64{0}
 
 // The log spans file, `<samples>.spans`, -1 unless the start opened it.
@@ -60,11 +85,15 @@ perf_samples_start: fn() {
         return
     }
     fd := I64{-1}
+    counters := I64{-1}
     if (rt_text_len(path) != I64{0}) {
         name: fd_c_path(path)
         fd = host_call(I64{2}, name, PERF_SAMPLES_OPEN, I64{384})
         fd_c_path_drop(name, path)
-        if (fd >= I64{0}) { perf_spans_open(path) }
+        if (fd >= I64{0}) {
+            perf_spans_fd_set(perf_samples_open_beside(path, rt_static_text(".spans")))
+            counters = perf_counters_open(path)
+        }
     }
     jet_rt_string_drop(path)
     if (fd < I64{0}) {
@@ -74,7 +103,7 @@ perf_samples_start: fn() {
     bias: alloc_check_bias(image)
     low: perf_samples_code_edge(image, false)
     high: perf_samples_code_edge(image, true)
-    buffer: alloc_map_try(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) * I64{8}))
+    buffer: alloc_map_try(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) * I64{8}))
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
         perf_samples_bias = bias
         perf_samples_code_low = low
@@ -101,26 +130,233 @@ perf_samples_start: fn() {
             perf_samples_fd = I64{-1}
         }
         _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        if (counters >= I64{0}) { _ := host_call(I64{3}, counters, I64{0}, I64{0}) }
+        return
     }
+    perf_counters_start(buffer, counters)
 }
 
-// Open `<samples>.spans` for the closed log spans' rows; a file that cannot
-// be opened leaves the spans without rows, as before.
-perf_spans_open: fn(samples: I64) {
+// The file `<samples><suffix>`, opened to append to as the samples file is,
+// or -1 when it cannot be.
+perf_samples_open_beside: fn(samples: I64, suffix: I64) -> I64 {
     builder: jet_rt_string_builder_new()
     jet_rt_string_builder_push(builder, samples)
-    jet_rt_string_builder_push(builder, rt_static_text(".spans"))
+    jet_rt_string_builder_push(builder, suffix)
     path: jet_rt_string_builder_finish(builder)
     name: fd_c_path(path)
     fd: host_call(I64{2}, name, PERF_SAMPLES_OPEN, I64{384})
     fd_c_path_drop(name, path)
     jet_rt_string_drop(path)
+    fd
+}
+
+// Keep `<samples>.spans` for the closed log spans' rows; a file that cannot
+// be opened (-1) leaves the spans without rows, as before.
+perf_spans_fd_set: fn(fd: I64) {
     if (fd < I64{0}) {
         return
     }
     #Unsafe("the observation start runs before the entry, whose span closes read it") {
         perf_spans_fd = fd
     }
+}
+
+// `<samples>.counters` when JET_PERF_COUNTERS asks for the counters, else
+// -1.
+perf_counters_open: fn(samples: I64) -> I64 {
+    flag: rt_env_get(env_name_jet_perf_counters())
+    if (flag == I64{0}) { return I64{-1} }
+    jet_rt_string_drop(flag)
+    perf_samples_open_beside(samples, rt_static_text(".counters"))
+}
+
+// The perf_event_attr type, config and sample period of counter `index`:
+// L1D, LLC and dTLB read misses (PERF_TYPE_HW_CACHE, the cache's id | read
+// << 8 | miss << 16), then page faults (PERF_TYPE_SOFTWARE PAGE_FAULTS).
+// The periods are primes, so that a sample does not keep landing on the
+// same iteration of a loop.
+perf_counter_type: fn(index: I64) -> I64 {
+    if (index == I64{3}) { return I64{1} }
+    I64{3}
+}
+
+perf_counter_config: fn(index: I64) -> I64 {
+    if (index == I64{0}) { return I64{65536} }
+    if (index == I64{1}) { return I64{65538} }
+    if (index == I64{2}) { return I64{65539} }
+    I64{2}
+}
+
+perf_counter_period: fn(index: I64) -> I64 {
+    if (index == I64{0}) { return I64{10007} }
+    if (index == I64{3}) { return I64{1} }
+    I64{1009}
+}
+
+// The raw event (PERF_TYPE_RAW) that counts LLC read misses where the
+// kernel has no generic one: on AMD family 19h and later (Zen 3, 4 and 5),
+// whose core PMU refuses the generic event with ENOENT, event 0x43
+// (ls_dmnd_fills_from_sys) with every source past the core's own L2 and L3
+// in its unit mask (0xFC): the demand data-cache fills from another CCX's
+// cache or from DRAM, each a demand read that missed the LLC. 0 on any
+// other CPU. "AuthenticAMD" is CPUID.0's EBX, EDX, ECX: "Auth", "enti",
+// "cAMD".
+perf_counter_llc_raw: fn() -> I64 {
+    #Unsafe("cpuid only reports processor identification") {
+        amd: os_cpuid_ebx_i64(I64{0}, I64{0}) == I64{1752462657} && os_cpuid_edx_i64(I64{0}, I64{0}) == I64{1769238117} && os_cpuid_ecx_i64(I64{0}, I64{0}) == I64{1145913699}
+        if (!amd) { return I64{0} }
+        signature: os_cpuid_eax_i64(I64{1}, I64{0})
+        family: wrapping(((signature >> I64{8}) & I64{15}) + ((signature >> I64{20}) & I64{255}))
+        if (family < I64{25}) { return I64{0} }
+    }
+    I64{64579}
+}
+
+// The counters' descriptors in the record buffer `buffer`.
+perf_counters_table: fn(buffer: I64) -> I64 {
+    wrapping(buffer + wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) * I64{8}))
+}
+
+// Open and arm each counter on this thread, the handler installed for
+// PERF_COUNTERS_SIGNAL first, and write each one's period or errno to
+// `file` (`<samples>.counters`, or -1 when none was asked for). A buffer
+// that could not be mapped leaves every counter unavailable (ENOMEM). The
+// start holds the record buffer meanwhile, as a handler does, since it
+// builds each counter's attribute words in it.
+perf_counters_start: fn(buffer: I64, file: I64) {
+    if (file < I64{0}) {
+        return
+    }
+    status := I64{-12}
+    if (buffer != I64{0}) {
+        #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
+            status = os_syscall_stack4_i64(I64{13}, PERF_COUNTERS_SIGNAL, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
+        }
+    }
+    if (status >= I64{0}) {
+        loop {
+            if (sync_cas(buffer, I64{0}, I64{1}) == I64{0}) { break }
+        }
+        index := I64{0}
+        loop index < PERF_COUNTERS_COUNT {
+            rt_text_store(wrapping(perf_counters_table(buffer) + wrapping(index * I64{8})), I64{-1})
+            index = wrapping(index + I64{1})
+        }
+    }
+    tid: thread_tid()
+    index := I64{0}
+    loop index < PERF_COUNTERS_COUNT {
+        result := status
+        if (status >= I64{0}) { result = perf_counter_arm(buffer, index, tid) }
+        period := I64{0}
+        errno := I64{0}
+        if (result >= I64{0}) { period = perf_counter_period(index) } else {
+            errno = wrapping(I64{0} - result)
+        }
+        #Unsafe("two writes of a stack-local word, which the kernel copies before each call returns") {
+            _ := os_write_word_i64(file, period, I64{8})
+            _ := os_write_word_i64(file, errno, I64{8})
+        }
+        index = wrapping(index + I64{1})
+    }
+    if (status >= I64{0}) { sync_store(buffer, I64{0}) }
+    _ := host_call(I64{3}, file, I64{0}, I64{0})
+}
+
+// Open counter `index` on this thread (`tid`), its attribute words built in
+// `buffer`, have it signal this thread at each overflow and arm it for its
+// first period; its descriptor goes in the table before it is armed. An LLC
+// counter the kernel has no generic event for (ENOENT) opens the CPU's raw
+// one instead, where perf_counter_llc_raw knows it. 0, or the negated errno
+// of the call the kernel refused.
+perf_counter_arm: fn(buffer: I64, index: I64, tid: I64) -> I64 {
+    attr: wrapping(buffer + I64{8})
+    fd := perf_counter_event_open(attr, perf_counter_type(index), perf_counter_config(index), perf_counter_period(index))
+    if (fd == I64{-2} && index == I64{1}) {
+        raw: perf_counter_llc_raw()
+        if (raw != I64{0}) {
+            fd = perf_counter_event_open(attr, I64{4}, raw, perf_counter_period(index))
+        }
+    }
+    if (fd < I64{0}) { return fd }
+    result := I64{0}
+    // fcntl F_SETFL O_ASYNC, F_SETSIG PERF_COUNTERS_SIGNAL, then
+    // F_SETOWN_EX with the f_owner_ex {F_OWNER_TID, tid}: each overflow
+    // signals this thread, the descriptor in its siginfo.
+    #Unsafe("fcntl reads the two-word f_owner_ex the held buffer keeps") {
+        result = os_syscall_i64(I64{72}, fd, I64{4}, I64{8192}, I64{0}, I64{0}, I64{0})
+        if (result >= I64{0}) {
+            result = os_syscall_i64(I64{72}, fd, I64{10}, PERF_COUNTERS_SIGNAL, I64{0}, I64{0}, I64{0})
+        }
+        if (result >= I64{0}) {
+            rt_text_store(attr, tid << I64{32})
+            result = os_syscall_i64(I64{72}, fd, I64{15}, attr, I64{0}, I64{0}, I64{0})
+        }
+    }
+    slot: wrapping(perf_counters_table(buffer) + wrapping(index * I64{8}))
+    if (result >= I64{0}) {
+        rt_text_store(slot, fd)
+        result = perf_counter_refresh(fd)
+    }
+    if (result < I64{0}) {
+        rt_text_store(slot, I64{-1})
+        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+        return result
+    }
+    I64{0}
+}
+
+// perf_event_open of the counter of type `kind`, `config` and `period` on
+// this thread, any CPU, no group, PERF_FLAG_FD_CLOEXEC, its attribute words
+// built at `attr`: perf_event_attr's first 64 bytes (PERF_ATTR_SIZE_VER0),
+// its type and size, config, sample_period, sample_type and read_format,
+// then its flags, disabled | exclude_kernel | exclude_hv, the rest zero. Its
+// descriptor, or the negated errno.
+perf_counter_event_open: fn(attr: I64, kind: I64, config: I64, period: I64) -> I64 {
+    rt_text_store(attr, kind | (I64{64} << I64{32}))
+    rt_text_store(wrapping(attr + I64{8}), config)
+    rt_text_store(wrapping(attr + I64{16}), period)
+    rt_text_store(wrapping(attr + I64{24}), I64{0})
+    rt_text_store(wrapping(attr + I64{32}), I64{0})
+    rt_text_store(wrapping(attr + I64{40}), I64{97})
+    rt_text_store(wrapping(attr + I64{48}), I64{0})
+    rt_text_store(wrapping(attr + I64{56}), I64{0})
+    #Unsafe("perf_event_open reads the attribute words the held buffer keeps") {
+        return os_syscall_i64(I64{298}, attr, I64{0}, I64{-1}, I64{-1}, I64{8}, I64{0})
+    }
+}
+
+// Arm counter descriptor `fd` for one more overflow (PERF_EVENT_IOC_REFRESH
+// 1): at it the kernel disables the counter and signals the thread.
+perf_counter_refresh: fn(fd: I64) -> I64 {
+    #Unsafe("ioctl PERF_EVENT_IOC_REFRESH takes its count as a word") {
+        return os_syscall_i64(I64{16}, fd, I64{9218}, I64{1}, I64{0}, I64{0}, I64{0})
+    }
+}
+
+// Arm counter `counter` (an index, or -1 for a CPU-time sample) for its
+// next period, after the handler wrote its sample.
+perf_counter_rearm: fn(buffer: I64, counter: I64) {
+    if (counter < I64{0}) {
+        return
+    }
+    _ := perf_counter_refresh(rt_text_word(wrapping(perf_counters_table(buffer) + wrapping(counter * I64{8}))))
+}
+
+// The index of the counter whose overflow `info` reports (a siginfo of
+// si_code POLL_IN..POLL_HUP, si_fd at 24 a counter's descriptor), or -1.
+perf_counter_of: fn(info: I64, buffer: I64) -> I64 {
+    if (info == I64{0} || buffer == I64{0}) { return I64{-1} }
+    code: rt_text_word(wrapping(info + I64{8})) & I64{4294967295}
+    if (code < I64{1} || code > I64{6}) { return I64{-1} }
+    fd: rt_text_word(wrapping(info + I64{24})) & I64{4294967295}
+    table: perf_counters_table(buffer)
+    index := I64{0}
+    loop index < PERF_COUNTERS_COUNT {
+        if (rt_text_word(wrapping(table + wrapping(index * I64{8}))) == fd) { return index }
+        index = wrapping(index + I64{1})
+    }
+    I64{-1}
 }
 
 // Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
@@ -164,26 +400,35 @@ perf_samples_in_code: fn(address: I64) -> Bool {
     address >= perf_samples_code_low && address < perf_samples_code_high
 }
 
-// The SIGPROF handler (SA_SIGINFO): the interrupted rip, rbp and rsp are
-// ucontext_t's mcontext gregs[16], [10] and [15], at 168, 120 and 160. In
-// Jet code rbp is always a frame of the chain (the caller's, before the
-// prologue sets it), so the walk starts there when rip is in the image's
-// code. It follows each [saved rbp][return address] pair while the call
-// site is Jet code too, whose caller keeps its own frame pointer, as the
-// fault report's walk does (Fault.jet trace_frames). One thread fills the
-// record buffer at a time; another thread's sample meanwhile, or one
-// outside Jet code, is its program counter alone. A write the kernel
-// refuses loses that one sample; O_APPEND puts each record after the last.
-#Export(c) jet_rt_perf_samples_signal: fn(_signal: I64, _info: I64, context: I64) -> I64 {
+// The SIGPROF handler (SA_SIGINFO), and PERF_COUNTERS_SIGNAL's: the
+// interrupted rip, rbp and rsp are ucontext_t's mcontext gregs[16], [10]
+// and [15], at 168, 120 and 160. In Jet code rbp is always a frame of the
+// chain (the caller's, before the prologue sets it), so the walk starts
+// there when rip is in the image's code. It follows each [saved rbp][return
+// address] pair while the call site is Jet code too, whose caller keeps its
+// own frame pointer, as the fault report's walk does (Fault.jet
+// trace_frames). One thread fills the record buffer at a time; another
+// thread's sample meanwhile, or one outside Jet code, is its program
+// counter alone. A write the kernel refuses loses that one sample; O_APPEND
+// puts each record after the last. A counter's record has its kind, and
+// the counter is armed again once it is written.
+#Export(c) jet_rt_perf_samples_signal: fn(signal: I64, info: I64, context: I64) -> I64 {
     fd: perf_samples_fd
     if (fd < I64{0} || context == I64{0}) { return I64{0} }
+    buffer: perf_samples_buffer
+    counter := I64{-1}
+    if (signal == PERF_COUNTERS_SIGNAL) {
+        counter = perf_counter_of(info, buffer)
+        if (counter < I64{0}) { return I64{0} }
+    }
+    kind: wrapping(counter + I64{1}) << PERF_SAMPLES_KIND_BITS
     bias: perf_samples_bias
     pc: wrapping(rt_text_word(wrapping(context + I64{168})) - bias)
-    buffer: perf_samples_buffer
     if (buffer == I64{0} || !perf_samples_in_code(pc) || sync_cas(buffer, I64{0}, I64{1}) != I64{0}) {
         #Unsafe("one write of a stack-local word, which the kernel copies before the call returns") {
-            _ := os_write_word_i64(fd, (pc & PERF_SAMPLES_ADDRESS_MASK) | (I64{1} << PERF_SAMPLES_ADDRESS_BITS), I64{8})
+            _ := os_write_word_i64(fd, (pc & PERF_SAMPLES_ADDRESS_MASK) | (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind, I64{8})
         }
+        perf_counter_rearm(buffer, counter)
         return I64{0}
     }
     count := I64{1}
@@ -202,10 +447,11 @@ perf_samples_in_code: fn(address: I64) -> Bool {
             frame = stack_frame_caller(frame)
         }
     }
-    rt_text_store(wrapping(buffer + I64{8}), pc | (count << PERF_SAMPLES_ADDRESS_BITS))
+    rt_text_store(wrapping(buffer + I64{8}), pc | (count << PERF_SAMPLES_ADDRESS_BITS) | kind)
     #Unsafe("one write of the record's words, which the kernel copies before the call returns") {
         _ := os_syscall_i64(I64{1}, fd, wrapping(buffer + I64{8}), wrapping(count * I64{8}), I64{0}, I64{0}, I64{0})
     }
     sync_store(buffer, I64{0})
+    perf_counter_rearm(buffer, counter)
     I64{0}
 }

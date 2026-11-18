@@ -5,6 +5,8 @@ use jet_foundation.[
     JetDevtoolsEventBody,
     JetSymbolRef,
     SourceIdentity,
+    TraceCounter,
+    TraceCounterName,
     TraceIO,
     TraceProfileRow,
     TraceProfileSource,
@@ -92,8 +94,12 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
         TraceProfileRow{
             clock: "wall",
             allocation_count: None,
+            dtlb_miss_count: None,
             execution_count: None,
             inclusive_count: None,
+            l1d_miss_count: None,
+            llc_miss_count: None,
+            page_fault_count: None,
             sample_count: U64{1},
             sample_weight: U64{37},
             source: TraceProfileSource{path: "app.jet", sha256: "a".repeat(64), start_line: U64{1}, start_column: U64{1}, end_line: U64{3}, end_column: U64{2}},
@@ -130,6 +136,39 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     _: jettrace_test_valid(skeleton)
     skeleton.profile.rows = [TraceProfileRow]{}
     assert(jettrace_test_error(skeleton).contains("truncated profile must retain bounded rows"))
+}
+
+#Test("JetTrace memory profile counters are captured with counts or unavailable with an errno") {
+    skeleton := jettrace_test_profile_skeleton()
+    skeleton.profile.method = "memory"
+    assert(jettrace_test_error(skeleton).contains("must hold the memory method's 4 counters"))
+    skeleton.profile.counters = [TraceCounter]{
+        TraceCounter{name: TraceCounterName.L1dMisses, period: Val(U64{1000}), errno: None},
+        TraceCounter{name: TraceCounterName.LlcMisses, period: None, errno: Val(U64{2})},
+        TraceCounter{name: TraceCounterName.DtlbMisses, period: Val(U64{100}), errno: None},
+        TraceCounter{name: TraceCounterName.PageFaults, period: Val(U64{1}), errno: None},
+    }
+    // A row the samples do not name has no count, captured or not.
+    _: jettrace_test_valid(skeleton)
+    skeleton.profile.rows[0].l1d_miss_count = Val(U64{0})
+    skeleton.profile.rows[0].dtlb_miss_count = Val(U64{100})
+    skeleton.profile.rows[0].page_fault_count = Val(U64{3})
+    _: jettrace_test_valid(skeleton)
+    // An unavailable counter has no count, not even zero.
+    skeleton.profile.rows[0].llc_miss_count = Val(U64{0})
+    assert(jettrace_test_error(skeleton).contains("llc_miss_count is present only when its counter is captured"))
+    skeleton.profile.rows[0].llc_miss_count = None
+    skeleton.profile.counters[1].errno = None
+    assert(jettrace_test_error(skeleton).contains("an unavailable counter has an errno and no period"))
+    skeleton.profile.counters[1].errno = Val(U64{2})
+    skeleton.profile.counters[0].errno = Val(U64{2})
+    assert(jettrace_test_error(skeleton).contains("a captured counter has a nonzero period and no errno"))
+    skeleton.profile.counters[0].errno = None
+    skeleton.profile.counters[3].name = TraceCounterName.L1dMisses
+    assert(jettrace_test_error(skeleton).contains("counters[3].name must be page_faults"))
+    skeleton.profile.counters[3].name = TraceCounterName.PageFaults
+    skeleton.profile.method = "sampling"
+    assert(jettrace_test_error(skeleton).contains("must hold the sampling method's 0 counters"))
 }
 
 #Test("JetTrace receipt sections enforce UTF8 byte caps and digest") {

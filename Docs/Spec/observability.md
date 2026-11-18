@@ -127,6 +127,32 @@ fn` declaration (`fn` through its closing brace) and do not separate the
 functions that `run` calls; their `inclusive_count` and `allocation_count` are
 null.
 
+`jet perf run --method=memory` samples the program's memory behavior beside
+its CPU time. The runtime opens four counters of the program's main thread
+with `perf_event_open`, in user mode only: L1D read misses (one sample per
+10007 events), LLC and dTLB read misses (one per 1009) and page faults (one
+per fault). The kernel has no generic LLC read-miss event for AMD's cores; on
+AMD family 19h and later (Zen 3, 4 and 5) the LLC counter opens the core's
+event 0x43 with unit mask 0xFC instead, the demand data-cache fills from
+another CCX's cache or from DRAM, each a demand read that missed the L3.
+Lines the hardware prefetcher fetched ahead of the reads count in neither
+event. Each counter's overflow signals that thread, and the handler
+records the program counter and the Jet call sites as it does for a CPU-time
+sample, marked with the counter. The profile's `method` is `memory` and its
+`counters` lists the four in that order, each `captured` with its `period`
+or `unavailable` with the `errno` the kernel refused it with (0 when the
+program opened none). A counter's sample counts its period of events at the
+innermost line of the checked source on its stack, into the row's
+`l1d_miss_count`, `llc_miss_count`, `dtlb_miss_count` or `page_fault_count`;
+every per-line row has the count of each captured counter, and no row has a
+count of an unavailable one, not even zero, so a host without the counters
+(a VM, a CPU without the event, a kernel that forbids `perf_event_open`)
+reports them unavailable and the `reason` says why. Events of other threads
+are not counted. `jet perf view` prints `counter l1d_misses captured
+period=10007` or `counter l1d_misses unavailable errno=2` per counter and
+adds each count to a line (`line 30 samples=40 inclusive=40 allocations=0
+l1d_misses=1600000`).
+
 A `jet perf run` or `jet perf test` trace records one receipt section, `perf`
 (type `JetPerfReceipt`). Its `build` names the build the program compiled
 under: `profile`, the profile the run's words select (null for none), and
@@ -136,11 +162,11 @@ resolves its build through its settings layers as well, which the session does
 not, so its `build` is null, as it is for words the run refuses. Its `capture`
 names the capture's settings: `allowlist`, the privacy fields the trace keeps
 (comma-separated, null for none), and `sampling`, null unless the program
-sampled, else `clock` `cpu`, `interval_us` 1000 and `allocations`
-`call-sites`. `jet perf view` prints it as `receipt perf <canonical JSON>`,
-and `jet perf compare` lists each field that differs between two traces'
-receipts (`perf.build.options.optimize: "O0" -> "O2"`). `jet perf attach`
-records none.
+sampled, else `clock` `cpu`, `interval_us` 1000, `allocations`
+`call-sites` and `method`, `sampling` or `memory`. `jet perf view` prints it
+as `receipt perf <canonical JSON>`, and `jet perf compare` lists each field
+that differs between two traces' receipts (`perf.build.options.optimize: "O0"
+-> "O2"`). `jet perf attach` records none.
 
 ## Canonical devtools protocol
 
