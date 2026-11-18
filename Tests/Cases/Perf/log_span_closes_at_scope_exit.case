@@ -9,23 +9,23 @@ step o0: jet run -A -O0 main.jet
 exit: 0
 stdout: = log_span_closes_at_scope_exit.out
 stderr: empty
-file: events.jsonl ~ "\"level\":\"warn\",\"body\":\"Log span `kept` was never closed\""
+file: events.jsonl ~ "\"level\":\"warn\",\"body\":\"Log span `kept` was never closed\"" # the span left open at exit is reported
 step o2: jet run -A -O2 main.jet
 exit: 0
 stdout: = log_span_closes_at_scope_exit.out
 stderr: empty
-file: events.jsonl ~ "\"level\":\"warn\",\"body\":\"Log span `kept` was never closed\""
+file: events.jsonl ~ "\"level\":\"warn\",\"body\":\"Log span `kept` was never closed\"" # the span left open at exit is reported
 step: jet perf run main.jet --out spans.jettrace
 exit: 0
 stdout: = log_span_closes_at_scope_exit.out
-stderr: ~ "Trace:"
-file: spans.jettrace ~ "\"kind\":\"log_span\""
-file: spans.jettrace ~ "\"name\":\"frame\""
-file: spans.jettrace ~ "\"name\":\"query\""
-file: spans.jettrace ~ "\"name\":\"inner\""
-file: spans.jettrace ~ "\"name\":\"request\""
-file: spans.jettrace !~ "\"name\":\"kept\""
+stderr: ~ "Trace:" # jet perf run names the trace it wrote
+file: spans.jettrace ~ "\"kind\":\"log_span\"" # closed spans are trace rows
+file: spans.jettrace ~ "\"name\":\"frame\"" # closed at the end of its function
+file: spans.jettrace ~ "\"name\":\"query\"" # closed on an early return
+file: spans.jettrace ~ "\"name\":\"inner\"" # closed on a failure that propagates
+file: spans.jettrace ~ "\"name\":\"request\"" # closed by an explicit close
+file: spans.jettrace !~ "\"name\":\"kept\"" # a span never closed is no trace row
 step: jet perf view spans.jettrace
 exit: 0
-stdout: ~ "log spans count=4 "
-stdout: ~ "main.jet#frame"
+stdout: ~ "log spans count=4 " # the view counts the four closed spans
+stdout: ~ "main.jet#frame" # each span row names its site
