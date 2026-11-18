@@ -63,6 +63,7 @@ use {
         dimension_identity,
         expr_source_span,
         jet_target_layout_check_alignment,
+        jet_target_layout_distinct_facts_in_module,
         jet_target_layout_engine_target,
         jet_target_layout_engine_with_registry,
         jet_target_layout_enum_c_tag,
@@ -1241,7 +1242,7 @@ sema_comptime_reflection_layout_info: fn(kind: String, guarantee: String, source
 sema_comptime_reflection_struct_layout: fn(registration: SemaRegistrationGraph, caller: Int, definition: StructDef, engine: TargetLayoutEngine, facts: LayoutFacts) -> TComptimeValue {
     target: jet_target_layout_engine_target(engine)
     kind := "default"
-    guarantee := "optimized"
+    guarantee := "none"
     if definition.layout == {
         .Val(layout) -> {
             if layout == {
@@ -1294,14 +1295,15 @@ sema_comptime_reflection_struct_layout: fn(registration: SemaRegistrationGraph, 
 }
 
 // An enum without a C tag reports the compiler's own placement
-// (jet_target_layout_native_enum_facts), as a struct without `#Layout` does;
-// a generic one lays out per instance and has no byte facts.
+// (jet_target_layout_native_enum_facts) with guarantee `none`, as a struct
+// without `#Layout` does; a generic one lays out per instance and has no byte
+// facts.
 sema_comptime_reflection_enum_layout: fn(registration: SemaRegistrationGraph, caller: Int, definition: EnumDef, engine: TargetLayoutEngine, module_identity: String) -> TComptimeValue {
     target: jet_target_layout_engine_target(engine)
     c_tag: jet_target_layout_enum_c_tag(definition)
     facts: jet_target_layout_enum_facts_in_module(engine, definition, module_identity)
     kind: if c_tag != None -> "c" else -> "default"
-    guarantee: if c_tag != None -> "repr(C) declaration" else if facts.bytes != None -> "optimized" else -> "enum physical layout unspecified"
+    guarantee: if c_tag != None -> "repr(C) declaration" else if facts.bytes != None -> "none" else -> "enum physical layout unspecified"
     layout_fields := [TComptimeValue]{}
     loop variant_index in 0..<definition.variants.len() {
         index: sema_comptime_reflection_layout_field(facts, definition.variants[variant_index].name)
@@ -2451,17 +2453,12 @@ sema_comptime_reflection_distinct_facts: fn(definition: DistinctDef) -> [TCompti
     facts
 }
 
-sema_comptime_reflection_distinct_layout: fn(engine: TargetLayoutEngine) -> TComptimeValue Never! {
-    sema_comptime_reflection_layout_info(
-        "default",
-        "physical layout unspecified",
-        "distinct declaration",
-        jet_target_layout_engine_target(engine),
-        LayoutFacts{bytes: None, fields: [FieldLayoutFacts]{}},
-        None,
-        None,
-        [TComptimeValue]{},
-    )
+// A distinct type reports its base's bytes on this target, with guarantee
+// `none`.
+sema_comptime_reflection_distinct_layout: fn(engine: TargetLayoutEngine, definition: DistinctDef, module_text: String) -[Mem.Alloc]> TComptimeValue Never! {
+    facts: jet_target_layout_distinct_facts_in_module(engine, definition, module_text)
+    guarantee: if facts.bytes != None -> "none" else -> "physical layout unspecified"
+    sema_comptime_reflection_layout_info("default", guarantee, "distinct declaration", jet_target_layout_engine_target(engine), facts, None, None, [TComptimeValue]{})
 }
 
 // A builtin scalar named as the subject (`U64.reflect().layout`): its fixed target
@@ -2965,7 +2962,7 @@ sema_comptime_reflection_distinct_type_info: fn(
         registered_module.module_path,
         sema_comptime_reflection_declared_type_id(registration, caller, definition.name, [SemaInferenceBinding]{}),
         "distinct",
-        sema_comptime_reflection_distinct_layout(engine),
+        sema_comptime_reflection_distinct_layout(engine, definition, module_text(registration.module_table, registered_module.module_identity)),
         definition.name_span,
         [TComptimeValue]{},
         [TComptimeValue]{},

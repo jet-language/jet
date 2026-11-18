@@ -1,0 +1,22 @@
+// `Secret` is a `priv` type of module `geo`, so only `geo` and its
+// children name it. The file around `geo` gets E0605 for using it as a
+// parameter type, naming it and building it, as for a `priv` function.
+geo: module {
+    priv Secret: struct {
+        key: Int,
+    }
+
+    secret_key: fn() -> Int {
+        s: Secret{key: 7}
+        s.key
+    }
+}
+
+peek: fn(s: geo.Secret) -> Int { s.key }
+
+blank: fn() -> geo.Secret? { None }
+
+run: fn() {
+    print(geo.secret_key())
+    print(peek(geo.Secret{key: 1}))
+}

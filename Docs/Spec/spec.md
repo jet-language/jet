@@ -1395,7 +1395,11 @@ A struct without `#Layout` is laid out by the compiler: its stored fields take
 offsets by descending alignment (declaration order among equals), each at its
 own alignment, and the struct rounds up to a multiple of 8 bytes, so
 `{U8, Int, U8, Int, U8}` takes 24 bytes. `T.reflect().layout` reports the size,
-alignment and offsets the compiler chose, with guarantee `optimized`. A C
+alignment, stride and offsets the compiler chose for the target being built,
+with guarantee `none` (D-LAYOUT-SHOW1=B): the numbers are values compile-time
+code may read and branch on, but a later compiler or another target may place
+the type otherwise. An enum without `#Layout` reports its own bytes and each
+case's offset the same way, and a distinct type its base's bytes. A C
 declaration that follows them, with explicit padding fields, takes such a
 struct by reference: an `#Import` C function with a `&T` parameter receives the
 address of the value's own bytes when every field is a machine integer, float,

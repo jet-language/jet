@@ -5,7 +5,9 @@ use jet_foundation.[ImportDecl, Item, Program]
 reexport_test_row: fn(imports: [ImportDecl], alias: String) -> String {
     loop import in imports {
         if import.alias != alias -> next
-        if import.kind == .Module(name, _) -> return if import.is_pub -> "export {name}" else -> name
+        if import.kind == .Module(name, _) {
+            return if import.is_pub -> "export {name}" else -> name
+        }
     }
     panic("expected a module row named `{alias}`")
 }
@@ -68,13 +70,34 @@ run: fn() {}
     } else { panic("expected the inline module first") }
 }
 
+#Test("a re-export that repeats its member is that member's import row") {
+    source: "bank: module {{\n    launch: fn() {{}}\n}}\n\nbridge: module {{\n    launch: bank.launch\n}}\n\nrun: fn() {{}}\n"
+    program: parser_test_program(source)
+    if program.items[1] == .CodeModule(definition) {
+        assert_eq(definition.imports.len(), 1)
+        row: definition.imports[0]
+        assert(row.is_pub)
+        assert_eq(row.alias, "launch")
+        if row.kind == .Unqualified(module_alias, _, items, _, _) {
+            assert_eq(module_alias, "bank")
+            assert_eq(items.len(), 1)
+            assert_eq(items[0].original, "launch")
+        } else { panic("expected the member import row `use bank.launch`") }
+    } else { panic("expected the bridge module second") }
+    assert_eq(parser_test_stable(source), source)
+    renamed: parser_test_program("use text\n\nshout: text.loud\n\nrun: fn() {{}}\n")
+    assert_eq(reexport_test_row(renamed.imports, "shout"), "export text.loud")
+}
+
 #Test("a name a file use row binds re-exports that file module") {
     program: parser_test_program("use bank_file: \"bank.jet\"\n\nbank: bank_file\n\nrun: fn() {{}}\n")
     assert_eq(program.imports.len(), 2)
     exported: program.imports[1]
     assert(exported.is_pub)
     assert_eq(exported.alias, "bank")
-    if exported.kind == .File(path, _) -> assert_eq(path, "bank.jet") else -> panic("expected a file row")
+    if exported.kind == .File(path, _) -> assert_eq(path, "bank.jet") else {
+        panic("expected a file row")
+    }
     assert_eq(parser_test_stable("use bank_file: \"bank.jet\"\n\nbank: bank_file\n\nrun: fn() {{}}\n"), "use bank_file: \"bank.jet\"\n\nbank: bank_file\n\nrun: fn() {{}}\n")
 }
 

@@ -18,7 +18,7 @@
 // file module. A one-word path that no `use` binds stays a binding (a module
 // alias, a constant). A type name re-exports through the alias rule
 // (`Point: geo.Point`), and a parenthesized path stays a constant.
-use jet_foundation.[ConstDef, Expr, ImportDecl, ImportKind, Item, Span, expr_span, member_import_local]
+use jet_foundation.[ConstDef, Expr, ImportDecl, ImportKind, ImportedItem, Item, Span, expr_span, member_import_local]
 
 // `items` with each re-exporting binding moved out, as a public import, to
 // the end of `imports`; the items as they are when none re-exports.
@@ -47,7 +47,10 @@ parser_reexport_declarations: fn(items: &&[Item], imports: &[ImportDecl]) -> [It
 }
 
 // The public import a re-exporting binding means, or None for any other
-// binding.
+// binding. A re-export whose name repeats the member of a two-word path
+// (`launch: bank.launch`) is the member import `use bank.launch` written as
+// a declaration, so it is that import's row and binds as that row binds,
+// through a module beside it in the same file too.
 parser_reexport_import: fn(definition: ConstDef, imports: [ImportDecl]) -> ImportDecl? Never! {
     if definition.mutable || definition.is_comptime || definition.is_persist || definition.ty != None || definition.meta != None || definition.ct != None || definition.attrs.len() > 0 || definition.markers.len() > 0 {
         return None
@@ -59,7 +62,14 @@ parser_reexport_import: fn(definition: ConstDef, imports: [ImportDecl]) -> Impor
     }
     target: parser_reexport_target(definition.value, imports, true) ?? return None
     path: parser_cover(parser_reexport_head_span(definition.value), expr_span(definition.value))
-    ImportDecl{kind: ImportKind.Module{name: target, span: path}, alias: definition.name, alias_span: definition.name_span, span: parser_cover(definition.span, path), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None}
+    span: parser_cover(definition.span, path)
+    if definition.value == .Field(base, member, member_span, _) && base == .Ident(head, head_span, _) && member == definition.name {
+        bound: parser_reexport_bound(head, imports) ?? ""
+        if bound == "" || bound == head {
+            return Val(ImportDecl{kind: ImportKind.Unqualified{module_alias: head, module_alias_span: head_span, items: [ImportedItem]{ImportedItem{original: member, alias: None}}, items_span: member_span, span: span}, alias: definition.name, alias_span: definition.name_span, span: span, item_spans: [Span]{member_span}, local_spans: [Span]{definition.name_span}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None})
+        }
+    }
+    ImportDecl{kind: ImportKind.Module{name: target, span: path}, alias: definition.name, alias_span: definition.name_span, span: span, item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None}
 }
 
 // The file a one-word `value` names through a file `use` row of `imports`,

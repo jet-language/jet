@@ -85,7 +85,7 @@ Run a lesson from the repository root, for example `jet run Examples/Metaprogram
 - [FieldFacts](Reflection/FieldFacts/) — A field's type, default and offset read the same at every rung: a marker body that adds a method to another type, a marker that adds a method to the type it marks, a comptime constant, ordinary code through `Rock.reflect()` and fn build each print one line per field of `Rock`.
 - [GeneratingMarker](Reflection/GeneratingMarker.jet) — A marker that writes code types its template `-[Meta.Generate]>`, the row of `Marker.expand`.
 - [GenericTypeValues](Reflection/GenericTypeValues.jet) — Type values in generic code: inside a generic body `Type{V}` names the type each instance fills `V` with.
-- [LayoutFacts](Reflection/LayoutFacts.jet) — Focused layout facts and full reflection share one typed model; a struct without `#Layout` reports the bytes the compiler chose for it.
+- [LayoutFacts](Reflection/LayoutFacts.jet) — Focused layout facts and full reflection share one typed model; a struct or enum without `#Layout` reports the bytes the compiler chose for it on this target, with guarantee `none`: `jet inspect shapes` prints the same numbers, and a later compiler may place the type otherwise.
 - [MarkerSites](Reflection/MarkerSites.jet) — A marker's `expand` body runs at every site its `sites` names.
 - [MarkerUses](Reflection/MarkerUses.jet) — `M.reflect().uses` lists every use of marker struct `M` in the program: each use's typed marker value, then the site that carries it. The list folds to a constant after checking, so the route table and the entity count below cost nothing at run time.
 - [MarkerViews](Reflection/MarkerViews.jet) — `T.reflect()` in comptime is the declared type's TypeInfo.

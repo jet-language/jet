@@ -1,8 +1,9 @@
 // A struct without `#Layout` is laid out by the compiler: its fields take
 // offsets by descending alignment (declaration order among equals), packed at
 // their own alignment, and the struct rounds up to a multiple of 8 bytes.
-// `reflect().layout` reports the bytes the compiler chose. `#Layout(c)` keeps the
-// written order and C padding, as a C header declares it.
+// `reflect().layout` reports the bytes the compiler chose on this target, with
+// guarantee `none`: a later compiler may place them otherwise. `#Layout(c)`
+// keeps the written order and C padding, as a C header declares it.
 Mixed: struct {
     a: U8,
     b: Int,
@@ -48,7 +49,7 @@ bump: fn(value: &Mixed) {
 }
 
 run: fn() {
-    print("Mixed: size {MIXED_SIZE}, alignment {MIXED_ALIGNMENT}, {MIXED_GUARANTEE}")
+    print("Mixed: size {MIXED_SIZE}, alignment {MIXED_ALIGNMENT}, guarantee {MIXED_GUARANTEE}")
     print("offsets: a {MIXED_A}, b {MIXED_B}, c {MIXED_C}, d {MIXED_D}, e {MIXED_E}")
     print("CMixed: size {C_SIZE}, e at {C_E}")
     values := [Mixed]{}

@@ -168,12 +168,17 @@ SemaInlineRewrite: struct {
     variadic: [String:Int],
     variadic_arities: [String:[Int]],
     diagnostics: [Diagnostic],
+    // Member types written `priv`, by full dotted path (`lib.Secret`) -> the
+    // span of the name their declaration gives; only their module and its
+    // children name them (sema_inline_private_type).
+    private_types: [String:Span],
 }
 
 SemaInlineHoist: struct {
     declarations: [Item],
     exported: [String:Type],
     has_exported: Bool,
+    private_types: [String:Span],
 }
 
 SemaInlineHoisted: struct {
@@ -539,7 +544,7 @@ sema_inline_alias_imports: fn(items: [Item], parent: String, file_imports: [Impo
 // `rewrite_inline_calls_expr` and the checker's inline-module call routes).
 
 sema_inline_rewrite_empty: fn() -> SemaInlineRewrite Never! {
-    SemaInlineRewrite{types: [String:Type]{}, values: [String:Expr]{}, sibling_module: "", siblings: [String:Bool]{}, modules: [SemaInlineModuleSurface]{}, imported: [String:SemaInlineFunctionBinding]{}, qualified: [String:SemaInlineTarget]{}, aliases: [String:String]{}, locals: [String]{}, variadic: [String:Int]{}, variadic_arities: [String:[Int]]{}, diagnostics: [Diagnostic]{}}
+    SemaInlineRewrite{types: [String:Type]{}, values: [String:Expr]{}, sibling_module: "", siblings: [String:Bool]{}, modules: [SemaInlineModuleSurface]{}, imported: [String:SemaInlineFunctionBinding]{}, qualified: [String:SemaInlineTarget]{}, aliases: [String:String]{}, locals: [String]{}, variadic: [String:Int]{}, variadic_arities: [String:[Int]]{}, diagnostics: [Diagnostic]{}, private_types: [String:Span]{}}
 }
 
 sema_inline_is_local: fn(rewrite: SemaInlineRewrite, name: String) -> Bool Never! {
@@ -550,11 +555,13 @@ sema_inline_is_local: fn(rewrite: SemaInlineRewrite, name: String) -> Bool Never
 }
 
 // `alias.Type` as a value's base (`internal.Failure.Missing`) names the
-// hoisted member type, as a type position spelling `alias.Type` does.
-sema_inline_type_path: fn(rewrite: SemaInlineRewrite, base: Expr) -> Expr? Never! {
+// hoisted member type, as a type position spelling `alias.Type` does, and
+// is refused as it is outside the module when the type is `priv`.
+sema_inline_type_path: fn(rewrite: &SemaInlineRewrite, base: Expr) -> Expr? Never! {
     if base == .Field(inner, member, span, node) && inner == .Ident(alias, _, _) {
         if sema_inline_is_local(rewrite, alias) -> return None
         if rewrite.types.get("{alias}.{member}") == .Val(.Named(name)) {
+            sema_inline_private_type(rewrite, "{alias}.{member}", span)
             return Val(Expr.Ident{name: name, span: span, id: node})
         }
     }
@@ -901,11 +908,64 @@ sema_inline_rewrite_member_value: fn(rewrite: &SemaInlineRewrite, base: Expr, me
 // module and its children (E0605, naming the member's `priv` declaration).
 sema_inline_private_member: fn(rewrite: SemaInlineRewrite, surface: SemaInlineModuleSurface, member: String, span: Span) -> Diagnostic? Never! {
     declared: surface.private_members.get(member) ?? return None
-    if rewrite.sibling_module == surface.path || rewrite.sibling_module.starts_with("{surface.path}.") {
-        return None
-    }
-    diagnostic: sema_error("E0605", span, "`{member}` is private to module `{surface.path}`", "a `priv` declaration is usable only inside the module that declares it and that module's children", "use `{member}` from inside `{surface.path}`, or remove `priv` from it")
+    if sema_inline_inside(rewrite, surface.path) -> return None
+    diagnostic: sema_registration_private_member_error(member, surface.path, span)
     Val(diagnostic_with_label(diagnostic, declared, "`{member}` is declared `priv` here"))
+}
+
+// Whether the body being rewritten is module `path` or one nested in it.
+sema_inline_inside: fn(rewrite: SemaInlineRewrite, path: String) -> Bool Never! {
+    rewrite.sibling_module == path || rewrite.sibling_module.starts_with("{path}.")
+}
+
+// E0605 for each `priv` member type of an inline module that `ty`, written
+// at `span`, names outside that module and its children: naming it is using
+// it, as calling a `priv` member function is.
+sema_inline_private_types: fn(rewrite: &SemaInlineRewrite, ty: Type, span: Span) Never! {
+    if rewrite.private_types.len() == 0 {
+        return
+    }
+    if ty == {
+        .Named(name) -> { sema_inline_private_type(rewrite, name, span) }
+        .Apply(name, args) -> {
+            sema_inline_private_type(rewrite, name, span)
+            loop arg in args -> sema_inline_private_types(rewrite, arg, span)
+        }
+        .List(inner) | .Shared(inner) | .Option(inner) | .Tagged(_, inner) | .FixedList(inner, _) | .Case(_, inner) | .Quantity(inner, _) | .InlineRange(inner, _, _) -> {
+            sema_inline_private_types(rewrite, inner, span)
+        }
+        .Map(key, _, value) -> {
+            sema_inline_private_types(rewrite, key, span)
+            sema_inline_private_types(rewrite, value, span)
+        }
+        .Result(ok, err) -> {
+            sema_inline_private_types(rewrite, ok, span)
+            sema_inline_private_types(rewrite, err, span)
+        }
+        .Fn(params, ret, _, _, _, _) -> {
+            loop param in params -> sema_inline_private_types(rewrite, param, span)
+            if ret == .Val(value) -> sema_inline_private_types(rewrite, value, span)
+        }
+        .Tuple(fields) -> {
+            loop field in fields -> sema_inline_private_types(rewrite, field.ty, span)
+        }
+        .Union(members) -> {
+            loop member in members -> sema_inline_private_types(rewrite, member, span)
+        }
+        .Int | .Float | .Bool | .String | .Char | .TraitObject(_) | .IntN(_, _) | .Float32 | .Measure(_) -> {}
+    }
+}
+
+// E0605 when `name`, written at `span`, is a `priv` member type
+// (`lib.Secret`) named outside its module and that module's children.
+sema_inline_private_type: fn(rewrite: &SemaInlineRewrite, name: String, span: Span) Never! {
+    declared: rewrite.private_types.get(name) ?? return
+    owner: name.cut_last(".") ?? return
+    if sema_inline_inside(rewrite, owner.before) {
+        return
+    }
+    diagnostic: sema_registration_private_member_error(owner.after, owner.before, span)
+    rewrite.diagnostics.push(diagnostic_with_label(diagnostic, declared, "`{owner.after}` is declared `priv` here"))
 }
 
 // The functions and constants `body` declares onto `surface`. A member
@@ -957,7 +1017,7 @@ sema_inline_private_step: fn(rewrite: SemaInlineRewrite, segments: [NamedSpan]) 
         prefix = "{prefix}.{segments[index].name}"
         surface: sema_inline_surface(rewrite, prefix) ?? return None
         owner: surface.private_to ?? next
-        if rewrite.sibling_module == owner || rewrite.sibling_module.starts_with("{owner}.") -> next
+        if sema_inline_inside(rewrite, owner) -> next
         return Val(sema_error("E0609", segments[index].span, "`{segments[index].name}` is private in module `{owner}`", "a `priv module` is usable only by its enclosing module", "call it from inside `{owner}`, or remove `priv` from `{segments[index].name}: module`"))
     }
     None
@@ -1097,6 +1157,7 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
                 .Field(base, member, span, _) -> {
                     if base == .Ident(alias, _, _) {
                         if !sema_inline_is_local(rewrite, alias) && rewrite.types.get("{alias}.{member}") == .Val(.Named(resolved)) {
+                            sema_inline_private_type(rewrite, "{alias}.{member}", span)
                             mapped_receiver = Expr.Ident{name: resolved, span: span, id: AST_NODE_GENERATED}
                         }
                     }
@@ -1115,6 +1176,9 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
             }
             if resolved == None -> resolved = rewrite.types.get(type_name)
             if resolved == .Val(.Named(name)) {
+                if import_ns == .Val(namespace) {
+                    sema_inline_private_type(rewrite, "{namespace}.{type_name}", span)
+                } else { sema_inline_private_type(rewrite, type_name, span) }
                 mapped_name = name
                 mapped_ns = String?{None}
             } else if import_ns == .Val(namespace) {
@@ -1129,9 +1193,15 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
             }
             return Expr.StructLit{type_name: mapped_name, type_args: sema_inline_rewrite_types(rewrite, type_args), import_ns: mapped_ns, as_trait: as_trait, fields: sema_inline_rewrite_fields(rewrite, fields), inferred: inferred, span: span, id: node}
         }
-        .TypedLit(head, body, span, node) -> return Expr.TypedLit{head: sema_inline_rewrite_optional_type(rewrite, head), body: sema_inline_rewrite_typed_body(rewrite, body), span: span, id: node}
+        .TypedLit(head, body, span, node) -> {
+            if head == .Val(ty) -> sema_inline_private_types(rewrite, ty, span)
+            return Expr.TypedLit{head: sema_inline_rewrite_optional_type(rewrite, head), body: sema_inline_rewrite_typed_body(rewrite, body), span: span, id: node}
+        }
         // copy: `variant_span` is a payload of read parameter `expression`, which keeps the original; field `variant_span` of the new Expr.EnumLit owns this one
-        .EnumLit(type_name, variant, variant_span, args, leading_dot, span, node) -> return Expr.EnumLit{type_name: sema_inline_mapped_name(rewrite, type_name), variant: variant, variant_span: variant_span.copy(), args: sema_inline_rewrite_enum_args(rewrite, args), leading_dot: leading_dot, span: span, id: node}
+        .EnumLit(type_name, variant, variant_span, args, leading_dot, span, node) -> {
+            sema_inline_private_type(rewrite, type_name, span)
+            return Expr.EnumLit{type_name: sema_inline_mapped_name(rewrite, type_name), variant: variant, variant_span: variant_span.copy(), args: sema_inline_rewrite_enum_args(rewrite, args), leading_dot: leading_dot, span: span, id: node}
+        }
         // copy: `tainted_tag` is a payload of read parameter `expression`, which keeps the original; field `tag` of the new Expr.Tainted owns this one
         .Tainted(value, tainted_tag, span, node) -> return Expr.Tainted{value: sema_inline_rewrite_expr(rewrite, value), tag: tainted_tag.copy(), span: span, id: node}
         .Present(value, span, node) -> return Expr.Present{value: sema_inline_rewrite_expr(rewrite, value), span: span, id: node}
@@ -1200,6 +1270,11 @@ sema_inline_declare_binding: fn(rewrite: &SemaInlineRewrite, binding: Binding) N
 
 sema_inline_rewrite_binding: fn(rewrite: &SemaInlineRewrite, binding: Binding) -> Binding Never! {
     updated := binding
+    if binding.ty == .Val(ty) {
+        if binding.ty_span == .Val(span) -> sema_inline_private_types(rewrite, ty, span) else {
+            sema_inline_private_types(rewrite, ty, binding.name_span)
+        }
+    }
     updated.ty = sema_inline_rewrite_optional_type(rewrite, binding.ty)
     updated.init = sema_inline_rewrite_expr(rewrite, binding.init)
     updated.markers = sema_inline_rewrite_markers(rewrite, binding.markers)
@@ -1397,6 +1472,7 @@ sema_inline_rewrite_params: fn(rewrite: &SemaInlineRewrite, params: [Param]) -> 
     mapped := [Param]{}
     loop param in params {
         updated := param
+        sema_inline_private_types(rewrite, param.ty, param.ty_span)
         updated.ty = sema_inline_rewrite_type(rewrite, param.ty)
         updated.default = sema_inline_rewrite_optional_expr(rewrite, param.default)
         mapped.push(updated)
@@ -1423,6 +1499,11 @@ sema_inline_rewrite_func: fn(rewrite: &SemaInlineRewrite, function: Func) -> Fun
     saved: rewrite.locals.len()
     updated.type_params = sema_inline_rewrite_type_params(rewrite, function.type_params)
     updated.params = sema_inline_rewrite_params(rewrite, function.params)
+    if function.return_type == .Val(return_type) {
+        if function.return_type_span == .Val(span) {
+            sema_inline_private_types(rewrite, return_type, span)
+        } else { sema_inline_private_types(rewrite, return_type, function.name_span) }
+    }
     updated.return_type = sema_inline_rewrite_optional_type(rewrite, function.return_type)
     updated.markers = sema_inline_rewrite_markers(rewrite, function.markers)
     updated.meta = sema_inline_rewrite_meta(rewrite, function.meta)
@@ -1580,6 +1661,9 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
     display_alias: sema_inline_type_alias(module_name)
     direct_types := [String:Type]{}
     direct_names := [String]{}
+    // As for member functions, a plain `priv` module already hides every
+    // member, so its member types record no `priv` of their own.
+    hides_members: !code_module.is_pub && !code_module.is_package_pub
     loop inner in body {
         name := ""
         if inner == {
@@ -1601,6 +1685,9 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
         // module's compiler-owned spelling; normalize it to this identity.
         direct_types[sema_inline_type_name(display_alias, name)] = resolved
         direct_names.push(name.copy())
+        if !hides_members && sema_inline_private_type_span(inner) == .Val(declared) {
+            hoist.private_types["{source_path}.{name}"] = declared
+        }
         // The enclosing file reaches private member types by
         // their full module path too. Do not export a nested relative name.
         hoist.exported["{source_path}.{name}"] = resolved
@@ -1713,6 +1800,33 @@ sema_inline_hoist_module: fn(code_module: CodeModule, source_path: String, hoist
     SemaInlineHoisted{code_module: updated, paths: all_paths, types: all_types}
 }
 
+// The span of the name `item` declares when it is a member type written
+// `priv` (`priv(package)` reaches the whole package, this file included).
+sema_inline_private_type_span: fn(item: Item) -> Span? Never! {
+    if item == {
+        .Struct(definition) -> {
+            if !definition.is_pub && !definition.is_package_pub -> return Val(definition.name_span)
+        }
+        .Enum(definition) -> {
+            if !definition.is_pub && !definition.is_package_pub -> return Val(definition.name_span)
+        }
+        .Trait(definition) -> {
+            if !definition.is_pub && !definition.is_package_pub -> return Val(definition.name_span)
+        }
+        .Tag(definition) -> {
+            if !definition.is_pub && !definition.is_package_pub -> return Val(definition.name_span)
+        }
+        .Distinct(definition) -> {
+            if !definition.is_pub && !definition.is_package_pub -> return Val(definition.name_span)
+        }
+        .TypeAlias(definition) -> {
+            if !definition.is_pub && !definition.is_package_pub -> return Val(definition.name_span)
+        }
+        .Func(_) | .UnitFamily(_) | .EffectDecl(_) | .Impl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .CodeModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .GenericModule(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+    }
+    None
+}
+
 // Rust `rewrite_exported_inline_types`: member types reach every function of
 // the enclosing file (and its inline modules) by their qualified name. The
 // file's own structs, enums and tests name them the same way, so a field
@@ -1743,10 +1857,16 @@ sema_inline_rewrite_exported: fn(items: [Item], rewrite: &SemaInlineRewrite) -> 
                 updated.methods = sema_inline_rewrite_funcs(rewrite, definition.methods)
                 mapped.push(Item.Impl{value: updated})
             }
+            // A module's own bodies may name its `priv` member types.
             .CodeModule(definition) -> {
                 updated := definition
                 if definition.body == .Val(body) {
+                    // The body reads as its module's own; after it, the path
+                    // drops that module's segment again.
+                    rewrite.sibling_module = if rewrite.sibling_module == "" -> "{definition.name}" else -> "{rewrite.sibling_module}.{definition.name}"
                     updated.body = Val(sema_inline_rewrite_exported(body, rewrite))
+                    enclosing: rewrite.sibling_module.cut_last(".")
+                    rewrite.sibling_module = if enclosing == .Val(parts) -> parts.before else -> ""
                 }
                 mapped.push(Item.CodeModule{value: updated})
             }
@@ -2099,7 +2219,7 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
     // 1. Member types, in item order, then the enclosing file's qualified
     //    names. Each inline module is hoisted in place; every other item
     //    stays where it is.
-    hoist := SemaInlineHoist{declarations: [Item]{}, exported: [String:Type]{}, has_exported: false}
+    hoist := SemaInlineHoist{declarations: [Item]{}, exported: [String:Type]{}, has_exported: false, private_types: [String:Span]{}}
     loop index in 0..<program.items.len() {
         hoisted := Item?{None}
         if program.items[index] == .CodeModule(definition) {
@@ -2112,7 +2232,9 @@ sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> 
     if hoist.has_exported {
         exported := sema_inline_rewrite_empty()
         exported.types = hoist.exported
+        exported.private_types = hoist.private_types
         program.items = sema_inline_rewrite_exported(program.items, exported)
+        loop diagnostic in exported.diagnostics -> diagnostics.push(diagnostic)
     }
 
     // 2. Module functions, top-level and nested, become their member

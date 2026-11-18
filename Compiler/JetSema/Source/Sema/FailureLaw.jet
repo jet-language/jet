@@ -1414,9 +1414,11 @@ sema_failure_union_names_generic: fn(members: [Type], generic_names: [String]) -
 }
 
 // E0605 for a written type `alias.child.Name` that reaches into a `priv
-// module` of the imported module `alias`.
+// module` of the imported module `alias`, or `alias.Name` that names a
+// declaration `alias` keeps private.
 sema_check_private_module_type: fn(name: String, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
-    if !name.contains(".") || name.contains("::") {
+    qualified: name.split_once(".") ?? return
+    if name.contains("::") {
         return
     }
     if program.registration_graph == .Val(graph) {
@@ -1426,6 +1428,8 @@ sema_check_private_module_type: fn(name: String, span: Span, environment: SemaSc
         }
         if sema_registration_private_module_path(graph, graph.modules[caller].module_identity, name) == .Val(path) {
             diagnostics.push(sema_registration_private_module_error(path, span))
+        } else if !qualified.after.contains(".") && sema_registration_private_member(graph, graph.modules[caller].module_identity, qualified.before, qualified.after) {
+            diagnostics.push(sema_registration_private_member_error(qualified.after, qualified.before, span))
         }
     }
 }

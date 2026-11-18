@@ -4332,9 +4332,11 @@ focused projection of `T.reflect().layout`, not a second metadata model. Users
 cannot declare `$` members.
 Layout exposes kind, optional size/alignment/stride, target,
 guarantee, source, fields, and typed `[.field]` selection. Field byte facts are
-computed by one target-aware compiler engine for Jet-owned physical layouts
-(`c`, `columnar`, and fixed-width scalar members); they remain optional when
-physical layout is not guaranteed. Completion visibly groups
+computed by one target-aware compiler engine. D-LAYOUT-SHOW1=B amends the
+default layout: a struct, enum or distinct type without `#Layout` reports this
+target's size, alignment, stride and offsets with guarantee `none`, so
+compile-time code may branch on them; they stay optional only where no layout
+is computed (a generic declaration). Completion visibly groups
 `$layout` as a compiler fact; hover, rename, navigation, diagnostics,
 `jet inspect expand --facts layout`, and JSON project the same model.
 
