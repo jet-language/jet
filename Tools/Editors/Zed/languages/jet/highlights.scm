@@ -51,14 +51,13 @@
   "return"
 ] @keyword.control
 
-; keyword.declaration: Context Impure Reactive Scrub State Test Todo Transact Unsafe add as change client distinct enum extern fn impl migration module policy priv protocol pub remove rename rust server state struct trait use validate via wrap
+; keyword.declaration: Context Impure Reactive Scrub State Test Todo Transact Unsafe add as change client distinct enum extern fn impl migration module policy priv protocol remove rename rust server state struct trait use validate via wrap
 [
   "enum"
   "extern"
   "fn"
   "impl"
   "module"
-  "pub"
   "struct"
   "trait"
   "use"

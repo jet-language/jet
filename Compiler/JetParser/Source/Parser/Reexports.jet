@@ -13,9 +13,10 @@
 // function, a value or a module. The path's head is a module the body can
 // name (`core`, a module beside it, a package), or a name a `use` of the
 // same body binds, which stands for what that `use` imports: after
-// `use core.math.[clamp]`, `my_clamp: clamp` re-exports `core.math.clamp`.
-// A one-word path that no `use` binds stays a binding (a module alias, a
-// constant). A type name re-exports through the alias rule
+// `use core.math.[clamp]`, `my_clamp: clamp` re-exports `core.math.clamp`,
+// and after `use bank_file: "bank.jet"`, `bank: bank_file` re-exports that
+// file module. A one-word path that no `use` binds stays a binding (a module
+// alias, a constant). A type name re-exports through the alias rule
 // (`Point: geo.Point`), and a parenthesized path stays a constant.
 use jet_foundation.[ConstDef, Expr, ImportDecl, ImportKind, Item, Span, expr_span, member_import_local]
 
@@ -52,9 +53,25 @@ parser_reexport_import: fn(definition: ConstDef, imports: [ImportDecl]) -> Impor
         return None
     }
     if !parser_reexport_value_word(definition.name) -> return None
+    file: parser_reexport_file(definition.value, imports)
+    if file == .Val(path) {
+        return Val(ImportDecl{kind: ImportKind.File{path: path, span: expr_span(definition.value)}, alias: definition.name, alias_span: definition.name_span, span: parser_cover(definition.span, expr_span(definition.value)), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None})
+    }
     target: parser_reexport_target(definition.value, imports, true) ?? return None
     path: parser_cover(parser_reexport_head_span(definition.value), expr_span(definition.value))
     ImportDecl{kind: ImportKind.Module{name: target, span: path}, alias: definition.name, alias_span: definition.name_span, span: parser_cover(definition.span, path), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None}
+}
+
+// The file a one-word `value` names through a file `use` row of `imports`,
+// or None.
+parser_reexport_file: fn(value: Expr, imports: [ImportDecl]) -> String? Never! {
+    if value == .Ident(name, _, _) {
+        loop import in imports {
+            if import.comptime_span != None || import.alias != name -> next
+            if import.kind == .File(path, _) -> return Val("{path}")
+        }
+    }
+    None
 }
 
 // The span of the first word of the path `value`; a field's own span is its

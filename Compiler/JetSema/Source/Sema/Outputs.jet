@@ -193,7 +193,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
                 }
             } else {
                 if surface.functions.get(path.members[0].name) == (Val(false)) {
-                    diagnostics.push(sema_output_error(path.members[0].span, "function `{path.root}.{path.members[0].name}` is private", "an Output can only invoke code visible from its declaring module", "add `pub` before `{path.members[0].name}: fn` in module `{path.root}`"))
+                    diagnostics.push(sema_output_error(path.members[0].span, "function `{path.root}.{path.members[0].name}` is private", "an Output can only invoke code visible from its declaring module", "remove `priv` from `{path.members[0].name}: fn` in module `{path.root}`"))
                     return None
                 }
                 registered = sema_registration_lookup_name(graph, owner.module_identity, sema_inline_member_name(path.root, path.members[0].name))
@@ -311,7 +311,7 @@ sema_output_callable_target: fn(graph: SemaRegistrationGraph, declaring_index: I
 
 // Whether `members[from]` up to the last member's module is a path of inline
 // modules declared in `module_row`: None when it isn't, else whether each
-// module nested in `members[from]` is visible to `requester_package` (`pub`,
+// module nested in `members[from]` is visible to `requester_package` (public,
 // or `priv(package)` in that package; a `priv` module only to its parent).
 // `members[from]` itself is visible as its export says.
 sema_output_nested_modules_visible: fn(module_row: SemaRegistrationModule, members: [ExprMember], from: Int, requester_package: String) -> Bool? Never! {

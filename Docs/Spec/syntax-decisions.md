@@ -31,14 +31,14 @@ Do not hand-edit these rows. Add or change a spelling in Spellings.jet, then rer
 | `:` | immutable binding and declaration: `name: value`, `name: fn(…)`, `Name: struct {…}`, `name: module {…}`; `run: fn() {…}` declares a program's one entry, and a program is either that entry or its entry file's top-level statements, never both, anywhere in its load graph, package or project (E0621) |
 | `:=` | mutable binding |
 | `name := value` | mutable module global at file scope: starts from any storable value its initializer computes while building, held as program data with no startup copy, which an assignment replaces; only a value holding a runtime handle, such as a `Shared` cell, is built on the global's first use; any function that sees it reads and writes it directly, the main task owns it, and a task whose work touches it is a build error naming the variable and the call path |
-| `use { … } / use alias: path` | import block: one row per line, each a module path, `alias: path`, a "file" path or `alias: "file"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope, `pub use { … }` re-exports every row |
+| `use { … } / use alias: path` | import block: one row per line, each a module path, `alias: path`, a "file" path or `alias: "file"`; `alias: owner.x` where `owner.x` names no module binds the member `x` that `owner` declares; several blocks per scope; a row binds only locally, and a re-export is the bare-path declaration `name: module.member` |
 | `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value |
 | `name: T -> expr` | computed struct field: a read-time formula read like a field; nothing assigns, lends for writing or takes it, even inside its module (E0339), so a public one over `priv` storage is a read-only field |
 | `Name: enum { A, B(T) } / .A / Name.A` | enum declaration: its cases are written bare and separated as struct fields are; a value or pattern names a case with its leading dot where the type is known (`.A`) or with the enum's name (`Name.A`); a dotted declaration is not Jet syntax |
 | `#` | attached marker; #[A, B] stacks |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring |
 | `Name: struct { impl Marker { group: #[A, B] } }` | fixed named marker-group declaration; expands at each use without hiding gates or refusals |
-| `#module.Marker / #[module.Marker, Other]` | library marker through the import's local name; pub exports its declaration |
+| `#module.Marker / #[module.Marker, Other]` | library marker through the import's local name; its declaration is public unless `priv` |
 | `#Inline / #Scalar / #Kernel / #Static` | separate callable promise, scalar hint, kernel proof and constant storage rules |
 | `#DevPanel` | exported typed devtools panel marker |
 | `web.form(Model, action: handler)` | struct-derived headless form with progressive action |
@@ -486,7 +486,7 @@ top-level statements, or one `run: fn` entry, never mixed, at any scope. A
 `run: fn` anywhere in the program's load graph, package or project (the entry
 file, an imported module, a nested `name: module { … }`, another file of the
 package, generated code) or an import that binds the local name `run` (`use {
-run: other.main }`, a `pub use run: …` re-export) refuses top-level statements
+run: other.main }`, a `run: other.main` re-export) refuses top-level statements
 anywhere in that scope, and the reverse; top-level statements in any file but the
 entry are a second script entry. E0621 names both sites, the statements and the
 other entry, as `file:line`. E0620 (an imported file with loose statements) is
@@ -2016,7 +2016,7 @@ a name that is both. `Name: distinct Base` still declares a new nominal type.
 `alias` is an ordinary identifier; `alias X: Y` is an ordinary parse error
 with no legacy diagnostic. Expansion, E0324, E0394 and discarded parameters are
 unchanged. Core's former `Date: LocalDate` is the prelude rename
-`pub use Date: core.time.LocalDate`.
+`Date: core.time.LocalDate`.
 
 **D-COMPUTED-ALIAS1=A — Bounded computed aliases** *(ratified 2026-11-11,
 card #3505; amends D-TYPEALIAS1)*: an alias with number parameters may choose its
@@ -2683,7 +2683,7 @@ use {
 ```
 
 Two-step dot access; `use math.*` wildcard rejected (E0612, D-GLOBIMPORT1).
-Re-export is `pub use` (D-MOD4, ballot pending; see S18); a directory module's summary file is
+Re-export is the bare-path declaration `name: module.member` (see S18); a directory module's summary file is
 `module.jet`. Ambiguous module resolution E0606/E0607. `import` is not a
 keyword.
 
@@ -2702,7 +2702,7 @@ paths. The prefix itself may be dotted at any depth, so
 `use core.[encoding.json, encoding.csv]`.
 
 **D-NAME-WALK1=A** *(ratified 2026-08-07, card #1803)*: a module body is a
-namespace like any other, so `use` and `pub use` are legal inside
+namespace like any other, so `use` rows and re-exports are legal inside
 `name: module { }`. They resolve in the enclosing file's scope and bind only
 inside that body.
 
@@ -2725,16 +2725,26 @@ is the only hiding form:
   type's own module (and its children). Invariant carriers such as secrets,
   native handles and validated values use it.
 
-Removed forms are compile errors whose fix deletes the marker: `pub` and
-`pub(…)` on a declaration, method or field (E0411), `private` (E0412),
-`pub:`/`priv:` section labels (E0415), `priv(package)` on a top-level
-declaration other than a module (E0414: write `priv`) or on a field (E0417),
-and `#PubFile` (E0418). Reaching a `priv` declaration, a `priv module` or a
-`priv` field from outside is E0605/E0609.
+Removed forms are errors: `private` (E0412), `pub:`/`priv:` section labels
+(E0415, now `priv:` only; `pub:` is an ordinary declaration name),
+`priv(package)` on a top-level declaration other than a module (E0414: write
+`priv`) or on a field (E0417), and `#PubFile` (E0418). `pub` is not a word of
+Jet: the lexer reads it as a name, so `pub fn` and `pub use` get the generic
+parse error with no teaching. Reaching a `priv` declaration, a `priv module`
+or a `priv` field from outside is E0605/E0609.
 
-Re-export (`pub use`) is not decided: it stays the only `pub` form until the
-re-export ballot is ratified (the owner leans toward imports being public by
-default with `priv use` keeping one local).
+**D-VIS-REEXPORT1=A — Re-export is a bare-path declaration** *(card #4723)*:
+a `use` row binds its names only in its own scope. A module re-exports a name
+by declaring it: `clamp: core.math.clamp` at the top of a module body (or a
+file) publishes `module.clamp` as that function. The target is a function,
+type, enum, trait, tag, protocol, constant or public module, written as a
+plain lowercase dotted path whose head is a module or a name a `use` row
+binds; a one-word name a file `use` row binds re-exports that file module
+(`use bank_file: "bank.jet"` then `bank: bank_file`). A type re-export
+(`Point: geo.Point`) is the ordinary alias. A call, an annotation, a generic
+instance, an enum case or a parenthesized path stays a constant, and inside a
+function `f: other.f` stays a local binding. Like any declaration, a
+re-export is public unless `priv`.
 
 **U3 / D-SHAPE-MODULEINTERNAL1=A — Module declarations and internal discovery**
 *(ratified 2026-07-15, card #602)*: `name: module { … }` is the single outermost
@@ -2819,8 +2829,8 @@ generic nested modules, and aliases. Names outside the template resolve in the
 template's definition-site lexical scope. A specialization gains no additional
 authority from its application site.
 
-Inline `use`/`pub use` is admitted, on the same terms ordinary module bodies
-admit it (D-NAME-WALK1=A).
+Inline `use` rows and re-exports are admitted, on the same terms ordinary module bodies
+admit them (D-NAME-WALK1=A).
 File/package/build/FFI/C-module/generated-binding/role-module/policy/protocol/
 state/migration/user-derive/generic-package declarations remain in their
 existing homes. Existing markers apply only to their already-legal declaration
@@ -8574,7 +8584,9 @@ are validated even when a sole Output or legacy `run: fn` would otherwise win.
 
 **D-SHAPE-INTERNAL1=A — `pub _name` is soft-public** *(ratified 2026-07-15)*:
 outside use is allowed with one unsuppressible warning, but the name is omitted
-from beginner discovery and carries no supported-API or semver promise.
+from beginner discovery and carries no supported-API or semver promise. Since
+S18 made declarations public by default and removed `pub`, a `_name`
+declaration without `priv` is this soft-public form.
 
 **D-SHAPE-DUNDER2=A — `__name` belongs to Jet** *(ratified 2026-07-15)*:
 every source-written double-underscore identifier is rejected. The namespace is
@@ -8825,12 +8837,12 @@ D-NAME-REFLECT1=A, D-NAME-SIGIL1=A** *(card #1625)*.
   declaration attaches it, and an alias only points at it. Sema writes one name
   ledger that every engine and tool reads.
 - **D-NAME-ALIAS1=A** — Core ships one short prelude module. It declares the
-  ambient basics and uses `pub use` aliases for the rest of the ratified Core
+  ambient basics and re-exports the rest of the ratified Core
   tree. The compiler opens it for every file, and `#NoPrelude` still opts out.
 - **D-NAME-FENCE1** — superseded by D-VIS-MODULE1 (card #4723): declarations
   are public by default, `priv module` / `priv(package) module` and `priv`
   fields carry all privacy, and `_name` means internal everywhere.
-- **D-NAME-WALK1=A** — `use` and `pub use` work in module bodies with the same
+- **D-NAME-WALK1=A** — `use` rows and re-exports work in module bodies with the same
   meaning as at file top. `.[ ]` always means "these members of that prefix":
   values in expression position and aliases after `use`.
 - **D-NAME-ROLEMOD1=A** — `module` means code. Ecosystem entries are typed
@@ -9339,7 +9351,8 @@ The lifecycle ladder is `_name`, `pub _name`, `pub`, `#Deprecated(since:,
 use:, removed_in:)`, then a named removed delta; any package may mark a `pub`
 item, with `removed_in` dormant until editions exist. It opens the Core-only
 E2001/E2002/L2001 area to all packages and retires the two duplicate Core
-tables into ordinary markers.
+tables into ordinary markers. Since S18 removed `pub`, the ladder reads `priv`,
+`_name` (soft-public), a plain name (stable), `#Deprecated`, then the delta.
 
 **2026-08-19 — D-STRUCT-EDGE1=A** *(card #2052; ratified 2026-08-19)*:
 Packages may write `boundaries: { deny: [{ from: "...", to: "..." }] }` for
@@ -10309,8 +10322,8 @@ structure-program-is-a-value slate. They are ratified law.
   default. Delete the name or rename it to the existing `_name` form; library
   public items remain exempt, the first three checks are file-local, and export
   reachability uses the package's explicit import graph.
-- **D-STRUCT-LIFE1=A — one lifecycle ladder.** `_name` is internal, `pub _name`
-  is soft-public, `pub` is stable, `#Deprecated(since: "1.2", use: "parse")`
+- **D-STRUCT-LIFE1=A — one lifecycle ladder.** `priv` is internal, `_name`
+  is soft-public, a plain name is stable, `#Deprecated(since: "1.2", use: "parse")`
   is retiring, and removal is a named delta; `removed_in:` waits for editions
   and is warn-only before then. The consumer warning carries the replacement,
   `jet fix` handles a plain rename, and the duplicated Core-only deprecation

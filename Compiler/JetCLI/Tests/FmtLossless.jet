@@ -55,7 +55,6 @@ use {
         TOKEN_KW_IF,
         TOKEN_KW_IMPL,
         TOKEN_KW_LOOP,
-        TOKEN_KW_PUB,
         TOKEN_KW_STRUCT,
         TOKEN_KW_USE,
         TOKEN_LBRACE,
@@ -518,14 +517,14 @@ fl_flatten_use_groups: fn(tokens: [FmtTok]) -> [FmtTok] {
 fl_use_row_start: fn(tokens: [FmtTok], open: Int, cursor: Int) -> Bool {
     kind: tokens[cursor].kind
     if kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> return false
-    if kind != TOKEN_IDENT && kind != TOKEN_STRING && kind != TOKEN_HASH && kind != TOKEN_KW_PUB {
+    if kind != TOKEN_IDENT && kind != TOKEN_STRING && kind != TOKEN_HASH {
         return false
     }
     if kind == TOKEN_IDENT && tokens[cursor].text == FL_KW_AS -> return false
     if cursor == open + 1 -> return true
     previous: tokens[cursor - 1]
     if previous.kind == TOKEN_LINE_COMMENT || previous.kind == TOKEN_BLOCK_COMMENT -> return true
-    if previous.kind == TOKEN_DOT || previous.kind == TOKEN_COLON || previous.kind == TOKEN_LBRACKET || previous.kind == TOKEN_COMMA || previous.kind == TOKEN_HASH || previous.kind == TOKEN_KW_PUB {
+    if previous.kind == TOKEN_DOT || previous.kind == TOKEN_COLON || previous.kind == TOKEN_LBRACKET || previous.kind == TOKEN_COMMA || previous.kind == TOKEN_HASH {
         return false
     }
     !(previous.kind == TOKEN_IDENT && previous.text == FL_KW_AS)
@@ -941,11 +940,6 @@ fl_file_chunk_category: fn(chunk: [FmtTok]) -> Int {
     code: fl_code_tokens(chunk)
     if code.len() == 0 -> return 3
     if code[0].kind == TOKEN_KW_USE -> return 1
-    if code[0].kind == TOKEN_KW_PUB {
-        loop index in 1..<code.len() {
-            if code[index].kind == TOKEN_KW_USE -> return 1
-        }
-    }
     if code.len() >= 2 && code[0].kind == TOKEN_HASH && code[1].kind == TOKEN_IDENT {
         if code[1].text == FL_MARKER_NO_PRELUDE -> return 0
         if code[1].text == FL_MARKER_TARGET || code[1].text == FL_MARKER_HTML -> return 2

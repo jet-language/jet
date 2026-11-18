@@ -238,7 +238,7 @@ sema_alias_path_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaR
 }
 
 // The meaning of `path` as a member of the scope `site` names in another
-// module: its declarations, then what it re-exports with `pub use`.
+// module: its declarations, then what it re-exports.
 sema_alias_member_meaning: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [U32:Int], globals: SemaAliasGlobals, site: SemaAliasSite, path: [String]) -> SemaAliasMeaning Never! {
     if site.depth > SEMA_ALIAS_MAX_DEPTH || path.len() == 0 -> return .Unknown
     declared: sema_alias_declared_in(inputs[site.input].program.items, site.scope, 0, path[0])
@@ -313,7 +313,7 @@ sema_alias_meaning_if: fn(matches: Bool, meaning: SemaAliasMeaning) -> SemaAlias
 }
 
 // The meaning of `path` through an import of the scope `site`. A module's
-// member (`exported`) is reached only through its `pub use` re-exports.
+// member (`exported`) is reached only through its re-exports.
 sema_alias_imported: fn(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], rows: [U32:Int], globals: SemaAliasGlobals, site: SemaAliasSite, path: [String], exported: Bool) -> SemaAliasMeaning Never! {
     identity: inputs[site.input].module_identity
     source_scope: site.scope.join(".")

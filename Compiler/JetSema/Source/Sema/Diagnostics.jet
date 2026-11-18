@@ -281,7 +281,7 @@ sema_unknown_module_alias: fn(module_alias: String, span: Span) -> Diagnostic {
 }
 
 // E0628: `name.member` where `name` is the item this module takes from its
-// file module `name` (`wrap: module` with `pub use wrap.wrap`).
+// file module `name` (`wrap: module` with `wrap: wrap.wrap`).
 sema_taken_over_file_member: fn(name: String, member: String, span: Span) -> Diagnostic {
     row: diagnostic_registry_row("E0628") ?? panic("E0628 has no registry row")
     sema_error("E0628", span, row.what.replace("{{name}}", name).replace("{{member}}", member), row.why.replace("{{name}}", name).replace("{{member}}", member), row.fix.replace("{{name}}", name).replace("{{member}}", member))

@@ -412,10 +412,9 @@ has_ffi_marker: fn(source: [U8], facts: [Int], function_index: Int) -> Bool Neve
     }
     loop cursor >= 0 {
         kind: kind_at(facts, cursor)
-        // Comments, `pub` and `;` between markers and `fn` are skipped, as in
-        // Rust's prelude filter.
+        // Comments and `;` between markers and `fn` are skipped, as in Rust's
+        // prelude filter.
         is_skipped: if kind == {
-            K_PUB -> true
             K_SEMI -> true
             K_LINE_COMMENT -> true
             K_BLOCK_COMMENT -> true

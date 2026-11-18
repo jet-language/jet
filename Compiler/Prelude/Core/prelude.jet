@@ -23,22 +23,34 @@
 //   channel: fn<T>(capacity: Int{0})
 //   embed_file, embed_bytes, find, fetch: the build-time file and network
 //     reads, ordinary effectful calls in comptime code.
-//
+use {
+    core.files.path
+    core.time
+}
+
 // Measurement claims use the one always-available identity
 // sink; its AOT implementation is the shared Prelude black-box kernel.
-pub use {
-    core.prelude.[keep]
-    // Ordered extrema over one Comparable type, with no import: they order by
-    // `compare` (a Float by IEEE 754 totalOrder), and `clamp` accepts reversed bounds.
-    core.prelude.[min, max, clamp]
-    core.term.[eprint]
-    core.time.[Clock, Instant, Duration]
-    Date: core.time.LocalDate
-    core.files.path.[Path]
-    read_file: core.files.read
-    write_file: core.files.write
-    file_exists: core.files.exists
-}
+keep: core.prelude.keep
+// Ordered extrema over one Comparable type, with no import: they order by
+// `compare` (a Float by IEEE 754 totalOrder), and `clamp` accepts reversed bounds.
+min: core.prelude.min
+max: core.prelude.max
+clamp: core.prelude.clamp
+eprint: core.term.eprint
+read_file: core.files.read
+write_file: core.files.write
+file_exists: core.files.exists
+
+// The ambient types are aliases of their Core declarations.
+Clock: time.Clock
+
+Instant: time.Instant
+
+Duration: time.Duration
+
+Date: time.LocalDate
+
+Path: path.Path
 
 // Checked text is an ordinary nominal type with one ordinary CheckedText
 // implementation. The trait has one associated check error, one pure

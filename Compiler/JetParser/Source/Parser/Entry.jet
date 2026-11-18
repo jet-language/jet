@@ -72,7 +72,6 @@ use {
         TOKEN_KW_LOOP,
         TOKEN_KW_MODULE,
         TOKEN_KW_PRIV,
-        TOKEN_KW_PUB,
         TOKEN_KW_STRUCT,
         TOKEN_KW_TRAIT,
         TOKEN_KW_USE,
@@ -399,7 +398,7 @@ ParserChunkOutput: struct {
 // keywords, the visibility words and a `#` marker run (whose item follows
 // inside the same chunk, since `parser_hash_leads_to_item` reads it there).
 parser_chunk_head_kind: fn(kind: Int) -> Bool Never! {
-    parser_is_item_keyword(kind) || kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_HASH
+    parser_is_item_keyword(kind) || kind == TOKEN_KW_PRIV || kind == TOKEN_HASH
 }
 
 // The chunk bounds for the admitted threads: `[0, c1, …, tokens.len()]`, or
@@ -1319,8 +1318,7 @@ parser_file_cap_ahead: fn(state: &JetParserState) -> Bool Never! {
     offset := parser_marker_head_end(state, 0)
     if offset < 0 -> return false
     loop parser_kind_at(state, offset) == TOKEN_SEMI -> offset += 1
-    after: parser_kind_at(state, offset)
-    after == TOKEN_KW_USE || (after == TOKEN_KW_PUB && parser_kind_at(state, offset + 1) == TOKEN_KW_USE)
+    parser_kind_at(state, offset) == TOKEN_KW_USE
 }
 
 // The file's cap; a second one is E0999. Its owner is filled in by sema,
@@ -1388,7 +1386,7 @@ parser_file_marker_group_ahead: fn(state: &JetParserState) -> Bool Never! {
     after: parser_kind_at(state, offset)
     if !every_entry_fits_function -> return true
     if after == TOKEN_KW_STRUCT || after == TOKEN_KW_ENUM -> return false
-    function_follows: after == TOKEN_KW_FN || (after == TOKEN_KW_PUB && parser_kind_at(state, offset + 1) == TOKEN_KW_FN) || parser_prep_verb_ahead(state, offset, TOKEN_KW_FN) || after == TOKEN_HASH
+    function_follows: after == TOKEN_KW_FN || parser_prep_verb_ahead(state, offset, TOKEN_KW_FN) || after == TOKEN_HASH
     !(every_entry_fits_function && function_follows)
 }
 
@@ -1545,12 +1543,10 @@ parser_report_grouped_target_conflict: fn(state: &JetParserState, marker: Marker
     parser_add_error(state, marker.span, "this grouped `#Target` duplicates or cannot attach at file scope", "a file marker list may contain one file target and one companion `#HTML` marker", "remove the duplicate, or move an OS target directly onto its `impl`")
 }
 
-// `pub:` / `priv:` section labels would let one line flip
-// the visibility of everything below it; E0415 rejects the label itself.
+// A `priv:` section label would let one line flip the visibility of
+// everything below it; E0415 rejects the label itself.
 parser_section_label_ahead: fn(state: &JetParserState) -> Bool Never! {
-    if parser_kind_at(state, 1) != TOKEN_COLON -> return false
-    kind: parser_current_kind(state)
-    kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV
+    parser_kind_at(state, 1) == TOKEN_COLON && parser_current_kind(state) == TOKEN_KW_PRIV
 }
 
 parser_report_section_label: fn(state: &JetParserState) {
@@ -1558,7 +1554,7 @@ parser_report_section_label: fn(state: &JetParserState) {
     colon: parser_bump(state)
     label: parser_cover(first.span, colon.span)
     deletion: parser_deletion_edit(state, label)
-    parser_add_error_code_edit(state, "E0415", label, "section visibility labels like `pub:` / `priv:` are not supported", "moving an item above or below a label would silently change its visibility", "delete the label; group internal declarations in a `priv module`", deletion)
+    parser_add_error_code_edit(state, "E0415", label, "section visibility labels like `priv:` are not supported", "moving an item above or below a label would silently change its visibility", "delete the label; group internal declarations in a `priv module`", deletion)
 }
 
 parser_item_ahead: fn(state: &JetParserState) -> Bool Never! {
@@ -1567,19 +1563,12 @@ parser_item_ahead: fn(state: &JetParserState) -> Bool Never! {
         parser_item_declaration_ahead_at(state, 0) -> true
         parser_template_loop_ahead(state) -> true
         parser_is_item_keyword(kind) -> true
-        kind == TOKEN_KW_PUB -> parser_pub_use_ahead(state)
         parser_prep_verb_ahead(state, 0, TOKEN_KW_USE) -> true
         kind == TOKEN_KW_PRIV -> true
         parser_type_alias_ahead_at(state, 0) -> true
         kind == TOKEN_HASH -> parser_hash_leads_to_item(state)
         else -> false
     }
-}
-
-// `pub use` (or `pub(package) use`) is the re-export spelling; `pub` starts
-// no other declaration.
-parser_pub_use_ahead: fn(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(state) == TOKEN_KW_PUB && (parser_kind_at(state, 1) == TOKEN_KW_USE || (parser_kind_at(state, 1) == TOKEN_LPAREN && parser_kind_at(state, 4) == TOKEN_KW_USE))
 }
 
 parser_is_item_keyword: fn(kind: Int) -> Bool Never! {
@@ -1642,15 +1631,14 @@ parser_hash_leads_to_item: fn(state: &JetParserState) -> Bool Never! {
     offset: parser_hash_item_offset(state)
     if offset < 0 -> return false
     kind: parser_kind_at(state, offset)
-    parser_item_declaration_ahead_at(state, offset) || parser_marked_const_ahead(state, offset) || parser_type_alias_ahead_at(state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV)
+    parser_item_declaration_ahead_at(state, offset) || parser_marked_const_ahead(state, offset) || parser_type_alias_ahead_at(state, offset) || parser_is_item_keyword(kind) || kind == TOKEN_KW_PRIV
 }
 
-// The marker run ahead heads a function (`fn`, `pub fn`, `#run fn`) or a
-// `module`.
+// The marker run ahead heads a function (`fn`, `#run fn`) or a `module`.
 parser_hash_leads_to_function_or_module: fn(state: &JetParserState) -> Bool Never! {
     offset := parser_hash_item_offset(state)
     if offset < 0 -> return false
-    if parser_kind_at(state, offset) == TOKEN_KW_PUB || parser_kind_at(state, offset) == TOKEN_KW_PRIV {
+    if parser_kind_at(state, offset) == TOKEN_KW_PRIV {
         offset += 1
     }
     kind: parser_kind_at(state, offset)

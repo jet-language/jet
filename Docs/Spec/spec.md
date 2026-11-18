@@ -152,7 +152,7 @@ vocabulary](vocabulary.md).
   Comments, documentation and marker arguments stay distinct. A TypeInfo,
   FieldInfo, MethodInfo or FunctionInfo lists its declaration's
   `documentation`: the `///` lines written directly above it, read up past
-  its markers, its `pub` or `priv` and any other comment, until a blank line
+  its markers, its `priv` and any other comment, until a blank line
   or other code. A ModuleInfo lists every comment written in its file as
   `comments`. Each is a CommentInfo: its `text` without the `//`, `///` or
   `/* */` and one space after the opening, its `span` (a SourceSpan: the
@@ -836,9 +836,9 @@ also be omitted from `Type.new(…)` when constructor inputs and expected type
 force one answer; otherwise write `Type<Args>.new(…)` (S27, S29–S33,
 D-SHAPE3a, D-SHAPE-OPAQUE-INFER1).
 
-Struct and enum bodies may declare methods with `fn` or `pub fn`; `pub`
-exports the method, while an unqualified method remains private. A build-time
-method places `#run` directly before `fn`, including `pub #run fn`.
+Struct and enum bodies may declare methods with `fn`; like every declaration a
+method is public unless marked `priv`. A build-time method places `#run`
+directly before `fn`.
 Methods declared inside a generic struct share that struct's type-parameter
 scope; Core's generic record methods use this form rather than generic `impl`
 heads.
@@ -3658,12 +3658,13 @@ The last path segment supplies the default namespace; `alias: path` gives
 either form an explicit alias (S16).
 
 Two or more imports are written as one `use { … }` block with one row per
-line, and `pub use { … }` re-exports every row (#6542). A row is any import:
-a module path, `path#version`, a member list `path.[a, b]`, a quoted file,
-each optionally after `alias:`. A file may hold several blocks, and an
-inline module body takes its own. `jet fmt` writes a lone import on one line
-and two or more as a block, with re-exports in a separate `pub use { … }`
-block.
+line (#6542). A row is any import: a module path, `path#version`, a member
+list `path.[a, b]`, a quoted file, each optionally after `alias:`. A file may
+hold several blocks, and an inline module body takes its own. `jet fmt` writes
+a lone import on one line and two or more as a block. A `use` row binds its
+names only in its own scope; a module re-exports a name by declaring it as a
+bare path, `clamp: core.math.clamp`, which `jet fmt` keeps right after the
+imports.
 
 ```jet
 use {
@@ -3863,11 +3864,11 @@ to the segment after it: `impl types.Span { ... }` extends `types.Span`, and
 `impl Local.types.Named { ... }` implements `types.Named` for `Local`
 (D-IMPLDOT1).
 
-A directory module exposes a child only through an explicit Rust-style
-re-export:
+A directory module exposes a child only through an explicit re-export, a
+bare-path declaration:
 
 ```jet
-pub use wrap.wrap
+wrap: wrap.wrap
 ```
 
 A public declaration that is not re-exported does not become part of the
@@ -3881,7 +3882,7 @@ re-exported item then owns the name in the parent (D-MOD-NAMESPACE1):
 name `wrap` is the function too. The file is still reached where a module is
 expected, at the start of a `use` path such as `use wrap.decorate`. Any other
 `wrap.member` in the parent reports **E0628**, whose fix brings the member in
-with its own `use` line. This holds for `use` and `pub use` alike; every other
+with its own `use` line. This holds for `use` rows and re-exports alike; every other
 pair of equal names stays **E0105**.
 
 Re-exported calls retain the defining function's borrow and move rules.

@@ -66,7 +66,6 @@ use {
         TOKEN_KW_MOVE,
         TOKEN_KW_MUTATE,
         TOKEN_KW_PRIV,
-        TOKEN_KW_PUB,
         TOKEN_KW_STRUCT,
         TOKEN_KW_TRAIT,
         TOKEN_KW_YIELD,
@@ -208,15 +207,15 @@ parser_colon_skip_group: fn(tokens: [Token], open: Int) -> Int Never! {
     index
 }
 
-// The head of the statement starting at `start`: past `pub`, `pub(…)`,
-// `priv`, `priv(…)`, `#run` and `#Marker(…)` / `#[…]` markers written on
-// the declaration's line. A `pub:` / `priv:` section label (E0415) is passed
-// over too, so the declaration after it keeps its head.
+// The head of the statement starting at `start`: past `priv`, `priv(…)`,
+// `#run` and `#Marker(…)` / `#[…]` markers written on the declaration's line.
+// A `priv:` section label (E0415) is passed over too, so the declaration
+// after it keeps its head.
 parser_colon_head_at: fn(tokens: [Token], start: Int) -> Int Never! {
     index := parser_colon_code_at(tokens, start)
     loop index < tokens.len() {
         kind: tokens[index].kind
-        if kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV {
+        if kind == TOKEN_KW_PRIV {
             index = parser_colon_code_at(tokens, index + 1)
             if index < tokens.len() && tokens[index].kind == TOKEN_LPAREN {
                 index = parser_colon_code_at(tokens, parser_colon_skip_group(tokens, index))
@@ -288,7 +287,7 @@ parser_colon_head_colon: fn(tokens: [Token], head: Int) -> Int Never! {
 // Whether the `fn` signature at `keyword` has a body before its line ends:
 // a `{` outside its groups, or an arrow past the result's (the arrow body).
 // Each `fn` type in the signature brings an arrow of its own, and a comma
-// outside its groups and type arguments, a `pub` or a `priv` ends the member
+// outside its groups and type arguments or a `priv` ends the member
 // first.
 parser_colon_fn_has_body: fn(tokens: [Token], keyword: Int) -> Bool Never! {
     depth := 0
@@ -303,7 +302,7 @@ parser_colon_fn_has_body: fn(tokens: [Token], keyword: Int) -> Bool Never! {
             depth -= 1
         } else if depth == 0 {
             if kind == TOKEN_LBRACE -> return true
-            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV {
+            if kind == TOKEN_SEMI || kind == TOKEN_RBRACE || kind == TOKEN_KW_PRIV {
                 return false
             }
             if kind == TOKEN_COMMA && angles == 0 -> return false
@@ -472,13 +471,13 @@ parser_colon_member_frame: fn(frame: Int) -> Bool Never! {
 
 // Whether a member starts at `index` with no separator before it, as in the
 // one-line bodies `{ step: Int fn step(self) {} }` and
-// `{ step: Int step: fn(self) {} }`: a `pub` or `priv`, or a declaration head
+// `{ step: Int step: fn(self) {} }`: a `priv`, or a declaration head
 // right after the last token of a type (`previous`). A `name: fn`-style head
 // starts a member after any other token too: a line the lexer continued
 // (`use math.*` before `run: fn() {`) still ends before it.
 parser_colon_member_break: fn(tokens: [Token], index: Int, previous: Int) -> Bool Never! {
     kind: tokens[index].kind
-    if kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV -> return true
+    if kind == TOKEN_KW_PRIV -> return true
     if previous < 0 -> return false
     before: tokens[previous].kind
     if before != TOKEN_IDENT && before != TOKEN_RPAREN && before != TOKEN_RBRACKET && before != TOKEN_GT {
