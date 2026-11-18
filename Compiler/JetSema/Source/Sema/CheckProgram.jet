@@ -1757,6 +1757,11 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     }
     // A lifted inline-module member reports its own body under its source name.
     context.function_name = sema_inline_member_source_name(func.name)
+    // The written success names E0113's alias: the failure solver's `T Never!`
+    // and the default `T Err!` both show as T.
+    if func.return_type == .Val(written) {
+        context.return_alias = if written == .Result(success, error) && (sema_expr_unwrap_tag(error) == (Type.Named{name: "Never"}) || error == (Type.Named{name: "Err"})) -> sema_call_alias_shown(success, updated, program) else -> sema_call_alias_shown(written, updated, program)
+    }
     // #6281 c176: the union solve reads this body's default `Err` route as
     // sema_failure_union_infer does: a top-level candidate other than the
     // entry `run`, which keeps the `Unit Err!` exit contract.

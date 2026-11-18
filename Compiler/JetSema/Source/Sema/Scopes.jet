@@ -904,6 +904,9 @@ SemaCheckContext: struct {
     failure_repair: SemaFailureRepair?,
     // The enclosing named callable, for the return verdicts.
     function_name: String,
+    // How E0113 names that callable's return type when it is written as a
+    // generic alias (sema_call_alias_shown), or None.
+    return_alias: String?,
     // The module state this body writes (sema_scope_record_module_write),
     // which a pure function may not reach (E3401).
     module_writes: [TEffectSpan]{[TEffectSpan]{}},
@@ -1540,6 +1543,7 @@ sema_check_context_init: fn() -> SemaCheckContext Never! {
         failure_contract_source: "no declared failure contract",
         failure_repair: None,
         function_name: "",
+        return_alias: None,
         fallback_err_denial: None,
         noelse_chain_starts: [Int]{},
         fallback_tables: [Int]{},
@@ -1616,6 +1620,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         failure_contract_source: source.failure_contract_source,
         failure_repair: source.failure_repair,
         function_name: source.function_name,
+        return_alias: source.return_alias,
         fallback_err_denial: source.fallback_err_denial,
         noelse_chain_starts: source.noelse_chain_starts.copy(),
         fallback_tables: source.fallback_tables.copy(),
@@ -1777,6 +1782,7 @@ sema_check_context_save: fn(context: SemaCheckContext) -> SemaCheckContextMark N
             failure_contract_source: context.failure_contract_source,
             failure_repair: context.failure_repair,
             function_name: context.function_name,
+            return_alias: context.return_alias,
             fallback_err_denial: context.fallback_err_denial,
             noelse_chain_starts: [Int]{},
             fallback_tables: [Int]{},
@@ -1903,6 +1909,7 @@ sema_check_context_rollback: fn(context: &SemaCheckContext, mark: &&SemaCheckCon
     context.failure_contract_source = saved.failure_contract_source.move()
     context.failure_repair = saved.failure_repair.move()
     context.function_name = saved.function_name.move()
+    context.return_alias = saved.return_alias.move()
     context.fallback_err_denial = saved.fallback_err_denial.move()
     context.lost_tail_span = saved.lost_tail_span
     context.value_tail_span = saved.value_tail_span
