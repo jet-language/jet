@@ -4014,7 +4014,7 @@ jet_cli_fmt_changed_files: fn() -> [String]? {
     Val(found)
 }
 
-// Rust `Path::strip_prefix(display_root)`, else the path as given.
+// Rust `Path.strip_prefix(display_root)`, else the path as given.
 jet_cli_fmt_relative: fn(path: String, root: String) -> String Never! {
     if path == root -> return ""
     prefix: if root.ends_with("/") -> root else -> "{root}/"
@@ -4029,7 +4029,7 @@ jet_cli_fmt_relative: fn(path: String, root: String) -> String Never! {
 // Flags the environment run takes unchanged.
 JET_CLI_EXTERNAL_FMT_FORWARDED: [String]{"--trust", "--offline", "--online", "--no-color", "--json", "--flake", "--pure", "--yes", "-y"}
 
-// Rust `str::trim_start_matches` for a string prefix.
+// Rust `str.trim_start_matches` for a string prefix.
 jet_cli_trim_start_matches: fn(text: String, prefix: String) -> String Never! {
     rest := text
     loop prefix.len() > 0 && rest.starts_with(prefix) {
@@ -4068,7 +4068,7 @@ jet_cli_external_formatter_program: fn(package: String) -> String? Never! {
     Val(program)
 }
 
-// Rust `Path::extension(path) == Some(language)`: the text after the last
+// Rust `Path.extension(path) == Some(language)`: the text after the last
 // `.` of the file name, when that `.` is not the name's first byte.
 jet_cli_external_fmt_matches: fn(path: String, language: String) -> Bool Never! {
     name: jet_cli_fmt_file_name(path)
@@ -4180,13 +4180,13 @@ jet_cli_external_fmt_ok: fn(json: Bool) -> JetDriverVerbOutput Never! {
     JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
-// A staging directory (`ExternalFmtTempDir::new`), or the problem text.
+// A staging directory (`ExternalFmtTempDir.new`), or the problem text.
 JetCLIExternalFmtTemp: struct {
     path: String,
     problem: String?,
 }
 
-// `ExternalFmtTempDir::new`: `jet-fmt-<ns>-<pid>-<attempt>` under the
+// `ExternalFmtTempDir.new`: `jet-fmt-<ns>-<pid>-<attempt>` under the
 // system temporary directory, skipping names that already exist.
 jet_cli_external_fmt_temp_dir: fn() -> JetCLIExternalFmtTemp {
     base: cli_sys.get("TMPDIR") ?? "/tmp"

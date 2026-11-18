@@ -5,7 +5,7 @@ Row: struct {
     name: String,
 }
 
-keep: fn(row: &&Row) -> Row Never! { row }
+keep_row: fn(row: &&Row) -> Row Never! { row }
 
 keep_text: fn(text: &&String) -> String Never! { text }
 
@@ -16,8 +16,8 @@ renamed: fn(row: &&Row, name: String) -> Row Never! {
 }
 
 run: fn() {
-    print(keep(Row{name: "a"}).name)
-    print(keep(keep(Row{name: "b"})).name)
+    print(keep_row(Row{name: "a"}).name)
+    print(keep_row(keep_row(Row{name: "b"})).name)
     print(keep_text("c"))
-    print(renamed(keep(Row{name: "d"}), "e").name)
+    print(renamed(keep_row(Row{name: "d"}), "e").name)
 }

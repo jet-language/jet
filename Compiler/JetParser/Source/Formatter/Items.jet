@@ -134,7 +134,7 @@ JetFmtTypeBody: struct {
     markers: [Marker]{[Marker]{}},
 }
 
-// Rust `TypeBodyMember::is_compact` / `ImplBodyMember::is_compact`: data
+// Rust `TypeBodyMember.is_compact` / `ImplBodyMember.is_compact`: data
 // declarations stack on adjacent lines; anything carrying a body is set off
 // from its neighbor by a blank line.
 jfmt_member_is_compact: fn(member: JetFmtMember) -> Bool Never! {
@@ -208,7 +208,7 @@ jfmt_item_spans_for: fn(f: JetFmt, source: JetFmtSourceList?) -> [Span] {
     [Span]{}
 }
 
-// Byte search over source text; Rust `str::find`/`rfind` offsets.
+// Byte search over source text; Rust `str.find`/`rfind` offsets.
 jfmt_items_find: fn(haystack: [U8], needle: [U8], from: Int) -> Int? Never! {
     if needle.len() == 0 -> return Val(from)
     index := from
@@ -256,7 +256,7 @@ jfmt_has_name: fn(entries: [NamedSpan], name: String) -> Bool Never! {
     false
 }
 
-// Rust `Type::name().is_empty()`: only a nameless type spells empty.
+// Rust `Type.name().is_empty()`: only a nameless type spells empty.
 jfmt_type_name_is_empty: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Named(name) -> name.len() == 0
@@ -266,7 +266,7 @@ jfmt_type_name_is_empty: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `Generics::substitute_type`, reduced to what decode wire shapes read:
+// Rust `Generics.substitute_type`, reduced to what decode wire shapes read:
 // generic parameter names resolve to their arguments everywhere a shape can
 // see through.
 jfmt_substitute_type: fn(ty: Type, params: [TypeParam], args: [Type]) -> Type Never! {
@@ -328,7 +328,7 @@ jfmt_finish_shapes: fn(shapes: [SerdeWireShape]) -> [SerdeWireShape]? Never! {
     Val(out)
 }
 
-// Rust `UnitFamilyDef::type_name`: `m_per_s` -> `MPerS`.
+// Rust `UnitFamilyDef.type_name`: `m_per_s` -> `MPerS`.
 jfmt_unit_type_name: fn(member: String) -> String Never! {
     out := ""
     loop segment in member.split("_") {
@@ -340,7 +340,7 @@ jfmt_unit_type_name: fn(member: String) -> String Never! {
     out
 }
 
-// Rust `UnitFamilyDef::distinct_defs`, reduced to the minted names and their
+// Rust `UnitFamilyDef.distinct_defs`, reduced to the minted names and their
 // `Decode` fact (base `Float`).
 jfmt_unit_family_decodes: fn(family: UnitFamilyDef, name: String) -> Bool? Never! {
     if family.family == "Time" && (family.resolved_owner ?? "") == "core.units" -> return None
@@ -363,14 +363,14 @@ jfmt_unit_family_decodes: fn(family: UnitFamilyDef, name: String) -> Bool? Never
     None
 }
 
-// Rust `Names::member_name(module_name, "")`.
+// Rust `Names.member_name(module_name, "")`.
 jfmt_member_name_prefix: fn(module_name: String) -> String Never! {
     stripped: if module_name.starts_with("__jet_") -> foundation_byte_text(module_name.bytes(), 6, module_name.bytes().len()) else -> module_name.copy()
     decoded: jfmt_decode_generated_suffix(stripped) ?? stripped
     jfmt_generated_path("{decoded}.")
 }
 
-// Rust `Syntax::generated_path`.
+// Rust `Syntax.generated_path`.
 jfmt_generated_path: fn(path: String) -> String Never! {
     hex: "0123456789abcdef".bytes()
     out := [U8]{}
@@ -407,7 +407,7 @@ jfmt_hex_value: fn(code: Int) -> Int Never! {
     }
 }
 
-// Rust `Syntax::decode_generated_path_suffix`.
+// Rust `Syntax.decode_generated_path_suffix`.
 jfmt_decode_generated_suffix: fn(suffix: String) -> String? Never! {
     bytes: suffix.bytes()
     out := [U8]{}
@@ -442,7 +442,7 @@ jfmt_decode_generated_suffix: fn(suffix: String) -> String? Never! {
     Val(String.from_bytes(out) ?? return None)
 }
 
-// Rust `AST::resolved_decode_wire_shapes` `named`.
+// Rust `AST.resolved_decode_wire_shapes` `named`.
 jfmt_decode_named_shapes: fn(items: [Item], name: String, args: [Type], seen: &[String]) -> [SerdeWireShape]? {
     loop seen_name in seen {
         if seen_name == name -> return None
@@ -550,7 +550,7 @@ jfmt_decode_named_shapes_inner: fn(items: [Item], name: String, args: [Type], se
     None
 }
 
-// Rust `AST::resolved_decode_wire_shapes` `resolve`.
+// Rust `AST.resolved_decode_wire_shapes` `resolve`.
 jfmt_decode_shapes: fn(items: [Item], ty: Type, seen: &[String]) -> [SerdeWireShape]? {
     shapes := [SerdeWireShape]{}
     if ty == {
@@ -1805,7 +1805,7 @@ jfmt_fmt_impl_body: fn(f: &JetFmt, assoc_types: [NamedType], constants: [ImplCon
     }
 }
 
-// Rust `Registry::callable_marker_needs_line_break`: the rows that keep the
+// Rust `Registry.callable_marker_needs_line_break`: the rows that keep the
 // established readable layout on their own line above `fn`, the web bridge
 // `#Export(wasm)` among them (`#Export(c)` stays on the `fn` line).
 jfmt_callable_marker_needs_line_break: fn(marker: Marker) -> Bool Never! {

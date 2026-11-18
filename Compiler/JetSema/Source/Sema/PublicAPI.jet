@@ -15,6 +15,7 @@ use jet_foundation.[
     ModuleCap,
     Param,
     PublicAPIItem,
+    Span,
     StructDef,
     TraitDef,
     TraitImplBlock,
@@ -480,4 +481,72 @@ sema_public_api_unit_family: fn(definition: UnitFamilyDef, prefix: String) -> Pu
         members.push("{member.name} = {member.scale.numerator}/{member.scale.denominator}{offset}")
     }
     PublicAPIItem{kind: "unit", name: name, signature: "unit {name}{dimension}{base}{owner} {{ {members.join(", ")} }}"}
+}
+
+// A re-export a module declares (`clamp: core.math.clamp`): its name, the
+// path it names as written, the signature of the declaration that path
+// reaches, spelled under the path as that declaration's own row spells it,
+// and the declaration's span. A module target's signature is
+// `module <path>`.
+SemaPublicAPIReexport: struct {
+    name: String,
+    target: String,
+    signature: String,
+    span: Span,
+}
+
+// The re-exports module row `module_index` of `graph` declares, in
+// declaration order. A function target reads its solved effect row from the
+// checked bodies of `result`, as the declaring package's own row does.
+// A re-export names a function, a value or a module, so those are the
+// targets read.
+sema_public_api_reexports: fn(graph: SemaRegistrationGraph, result: SemaGraphResult, module_index: Int) -[]> [SemaPublicAPIReexport] {
+    reexports := [SemaPublicAPIReexport]{}
+    loop import in graph.modules[module_index].imports {
+        if !import.declaration.is_pub || import.declaration.comptime_span != None -> next
+        loop binding in import.bindings {
+            target: if import.declaration.kind == {
+                .Unqualified(module_alias, _, _, _, _) -> "{module_alias}.{binding.original}"
+                .Module(name, _) -> "{name}"
+                .File(path, _) -> "\"{path}\""
+            }
+            signature := "module {target}"
+            if binding.declaration_position == .Val(position) {
+                owner: binding.target_module_index ?? next
+                signature = sema_public_api_reexport_signature(graph, result, owner, position, target) ?? next
+            } else if import.declaration.kind == .Unqualified(_, _, _, _, _) { next }
+            reexports.push(SemaPublicAPIReexport{name: "{binding.local}", target: target, signature: signature, span: import.declaration.span})
+        }
+    }
+    reexports
+}
+
+// The row signature, spelled under `target`, of the declaration at
+// `position` in module row `owner`: a function's or a constant's, None for
+// any other declaration.
+sema_public_api_reexport_signature: fn(graph: SemaRegistrationGraph, result: SemaGraphResult, owner: Int, position: Int, target: String) -[]> String? {
+    if graph.modules[owner].declarations[position] == .Const(constant) {
+        ty: if constant.ty == .Val(value) -> ": {type_name(value)}" else -> ""
+        return Val("const {target}{ty}")
+    }
+    if graph.modules[owner].declarations[position] == .Func(function) {
+        loop checked in result.modules {
+            if checked.module_identity == graph.modules[owner].module_identity {
+                return Val(sema_public_api_fn(target, function, checked.functions, [String:String]{}).signature)
+            }
+        }
+        return Val(sema_public_api_fn(target, function, [FnBody]{}, [String:String]{}).signature)
+    }
+    None
+}
+
+// One `reexport` row per re-export dependents can name, under `prefix` as
+// the module's other rows: `reexport clamp = fn core.math.clamp(…) -[]> Int`.
+// A changed target, or a target whose signature changed, changes the row.
+sema_public_api_reexport_rows: fn(reexports: [SemaPublicAPIReexport], prefix: String, rows: &[PublicAPIItem]) -[]> {
+    loop reexport in reexports {
+        if !sema_public_api_named(reexport.name) -> next
+        name: "{prefix}{reexport.name}"
+        rows.push(PublicAPIItem{kind: "reexport", name: name, signature: "reexport {name} = {reexport.signature}"})
+    }
 }

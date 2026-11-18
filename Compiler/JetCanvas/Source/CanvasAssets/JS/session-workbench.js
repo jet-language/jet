@@ -562,7 +562,7 @@
   }
 
   // Accept only the already-projected panel/view stream published by
-  // BrowserWebAdapter::view_json (still JSON at the `/__jet_devtools`
+  // BrowserWebAdapter.view_json (still JSON at the `/__jet_devtools`
   // transport boundary). No raw event envelope is decoded here.
   function devtoolsFrameFrom(value) {
     const payload = devtoolsObject(value);
@@ -612,7 +612,7 @@
   }
 
   // Each recorded fact publishes its source/kind/entity/fields/payload as
-  // labeled children (see BrowserWebAdapter::panel_from_projection); read
+  // labeled children (see BrowserWebAdapter.panel_from_projection); read
   // them by label, never by position or by re-deriving meaning from raw
   // event JSON.
   function devtoolsNodeField(node, label) {
@@ -1012,7 +1012,7 @@
   }
 
   // The scrub cursor set via POST /__jet_devtools/cursor is echoed on every
-  // panel from the canonical projection (JetDevtoolsPanelCatalog::project);
+  // panel from the canonical projection (JetDevtoolsPanelCatalog.project);
   // every panel carries the same value, so the first present one is
   // authoritative. This is the confirmed server position, not a guess.
   function devtoolsCanonicalCursor(frame) {

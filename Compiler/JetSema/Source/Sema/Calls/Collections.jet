@@ -488,7 +488,7 @@ sema_call_try_builtin_collections: fn(receiver: Expr, receiver_value: TExpr, met
             if !sema_call_set_bits_ready(element, "bits()", span, environment, program, diagnostics) {
                 return SemaMethodSpecialCheck{handled: true, value: None}
             }
-            path: "std::collections::HashSet"
+            path: "std.collections.HashSet"
             reference := TMethodRef{symbol: sema_symbol_id(program, context, SymbolKind.Function, "", path, "bits"), name: "bits", mangled: false, trait_owner: None, operator_identity: None}
             argument := TCallArg{value: receiver_value, template_items: [SymbolID]{}, borrow: true, mut_borrow: false, fn_coerce: None, widen_to_vec: false, widen_to_union: None, box_as_trait: None, label: None, spread: false}
             sema_tree_node(result_type, TExprKind.StaticCall{owner: TStaticOwner.Prelude{rooted: false, path: path, generics: [TPreludeArg]{TPreludeArg.Jet{ty: element}}}, owner_type: None, method: reference, type_args: [Type]{}, args: [TCallArg]{argument}}, span)
@@ -551,7 +551,7 @@ sema_call_collections_list_as_iter: fn(value: TExpr, span: Span) -> TExpr Never!
     sema_tree_node(Type.Apply{name: "Iter", args: [Type]{element}}, TExprKind.BuiltinMethod{receiver: value, operation: TBuiltinOp.ListLazy, args: [TExpr]{}}, span)
 }
 
-// Rust Type::without_user_tags, then a List or FixedList element.
+// Rust Type.without_user_tags, then a List or FixedList element.
 sema_call_collections_list_element: fn(ty: Type) -> Type? Never! {
     return if ty == {
         .Tagged(marker, inner) -> if marker == {

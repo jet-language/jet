@@ -9,7 +9,7 @@ Res: struct {
     }
 }
 
-keep: fn(r: &&Res) -> Int { r.name.len() }
+hold: fn(r: &&Res) -> Int { r.name.len() }
 
 make: fn(name: String) -> Res? { Val(Res{name: name}) }
 
@@ -17,7 +17,7 @@ from_local: fn() -> Int {
     local := make("local")
     if local == .Val(held) {
         applied := held.move()
-        return keep(applied)
+        return hold(applied)
     }
     0
 }
@@ -26,7 +26,7 @@ from_call: fn() -> Int {
     if make("call") == {
         .Val(held) -> {
             applied := held.move()
-            keep(applied)
+            hold(applied)
         }
         .None -> 0
     }

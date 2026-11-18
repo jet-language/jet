@@ -20,12 +20,12 @@ read_store: fn(key: String) -> String StoreErr! {
     "user {key}"
 }
 
-fetch: fn(seconds: Int) -> String NetErr! { Err(NetErr.Timeout(seconds)) }
+download: fn(seconds: Int) -> String NetErr! { Err(NetErr.Timeout(seconds)) }
 
 // Each typed failure converts into `Err` at the written `Err!`.
 load_user: fn(key: String) -> String Err! { read_store(key) }
 
-load_remote: fn(seconds: Int) -> String Err! { fetch(seconds) }
+load_remote: fn(seconds: Int) -> String Err! { download(seconds) }
 
 load_plain: fn() -> String Err! { Err("no user") }
 

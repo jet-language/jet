@@ -620,17 +620,27 @@ CLOSED_LIST_DISPATCH_PATHS: [String]{
 
 // Whether a string literal spells a Core name: a type, member or module
 // (`Signal`, `on_priority`, `Signal.get`, `core.event`, `Build.`). Messages,
-// templates and host symbols (`jet_list_clear`, `JetCache::clear`) are not
-// Core names.
+// templates and host symbols (`jet_list_clear`, `JetCache.clear`,
+// `std.collections.HashSet.new`) are not Core names.
 closed_list_member_shaped: fn(literal: String) -> Bool {
     bytes: literal.bytes()
-    if bytes.len() == 0 || literal.starts_with("jet_") -> return false
+    if bytes.len() == 0 || literal.starts_with("jet_") || closed_list_host_symbol(literal) {
+        return false
+    }
     first: Int{bytes[0]}
     if first == 46 || (first >= 48 && first <= 57) -> return false
     loop byte in bytes {
         if !closed_list_ident_byte(byte) && (Int{byte}) != 46 -> return false
     }
     true
+}
+
+// Whether a dotted literal is a runtime route symbol: its first segment is
+// `std` or a runtime host type (`Jet` and an uppercase letter).
+closed_list_host_symbol: fn(literal: String) -> Bool {
+    parts: literal.split_once(".") ?? return false
+    head: parts.before.bytes()
+    parts.before == "std" || (parts.before.starts_with("Jet") && head.len() > 3 && Int{head[3]} >= 65 && Int{head[3]} <= 90)
 }
 
 // The index of the last byte before `index` that is not whitespace, or -1.
@@ -1190,7 +1200,7 @@ closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -
 #Test("a route or dispatch file's functions are closed lists of the Core names they hold") {
     guards_enter_root()
     found := [ClosedListFinding]{}
-    source: "route: fn(name: String, method: String) -> String? {{\n    if name == \"Signal\" && method == {{\n        \"get\" | \"set\" -> return Val(\"jet_std::JetSignal::{{method}}\")\n        else -> panic(\"no route for this member\")\n    }}\n    None\n}}\nkeyed: fn(symbol: SymbolID) -> Int {{ symbol.id }}\nwords: fn(detail: String) -> Bool {{ detail.contains(\"tls\") || detail.contains(\"alert\") || fail(\"E3414\", \"handshake\") }}\nbuild: fn(member: String) -> Bool {{ member == \"BuildPlan.graph\" || member.starts_with(\"Build.\") || member == \"Code.pasted\" }}\n"
+    source: "route: fn(name: String, method: String) -> String? {{\n    if name == \"Signal\" && method == {{\n        \"get\" | \"set\" -> return Val(\"jet_std.JetSignal.{{method}}\")\n        else -> panic(\"no route for this member\")\n    }}\n    None\n}}\nkeyed: fn(symbol: SymbolID) -> Int {{ symbol.id }}\nwords: fn(detail: String) -> Bool {{ detail.contains(\"tls\") || detail.contains(\"alert\") || fail(\"E3414\", \"handshake\") }}\nbuild: fn(member: String) -> Bool {{ member == \"BuildPlan.graph\" || member.starts_with(\"Build.\") || member == \"Code.pasted\" }}\n"
     closed_list_dispatch_in("r.jet", source, true, found)
     // `words` tests text and passes call arguments; it dispatches on nothing.
     assert_eq(found.len(), 2)
@@ -1206,7 +1216,9 @@ closed_list_core_levels_problem: fn(levels_text: String, options_text: String) -
     assert_eq(held[1].members.join(","), "tls,alert,e3414,handshake")
     // Messages, host symbols and templates are not Core names.
     assert(!closed_list_member_shaped("no route for this member"))
-    assert(!closed_list_member_shaped("jet_std::JetSignal::get"))
+    assert(!closed_list_member_shaped("jet_std.JetSignal.get"))
+    assert(!closed_list_member_shaped("JetCache.clear"))
+    assert(!closed_list_member_shaped("std.collections.HashSet.new"))
     assert(!closed_list_member_shaped("jet_{{key}}_{{method}}"))
     assert(!closed_list_member_shaped("jet_list_clear"))
     assert(closed_list_member_shaped("core.event"))

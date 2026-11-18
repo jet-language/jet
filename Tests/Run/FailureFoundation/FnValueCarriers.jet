@@ -45,7 +45,7 @@ mapped_tens: fn(value: Int?) -> Int Err! {
     Ok(mapped ?? -1)
 }
 
-find: fn(present: Bool) -> (fn(Int) -> Int)? {
+lookup_fn: fn(present: Bool) -> (fn(Int) -> Int)? {
     if present -> return Val(double)
     None
 }
@@ -79,13 +79,13 @@ run: fn() {
     fallback: commands.get("quiet") ?? upper
     print("map: {shout("Hi")} {quiet("Hi")} {fallback("Hi")}")
 
-    found: find(true).or_err("none") ?? triple
-    missing: find(false).or_err("none") ?? triple
+    found: lookup_fn(true).or_err("none") ?? triple
+    missing: lookup_fn(false).or_err("none") ?? triple
     print("option or_err: {found(10)} {missing(10)}")
-    print("option ??: {(find(true) ?? triple)(5)} {(find(false) ?? triple)(5)}")
-    print("option map: {find(true).map(fn(f) { f(4) }) ?? -1} {find(false).map(fn(f) { f(4) }) ?? -1}")
-    if find(true) == .Val(f) -> print("if-let: {f(6)}")
-    if find(false) == {
+    print("option ??: {(lookup_fn(true) ?? triple)(5)} {(lookup_fn(false) ?? triple)(5)}")
+    print("option map: {lookup_fn(true).map(fn(f) { f(4) }) ?? -1} {lookup_fn(false).map(fn(f) { f(4) }) ?? -1}")
+    if lookup_fn(true) == .Val(f) -> print("if-let: {f(6)}")
+    if lookup_fn(false) == {
         .Val(f) -> { print("match: {f(1)}") }
         .None -> print("match: none")
     }
@@ -94,8 +94,8 @@ run: fn() {
     unmade: make(false) ?? triple
     print("result: {made(10)} {unmade(10)}")
     print("propagate: {apply(true) ?? -1} {apply(false) ?? -1}")
-    picked: pick(find(true)) ?? triple
-    unpicked: pick(find(false)) ?? triple
+    picked: pick(lookup_fn(true)) ?? triple
+    unpicked: pick(lookup_fn(false)) ?? triple
     print("generic: {picked(50)} {unpicked(50)}")
 
     pair: find_pair(true).or_err("none") ?? Pair{count: 0, label: "zero"}

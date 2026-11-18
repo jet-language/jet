@@ -37,7 +37,7 @@ count_of: fn(n: Int) -> Int Lookup! {
     n
 }
 
-find: fn(n: Int) -> Int? Lookup! {
+locate: fn(n: Int) -> Int? Lookup! {
     if n < 0 -> return Err(Lookup.Missing)
     maybe(n)
 }
@@ -62,10 +62,10 @@ run: fn() {
     print(shown(reflect.of(maybe(0))))
     print(counted(count_of(2)))
     print(counted(count_of(-1)))
-    print(found(find(4)))
-    print(found(find(0)))
-    print(found(find(-1)))
-    reading: Reading{count: count_of(5), found: find(0), gate: Gate.Open(maybe(0))}
+    print(found(locate(4)))
+    print(found(locate(0)))
+    print(found(locate(-1)))
+    reading: Reading{count: count_of(5), found: locate(0), gate: Gate.Open(maybe(0))}
     loop field in reflect.of(reading).fields() {
         print("{field.name()}: {field.value().type_name()} -> {shown(field.value())}")
     }

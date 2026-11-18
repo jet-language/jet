@@ -113,14 +113,25 @@ X64DebugEnumerator: struct {
     value: Int,
 }
 
+// One variant of a value whose type has a variant part: `member` is what
+// the value holds while its discriminant is `value` (None: any value no
+// other variant names).
+X64DebugVariant: struct {
+    value: Int?,
+    member: X64DebugMember,
+}
+
 // Type references are rows of X64ModuleDebug.types; -1 is no type (an
 // untyped pointer). `Opaque` has a name and size but no known contents.
+// `Variants` is a struct of its `discriminant` member and a variant part
+// (DW_TAG_variant_part) that the discriminant's value selects in.
 X64DebugTypeKind: enum {
     Base(encoding: X64DebugEncoding),
     Pointer(target: Int),
     Struct(members: [X64DebugMember]),
     Union(members: [X64DebugMember]),
     Enum(enumerators: [X64DebugEnumerator]),
+    Variants(discriminant: X64DebugMember, variants: [X64DebugVariant]),
     Typedef(target: Int),
     Opaque,
 }

@@ -82,25 +82,25 @@ ir_builtin_route_for_receiver: fn(operation: TBuiltinOp, receiver: Type, carrier
     if operation == {
         .Clear -> {
             if family == Val(CollectionReceivers.Set) {
-                return ir_builtin_route_row("std::collections::HashSet::clear", 1, [Bool]{true})
+                return ir_builtin_route_row("std.collections.HashSet.clear", 1, [Bool]{true})
             }
             if family == Val(CollectionReceivers.Rank) {
-                return ir_builtin_route_row("std::collections::BTreeSet::clear", 1, [Bool]{true})
+                return ir_builtin_route_row("std.collections.BTreeSet.clear", 1, [Bool]{true})
             }
             if family == Val(CollectionReceivers.Tally) || family == Val(CollectionReceivers.Map) {
-                return ir_builtin_route_row("std::collections::HashMap::clear", 1, [Bool]{true})
+                return ir_builtin_route_row("std.collections.HashMap.clear", 1, [Bool]{true})
             }
             if family == Val(CollectionReceivers.Cache) {
-                return ir_builtin_route_row("JetCache::clear", 1, [Bool]{true})
+                return ir_builtin_route_row("JetCache.clear", 1, [Bool]{true})
             }
             if family == Val(CollectionReceivers.Queue) {
-                return ir_builtin_route_row("std::collections::VecDeque::clear", 1, [Bool]{true})
+                return ir_builtin_route_row("std.collections.VecDeque.clear", 1, [Bool]{true})
             }
             if family == Val(CollectionReceivers.PriorityQueue) {
-                return ir_builtin_route_row("std::collections::BinaryHeap::clear", 1, [Bool]{true})
+                return ir_builtin_route_row("std.collections.BinaryHeap.clear", 1, [Bool]{true})
             }
             if family == Val(CollectionReceivers.Bits) {
-                return ir_builtin_route_row("JetBitSet::clear", 1, [Bool]{true})
+                return ir_builtin_route_row("JetBitSet.clear", 1, [Bool]{true})
             }
             return ir_builtin_route_row("jet_list_clear", 1, [Bool]{true})
         }
@@ -212,7 +212,7 @@ ir_builtin_route_for_receiver: fn(operation: TBuiltinOp, receiver: Type, carrier
                 return ir_builtin_route_row("jet_bit_set_has", 2, [Bool]{true, false})
             }
             if family == Val(CollectionReceivers.Rank) {
-                return ir_builtin_route_row("std::collections::BTreeSet::contains", 2, [Bool]{true, true})
+                return ir_builtin_route_row("std.collections.BTreeSet.contains", 2, [Bool]{true, true})
             }
         }
         .StartsWith -> return ir_builtin_route_row("jet_list_starts_with", 2, [Bool]{true, true})
@@ -309,8 +309,8 @@ ir_builtin_container_route: fn(operation: TBuiltinOp) -> IRBuiltinRoute Never! {
         .LRUGet -> return ir_builtin_route_row("jet_lru_get", 2, [Bool]{true, true})
         .LRUKeys -> return ir_builtin_route_row("jet_lru_keys", 1, [Bool]{true})
         .BitSetAdd -> return ir_builtin_route_row("jet_bitset_add", 2, [Bool]{true, false})
-        .LRUCapacity -> return ir_builtin_route_row("JetCache::capacity", 1, [Bool]{true})
-        .LRURemove -> return ir_builtin_route_row("JetCache::remove", 2, [Bool]{true, true})
+        .LRUCapacity -> return ir_builtin_route_row("JetCache.capacity", 1, [Bool]{true})
+        .LRURemove -> return ir_builtin_route_row("JetCache.remove", 2, [Bool]{true, true})
         .BitSetRemove -> return ir_builtin_route_row("jet_bitset_remove", 2, [Bool]{true, false})
         .BitSetCount -> return ir_builtin_route_row("jet_bit_set_count", 1, [Bool]{true})
         .BitSetToList -> return ir_builtin_route_row("jet_bit_set_to_list", 1, [Bool]{true})
@@ -356,7 +356,7 @@ ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, c
         }
         .Push -> {
             if ir_builtin_family(receiver) == Val(CollectionReceivers.PriorityQueue) {
-                return ir_builtin_route_row("std::collections::BinaryHeap::push", 2, [Bool]{true, false})
+                return ir_builtin_route_row("std.collections.BinaryHeap.push", 2, [Bool]{true, false})
             }
             return ir_builtin_route_row("jet_list_push", 2, [Bool]{true, false})
         }
@@ -450,10 +450,10 @@ ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, c
         .Split -> return ir_builtin_route_row("jet_iter_string_split", 2, [Bool]{true, true})
         .Lines -> return ir_builtin_route_row("jet_string_lines", 1, [Bool]{true})
         .Chars -> return ir_builtin_route_row("jet_string_chars", 1, [Bool]{true})
-        .ParseInt -> return ir_builtin_route_row("jet_std::jet_int_parse", 1, [Bool]{true})
-        .ParseFloat -> return ir_builtin_route_row("jet_std::jet_float_parse", 1, [Bool]{true})
-        .IntToRadix -> return ir_builtin_route_row("jet_std::jet_int_to_radix", 2, [Bool]{false, false})
-        .IntFromRadix -> return ir_builtin_route_row("jet_std::jet_int_from_radix", 2, [Bool]{true, false})
+        .ParseInt -> return ir_builtin_route_row("jet_std.jet_int_parse", 1, [Bool]{true})
+        .ParseFloat -> return ir_builtin_route_row("jet_std.jet_float_parse", 1, [Bool]{true})
+        .IntToRadix -> return ir_builtin_route_row("jet_std.jet_int_to_radix", 2, [Bool]{false, false})
+        .IntFromRadix -> return ir_builtin_route_row("jet_std.jet_int_from_radix", 2, [Bool]{true, false})
         .ToUpper -> return ir_builtin_route_row("jet_unicode_upper", 1, [Bool]{true})
         .ToLower -> return ir_builtin_route_row("jet_unicode_lower", 1, [Bool]{true})
         .ToASCIILower -> return ir_builtin_route_row("jet_text_ascii_lower", 1, [Bool]{true})
@@ -491,9 +491,9 @@ ir_builtin_route_plan: fn(operation: TBuiltinOp, receiver: Type, result: Type, c
         .TryCollect | .IterToList | .IterCollect | .ListLazy | .Take | .Skip | .StepBy | .Dedup | .Chunks | .Windows | .IterRepeat | .IterCycle | .IterDropLast | .IterShuffle | .IterIsSorted | .IterLastIndexOf | .IterAverage(_) | .IterCompare -> return ir_builtin_iter_route(operation, receiver, carrier)
         .StringMethod(symbol) -> return ir_builtin_string_method_route(symbol)
         .ByteBufferMethod(symbol) | .ByteBufferWrite(symbol) -> return ir_builtin_byte_buffer_route(symbol)
-        .ByteBufferToBytes -> return ir_builtin_route_row("JetByteBuffer::to_bytes", 1, [Bool]{true})
-        .ByteBufferFrom -> return ir_builtin_route_row("JetByteBuffer::from", 1, [Bool]{true})
-        .ByteBufferWithCapacity -> return ir_builtin_route_row("JetByteBuffer::with_capacity", 1, [Bool]{true})
+        .ByteBufferToBytes -> return ir_builtin_route_row("JetByteBuffer.to_bytes", 1, [Bool]{true})
+        .ByteBufferFrom -> return ir_builtin_route_row("JetByteBuffer.from", 1, [Bool]{true})
+        .ByteBufferWithCapacity -> return ir_builtin_route_row("JetByteBuffer.with_capacity", 1, [Bool]{true})
         .Repeat -> return ir_builtin_route_row("jet_string_repeat", 2, [Bool]{true, false})
         .ListSlice -> return ir_builtin_route_row("jet_list_slice", 3, [Bool]{true, false, false})
         .ListBinarySearch -> return ir_builtin_route_row("jet_list_binary_search", 2, [Bool]{true, true})

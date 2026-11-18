@@ -1224,7 +1224,7 @@ set_mode: fn(path: Path | String, mode: Int) -[FS.Write]> IOError! {
     files8_preflight("FS.Write", .Write, text)
     if rt.os_family() == "unix" {
         if !files8_u32(mode) {
-            return Err(files8_other(.Write, Val(text), "file mode must be between 0 and u32::MAX"))
+            return Err(files8_other(.Write, Val(text), "file mode must be between 0 and U32.MAX"))
         }
     } else if mode != 0 && mode != 1 {
         return Err(files8_other(.Write, Val(text), "file mode must contain only the readonly bit on this platform"))

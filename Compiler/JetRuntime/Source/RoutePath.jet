@@ -1,5 +1,5 @@
 // The core.handle.path value routes. A Path8 handle owns one native [U8] of
-// its bytes (ByteHandlesABI.jet). Every rule is lexical over the Unix std::path
+// its bytes (ByteHandlesABI.jet). Every rule is lexical over the Unix std.path
 // component grammar after the shared `\` -> `/` source spelling; nothing
 // touches the filesystem. Text results and kernel inputs are the lossy UTF-8
 // rendering, as the reference converts with to_string_lossy.
@@ -45,7 +45,7 @@ path_route_source: fn(path: I64) -> I64 {
 
 path_route_byte: fn(data: I64, at: I64) -> I64 { rt_text_byte(wrapping(data + at)) }
 
-// Components::trim_right on [start, end): the end of the last component,
+// Components.trim_right on [start, end): the end of the last component,
 // skipping separators and "." components (a "." at `start` is the leading
 // CurDir and stays). Never trims into the root separator at `start`.
 path_route_trim_end: fn(data: I64, start: I64, end: I64, rooted: Bool) -> I64 {
@@ -78,7 +78,7 @@ path_route_is_dot_dot: fn(data: I64, at: I64, len: I64) -> Bool {
     len == I64{2} && path_route_byte(data, at) == I64{46} && path_route_byte(data, at + I64{1}) == I64{46}
 }
 
-// Path::file_name: the last component when it is Normal, as [start, start+len);
+// Path.file_name: the last component when it is Normal, as [start, start+len);
 // length -1 when there is none (empty, a root, ".", or "..").
 path_route_file_name: fn(data: I64, len: I64, out: I64) -> I64 {
     rooted: len > I64{0} && path_route_byte(data, I64{0}) == I64{47}
@@ -104,10 +104,10 @@ path_route_extension_dot: fn(data: I64, start: I64, length: I64) -> I64 {
     I64{-1}
 }
 
-// PathBuf::from(text): the text's bytes.
+// PathBuf.from(text): the text's bytes.
 #Export(c) jet_path_from: fn(text: I64) -> I64 { path_route_from_text(text) }
 
-// PathBuf::push over both lexical sources (an absolute part replaces; otherwise
+// PathBuf.push over both lexical sources (an absolute part replaces; otherwise
 // one separator unless the base is empty or ends in one).
 #Export(c) jet_path_join: fn(path: I64, other: I64) -> I64 {
     base: path_route_source(path)
@@ -120,8 +120,8 @@ path_route_extension_dot: fn(data: I64, start: I64, length: I64) -> I64 {
     result
 }
 
-// Path::parent: None for an empty path or a lone root; otherwise the path up
-// to the last component, trimmed as Components::as_path trims it.
+// Path.parent: None for an empty path or a lone root; otherwise the path up
+// to the last component, trimmed as Components.as_path trims it.
 #Export(c) jet_path_parent: fn(path: I64, some: I64) -> I64 {
     source: path_route_source(path)
     data: rt_text_data(source)

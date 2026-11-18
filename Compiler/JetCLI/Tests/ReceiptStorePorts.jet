@@ -46,7 +46,7 @@ rsp_claim: fn(verb: String, args: [String], paths: [String]) -[FS, Env, Time.Wai
 }
 
 // The Rust store.write(&claim, &args, status, stdout, stderr). Like the Rust
-// ReceiptStore::new, the store root is created first; the Jet store opens it.
+// ReceiptStore.new, the store root is created first; the Jet store opens it.
 rsp_publish: fn(store: String, claim: JetDriverRunReceiptClaim, stdout: String) -[FS, Env, Time.Wait]> {
     rsp_files.create_dir_all(store) ?? panic("create store root {store}")
     receipt: jet_cli_receipt_prepare(claim, 0, stdout.bytes(), [U8]{}, [JetDriverRunReceiptSection]{}, [JetDriverRecordLink]{}, [JetDriverRecordLink]{}, [String]{}) ?? panic("prepare: {err.message}")
@@ -105,7 +105,7 @@ rsp_list_current: fn(store: String) -[FS, Time.Wait]> Int {
     assert(rsp_current(store, unrelated_claim))
 }
 
-// The Rust ReceiptStore::input_paths_for read the explicit target's authority
+// The Rust ReceiptStore.input_paths_for read the explicit target's authority
 // inputs; jet_cli_comparison_input_paths is the Jet producer of that closure.
 #Test("explicit_check_receipt_tracks_package_workspace_and_generated_authorities") {
     root: rsp_root("project-authorities")

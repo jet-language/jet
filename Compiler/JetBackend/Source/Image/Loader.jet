@@ -410,23 +410,40 @@ loader_hex_push: fn(out: &[U8], value: Int) Never! {
     }
 }
 
-// Write the perf map of the image `bytes` running as `pid`:
-// /tmp/perf-<pid>.map, where `perf report` looks up code that has no file
-// behind it, as an image run from memory has none. One "<start> <size>
-// <name>" line (hex) per sized function of the image's .symtab, the names
-// a built program shows. JET_PERF_MAP=1 asks for it (Host.jet
-// jet_cli_launch). Returns "" once written, else why it wasn't.
-x64_image_perf_map: fn(bytes: [U8], pid: Int) -> String {
+// A sized function of an image's .symtab: its link address, its length in
+// bytes, and its name as a built program's symbols spell it.
+X64ImageFunction: struct {
+    start: Int,
+    size: Int,
+    name: String,
+}
+
+// The sized functions of an image's .symtab in table order, or why it has
+// none it can name (`failure`, "" when read).
+X64ImageFunctions: struct {
+    functions: [X64ImageFunction],
+    failure: String,
+}
+
+// The sized functions of the ELF image `bytes`, from its .symtab: the
+// names `perf`, `nm` and `jet perf` show for its code.
+x64_image_functions: fn(bytes: [U8]) -> X64ImageFunctions Never! {
+    read := X64ImageFunctions{functions: [X64ImageFunction]{}, failure: ""}
     size: bytes.len()
-    if size < 64 -> return "the image is not an ELF file"
+    if size < 64 {
+        read.failure = "the image is not an ELF file"
+        return read
+    }
     shoff: loader_u64(bytes, 40)
     shnum: loader_u16(bytes, 60)
-    if shoff == 0 || shnum == 0 -> return "the image has no section headers"
-    if loader_u16(bytes, 58) != 64 || shoff + shnum * 64 > size {
-        return "the image's section headers are malformed"
+    if shoff == 0 || shnum == 0 {
+        read.failure = "the image has no section headers"
+        return read
     }
-    separators: " \n".bytes()
-    out := [U8]{}
+    if loader_u16(bytes, 58) != 64 || shoff + shnum * 64 > size {
+        read.failure = "the image's section headers are malformed"
+        return read
+    }
     loop k in 0..<shnum {
         at: shoff + k * 64
         // SHT_SYMTAB; its sh_link names the string table.
@@ -435,29 +452,59 @@ x64_image_perf_map: fn(bytes: [U8], pid: Int) -> String {
         symbols_size: loader_u64(bytes, at + 32)
         link: loader_u32(bytes, at + 40)
         if link >= shnum || symbols + symbols_size > size {
-            return "the image's .symtab is malformed"
+            read.failure = "the image's .symtab is malformed"
+            return read
         }
         names: loader_u64(bytes, shoff + link * 64 + 24)
         names_end: names + loader_u64(bytes, shoff + link * 64 + 32)
-        if names_end > size -> return "the image's .strtab is malformed"
+        if names_end > size {
+            read.failure = "the image's .strtab is malformed"
+            return read
+        }
         loop s in 0..<symbols_size /% 24 {
             symbol: symbols + s * 24
             // STT_FUNC
             if (Int{bytes[symbol + 4]}) & 15 != 2 -> next
             value: loader_u64(bytes, symbol + 8)
             length: loader_u64(bytes, symbol + 16)
-            name := names + loader_u32(bytes, symbol)
-            if value == 0 || length == 0 || name >= names_end || (Int{bytes[name]}) == 0 -> next
-            loader_hex_push(out, value)
-            out.push(separators[0])
-            loader_hex_push(out, length)
-            out.push(separators[0])
-            loop name < names_end && (Int{bytes[name]}) != 0 {
-                out.push(bytes[name])
-                name += 1
+            name: names + loader_u32(bytes, symbol)
+            if value == 0 || length == 0 || name >= names_end -> next
+            text: x64_jetline_text(bytes, name)
+            if text != "" {
+                read.functions.push(X64ImageFunction{start: value, size: length, name: text})
             }
-            out.push(separators[1])
         }
+    }
+    read
+}
+
+// The index of the function of `functions` whose code holds link address
+// `pc`, else -1.
+x64_image_function_find: fn(functions: [X64ImageFunction], pc: Int) -> Int Never! {
+    loop (k, function) in functions {
+        if pc >= function.start && pc < function.start + function.size -> return k
+    }
+    -1
+}
+
+// Write the perf map of the image `bytes` running as `pid`:
+// /tmp/perf-<pid>.map, where `perf report` looks up code that has no file
+// behind it, as an image run from memory has none. One "<start> <size>
+// <name>" line (hex) per sized function of the image's .symtab
+// (x64_image_functions). JET_PERF_MAP=1 asks for it (Host.jet
+// jet_cli_launch). Returns "" once written, else why it wasn't.
+x64_image_perf_map: fn(bytes: [U8], pid: Int) -> String {
+    read: x64_image_functions(bytes)
+    if read.failure != "" -> return read.failure
+    separators: " \n".bytes()
+    out := [U8]{}
+    loop function in read.functions {
+        loader_hex_push(out, function.start)
+        out.push(separators[0])
+        loader_hex_push(out, function.size)
+        out.push(separators[0])
+        loop byte in function.name.bytes() -> out.push(byte)
+        out.push(separators[1])
     }
     path: "/tmp/perf-{pid}.map"
     loader_files.write_bytes(path, out) ?? return "couldn't write {path}: {err}"

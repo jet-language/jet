@@ -1,7 +1,7 @@
 // core.term leaves over the runtime's one stdio layer.
 
 // Stdout write_all, then flush when asked, when the frame is nonempty, or when
-// stdout is a terminal; io::Error's Display on failure.
+// stdout is a terminal; io.Error's Display on failure.
 #Export(c) jet_terminal8_write_stdout: fn(text: I64, flush: Bool, some: I64) -> I64 {
     now: flush || rt_text_len(text) != I64{0} || host_is_tty(I64{1})
     host_stdio_option_cause(host_stdio_text_failure(text, false, false, now), some)
@@ -40,7 +40,7 @@ term_read_line: fn(value: I64) -> I64 {
     failure
 }
 
-// stdin().read_line: (eof, line, None), or (false, "", Some(io::Error
+// stdin().read_line: (eof, line, None), or (false, "", Some(io.Error
 // Display)). Invalid UTF-8 is std's InvalidData "stream did not contain valid
 // UTF-8".
 #Export(c) jet_terminal8_line: fn(eof: I64, line: I64, error_tag: I64, error: I64) {
@@ -72,7 +72,7 @@ term_read_line: fn(value: I64) -> I64 {
 
 // One line of stdin for jet.runtime.term's stdin_line and the stdin line loop: its
 // text with every trailing LF and CR removed, 0 at end of input, or -1 with
-// jet_std::io_error_at(Read, "stdin") in `error`: errno through its IOError
+// jet_std.io_error_at(Read, "stdin") in `error`: errno through its IOError
 // arm, invalid UTF-8 (InvalidData) as Other. A line already whole in the
 // stdin buffer is found and checked for ASCII in one pass (stdin_line_scan),
 // validated as UTF-8 only when it is not ASCII, and copied out once at its
@@ -243,7 +243,7 @@ stdin_utf8_error: fn(error: I64) -> I64 {
 }
 
 // One stdin read of up to `n` bytes (the buffered ones first, without a read),
-// as (bytes, None), or ([], Some(io::Error Display)). Read errors propagate as
+// as (bytes, None), or ([], Some(io.Error Display)). Read errors propagate as
 // read() reports them (no EINTR retry); std's stdin maps EBADF to end of input.
 // Core rejects a negative `n` before the call.
 #Export(c) jet_terminal8_take: fn(n: I64, data: I64, length: I64, error_tag: I64, error: I64) {

@@ -1,0 +1,12 @@
+# A program run without `--observe` publishes nothing to attach to.
+# `jet inspect live --attach` names that, exits nonzero, and leaves the
+# program to run to its end exactly as it would have.
+fixture: Quiet.fixture
+session app raw: jet run quiet.jet
+step: jet inspect live --attach {pid:app} --once
+exit: 1
+stdout: empty
+stderr: ~ "Process {pid:app} was not started with observe enabled"
+close app
+exit: 0
+stdout: = "started\nfinished\n"

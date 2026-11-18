@@ -57,7 +57,7 @@ dns_slice_ms: fn(deadline: I64, name: I64, error: I64) -> I64 {
     (remaining + I64{999999}) /% I64{1000000}
 }
 
-// Instant::now() + timeout (ms); "network timeout exceeds platform range" on
+// Instant.now() + timeout (ms); "network timeout exceeds platform range" on
 // overflow. Returns the deadline or 0 with the message.
 dns_deadline_after: fn(milliseconds: I64, error: I64) -> I64 {
     now: sync_now_ns()
@@ -1188,7 +1188,7 @@ dns_system_servers: fn(servers_out: I64) -> I64 {
     kept
 }
 
-// char::is_whitespace of the UTF-8 scalar at `at`: its byte width, else 0.
+// char.is_whitespace of the UTF-8 scalar at `at`: its byte width, else 0.
 dns_space_width: fn(at: I64) -> I64 {
     if unicode_is_white_space(rt_text_decode(at)) -> rt_text_width(at) else -> I64{0}
 }
@@ -1264,7 +1264,7 @@ dns_system_lookup_kind: fn(name: I64, milliseconds: I64, kind: I64, data_out: I6
             last = dns_named(rt_static_text("network timeout during DNS lookup for `"), name, rt_static_text("`"))
             break
         }
-        // Duration::as_millis truncates.
+        // Duration.as_millis truncates.
         budget: remaining /% I64{1000000}
         server: trap_word(wrapping(servers + at * I64{8}))
         status: if (kind == I64{0}) -> dns_txt_at(server, name, budget, data_out, length_out, error) else if (kind == I64{1}) -> dns_ptr_at(server, name, budget, data_out, length_out, error) else -> dns_srv_at(server, name, budget, data_out, length_out, error)

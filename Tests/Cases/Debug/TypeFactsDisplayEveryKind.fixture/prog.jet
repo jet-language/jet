@@ -1,0 +1,56 @@
+Point: struct {
+    x: Int,
+    y: Int,
+}
+
+Color: enum {
+    Red,
+    Green,
+    Blue,
+}
+
+Shape: enum {
+    Circle(radius: Int),
+    Rect(w: Int, h: Int),
+    Empty,
+}
+
+Tag: enum {
+    Num(Int),
+    Word(String),
+}
+
+Holder: struct {
+    tag: Tag,
+    color: Color,
+}
+
+hold: fn(value: Int | String) -> Int | String { value.copy() }
+
+run: fn() {
+    flag: true
+    letter: 'j'
+    color: Color.Green
+    shape: Shape.Rect{w: 3, h: 4}
+    empty: Shape.Empty
+    tag: Tag.Num(7)
+    some: Int?{5}
+    none: Int?{None}
+    text: String?{"hi"}
+    results: [Int String!]{Ok(2), Err("no")}
+    either: hold("seven")
+    pair: {n: 1, word: "two"}
+    points: [Point]{Point{x: 1, y: 2}}
+    holder: Holder{tag: Tag.Word("x"), color: Color.Red}
+    print("{flag} {letter} {color} {shape} {empty} {tag} {some} {none} {text} {results.len()} {pair.n} {points.len()} {holder.color}")
+    print(describe(either))
+}
+
+describe: fn(value: Int | String) -> String {
+    copied: value.copy()
+    if copied == {
+        .Int(n) -> { return "{n}" }
+        .String(word) -> { return word }
+    }
+    return ""
+}

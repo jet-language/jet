@@ -1,0 +1,16 @@
+# A union arm names an inline module's member type as type position does:
+# `.geo.Point(p)` matches the `geo.Point` member of `Int | geo.Point`, in a
+# match and in a one-arm test, and `.Int(n)` matches the other member.
+fixture: InlineModuleUnionArmNamesAMemberType/Input
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "int 14\npoint 1 2\nonly 3\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "int 14\npoint 1 2\nonly 3\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "int 14\npoint 1 2\nonly 3\n"

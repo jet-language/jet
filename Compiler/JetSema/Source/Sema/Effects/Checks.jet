@@ -652,7 +652,7 @@ sema_effect_nondeterministic_core: fn(node: SemaEffectNode, expression: BodyNode
     None
 }
 
-// Rust `assume_deterministic { … }` (Stmt::AssumeDet, det_suppress):
+// Rust `assume_deterministic { … }` (Stmt.AssumeDet, det_suppress):
 // inside a pure body the block suspends the determinism rejections, E3403 and
 // E3401 alike.
 sema_effect_in_assume_det: fn(node: SemaEffectNode, span: Span) -> Bool Never! {
@@ -664,7 +664,7 @@ sema_effect_in_assume_det: fn(node: SemaEffectNode, span: Span) -> Bool Never! {
     false
 }
 
-// Rust `crate::Sema::e3403` at a Clock intrinsic site
+// Rust `crate.Sema.e3403` at a Clock intrinsic site
 // (record_static_time_effect and the `Clock.{method}` check, `Clock
 // comparison`, `Clock formatting` and `Clock copy`) or an `ExpiringSecret.with`
 // expiry read: the producer recorded a `Time` row under the operation's own
@@ -3966,7 +3966,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
         // `Shared{x}` (Rust `Shared.new`): new shared storage that every
         // handle copy retains.
         .StaticCall(owner, _, method, _, _) -> {
-            if owner == .Prelude(_, path, _) && path == "jet_std::JetShared" && method.name == "new" {
+            if owner == .Prelude(_, path, _) && path == "jet_std.JetShared" && method.name == "new" {
                 sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` allocates shared storage", "alloc", None)
                 sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` introduces reference-counted ownership", "rc", None)
             }
@@ -4662,7 +4662,7 @@ sema_effect_above_bytes: fn(name: String, opening: String) -> Int? {
     Val(bytes)
 }
 
-// Rust `MemoryFact::display` for the denials a memory proof covers.
+// Rust `MemoryFact.display` for the denials a memory proof covers.
 sema_effect_memory_fact: fn(name: String) -> String? {
     if name == "Mem.Alloc" || name == "Mem.Rc" -> return Val("!{name}")
     bound: sema_effect_memory_bound(name) ?? return None

@@ -102,7 +102,7 @@ entries_slot: fn(context: I64, index: I64) -> I64 {
     I64{0}
 }
 
-// A recycled index (Vec::pop of the free list), else a new trailing slot.
+// A recycled index (Vec.pop of the free list), else a new trailing slot.
 entries_slot_take: fn(context: I64) -> I64 {
     free: rt_text_word(wrapping(context + I64{40}))
     if (free != I64{0}) {
@@ -149,7 +149,7 @@ entries_out_error: fn(failure: I64, kind: I64, code_tag: I64, code: I64, cause_t
     rt_text_store(cause, host_errno_cause(errno))
 }
 
-// The (kind, code?, cause?) of a std io::Error that a shared leaf already
+// The (kind, code?, cause?) of a std io.Error that a shared leaf already
 // carried in an IOError (its OS code, else its InvalidInput/Other kind and
 // Display cause); consumes the IOError.
 entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
@@ -193,7 +193,7 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
     jet_int_owned_from_i64(key)
 }
 
-// HashMap::remove: an unknown key is a no-op.
+// HashMap.remove: an unknown key is a no-op.
 #Export(c) jet_entries8_close: fn(key: I64) {
     root: entries_root
     sync_mutex_lock(root)
@@ -239,7 +239,7 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
     entries_leave(context)
 }
 
-// std::fs::read_dir (opendir: O_RDONLY|O_DIRECTORY|O_CLOEXEC) into the slot.
+// std.fs.read_dir (opendir: O_RDONLY|O_DIRECTORY|O_CLOEXEC) into the slot.
 #Export(c) jet_entries8_read_dir: fn(key: I64, index: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
     context: entries_enter(key)
     if (context == I64{0}) {
@@ -270,7 +270,7 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
     entries_out_error(failure, kind, code_tag, code, cause_tag, cause)
 }
 
-// ReadDir::next for the slot: (end, child, kind, code?, cause?). The child
+// ReadDir.next for the slot: (end, child, kind, code?, cause?). The child
 // slot takes path.join(name), destination.join(name), the name and the
 // entry's d_type; end clears the parent's stream.
 #Export(c) jet_entries8_next: fn(key: I64, index: I64, end: I64, child: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
@@ -331,7 +331,7 @@ entries_out_io_error: fn(value: I64, kind: I64, code_tag: I64, code: I64, cause_
     entries_out_error(I64{0}, kind, code_tag, code, cause_tag, cause)
 }
 
-// DirEntry::file_type: d_type, with the no-follow metadata fallback for
+// DirEntry.file_type: d_type, with the no-follow metadata fallback for
 // DT_UNKNOWN; (is_dir, is_file, kind, code?, cause?).
 #Export(c) jet_entries8_file_type: fn(key: I64, index: I64, directory: I64, file: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
     context: entries_enter(key)
@@ -373,7 +373,7 @@ entries_destination_text: fn(context: I64, slot: I64) -> I64 {
     rt_text_copy(destination, rt_text_word(wrapping(slot + I64{32})))
 }
 
-// std::fs::create_dir_all(destination), the shared create_dirs leaf.
+// std.fs.create_dir_all(destination), the shared create_dirs leaf.
 #Export(c) jet_entries8_mkdir: fn(key: I64, index: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
     context: entries_enter(key)
     if (context == I64{0}) {
@@ -397,7 +397,7 @@ entries_destination_text: fn(context: I64, slot: I64) -> I64 {
     jet_rt_free(scratch, I64{8}, I64{8})
 }
 
-// std::fs::copy(path, destination), the shared copy leaf.
+// std.fs.copy(path, destination), the shared copy leaf.
 #Export(c) jet_entries8_copy: fn(key: I64, index: I64, kind: I64, code_tag: I64, code: I64, cause_tag: I64, cause: I64) {
     context: entries_enter(key)
     if (context == I64{0}) {
@@ -679,7 +679,7 @@ files_name_valid: fn(text: I64, operation: I64, shown: I64, error: I64) -> Bool 
     I64{1}
 }
 
-// std's UTF-8 acceptance (String::from_utf8 / OsString::into_string).
+// std's UTF-8 acceptance (String.from_utf8 / OsString.into_string).
 files_utf8_valid: fn(data: I64, length: I64) -> Bool {
     message: text_bytes_utf8_error(data, length)
     if (message == I64{0}) { return true }
@@ -687,7 +687,7 @@ files_utf8_valid: fn(data: I64, length: I64) -> Bool {
     false
 }
 
-// Vec<String>::sort: byte order (insertion sort keeps equal names stable).
+// Vec<String>.sort: byte order (insertion sort keeps equal names stable).
 files_texts_sort: fn(data: I64, count: I64) {
     at := I64{1}
     loop at < count {
@@ -803,7 +803,7 @@ files_texts_sort: fn(data: I64, count: I64) {
     I64{1}
 }
 
-// std::fs::create_dir_all, the shared create_dirs leaf.
+// std.fs.create_dir_all, the shared create_dirs leaf.
 #Export(c) jet_std_fs_create_dir_all_raw: fn(path: I64, error: I64) -> I64 {
     jet_files_create_dirs_os(path, error)
 }

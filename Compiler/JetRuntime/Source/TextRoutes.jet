@@ -13,7 +13,7 @@
     jet_int_owned_from_i64(if (cap > I64{0}) -> cap else -> rt_text_len(value))
 }
 
-// `s.compare(other)` (Rust `str::cmp`): -1, 0 or 1 by lexicographic UTF-8
+// `s.compare(other)` (Rust `str.cmp`): -1, 0 or 1 by lexicographic UTF-8
 // byte order, read in place; a proper prefix orders first.
 #Export(c) jet_text_compare: fn(left: I64, right: I64) -> I64 {
     left_data: rt_text_data(left)
@@ -98,7 +98,7 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
 }
 
 #Export(c) jet_string_lines: fn(value: I64, output: I64) -> I64 {
-    // Rust str::lines: LF terminates, one preceding CR is removed; a trailing
+    // Rust str.lines: LF terminates, one preceding CR is removed; a trailing
     // LF has no extra empty line. A bare final CR is ordinary text.
     bytes: rt_text_data(value)
     length: rt_text_len(value)
@@ -135,7 +135,7 @@ rt_text_hash_fold: fn(hash: I64, word: I64) -> I64 {
     count
 }
 
-// jet_string_words: Rust str::split_whitespace, the fields between runs of
+// jet_string_words: Rust str.split_whitespace, the fields between runs of
 // Unicode White_Space. No field is empty, so blank text has none. An ASCII
 // byte is tested in place (space and bytes 9 through 13 are its White_Space);
 // only a multi-byte scalar is decoded and looked up.
@@ -274,7 +274,7 @@ rt_text_ascii: fn(value: I64, upper: Bool) -> I64 {
 #Export(c) jet_text_ascii_upper: fn(value: I64) -> I64 { rt_text_ascii(value, true) }
 
 #Export(c) jet_string_slice: fn(value: I64, start: I64, end: I64, file: I64, line: I64) -> I64 {
-    // CAbiRoutes fixed::<u32> decodes an exact Int then checks the width.
+    // CAbiRoutes fixed<u32> decodes an exact Int then checks the width.
     native_line: jet_int_owned_to_i64(line)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     if (native_line < I64{0} || native_line > I64{4294967295}) {

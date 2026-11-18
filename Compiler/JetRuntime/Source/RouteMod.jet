@@ -74,7 +74,7 @@ MOD_MAX_EXPORT_PARAMS: I64{4096}
 
 MOD_ABI_VERSION_ACCEPTED: I64{2}
 
-// O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC: OpenOptions::write().create_new().
+// O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC: OpenOptions.write().create_new().
 MOD_STAGE_FLAGS: I64{524481}
 
 // JetMod: [native handle, staged payload path].
@@ -130,7 +130,7 @@ mod_texts_equal: fn(left: I64, right: I64) -> Bool {
     rt_text_len(left) == rt_text_len(right) && rt_text_equal_bytes(rt_text_data(left), rt_text_data(right), rt_text_len(left))
 }
 
-// Path::display of exact path bytes.
+// Path.display of exact path bytes.
 mod_push_display: fn(target: I64, path: I64) {
     shown: rt_text_lossy(rt_text_data(path), rt_text_len(path))
     jet_rt_string_builder_push(target, shown)
@@ -143,7 +143,7 @@ mod_unlink: fn(path: I64) {
     fd_c_path_drop(name, path)
 }
 
-// std::fs::metadata (following links) st_mode, or -1 when it fails.
+// std.fs.metadata (following links) st_mode, or -1 when it fails.
 mod_metadata_mode: fn(path: I64) -> I64 {
     scratch: jet_rt_alloc(I64{160}, I64{8})
     jet_fs_stat_raw(path, true, scratch, wrapping(scratch + I64{128}))
@@ -220,7 +220,7 @@ mod_reject_reparse: fn(path: I64, label: I64) -> I64 {
     failure
 }
 
-// std::fs::canonicalize as exact path bytes; a failure stores the tagged
+// std.fs.canonicalize as exact path bytes; a failure stores the tagged
 // reason (NotFound for ENOENT, else Invalid) and returns 0.
 mod_realpath: fn(path: I64, label: I64, error: I64) -> I64 {
     name: fd_c_path(path)
@@ -279,7 +279,7 @@ mod_canonical: fn(path: I64, label: I64, error: I64) -> I64 {
     second
 }
 
-// Path::strip_prefix: `path` is `root` or lies below it, component-wise.
+// Path.strip_prefix: `path` is `root` or lies below it, component-wise.
 mod_within: fn(path: I64, root: I64) -> Bool {
     length: rt_text_len(root)
     if (rt_text_len(path) < length || !rt_text_equal_bytes(rt_text_data(path), rt_text_data(root), length)) {

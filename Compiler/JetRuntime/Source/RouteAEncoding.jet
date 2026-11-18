@@ -11,8 +11,8 @@
     result
 }
 
-// format!("{:?}", io::Error::from_raw_os_error(code).kind()) on Linux (the
-// Rust 1.97 sys::decode_error_kind table).
+// format!("{:?}", io.Error.from_raw_os_error(code).kind()) on Linux (the
+// Rust 1.97 sys.decode_error_kind table).
 rt_io_error_kind_name: fn(code: I64) -> I64 {
     if {
         (code == I64{1} || code == I64{13}) -> rt_static_text("PermissionDenied")
@@ -109,7 +109,7 @@ encoding_env_flag: fn(name: I64) -> Bool {
     !(length == I64{1} && rt_text_byte(value) == I64{48})
 }
 
-// str::trim's Unicode White_Space set.
+// str.trim's Unicode White_Space set.
 encoding_white_space: fn(scalar: I64) -> Bool {
     (scalar >= I64{9} && scalar <= I64{13}) || scalar == I64{32} || scalar == I64{133} || scalar == I64{160} || scalar == I64{5760} || (scalar >= I64{8192} && scalar <= I64{8202}) || scalar == I64{8232} || scalar == I64{8233} || scalar == I64{8239} || scalar == I64{8287} || scalar == I64{12288}
 }
@@ -146,7 +146,7 @@ encoding_trim: fn(data: I64, start: I64, end: I64, out: I64) {
     rt_text_store(wrapping(out + I64{8}), to)
 }
 
-// `str::parse::<uN>()` of data[start..end): optional '+', decimal digits, no
+// `str.parse<uN>()` of data[start..end): optional '+', decimal digits, no
 // overflow past `limit` (an unsigned bound in U64 bits). -1: Err.
 encoding_parse_unsigned: fn(data: I64, start: I64, end: I64, limit: U64) -> I64 {
     at := start
@@ -163,7 +163,7 @@ encoding_parse_unsigned: fn(data: I64, start: I64, end: I64, limit: U64) -> I64 
     wrapping(I64{value})
 }
 
-// std::env::var(name).ok().and_then(|v| v.parse().ok()); -1 when absent.
+// std.env.var(name).ok().and_then(|v| v.parse().ok()); -1 when absent.
 encoding_env_number: fn(name: I64, limit: U64) -> I64 {
     value: rt_env_get(name)
     if (value == I64{0}) { return I64{-1} }
@@ -345,7 +345,7 @@ encoding_hostile_read_done: fn(state: I64, count: I64) -> Bool {
     rt_text_word(wrapping(state + I64{40})) != I64{0} && alloc_unsigned_less(rt_text_word(wrapping(state + I64{48})), total)
 }
 
-// std::fs::metadata (stat, following links) of the raw path bytes; a NUL is
+// std.fs.metadata (stat, following links) of the raw path bytes; a NUL is
 // std's CString refusal.
 #Export(c) jet_data_host_path_is_file: fn(data: I64, length: I64, ok: I64, error: I64) -> I64 {
     count: if (length < I64{0} || data == I64{0}) -> I64{0} else -> length

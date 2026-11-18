@@ -380,7 +380,7 @@
   function sourceBindingNames(src) {
     const names = [];
     const seen = new Set();
-    const re = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?::=|::)/gm;
+    const re = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*:=/gm;
     let match;
     while ((match = re.exec(String(src || "")))) {
       if (seen.has(match[1])) continue;
@@ -509,7 +509,7 @@
     for (const span of spans) {
       if (span.start < start || span.end > end) return null;
     }
-    if (!/^\s*(if|loop|return|break|next|[A-Za-z_][A-Za-z0-9_]*(\s*[:=]|::|\())/m.test(snippet)) return null;
+    if (!/^\s*(if|loop|return|break|next|[A-Za-z_][A-Za-z0-9_]*(\s*[:=]|\())/m.test(snippet)) return null;
     return {
       text: snippet.endsWith("\n") ? snippet : snippet + "\n",
       title: nodes.map((n) => n.title || n.kind).join(", "),

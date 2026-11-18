@@ -290,7 +290,7 @@ spawn_exec_errno_class: fn(result: I64) -> I64 {
 
 // ONLY raw word loads/stores/syscalls are reachable in the child. In particular
 // there is no allocation, exact-Int/Text helper, mutex, or inherited TLS use.
-// Mirrors std::process's Unix fork+pre_exec path; the child shares the parent's
+// Mirrors std.process's Unix fork+pre_exec path; the child shares the parent's
 // memory (spawn_vfork), so its only stores are the scratch error words and the
 // fallback argv slot this spawn owns.
 spawn_exec_child: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, err_write: I64, candidates: I64, argv: I64, envp: I64, fallback_argv: I64, cwd: I64, dirs: I64, session: Bool, terminal: Bool, cpu: Bool, memory: Bool, files: Bool, parent: I64, affinity: I64, ioprio: I64, scope: I64) {
@@ -821,7 +821,7 @@ spawn_vfork: fn(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, 
     }
     sync_mutex_lock(child)
     pid: fd_word(child, I64{8})
-    // std::process::Child::kill succeeds after its cached reap. Explicit
+    // std.process.Child.kill succeeds after its cached reap. Explicit
     // group signaling can still clean descendants after their leader exits.
     result: if (!group && fd_word(child, I64{16}) == I64{1}) -> I64{0} else -> host_call(I64{62}, if group -> wrapping(I64{0} - pid) else -> pid, native_signal, I64{0})
     sync_mutex_unlock(child)

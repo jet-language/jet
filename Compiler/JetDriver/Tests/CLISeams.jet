@@ -284,7 +284,8 @@ seams_deep_refused: fn(scope: String) -> [String] {
     every: seams_deep_kept(DeepChecks{all: true})
     seams_require(every.len() == 1, "the bare request keeps the one holder, not {every.len()}")
     seams_require(seams_deep_kept(DeepChecks{scopes: [String]{"tree"}}) == every, "the package scope keeps its holder")
-    seams_require(seams_deep_kept(DeepChecks{scopes: [String]{"tree::check"}}) == every, "the function scope keeps its holder")
-    seams_require(seams_deep_refused("tree::leaf") == [String]{"E2121"}, "a scope whose declarations hold none is E2121")
-    seams_require(seams_deep_refused("tree::nowhere") == [String]{"E2120"}, "a scope naming no declaration is E2120")
+    seams_require(seams_deep_kept(DeepChecks{scopes: [String]{"tree.check"}}) == every, "the function scope keeps its holder")
+    seams_require(seams_deep_refused("tree.leaf") == [String]{"E2121"}, "a scope whose declarations hold none is E2121")
+    seams_require(seams_deep_refused("tree.nowhere") == [String]{"E2120"}, "a scope naming no declaration is E2120")
+    seams_require(seams_deep_refused("forest.check") == [String]{"E2122"}, "a scope whose prefix names no module is E2122")
 }

@@ -499,7 +499,7 @@ jet_target_programmers_json: fn(programmers: [TargetProgrammerFacts]) -> String 
     "[{rows.join(",")}]"
 }
 
-// Rust TargetProgrammerFacts::missing_fact.
+// Rust TargetProgrammerFacts.missing_fact.
 jet_target_programmer_missing_fact: fn(facts: TargetProgrammerFacts) -> String? Never! {
     if facts.executable.trim().is_empty() -> return Val("executable")
     loop value in facts.config {
@@ -745,7 +745,7 @@ jet_target_triple_os: fn(triple: String) -> TTargetOS? Never! {
     }
 }
 
-// Rust TargetMachineUse::default.
+// Rust TargetMachineUse.default.
 jet_target_machine_use_default: fn() -> TargetMachineUse Never! {
     TargetMachineUse{
         stack_bytes: 0,
@@ -757,7 +757,7 @@ jet_target_machine_use_default: fn() -> TargetMachineUse Never! {
     }
 }
 
-// Rust TargetCapability::as_str.
+// Rust TargetCapability.as_str.
 jet_target_capability_name: fn(capability: TargetCapability) -> String Never! {
     if capability == {
         .Allocator -> "Target.Allocator"
@@ -823,7 +823,7 @@ jet_target_capabilities_for_core_usage: fn(api: String) -> [TargetCapability] Ne
     result
 }
 
-// Rust TargetMachineUse::from_core_apis.
+// Rust TargetMachineUse.from_core_apis.
 jet_target_machine_use_from_core_apis: fn(apis: [String]) -> TargetMachineUse Never! {
     usage := jet_target_machine_use_default()
     sorted := apis.copy()
@@ -848,9 +848,9 @@ jet_target_machine_use_from_core_apis: fn(apis: [String]) -> TargetMachineUse Ne
     usage
 }
 
-// Rust ProviderAbi::is_valid / ProviderContract::is_valid.
+// Rust ProviderAbi.is_valid / ProviderContract.is_valid.
 jet_target_no_whitespace: fn(value: String) -> Bool Never! {
-    // UTF-8 spellings of Rust char::is_whitespace. Scan the borrowed byte
+    // UTF-8 spellings of Rust char.is_whitespace. Scan the borrowed byte
     // view rather than allocating chars and a one-character String per scalar.
     bytes: value.bytes()
     loop index in 0..<bytes.len() {
@@ -892,7 +892,7 @@ jet_target_provider_valid: fn(provider: ProviderContract) -> Bool Never! {
     true
 }
 
-// Rust MemoryRegion::end / contains.
+// Rust MemoryRegion.end / contains.
 jet_target_memory_end: fn(region: MemoryRegion) -> Int? Never! {
     end: region.origin + region.size.bytes
     if end > 18446744073709551615 -> None else -> Val(end)
@@ -938,7 +938,7 @@ jet_target_sink_provider: fn(policy: ByteSinkPolicy, capability: TargetCapabilit
     }
 }
 
-// Rust TargetMachine::provides_capability.
+// Rust TargetMachine.provides_capability.
 jet_target_machine_provides_capability: fn(machine: TargetMachine, capability: TargetCapability) -> Bool Never! {
     hosted: jet_target_environment_identity(machine) == "hosted"
     if capability == {
@@ -1237,7 +1237,7 @@ jet_target_validate_mmio: fn(machine: TargetMachine, usage: TargetMachineUse, er
     }
 }
 
-// Rust TargetHardwareFacts::validate_into.
+// Rust TargetHardwareFacts.validate_into.
 jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [MemoryRegion], errors: &[TargetMachineError]) Never! {
     if hardware.svd == Val(svd) {
         digest: if svd.sha256.starts_with("sha256:") -> String.from_bytes(svd.sha256.bytes()[7..<svd.sha256.bytes().len()]) ?? "" else -> ""
@@ -1333,14 +1333,14 @@ jet_target_hardware_validate_into: fn(hardware: TargetHardwareFacts, memory: [Me
     }
 }
 
-// Rust TargetHardwareFacts::validate.
+// Rust TargetHardwareFacts.validate.
 jet_target_hardware_validate: fn(hardware: TargetHardwareFacts, memory: [MemoryRegion]) -> [TargetMachineError] Never! {
     errors := [TargetMachineError]{}
     jet_target_hardware_validate_into(hardware, memory, errors)
     errors
 }
 
-// Rust TargetMachine::validate; preserve push order.
+// Rust TargetMachine.validate; preserve push order.
 jet_target_machine_validate: fn(machine: TargetMachine, usage: TargetMachineUse) -> [TargetMachineError] Never! {
     errors := [TargetMachineError]{}
     if machine.triple.trim().is_empty() -> errors.push(.MissingTargetTriple)
@@ -1465,12 +1465,12 @@ jet_target_machine_errors_debug: fn(errors: [TargetMachineError]) -> String Neve
     "[{rows.join(", ")}]"
 }
 
-// Rust MemoryRegion::new.
+// Rust MemoryRegion.new.
 jet_target_memory_region_new: fn(name: String, origin: Int, size: ByteSize, kind: MemoryKind, access: MemoryAccess) -> MemoryRegion Never! {
     MemoryRegion{name: name, origin: origin, size: size, kind: kind, access: access}
 }
 
-// Rust TargetMachine::with_startup_facts.
+// Rust TargetMachine.with_startup_facts.
 jet_target_machine_with_startup_facts: fn(machine: TargetMachine, entry: String, vectors: String, abi: ProviderABI, placement: String) -> TargetMachine Never! {
     result := machine
     result.startup_entry = entry
@@ -1493,7 +1493,7 @@ jet_target_builtin_provider_digest: fn(name: String, digest: String) -> Provider
     }
 }
 
-// Rust TargetMachine::board_sensor_v1.
+// Rust TargetMachine.board_sensor_v1.
 jet_target_machine_board_sensor_v1: fn(package_version: String) -> TargetMachine Never! {
     machine := jet_target_machine_bare_metal("board.sensor_v1", "thumbv7em-none-eabihf", package_version)
     machine.memory = [MemoryRegion]{
@@ -1533,7 +1533,7 @@ jet_target_machine_board_sensor_v1: fn(package_version: String) -> TargetMachine
     machine
 }
 
-// Rust TargetMachine::board_virt_aarch64.
+// Rust TargetMachine.board_virt_aarch64.
 jet_target_machine_board_virt_aarch64: fn(package_version: String) -> TargetMachine Never! {
     machine := jet_target_machine_with_startup_facts(jet_target_machine_bare_metal("board.virt_aarch64", "aarch64-unknown-none", package_version), "_start", "vectors", ProviderABI{calling_convention: "AArch64", version: "1"}, ".vectors")
     machine.memory = [MemoryRegion]{
@@ -1570,7 +1570,7 @@ jet_target_machine_board_virt_aarch64: fn(package_version: String) -> TargetMach
     machine
 }
 
-// Rust TargetMachine::wasm_no_os.
+// Rust TargetMachine.wasm_no_os.
 jet_target_machine_wasm_no_os: fn(package_version: String) -> TargetMachine Never! {
     machine := jet_target_machine_bare_metal("wasm.no-os", "wasm32-unknown-unknown", package_version)
     machine.memory = [MemoryRegion]{
@@ -1604,7 +1604,7 @@ jet_target_execution_tier_name: fn(tier: TargetExecutionTier) -> String Never! {
     }
 }
 
-// Rust TargetMachine::supports_execution_tier: no-OS machines are AOT-only;
+// Rust TargetMachine.supports_execution_tier: no-OS machines are AOT-only;
 // hosted ones keep Dev.
 jet_target_machine_supports_execution_tier: fn(machine: TargetMachine, tier: TargetExecutionTier) -> TargetMachineError? Never! {
     if machine.no_os && tier == .Dev {

@@ -294,19 +294,17 @@ deep_checks_read: fn(argv: [String]) -> DeepChecksRead Never! {
     DeepChecksRead.Read{request: request}
 }
 
-// A scope is a package name, alone or then `::` and the names of a module,
-// type or function under it joined by `.` (`tree`, `tree::run`,
-// `tree::balance.Tree.fix`). A package name is ASCII letters, digits, `_`
-// and `-`; each name after `::` is letters, digits and `_`.
+// A scope is a dotted path: a package name, alone or then the names of a
+// module, type or function under it (`tree`, `tree.run`,
+// `tree.balance.Tree.fix`). A package name is ASCII letters, digits, `_`
+// and `-`; every later name is letters, digits and `_`.
 deep_checks_scope_valid: fn(scope: String) -> Bool Never! {
-    if scope.split_once("::") == .Val(parts) {
-        if !deep_checks_name_valid(parts.before, true) -> return false
-        loop name in parts.after.split(".") {
-            if !deep_checks_name_valid(name, false) -> return false
-        }
-        return true
+    package := true
+    loop name in scope.split(".") {
+        if !deep_checks_name_valid(name, package) -> return false
+        package = false
     }
-    deep_checks_name_valid(scope, true)
+    true
 }
 
 // One name of a scope: ASCII letters, digits and `_`, and `-` in a package
@@ -347,41 +345,49 @@ deep_checks_flags: fn(request: DeepChecks) -> [String] Never! {
     words
 }
 
-// Does `scope` select the declaration at `path` (`<package>::<names>`): the
-// path itself, or one under it, at `::` under a package and at `.` under a
-// name (`tree` selects `tree::run` and `tree::balance.Tree.fix`;
-// `tree::balance` selects the latter).
+// Does `scope` select the declaration at `path` (`<package>.<names>`): the
+// path itself, or one under it at a `.` (`tree` selects `tree.run` and
+// `tree.balance.Tree.fix`; `tree.balance` selects the latter and not
+// `tree.balanced.fix`).
 deep_checks_selects: fn(scope: String, path: String) -> Bool Never! {
-    if path == scope -> return true
-    separator: if scope.contains("::") -> "." else -> "::"
-    path.starts_with("{scope}{separator}")
+    path == scope || path.starts_with("{scope}.")
 }
 
 // A scope that keeps no deep check. `selected` are the declarations it
 // names, none of which holds one; empty when it names no declaration.
+// `unresolved` is the split of a scope whose longest module prefix names no
+// one module of the program (dotted_path_split).
 DeepChecksUnselected: struct {
     scope: String,
     selected: [String],
+    unresolved: DottedPathSplit?{None},
 }
 
 // Every scope of `request` that keeps no deep check, in argv order, given the
-// path of each declaration (`paths`) and of each that holds a deep check
-// (`holders`). A bare flag beside a scope excuses none.
-deep_checks_unselected: fn(request: DeepChecks, paths: [String], holders: [String]) -> [DeepChecksUnselected] Never! {
+// program's modules, each named by its package and dotted module path
+// (`modules`), the path of each declaration (`paths`) and of each that holds
+// a deep check (`holders`). A scope is read as every dotted path is: at its
+// longest prefix that names one module. A bare flag beside a scope excuses
+// none.
+deep_checks_unselected: fn(request: DeepChecks, modules: [NameModule], paths: [String], holders: [String]) -> [DeepChecksUnselected] Never! {
     found := [DeepChecksUnselected]{}
     loop scope in request.scopes {
-        kept := false
-        loop path in holders {
-            if deep_checks_selects(scope, path) -> kept = true
-        }
-        if kept -> next
+        split: dotted_path_split(scope, modules)
+        unresolved: if split.named == 1 -> DottedPathSplit?{None} else -> Val(split)
         selected := [String]{}
-        loop path in paths {
-            if deep_checks_selects(scope, path) && !selected.contains(path) {
-                selected.push(path.copy())  // copy: the report owns its paths.
+        if unresolved == None {
+            kept := false
+            loop path in holders {
+                if deep_checks_selects(scope, path) -> kept = true
+            }
+            if kept -> next
+            loop path in paths {
+                if deep_checks_selects(scope, path) && !selected.contains(path) {
+                    selected.push(path.copy())  // copy: the report owns its paths.
+                }
             }
         }
-        found.push(DeepChecksUnselected{scope: scope.copy(), selected: selected})  // copy: the report outlives the request.
+        found.push(DeepChecksUnselected{scope: scope.copy(), selected: selected, unresolved: unresolved})  // copy: the report outlives the request.
     }
     found
 }
@@ -395,10 +401,15 @@ deep_checks_malformed: fn(argument: String) -> Diagnostic Never! {
     deep_checks_report("E2119", argument, "", "", "")
 }
 
-// The report of one scope that keeps no deep check: E2120 when it names no
-// declaration, E2121 when the declarations it names hold none. The fix offers
-// the scopes that do keep a deep check, ready to copy.
-deep_checks_unselected_report: fn(row: DeepChecksUnselected, holders: [String]) -> Diagnostic Never! {
+// The report of one scope that keeps no deep check: E2122 when its prefix
+// names no one module of `modules` (offering those of `package`, the
+// program's own), E2120 when it names no declaration, E2121 when the
+// declarations it names hold none. The E2120 and E2121 fix offers the scopes
+// that do keep a deep check, ready to copy.
+deep_checks_unselected_report: fn(row: DeepChecksUnselected, modules: [NameModule], package: String, holders: [String]) -> Diagnostic Never! {
+    if row.unresolved == .Val(split) {
+        return dotted_path_unresolved(row.scope, modules, package, split)
+    }
     held: if holders.len() == 0 -> "no declaration of this program holds one" else -> deep_checks_names(holders, "{DEEP_CHECKS_FLAG}=")
     if row.selected.len() == 0 -> return deep_checks_report("E2120", "", row.scope, "", held)
     deep_checks_report("E2121", "", row.scope, deep_checks_names(row.selected, ""), held)

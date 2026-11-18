@@ -19,9 +19,13 @@ JetLiveValue: struct {
     rendered_value: String?,
 }
 
+// `label` is the task's name (`task@<site>` when the program gave none) and
+// `spawn_site` the runtime's spawn-site ordinal.
 JetLiveTask: struct {
     id: Int,
     parent: Int,
+    label: String,
+    spawn_site: Int,
     state: String,
     wait: String,
     deadline_ms: Int?,
@@ -198,6 +202,30 @@ jet_live_contains: fn(raw: [U8], word: String) -> Bool Never! {
     false
 }
 
+// A live value is a module-level static that a hot reload carries, so its id
+// is that static's identity in the one kind-prefix scheme of the semantic
+// index and `jet expand`: `static:` and the dotted path of its module and
+// name (`static:app.counter`), each name letters, digits and `_`.
+JET_LIVE_VALUE_KIND: "static:"
+
+jet_live_value_identity: fn(value_id: String) -> Bool Never! {
+    if !value_id.starts_with(JET_LIVE_VALUE_KIND) -> return false
+    bytes: value_id.bytes()
+    names := 1
+    length := 0
+    loop at in JET_LIVE_VALUE_KIND.bytes().len()..<bytes.len() {
+        byte: Int{bytes[at]}
+        if byte == 46 {
+            if length == 0 -> return false
+            names += 1
+            length = 0
+        } else if (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 {
+            length += 1
+        } else { return false }
+    }
+    names > 1 && length > 0
+}
+
 jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     cursor := JetLiveCursor{bytes: bytes, at: 0}
     if jet_live_word(cursor) != JET_LIVE_MAGIC {
@@ -244,12 +272,13 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
             loop _ in 0..<count {
                 id: jet_live_unsigned(cursor)
                 parent: jet_live_unsigned(cursor)
-                _: jet_live_word(cursor)
+                spawn_site: jet_live_unsigned(cursor)
                 state_word: jet_live_word(cursor)
                 deadline_present: jet_live_word(cursor) != U64{0}
                 deadline: jet_live_signed(cursor)
                 task_canceled: jet_live_word(cursor) != U64{0}
-                _: jet_live_raw(cursor)
+                label_recorded: jet_live_raw(cursor)
+                label_raw: label_recorded ?? [U8]{}
                 wait_recorded: jet_live_raw(cursor)
                 wait_raw: wait_recorded ?? [U8]{}
                 state: if state_word == (U64{0}) -> "queued" else if state_word == (U64{1}) -> "running" else if state_word == (U64{2}) -> "blocked" else -> "paused"
@@ -268,7 +297,7 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                 }
                 if task_canceled -> canceled += 1
                 if state_word == (U64{1}) -> running += 1
-                tasks.push(JetLiveTask{id: id, parent: parent, state: state, wait: jet_live_shown(wait_raw, "live task `wait`"), deadline_ms: if deadline_present -> Val(deadline) else -> None, canceled: task_canceled})
+                tasks.push(JetLiveTask{id: id, parent: parent, label: jet_live_shown(label_raw, "live task `label`"), spawn_site: spawn_site, state: state, wait: jet_live_shown(wait_raw, "live task `wait`"), deadline_ms: if deadline_present -> Val(deadline) else -> None, canceled: task_canceled})
             }
         } else if section == 2 {
             loop _ in 0..<count {
@@ -291,6 +320,9 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                 disposition: jet_live_read_text(cursor, "live value `disposition`")
                 reason: jet_live_read_text(cursor, "live value `reason`")
                 rendered: jet_live_read_optional(cursor, "live value `rendered_value`")
+                if !jet_live_value_identity(value_id) {
+                    return Err(jet_live_error("live value `value_id` is not a `{JET_LIVE_VALUE_KIND}` dotted path"))
+                }
                 if (![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition)) {
                     return Err(jet_live_error("live value has an unsupported disposition"))
                 }
@@ -417,12 +449,31 @@ jet_live_process_stat: fn(pid: Int) -[FS, Time.Wait]> String JetLiveSnapshotErro
 // is retained for the whole bounded read. An explicit path is the private
 // boundary filesystem witnesses use; command callers pass
 // `jet_live_snapshot_path(pid)`. The snapshot must belong to `pid`, be fresh,
-// and on Linux/Android carry the process start identity from /proc.
+// and on Linux/Android carry the process start identity from /proc. Where
+// /proc shows the process, one another user owns is refused before anything
+// is read, and one with no snapshot was not started with observe enabled.
+// Nothing is written: the target runs on as it was.
 jet_live_read: fn(pid: Int, path: String) -[FS, Env, Time]> JetLiveSnapshot JetLiveSnapshotError! {
     if pid <= 0 || pid > 4294967295 {
         return Err(jet_live_error("process id must be greater than zero and fit u32"))
     }
-    entry: live_files.stat(path) ?? return Err(jet_live_error("no live Jet runtime is observable at process {pid}"))
+    // /proc shows a running process and its owner.
+    running := false
+    if live_files.stat("/proc/{pid}") == {
+        .Ok(found) -> {
+            if live_sys.is_unix() && found.owner != Val(live_sys.getuid()) {
+                return Err(jet_live_error("process {pid} belongs to another user"))
+            }
+            running = true
+        }
+        .Err(_) -> {}
+    }
+    entry: live_files.stat(path) ?? {
+        if running {
+            return Err(jet_live_error("process {pid} was not started with observe enabled"))
+        }
+        return Err(jet_live_error("no live Jet runtime is observable at process {pid}"))
+    }
     if !entry.is_file || entry.is_symlink {
         return Err(jet_live_error("live runtime snapshot is not a regular file"))
     }

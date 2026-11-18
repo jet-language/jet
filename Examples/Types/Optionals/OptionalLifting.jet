@@ -5,7 +5,7 @@ Config: struct {
 
 describe: fn(value: String?) -> String { value ?? "none" }
 
-find: fn(n: Int) -> Int? {
+positive: fn(n: Int) -> Int? {
     if n > 0 -> return n
     return None
 }
@@ -33,7 +33,7 @@ first_byte: fn(bytes: [U8]) -> U8? Err! {
 }
 
 doubled: fn(n: Int) -> Int? {
-    m: find(n) ?? return None
+    m: positive(n) ?? return None
     return m * 2
 }
 
@@ -44,10 +44,10 @@ run: fn() {
     limit = 20
     print(describe("hi"))
     print(describe(None))
-    if find(3) == 3 -> print("three")
-    if find(3) != 4 -> print("not four")
-    if find(0) != 3 -> print("absent is not three")
-    if find(3) == Val(v) -> print("found {v}")
+    if positive(3) == 3 -> print("three")
+    if positive(3) != 4 -> print("not four")
+    if positive(0) != 3 -> print("absent is not three")
+    if positive(3) == Val(v) -> print("found {v}")
     print(cfg.limit ?? 0)
     print(ids[0] ?? 0)
     print(ids[1] ?? -1)
@@ -56,7 +56,7 @@ run: fn() {
     held := Box?{None}
     held = make_box(8)
     print(box_value(held))
-    print(Config{limit: find(4)}.limit ?? 0)
+    print(Config{limit: positive(4)}.limit ?? 0)
     print(Config{limit: box_value(make_box(9))}.limit ?? 0)
     slot: Slot.Held(4)
     if slot == .Held(inner) -> print("held {inner ?? 0}")

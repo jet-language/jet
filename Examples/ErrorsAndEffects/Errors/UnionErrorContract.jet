@@ -15,14 +15,14 @@ Entry: struct {
     id: Int,
 }
 
-fetch: fn(id: Int) -> Entry (DBError | TimeoutError)! {
+load_entry: fn(id: Int) -> Entry (DBError | TimeoutError)! {
     if id < 0 -> return Err(DBError.Down)
     if id > 100 -> return Err(TimeoutError.Late(id))
     return Entry{id: id}
 }
 
 describe: fn(id: Int) -> String {
-    if fetch(id) == {
+    if load_entry(id) == {
         .Ok(entry) -> { return "got {entry.id}" }
         .Err(error) -> {
             if error == {
@@ -35,9 +35,9 @@ describe: fn(id: Int) -> String {
 }
 
 run: fn() {
-    entry: fetch(3) ?? return
+    entry: load_entry(3) ?? return
     print("got {entry.id}")
-    fallback: fetch(-1) ?? Entry{id: 0}
+    fallback: load_entry(-1) ?? Entry{id: 0}
     print("fallback {fallback.id}")
     print(describe(7))
     print(describe(-1))

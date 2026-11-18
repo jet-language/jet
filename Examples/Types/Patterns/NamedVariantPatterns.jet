@@ -20,7 +20,7 @@ Shape: enum {
     Circle(r: Int),
 }
 
-fetch: fn(raw: String) -> String AppError! {
+load_page: fn(raw: String) -> String AppError! {
     if raw == "ftp://b" {
         return Err(AppError.FailedToFetch{url: raw, cause: FetchError.BadURL("ftp is not supported")})
     }
@@ -35,7 +35,7 @@ fetch: fn(raw: String) -> String AppError! {
 // and entries in a different order from the declaration. The table covers
 // every state without `else`.
 report: fn(raw: String) -> String {
-    if fetch(raw) == {
+    if load_page(raw) == {
         .Ok(page) -> page
         .Err(.FailedToFetch{url, cause: .BadURL(why)}) -> "could not fetch {url}: {why}"
         .Err(.FailedToFetch{cause: .Timeout{seconds, ..}, url}) -> "timed out after {seconds}s: {url}"

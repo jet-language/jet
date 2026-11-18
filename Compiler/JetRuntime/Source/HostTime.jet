@@ -1,5 +1,5 @@
 // Raw host facts only. Core owns clock selection, civil arithmetic and clamps.
-// One native process-relative monotonic epoch mirrors TimeMonotonic::EPOCH;
+// One native process-relative monotonic epoch mirrors TimeMonotonic.EPOCH;
 // scheduler deadlines/Sync still use their existing absolute clocks.
 // Root56: SyncOnce0, epoch seconds8, epoch nanoseconds16, provider TLS key24,
 // and the wall-clock override of jet_std_time_now (Deadline.jet): SyncOnce32,
@@ -81,7 +81,7 @@ time_host_monotonic_sample: fn() -> I64 {
         seconds -= I64{1}
         nanos += I64{1000000000}
     }
-    // std Instant elapsed saturates a backwards clock to Duration::ZERO.
+    // std Instant elapsed saturates a backwards clock to Duration.ZERO.
     if (seconds < I64{0}) {
         seconds = I64{0}
         nanos = I64{0}
@@ -153,7 +153,7 @@ time_optional_i64: fn(present: Bool, output: I64) -> I64 {
     I64{1}
 }
 
-// std::env::var_os(...).to_string_lossy(): startup bytes, NOT the Core overlay.
+// std.env.var_os(...).to_string_lossy(): startup bytes, NOT the Core overlay.
 #Export(c) jet_time_raw_zone_env: fn(name: I64, output: I64) -> I64 {
     rt_test_reads_text(I64{69}, name)
     value: rt_env_get_lossy(name)

@@ -115,7 +115,7 @@ net_udp_wait: fn(state: I64, reading: Bool, operation: I64, scratch: I64, error:
     I64{1}
 }
 
-// UdpSocket::close: idempotent. The shared FD72 is marked closed (failing
+// UdpSocket.close: idempotent. The shared FD72 is marked closed (failing
 // any poller waiting on it); later operations report "socket is closed".
 #Export(c) jet_net_udp_close: fn(value: I64, error: I64) -> I64 {
     scratch: jet_rt_alloc(I64{40}, I64{8})
@@ -126,7 +126,7 @@ net_udp_wait: fn(state: I64, reading: Bool, operation: I64, scratch: I64, error:
     I64{1}
 }
 
-// UdpSocket::ready: one readiness wait under the explicit deadline; a
+// UdpSocket.ready: one readiness wait under the explicit deadline; a
 // canceled waiter reports "udp ready canceled".
 #Export(c) jet_net_udp_ready: fn(value: I64, interest: I64, deadline: I64, output: I64, error: I64) -> I64 {
     operation: rt_static_text("udp ready")
@@ -201,7 +201,7 @@ net_udp_send: fn(value: I64, data: I64, length: I64, address: I64, explicit: Boo
     net_udp_send(value, data, length, address, false, I64{0}, output, error)
 }
 
-// UdpSocket::send_to(bytes, address, deadline:): one datagram under the
+// UdpSocket.send_to(bytes, address, deadline:): one datagram under the
 // explicit deadline instead of the socket's timeout.
 #Export(c) jet_net_udp_send_bytes_to_deadline: fn(value: I64, data: I64, length: I64, address: I64, deadline: I64, output: I64, error: I64) -> I64 {
     net_udp_send(value, data, length, address, true, deadline, output, error)

@@ -28,7 +28,7 @@ route_paths: fn() -> [String] Never! {
     [String]{BUILD_ROUTES_PATH, BUILD_TYPES_PATH, ROUTE_HANDLE_PATH, RUNTIME_ROUTES_PATH, RUNTIME_HANDLES_PATH, RUNTIME_RECORDS_PATH, COMPILER_OWNED_PATH, EVAL_VALUES_PATH}
 }
 
-read_file: fn(root: String, path: String) -[FS]> SourceFile Err! {
+read_source: fn(root: String, path: String) -[FS]> SourceFile Err! {
     raw: files.read_bytes(files.join(root, path)) ?? return Err("cannot read {path}: {err}")
     Ok(SourceFile{path: path.copy(), text: String.from_bytes_lossy(raw)})
 }
@@ -62,31 +62,31 @@ load_inputs: fn(root: String) -[FS]> Inputs Err! {
     core_sources := [SourceFile]{}
     loop row in CORE_SOURCE_OWNED_ROWS {
         if has_path(core_sources, row.path) -> next
-        core_sources.push(read_file(root, row.path) ?? return Err(err))
+        core_sources.push(read_source(root, row.path) ?? return Err(err))
     }
     route_files := [SourceFile]{}
-    loop path in route_paths() -> route_files.push(read_file(root, path) ?? return Err(err))
+    loop path in route_paths() -> route_files.push(read_source(root, path) ?? return Err(err))
     registry_paths := [String]{}
     jet_files(root, REGISTRY_DIR, registry_paths) ?? return Err(err)
     registry_files := [SourceFile]{}
-    loop path in registry_paths -> registry_files.push(read_file(root, path) ?? return Err(err))
-    specials: read_file(root, SPECIAL_ROUTES_PATH) ?? return Err(err)
+    loop path in registry_paths -> registry_files.push(read_source(root, path) ?? return Err(err))
+    specials: read_source(root, SPECIAL_ROUTES_PATH) ?? return Err(err)
     special_rows: parse_special_routes(specials.text) ?? return Err(err)
     special_files := [SourceFile]{}
     loop row in special_rows {
         if has_path(special_files, row.path) -> next
         if !files.is_file(files.join(root, row.path)) -> next
-        special_files.push(read_file(root, row.path) ?? return Err(err))
+        special_files.push(read_source(root, row.path) ?? return Err(err))
     }
-    exclusions: read_file(root, EXCLUSIONS_PATH) ?? return Err(err)
+    exclusions: read_source(root, EXCLUSIONS_PATH) ?? return Err(err)
     witness_paths := [String]{}
     jet_files(root, CORPUS_ROOT, witness_paths) ?? return Err(err)
     witnesses := [SourceFile]{}
-    loop path in witness_paths -> witnesses.push(read_file(root, path) ?? return Err(err))
+    loop path in witness_paths -> witnesses.push(read_source(root, path) ?? return Err(err))
     generator_paths := [String]{}
     jet_files(root, GENERATOR_ROOT, generator_paths) ?? return Err(err)
     generator_files := [SourceFile]{}
-    loop path in generator_paths -> generator_files.push(read_file(root, path) ?? return Err(err))
+    loop path in generator_paths -> generator_files.push(read_source(root, path) ?? return Err(err))
     Ok(Inputs{core_sources: core_sources, route_files: route_files, registry_files: registry_files, specials_text: specials.text.copy(), special_files: special_files, exclusions_text: exclusions.text.copy(), witnesses: witnesses, generator_files: generator_files})
 }
 

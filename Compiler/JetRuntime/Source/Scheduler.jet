@@ -1235,7 +1235,7 @@ rt_scheduler_monitor_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
-// usize::from_str accepts '+' and the full u64 range. Counts above i64::MAX
+// usize.from_str accepts '+' and the full u64 range. Counts above i64.MAX
 // are returned as their bit pattern, not treated as an invalid override.
 scheduler_parse_threads: fn(text: I64, out: I64) -> Bool {
     if (text == I64{0}) { return false }
@@ -1250,7 +1250,7 @@ scheduler_parse_threads: fn(text: I64, out: I64) -> Bool {
         byte: trap_byte(wrapping(data + at))
         if (byte < I64{48} || byte > I64{57}) { return false }
         digit: byte - I64{48}
-        // (u64::MAX / 10) fits signed; any larger accumulator overflows next.
+        // (u64.MAX / 10) fits signed; any larger accumulator overflows next.
         if (number < I64{0} || number > I64{1844674407370955161}) { return false }
         if (number == I64{1844674407370955161} && digit > I64{5}) { return false }
         number = wrapping(wrapping(number * I64{10}) + digit)
@@ -1365,7 +1365,7 @@ scheduler_get: fn() -> I64 {
 // Queues a job (scheduler_run_job) for a carrier. The job wakes an idle
 // carrier, else starts one more while there is room
 // (scheduler_carrier_room), else arms the monitor. Unsigned pool sizes above
-// i64::MAX are attempted just as Rust does, failing at thread_spawn.
+// i64.MAX are attempted just as Rust does, failing at thread_spawn.
 scheduler_submit: fn(task: I64) {
     root: scheduler_get()
     sync_store(wrapping(task + I64{88}), I64{0})

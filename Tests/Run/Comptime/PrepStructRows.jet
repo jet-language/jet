@@ -16,13 +16,13 @@ make: fn(name: String, bits: Int) -> Row Never! { Row{name: name, bits: bits} }
 
 mode: fn(name: String) -> Mode Never! { if name == "fast" -> Mode.Fast else -> Mode.Slow }
 
-keep: fn(row: &&Row) -> Row Never! { row }
+hold: fn(row: &&Row) -> Row Never! { row }
 
 ROW: #run make("a", 1)
 
 MODE: #run mode("fast")
 
-ROWS: #run { [Row]{keep(make("b", 2)), keep(keep(make("c", 3)))} }
+ROWS: #run { [Row]{hold(make("b", 2)), hold(hold(make("c", 3)))} }
 
 run: fn() {
     print("row {ROW.name} {ROW.bits}")

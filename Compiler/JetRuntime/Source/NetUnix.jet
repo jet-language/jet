@@ -13,7 +13,7 @@ net_unix_path_refused: fn(status: I64, operation: I64, path: I64, error: I64) ->
     jet_rt_world_reject_uncontrolled(I64{1})
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }
     operation: rt_static_text("unix listen")
-    // std::fs::remove_file(path) first; its failure is ignored.
+    // std.fs.remove_file(path) first; its failure is ignored.
     if (net_unix_path_status(path) != HOST_UNIX_PATH_NUL) {
         name: fd_c_path(path)
         _ := host_call(I64{87}, name, I64{0}, I64{0})
@@ -25,7 +25,7 @@ net_unix_path_refused: fn(status: I64, operation: I64, path: I64, error: I64) ->
     status := I64{-1}
     if (state != I64{0}) {
         status = jet_socket_unix_bind_raw(state, path, scratch)
-        // std's Linux UnixListener::bind listens with backlog -1 (somaxconn).
+        // std's Linux UnixListener.bind listens with backlog -1 (somaxconn).
         if (status >= I64{0}) { status = jet_socket_listen_raw(state, I64{-1}, scratch) }
     }
     code: net_word(scratch, I64{8})
@@ -436,7 +436,7 @@ net_unix_fd_option: fn(descriptor: I64, option: I64) -> I64 {
     if (result < I64{0}) -> I64{-1} else -> value
 }
 
-// UnixListener::from_raw_fd, validated: the descriptor must be a listening
+// UnixListener.from_raw_fd, validated: the descriptor must be a listening
 // AF_UNIX SOCK_STREAM socket. It then becomes CLOEXEC and nonblocking (the
 // accept loop waits on readiness) and the listener owns it.
 #Export(c) jet_net_unix_listener_adopt: fn(word: I64, output: I64, error: I64) -> I64 {

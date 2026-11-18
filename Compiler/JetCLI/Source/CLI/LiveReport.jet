@@ -1,6 +1,6 @@
-// run_inspect_live and LiveInspect::render. Every output comes from the
+// run_inspect_live and LiveInspect.render. Every output comes from the
 // validated retained snapshot, never source guesses.
-use jet_foundation.[JetLiveSnapshot]
+use jet_foundation.[JetLiveChannel, JetLiveSnapshot, JetLiveTask]
 
 jet_cli_live_text: fn(snapshot: JetLiveSnapshot) -> String Never! {
     event_lines := snapshot.events
@@ -12,7 +12,7 @@ jet_cli_live_text: fn(snapshot: JetLiveSnapshot) -> String Never! {
     loop live_task in snapshot.tasks {
         deadline: if live_task.deadline_ms == .Val(value) -> "{value}" else -> "-"
         wait: if live_task.wait == "" -> "-" else -> live_task.wait
-        out = "{out}  Task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} canceled={live_task.canceled}\n"
+        out = "{out}  Task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} canceled={live_task.canceled} label={live_task.label}\n"
     }
     out = "{out}\nChannels\n"
     if snapshot.channels.len() == 0 -> out = "{out}  (no live channels)\n"
@@ -80,7 +80,49 @@ jet_cli_live_json_report: fn(snapshot: JetLiveSnapshot, plane: String) -> String
     }
     fields := [JetCLIStatusField]{jet_cli_status_field("plane", jet_cli_status_text(plane))}
     fields.extend(jet_cli_live_identity_fields(snapshot))
+    fields.push(jet_cli_status_field("tasks", jet_cli_status_array(snapshot.tasks.map(fn(live_task) { jet_cli_live_task_json(live_task) }))))
+    fields.push(jet_cli_status_field("channels", jet_cli_status_array(snapshot.channels.map(fn(channel) { jet_cli_live_channel_json(channel) }))))
+    fields.push(jet_cli_status_field("effects", jet_cli_live_counts_json(snapshot.effects, [String]{"compute", "waiting", "channel", "time", "io"})))
+    fields.push(jet_cli_status_field("resources", jet_cli_live_counts_json(snapshot.resources, [String]{"workers", "running", "queued", "cancelled", "arenas", "arena_allocations", "arena_bytes"})))
     fields.push(jet_cli_status_field("values", jet_cli_status_array(values)))
     fields.push(jet_cli_status_field("shapes", jet_cli_status_array(shapes)))
     "{jet_cli_status_render("inspect.{plane}", true, fields)}\n"
+}
+
+// One task of the tree: its place, its name and spawn site, and what it is
+// doing; never its locals or the values it holds.
+jet_cli_live_task_json: fn(live_task: JetLiveTask) -> JetCLIStatusValue Never! {
+    jet_cli_status_object(
+        [
+            jet_cli_status_field("id", jet_cli_status_int(live_task.id)),
+            jet_cli_status_field("parent", jet_cli_status_int(live_task.parent)),
+            jet_cli_status_field("label", jet_cli_status_text(live_task.label)),
+            jet_cli_status_field("spawn_site", jet_cli_status_int(live_task.spawn_site)),
+            jet_cli_status_field("state", jet_cli_status_text(live_task.state)),
+            jet_cli_status_field("wait", jet_cli_status_text(live_task.wait)),
+            jet_cli_status_field("deadline_ms", if live_task.deadline_ms == .Val(deadline) -> jet_cli_status_int(deadline) else -> JetCLIStatusValue.Null),
+            jet_cli_status_field("canceled", jet_cli_status_bool(live_task.canceled)),
+        ],
+    )
+}
+
+// One channel: how full it is and who waits on it; an unbounded channel's
+// capacity is null.
+jet_cli_live_channel_json: fn(channel: JetLiveChannel) -> JetCLIStatusValue Never! {
+    jet_cli_status_object(
+        [
+            jet_cli_status_field("id", jet_cli_status_int(channel.id)),
+            jet_cli_status_field("depth", jet_cli_status_int(channel.depth)),
+            jet_cli_status_field("capacity", if channel.capacity == .Val(capacity) -> jet_cli_status_int(capacity) else -> JetCLIStatusValue.Null),
+            jet_cli_status_field("send_waiters", jet_cli_status_int(channel.send_waiters)),
+            jet_cli_status_field("recv_waiters", jet_cli_status_int(channel.recv_waiters)),
+            jet_cli_status_field("closed", jet_cli_status_bool(channel.closed)),
+        ],
+    )
+}
+
+// The named counters, in the text view's order, each 0 when unrecorded. The
+// snapshot's `cancelled` count is shown as `canceled`, as the text view does.
+jet_cli_live_counts_json: fn(counts: [String:Int], names: [String]) -> JetCLIStatusValue Never! {
+    jet_cli_status_object(names.map(fn(name) { jet_cli_status_field(if name == "cancelled" -> "canceled" else -> name, jet_cli_status_int(counts.get(name) ?? 0)) }))
 }

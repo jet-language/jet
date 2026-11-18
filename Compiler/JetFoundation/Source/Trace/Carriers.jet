@@ -40,9 +40,13 @@ TraceProfileSource: struct {
     end_column: U64,
 }
 
+// One profile row: the samples of one source range on one clock.
+// `inclusive_count`, when the sampler walks the stack, counts the samples
+// that hold the range anywhere on it, once each however often.
 TraceProfileRow: struct {
     clock: String,
     execution_count: U64?,
+    inclusive_count: U64?,
     sample_count: U64,
     sample_weight: U64,
     source: TraceProfileSource,
@@ -324,7 +328,7 @@ trace_profile_source_to_json: fn(value: TraceProfileSource) -> CanonicalJSON Jet
 }
 
 trace_profile_row_to_json: fn(value: TraceProfileRow) -> CanonicalJSON JetTraceError! {
-    jettrace_object([CanonicalJSONField]{jettrace_field("clock", .String(value.clock.copy())), jettrace_field("execution_count", jettrace_optional_uint(value.execution_count)), jettrace_field("sample_count", jettrace_uint(value.sample_count)), jettrace_field("sample_weight", jettrace_uint(value.sample_weight)), jettrace_field("source", trace_profile_source_to_json(value.source)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol))})
+    jettrace_object([CanonicalJSONField]{jettrace_field("clock", .String(value.clock.copy())), jettrace_field("execution_count", jettrace_optional_uint(value.execution_count)), jettrace_field("inclusive_count", jettrace_optional_uint(value.inclusive_count)), jettrace_field("sample_count", jettrace_uint(value.sample_count)), jettrace_field("sample_weight", jettrace_uint(value.sample_weight)), jettrace_field("source", trace_profile_source_to_json(value.source)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol))})
 }
 
 trace_profile_to_json: fn(value: TraceProfile) -> CanonicalJSON JetTraceError! {

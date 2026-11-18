@@ -643,7 +643,7 @@ SemaRegistrationModuleInput: struct {
     // The dotted `name: module` path that declared the file ("" at the
     // package root): the start of SourceLocation's `module`.
     declared_module: String{""},
-    // The module's source text (Rust `Module::source`). A declared text block
+    // The module's source text (Rust `Module.source`). A declared text block
     // hands the text inside its braces to its rule.
     source: String{""},
     // The unit mentions of `source` (sema_units_source_mentions) when the
@@ -741,7 +741,7 @@ SemaRegistrationModule: struct {
     persist_roots: [SymbolID]{[SymbolID]{}},
     imports: [SemaRegistrationImport],
     exports: [SemaRegistrationExport],
-    // Local import name -> its binding (Rust `Checker::imports`). Import
+    // Local import name -> its binding (Rust `Checker.imports`). Import
     // names are unique per module, so each name has one row; the row packs
     // the import and binding positions (sema_registration_import_binding_at).
     import_binding_rows: NameRows,
@@ -1008,7 +1008,7 @@ SemaRegistrationGraph: struct {
     // (sema_registration_module_settled). Empty when not set, or when an
     // error names no source file.
     settled_modules: [Bool]{[Bool]{}},
-    // Test mode (Rust `CompileMode::Test`/`TestOverride`), set by the driver:
+    // Test mode (Rust `CompileMode.Test`/`TestOverride`), set by the driver:
     // named `#Test` bodies are checked and lowered as synthetic functions.
     test_mode: Bool{false},
     // Test mode: each law test the compiler could not make (TraitLaws.jet),
@@ -2280,7 +2280,7 @@ sema_registration_original_error_module: fn(module_table: &ModuleTable) -> SemaR
     }
 }
 
-// Rust `Prelude::retain_error_prelude_module`: a graph whose inputs already
+// Rust `Prelude.retain_error_prelude_module`: a graph whose inputs already
 // retain the original error module (the driver loads it as a source module)
 // keeps that one owner after checking its source context; otherwise the
 // original module is appended once. An input holding the original path or
@@ -2547,6 +2547,22 @@ sema_registration_import_binding_at: fn(module_row: SemaRegistrationModule, name
 
 sema_registration_import_binding_named: fn(module_row: SemaRegistrationModule, name: String) -> SemaRegistrationImportBindingRef? Never! {
     sema_registration_import_binding_at(module_row, name, name_rows_hash(name))
+}
+
+// The E0105 for import `declaration` binding `local` a second time. A
+// re-export (a public row; a `use` row is never public) of a name a `use` row
+// already binds gets the fix that deletes the name from that row, since the
+// re-export binds it in this module too.
+sema_registration_import_twice: fn(module_row: SemaRegistrationModule, declaration: ImportDecl, local: String, span: Span) -[]> Diagnostic {
+    if (declaration.is_pub || declaration.is_package_pub) && !sema_registration_module_has_name(module_row, local) {
+        if sema_registration_import_binding_named(module_row, local) == .Val(earlier) {
+            used: module_row.imports[earlier.import_index].declaration
+            if !used.is_pub && !used.is_package_pub {
+                return sema_error("E0105", span, "`{local}` is both imported and re-exported", "a `use` row binds `{local}` in this module, and the re-export binds it again", "delete `{local}` from the `use` line; the re-export already binds it here")
+            }
+        }
+    }
+    sema_defined_twice(local, "imported names share the module namespace", span)
 }
 
 sema_registration_push_import_binding: fn(graph: &SemaRegistrationGraph, module_index: Int, import_index: Int, binding: SemaRegistrationImportBinding) Never! {
@@ -3934,7 +3950,7 @@ sema_registration_cli_callable_params: fn(function: Func, command: String, share
     }
 }
 
-// Rust `Expr::without_parens` matched against a literal Int, Float, Bool or String.
+// Rust `Expr.without_parens` matched against a literal Int, Float, Bool or String.
 sema_registration_cli_literal_default: fn(expr: Expr) -> Bool Never! {
     current: sema_registration_cli_without_parens(expr)
     if current == {
@@ -3963,7 +3979,7 @@ sema_registration_cli_binding_target: fn(items: [Item], target: Expr) -> Func? {
     None
 }
 
-// Rust `Expr::without_parens`.
+// Rust `Expr.without_parens`.
 sema_registration_cli_without_parens: fn(expr: Expr) -> Expr Never! {
     current := expr
     loop {
@@ -4476,7 +4492,7 @@ sema_registration_serde_union_members: fn(items: [Item], union_ty: Type, members
     }
 }
 
-// Rust `label`: the member's `Type::show` with surrounding backticks trimmed.
+// Rust `label`: the member's `Type.show` with surrounding backticks trimmed.
 sema_registration_serde_label: fn(ty: Type) -> String Never! {
     label := sema_type_show(ty)
     loop label.starts_with("`") -> label = label.slice(1, label.len())
@@ -4512,7 +4528,7 @@ sema_registration_serde_sorted_shapes: fn(shapes: [SerdeWireShape]) -> [SerdeWir
     sorted
 }
 
-// Rust `SerdeWireShape::name`.
+// Rust `SerdeWireShape.name`.
 sema_registration_serde_shape_name: fn(shape: SerdeWireShape) -> String Never! {
     if shape == {
         .Null -> "Null"
@@ -4984,7 +5000,8 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                     submodule: "{target_name}.{item.original}"
                     if (target_name == "core" || target_name.starts_with("core.")) && core_module_export(submodule) != None {
                         if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) {
-                            sema_registration_push_graph_diagnostic(graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
+                            twice: sema_registration_import_twice(graph.modules[module_index], declaration, local, declaration.span)
+                            sema_registration_push_graph_diagnostic(graph, module_index, twice)
                             next
                         }
                         import_visibility: graph.modules[module_index].imports[import_index].visibility
@@ -5015,7 +5032,8 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                             duplicate: sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_function_conflict(graph, module_index, local, item.original, export.source_module_identity))
                             if {
                                 duplicate -> {
-                                    sema_registration_push_graph_diagnostic(graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
+                                    twice: sema_registration_import_twice(graph.modules[module_index], declaration, local, declaration.span)
+                                    sema_registration_push_graph_diagnostic(graph, module_index, twice)
                                 }
                                 else -> {
                                     imported_symbol := export.symbol
@@ -5038,7 +5056,8 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                             // the module's Core call records (Calls/Direct.jet).
                             if (target_name == "core" || target_name.starts_with("core.")) && core_module_has_member(target_name, item.original) && sema_registration_direct_symbol(graph.modules[target_index], item.original) == None {
                                 if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_function_owner(graph, module_index, local)) {
-                                    sema_registration_push_graph_diagnostic(graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
+                                    twice: sema_registration_import_twice(graph.modules[module_index], declaration, local, declaration.span)
+                                    sema_registration_push_graph_diagnostic(graph, module_index, twice)
                                     next
                                 }
                                 leaf_identity: graph.modules[target_index].module_identity
@@ -5089,7 +5108,8 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                     duplicate: sema_registration_module_has_name(graph.modules[module_index], declaration.alias) || sema_registration_module_has_import_name(graph.modules[module_index], declaration.alias)
                     if {
                         duplicate -> {
-                            sema_registration_push_graph_diagnostic(graph, module_index, sema_defined_twice(declaration.alias, "imported names share the module namespace", declaration.alias_span))
+                            twice: sema_registration_import_twice(graph.modules[module_index], declaration, declaration.alias, declaration.alias_span)
+                            sema_registration_push_graph_diagnostic(graph, module_index, twice)
                         }
                         else -> {
                             import_visibility: graph.modules[module_index].imports[import_index].visibility
@@ -5651,7 +5671,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     // check_guest_symbol_collisions: the C guest boundary is checked once every
     // declaration is registered, before any body is checked.
     sema_guest_check_surfaces(graph)
-    // Rust CheckInner BudgetSpecs::validate_bundle: every performance role
+    // Rust CheckInner BudgetSpecs.validate_bundle: every performance role
     // elaborates into its canonical typed budgets once every declaration is
     // registered.
     budget_findings: sema_budget_validate_graph(graph)
@@ -5784,7 +5804,7 @@ sema_registration_index_namespaces: fn(graph: &SemaRegistrationGraph) Never! {
     }
 }
 
-// (Rust `NameLedger::namespace_owner`): the registered symbol
+// (Rust `NameLedger.namespace_owner`): the registered symbol
 // row of `name` in the other member of `module_index`'s package that
 // declares it, or none (no namespace, the module's own name, or a
 // declaration that did not register).

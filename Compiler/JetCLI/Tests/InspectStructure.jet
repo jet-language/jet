@@ -40,7 +40,7 @@ INSPECT_STRUCTURE_TEST_KINDS: [StructureFactKind]{StructureFactKind.Liveness, St
 
 #Test("inspect_structure") {
     empty: jet_cli_structure_report([StructureFact]{}, GateLedger{}, false)
-    if !empty.ends_with("facts: 0\n  (none in this program)\ngates: 0\n  (none in this program)\n") {
+    if !empty.ends_with("Facts: 0\n  (none in this program)\nGates: 0\n  (none in this program)\n") {
         panic("empty structure text")
     }
     facts: [StructureFact]{StructureFact{kind: StructureFactKind.Liveness, subject: "unused", source: "entry.jet", span: Span{start: 3, end: 9}, status: "unreachable", detail: "private function is never reached", gate: None}}
@@ -57,7 +57,7 @@ INSPECT_STRUCTURE_TEST_KINDS: [StructureFactKind]{StructureFactKind.Liveness, St
     }
     if !machine.ends_with("\n") -> panic("structure report newline")
     core: jet_cli_structure_core(false)
-    if core.exit_code != 0 || core.stderr != "" || !core.stdout.starts_with("core\nbootstrap:\n  1. Syntax  depends_on [none]\n") {
+    if core.exit_code != 0 || core.stderr != "" || !core.stdout.starts_with("Core\nBootstrap:\n  1. Syntax  depends_on [none]\n") {
         panic("canonical Core text")
     }
     core_json: jet_cli_structure_core(true)

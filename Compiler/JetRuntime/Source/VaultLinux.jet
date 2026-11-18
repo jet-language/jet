@@ -16,7 +16,7 @@ VAULT_STAT_MODE: I64{24}
 VAULT_STAT_UID: I64{28}
 
 // Only the temporary NUL shell is allocated; embedded NUL is invalid exactly
-// as CString::new. No normalization or UTF-8 conversion of filesystem bytes.
+// as CString.new. No normalization or UTF-8 conversion of filesystem bytes.
 vault_linux_path: fn(path: I64) -> I64 {
     length: rt_text_len(path)
     if (length < I64{0} || length == I64{9223372036854775807}) { return I64{0} }
@@ -73,7 +73,7 @@ vault_linux_dir_io: fn(stat: Bool, repository: Bool, scratch: I64) -> I64 {
 
 // Returns zero on success and adopts the held .jet fd into out. On error returns
 // a real private error owner; out is unchanged. Root may follow symlinks just
-// as File::open in the seed; the child .jet path may not follow any symlink.
+// as File.open in the seed; the child .jet path may not follow any symlink.
 vault_linux_dir_at_root: fn(root: I64, out: I64) -> I64 {
     scratch: jet_rt_alloc(VAULT_STAT_BYTES + I64{24}, I64{8})
     root_path: vault_linux_path(root)
@@ -292,7 +292,7 @@ vault_linux_install_exact: fn(dirfd: I64, next: I64, final_name: I64, temp: I64,
     I64{0}
 }
 
-// The duplicate shares the seek offset as Rust File::try_clone does. It is
+// The duplicate shares the seek offset as Rust File.try_clone does. It is
 // closed on all paths; the borrowed original stays live. Binary result adopts a
 // packed DataSequence, not a Rust Vec carrier. scratch borrows one exclusive
 // byte for EOF probing; a full buffer does not allocate or copy merely to
@@ -309,7 +309,7 @@ vault_linux_read_file: fn(file: I64, out: I64, scratch: I64) -> I64 {
     error
 }
 
-// std::fs::read_to_string's opened fd has no duplicate or seek. This shared
+// std.fs.read_to_string's opened fd has no duplicate or seek. This shared
 // EOF loop accepts regular files AND FIFOs/char devices/pipes. It borrows the
 // descriptor and one caller byte, retries EINTR and wipes partial error bytes.
 vault_linux_read_to_end: fn(file: I64, out: I64, scratch: I64) -> I64 {
@@ -391,7 +391,7 @@ vault_root_is_current: fn(root: I64) -> Bool {
 // Reuse the ONE Host startup environment view, just as Deadline/Scheduler/
 // SentryLedger do. HostStartup.jet:227-239 owns rt_env_get: absent or invalid
 // UTF-8 is null; empty is a real empty Text. Leaves std's host
-// environment immutable, so this capture preserves the seed std::env::var read.
+// environment immutable, so this capture preserves the seed std.env.var read.
 vault_identity_env: fn(first: I64, second: I64, length: I64, scratch: I64) -> I64 {
     rt_text_store(scratch, first)
     rt_text_store(wrapping(scratch + I64{8}), second)
@@ -495,7 +495,7 @@ vault_identity_read_at_root: fn(root: I64, out: I64) -> I64 {
     error
 }
 
-// Every seed std File::open/fs::read* site uses cvt_r; raw openat2/pidfd sites
+// Every seed std File.open/fs.read* site uses cvt_r; raw openat2/pidfd sites
 // do NOT. This single plain reader follows symlinks and retries only EINTR.
 vault_linux_plain_open_at: fn(dir: I64, path: I64, flags: I64, mode: I64) -> I64 {
     file := I64{-4}
@@ -812,7 +812,7 @@ vault_recover_backup_at_root: fn(root: I64) -> I64 { vault_recover_backup_mode(r
 
 vault_recover_backup_held: fn(root: I64) -> I64 { vault_recover_backup_mode(root, true) }
 
-// library/std/src/sys/fs/unix.rs File::fsync uses cvt_r: retry EINTR only.
+// library/std/src/sys/fs/unix.rs File.fsync uses cvt_r: retry EINTR only.
 vault_linux_fsync: fn(fd: I64) -> I64 {
     result := I64{-4}
     loop result == (I64{-4}) {
@@ -876,7 +876,7 @@ vault_writer_plaintext_matches: fn(store: I64, plaintext: I64, scratch: I64) -> 
     I64{0}
 }
 
-// Seed test-only substitution uses fs::rename/fs::write, not renameat2's
+// Seed test-only substitution uses fs.rename/fs.write, not renameat2's
 // noreplace policy. Own the replacement fd briefly; never substitute the temp.
 vault_writer_substitute: fn(dir: I64, next: I64, scratch: I64) -> I64 {
     stolen: wrapping(scratch + I64{64})
@@ -1193,7 +1193,7 @@ vault_bytes_equal_words: fn(bytes: I64, length: I64, first: I64, second: I64, co
     true
 }
 
-// Seed BufReader::read_line: grow only when the line fills the current buffer,
+// Seed BufReader.read_line: grow only when the line fills the current buffer,
 // stop at its FIRST LF (ignore any read-ahead), and retry only read's EINTR.
 vault_tty_answer: fn(file: I64) -> Bool {
     bytes: data_sequence_new(I64{8192}, RT_HOST_U8_STRIDE)

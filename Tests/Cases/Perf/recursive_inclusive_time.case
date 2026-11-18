@@ -1,0 +1,21 @@
+# `jet perf run` reports each source line's exclusive time (the samples
+# whose program counter is on it) and its inclusive time (the samples that
+# hold it anywhere on the stack). A sample in a recursive fib holds fib's
+# recursive line many times over; it counts once, so that line's inclusive
+# time is no more than that of run's line that makes the first call, which
+# every one of those samples holds too.
+requires: os-name:linux
+fixture: RecursiveInclusiveTime.fixture
+env: NO_COLOR=1
+step: jet perf run -O0 fib.jet --out {work}/fib.jettrace -- 35
+exit: 0
+stdout: = "fib=9227465\n"
+json: file fib.jettrace doc $.content.profile.rows[0].symbol.name = "fib" # fib's lines take nearly every sample
+json: file fib.jettrace doc $.content.profile.rows[0].sample_count >= 10 # exclusive time
+json: file fib.jettrace doc $.content.profile.rows[0].inclusive_count >= 10 # and inclusive time, per line
+step: jet perf view {work}/fib.jettrace
+exit: 0
+stdout: ~ "  line 7 samples=" # fib's recursive line
+stdout: ~ "  line 13 samples=" # run's line that calls fib, though few samples or none land on it
+capture: outer = text stdout.split("  line 13 samples=", 1).split("inclusive=", 1).split("\n", 0).trim
+json: stdout.split("  line 7 samples=", 1).split("inclusive=", 1).split("\n", 0).trim doc $ <= {cap:outer}+0 # recursion counts once per sample

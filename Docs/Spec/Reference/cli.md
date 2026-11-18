@@ -1431,15 +1431,15 @@ architecture advice and check provenance. Shared-callee and consumer-agreement
 candidates retain definition/call-site spans, effects, behavioral-check
 statuses, and uncertainty; they neither execute user code nor apply a refactor.
 
-The checked program's fact channel classifies view materialization, collection
-copy-on-write, exact-integer spill, retained outcome construction, and
-representation fallback. Inline-integer removal is a proof from typed
-operand intervals, not an assumption about the runtime value. The cost query
-first proves callable coverage using sema-owned roots, direct calls and stored
-function references, including source methods and selected outputs. A reachable
-callable without a complete checked body or specialization refuses with E2104;
-it never produces a clean-cost claim. The collector retains nested loop depth
-through control flow and closure bodies. `lint --cost` reports each retained
+The checked program's fact channel classifies view materialization, implicit
+copy, collection copy-on-write, exact-integer spill, retained outcome
+construction, and representation fallback. Inline-integer removal is a proof
+from typed operand intervals, not an assumption about the runtime value. The
+cost query first proves callable coverage using sema-owned roots, direct calls
+and stored function references, including source methods and selected outputs.
+A reachable callable without a complete checked body or specialization refuses
+with E2104; it never produces a clean-cost claim. The collector retains nested
+loop depth through control flow and closure bodies. `lint --cost` reports each retained
 cost inside a loop once per site and operation as L2510 (view
 materialization included) and omits optimizer-proven removals; `jet check`
 does not report L2510. Findings exit 1 on stderr (diagnostic JSON Lines under

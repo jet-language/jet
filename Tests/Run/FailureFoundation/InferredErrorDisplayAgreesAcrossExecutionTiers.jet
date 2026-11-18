@@ -1,9 +1,9 @@
-// `find` and `level` write no failure contract, so the cases they create form
-// their own error types, `FindError` and `LevelError`. Each shows with `{e}`
+// `find_age` and `level` write no failure contract, so the cases they create
+// form their own error types, `FindAgeError` and `LevelError`. Each shows with `{e}`
 // and `{e:Debug}` as a written `#Error enum` does. `level` also fails with a
 // message, so its failures are the open union `Err | LevelError`, which shows
 // the member that arrived.
-find: fn(book: [String:Int], name: String) -> Int {
+find_age: fn(book: [String:Int], name: String) -> Int {
     if name == "" -> return Err(.Blank)
     if book.has_key(name) -> return book[name]
     Err(.NotFound(name.copy()))
@@ -16,7 +16,7 @@ level: fn(raw: String) -> Int {
 }
 
 show_find: fn(book: [String:Int], name: String) -> String {
-    if find(book, name) == {
+    if find_age(book, name) == {
         .Ok(n) -> "found {n}"
         .Err(e) -> "failed: {e} ({e:Debug})"
     }

@@ -160,11 +160,11 @@ keyword_rows: fn(mapping: String, syntax: String, tokens: String, tags: String) 
         token_tag: arm.groups[2]
         values: constants.get(constant) ?? [String]{}
         if values.len() != 1 {
-            return Err(rows_fail("unresolved/ambiguous literal Syntax::{constant}"))
+            return Err(rows_fail("unresolved/ambiguous literal Syntax.{constant}"))
         }
-        spelling: literal_value(values[0]) ?? return Err(rows_fail("unsupported Jet literal Syntax::{constant}"))
+        spelling: literal_value(values[0]) ?? return Err(rows_fail("unsupported Jet literal Syntax.{constant}"))
         if !SPELLING.is_match(spelling) {
-            return Err(rows_fail("unsupported keyword spelling Syntax::{constant}"))
+            return Err(rows_fail("unsupported keyword spelling Syntax.{constant}"))
         }
         tag_count := 0
         loop name in tag_names {
@@ -251,7 +251,7 @@ branches: fn(rows: [KeywordRow], offset: Int, indent: String) -> String Never! {
 // The arm `key -> value` for `rows`; an arm that settles one keyword names
 // its Syntax constant on the line above, where `jet fmt` keeps a comment.
 arm: fn(rows: [KeywordRow], key: String, offset: Int, indent: String) -> String Never! {
-    note: if rows.len() == 1 -> "{indent}// Syntax::{rows[0].constant}\n" else -> ""
+    note: if rows.len() == 1 -> "{indent}// Syntax.{rows[0].constant}\n" else -> ""
     "{note}{indent}{key} -> {branches(rows, offset, indent)}\n"
 }
 
@@ -333,10 +333,10 @@ keyword_rows_error: fn(mapping: String, syntax: String, tokens: String, tags: St
     assert(generated.starts_with(SPANS_HEADER))
     assert(!generated.contains("slice_text") && !generated.contains(".bytes(") && !generated.contains("String.from_bytes") && !generated.contains("[U8]{{"))
     loop row in rows {
-        assert_eq(generated.split("// Syntax::{row.constant}\n").to_list().len() - 1, 1)
+        assert_eq(generated.split("// Syntax.{row.constant}\n").to_list().len() - 1, 1)
         assert(generated.contains(row.tag))
     }
-    assert(generated.contains("        // Syntax::KW_FN\n        2 -> if byte_at(source, start + 0) == 102 && byte_at(source, start + 1) == 110 -> K_FN else -> K_IDENT\n"))
+    assert(generated.contains("        // Syntax.KW_FN\n        2 -> if byte_at(source, start + 0) == 102 && byte_at(source, start + 1) == 110 -> K_FN else -> K_IDENT\n"))
     assert(generated.ends_with("\nLEXER_KEYWORD_SPELLINGS: [String]{{\n    \"fn\",\n    \"for\",\n}}\n\nLEXER_RETIRED_SPELLINGS: [String]{{\n}}\n"))
     retired_spans: render_keyword_spans(keyword_rows(mapping.replace("\"K_FOR\", retired: false", "\"K_FOR\", retired: true"), syntax.replace("    KW_FOR, // loops\n", ""), tokens, tags) ?? panic("the retired table did not parse: {err.message}"))
     assert(retired_spans.ends_with("\nLEXER_KEYWORD_SPELLINGS: [String]{{\n    \"fn\",\n}}\n\nLEXER_RETIRED_SPELLINGS: [String]{{\n    \"for\",\n}}\n"))

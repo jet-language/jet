@@ -57,7 +57,7 @@ use {
     ]
 }
 
-// Rust `jet_foundation::Registry::MarkerArgument`: the typed values a
+// Rust `jet_foundation.Registry.MarkerArgument`: the typed values a
 // dedicated block-construct node carries for its marker row.
 JetFmtMarkerArgument: enum {
     Expr(label: String?, value: Expr),
@@ -67,7 +67,7 @@ JetFmtMarkerArgument: enum {
     Policy(declarations: [PolicyDeclaration]),
 }
 
-// Rust `jet_foundation::Registry::MarkerRowAndArgs`. Every block construct
+// Rust `jet_foundation.Registry.MarkerRowAndArgs`. Every block construct
 // names a registered marker row, so the row is its canonical name.
 JetFmtBlockMarker: struct {
     name: String,
@@ -75,13 +75,13 @@ JetFmtBlockMarker: struct {
     args: [JetFmtMarkerArgument],
 }
 
-// Rust `AST::ReadinessHead`.
+// Rust `AST.ReadinessHead`.
 JetFmtReadinessHead: enum {
     Receive(binding: String, source: Expr),
     After(duration: Expr),
 }
 
-// Rust `Stmt::span`.
+// Rust `Stmt.span`.
 jfmt_stmt_span: fn(stmt: Stmt) -> Span Never! {
     if stmt == {
         .Expr(e) -> expr_span(e)
@@ -122,7 +122,7 @@ jfmt_stmt_span: fn(stmt: Stmt) -> Span Never! {
     }
 }
 
-// Rust `LValue::span`.
+// Rust `LValue.span`.
 jfmt_lvalue_span: fn(target: LValue) -> Span Never! {
     if target == {
         .Local(_, name_span) -> name_span
@@ -157,7 +157,7 @@ jfmt_is_ascii_space: fn(byte: U8) -> Bool Never! {
     code == 32 || code == 9 || code == 10 || code == 13 || code == 11 || code == 12
 }
 
-// Rust `Policy::PolicyKey::name`.
+// Rust `Policy.PolicyKey.name`.
 jfmt_policy_key_name: fn(key: PolicyKey) -> String Never! {
     if key == {
         .Unsafe -> "unsafe"
@@ -187,7 +187,7 @@ jfmt_policy_key_name: fn(key: PolicyKey) -> String Never! {
     }
 }
 
-// Rust `Policy::PolicyValue::display`.
+// Rust `Policy.PolicyValue.display`.
 jfmt_policy_value_display: fn(value: PolicyValue) -> String Never! {
     if value == {
         .Enabled -> "true"
@@ -224,7 +224,7 @@ jfmt_fmt_policy_entry: fn(f: &JetFmt, declaration: PolicyDeclaration) {
     }
 }
 
-// Rust `jet_foundation::Registry::block_marker`: the registry row and typed
+// Rust `jet_foundation.Registry.block_marker`: the registry row and typed
 // argument values for every dedicated block-construct node.
 jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockMarker? Never! {
     if stmt == {
@@ -296,7 +296,7 @@ jfmt_block_marker: fn(stmt: Stmt, policies: [PolicyDeclaration]) -> JetFmtBlockM
     }
 }
 
-// Rust `AST::readiness_head`.
+// Rust `AST.readiness_head`.
 jfmt_readiness_head_of: fn(expr: Expr) -> JetFmtReadinessHead? Never! {
     if expr == {
         .TupleLit(fields, _, _, _) -> {
@@ -310,7 +310,7 @@ jfmt_readiness_head_of: fn(expr: Expr) -> JetFmtReadinessHead? Never! {
     }
 }
 
-// Rust `AST::uses_classic_if_spelling`: only significant source between the
+// Rust `AST.uses_classic_if_spelling`: only significant source between the
 // `if` token and the first condition decides; comment braces are trivia.
 jfmt_uses_classic_if_spelling: fn(bytes: [U8], if_span: Span, first_condition: Span) -> Bool Never! {
     if if_span.end > first_condition.start || first_condition.start > bytes.len() -> return false
@@ -351,7 +351,7 @@ jfmt_uses_classic_if_spelling: fn(bytes: [U8], if_span: Span, first_condition: S
     true
 }
 
-// Rust `Expr::without_parens`.
+// Rust `Expr.without_parens`.
 jfmt_expr_without_parens: fn(expr: Expr) -> Expr Never! {
     current := expr
     loop {
@@ -963,7 +963,7 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             jfmt_fmt_for_stmt(f, var, var_span, var2, kind, body, span, arrow_body, label)
         }
         // Multi-arm dispatch renders as
-        // `if subject OP { head -> body }` (the `Stmt::Switch` IR is shared
+        // `if subject OP { head -> body }` (the `Stmt.Switch` IR is shared
         // with the retired `when`). The comparison marker enters dispatch;
         // arm heads carry no repeated `subject OP`.
         .Switch(subject, arms, else_body, span) -> {
@@ -1135,7 +1135,7 @@ jfmt_fmt_stmt: fn(f: &JetFmt, stmt: Stmt) {
             }
         }
         // `#if #build.target.os == { … }` — the OS-dispatch switch. Formats
-        // exactly like a `Stmt::Switch` (arm grammar) with a `#` lead.
+        // exactly like a `Stmt.Switch` (arm grammar) with a `#` lead.
         .ComptimeSwitch(subject, arms, else_body, span) -> {
             jfmt_write(f, "#if ")
             jfmt_fmt_dispatch(f, subject, arms, else_body, true, span)
@@ -1381,7 +1381,7 @@ jfmt_is_explicit_drop: fn(stmt: Stmt) -> Bool {
 
 // Render a dispatch body
 // `OP { arm -> … [else -> …] }` (the caller has already written the `if` /
-// `#if` lead). Shared by `Stmt::Switch` and `Stmt::ComptimeSwitch`.
+// `#if` lead). Shared by `Stmt.Switch` and `Stmt.ComptimeSwitch`.
 // A table written on one line stays on one line when it fits, as
 // `jfmt_fmt_guard_expr` keeps a value table.
 jfmt_fmt_dispatch: fn(f: &JetFmt, subject: Expr, arms: [SwitchArm], else_body: [Stmt]?, force_arm_blocks: Bool, span: Span) {
@@ -1606,7 +1606,7 @@ jfmt_consecutive_expr_int_range: fn(f: JetFmt, fence: FencedNames) -> NameRange?
     Val(NameRange{start: texts[0], end: texts[texts.len() - 1]})
 }
 
-// Rust `str::parse::<i64>`: an optional sign, then one or more ASCII digits.
+// Rust `str.parse<i64>`: an optional sign, then one or more ASCII digits.
 jfmt_parse_decimal_i64: fn(text: String) -> Int? Never! {
     bytes: text.bytes()
     index := 0
@@ -2217,7 +2217,7 @@ jfmt_fmt_lvalue: fn(f: &JetFmt, lv: LValue) {
     }
 }
 
-// The inverse of `Parser::desugar_layout_anchors`
+// The inverse of `Parser.desugar_layout_anchors`
 // — turns a `name.h(box, anchor)` / `name.v(box, anchor)` call back into the
 // `box.anchor` / `self.anchor` source spelling before formatting. Only fires
 // on the EXACT shape the parser's desugar produces (receiver is a bare

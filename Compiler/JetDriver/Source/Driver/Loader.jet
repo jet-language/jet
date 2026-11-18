@@ -184,7 +184,7 @@ use {
 // The one language edition (greenfield: one meaning, no edition-gated behavior).
 JET_DRIVER_EDITION: "2026"
 
-// S51 (Rust `Syntax::FIRST_PARTY_RESERVED`): first-party short names reserved
+// S51 (Rust `Syntax.FIRST_PARTY_RESERVED`): first-party short names reserved
 // before packages land.
 JET_DRIVER_FIRST_PARTY_RESERVED: #run { [String]{
     "core",
@@ -2613,12 +2613,11 @@ jet_driver_find_module_import_target: fn(
 ) -> Int? {
     source_package_index: jet_driver_find_package_by_root(packages, source_unit.root_index) ?? return None
     source_package := packages[source_package_index]
-    path_parts: module_name.split("::").to_list()
-    if path_parts.len() == 0 || path_parts[0].len() == 0 {
+    if module_name.len() == 0 {
         diagnostics.push(jet_driver_diagnostic("E0603", span, "the module import has no package or module name", "module references resolve through one direct package binding or local module", "name a local module or a declared direct dependency"))
         return None
     }
-    dependency: jet_driver_find_dependency(source_package, path_parts[0])
+    dependency: jet_driver_find_dependency(source_package, module_name)
     if dependency == .Val(selected_dependency) {
         if selected_dependency.target_root_index < 0 {
             // A version dependency resolves only to the toolchain's
@@ -2641,28 +2640,12 @@ jet_driver_find_module_import_target: fn(
                 return None
             }
         }
-        module_path := ""
-        pascal_path := ""
-        loop path_index in 1..<path_parts.len() {
-            part: path_parts[path_index]
-            if part.len() == 0 || part == "." || part == ".." || part.contains("/") || part.contains("\\") {
-                diagnostics.push(jet_driver_diagnostic("E0602", span, "the module import contains an unsafe package-relative component", "module resolution cannot traverse outside a declared dependency root", "use non-empty module names without `.` or `..` components"))
-                return None
-            }
-            if module_path.len() > 0 -> module_path = "{module_path}/{part}" else {
-                module_path = part
-            }
-            pascal: jet_driver_pascal_segment(part)
-            if pascal_path.len() > 0 -> pascal_path = "{pascal_path}/{pascal}" else {
-                pascal_path = pascal
-            }
-        }
-        candidate_paths: if module_path.len() > 0 -> [String]{"{module_path}.jet", "{pascal_path}.jet", "{module_path}/run.jet", "{pascal_path}/run.jet"} else -> [String]{"{selected_dependency.name}.jet", "{selected_dependency.name}/run.jet"}
+        candidate_paths: [String]{"{selected_dependency.name}.jet", "{selected_dependency.name}/run.jet"}
         // Only this lookup's own problems stop the fallbacks; earlier imports' errors don't.
         lookup_start: diagnostics.len()
         target := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, candidate_paths, diagnostics, span)
         if target != None -> return target
-        if module_path.len() == 0 && diagnostics.len() == lookup_start {
+        if diagnostics.len() == lookup_start {
             root_entry := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, [String]{"run.jet"}, diagnostics, span)
             if root_entry != None -> return root_entry
             // A dependency package is one namespace; any member
@@ -2680,29 +2663,18 @@ jet_driver_find_module_import_target: fn(
         diagnostics.push(jet_driver_diagnostic("E0603", selected_version.span, "a local module import cannot select a package version", "inline versions bind only direct package dependencies", "remove the version selector or import a declared package dependency"))
         return None
     }
-    module_path := ""
-    pascal_path := ""
-    loop path_index in 0..<path_parts.len() {
-        part: path_parts[path_index]
-        if part.len() == 0 || part == "." || part == ".." || part.contains("/") || part.contains("\\") {
-            diagnostics.push(jet_driver_diagnostic("E0602", span, "the local module path contains an unsafe component", "module resolution stays within the current package root", "use module names without `.` or `..` path components"))
-            return None
-        }
-        if module_path.len() > 0 -> module_path = "{module_path}/{part}" else -> module_path = part
-        pascal: jet_driver_pascal_segment(part)
-        if pascal_path.len() > 0 -> pascal_path = "{pascal_path}/{pascal}" else {
-            pascal_path = pascal
-        }
+    if module_name == "." || module_name == ".." || module_name.contains("/") || module_name.contains("\\") {
+        diagnostics.push(jet_driver_diagnostic("E0602", span, "the local module path contains an unsafe component", "module resolution stays within the current package root", "use module names without `.` or `..` path components"))
+        return None
     }
-    candidate_paths: [String]{"{module_path}.jet", "{pascal_path}.jet", "{module_path}/run.jet", "{pascal_path}/run.jet"}
+    pascal_path: jet_driver_pascal_segment(module_name)
+    candidate_paths: [String]{"{module_name}.jet", "{pascal_path}.jet", "{module_name}/run.jet", "{pascal_path}/run.jet"}
     diagnostics_before: diagnostics.len()
     target := jet_driver_find_source_path(source_units, source_unit.root_index, candidate_paths, diagnostics, span)
     if target != None -> return target
     if diagnostics.len() != diagnostics_before -> return None
-    if path_parts.len() == 1 {
-        target = jet_driver_find_module_target(index, source_units, source_unit.package_identity, module_name, span, diagnostics)
-        if target != None -> return target
-    }
+    target = jet_driver_find_module_target(index, source_units, source_unit.package_identity, module_name, span, diagnostics)
+    if target != None -> return target
     diagnostics.push(jet_driver_diagnostic("E0603", span, "the imported module is not present in the package source snapshot", "module lookup stays within the selected package or one explicit direct dependency", "provide the module in the current package or declare its dependency"))
     None
 }
@@ -3424,7 +3396,7 @@ jet_driver_path_leaf: fn(path: String) -> String Never! {
 // (`namespace_private`, which sema doesn't refuse as E0105 against a
 // sibling's same name); semantic registration keeps ONE name -> declaring
 // member table per package and consults it after a module's own
-// declarations and imports (Rust `NameLedger::namespace_owner`). No member
+// declarations and imports (Rust `NameLedger.namespace_owner`). No member
 // receives import rows or edges for its siblings.
 jet_driver_bind_package_namespaces: fn(
     modules: &[JetDriverLoadedModule],
@@ -3534,7 +3506,7 @@ jet_driver_bind_package_namespaces: fn(
 }
 
 // Root component of every embedded Core module path (`<corelib>/Core/Perf/Perf.jet`),
-// the Rust `Diagnostics::CORE_SOURCE_ROOT`. Core is library source, not the
+// the Rust `Diagnostics.CORE_SOURCE_ROOT`. Core is library source, not the
 // user's program; no authorized disk file ever carries this prefix.
 JET_DRIVER_CORE_SOURCE_ROOT: "<corelib>"
 
@@ -3659,7 +3631,7 @@ jet_driver_language_root: fn(block: TraitImplBlock) -> String? {
 }
 
 // The one leading `package: { … }` carrier of a source
-// (Rust `Package::extract_inline_package`). Offsets index the original text;
+// (Rust `Package.extract_inline_package`). Offsets index the original text;
 // `error` is the E1360/E1361/E1362 structure failure.
 JetDriverInlinePackage: struct {
     found: Bool,
@@ -4044,7 +4016,7 @@ jet_driver_inline_scan_part: fn(inputs: Shared<JetDriverInlineShared>, part: Sha
 }
 
 // Blank `start..<end` with spaces, keeping line endings, so every span stays
-// an offset into the original text (Rust `InlinePackageBlock::mask_source`).
+// an offset into the original text (Rust `InlinePackageBlock.mask_source`).
 jet_driver_blank_source_range: fn(source: String, start: Int, end: Int) -> String {
     bytes := source.bytes()
     jet_driver_blank_bytes(bytes, start, end)
@@ -4062,7 +4034,7 @@ jet_driver_blank_bytes: fn(bytes: &[U8], start: Int, end: Int) Never! {
 }
 
 // The source an ordinary parse reads: the inline carrier masked away (Rust
-// `Package::mask_inline_package_source`).
+// `Package.mask_inline_package_source`).
 jet_driver_mask_inline_package: fn(source: String, carrier: JetDriverInlinePackage) -> String {
     // copy: the masked source is a new owned String. Without an inline carrier it equals `source`,
     // the caller's file text (a read parameter), which stays with the caller.
@@ -4071,7 +4043,7 @@ jet_driver_mask_inline_package: fn(source: String, carrier: JetDriverInlinePacka
 }
 
 // Only the carrier's body, at its original offsets, for the manifest field
-// parser (Rust `InlinePackageBlock::body`). Every byte outside the body is
+// parser (Rust `InlinePackageBlock.body`). Every byte outside the body is
 // blanked, so text after the carrier never reaches the field lexer.
 jet_driver_inline_package_body: fn(source: String, carrier: JetDriverInlinePackage) -> String {
     bytes := source.bytes()

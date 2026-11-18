@@ -89,7 +89,7 @@ live_transport_rejected: fn(pid: Int, path: String, message: String) {
     live_transport_rejected(pid, path, "not publishing a live runtime snapshot")
     cli_files.write_bytes(path, live_transport_fixture(pid + 1, latest, now, None)) ?? panic("wrong pid fixture")
     live_transport_rejected(pid, path, "does not belong to process")
-    // PID error precedes event-validation error, exactly as LiveInspect::read.
+    // PID error precedes event-validation error, exactly as LiveInspect.read.
     cli_files.write_bytes(path, live_transport_fixture(pid + 1, latest, now, Val(0))) ?? panic("wrong pid plus invalid event fixture")
     live_transport_rejected(pid, path, "does not belong to process")
     cli_files.write_bytes(path, live_transport_fixture(pid, latest, now, Val(0))) ?? panic("invalid event sequence fixture")
@@ -98,5 +98,11 @@ live_transport_rejected: fn(pid: Int, path: String, message: String) {
     live_transport_rejected(pid, path, "1 MiB safety limit")
     cli_files.write_bytes(path, [U8]{U8{255}}) ?? panic("short snapshot fixture")
     live_transport_rejected(pid, path, "invalid or unsafe schema: live runtime snapshot is truncated")
+    // The process itself: this user's that publishes nothing was not started
+    // with observe, and another user's is refused before its snapshot is read.
+    live_transport_rejected(pid, "{root}/missing.json", "process {pid} was not started with observe enabled")
+    if cli_files.stat("/proc/1") == .Ok(init) && init.owner != Val(cli_sys.getuid()) {
+        live_transport_rejected(1, path, "process 1 belongs to another user")
+    }
     cli_files.remove_all(root) ?? panic("transport fixture cleanup")
 }

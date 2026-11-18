@@ -113,13 +113,13 @@ compiler_process_status_text: fn(status: I64) -> I64 {
     I64{1}
 }
 
-// These match std::env::consts for this pack's Linux x86-64 OS seed; they are
+// These match std.env.consts for this pack's Linux x86-64 OS seed; they are
 // the build target identity, not uname's machine/release or the compiler target.
 #Export(c) jet_std_os_name: fn() -> I64 { jet_rt_string_clone(rt_static_text("linux")) }
 
 #Export(c) jet_std_os_arch: fn() -> I64 { jet_rt_string_clone(rt_static_text("x86_64")) }
 
-// std::env::consts::FAMILY of the Linux build target.
+// std.env.consts.FAMILY of the Linux build target.
 #Export(c) jet_std_os_family: fn() -> I64 { jet_rt_string_clone(rt_static_text("unix")) }
 
 // An entry of the start stack's auxiliary vector, 0 when it has none, as
@@ -187,7 +187,7 @@ HOST_AT_EXECUTABLE: I64{1246057473}
 
 HOST_AT_IMAGE: I64{1246057474}
 
-// jet_sys_executable_raw: std::env::current_exe on Linux reads the
+// jet_sys_executable_raw: std.env.current_exe on Linux reads the
 // /proc/self/exe link, decoded lossily; any failure is None. The native
 // compiler locates its jet-runtime pack beside this path. A program run from
 // memory reports the path its loader gave (HOST_AT_EXECUTABLE).
@@ -319,8 +319,8 @@ host_image_part_length: fn(note: I64, name: I64) -> I64 {
     I64{1}
 }
 
-// jet_sys_current_dir_raw: std::env::current_dir is getcwd(3), decoded lossily;
-// the error is the io::Error text "<message> (os error N)". The raw syscall
+// jet_sys_current_dir_raw: std.env.current_dir is getcwd(3), decoded lossily;
+// the error is the io.Error text "<message> (os error N)". The raw syscall
 // reports an unreachable directory as a non-absolute path, which getcwd(3)
 // refuses with ENOENT.
 #Export(c) jet_sys_current_dir_raw: fn(ok: I64, err: I64) -> I64 {

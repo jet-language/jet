@@ -14,9 +14,11 @@ use {
         X64DataID,
         X64DataReloc,
         X64DebugEncoding,
+        X64DebugEnumerator,
         X64DebugMember,
         X64DebugType,
         X64DebugTypeKind,
+        X64DebugVariant,
         X64DebugVariable,
         X64ExecutableResult,
         X64FunctionDebug,
@@ -246,10 +248,11 @@ ir_x64_debug_pointer: fn(tables: &IRX64Tables, target: Int) -> Int Never! {
 // layout: debug row r describes m.types[r]; the rows they name follow. A
 // String is a pointer to its header [data, byte length, cap]; a List its
 // inline header [len, cap, data], data pointing at its element row
-// (IRModule.list_elements); a struct its members at their offsets
-// (IRModule.debug_members); a Decimal or Fraction a pointer to its runtime
-// handle's two exact Ints (JetRuntime RoutePrecise.jet). Any other
-// aggregate stays opaque.
+// (IRModule.list_elements); a struct or tuple its members at their offsets
+// (IRModule.debug_members); an enum, union, Option or Result its variants
+// (IRModule.debug_variants, ir_x64_debug_variants); a Decimal or Fraction a
+// pointer to its runtime handle's two exact Ints (JetRuntime
+// RoutePrecise.jet). Any other aggregate stays opaque.
 ir_x64_debug_types: fn(m: IRModule, tables: &IRX64Tables) Never! {
     loop _ in 0..<m.types.len() {
         tables.debug_types.push(X64DebugType{name: "", size: 0, kind: X64DebugTypeKind.Opaque})
@@ -267,6 +270,7 @@ ir_x64_debug_types: fn(m: IRModule, tables: &IRX64Tables) Never! {
 
 // The DWARF description of IR type row `row`.
 ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType Never! {
+    if ir_x64_debug_variants(m, tables, shared, row, ty) == .Val(described) -> return described
     if ty.kind == {
         .Unit -> X64DebugType{name: "Unit", size: 0, kind: X64DebugTypeKind.Opaque}
         .Bool -> X64DebugType{name: "Bool", size: 1, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Bool}}
@@ -326,6 +330,72 @@ ir_x64_debug_handle: fn(tables: &IRX64Tables, name: String, first: String, secon
     members: [X64DebugMember]{X64DebugMember{name: first, offset: 0, ty: first_ty}, X64DebugMember{name: second, offset: 8, ty: second_ty}}
     handle: ir_x64_debug_add(tables, X64DebugType{name: name, size: 16, kind: X64DebugTypeKind.Struct{members: members}})
     ir_x64_debug_pointer(tables, handle)
+}
+
+// The DWARF description of a row with variants (IRModule.debug_variants),
+// None for any other row. A payload-free enum is an enumeration of its
+// variant indexes. Any other is a struct whose discriminant selects its
+// variant: the value's own word (an inline Option), its own box pointer (a
+// boxed Option, null when absent), or, through a typedef of the box
+// pointer, the box's selector word at 0 (an enum, union or Result box).
+ir_x64_debug_variants: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType? Never! {
+    list: m.debug_variants.get(row) ?? return None
+    if list < 0 -> return None
+    described: m.variant_lists[list]
+    name: ir_type_name(ty.ty)
+    payload_free := described.selector == .Word
+    loop variant in described.variants {
+        if variant.selector < 0 || variant.members.len() > 0 -> payload_free = false
+    }
+    if payload_free {
+        enumerators: loop variant in described.variants -> X64DebugEnumerator{name: ir_short_name(variant.name), value: variant.selector}
+        return Val(X64DebugType{name: name, size: ty.size, kind: X64DebugTypeKind.Enum{enumerators: enumerators}})
+    }
+    arms := [X64DebugVariant]{}
+    box_size := 8
+    loop variant in described.variants {
+        member: ir_x64_debug_arm(m, tables, shared, described.selector, variant)
+        arms.push(X64DebugVariant{value: if variant.selector < 0 -> None else -> Val(variant.selector), member: member})
+        end: ir_x64_debug_end(m, variant.members)
+        if end > box_size -> box_size = end
+    }
+    if described.selector == {
+        .Box -> {
+            selector: X64DebugMember{name: "tag", offset: 0, ty: shared.word}
+            box: ir_x64_debug_add(tables, X64DebugType{name: name, size: box_size, kind: X64DebugTypeKind.Variants{discriminant: selector, variants: arms}})
+            Val(X64DebugType{name: name, size: 8, kind: X64DebugTypeKind.Typedef{target: ir_x64_debug_pointer(tables, box)}})
+        }
+        .Word -> Val(X64DebugType{name: name, size: 8, kind: X64DebugTypeKind.Variants{discriminant: X64DebugMember{name: "word", offset: 0, ty: shared.word}, variants: arms}})
+        .Pointer -> Val(X64DebugType{name: name, size: 8, kind: X64DebugTypeKind.Variants{discriminant: X64DebugMember{name: "box", offset: 0, ty: shared.pointer}, variants: arms}})
+    }
+}
+
+// The member a value holds while `variant` is selected: its one unnamed
+// payload member itself (a present Option's value, behind the box pointer
+// for a Pointer selector; a union's member), else a struct named as Jet
+// spells the variant whose members are its payload at their offsets.
+ir_x64_debug_arm: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows, selector: IRDebugSelector, variant: IRDebugVariant) -> X64DebugMember Never! {
+    if variant.name == "" && variant.members.len() == 1 {
+        held: variant.members[0]
+        target: if held.boxed -> shared.pointer else -> held.ty
+        if selector == .Pointer {
+            return X64DebugMember{name: "", offset: 0, ty: ir_x64_debug_pointer(tables, target)}
+        }
+        return X64DebugMember{name: "", offset: held.offset, ty: target}
+    }
+    members: loop held in variant.members -> X64DebugMember{name: held.name, offset: held.offset, ty: if held.boxed -> shared.pointer else -> held.ty}
+    payload: ir_x64_debug_add(tables, X64DebugType{name: variant.name, size: ir_x64_debug_end(m, variant.members), kind: X64DebugTypeKind.Struct{members: members}})
+    X64DebugMember{name: variant.name, offset: 0, ty: payload}
+}
+
+// The end of the last of `members`' bytes.
+ir_x64_debug_end: fn(m: IRModule, members: [IRMember]) -> Int Never! {
+    end := 0
+    loop member in members {
+        size: if member.boxed || member.ty < 0 -> 8 else -> m.types[member.ty].size
+        if member.offset + size > end -> end = member.offset + size
+    }
+    end
 }
 
 // The tables of all of `m` at once: what ir_x64_compile_module_logged

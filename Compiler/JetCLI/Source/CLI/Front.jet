@@ -465,6 +465,7 @@ JET_CLI_SEPARATE_VALUE_FLAGS: [String]{
     "--deny",
     "--scope",
     "--live",
+    "--attach",
     "--replay",
     "--project",
     "--console-ttl",
@@ -848,7 +849,7 @@ jet_cli_misplaced_flag: fn(flag: String, command: String, takers: [String], colo
     jet_cli_fail("E2102", "`{flag}` is only valid with {listed}", jet_cli_why("E2102"), "drop `{flag}` from `jet {command}`, or run `jet {takers[0]} {flag}`", color, JET_DRIVER_EXIT_USAGE)
 }
 
-// The directory part of `path`, as Rust `Path::parent` reads it.
+// The directory part of `path`, as Rust `Path.parent` reads it.
 jet_cli_parent: fn(path: String) -> String? Never! {
     if path == "/" -> return None
     parts: path.split("/").to_list()
@@ -2282,7 +2283,7 @@ jet_cli_test_browser_scaffold: fn(jet_argv: [String], name: String, color: Bool,
     jet_cli_new_plan(name, "browser-test", false, quiet, jet_argv.contains("--json"), color)
 }
 
-// `jet test [<target>] [<filter>]` (`TestRunOpts::parse`, `run_test_opts`,
+// `jet test [<target>] [<filter>]` (`TestRunOpts.parse`, `run_test_opts`,
 // `run_test_target` up to the compile). A package directory (or no target
 // inside a package) tests through its own `test: fn(t: Test)` when it declares
 // one, as `jet build` runs its `build: fn`. The tested file's doctests run as
@@ -2834,7 +2835,7 @@ jet_cli_owned_flags: fn(raw: [String]) -[FS]> [String] Never! {
     jet_cli_prefix(raw, jet_cli_owned_end(raw))
 }
 
-// `OutputMode::json`: `--json` before `--`, or the `inspect compiler` plane,
+// `OutputMode.json`: `--json` before `--`, or the `inspect compiler` plane,
 // which is machine output by construction. A bare `compiler` is only the
 // moved-command refusal (E2101), which answers as every moved word does.
 jet_cli_wants_json: fn(owned: [String]) -> Bool Never! {
@@ -3366,7 +3367,7 @@ jet_cli_plan_with: fn(raw: [String], discovery: &WorkspaceDeclarationCache) -[FS
             }
             return JetCLIPlan.Try{plan_path: args[1], keep: jet_argv.contains("--keep"), json: json}
         }
-        // `"import"` -> CmdImport::run(&raw): raw with the command word first.
+        // `"import"` -> CmdImport.run(&raw): raw with the command word first.
         "import" -> return JetCLIPlan.Done{output: jet_cli_import_run(jet_cli_command_first(argv, command), json)}
         else -> {}
     }

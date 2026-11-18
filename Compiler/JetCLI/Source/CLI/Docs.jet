@@ -1,5 +1,5 @@
 // The documentation projection of the Jet-hosted `jet doc` (jet-semindex
-// `build_doc_graph`, `DocGraph::to_status_envelope`, `to_markdown`, `to_html`).
+// `build_doc_graph`, `DocGraph.to_status_envelope`, `to_markdown`, `to_html`).
 // The callable failure and nominal trait-contract facts it reads are the shared
 // semantic index's (jet_semindex SemIndex/Build.jet `semindex_build`), exactly reads
 // `SemIndex`. The command checks a bundle, builds the index once, asks this
@@ -19,6 +19,7 @@ use {
         Span,
         type_name,
     ]
+    jet_sema.[SemaPublicAPIReexport]
     jet_semindex.[
         SemCallable,
         SemDef,
@@ -294,6 +295,16 @@ jet_cli_doc_add_item: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, kind: St
 
 jet_cli_doc_add_function: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, function: Func, parent: String, inherited_public: Bool) Never! {
     jet_cli_doc_add_item(output, unit, "function", function.name, parent, function.is_pub || inherited_public, function.is_package_pub, function.span, function.name_span, jet_cli_doc_marker_names(function.markers))
+}
+
+// Each re-export as an item: its declaration as written, then `Target: ` and
+// the signature of the declaration its path reaches.
+jet_cli_doc_add_reexports: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, reexports: [SemaPublicAPIReexport]) -[]> {
+    loop reexport in reexports {
+        jet_cli_doc_add_item(output, unit, "reexport", reexport.name, "", true, false, reexport.span, reexport.span, [String]{})
+        last: output.len() - 1
+        output[last].signature = "{output[last].signature}\nTarget: {reexport.signature}"
+    }
 }
 
 jet_cli_doc_sorted_names: fn(functions: [Func]) -> [String] Never! {
@@ -781,6 +792,7 @@ jet_cli_build_doc_graph: fn(modules: [JetDriverDocModule], index: SemIndex) -> J
         )
         loop test in jet_cli_doc_discover_doctests(unit) -> graph.doctests.push(test)
         jet_cli_doc_collect_items(doc_module.items, unit, "", false, protocol_names, graph.items, graph.impls)
+        jet_cli_doc_add_reexports(graph.items, unit, doc_module.reexports)
     }
     jet_cli_doc_enrich(graph.items, index)
     jet_cli_doc_sort_modules(graph.modules)
@@ -790,7 +802,7 @@ jet_cli_build_doc_graph: fn(modules: [JetDriverDocModule], index: SemIndex) -> J
     graph
 }
 
-// `DocGraph::undocumented_public`: the public items without a summary, except
+// `DocGraph.undocumented_public`: the public items without a summary, except
 // command entries, which are not library API.
 jet_cli_doc_undocumented_public: fn(graph: JetCLIDocGraph) -> [JetCLIDocItem] Never! {
     undocumented := [JetCLIDocItem]{}
@@ -887,7 +899,7 @@ jet_cli_doc_test_value: fn(test: JetCLIDocTest) -> JetCLIStatusValue Never! {
     )
 }
 
-// `DocGraph::to_status_envelope().json()`: the `inspect.doc` status line.
+// `DocGraph.to_status_envelope().json()`: the `inspect.doc` status line.
 jet_cli_doc_status_json: fn(graph: JetCLIDocGraph) -> String Never! {
     projection: jet_cli_status_object(
         [JetCLIStatusField]{
@@ -927,7 +939,7 @@ jet_cli_doc_summary_text: fn(item: JetCLIDocItem) -> String Never! {
     if item.summary == "" -> "Undocumented public item." else -> item.summary
 }
 
-// `DocGraph::to_markdown`, linking back to the sources through `base`
+// `DocGraph.to_markdown`, linking back to the sources through `base`
 // (jet_cli_doc_link).
 jet_cli_doc_markdown: fn(graph: JetCLIDocGraph, base: String) -> String Never! {
     out := "{JET_CLI_DOC_HEADER}# Jet Documentation\n\nGenerated from the checked semantic graph.\n\n## Effect Roles\n\n{jet_cli_effect_projection_line(graph.effect_projection)}\n\n## Modules\n\n"
@@ -968,7 +980,7 @@ jet_cli_doc_markdown: fn(graph: JetCLIDocGraph, base: String) -> String Never! {
     out
 }
 
-// `DocGraph::to_html`, linking back to the sources through `base`
+// `DocGraph.to_html`, linking back to the sources through `base`
 // (jet_cli_doc_link).
 jet_cli_doc_html: fn(graph: JetCLIDocGraph, base: String) -> String Never! {
     out := "{JET_CLI_DOC_HEADER}<!doctype html><html><head><meta charset=\"utf-8\"><title>Jet Documentation</title></head><body><h1>Jet Documentation</h1><p>Generated from the checked semantic graph.</p><h2>Effect Roles</h2><p>{jet_cli_html_escape(jet_cli_effect_projection_line(graph.effect_projection))}</p><h2>Modules</h2><ul>"

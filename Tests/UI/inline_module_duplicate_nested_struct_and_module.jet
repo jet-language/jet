@@ -1,0 +1,13 @@
+// A module nested in an inline module is one namespace too: a `Shape` module
+// beside a `Shape` struct declares `Shape` twice.
+geo: module {
+    plane: module {
+        Shape: struct { side: Int }
+
+        Shape: module {
+            area: fn(side: Int) -> Int { side * side }
+        }
+    }
+}
+
+run: fn() { print(geo.plane.Shape{side: 2}.side) }

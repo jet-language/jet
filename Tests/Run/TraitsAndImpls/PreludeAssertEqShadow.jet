@@ -1,4 +1,8 @@
-// User declarations shadow every prelude alias, including assert_eq.
-assert_eq: fn(value: Int) -> Int Never! { value + 1 }
+// User declarations shadow every prelude alias, including assert_eq: the
+// replacement is the tidy error L0510, allowed here so the program still shows
+// the user's declaration winning on every tier.
+#Allow(jet.PreludeAliasShadow, "the golden proves a user declaration wins over the prelude alias") assert_eq: fn(value: Int) -> Int Never! {
+    value + 1
+}
 
 run: fn() { print(assert_eq(41)) }

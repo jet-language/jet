@@ -1,0 +1,8 @@
+Error [jet.PreludeAliasShadow]: Declaration `print` replaces the Core prelude alias `print`.
+  --> Tests/UI/prelude_alias_shadow_print.jet:4:1
+    |
+  4 | print: fn(text: String) -> Int { text.len() }
+    | ^^^^^
+ Why: The readable Core prelude opens `print` in every file, and this declaration silently wins over it in its file, so a call that reads like the prelude's runs this one.
+ Fix: Rename `print` and its calls to a name the prelude does not open.
+More: jet-lang.dev/e/L0510

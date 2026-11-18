@@ -57,53 +57,51 @@ ir_event_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
         }
     }
     if ir_event_listen_export(symbol) == .Val(listen) {
-        if symbol.ends_with("::on") {
+        if symbol.ends_with(".on") {
             return Val(ir_event_listen(m, p, b, ty, receiver, args, listen, false, false, span))
         }
-        if symbol.ends_with("::once") {
+        if symbol.ends_with(".once") {
             return Val(ir_event_listen(m, p, b, ty, receiver, args, listen, false, true, span))
         }
-        if symbol.ends_with("::on_priority") {
+        if symbol.ends_with(".on_priority") {
             return Val(ir_event_listen(m, p, b, ty, receiver, args, listen, true, false, span))
         }
     }
-    if symbol == "jet_std::JetEvent::emit" {
+    if symbol == "jet_std.JetEvent.emit" {
         return Val(ir_event_emit(m, p, b, ty, receiver, args, span))
     }
-    if symbol == "jet_std::JetHook::run" {
-        return Val(ir_hook_run(m, p, b, ty, receiver, args, span))
-    }
-    if symbol == "jet_std::JetDecisionHook::run" {
+    if symbol == "jet_std.JetHook.run" -> return Val(ir_hook_run(m, p, b, ty, receiver, args, span))
+    if symbol == "jet_std.JetDecisionHook.run" {
         return Val(ir_decision_hook_run(m, p, b, ty, receiver, args, span))
     }
-    if symbol == "jet_std::JetAsyncEvent::emit_async" {
+    if symbol == "jet_std.JetAsyncEvent.emit_async" {
         return Val(ir_async_emit(m, p, b, ty, receiver, args, span))
     }
-    if symbol == "jet_std::JetDispatchReport::failures" {
+    if symbol == "jet_std.JetDispatchReport.failures" {
         return Val(ir_dispatch_report_failures(m, p, b, ty, receiver, args, span))
     }
     export: if symbol == {
-        "jet_std::JetEvent::listener_count" -> "jet_event_listener_count"
-        "jet_std::JetEvent::trace" -> "jet_event_trace"
-        "jet_std::JetHook::listener_count" | "jet_std::JetDecisionHook::listener_count" -> "jet_hook_listener_count"
-        "jet_std::JetHook::trace" -> "jet_hook_trace"
-        "jet_std::JetAsyncEvent::close" -> "jet_async_event_close"
-        "jet_std::JetAsyncEvent::listener_count" -> "jet_async_event_listener_count"
-        "jet_std::JetAsyncEvent::queued_count" -> "jet_async_event_queued_count"
-        "jet_std::JetAsyncEvent::running_count" -> "jet_async_event_running_count"
-        "jet_std::JetAsyncEvent::blocked_count" -> "jet_async_event_blocked_count"
-        "jet_std::JetDispatchReport::state" -> "jet_dispatch_report_state"
-        "jet_std::JetDispatchReport::accepted" -> "jet_dispatch_report_accepted"
-        "jet_std::JetDispatchReport::delivered_handlers" -> "jet_dispatch_report_delivered_handlers"
-        "jet_std::JetDispatchReport::trace" -> "jet_dispatch_report_trace"
-        "jet_std::JetEventScope::cancel" -> "jet_event_scope_cancel"
-        "jet_std::JetEventScope::active_count" -> "jet_event_scope_active_count"
-        "jet_std::JetSubscription::unsubscribe" -> "jet_subscription_unsubscribe"
-        "jet_std::JetSubscription::active" -> "jet_subscription_active"
-        "jet_std::JetEventTrace::summary" -> "jet_event_trace_summary"
-        "jet_std::JetEventTrace::delivered" -> "jet_event_trace_delivered"
-        "jet_std::JetEventTrace::queued" -> "jet_event_trace_queued"
-        "jet_std::JetEventTrace::dropped" -> "jet_event_trace_dropped"
+        "jet_std.JetEvent.listener_count" -> "jet_event_listener_count"
+        "jet_std.JetEvent.trace" -> "jet_event_trace"
+        "jet_std.JetHook.listener_count" | "jet_std.JetDecisionHook.listener_count" -> "jet_hook_listener_count"
+        "jet_std.JetHook.trace" -> "jet_hook_trace"
+        "jet_std.JetAsyncEvent.close" -> "jet_async_event_close"
+        "jet_std.JetAsyncEvent.listener_count" -> "jet_async_event_listener_count"
+        "jet_std.JetAsyncEvent.queued_count" -> "jet_async_event_queued_count"
+        "jet_std.JetAsyncEvent.running_count" -> "jet_async_event_running_count"
+        "jet_std.JetAsyncEvent.blocked_count" -> "jet_async_event_blocked_count"
+        "jet_std.JetDispatchReport.state" -> "jet_dispatch_report_state"
+        "jet_std.JetDispatchReport.accepted" -> "jet_dispatch_report_accepted"
+        "jet_std.JetDispatchReport.delivered_handlers" -> "jet_dispatch_report_delivered_handlers"
+        "jet_std.JetDispatchReport.trace" -> "jet_dispatch_report_trace"
+        "jet_std.JetEventScope.cancel" -> "jet_event_scope_cancel"
+        "jet_std.JetEventScope.active_count" -> "jet_event_scope_active_count"
+        "jet_std.JetSubscription.unsubscribe" -> "jet_subscription_unsubscribe"
+        "jet_std.JetSubscription.active" -> "jet_subscription_active"
+        "jet_std.JetEventTrace.summary" -> "jet_event_trace_summary"
+        "jet_std.JetEventTrace.delivered" -> "jet_event_trace_delivered"
+        "jet_std.JetEventTrace.queued" -> "jet_event_trace_queued"
+        "jet_std.JetEventTrace.dropped" -> "jet_event_trace_dropped"
         else -> ""
     }
     if export == "" -> return None
@@ -112,11 +110,11 @@ ir_event_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receive
 
 // The provider registration of a family's on / once / on_priority row.
 ir_event_listen_export: fn(symbol: String) -> String? Never! {
-    if symbol.starts_with("jet_std::JetEvent::") -> return Val("jet_event_listen")
-    if symbol.starts_with("jet_std::JetHook::") || symbol.starts_with("jet_std::JetDecisionHook::") {
+    if symbol.starts_with("jet_std.JetEvent.") -> return Val("jet_event_listen")
+    if symbol.starts_with("jet_std.JetHook.") || symbol.starts_with("jet_std.JetDecisionHook.") {
         return Val("jet_hook_listen")
     }
-    if symbol.starts_with("jet_std::JetAsyncEvent::") -> return Val("jet_async_event_listen")
+    if symbol.starts_with("jet_std.JetAsyncEvent.") -> return Val("jet_async_event_listen")
     None
 }
 

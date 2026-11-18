@@ -4194,11 +4194,11 @@ ir_leaf_route: fn(name: String) -> String? Never! {
 // Routes built inline rather than calling the runtime (list.get /
 // list.index_of); None for any other route. Every argument is borrowed.
 ir_route_inline: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inputs: [Int], result: Type, span: Span) -> Int? Never! {
-    if name == "std::collections::BinaryHeap::new" {
+    if name == "std.collections.BinaryHeap.new" {
         return Val(ir_priority_queue_new(m, p, b, inputs, result, span))
     }
     // `Queue.new()` / `Tally.new()`: an empty List / Map carrier.
-    if (name == "std::collections::VecDeque::new" && ir_queue_element(result) != None) || (name == "std::collections::HashMap::new" && ir_tally_element(result) != None) {
+    if (name == "std.collections.VecDeque.new" && ir_queue_element(result) != None) || (name == "std.collections.HashMap.new" && ir_tally_element(result) != None) {
         row: ir_value_type(m, p, result) ?? return Val(ir_type_fail(b, span, result))
         return Val(ir_list_empty(m, b, row))
     }
@@ -4216,18 +4216,18 @@ ir_route_inline: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inp
         if b.fresh[inputs[0]] -> return Val(inputs[0])
         return Val(ir_copy_value(m, p, b, inputs[0], span))
     }
-    if name == "std::collections::HashSet::new" || name == "std::collections::BTreeSet::new" {
+    if name == "std.collections.HashSet.new" || name == "std.collections.BTreeSet.new" {
         return Val(ir_set_new(m, p, b, inputs, result, span))
     }
-    if name == "std::collections::HashSet::bits" {
+    if name == "std.collections.HashSet.bits" {
         return Val(ir_bit_set_bits(m, p, b, inputs, result, span))
     }
-    if name == "std::collections::HashSet::from_bits" {
+    if name == "std.collections.HashSet.from_bits" {
         return Val(ir_bit_set_from_bits(m, p, b, inputs, result, span))
     }
     // `Cache.new(capacity)`: no entries, the capacity a native word (a
     // negative one is 0).
-    if name == "JetCache::new" {
+    if name == "JetCache.new" {
         if inputs.len() != 1 || inputs[0] < 0 {
             return Val(ir_fail_slot(b, span, "Cache.new with {inputs.len()} arguments"))
         }
@@ -4276,10 +4276,10 @@ ir_route_inline: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, name: String, inp
     if name == "jet_ordering_then" || name == "jet_ordering_reverse" {
         return Val(ir_ordering_method(m, p, b, name, inputs, span))
     }
-    if name == "jet_std::JetShared::new" || name == "jet_std::JetCell::new" {
+    if name == "jet_std.JetShared.new" || name == "jet_std.JetCell.new" {
         return Val(ir_shared_new(m, p, b, inputs, result, span))
     }
-    if name == "jet_std::JetPool::new" -> return Val(ir_pool_new(m, p, b, result, span))
+    if name == "jet_std.JetPool.new" -> return Val(ir_pool_new(m, p, b, result, span))
     // `os.atexit(handler)` / `os.on_interrupt(handler)`: the runtime's exit
     // queue (Task.jet jet_rt_native_atexit) or interrupt list
     // (ProcessSignal.jet jet_rt_native_interrupt) takes the handler's closure
@@ -5370,24 +5370,24 @@ ir_route_symbol: fn(symbol: String) -> String Never! {
 // besides the leaf routes (ir_leaf_route); ir_route_labeled reaches it only
 // for these.
 IR_ROUTES_INLINE: #run { [String]{
-    "std::collections::BinaryHeap::new",
-    "std::collections::HashSet::new",
-    "std::collections::HashSet::bits",
-    "std::collections::HashSet::from_bits",
-    "std::collections::BTreeSet::new",
-    "std::collections::VecDeque::new",
-    "std::collections::HashMap::new",
+    "std.collections.BinaryHeap.new",
+    "std.collections.HashSet.new",
+    "std.collections.HashSet.bits",
+    "std.collections.HashSet.from_bits",
+    "std.collections.BTreeSet.new",
+    "std.collections.VecDeque.new",
+    "std.collections.HashMap.new",
     "jet_deque_from",
-    "JetCache::new",
+    "JetCache.new",
     "jet_eq",
     "jet_map_from_keys_kernel",
     "jet_map_from_keys_int",
     "jet_map_from_keys_composite",
     "jet_ordering_then",
     "jet_ordering_reverse",
-    "jet_std::JetShared::new",
-    "jet_std::JetCell::new",
-    "jet_std::JetPool::new",
+    "jet_std.JetShared.new",
+    "jet_std.JetCell.new",
+    "jet_std.JetPool.new",
     "jet_std_os_atexit",
     "jet_std_os_interrupt",
     "jet_rt_callback",
@@ -5436,7 +5436,7 @@ IR_ROUTES_FROZEN: #run { [String]{"jet_sys_image_part_raw"} }
 ir_route_builder_lowered: fn(name: String) -> Bool Never! {
     if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None -> return true
     if name == "jet_raw_crypto_wipe" -> return true
-    if name == "jet_std::channel" || name == "jet_std::channel_bounded" || name == "jet_std::after_value" || name == "jet_std::JetEvent::with_policy" {
+    if name == "jet_std.channel" || name == "jet_std.channel_bounded" || name == "jet_std.after_value" || name == "jet_std.JetEvent.with_policy" {
         return true
     }
     ir_lazy_symbol(name, Type.Apply{name: "Iter", args: [Type]{Type.Int}})
@@ -6699,20 +6699,18 @@ ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rec
         return ir_host_method(m, p, b, ty, "compiler.{canonical.member}", args, span)
     }
     if canonical.symbol == .Prelude(name) {
-        if name == "jet_std::channel" || name == "jet_std::channel_bounded" {
-            return ir_channel_new(m, p, b, ty, name == "jet_std::channel_bounded", args, span)
+        if name == "jet_std.channel" || name == "jet_std.channel_bounded" {
+            return ir_channel_new(m, p, b, ty, name == "jet_std.channel_bounded", args, span)
         }
-        if name == "jet_std::after_value" -> return ir_timer_after(m, p, b, ty, args, span)
-        if name == "jet_std::JetEvent::with_policy" {
+        if name == "jet_std.after_value" -> return ir_timer_after(m, p, b, ty, args, span)
+        if name == "jet_std.JetEvent.with_policy" {
             return ir_event_with_policy(m, p, b, ty, args, span)
         }
-        if name == "jet_std::JetHook::new" -> return ir_hook_new(m, p, b, ty, args, span)
-        if name == "jet_std::JetDecisionHook::new" {
+        if name == "jet_std.JetHook.new" -> return ir_hook_new(m, p, b, ty, args, span)
+        if name == "jet_std.JetDecisionHook.new" {
             return ir_decision_hook_new(m, p, b, ty, args, span)
         }
-        if name == "jet_std::JetAsyncEvent::new" {
-            return ir_async_event_new(m, p, b, ty, args, span)
-        }
+        if name == "jet_std.JetAsyncEvent.new" -> return ir_async_event_new(m, p, b, ty, args, span)
     }
     if canonical.module_name == "core.crypto.vault" && canonical.member == "current" {
         return ir_core_vault_current(m, p, b, ty, args, type_args, span)
@@ -7098,7 +7096,7 @@ IR_COMPTIME_AMBIENT_RANDOM: "the ambient random stream"
 ir_comptime_ambient_refusal: fn(symbol: String) -> String? Never! {
     if symbol == {
         "jet_random_state_raw" | "jet_random_try_update_raw" | "jet_std_random_seed" -> Val(IR_COMPTIME_AMBIENT_RANDOM)
-        "jet_std_env_get" | "jet_std_env_vars" | "jet_sys_env_value_raw" | "jet_sys_env_columns_raw" | "jet_sys_startup_env_columns_raw" | "jet_rt_logical_env_get" | "jet_sys_host_env_raw" | "jet_time_raw_zone_env" | "jet_std::jet_fs_temp_directory_raw" -> Val("the environment")
+        "jet_std_env_get" | "jet_std_env_vars" | "jet_sys_env_value_raw" | "jet_sys_env_columns_raw" | "jet_sys_startup_env_columns_raw" | "jet_rt_logical_env_get" | "jet_sys_host_env_raw" | "jet_time_raw_zone_env" | "jet_std.jet_fs_temp_directory_raw" -> Val("the environment")
         "jet_std_io_args" -> Val("the process arguments")
         "jet_sys_executable_raw" -> Val("the running executable's path")
         "jet_sys_image_part_raw" | "jet_sys_image_part_size_raw" -> Val("the running executable's image parts")
@@ -7329,16 +7327,16 @@ ir_core_native_int: fn(m: &IRModule, b: &IRBuilder, value: Int, span: Span) -> I
     args := [Int]{value, kind_word}
     site: b.line
     loop arg in ir_location(m, b, site) -> args.push(arg)
-    narrowed: ir_runtime(m, b, ir_route_export("jet_std::jet_int_checked_fixed"), args, word_row)
+    narrowed: ir_runtime(m, b, ir_route_export("jet_std.jet_int_checked_fixed"), args, word_row)
     ir_release(m, b, value)
     narrowed
 }
 
-// The C export of a Prelude route symbol (its last `::` segment when the
+// The C export of a Prelude route symbol (its last `.` segment when the
 // route table has no row).
 ir_route_export: fn(symbol: String) -> String Never! {
     if ir_runtime_route(symbol) == .Val(route) -> return route.export
-    parts: symbol.split("::").to_list()
+    parts: symbol.split(".").to_list()
     parts[parts.len() - 1].copy()
 }
 

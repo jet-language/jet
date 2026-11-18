@@ -1,8 +1,8 @@
-// A `dispatcher_row`'s expression in Compiler/Prelude/Core.rows is a Rust
-// `CoreCallRecord` builder chain; these evaluate it into the CoreCallRecord
-// CORE_CALLS holds, while the compiler builds. A string argument is a Rust
-// string literal or the name of a Syntax string constant
-// (Compiler/JetFoundation/Data/Syntax).
+// A `dispatcher_row`'s expression in Compiler/Prelude/Core.rows is a
+// `CoreCallRecord` builder chain (`CoreCallRecord.new(…).with_max_arity(2)`);
+// these evaluate it into the CoreCallRecord CORE_CALLS holds, while the
+// compiler builds. A string argument is a string literal or the name of a
+// Syntax string constant (Compiler/JetFoundation/Data/Syntax).
 
 #Error
 CoreDeclarationError: struct {
@@ -137,7 +137,7 @@ core_decl_split_top_level: fn(source: String, context: String) -> [String] CoreD
     Ok(parts)
 }
 
-// The call at byte `start` of `source`: a `::`-separated path of names, then
+// The call at byte `start` of `source`: a `.`-separated path of names, then
 // optional whitespace and its parenthesized arguments.
 core_decl_read_call: fn(source: String, start: Int, context: String) -> CoreDeclRustCall CoreDeclarationError! {
     bytes: source.bytes()
@@ -145,9 +145,9 @@ core_decl_read_call: fn(source: String, start: Int, context: String) -> CoreDecl
     if end == start {
         return Err(core_decl_fail("unsupported Rust call in {context}: {source.trim()}"))
     }
-    loop end + 2 < bytes.len() && (Int{bytes[end]}) == 58 && (Int{bytes[end + 1]}) == 58 {
-        segment_end: core_decl_name_end(bytes, end + 2)
-        if segment_end == end + 2 -> break
+    loop end + 1 < bytes.len() && (Int{bytes[end]}) == 46 {
+        segment_end: core_decl_name_end(bytes, end + 1)
+        if segment_end == end + 1 -> break
         end = segment_end
     }
     open: core_decl_skip_space(bytes, end)
@@ -272,15 +272,9 @@ core_decl_quoted: fn(value: String) -> String? Never! {
     Val(foundation_byte_text(bytes, 1, bytes.len() - 1))
 }
 
-// The Syntax constant a Rust path names (`NAME`, `Syntax::NAME`,
-// `crate::Syntax::NAME`, `super::NAME`), or None.
+// The Syntax constant a value names (`NAME` or `Syntax.NAME`), or None.
 core_decl_rust_constant: fn(value: String) -> String? Never! {
-    name: if {
-        value.starts_with("crate::Syntax::") -> value.removeprefix("crate::Syntax::")
-        value.starts_with("Syntax::") -> value.removeprefix("Syntax::")
-        value.starts_with("super::") -> value.removeprefix("super::")
-        else -> value.copy()
-    }
+    name: if value.starts_with("Syntax.") -> value.removeprefix("Syntax.") else -> value.copy()
     if !core_decl_is_constant(name) -> return None
     Val(name)
 }
@@ -349,11 +343,11 @@ core_decl_rust_some_string: fn(expression: String, context: String, constants: [
     core_decl_rust_string(call.args[0], context, constants)
 }
 
-// The CoreCallPureRoute a `CoreCallPureRoute::<Rust variant>` names: Jet
+// The CoreCallPureRoute a `CoreCallPureRoute.<Rust variant>` names: Jet
 // spells acronyms in caps; the retired Rust enum kept its Rust variant names.
 core_decl_pure_route: fn(expression: String, context: String) -> CoreCallPureRoute CoreDeclarationError! {
     value: expression.trim()
-    name: if value.starts_with("CoreCallPureRoute::") -> value.removeprefix("CoreCallPureRoute::") else -> ""
+    name: if value.starts_with("CoreCallPureRoute.") -> value.removeprefix("CoreCallPureRoute.") else -> ""
     if name == {
         "None" -> Ok(CoreCallPureRoute.NoPureRoute)
         "Mime" -> Ok(CoreCallPureRoute.MIME)
@@ -371,7 +365,7 @@ core_decl_pure_route: fn(expression: String, context: String) -> CoreCallPureRou
     }
 }
 
-// The CORE_CALL_COVERAGE_* bit of a `CoreCallCoverage::<NAME>` constant, or
+// The CORE_CALL_COVERAGE_* bit of a `CoreCallCoverage.<NAME>` constant, or
 // -1 when it has none.
 core_decl_coverage_bit: fn(name: String) -> Int Never! {
     if name == {
@@ -385,20 +379,20 @@ core_decl_coverage_bit: fn(name: String) -> Int Never! {
     }
 }
 
-// `CoreCallCoverage::from_bits(<constants and integers joined by |>)`.
+// `CoreCallCoverage.from_bits(<constants and integers joined by |>)`.
 core_decl_coverage: fn(expression: String, context: String) -> CoreCallCoverage CoreDeclarationError! {
     call: core_decl_whole_call(expression, context, "CoreCallCoverage") ?? return Err(err)
-    if call.name != "CoreCallCoverage::from_bits" || call.args.len() != 1 {
+    if call.name != "CoreCallCoverage.from_bits" || call.args.len() != 1 {
         return Err(core_decl_fail("unsupported CoreCallCoverage in {context}: {expression.trim()}"))
     }
     bits := 0
     loop raw in call.args[0].split("|") {
         part: raw.trim()
-        if part.starts_with("CoreCallCoverage::") {
-            name: part.removeprefix("CoreCallCoverage::")
+        if part.starts_with("CoreCallCoverage.") {
+            name: part.removeprefix("CoreCallCoverage.")
             bit: core_decl_coverage_bit(name)
             if bit < 0 {
-                return Err(core_decl_fail("CoreCallCoverage::{name} has no Jet coverage bit in {context}"))
+                return Err(core_decl_fail("CoreCallCoverage.{name} has no Jet coverage bit in {context}"))
             }
             bits |= bit
             next
@@ -414,9 +408,9 @@ core_decl_resource_access: fn(expression: String, context: String) -> CoreCallRe
         return Err(core_decl_fail("unsupported CoreCallResourceAccess in {context}"))
     }
     mode: if call.name == {
-        "CoreCallResourceAccess::read" -> CoreCallResourceAccessMode.Read
-        "CoreCallResourceAccess::write" -> CoreCallResourceAccessMode.Write
-        "CoreCallResourceAccess::move_" -> CoreCallResourceAccessMode.Move
+        "CoreCallResourceAccess.read" -> CoreCallResourceAccessMode.Read
+        "CoreCallResourceAccess.write" -> CoreCallResourceAccessMode.Write
+        "CoreCallResourceAccess.move_" -> CoreCallResourceAccessMode.Move
         else -> {
             return Err(core_decl_fail("unsupported CoreCallResourceAccess in {context}: {call.name}"))
         }
@@ -427,9 +421,9 @@ core_decl_resource_access: fn(expression: String, context: String) -> CoreCallRe
 core_decl_completion: fn(expression: String, context: String, constants: [String:String]) -> CoreCallCompletion CoreDeclarationError! {
     call: core_decl_whole_call(expression, context, "CoreCallCompletion") ?? return Err(err)
     kind: if call.name == {
-        "CoreCallCompletion::synchronous" -> if call.args.len() == 1 -> Val(CoreCallCompletionKind.Synchronous) else -> None
-        "CoreCallCompletion::pending" -> if call.args.len() == 2 -> Val(CoreCallCompletionKind.Pending) else -> None
-        "CoreCallCompletion::event" -> if call.args.len() == 2 -> Val(CoreCallCompletionKind.Event) else -> None
+        "CoreCallCompletion.synchronous" -> if call.args.len() == 1 -> Val(CoreCallCompletionKind.Synchronous) else -> None
+        "CoreCallCompletion.pending" -> if call.args.len() == 2 -> Val(CoreCallCompletionKind.Pending) else -> None
+        "CoreCallCompletion.event" -> if call.args.len() == 2 -> Val(CoreCallCompletionKind.Event) else -> None
         else -> None
     }
     done: kind ?? return Err(core_decl_fail("unsupported CoreCallCompletion in {context}: {call.name}"))
@@ -452,17 +446,17 @@ core_decl_capability: fn(expression: String, context: String, constants: [String
     }
     count: strings.len()
     if {
-        call.name == "CoreCapabilityContract::pure" && count == 0 -> return Ok(core_decl_pure_capability())
-        call.name == "CoreCapabilityContract::native_required" && count == 2 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.NativeRequired, provider: Val(strings[0].copy()), fallback: None, failure: Val(strings[1].copy())})
-        call.name == "CoreCapabilityContract::portable_fallback" && count == 3 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.PortableFallback, provider: Val(strings[0].copy()), fallback: Val(strings[1].copy()), failure: Val(strings[2].copy())})
-        call.name == "CoreCapabilityContract::explicit_simulation" && count == 2 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.ExplicitSimulation, provider: Val(strings[0].copy()), fallback: None, failure: Val(strings[1].copy())})
+        call.name == "CoreCapabilityContract.pure" && count == 0 -> return Ok(core_decl_pure_capability())
+        call.name == "CoreCapabilityContract.native_required" && count == 2 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.NativeRequired, provider: Val(strings[0].copy()), fallback: None, failure: Val(strings[1].copy())})
+        call.name == "CoreCapabilityContract.portable_fallback" && count == 3 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.PortableFallback, provider: Val(strings[0].copy()), fallback: Val(strings[1].copy()), failure: Val(strings[2].copy())})
+        call.name == "CoreCapabilityContract.explicit_simulation" && count == 2 -> return Ok(CoreCapabilityContract{kind: CoreCapabilityKind.ExplicitSimulation, provider: Val(strings[0].copy()), fallback: None, failure: Val(strings[1].copy())})
     }
     Err(core_decl_fail("unsupported CoreCapabilityContract in {context}: {call.name}"))
 }
 
 core_decl_marker: fn(expression: String, context: String, constants: [String:String]) -> CoreMarkerApplication CoreDeclarationError! {
     call: core_decl_whole_call(expression, context, "CoreMarkerApplication") ?? return Err(err)
-    if call.name != "CoreMarkerApplication::deprecated" || call.args.len() != 4 {
+    if call.name != "CoreMarkerApplication.deprecated" || call.args.len() != 4 {
         return Err(core_decl_fail("unsupported CoreMarkerApplication in {context}"))
     }
     Ok(
@@ -694,7 +688,7 @@ core_decl_call_effect_leaf: fn(module_name: String, member: String) -> String? N
     }
 }
 
-// `CoreCallRecord::new`'s record: the call's facts, Prelude symbol `symbol`.
+// `CoreCallRecord.new`'s record: the call's facts, Prelude symbol `symbol`.
 // Its effects are its root, unless its leaf refines that root (`FS.Read`
 // under `FS`), and its leaf: a leaf under another root (`Time.Wait` on a
 // network call) adds to the root.
@@ -733,7 +727,7 @@ core_decl_require_jet_route: fn(argument: String, context: String) -> Bool CoreD
     Ok(true)
 }
 
-// `CoreCallRecord::new(module, member, symbol, true, mask)`, with a sixth
+// `CoreCallRecord.new(module, member, symbol, true, mask)`, with a sixth
 // CoreCallCoverage argument for `new_with_coverage`.
 core_decl_new_record: fn(call: CoreDeclRustCall, count: Int, context: String, constants: [String:String]) -> CoreCallRecord CoreDeclarationError! {
     core_decl_expect_args(call, count, context) ?? return Err(err)
@@ -748,7 +742,7 @@ core_decl_new_record: fn(call: CoreDeclRustCall, count: Int, context: String, co
 
 core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, constants: [String:String]) -> CoreCallRecord CoreDeclarationError! {
     if call.name == {
-        "CoreCallRecord::source_owned" -> {
+        "CoreCallRecord.source_owned" -> {
             core_decl_expect_args(call, 3, context) ?? return Err(err)
             member: core_decl_rust_string(call.args[1], context, constants) ?? return Err(err)
             record: core_decl_plain_record(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err), member.copy(), member.copy(), core_decl_rust_bools(call.args[2], context) ?? return Err(err))
@@ -758,9 +752,9 @@ core_decl_constructor_record: fn(call: CoreDeclRustCall, context: String, consta
             core_decl_expect_args(call, 4, context) ?? return Err(err)
             Ok(core_decl_plain_record(core_decl_rust_string(call.args[0], context, constants) ?? return Err(err), core_decl_rust_string(call.args[1], context, constants) ?? return Err(err), core_decl_rust_string(call.args[2], context, constants) ?? return Err(err), core_decl_rust_bools(call.args[3], context) ?? return Err(err)))
         }
-        "CoreCallRecord::new" -> core_decl_new_record(call, 5, context, constants)
-        "CoreCallRecord::new_with_coverage" -> core_decl_new_record(call, 6, context, constants)
-        "CoreCallRecord::receiver_with_symbol" -> {
+        "CoreCallRecord.new" -> core_decl_new_record(call, 5, context, constants)
+        "CoreCallRecord.new_with_coverage" -> core_decl_new_record(call, 6, context, constants)
+        "CoreCallRecord.receiver_with_symbol" -> {
             core_decl_expect_args(call, 5, context) ?? return Err(err)
             core_decl_require_jet_route(call.args[3], context) ?? return Err(err)
             mask: core_decl_rust_bools(call.args[4], context) ?? return Err(err)

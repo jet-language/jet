@@ -3,7 +3,7 @@
 // `Meter.reflect().unit_scale_provenance`). Sema resolves one registered plane on the
 // subject and replaces the read with its typed compile-time value, so a fact
 // never reaches code generation as a runtime member read and cannot select
-// runtime behavior. Mirrors Rust `CheckerInfer::fold_fact_read`,
+// runtime behavior. Mirrors Rust `CheckerInfer.fold_fact_read`,
 // `reflected_fact_type`, `Comptime::reflected_fact_field` and the reflection
 // rows of `CheckerCoreLib::core_struct_field`.
 use jet_foundation.[
@@ -70,7 +70,7 @@ sema_fact_read_failed: fn() -> SemaFactReadCheck Never! {
     SemaFactReadCheck{handled: true, value: None}
 }
 
-// The typed reader named by a `$` member (Rust `Syntax::fact_read_kind` over
+// The typed reader named by a `$` member (Rust `Syntax.fact_read_kind` over
 // the registry's fact reads). The build-snapshot reads are not sema fact
 // reads here: `build`/`#package` roots carry them instead.
 sema_fact_read_kind: fn(member: String) -> FactRead? Never! {
@@ -758,7 +758,7 @@ sema_fact_first_dimension: fn(value: TComptimeValue) -> TComptimeValue? {
 }
 
 // Project one registered fact from an aggregate reflection value through its
-// typed FactInfo/FactValue carrier (Rust `Comptime::reflected_fact_field`).
+// typed FactInfo/FactValue carrier (Rust `Comptime.reflected_fact_field`).
 // Codegen reuses this for `$` steps of a prepared-constant path.
 sema_fact_reflected_field: fn(value: TComptimeValue, member: String) -> TComptimeValue? {
     read: sema_fact_read_kind(member) ?? return None
@@ -851,8 +851,8 @@ sema_fact_build_rooted: fn(base: Expr) -> Bool Never! {
     }
 }
 
-// The registered build-fact paths (Rust `Registry::build_fact_read`) and the
-// typed value each one takes from the snapshot (Rust `BuildFactSnapshot::value`).
+// The registered build-fact paths (Rust `Registry.build_fact_read`) and the
+// typed value each one takes from the snapshot (Rust `BuildFactSnapshot.value`).
 // `#build.target.*` reads the facts of the machine the build targets, the
 // ones `core.target` declares for each machine.
 sema_fact_build_value: fn(path: String, facts: SemaBuildFacts, machine: TargetMachine) -> SemaFactReadValue? {

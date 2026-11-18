@@ -31,12 +31,12 @@ ImpactReport: struct {
     upstream_callers: [ImpactEdge],
     downstream_callees: [ImpactEdge],
 
-    // Rust ImpactReport::analyze (44–72) over one checked program's index.
+    // Rust ImpactReport.analyze (44–72) over one checked program's index.
     analyze: fn(index: SemIndex, symbol: String, depth_limit: Int) -> ImpactReport Never! {
         impact_report(index.definitions, index.references, index.calls, symbol, depth_limit)
     }
 
-    // Rust ImpactReport::to_json and nested edge_json/ref_json (74–115).
+    // Rust ImpactReport.to_json and nested edge_json/ref_json (74–115).
     // Rust json_str (266–282) shares Foundation's exact quote contract, including
     // DEL/C1 controls and lowercase \u0008/\u000c rather than debug quoting.
     to_json: fn(self) -> String Never! {
@@ -52,7 +52,7 @@ ImpactReport: struct {
         "{{\"symbol\":{foundation_json_quote(self.symbol)},\"found\":{found},\"depth_limit\":{self.depth_limit},\"definition_module\":{definition_module},\"references\":[{refs.join(",")}],\"call_sites\":[{sites.join(",")}],\"upstream_callers\":[{upstream.join(",")}],\"downstream_callees\":[{downstream.join(",")}]}}"
     }
 
-    // Rust ImpactReport::render_text (117–170): preserve ordering and whitespace.
+    // Rust ImpactReport.render_text (117–170): preserve ordering and whitespace.
     render_text: fn(self) -> String Never! {
         out := ""
         if !self.found {

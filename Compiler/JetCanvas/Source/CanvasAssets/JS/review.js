@@ -110,7 +110,7 @@
         oldLine = oldRange.start;
         newLine = newRange.start;
         hunk = {
-          id: reviewPathKey(path) + "::hunk-" + (++hunkNumber),
+          id: reviewPathKey(path) + "#hunk-" + (++hunkNumber),
           oldStart: oldRange.start,
           oldCount: oldRange.count,
           newStart: newRange.start,
@@ -122,7 +122,7 @@
       if (!hunk) {
         if (line.startsWith("+") && !line.startsWith("+++")) {
           hunk = {
-            id: reviewPathKey(path) + "::hunk-" + (++hunkNumber),
+            id: reviewPathKey(path) + "#hunk-" + (++hunkNumber),
             oldStart: 0,
             oldCount: 0,
             newStart: 1,
@@ -155,7 +155,7 @@
     if (hunks.length) return hunks;
     if (String(diff || "").includes("Binary files") || String(fileStatus || "").trim().startsWith("R")) {
       return [{
-        id: reviewPathKey(path) + "::hunk-1",
+        id: reviewPathKey(path) + "#hunk-1",
         oldStart: 0,
         oldCount: 0,
         newStart: 0,

@@ -104,7 +104,7 @@ run_binary: fn(binary: String, mode: String) -[Exec, FS, IO, Time.Wait]> Outcome
     }
 }
 
-write_file: fn(path: String, bytes: [U8]) -[FS, IO]> Bool Never! {
+save_bytes: fn(path: String, bytes: [U8]) -[FS, IO]> Bool Never! {
     if files.write_bytes(path, bytes) == {
         .Ok(_) -> true
         .Err(error) -> {
@@ -119,9 +119,9 @@ record: fn(out: String, mode: String, outcome: Outcome) -[FS, IO]> Bool Never! {
     status: if outcome.exited -> "{outcome.status}" else -> "null"
     signal: if outcome.signal == "" -> "null" else -> json_text(outcome.signal)
     error: if outcome.error == "" -> "null" else -> json_text(outcome.error)
-    if !write_file("{out}/{mode}.stdout", outcome.stdout) -> return false
-    if !write_file("{out}/{mode}.stderr", outcome.stderr) -> return false
-    write_file("{out}/{mode}.status.json", "{{\"status\":{status},\"signal\":{signal},\"error\":{error}}}\n".bytes())
+    if !save_bytes("{out}/{mode}.stdout", outcome.stdout) -> return false
+    if !save_bytes("{out}/{mode}.stderr", outcome.stderr) -> return false
+    save_bytes("{out}/{mode}.status.json", "{{\"status\":{status},\"signal\":{signal},\"error\":{error}}}\n".bytes())
 }
 
 fatal: fn(outcome: Outcome) -> Bool Never! {
@@ -163,7 +163,7 @@ data_sequence: fn(cwd: String, out: String, binary: String) -[Exec, FS, IO, Time
         }
         rows.push("{mode}\tpass\texit=101\tstderr-byte-identical=true")
     }
-    if !write_file("{out}/data-sequence-results.tsv", "{rows.join("\n")}\n".bytes()) -> return 1
+    if !save_bytes("{out}/data-sequence-results.tsv", "{rows.join("\n")}\n".bytes()) -> return 1
     print("8 Dyn List/Entries std Vec bounds/capacity process goldens passed")
     0
 }
@@ -186,7 +186,7 @@ scalar_reflect: fn(out: String, binary: String) -[Exec, FS, IO, Time.Wait]> Int 
         }
         rows.push("{mode}\tpass\texit=101\tstdout-flushed=true\tstderr-byte-identical=true")
     }
-    if !write_file("{out}/scalar-reflect-stops.tsv", "{rows.join("\n")}\n".bytes()) -> return 1
+    if !save_bytes("{out}/scalar-reflect-stops.tsv", "{rows.join("\n")}\n".bytes()) -> return 1
     print("ScalarReflect bounds: exit 101, exact unsigned-index body and stdout flushed")
     0
 }

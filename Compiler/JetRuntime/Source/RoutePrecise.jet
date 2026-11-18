@@ -77,7 +77,7 @@ precise_signed: fn(magnitude: I64, negative: Bool) -> I64 {
     result
 }
 
-// CtBigInt::gcd over the magnitudes; gcd(0, d) is d.
+// CtBigInt.gcd over the magnitudes; gcd(0, d) is d.
 precise_gcd: fn(left: I64, right: I64) -> I64 {
     a := precise_abs(left)
     b := precise_abs(right)
@@ -108,7 +108,7 @@ precise_float_finite: fn(bits: I64) -> Bool { (bits >> I64{52}) & I64{2047} != I
 
 // ---- Fraction --------------------------------------------------------------
 
-// CtFraction::from_bigints, consuming both words; 0 for a zero denominator.
+// CtFraction.from_bigints, consuming both words; 0 for a zero denominator.
 fraction_make: fn(numerator: I64, denominator: I64) -> I64 {
     if (denominator == I64{0}) {
         jet_rt_int_drop(numerator)
@@ -153,7 +153,7 @@ fraction_parts: fn(numerator: I64, denominator: I64) -> I64 {
     result
 }
 
-// CtFraction::to_string_rep: the finite Decimal spelling when one exists,
+// CtFraction.to_string_rep: the finite Decimal spelling when one exists,
 // else "numerator/denominator".
 fraction_render: fn(value: I64) -> I64 {
     decimal: decimal_from_fraction(value)
@@ -195,7 +195,7 @@ fraction_render: fn(value: I64) -> I64 {
     precise_pair(jet_rt_int_clone(value), I64{1})
 }
 
-// CtFraction::from_float: the exact binary64 value as a reduced ratio.
+// CtFraction.from_float: the exact binary64 value as a reduced ratio.
 #Export(c) jet_fraction_from_float: fn(value: Float) -> I64 {
     bits: rt_f64_bits(value)
     if !precise_float_finite(bits) {
@@ -256,7 +256,7 @@ fraction_render: fn(value: I64) -> I64 {
     jet_rt_int_clone(precise_top(value))
 }
 
-// CtFraction::to_float: numerator.to_f64() / denominator.to_f64().
+// CtFraction.to_float: numerator.to_f64() / denominator.to_f64().
 #Export(c) jet_fraction_to_float: fn(value: I64) -> Float {
     jet_int_owned_to_f64(precise_top(value)) / jet_int_owned_to_f64(precise_bottom(value))
 }
@@ -294,7 +294,7 @@ fraction_render: fn(value: I64) -> I64 {
 
 // ---- Decimal ---------------------------------------------------------------
 
-// CtDecimal::normalize over an owned coefficient: trailing fractional zeros
+// CtDecimal.normalize over an owned coefficient: trailing fractional zeros
 // leave with the scale, and zero has scale 0.
 decimal_normalized: fn(coefficient: I64, scale: I64) -> I64 {
     digits := coefficient
@@ -323,7 +323,7 @@ decimal_strip_factor: fn(value: I64, factor: I64) -> I64 {
     count
 }
 
-// CtDecimal::from_fraction: the finite expansion of a reduced ratio, or 0
+// CtDecimal.from_fraction: the finite expansion of a reduced ratio, or 0
 // when its denominator has a prime factor other than 2 and 5.
 decimal_from_fraction: fn(value: I64) -> I64 {
     rest: jet_rt_alloc(I64{8}, I64{8})
@@ -341,7 +341,7 @@ decimal_from_fraction: fn(value: I64) -> I64 {
     decimal_normalized(digits, scale)
 }
 
-// CtDecimal::to_string_rep: the coefficient's digits with the point `scale`
+// CtDecimal.to_string_rep: the coefficient's digits with the point `scale`
 // places from the right, zero-padded to one leading integer digit.
 decimal_render: fn(value: I64) -> I64 {
     digits: jet_rt_int_to_string(precise_top(value))
@@ -455,7 +455,7 @@ decimal_common_scale: fn(left: I64, right: I64) -> I64 {
     precise_bottom(right)
 }
 
-// CtDecimal::add_with_sign: the larger scale is kept, nothing is normalized.
+// CtDecimal.add_with_sign: the larger scale is kept, nothing is normalized.
 decimal_sum: fn(left: I64, right: I64, subtract: Bool) -> I64 {
     scale: decimal_common_scale(left, right)
     a: decimal_scaled(left, scale)
@@ -466,7 +466,7 @@ decimal_sum: fn(left: I64, right: I64, subtract: Bool) -> I64 {
     precise_pair(sum, scale)
 }
 
-// CtDecimal::compare_value as -1/0/1.
+// CtDecimal.compare_value as -1/0/1.
 decimal_order: fn(left: I64, right: I64) -> I64 {
     scale: decimal_common_scale(left, right)
     a: decimal_scaled(left, scale)
@@ -520,7 +520,7 @@ decimal_integral: fn(value: I64, mode: I64) -> I64 {
     precise_pair(jet_rt_int_clone(value), I64{0})
 }
 
-// CtDecimal::from_float: significand * 2^power, or * 5^-power at scale -power.
+// CtDecimal.from_float: significand * 2^power, or * 5^-power at scale -power.
 #Export(c) jet_decimal_from_float: fn(value: Float) -> I64 {
     bits: rt_f64_bits(value)
     if !precise_float_finite(bits) -> return precise_fault(rt_static_text("Float is not finite"))
@@ -549,7 +549,7 @@ decimal_integral: fn(value: I64, mode: I64) -> I64 {
 
 #Export(c) jet_decimal_sub: fn(left: I64, right: I64) -> I64 { decimal_sum(left, right, true) }
 
-// CtDecimal::mul: the summed scale, trailing zeros dropped down to the larger
+// CtDecimal.mul: the summed scale, trailing zeros dropped down to the larger
 // operand scale.
 #Export(c) jet_decimal_mul: fn(left: I64, right: I64) -> I64 {
     minimum: decimal_common_scale(left, right)
@@ -605,7 +605,7 @@ decimal_integral: fn(value: I64, mode: I64) -> I64 {
     fraction_make(jet_rt_int_clone(precise_top(value)), precise_pow10(precise_bottom(value)))
 }
 
-// CtDecimal::to_f64 is the correctly rounded binary64 of the exact value,
+// CtDecimal.to_f64 is the correctly rounded binary64 of the exact value,
 // which is what the float parser returns for the canonical spelling.
 #Export(c) jet_decimal_to_float: fn(value: I64) -> Float {
     text: decimal_render(value)

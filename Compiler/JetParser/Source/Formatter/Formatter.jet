@@ -68,7 +68,7 @@ JFMT_INDENT: 4
 // The width floor (gate d) for keeping a body on one line.
 JFMT_MAX_WIDTH: 100
 
-// Rust `usize::MAX`: no trailing-comment limit.
+// Rust `usize.MAX`: no trailing-comment limit.
 JFMT_NO_LIMIT: 9223372036854775807
 
 // Rust `Prec`, ordered loosest to tightest.
@@ -238,7 +238,7 @@ jfmt_prec_add_rhs: fn(prec: Int) -> Int Never! {
     }
 }
 
-// Rust `BinOp::spell`. Power has no infix spelling: it is the `pow` method
+// Rust `BinOp.spell`. Power has no infix spelling: it is the `pow` method
 // (jfmt_bin_op_method).
 jfmt_bin_op_spell: fn(op: BinOp) -> String Never! {
     if op == {
@@ -346,7 +346,7 @@ jfmt_bytes_have_newline: fn(bytes: [U8], start: Int, end: Int) -> Bool Never! {
     false
 }
 
-// Rust `char::is_whitespace` over a source range. Non-ASCII whitespace
+// Rust `char.is_whitespace` over a source range. Non-ASCII whitespace
 // (NBSP, U+2028, …) is checked by its UTF-8 lead bytes.
 jfmt_src_all_whitespace: fn(f: JetFmt, start: Int, end: Int) -> Bool Never! {
     text: jfmt_src_text(f, start, end)
@@ -676,7 +676,7 @@ jfmt_digit_value: fn(byte: U8) -> Int Never! {
     }
 }
 
-// Rust `i64::from_str_radix` / `str::parse::<i64>` on `digits[start..]`.
+// Rust `i64.from_str_radix` / `str.parse<i64>` on `digits[start..]`.
 jfmt_parse_radix: fn(digits: [U8], start: Int, radix: Int, allow_sign: Bool) -> Int? Never! {
     index := start
     negative := false
@@ -2372,7 +2372,7 @@ jet_format_redundant_grouping: fn(src: String) -> [Span]? {
 
 jfmt_lines: fn(text: String) -> [String] Never! {
     lines := text.split("\n").to_list()
-    // Rust `str::lines`: no final empty line after a trailing newline, and a
+    // Rust `str.lines`: no final empty line after a trailing newline, and a
     // trailing `\r` is part of the line break.
     if lines.len() > 0 && lines[lines.len() - 1] == "" -> _ := lines.pop()
     loop index in 0..<lines.len() {

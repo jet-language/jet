@@ -24,6 +24,10 @@ NATIVE_TAG_TYPEDEF: 0x16
 
 NATIVE_TAG_UNION: 0x17
 
+NATIVE_TAG_VARIANT: 0x19
+
+NATIVE_TAG_VARIANT_PART: 0x33
+
 NATIVE_TAG_BASE: 0x24
 
 NATIVE_TAG_ENUMERATOR: 0x28
@@ -33,11 +37,12 @@ NATIVE_TAG_SUBPROGRAM: 0x2e
 NATIVE_TAG_VARIABLE: 0x34
 
 // One member of a struct or union type: its name, offset and type (a
-// NativeImage.types key).
+// NativeImage.types key), and the offset of its DIE.
 NativeMember: struct {
     name: String,
     offset: Int,
     ty: Int,
+    die: Int,
 }
 
 // One enumerator of an enumeration type.
@@ -46,13 +51,28 @@ NativeEnumerator: struct {
     value: Int,
 }
 
+// One variant of a variant part: the member a value holds while its
+// discriminant is `value` (None: any value no other variant names).
+NativeVariant: struct {
+    value: Int?,
+    member: NativeMember,
+}
+
+// The variant part of a struct: the member whose value selects, and the
+// variants it selects among.
+NativeVariants: struct {
+    discriminant: NativeMember,
+    arms: [NativeVariant],
+}
+
 // A type DIE: its name ("" for an unnamed pointer), byte size and DW_TAG
 // `tag`, one of NATIVE_TAG_BASE, POINTER, STRUCT, UNION, ENUM and TYPEDEF.
 // A base type has its `encoding`; a pointer or typedef its `target` type
 // (-1 for none). A struct's or union's members, or an enumeration's
 // enumerators, are `group`, an index in NativeImage.members or
 // NativeImage.enumerators; a struct without members (an opaque one) has
-// group -1.
+// group -1. A struct with a variant part has it at `variants`, an index in
+// NativeImage.variants (-1: none).
 NativeType: struct {
     name: String,
     size: Int,
@@ -60,6 +80,7 @@ NativeType: struct {
     encoding: X64DebugEncoding,
     target: Int,
     group: Int,
+    variants: Int{-1},
 }
 
 // Whether a DWARF variable is a parameter or a local.
@@ -90,14 +111,15 @@ NativeFunction: struct {
 }
 
 // The facts of one image. `types` is keyed by the type DIE's offset in
-// `.debug_info`; `members` and `enumerators` hold each struct's, union's and
-// enumeration's in DIE order, as its group names them.
+// `.debug_info`; `members`, `enumerators` and `variants` hold each struct's,
+// union's and enumeration's in DIE order, as its group names them.
 NativeImage: struct {
     lines: X64Jetline,
     functions: [NativeFunction],
     types: [Int:NativeType],
     members: [[NativeMember]],
     enumerators: [[NativeEnumerator]],
+    variants: [NativeVariants],
     loclists: [U8],
 }
 
@@ -114,7 +136,7 @@ NativeRange: struct {
 // The facts of the ELF image `elf`; None without a `.debug_jetline`.
 native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
     table: native_elf_section(elf, ".debug_jetline") ?? return None
-    image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, loclists: native_elf_section(elf, ".debug_loclists") ?? [U8]{}}
+    image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(elf, ".debug_loclists") ?? [U8]{}}
     info: native_elf_section(elf, ".debug_info") ?? return Val(image)
     abbrev: native_elf_section(elf, ".debug_abbrev") ?? return Val(image)
     at := 0
@@ -166,6 +188,8 @@ native_encoding: fn(code: Int) -> X64DebugEncoding Never! {
 }
 
 // The attribute values of one DIE the reader uses; a missing number is -1.
+// `discriminant` is the DIE a variant part's discriminant member is,
+// `selects` the discriminant value a variant is selected by.
 NativeDie: struct {
     tag: Int,
     offset: Int,
@@ -180,6 +204,8 @@ NativeDie: struct {
     encoding: Int,
     value: Int,
     line: Int,
+    discriminant: Int,
+    selects: Int?,
 }
 
 // The DIEs of the unit at [start, end) of `info`, into `image`.
@@ -206,7 +232,7 @@ native_image_unit: fn(image: &NativeImage, info: [U8], abbrev: [U8], start: Int,
             next
         }
         entry: table.entries.get(code) ?? return
-        die := NativeDie{tag: table.tags[entry], offset: offset, children: table.children[entry], name: "", ty: -1, low: -1, length: -1, location: -1, size: -1, member_offset: -1, encoding: -1, value: 0, line: 0}
+        die := NativeDie{tag: table.tags[entry], offset: offset, children: table.children[entry], name: "", ty: -1, low: -1, length: -1, location: -1, size: -1, member_offset: -1, encoding: -1, value: 0, line: 0, discriminant: -1, selects: None}
         loop k in table.starts[entry]..<table.starts[entry + 1] {
             form: table.forms[k]
             value_at: at
@@ -252,6 +278,8 @@ native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8],
         0x3e -> die.encoding = value
         0x1c -> die.value = value
         0x3b -> die.line = value
+        0x15 -> die.discriminant = value
+        0x16 -> die.selects = Val(value)
         else -> {}
     }
 }
@@ -283,12 +311,53 @@ native_image_die: fn(image: &NativeImage, die: NativeDie, open: [NativeDie], bas
             if open.len() == 0 {
                 return
             }
+            member: NativeMember{name: die.name, offset: if die.member_offset < 0 -> 0 else -> die.member_offset, ty: die.ty, die: die.offset}
+            // A variant's member: what its struct holds while it is selected.
+            if open[open.len() - 1].tag == NATIVE_TAG_VARIANT {
+                if open.len() < 3 {
+                    return
+                }
+                part: (image.types.get(open[open.len() - 3].offset) ?? return).variants
+                if part < 0 || image.variants[part].arms.len() == 0 {
+                    return
+                }
+                image.variants[part].arms[image.variants[part].arms.len() - 1].member = member
+                return
+            }
             ty: image.types.get(open[open.len() - 1].offset) ?? return
             group: if ty.tag == NATIVE_TAG_STRUCT || ty.tag == NATIVE_TAG_UNION -> ty.group else -> -1
             if group < 0 {
                 return
             }
-            image.members[group].push(NativeMember{name: die.name, offset: if die.member_offset < 0 -> 0 else -> die.member_offset, ty: die.ty})
+            image.members[group].push(member)
+        }
+        code == NATIVE_TAG_VARIANT_PART -> {
+            if open.len() == 0 {
+                return
+            }
+            holder: open[open.len() - 1].offset
+            ty := image.types.get(holder) ?? return
+            if ty.tag != NATIVE_TAG_STRUCT || ty.group < 0 {
+                return
+            }
+            discriminant: loop member in image.members[ty.group] {
+                if member.die == die.discriminant {
+                    break member
+                }
+            } ?? return
+            ty.variants = image.variants.len()
+            image.variants.push(NativeVariants{discriminant: discriminant, arms: [NativeVariant]{}})
+            image.types[holder] = ty
+        }
+        code == NATIVE_TAG_VARIANT -> {
+            if open.len() < 2 {
+                return
+            }
+            part: (image.types.get(open[open.len() - 2].offset) ?? return).variants
+            if part < 0 {
+                return
+            }
+            image.variants[part].arms.push(NativeVariant{value: die.selects, member: NativeMember{name: "", offset: 0, ty: -1, die: -1}})
         }
         code == NATIVE_TAG_ENUMERATOR -> {
             if open.len() == 0 {

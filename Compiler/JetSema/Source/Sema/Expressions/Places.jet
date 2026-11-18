@@ -242,7 +242,7 @@ sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected
         diagnostics.push(sema_error("E0213", span, "a window must start from a place", "a borrowed place needs stable storage", "bind a temporary before taking a place"))
         return None
     }
-    // Rust `Expr::Place`: the ownership walk opened this window on the
+    // Rust `Expr.Place`: the ownership walk opened this window on the
     // complete place, so the place's own base reads answer only for a move
     // of the whole name (`s` in `&s` would otherwise meet its own loan).
     previous_root_read: context.suppress_partial_move_root_read
@@ -255,7 +255,7 @@ sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected
     if convention == AccessConvention.Write && sema_expression_refuse_computed_place(checked, "lent for writing", environment, program, scopes, diagnostics) {
         return None
     }
-    // (Rust `Expr::Place`): a subrange of a declared view
+    // (Rust `Expr.Place`): a subrange of a declared view
     // takes its write window from the view's own access; a `View<T>` never
     // lends one.
     if convention == AccessConvention.Write && checked.kind == .Slice(view_base, _, _, _, _) {
@@ -265,7 +265,7 @@ sema_expression_place: fn(value: Expr, access: PlaceAccess, span: Span, expected
             }
         }
     }
-    // Rust `Expr::Place`: a list range (a compute tensor range is one on the
+    // Rust `Expr.Place`: a list range (a compute tensor range is one on the
     // tensor's `data`) is a `View`/`ViewMut` of its element, any other ranged
     // value (a `String`) keeps its own type.
     element := Type?{None}

@@ -127,7 +127,7 @@ jet_cli_import_foreign_language: fn(language: String) -> String? Never! {
     }
 }
 
-// Rust `Path::components`: redundant separators and `.` drop, `..` stays.
+// Rust `Path.components`: redundant separators and `.` drop, `..` stays.
 jet_cli_import_components: fn(path: String) -> [String] Never! {
     components := [String]{}
     loop part in import_files.split_slash(path) {
@@ -149,7 +149,7 @@ jet_cli_import_path_order: fn(left: String, right: String) -> Ordering Never! {
     a.len() <=> b.len()
 }
 
-// Rust `Path::strip_prefix` plus the component check of `collect_sources`:
+// Rust `Path.strip_prefix` plus the component check of `collect_sources`:
 // traversal is refused, never normalized into an apparently safe path.
 jet_cli_import_relative: fn(path: String, root: String) -> String JetCLIImportPlanError! {
     parts: jet_cli_import_components(path)
@@ -226,7 +226,7 @@ jet_cli_import_generated_tree_identity: fn(generated: [JetCLIImportGenerated], s
     identity.finish()
 }
 
-// Rust `std::env::consts::{ARCH, OS}` as `boundary_for_import` joins them.
+// Rust `std.env.consts.{ARCH, OS}` as `boundary_for_import` joins them.
 jet_cli_import_target_identity: fn() -[Env]> String Never! {
     "{import_sys.arch()}-{import_sys.name()}"
 }

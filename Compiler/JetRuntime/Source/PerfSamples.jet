@@ -3,14 +3,16 @@
 // (ObserveLive.jet jet_rt_observe_runtime_start_from_env) opens it and arms
 // the process's profiling timer (setitimer ITIMER_PROF), which sends SIGPROF
 // for each PERF_SAMPLES_INTERVAL_US of CPU time the process uses, to the
-// thread that was running. Each SIGPROF appends the program counter it
-// interrupted, less the image's load bias, as one little-endian word: a
-// link-time address in the image `jet run` writes beside the file, where the
-// image's location table names its function and line, as Linux perf names
-// the same image's samples. The handler allocates nothing and takes no lock:
-// it is one write of a stack word. Beside the samples, `<samples>.spans`
-// keeps a row for each core.log span the program closes (RouteALog.jet
-// log_span_row_write).
+// thread that was running. Each SIGPROF appends one record: the program
+// counter it interrupted, then the call site of each caller up the frame
+// pointer chain, innermost first, each less the image's load bias. Each is
+// a link-time address in the image `jet run` writes beside the file, where
+// the image's location table names its function and line, as Linux perf
+// names the same image's samples. A record is one write of little-endian
+// words; its first word holds the record's word count in its top 16 bits
+// above the program counter's low 48. The handler allocates nothing and
+// never waits. Beside the samples, `<samples>.spans` keeps a row for each
+// core.log span the program closes (RouteALog.jet log_span_row_write).
 
 // O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC.
 PERF_SAMPLES_OPEN: I64{525377}
@@ -20,11 +22,30 @@ PERF_SAMPLES_SIGNAL: I64{27}
 // One sample per millisecond of CPU time.
 PERF_SAMPLES_INTERVAL_US: I64{1000}
 
+// The most words one record keeps: its program counter and the call sites
+// of its innermost callers.
+PERF_SAMPLES_DEPTH: I64{1024}
+
+// A record's first word: the word count above bit 48, the address below.
+PERF_SAMPLES_ADDRESS_BITS: I64{48}
+
+PERF_SAMPLES_ADDRESS_MASK: I64{281474976710655}
+
 // The samples file, -1 until the start opens it, and the bias its addresses
 // are taken less.
 perf_samples_fd := I64{-1}
 
 perf_samples_bias := I64{0}
+
+// The image's code at link time, [low, high): a frame whose address is in
+// it is Jet code, which keeps its frame pointer, so its chain can be walked.
+perf_samples_code_low := I64{0}
+
+perf_samples_code_high := I64{0}
+
+// The record buffer: its first word is 1 while a handler fills the
+// PERF_SAMPLES_DEPTH words after it; 0 when the start could not map it.
+perf_samples_buffer := I64{0}
 
 // The log spans file, `<samples>.spans`, -1 unless the start opened it.
 perf_spans_fd := I64{-1}
@@ -49,9 +70,22 @@ perf_samples_start: fn() {
     if (fd < I64{0}) {
         return
     }
-    bias: alloc_check_bias(alloc_check_image())
+    image: alloc_check_image()
+    bias: alloc_check_bias(image)
+    code: perf_samples_code(image)
+    low := I64{0}
+    high := I64{0}
+    if (code != I64{0}) {
+        // p_vaddr and p_memsz of the program header.
+        low = rt_text_word(wrapping(code + I64{16}))
+        high = wrapping(low + rt_text_word(wrapping(code + I64{40})))
+    }
+    buffer: alloc_map_try(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) * I64{8}))
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
         perf_samples_bias = bias
+        perf_samples_code_low = low
+        perf_samples_code_high = high
+        perf_samples_buffer = buffer
         perf_samples_fd = fd
     }
     status := I64{0}
@@ -100,15 +134,75 @@ rt_perf_samples_signal_address: fn() -> I64 {
     loop { jet_rt_unreachable(I64{0}, I64{0}) }
 }
 
-// The SIGPROF handler (SA_SIGINFO): the interrupted rip is ucontext_t's
-// mcontext gregs[16], at 168. A write the kernel refuses loses that one
-// sample; O_APPEND puts each word after the last.
+// The program header of the executable segment (PT_LOAD with PF_X) of the
+// ELF64 file `image` (alloc_check_image, a read-only mapping of the whole
+// file, its program header table inside it), or 0.
+perf_samples_code: fn(image: I64) -> I64 {
+    if (image == I64{0}) { return I64{0} }
+    // e_phoff; e_phentsize is bits 48..63 of the word at 48, e_phnum bits
+    // 0..15 of the word at 56.
+    table: rt_text_word(wrapping(image + I64{32}))
+    entry: (rt_text_word(wrapping(image + I64{48})) >> I64{48}) & I64{65535}
+    count: rt_text_word(wrapping(image + I64{56})) & I64{65535}
+    index := I64{0}
+    loop index < count {
+        header: wrapping(image + wrapping(table + wrapping(index * entry)))
+        kind: rt_text_word(header)
+        if (kind & I64{4294967295} == I64{1} && (kind >> I64{32}) & I64{1} != I64{0}) {
+            return header
+        }
+        index = wrapping(index + I64{1})
+    }
+    I64{0}
+}
+
+// Whether link-time address `address` is in the image's code.
+perf_samples_in_code: fn(address: I64) -> Bool {
+    address >= perf_samples_code_low && address < perf_samples_code_high
+}
+
+// The SIGPROF handler (SA_SIGINFO): the interrupted rip, rbp and rsp are
+// ucontext_t's mcontext gregs[16], [10] and [15], at 168, 120 and 160. In
+// Jet code rbp is always a frame of the chain (the caller's, before the
+// prologue sets it), so the walk starts there when rip is in the image's
+// code. It follows each [saved rbp][return address] pair while the call
+// site is Jet code too, whose caller keeps its own frame pointer, as the
+// fault report's walk does (Fault.jet trace_frames). One thread fills the
+// record buffer at a time; another thread's sample meanwhile, or one
+// outside Jet code, is its program counter alone. A write the kernel
+// refuses loses that one sample; O_APPEND puts each record after the last.
 #Export(c) jet_rt_perf_samples_signal: fn(_signal: I64, _info: I64, context: I64) -> I64 {
     fd: perf_samples_fd
     if (fd < I64{0} || context == I64{0}) { return I64{0} }
-    pc: rt_text_word(wrapping(context + I64{168}))
-    #Unsafe("one write of a stack-local word, which the kernel copies before the call returns") {
-        _ := os_write_word_i64(fd, wrapping(pc - perf_samples_bias), I64{8})
+    bias: perf_samples_bias
+    pc: wrapping(rt_text_word(wrapping(context + I64{168})) - bias)
+    buffer: perf_samples_buffer
+    if (buffer == I64{0} || !perf_samples_in_code(pc) || sync_cas(buffer, I64{0}, I64{1}) != I64{0}) {
+        #Unsafe("one write of a stack-local word, which the kernel copies before the call returns") {
+            _ := os_write_word_i64(fd, (pc & PERF_SAMPLES_ADDRESS_MASK) | (I64{1} << PERF_SAMPLES_ADDRESS_BITS), I64{8})
+        }
+        return I64{0}
     }
+    count := I64{1}
+    stack: rt_text_word(wrapping(context + I64{160}))
+    frame := rt_text_word(wrapping(context + I64{120}))
+    if (frame < stack || wrapping(frame - stack) >= I64{16777216}) { frame = I64{0} }
+    loop count < PERF_SAMPLES_DEPTH {
+        if (frame == I64{0} || frame & I64{7} != I64{0}) { break }
+        // frame is a [saved rbp][return address] pair of the interrupted
+        // thread's chain: rbp of Jet code, or the saved rbp of a Jet caller.
+        site: wrapping(wrapping(rt_text_word(wrapping(frame + I64{8})) - I64{1}) - bias)
+        if (!perf_samples_in_code(site)) { break }
+        rt_text_store(wrapping(buffer + wrapping(wrapping(count + I64{1}) * I64{8})), site)
+        count = wrapping(count + I64{1})
+        #Unsafe("each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on the thread's chain") {
+            frame = stack_frame_caller(frame)
+        }
+    }
+    rt_text_store(wrapping(buffer + I64{8}), pc | (count << PERF_SAMPLES_ADDRESS_BITS))
+    #Unsafe("one write of the record's words, which the kernel copies before the call returns") {
+        _ := os_syscall_i64(I64{1}, fd, wrapping(buffer + I64{8}), wrapping(count * I64{8}), I64{0}, I64{0}, I64{0})
+    }
+    sync_store(buffer, I64{0})
     I64{0}
 }

@@ -32,7 +32,7 @@ use {
     jet_sema.[sema_checked_rename_case, sema_checked_wire_case, sema_registration_cli_arg_text, sema_serde_items_skips]
 }
 
-// `ShapeProjectionKind::ALL`, in order.
+// `ShapeProjectionKind.ALL`, in order.
 JET_CLI_SHAPE_PROJECTIONS: [String]{"json", "cbor", "csv", "toml", "yaml", "xml", "args", "env", "db", "layout"}
 
 // `Object` names the shape identity's type in the same source.
@@ -116,7 +116,7 @@ jet_cli_shape_type: fn(source: String, ty: Type) -> JetCLIShapeType Never! {
     }
 }
 
-// `shape_encoding`, as `ShapeEncoding::as_str`.
+// `shape_encoding`, as `ShapeEncoding.as_str`.
 jet_cli_shape_encoding: fn(ty: JetCLIShapeType) -> String Never! {
     if ty == {
         .Null -> "Null"
@@ -204,7 +204,7 @@ jet_cli_shape_marker_string: fn(tables: ASTTables, marker: Marker, label: String
     None
 }
 
-// `shape_field_names` over `ShapeFieldNames::from_source`; the markers'
+// `shape_field_names` over `ShapeFieldNames.from_source`; the markers'
 // arguments are nodes of `tables`.
 jet_cli_shape_field_names: fn(tables: ASTTables, structure: StructDef, field: Field) -> JetCLIShapeNames Never! {
     rename: jet_cli_shape_marker(field.serde_markers, "Rename")
@@ -264,7 +264,7 @@ jet_cli_shape_bad_name: fn(name: String) -> Bool Never! {
     false
 }
 
-// `ShapeFieldNames::validate`: the first invalid slot, in order.
+// `ShapeFieldNames.validate`: the first invalid slot, in order.
 jet_cli_shape_bad_slot: fn(names: JetCLIShapeNames) -> String? Never! {
     slots: [String?]{Val(names.text), names.json, names.cbor, names.csv, names.toml, names.yaml, names.xml, Val(names.args), Val(names.env), names.db, names.layout}
     labels: [String]{"text", "json", "cbor", "csv", "toml", "yaml", "xml", "args", "env", "db", "layout"}
@@ -276,7 +276,7 @@ jet_cli_shape_bad_slot: fn(names: JetCLIShapeNames) -> String? Never! {
     None
 }
 
-// `shape_fact_from_struct`, with the checks of `ShapeFact::new` and
+// `shape_fact_from_struct`, with the checks of `ShapeFact.new` and
 // `with_layout` a declared record can fail.
 jet_cli_shape_fact: fn(tables: ASTTables, source: String, structure: StructDef) -> JetCLIShapeBuild Never! {
     fields := [JetCLIShapeField]{}

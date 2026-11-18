@@ -1,5 +1,5 @@
 // The stable JSON encoding of the semantic index
-// (`SemIndex::to_status_envelope` and the `json_*` row encoders) and the `jet
+// (`SemIndex.to_status_envelope` and the `json_*` row encoders) and the `jet
 // inspect semindex` text summary.
 use {
     jet_driver.[JetDriverCompileResult]
@@ -292,7 +292,7 @@ jet_cli_sem_json_effect_projection: fn(projection: SemEffectProjection) -> Strin
     "{{\"required_effects\":{jet_cli_sem_json_strings(projection.required)},\"granted_effects\":{jet_cli_sem_json_strings(projection.granted)},\"denied_effects\":{jet_cli_sem_json_strings(projection.denied)},\"authority\":{jet_cli_json_string(projection.authority)}}}"
 }
 
-// The `semindex` payload of `SemIndex::to_status_envelope`. Standalone
+// The `semindex` payload of `SemIndex.to_status_envelope`. Standalone
 // source carries no package projection or workspace overlay policy. Every
 // field spells a lifted type by its ledger path (`geo.Point`), the identity
 // keys included, so no generated name reaches the document.
@@ -311,7 +311,7 @@ jet_cli_semindex_payload: fn(index: SemIndex) -> String {
     semindex_display_text(index, "{{\"schema_version\":{SEMINDEX_SCHEMA_VERSION},\"definitions\":[{definitions.join(",")}],\"definition_facts\":[{facts.join(",")}],\"derivations\":[{derivations.join(",")}],\"instances\":[{instances.join(",")}],\"outputs\":[{outputs.join(",")}],\"state_graphs\":[{graphs.join(",")}],\"package_facts\":null,\"workspace_overlays\":null,\"effect_projection\":{jet_cli_sem_json_effect_projection(index.effect_projection)},\"references\":[{references.join(",")}],\"calls\":[{calls.join(",")}],\"effects\":[{effects.join(",")}],\"arithmetic\":[{arithmetic.join(",")}],\"members\":[{members.join(",")}]}}")
 }
 
-// `SemIndex::to_status_envelope().json()`: the `inspect.semindex` status
+// `SemIndex.to_status_envelope().json()`: the `inspect.semindex` status
 // line. The payload is already canonical JSON, which the status `Float`
 // carrier writes verbatim.
 jet_cli_semindex_status_json: fn(index: SemIndex) -> String {

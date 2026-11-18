@@ -284,6 +284,12 @@ DWARF_ABBREV_ABSTRACT_GENERATED: 20
 
 DWARF_ABBREV_INLINED: 21
 
+DWARF_ABBREV_VARIANT_PART: 22
+
+DWARF_ABBREV_VARIANT: 23
+
+DWARF_ABBREV_DEFAULT_VARIANT: 24
+
 // Attribute names and forms.
 DW_AT_LOCATION: 0x02
 
@@ -298,6 +304,10 @@ DW_AT_LOW_PC: 0x11
 DW_AT_HIGH_PC: 0x12
 
 DW_AT_LANGUAGE: 0x13
+
+DW_AT_DISCR: 0x15
+
+DW_AT_DISCR_VALUE: 0x16
 
 DW_AT_COMP_DIR: 0x1b
 
@@ -452,6 +462,11 @@ dwarf_abbrevs: fn(sections: Bool) -> [U8] Never! {
             DW_FORM_UDATA,
         },
     )
+    // A variant part, selected by the discriminant member it names, and
+    // its variants: one per discriminant value and the default.
+    dwarf_abbrev(a, DWARF_ABBREV_VARIANT_PART, 0x33, true, [Int]{DW_AT_DISCR, DW_FORM_REF4})
+    dwarf_abbrev(a, DWARF_ABBREV_VARIANT, 0x19, true, [Int]{DW_AT_DISCR_VALUE, DW_FORM_SDATA})
+    dwarf_abbrev(a, DWARF_ABBREV_DEFAULT_VARIANT, 0x19, true, [Int]{})
     dwarf_uleb(a, 0)
     a
 }
@@ -540,6 +555,32 @@ dwarf_types: fn(info: &[U8], types: [X64DebugType]) -> [Int] Never! {
                     dwarf_string(info, enumerator.name)
                     dwarf_sleb(info, enumerator.value)
                 }
+                dwarf_uleb(info, 0)
+            }
+            .Variants(discriminant, variants) -> {
+                dwarf_uleb(info, DWARF_ABBREV_STRUCT)
+                dwarf_string(info, ty.name)
+                dwarf_uleb(info, ty.size)
+                // The discriminant member, then the variant part naming it
+                // (the unit starts `info`, so its offset is unit-relative).
+                selector: info.len()
+                dwarf_uleb(info, DWARF_ABBREV_MEMBER)
+                dwarf_string(info, discriminant.name)
+                dwarf_type_ref(info, refs, rows, discriminant.ty)
+                dwarf_uleb(info, discriminant.offset)
+                dwarf_uleb(info, DWARF_ABBREV_VARIANT_PART)
+                elf64_u32(info, selector)
+                loop variant in variants {
+                    if variant.value == {
+                        .Val(value) -> {
+                            dwarf_uleb(info, DWARF_ABBREV_VARIANT)
+                            dwarf_sleb(info, value)
+                        }
+                        .None -> dwarf_uleb(info, DWARF_ABBREV_DEFAULT_VARIANT)
+                    }
+                    dwarf_members(info, refs, rows, [X64DebugMember]{variant.member})
+                }
+                dwarf_uleb(info, 0)
                 dwarf_uleb(info, 0)
             }
             .Typedef(target) -> {

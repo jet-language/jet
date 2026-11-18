@@ -1,0 +1,22 @@
+use geo.[Point, double]
+
+geo: module {
+    Point: struct {
+        x: Int,
+        y: Int,
+    }
+
+    double: fn(n: Int) -> Int { n * 2 }
+}
+
+shift: fn(p: Point) -> Point { Point{x: double(p.x), y: p.y} }
+
+// `Point` and `geo.Point` are one type.
+same: fn(p: geo.Point) -> Point { Point{x: p.x, y: p.y} }
+
+run: fn() {
+    moved: shift(Point{x: 1, y: 2})
+    print("{moved.x} {moved.y}")
+    other: same(geo.Point{x: 5, y: double(moved.y)})
+    print("{other.x} {other.y}")
+}

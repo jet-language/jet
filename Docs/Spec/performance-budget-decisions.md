@@ -902,19 +902,22 @@ not emit a lint. A semantic cost that remains visible in lowered code remains
 reportable. The reason is to expose meaningful costs without warning about
 work that the optimizer eliminates.
 
-The five reportable cost rows are:
+The six reportable cost rows are:
 
 1. **View materialization:** a read-only view crosses an owning boundary and
    must copy.
-2. **Map copy-on-write:** a shared map spine is copied before mutation.
-3. **Exact-Int spill:** an operation leaves packed `Int` range and uses the
+2. **Implicit copy:** a value still used later fills an owning position, so
+   sema copies it without a written `.copy()` (a share site, or an argument
+   it materializes).
+3. **Map copy-on-write:** a shared map spine is copied before mutation.
+4. **Exact-Int spill:** an operation leaves packed `Int` range and uses the
    exact big-number representation.
-4. **Outcome construction:** a `Result` or `Option` carrier is built before an
+5. **Outcome construction:** a `Result` or `Option` carrier is built before an
    immediate consumer fast path can remove it.
-5. **Generic representation fallback:** a collection uses its generic
+6. **Generic representation fallback:** a collection uses its generic
    representation because no shape proof selected a direct representation.
 
-The checked program supplies all five rows and the complete explain
+The checked program supplies all six rows and the complete explain
 projection, as L2510 (`HiddenCostInLoop`) lint rows. Before projection, the
 shared cost seam requires every reachable callable to have a matching checked
 body: each generic specialization is checked as its own body, and a foreign
@@ -928,6 +931,7 @@ reconstruct cost from emitted code.
 ```jet
 loop item in items {
     out.push(item.view())        // view materialization: hidden-cost lint when semantic
+    held := items                // implicit copy: `items` is read again below
     counts[item.key] += 1        // map copy-on-write: hidden-cost lint when semantic
     total += item                // exact-Int spill: hidden-cost lint when semantic
     result: read(item)         // outcome construction: hidden-cost lint when semantic

@@ -156,12 +156,16 @@ sema_function_header_lint_err_params: fn(function: Func, diagnostics: &[Diagnost
 }
 
 // L0510: a user function whose name is one the readable prelude opens
-// replaces that alias in its file; the declaration wins, and is worth seeing.
+// silently replaces that alias in its file, a tidy error so the winner is
+// renamed rather than left for the reader to discover.
 sema_function_header_lint_prelude_shadow: fn(function: Func, diagnostics: &[Diagnostic]) {
     if function.compiler_generated || !SEMA_CALL_PRELUDE_NAMES.contains(function.name) {
         return
     }
-    diagnostics.push(sema_lint("L0510", function.name_span, "Declaration {function.name} replaces a Core prelude alias", "The readable Core prelude opens this name automatically, and a user declaration wins in its file", "Keep the declaration to accept the shadow, or rename it to use the prelude alias"))
+    name: function.name
+    what: "Declaration `{name}` replaces the Core prelude alias `{name}`."
+    why: "The readable Core prelude opens `{name}` in every file, and this declaration silently wins over it in its file, so a call that reads like the prelude's runs this one."
+    diagnostics.push(sema_lint("L0510", function.name_span, what, why, "Rename `{name}` and its calls to a name the prelude does not open."))
 }
 
 // L2401: a public function or method with a positional `Bool`

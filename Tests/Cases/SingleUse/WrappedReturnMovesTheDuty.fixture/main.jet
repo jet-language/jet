@@ -25,7 +25,7 @@ open_early: fn(resource: String) -> Lock LockError! {
     return Ok(lock)
 }
 
-find: fn(resource: String) -> Lock? {
+locate: fn(resource: String) -> Lock? {
     lock: acquire(resource)
     Val(lock)
 }
@@ -33,5 +33,5 @@ find: fn(resource: String) -> Lock? {
 run: fn() {
     release(open("db") ?? panic("open"))
     release(open_early("cache") ?? panic("open_early"))
-    release(find("log") ?? panic("find"))
+    release(locate("log") ?? panic("locate"))
 }

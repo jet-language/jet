@@ -70,7 +70,7 @@ comparison_json_optional_integer: fn(value: CanonicalJSON, key: String) -> Strin
     }
 }
 
-// Rust `str::parse::<u16 | u64 | usize>`: optional leading `+`, decimal
+// Rust `str.parse<u16 | u64 | usize>`: optional leading `+`, decimal
 // digits only, within `maximum`.
 comparison_parse_unsigned: fn(text: String, maximum: Int, message: String) -> Int ComparisonRecordError! {
     bytes: text.bytes()
@@ -182,7 +182,7 @@ comparison_sample_from_json: fn(value: CanonicalJSON, index: Int) -> ComparisonS
     Ok(sample)
 }
 
-// Rust `ComparisonRecord::from_json`.
+// Rust `ComparisonRecord.from_json`.
 comparison_record_from_json: fn(value: CanonicalJSON) -> ComparisonRecord ComparisonRecordError! {
     schema: comparison_parse_unsigned(comparison_json_integer(value, "schema_version"), 65535, "comparison schema_version is not a valid u16")
     if (U16{schema}) != TEST_COMPARISON_SCHEMA_VERSION {

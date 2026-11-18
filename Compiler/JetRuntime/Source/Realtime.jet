@@ -178,7 +178,7 @@ realtime_join: fn(stream: I64) {
     sync_mutex_lock(wrapping(scratch + RT_MATH_MUTEX))
     high: sync_load(wrapping(stream + RT_INDEX_HIGH))
     low: if (high == I64{0}) -> sync_load(wrapping(stream + RT_INDEX_LOW)) else -> I64{-1}
-    // Rust next_callback publishes min(index,u64::MAX), then recomputes Instant.
+    // Rust next_callback publishes min(index,u64.MAX), then recomputes Instant.
     offset: jet_rt_native_realtime_deadline_offset(sync_load(wrapping(stream + RT_RATE)), sync_load(wrapping(stream + RT_FRAMES)), low, I64{0}, scratch)
     deadline: realtime_add(sync_load(wrapping(stream + RT_START)), offset)
     sync_mutex_unlock(wrapping(scratch + RT_MATH_MUTEX))
@@ -332,7 +332,7 @@ rt_realtime_worker_address: fn() -> I64 {
         sync_store(wrapping(stream + RT_DEADLINE_IDENTITY), realtime_add(sync_load(wrapping(stream + RT_START_IDENTITY)), offset))
         sync_mutex_unlock(wrapping(scratch + RT_MATH_MUTEX))
     }
-    // Preserve BOTH clock steps: JetInstant::now() samples the provider, then
+    // Preserve BOTH clock steps: JetInstant.now() samples the provider, then
     // end_identity samples again. The discarded first value is observable to a
     // stepping clock.
     _ := realtime_now_ns()

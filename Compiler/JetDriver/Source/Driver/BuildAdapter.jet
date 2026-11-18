@@ -679,7 +679,7 @@ JET_DRIVER_BUILD_MAX_FILE_BYTES: 536870912
 
 JET_DRIVER_BUILD_MAX_FETCH_BYTES: 67108864
 
-// std::io::ErrorKind::NotFound as the reference's error text spells it.
+// std.io.ErrorKind.NotFound as the reference's error text spells it.
 JET_DRIVER_BUILD_NOT_FOUND: "No such file or directory (os error 2)"
 
 jet_driver_build_input_fail: fn(code: String, what: String, why: String, fix: String, span: Span) -> BuildSessionReply Never! {
@@ -707,7 +707,7 @@ jet_driver_build_join: fn(directory: String, name: String) -> String Never! {
     "{directory}/{name}"
 }
 
-// Path::starts_with over components: `path` is `root` or lies beneath it.
+// Path.starts_with over components: `path` is `root` or lies beneath it.
 jet_driver_build_within: fn(path: String, root: String) -> Bool Never! {
     if path == root || root == "/" -> return path.starts_with("/")
     path.starts_with("{root}/")
@@ -895,7 +895,7 @@ jet_driver_build_find: fn(host: JetDriverSharedBuildInputs, base_dir: String, ra
     BuildSessionReply.Value{value: BuildSessionValue.List{values: values.move()}}
 }
 
-// jet-net `FetchError::IO`/`Scheme` as eval_net_fetch reports it (E3414).
+// jet-net `FetchError.IO`/`Scheme` as eval_net_fetch reports it (E3414).
 jet_driver_build_fetch_error: fn(url: String, detail: String, span: Span) -> BuildSessionReply Never! {
     jet_driver_build_input_fail("E3414", "fetch failed: {detail}", "could not retrieve `{url}`", "check the URL is reachable and the network is available; use `file://` for a local path inside the compile-time source directory", span)
 }

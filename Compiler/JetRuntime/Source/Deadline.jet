@@ -81,9 +81,9 @@ deadline_monotonic_ns: fn(scratch: I64) -> I64 {
     time_host_monotonic_i64()
 }
 
-// Rust str::parse has no whitespace trimming, accepts one leading '+'; signed
+// Rust str.parse has no whitespace trimming, accepts one leading '+'; signed
 // parsing also accepts '-'. out is an exclusively borrowed word. Negative
-// accumulation admits i64::MIN without negation overflow.
+// accumulation admits i64.MIN without negation overflow.
 deadline_parse_i64: fn(text: I64, out: I64) -> Bool {
     if (text == I64{0}) { return false }
     length: sync_load(wrapping(text + I64{8}))
@@ -122,7 +122,7 @@ deadline_wall_now_ms: fn() -> I64 {
     wrapping(seconds * I64{1000} + sync_load(wrapping(scratch + I64{8})) /% I64{1000000})
 }
 
-// CoreReview2 #49 Rust's std::env reads the immutable host
+// CoreReview2 #49 Rust's std.env reads the immutable host
 // startup capture, never the Jet env overlay. RtL7 owns the one rt_env_get view.
 // That capture never changes, so the replay or epoch override it names is
 // parsed once (time_host_root @32..55) instead of on every clock read.

@@ -9,7 +9,7 @@ env_lower: fn(byte: I64) -> I64 {
     if (byte >= I64{65} && byte <= I64{90}) -> byte + I64{32} else -> byte
 }
 
-// ASCII case-insensitive equality of two byte ranges (str::eq_ignore_ascii_case).
+// ASCII case-insensitive equality of two byte ranges (str.eq_ignore_ascii_case).
 env_fold_equal: fn(left: I64, left_length: I64, right: I64, right_length: I64) -> Bool {
     if (left_length != right_length) { return false }
     at := I64{0}
@@ -41,7 +41,7 @@ env_copy: fn(data: I64, length: I64, mode: I64) -> I64 {
     target
 }
 
-// str::trim of a byte range: an owned String.
+// str.trim of a byte range: an owned String.
 env_trimmed: fn(data: I64, length: I64) -> I64 {
     raw: rt_text_copy(data, length)
     start: numeric_trim_start(raw)
@@ -119,7 +119,7 @@ env_dotenv_value: fn(value: I64) -> I64 {
     value
 }
 
-// Whether the scalar ending at byte `end` is White_Space (str::trim_end).
+// Whether the scalar ending at byte `end` is White_Space (str.trim_end).
 numeric_is_trailing_space: fn(data: I64, end: I64) -> Bool {
     start := end - I64{1}
     loop start > (I64{0}) && (rt_text_byte(wrapping(data + start)) & I64{192}) == (I64{128}) {
@@ -160,7 +160,7 @@ env_values_put: fn(values: I64, name: I64, value: I64) {
     csv_words_push(values, row)
 }
 
-// The dotenv lines (str::lines: LF-terminated, a trailing CR removed).
+// The dotenv lines (str.lines: LF-terminated, a trailing CR removed).
 // 0 on success, otherwise the owned "invalid .env line N" reason.
 env_dotenv_load: fn(text: I64, allow: I64, values: I64) -> I64 {
     data: rt_text_data(text)
@@ -412,8 +412,8 @@ env_file_relative: fn(file: I64) -> Bool {
     true
 }
 
-// std::fs::read_to_string: status 1 with the owned text, 0 when absent
-// (NotFound), -1 with the owned io::Error Display reason in `out`.
+// std.fs.read_to_string: status 1 with the owned text, 0 when absent
+// (NotFound), -1 with the owned io.Error Display reason in `out`.
 env_read_file: fn(file: I64, out: I64) -> I64 {
     name: fd_c_path(file)
     fd: host_call(I64{2}, name, I64{524288}, I64{0})

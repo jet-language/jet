@@ -9,7 +9,7 @@ text: fn(row: [U8]) -> String {
     out
 }
 
-fetch: fn(host: String) {
+get_hello: fn(host: String) {
     if client.jet_http_build_get(host, "{host}:{free-port:tls}", "/hello.txt", true, [[U8]]{[U8]{127, 0, 0, 1}}, {free-port:tls}, 5000, 1024) == {
         .Ok(rows) -> {
             out := ""
@@ -21,6 +21,6 @@ fetch: fn(host: String) {
 }
 
 run: fn() {
-    fetch("localhost")
-    fetch("fixture.test")
+    get_hello("localhost")
+    get_hello("fixture.test")
 }

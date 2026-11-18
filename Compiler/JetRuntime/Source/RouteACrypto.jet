@@ -3,7 +3,7 @@
 // Source owns the descriptors, file format, faults and publication; each leaf
 // is one host step. A failure is value -1 with the raw OS code, or EIO (5) when
 // std's error carries none (its CString refusal of a NUL path); the leaves' own
-// refusals use EBADF (9) for a descriptor outside 0..=i32::MAX and EINVAL (22)
+// refusals use EBADF (9) for a descriptor outside 0..=i32.MAX and EINVAL (22)
 // for a bad count, offset or NUL name.
 
 // JetCryptoJetcRaw48: value0, errno8, bytes List24 at 16 (packed U8), linux40.
@@ -88,7 +88,7 @@ jetc_open_path: fn(path: I64, flags: I64, mode: I64) -> I64 {
     jetc_result(fd)
 }
 
-// One read(2) of at most `count` bytes (File::read: no EINTR retry); the
+// One read(2) of at most `count` bytes (File.read: no EINTR retry); the
 // bytes are the prefix actually read.
 #Export(c) jet_crypto_jetc_read: fn(fd: I64, count: I64) -> I64 {
     native_fd: jet_int_owned_to_i64(fd)
@@ -109,7 +109,7 @@ jetc_open_path: fn(path: I64, flags: I64, mode: I64) -> I64 {
     result
 }
 
-// One write(2) of bytes[offset..][..count] (File::write: no EINTR retry).
+// One write(2) of bytes[offset..][..count] (File.write: no EINTR retry).
 #Export(c) jet_crypto_jetc_write: fn(fd: I64, data: I64, length: I64, offset: I64, count: I64) -> I64 {
     native_fd: jet_int_owned_to_i64(fd)
     start: jet_int_owned_to_i64(offset)
@@ -141,7 +141,7 @@ jetc_stat_new: fn(status: I64, errno: I64) -> I64 {
     result
 }
 
-// File::metadata on the borrowed descriptor (fstat: st_dev0 st_ino8
+// File.metadata on the borrowed descriptor (fstat: st_dev0 st_ino8
 // st_nlink16 st_mode24(u32) st_size48 st_mtime88 st_mtime_nsec96).
 #Export(c) jet_crypto_jetc_stat: fn(fd: I64) -> I64 {
     native_fd: jet_int_owned_to_i64(fd)
@@ -168,7 +168,7 @@ jetc_stat_new: fn(status: I64, errno: I64) -> I64 {
     result
 }
 
-// File::sync_all: fsync(2), retried after EINTR.
+// File.sync_all: fsync(2), retried after EINTR.
 #Export(c) jet_crypto_jetc_fsync: fn(fd: I64) -> I64 {
     native_fd: jet_int_owned_to_i64(fd)
     if (jet_scheduler_native_propagate() != I64{0}) { return I64{0} }

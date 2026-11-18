@@ -104,7 +104,7 @@ fs_lock_sleep: fn(nanos: I64) {
     rt_text_store(request, I64{0})
     rt_text_store(wrapping(request + I64{8}), nanos)
     loop {
-        // std::thread::sleep resumes with the remaining time after EINTR.
+        // std.thread.sleep resumes with the remaining time after EINTR.
         if (host_call(I64{35}, request, request, I64{0}) != I64{-4}) { break }
     }
     jet_rt_free(request, I64{16}, I64{8})

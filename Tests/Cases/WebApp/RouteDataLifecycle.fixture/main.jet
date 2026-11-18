@@ -102,7 +102,7 @@ add_task: fn(scope: db.DBScope, id: String, title: String) {
     _: scope.execute(SQL{"INSERT INTO tasks (owner, id, title) VALUES ({owner}, {id}, {title})"}) ?? panic("insert task")
 }
 
-keep: fn(tasks: db.DBScope) {
+remember: fn(tasks: db.DBScope) {
     store := STORE.guard_edit()
     store.value.tasks = Val(tasks.copy())
 }
@@ -117,7 +117,7 @@ run: fn() {
     _: db.migrate(notes, "notes-v1", [db.SQL]{SQL{"CREATE TABLE notes (owner TEXT, body TEXT)"}}) ?? panic("migrate notes")
     add_task(tasks, "7", "seven")
     add_task(tasks, "8", "eight")
-    keep(tasks)
+    remember(tasks)
     _: graph()
 
     // Opening a screen fetches its route data.

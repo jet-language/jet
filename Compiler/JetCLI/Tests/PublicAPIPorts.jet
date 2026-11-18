@@ -6,7 +6,8 @@
 // marked expected_fail states a behavior the producer does not have yet; its
 // comment names the gap.
 use {
-    jet_cli.[jet_cli_publish_public_api]
+    jet_cli.[JetCLIDocRequest, jet_cli_compile_file, jet_cli_doc_result, jet_cli_publish_public_api]
+    jet_driver.[JetDriverCompileMode]
     jet_foundation.[PublicAPIItem]
     jet_pkg_model.[PKG_API_SNAPSHOT_VERSION, pkg_api_snapshot_render, pkg_capability_snapshot_parse]
     jetpack_publication.[PublicationBreakingChange, publication_api_snapshot_items, publication_diff_public_api]
@@ -230,4 +231,32 @@ pap_cap_source: fn(receipt: String) -> String {
     changes: pap_changes(prelude_api, local_api)
     names: loop change in changes -> change.item_name.copy()
     assert(names == [String]{"Measure.scale"}, "changes {names.join(", ")}\nprelude API:\n{pap_text(prelude_api)}\nlocal API:\n{pap_text(local_api)}")
+}
+
+// A re-export is a row of its own that spells its target's signature, so a
+// retargeted re-export is a change the gate sees.
+#Test("a_reexport_row_spells_its_target_signature") {
+    root: pap_root("reexport")
+    owner: PapFixtureRoot{path: root}
+    defer close(owner)
+    lerp_api: pap_api(root, "lerp", "blender", "blend: core.math.lerp\n\nmix: fn() -> Float {{ blend(0.0, 2.0, 0.5) }}\n")
+    blend: pap_find(lerp_api, "blend")
+    assert_eq(blend.kind, "reexport")
+    assert(blend.signature.starts_with("reexport blend = fn core.math.lerp(a: Float, b: Float, t: Float)"), pap_text(lerp_api))
+    assert_eq(pap_changes(pap_frozen("blender", lerp_api), lerp_api).len(), 0)
+    entry: pap_files.join(pap_files.join(root, "lerp"), "main.jet")
+    compiled: jet_cli_compile_file(entry, false, None, JetDriverCompileMode.Doc)
+    if compiled == {
+        .Refused(refusal) -> { panic("blender does not compile for `jet doc`:\n{refusal.stderr}") }
+        .Compiled(result, snapshot) -> {
+            doc: jet_cli_doc_result(entry, pap_files.read(entry) ?? panic("read {entry}"), false, true, JetCLIDocRequest{check: false, out: None}, result, snapshot)
+            assert(doc.stdout.contains("blend: core.math.lerp\\nTarget: fn core.math.lerp(a: Float, b: Float, t: Float)"), "{doc.stdout}{doc.stderr}")
+        }
+    }
+    clamp_api: pap_api(root, "clamp", "blender", "blend: core.math.clamp_float\n\nmix: fn() -> Float {{ blend(0.0, 2.0, 0.5) }}\n")
+    description := ""
+    loop change in pap_changes(lerp_api, clamp_api) {
+        if change.item_name == "blend" -> description = "{change.description}"
+    }
+    assert(description.starts_with("public reexport `blend` changed signature"), "retargeting `blend` is no change:\n{pap_text(clamp_api)}")
 }

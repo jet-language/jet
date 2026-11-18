@@ -95,7 +95,7 @@ FailureContract: enum {
 // No contract was written and sema inferred the
 // typed failures (one member or their union) that reach the function.
 
-// Rust `FailureContract::from_return_type`: the contract a written return
+// Rust `FailureContract.from_return_type`: the contract a written return
 // type declares.
 failure_contract_from_return_type: fn(return_type: Type?) -> FailureContract Never! {
     declared: return_type ?? return FailureContract.Default{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
@@ -115,7 +115,7 @@ failure_contract_from_return_type: fn(return_type: Type?) -> FailureContract Nev
     FailureContract.Default{success: declared, error: Type.Named{name: "Err"}}
 }
 
-// Rust `Func::failure_contract`: sema projects a solved contract onto the
+// Rust `Func.failure_contract`: sema projects a solved contract onto the
 // declaration with no written span, so a span-less `T Never!` is the
 // inferred-empty set and a span-less typed error is an inferred union. The
 // defaulted `run` keeps its span-less `Err!` as an explicit contract.
@@ -259,7 +259,7 @@ comptime_walk_identifiers: fn(expr: Expr) -> [ComptimeNameSite] Never! {
     sites
 }
 
-// Rust `walk_expr_nodes` under `WalkOpts::PLAIN`; `calls` picks the visited
+// Rust `walk_expr_nodes` under `WalkOpts.PLAIN`; `calls` picks the visited
 // node kind (Call names, else Ident reads).
 ast_comptime_walk_expr: fn(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) Never! {
     if expr == {
@@ -447,7 +447,7 @@ ast_comptime_walk_stmts: fn(body: [Stmt], calls: Bool, sites: &[ComptimeNameSite
     loop statement in body -> ast_comptime_walk_stmt(statement, calls, sites)
 }
 
-// Rust `walk_stmt_expr_nodes` under `WalkOpts::PLAIN`: `#Impure` and
+// Rust `walk_stmt_expr_nodes` under `WalkOpts.PLAIN`: `#Impure` and
 // `#AssumeDet` bodies and switched-off statements are skipped; `#run`
 // blocks are crossed.
 ast_comptime_walk_stmt: fn(statement: Stmt, calls: Bool, sites: &[ComptimeNameSite]) Never! {
@@ -531,7 +531,7 @@ ast_comptime_walk_stmt: fn(statement: Stmt, calls: Bool, sites: &[ComptimeNameSi
     }
 }
 
-// Rust `CtKey::from_value`: the deterministic scalar or record key a value
+// Rust `CtKey.from_value`: the deterministic scalar or record key a value
 // names, or None for a value that cannot key a map.
 ast_comptime_key_from_value: fn(value: CtValue) -> CtKey? Never! {
     if value == {
@@ -571,7 +571,7 @@ ast_comptime_integer_key: fn(number: Int) -> CtKey Never! {
     CtKey.Int{value: number}
 }
 
-// Rust `CtKey::to_value`.
+// Rust `CtKey.to_value`.
 ast_comptime_key_to_value: fn(key: CtKey) -> CtValue Never! {
     if key == {
         .Int(number) -> CtValue.Int{value: number}
@@ -659,7 +659,7 @@ ast_comptime_key_text: fn(key: CtKey) -> String Never! {
     }
 }
 
-// Rust `str::cmp`: lexicographic over the UTF-8 bytes.
+// Rust `str.cmp`: lexicographic over the UTF-8 bytes.
 ast_comptime_bytes_compare: fn(left: [U8], right: [U8]) -> Int Never! {
     loop index in 0..<left.len() {
         if index >= right.len() -> return 1
@@ -669,12 +669,12 @@ ast_comptime_bytes_compare: fn(left: [U8], right: [U8]) -> Int Never! {
     0
 }
 
-// Rust `Syntax::is_memo_storage_name`: generated memo storage fields.
+// Rust `Syntax.is_memo_storage_name`: generated memo storage fields.
 ast_comptime_memo_storage_name: fn(field: String) -> Bool Never! {
     field.starts_with("__jet___memo_")
 }
 
-// Rust `CtValue::jet_show`: the Display rendering `print` and string
+// Rust `CtValue.jet_show`: the Display rendering `print` and string
 // interpolation give a compile-time value. Nominal values render the
 // compiled program's derived Rust `{:?}` spelling (I2).
 ast_comptime_value_show: fn(value: CtValue) -> String Never! {
@@ -709,7 +709,7 @@ ast_comptime_value_show: fn(value: CtValue) -> String Never! {
     }
 }
 
-// Rust `CtValue::debug_rust`: the `{:?}` spelling of the compiled program's
+// Rust `CtValue.debug_rust`: the `{:?}` spelling of the compiled program's
 // derived `Debug`, used for values nested in a nominal.
 ast_comptime_value_debug: fn(value: CtValue) -> String Never! {
     if value == {
@@ -776,7 +776,7 @@ ast_comptime_loadable: fn(variant: String, args: [CtEnumArg], debug: Bool) -> St
     variant.copy()
 }
 
-// Rust `CtFloat::render` (`{:?}`), which Jet's Float interpolation matches.
+// Rust `CtFloat.render` (`{:?}`), which Jet's Float interpolation matches.
 ast_comptime_float_text: fn(number: CtFloat) -> String Never! {
     if number == {
         .F32(value) -> "{value}"
@@ -810,7 +810,7 @@ ast_comptime_debug_escape: fn(text: String, in_char: Bool) -> String Never! {
     String.from_bytes(out) ?? text
 }
 
-// Rust `Syntax::GENERATED_NAME_PREFIX` names: `generated_name` prefixes a
+// Rust `Syntax.GENERATED_NAME_PREFIX` names: `generated_name` prefixes a
 // plain name once, `generated_suffix` drops the prefix, and `generated_path`
 // encodes a path identity as one injective Rust identifier suffix.
 ast_comptime_generated_name: fn(name: String) -> String Never! {
