@@ -608,7 +608,7 @@ core_decl_problem: fn(declared: CoreDeclarations) -> String Never! {
     }
     loop row in declared.dispatchers {
         if row.kind == "receiver" -> next
-        if row.constructor == "CoreCallRecord::source_owned" {
+        if row.constructor == "CoreCallRecord.source_owned" {
             owned := false
             loop source in declared.source_rows {
                 if source.module_name == row.module_name && source.members.contains(row.record.member) {
@@ -655,10 +655,10 @@ CoreDeclPublic: struct {
     line: Int,
 }
 
-// The byte offsets of `CoreCallRecord::new(` and
-// `CoreCallRecord::new_with_coverage(` in `expression`.
+// The byte offsets of `CoreCallRecord.new(` and
+// `CoreCallRecord.new_with_coverage(` in `expression`.
 core_decl_constructor_offsets: fn(expression: String) -> [Int] Never! {
-    head: "CoreCallRecord::new"
+    head: "CoreCallRecord.new"
     bytes: expression.bytes()
     out := [Int]{}
     start := 0
