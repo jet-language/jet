@@ -454,6 +454,10 @@ SemaComptimeItemSource: struct {
     // computed while building when its evaluation is pure and succeeds, and
     // refused otherwise (E0643, jet_driver_module_value_refused).
     module_value: Bool{false},
+    // An immutable module binding of a declared point's shape
+    // (sema_casing_point_shaped): its name's span, which the run holds to
+    // ALL_CAPS when the value is not a point (sema_comptime_module_point).
+    point_name: Span?{None},
     // A refused module value's check as ordinary code, outside compile-time
     // execution, which reports its real errors.
     runtime_check: Bool{false},
@@ -9645,6 +9649,9 @@ sema_comptime_collect_module_sources: fn(graph: SemaRegistrationGraph, source_mo
             last: sources.items.len() - 1
             if sources.items[last].key == constant_key {
                 if module_value -> sources.items[last].module_value = true
+                if module_value && !constant.declaration.mutable && !sema_context_key_declared(constant.declaration) && sema_casing_point_shaped(constant.declaration.value) {
+                    sources.items[last].point_name = Val(constant.declaration.name_span)
+                }
                 sources.items[last].step_limit = sema_comptime_step_limit(constant.declaration.markers)
             }
         }

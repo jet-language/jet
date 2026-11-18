@@ -36,6 +36,7 @@ use {
         core_decl_embedded_names,
         core_decl_list_body,
         core_decl_problem,
+        core_decl_pub_fn_name,
         core_decl_public_problem,
         core_decl_register_public,
         core_decl_resolve_items,
@@ -306,6 +307,12 @@ core_declarations_stray: fn(kind: String, module_name: String, member: String, e
     assert_eq(core_declarations_wrapper("{import_unit}copy: fn() -> Int {{ kernel.copy() }}\n", "copy"), "core.text.runtime.copy")
     // A declaration attribute does not hide the wrapper.
     assert_eq(core_declarations_wrapper("{import_unit}#Unsafe(\"validated carrier\") copy: fn() -> Int {{ kernel.copy() }}\n", "copy"), "core.text.runtime.copy")
+    // Nor does a dotted attribute with a case argument, as a role marks a declaration.
+    assert_eq(core_declarations_wrapper("use raw_copy: core.text.runtime.copy.copy\n#Builtin.Role(.HookPoint) copy: fn() -> Int {{ raw_copy() }}\n", "copy"), "core.text.runtime.copy")
+    assert_eq(core_decl_pub_fn_name("#Builtin.Role(.DecisionPoint) decision_point: fn<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {{"), "decision_point")
+    // Quoted text and nested parentheses stay inside their argument list.
+    assert_eq(core_decl_pub_fn_name("#Doc(\"a ) paren\") #Builtin.Role(.EventPoint) point: fn<T>() -> Event<T> Never! {{"), "point")
+    assert_eq(core_decl_pub_fn_name("#Builtin.Role(.HookPoint hook_point: fn() -> Int {{"), "")
     // A unit member alias names the same unit, in a `use` line or block.
     assert_eq(core_declarations_wrapper("use raw_copy: core.text.runtime.copy.copy\ncopy: fn() -> Int {{ raw_copy() }}\n", "copy"), "core.text.runtime.copy")
     assert_eq(core_declarations_wrapper("use {{\n    raw_copy: core.text.runtime.copy.copy\n    unicode: core.text\n}}\ncopy: fn() -> Int {{ raw_copy() }}\n", "copy"), "core.text.runtime.copy")

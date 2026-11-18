@@ -6,7 +6,7 @@
 // the provider retains, invoked through the typed lazy.callback helper with
 // the payload's slot lent for the call (its result written to the
 // provider's slot), and released once by the release helper.
-use jet_foundation.[Span, BodyHandleOp, Type, type_carrier_identity]
+use jet_foundation.[Span, BodyHandleOp, TConstantDef, Type, type_carrier_identity]
 
 // The compiler-known `Event<T>`.
 ir_event_type: fn(ty: Type) -> Bool Never! {
@@ -35,8 +35,8 @@ ir_event_with_policy: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: T
     event
 }
 
-// A fresh synchronous `Event<T>` of type `ty`, as `event.new<T>()` makes it:
-// a module event's (ir_event_holder_read, ir_storage_init).
+// A fresh synchronous `Event<T>` of type `ty`, as `event.point<T>()` makes
+// it: a declared event point's (ir_point_new).
 ir_event_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, span: Span) -> Int Never! {
     policy_ty: Type.Named{name: "EventPolicy"}
     policy_row: ir_value_type(m, p, policy_ty) ?? return ir_type_fail(b, span, policy_ty)
@@ -223,12 +223,18 @@ ir_event_family_row: fn(m: &IRModule, p: IRProgram, ty: Type) -> Int? Never! {
 // `core.event.__hook_new<T, R>(fallback)`: the hook takes over the moved
 // fallback under R's descriptor.
 ir_hook_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
-    row: ir_event_family_row(m, p, result_ty) ?? return ir_fail_slot(b, span, "Hook.new producing {ir_type_name(result_ty)}")
     if args.len() != 1 -> return ir_fail_slot(b, span, "Hook.new with {args.len()} arguments")
-    fallback_ty: ir_type_args(ir_untag(result_ty))[1].copy()
-    slot := ir_word_const(m, b, 0)
     fallback: ir_expr(m, p, b, args[0])
     if ir_failed(b) -> return -1
+    ir_hook_make(m, p, b, result_ty, fallback, span)
+}
+
+// A Hook<T, R> of type `result_ty` that takes over the moved `fallback`
+// (no slot for a unit R) under R's descriptor.
+ir_hook_make: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, fallback: Int, span: Span) -[]> Int {
+    row: ir_event_family_row(m, p, result_ty) ?? return ir_fail_slot(b, span, "Hook.new producing {ir_type_name(result_ty)}")
+    fallback_ty: ir_type_args(ir_untag(result_ty))[1].copy()
+    slot := ir_word_const(m, b, 0)
     if !ir_unit_type(fallback_ty) {
         if fallback < 0 -> return -1
         slot = ir_reactive_moved_slot(m, p, b, fallback, span)
@@ -241,19 +247,58 @@ ir_hook_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args
     hook
 }
 
-// `core.event.__decision_hook_new<T, E>(policy)`: the policy is its ordinal
-// word (the provider has one).
+// `core.event.__decision_hook_new<T, E>(policy)`.
 ir_decision_hook_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, args: [Int], span: Span) -> Int Never! {
-    row: ir_event_family_row(m, p, result_ty) ?? return ir_fail_slot(b, span, "DecisionHook.new producing {ir_type_name(result_ty)}")
     if args.len() != 1 {
         return ir_fail_slot(b, span, "DecisionHook.new with {args.len()} arguments")
     }
     policy: ir_expr(m, p, b, args[0])
     if ir_failed(b) || policy < 0 -> return -1
+    ir_decision_hook_make(m, p, b, result_ty, policy, span)
+}
+
+// A DecisionHook<T, E> of type `result_ty` under `policy`, which is
+// released here: the provider takes its ordinal word.
+ir_decision_hook_make: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, policy: Int, span: Span) -[]> Int {
+    row: ir_event_family_row(m, p, result_ty) ?? return ir_fail_slot(b, span, "DecisionHook.new producing {ir_type_name(result_ty)}")
     hook: ir_runtime(m, b, "jet_decision_hook_new", [Int]{policy}, row)
     b.fresh[hook] = true
     ir_release(m, b, policy)
     hook
+}
+
+// Whether `ty` is a declared point's carrier: core.event's Event<T>,
+// Hook<T, R> or DecisionHook<T, E>, not a declared type of the same name.
+ir_point_type: fn(p: IRProgram, ty: Type) -[]> Bool {
+    if ir_untag(ty) == .Apply(name, args) {
+        if ir_type_def(p, name) != None -> return false
+        if name == "Event" -> return args.len() == 1
+        return (name == "Hook" || name == "DecisionHook") && args.len() == 2
+    }
+    false
+}
+
+// The carrier of declared point `definition` as its constructor makes it:
+// a synchronous Event, a Hook over the landed fallback or a DecisionHook
+// under the landed policy (ir_point_holder_read, ir_storage_start_helper).
+ir_point_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TConstantDef, span: Span) -[]> Int {
+    if ir_untag(definition.ty) == .Apply(name, args) {
+        if name == {
+            "Event" -> return ir_event_new(m, p, b, definition.ty, span)
+            "Hook" -> {
+                fallback: if ir_unit_type(args[1]) -> -1 else -> ir_comptime(m, p, b, args[1], definition.value, span)
+                if ir_failed(b) -> return -1
+                return ir_hook_make(m, p, b, definition.ty, fallback, span)
+            }
+            "DecisionHook" -> {
+                policy: ir_comptime(m, p, b, Type.Named{name: "HookPolicy"}, definition.value, span)
+                if ir_failed(b) || policy < 0 -> return -1
+                return ir_decision_hook_make(m, p, b, definition.ty, policy, span)
+            }
+            else -> {}
+        }
+    }
+    ir_fail_slot(b, span, "point of {ir_type_name(definition.ty)}")
 }
 
 ir_event_ok_type: fn(ty: Type) -> Type? Never! {

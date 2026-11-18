@@ -400,11 +400,18 @@ so no such value is ever stored. A `name: Shared{value}`
 global holds one process-wide cell: the build computes `value`, which must be
 literal data, and every read shares the one cell; a mutable
 `name := Shared{value}` global holds such a cell until an assignment replaces
-it. A `NAME: event.new<T>()` global is one process-wide event: an event is a
-runtime handle the build can't make, so the program makes it at its first
-read, once, and every read, from any task, shares it and its listeners; a
-mutable `name := event.new<T>()` global starts from a fresh event made at its
-first use. Only an explicit
+it. A declared point, a global whose whole value is `event.point<T>()`,
+`event.hook_point<T, R>(fallback)` or `event.decision_point<T, E>(policy)`,
+is one process-wide event, hook or decision hook, and the global is its
+identity: a carrier is a runtime handle the build can't make, so the build
+keeps only the fallback or policy, which must be literal data, and the
+program makes the carrier at its first read, once, and every read, from any
+task, shares it and its listeners; a mutable `name := event.point<T>()`
+global starts from a fresh carrier made at its first use. A point's name may
+be snake_case or ALL_CAPS, and its constructor is refused anywhere else
+(E0644). `NAME: event.new<T>()` still declares an event point while Core's
+own `app.LIFECYCLE` is written that way. Any other global holding an event is
+E0643. Only an explicit
 `#run { … }` reads build
 inputs. Both globals are visible to functions in the file; only the mutable
 form may be assigned after initialization. A local value whose call reads a

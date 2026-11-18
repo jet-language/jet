@@ -1887,7 +1887,25 @@ sema_call_lint_shared_loop_arguments: fn(args: [CallArg], environment: SemaScope
     }
 }
 
+// A declared point's constructor (`event.point<T>()`, sema_core_point_constructor)
+// called in a body: a point is a module binding's identity, so its call is
+// valid only as such a binding's whole value.
+sema_call_point_in_body: fn(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -[]> Bool {
+    if environment.function_name == "" || !module_is_core(target.symbol.module_identity) {
+        return false
+    }
+    if program.registration_graph == .Val(graph) {
+        row: sema_registration_callable_row_of(graph, target.symbol.id) ?? return false
+        return sema_core_point_constructor(graph, row)
+    }
+    false
+}
+
 sema_call_direct_checked_from_target: fn(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+    if sema_call_point_in_body(target, environment, program) {
+        diagnostics.push(sema_error("E0644", call.name_span, "`{target.symbol.name}` makes a point, which is declared only as a module binding's value", "a point is the module binding it initializes: the program makes its carrier at the first read and every reader shares it, and a call in a body would make a new, anonymous carrier each time it runs", "declare it at module level (`clicked: event.point<Int>()`) and use that binding; for a value that is local by design, use `event.new`, `event.hook` or `event.decision_hook`"))
+        return None
+    }
     candidate := target
     params := sema_call_params_from_type(candidate.signature) ?? {
         diagnostics.push(sema_call_not_callable(call.name, candidate.signature, call.name_span))

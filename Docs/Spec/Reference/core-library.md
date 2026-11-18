@@ -5773,6 +5773,19 @@ resources remain provider-owned.
 | `decision_hook<T, E>(policy: HookPolicy) -> DecisionHook<T, E>` | hook | Create a hook with an explicit decision policy. |
 | `policy_sync() -> EventPolicy` | policy | Select synchronous delivery policy. |
 | `async_result<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEvent<T, E> EventConfigError!` | event | Configure bounded asynchronous delivery. |
+| `point<T>() -> Event<T>` | point | Declare an event point; valid only as a module binding's value. |
+| `hook_point<T, R>(fallback: R) -> Hook<T, R>` | point | Declare a hook point with a fallback result; valid only as a module binding's value. |
+| `decision_point<T, E>(policy: HookPolicy) -> DecisionHook<T, E>` | point | Declare a decision point; valid only as a module binding's value. |
+
+A declared point is a module binding whose whole value is `point`,
+`hook_point` or `decision_point` (`clicked: event.point<Int>()`): the
+binding is the point's identity, its name may be snake_case or ALL_CAPS, and
+the program makes its carrier at the first read, once, shared by every read.
+A hook point's fallback and a decision point's policy are literal data the
+build keeps. `NAME: event.new<T>()` as a module binding's whole value still
+declares an event point while Core's own `app.LIFECYCLE` is written that way.
+Any other module value that holds an event is refused as one the build cannot
+compute.
 
 Provider event handles expose `.on`, `.emit`, `.listener_count`, and `.close`;
 subscriptions expose `.is_active`. Async events expose `.emit_async` and a

@@ -270,10 +270,10 @@ ir_storage_address: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definition: TC
         s := IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
         cell: ir_static_new(s, size)
         // A `Shared{X}` binding's value is its payload, which a new cell
-        // holds, and a module event binding's is made at its first use. An
+        // holds, and a declared point binding's is made at its first use. An
         // exact Int node is static data a write's drop leaves alone
         // (IR_STATIC_INT_COUNT).
-        frozen: if ir_untag(definition.ty) == .Shared(_) || ir_event_type(definition.ty) -> false else -> ir_static_into(m, p, s, cell, 0, definition.ty, row, definition.value)
+        frozen: if ir_untag(definition.ty) == .Shared(_) || ir_point_type(p, definition.ty) -> false else -> ir_static_into(m, p, s, cell, 0, definition.ty, row, definition.value)
         if !frozen {
             s = IRStaticBuild{bytes: [[U8]]{}, relocs: [[IRStaticReloc]]{}}
             _: ir_static_new(s, size)
@@ -342,10 +342,10 @@ ir_storage_start_helper: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, definitio
         static_payload: ir_static_read(m, p, a, inner, "{definition.key}#payload", definition.value)
         payload: if static_payload >= 0 -> static_payload else -> ir_comptime(m, p, a, inner, definition.value, span)
         if a.error == "" -> value = ir_shared_new(m, p, a, [Int]{payload}, definition.ty, span)
-    } else if ir_event_type(definition.ty) {
-        // A module event binding (`name := event.new<T>()`) starts from a
-        // fresh event (ir_event_holder_read).
-        value = ir_event_new(m, p, a, definition.ty, span)
+    } else if ir_point_type(p, definition.ty) {
+        // A declared point binding (`clicked := event.point<Int>()`) starts
+        // from a fresh carrier (ir_point_holder_read).
+        value = ir_point_new(m, p, a, definition, span)
     } else { value = ir_comptime(m, p, a, definition.ty, definition.value, span) }
     if a.error == "" -> ir_store_at(m, p, a, address, 0, value)
     published: ir_word_const(m, a, 1)

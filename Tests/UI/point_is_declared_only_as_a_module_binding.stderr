@@ -1,0 +1,8 @@
+Error [jet.PointOutsideBinding]: `point` makes a point, which is declared only as a module binding's value
+  --> Tests/UI/point_is_declared_only_as_a_module_binding.jet:3:22
+    |
+  3 | run: fn() { _: event.point<Int>() }
+    |                      ^^^^^
+ Why: A point is the module binding it initializes: the program makes its carrier at the first read and every reader shares it, and a call in a body would make a new, anonymous carrier each time it runs
+ Fix: Declare it at module level (`clicked: event.point<Int>()`) and use that binding; for a value that is local by design, use `event.new`, `event.hook` or `event.decision_hook`
+More: jet-lang.dev/e/E0644

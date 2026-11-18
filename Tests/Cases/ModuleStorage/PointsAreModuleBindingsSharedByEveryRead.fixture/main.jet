@@ -1,0 +1,19 @@
+// A declared point is a module binding whose name may be snake_case: the
+// build keeps a hook point's literal fallback, and every read shares the one
+// carrier the program makes at the first read, so a handler attached through
+// one read answers a call through another.
+use event: core.event
+
+clicked: event.point<Int>()
+
+greeting: event.hook_point<Int, String>("nobody")
+
+answer: fn(n: Int) -> String { greeting.run(n, "unheard") }
+
+run: fn() {
+    scope: event.scope()
+    clicked.on(scope, fn(n: Int) { print("clicked {n}") })
+    _: clicked.emit(3)
+    greeting.on(scope, fn(n: Int) { "hello {n}" })
+    print(answer(2))
+}

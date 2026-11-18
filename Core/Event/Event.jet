@@ -11,6 +11,7 @@ package: {
 
 use {
     core: core
+    builtin: jet_builtins
     core.event.[Event]
 }
 
@@ -69,6 +70,26 @@ with_policy: fn<T>(policy: EventPolicy) -> Event<T> Never! {
 hook: fn<T, R>(fallback: R) -> Hook<T, R> Never! { core.event.__hook_new<T, R>(fallback) }
 
 decision_hook: fn<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
+    core.event.__decision_hook_new<T, E>(policy)
+}
+
+// A declared point: a module binding whose whole value calls one of these
+// names a typed extension point, and the binding is its identity. The
+// program makes its carrier at the first read, once, and every read shares
+// it. The call is valid only as a module binding's value, where the compiler
+// finds it by its jet_builtins role; the bodies make the same carriers
+// `new`, `hook` and `decision_hook` make.
+
+/// A declared event point: `clicked: event.point<Int>()`.
+#Builtin.Role(.EventPoint) point: fn<T>() -> Event<T> Never! { with_policy<T>(policy_sync()) }
+
+/// A declared hook point, which returns `fallback` when nothing handles it.
+#Builtin.Role(.HookPoint) hook_point: fn<T, R>(fallback: R) -> Hook<T, R> Never! {
+    core.event.__hook_new<T, R>(fallback)
+}
+
+/// A declared decision point, whose handlers' decisions `policy` combines.
+#Builtin.Role(.DecisionPoint) decision_point: fn<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
     core.event.__decision_hook_new<T, E>(policy)
 }
 

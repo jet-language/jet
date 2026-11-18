@@ -42,24 +42,48 @@ core_decl_word_then_space: fn(text: String, at: Int, word: String) -> Bool Never
     end < bytes.len() && foundation_byte_text(bytes, at, end) == word && core_decl_space(Int{bytes[end]})
 }
 
-// The byte of `line` after any `#Attr` or `#Attr("…")` attributes, or -1
-// when an attribute is malformed.
+// The byte of `line` after any leading attributes, or -1 when an attribute
+// is malformed. An attribute is `#` and a dotted name, then optionally one
+// parenthesized argument list (`#Test("…")`, `#Builtin.Role(.HookPoint)`)
+// whose nested parentheses and quoted text are skipped whole.
 core_decl_attributes_end: fn(line: String) -> Int Never! {
     bytes: line.bytes()
     at := core_decl_skip_space(bytes, 0)
     loop at < bytes.len() && (Int{bytes[at]}) == 35 {
-        end := core_decl_name_end(bytes, at + 1)
-        if end == at + 1 -> return -1
-        if end + 1 < bytes.len() && (Int{bytes[end]}) == 40 && (Int{bytes[end + 1]}) == 34 {
-            close: core_decl_quote_end(bytes, end + 1)
-            if close < 0 || close + 1 >= bytes.len() || (Int{bytes[close + 1]}) != 41 -> return -1
-            end = close + 2
+        if core_decl_name_end(bytes, at + 1) == at + 1 -> return -1
+        end := core_decl_path_end(bytes, at + 1)
+        if end < bytes.len() && (Int{bytes[end]}) == 40 {
+            end = core_decl_arguments_end(bytes, end)
+            if end < 0 -> return -1
         }
         after: core_decl_after_space(bytes, end)
         if after < 0 -> return -1
         at = after
     }
     at
+}
+
+// The byte after the `)` that closes the `(` at byte `open`, skipping nested
+// parentheses and quoted text, or -1 when it is not closed.
+core_decl_arguments_end: fn(bytes: [U8], open: Int) -[]> Int {
+    depth := 0
+    at := open
+    loop at < bytes.len() {
+        code: Int{bytes[at]}
+        if code == 34 {
+            close: core_decl_quote_end(bytes, at)
+            if close < 0 -> return -1
+            at = close + 1
+            next
+        }
+        if code == 40 -> depth += 1
+        if code == 41 {
+            depth -= 1
+            if depth == 0 -> return at + 1
+        }
+        at += 1
+    }
+    -1
 }
 
 // The name of the `name: fn` declaration at byte `at` of `line`, or "".
