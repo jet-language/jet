@@ -2097,13 +2097,14 @@ second, so it shows the latest run.
 ### `core.browser.host` — events and values in the page
 
 `core.browser.host` is the checked surface a web app's code uses inside the
-page. Both operations carry the `Browser` effect and are lowered by the web
-target; native codegen keeps them as inert checked calls.
+page. Both operations carry the `Browser` effect and ask the page's
+`core.ui.host` provider; outside a page no provider answers, so `on` binds
+nothing and `value` reads `""`.
 
 | Signature | Result | Description |
 |---|---|---|
-| `on(target: String, event: String, handler: fn(WebEvent)) -[Browser]>` | — | Register a DOM event handler on the selected element. |
-| `value(target: String) -[Browser]> String` | text | Read the selected input or element value. |
+| `on(target: String, event: String, handler: &&fn(WebEvent)) -[Browser]>` | — | Run `handler` for each `event` (a DOM event type) of the element the CSS selector `target` selects, once the program's `run` returned, as a click on a scene element runs its handler. The `WebEvent` carries `target` as `path`, `event` as `title`, and the value the element holds then as `payload`. |
+| `value(target: String) -[Browser]> String` | text | Read the selected input's value, else the element's text; `""` when nothing matches. |
 
 ### `core.browser.storage` — browser storage adapters
 
@@ -2125,6 +2126,10 @@ and scope.
 | `core.browser.storage.session.set(key: String, value: String)` | — | Write a session key. |
 | `core.browser.storage.session.remove(key: String)` / `clear()` | — | Remove one or all session keys. |
 | `core.browser.storage.session.get_or(key, fallback) -> String` / `has(key) -> Bool` | text/Boolean | Read with a fallback or test session presence. |
+
+In a page (a web build), `local` is the page's `localStorage` and `session`
+its `sessionStorage`, which the page's `core.ui.host` provider reads and
+writes.
 
 Outside a browser (`jet run`, a native build), each of `local` and `session`
 is one process-wide in-memory store, and the two stay separate: `set`

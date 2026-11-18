@@ -215,7 +215,9 @@ function providerRecord(fields) {
 // says when it asks. The file dialogs that answer a path (dialogRequest) and
 // font shaping are absent: a page gives no filesystem path. A device request,
 // the app's file chooser, the files dropped on it and the folders it is given
-// among them, is answered the browser's way (deviceRequest).
+// among them, is answered the browser's way (deviceRequest): core.browser.host
+// routes listen on the elements they select, and core.browser.storage is the
+// page's localStorage and sessionStorage.
 const UI_QUEUE = 256;
 
 // How long a location request waits for the person: then it is refused, as
@@ -656,10 +658,13 @@ function postRequest(request) {
 // page's lifecycle through the hook whose click slot `request` names,
 // its first moment the document's visibility, 17 the oldest moment
 // of the page's lifecycle the app hasn't taken (Host followLifecycle),
-// 18 a remote call's POST (postRequest), and 19 the app drawing its
-// screens through the hook whose click slot `request` names (Host show),
-// the page's address, null for none. An answer may be a promise.
-function deviceRequest(doc, kept, watches, drops, lifecycle, kind, request) {
+// 18 a remote call's POST (postRequest), 19 the app drawing its screens
+// through the hook whose click slot `request` names (Host show), the page's
+// address, 20 a route's binding (bindRoute), 21 the payload of the event
+// whose route's handler runs, 22 the value of the element the selector
+// `request` selects (elementValue) and 23 an operation on the page's
+// storage (storageRequest), null for none. An answer may be a promise.
+function deviceRequest(doc, kept, watches, drops, lifecycle, routes, kind, request) {
   if (kind === 0) return askPermission(request);
   if (kind === 1) return findPlace().then(providerRecord);
   if (kind === 2) {
@@ -707,6 +712,10 @@ function deviceRequest(doc, kept, watches, drops, lifecycle, kind, request) {
     const place = globalThis.location;
     return place?.pathname ? place.pathname + (place.search ?? "") : "/";
   }
+  if (kind === 20) return bindRoute(doc, routes, request);
+  if (kind === 21) return routes.payload;
+  if (kind === 22) return elementValue(doc.querySelector?.(request));
+  if (kind === 23) return storageRequest(request);
   return null;
 }
 
@@ -715,7 +724,50 @@ function deviceRequest(doc, kept, watches, drops, lifecycle, kind, request) {
 function keptFile(kept, file) {
   return [String(kept.push(file) - 1), String(file.size), file.name];
 }
-function defaultUiProvider(doc) {
+
+// What `element` holds: an input's value, else its text; null for no
+// element.
+function elementValue(element) {
+  if (!element) return null;
+  return String(typeof element.value === "string" ? element.value : (element.textContent ?? ""));
+}
+
+// Binds the route `<click slot> <event type> <selector>` (core.browser.host
+// on): each event of that type on the element the selector selects runs the
+// slot's handler (routes.run), with the value the element holds then as the
+// event's payload. "bound", or null when no element matches.
+function bindRoute(doc, routes, request) {
+  const [slot, type] = request.split(" ", 2);
+  const element = doc.querySelector?.(request.slice(slot.length + type.length + 2));
+  if (!element?.addEventListener) return null;
+  element.addEventListener(type, (event) => {
+    const payload = elementValue(event.target ?? element) ?? "";
+    return routes.run(Number(slot), () => (routes.payload = payload));
+  });
+  return "bound";
+}
+
+// An operation on the page's storage (core.browser.storage page_ask):
+// `<area> <op> <key bytes> <key><value>`, the area local or session. A get
+// answers the record of the key's value, empty when it has none; set,
+// remove and clear answer "ok". Null when the page has no such storage.
+function storageRequest(request) {
+  const [area, op, size] = request.split(" ", 3);
+  const store = area === "session" ? globalThis.sessionStorage : area === "local" ? globalThis.localStorage : undefined;
+  if (!store) return null;
+  const rest = encoder.encode(request.slice(area.length + op.length + size.length + 3));
+  const key = decoder.decode(rest.subarray(0, Number(size)));
+  if (op === "get") {
+    const value = store.getItem(key);
+    return providerRecord(value === null ? [] : [value]);
+  }
+  if (op === "set") store.setItem(key, decoder.decode(rest.subarray(Number(size))));
+  else if (op === "remove") store.removeItem(key);
+  else if (op === "clear") store.clear();
+  else return null;
+  return "ok";
+}
+function defaultUiProvider(doc, run) {
   const queues = [[], [], []];
   const claims = new Set();
   let clipboard = null;
@@ -726,10 +778,13 @@ function defaultUiProvider(doc) {
   // each stops. The click slots of the hooks of the app that launched (each
   // 0 before one launched): the one following the page's lifecycle, with
   // the moments it hasn't taken, and the one drawing its screens (Host show).
+  // How a route runs its handler as the page's next entry (`run`, Host
+  // click), and the payload of the event whose route's handler runs.
   const kept = [];
   const drops = [];
   const watches = { count: 0, held: new Map() };
   const lifecycle = { hook: 0, moments: [], draw: 0 };
+  const routes = { run, payload: "" };
   const enqueue = (queue, fields) => {
     const records = queues[queue];
     if (records.length < UI_QUEUE) records.push(providerRecord(fields));
@@ -790,7 +845,7 @@ function defaultUiProvider(doc) {
     eventPop: (queue) => queues[queue]?.shift() ?? null,
     dialogRequest: () => -1,
     dialogResult: () => null,
-    device: (kind, request) => deviceRequest(doc, kept, watches, drops, lifecycle, kind, request),
+    device: (kind, request) => deviceRequest(doc, kept, watches, drops, lifecycle, routes, kind, request),
     filesDropped: (files) => drops.push(files),
     // A moment of the page's lifecycle (Host followLifecycle), held for the
     // app that launched: its hook's click slot, 0 with no app to tell.
@@ -1050,14 +1105,15 @@ class Host {
   // and both modules must come from the build that wrote the entry; a
   // harness that loads the modules itself passes none.
   static async open(url, args, environment, binding = null) {
-    // A page gets the default core.ui.host provider unless it installed one.
-    if (globalThis.document?.addEventListener && globalThis.jetUiProvider === undefined) {
-      globalThis.jetUiProvider = defaultUiProvider(globalThis.document);
-    }
     const base = new URL(".", url);
     const manifest = JSON.parse(decoder.decode(await load(new URL("web.manifest.json", base))));
     if (binding) checkBinding(binding, manifest);
     const host = new Host(manifest);
+    // A page gets the default core.ui.host provider unless it installed one;
+    // its routes run their handlers as this host's clicks.
+    if (globalThis.document?.addEventListener && globalThis.jetUiProvider === undefined) {
+      globalThis.jetUiProvider = defaultUiProvider(globalThis.document, (slot, before) => host.click(slot, before));
+    }
     host.rt = (await host.instantiate(new URL(host.runtime.module, base), {}, binding?.runtimeIdentity)).instance.exports;
     const app = await host.instantiate(url, { rt: host.rt }, binding?.artifactIdentity);
     host.app = app.instance.exports;
@@ -1658,10 +1714,12 @@ class Host {
 
   // A click on a scene element, once the program's run returned 0: runs the
   // element's handler as the next entry (turn), then shows what it changed
-  // (show). A promise of the handler's end.
-  click(id) {
+  // (show). A route's click (bindRoute) first sets its event's payload
+  // (`before`), in its own turn. A promise of the handler's end.
+  click(id, before = null) {
     return this.turn(async () => {
       if (this.outcome !== 0) return;
+      before?.();
       await this.waitableCall(this.rt.jet_ui_click, BigInt(id));
       await this.show();
     });

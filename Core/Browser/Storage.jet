@@ -9,7 +9,11 @@ package: {
     }
 }
 
-use world_rt: jet.runtime.testing
+use {
+    ui: core.ui
+    ui_rt: jet.runtime.ui
+    world_rt: jet.runtime.testing
+}
 
 // core.browser.storage — browser storage namespaces.
 
@@ -24,6 +28,27 @@ session: fn() -> WebStorage Never! { {ns: "session"} }
 kind_local: fn() -> String Never! { "local" }
 
 kind_session: fn() -> String Never! { "session" }
+
+// In a page, local and session storage are the page's localStorage and
+// sessionStorage, which its core.ui.host provider reads and writes (JetWeb
+// Host.jet storageRequest). Elsewhere no provider answers, and each is a
+// process store.
+priv WEB_DEVICE_STORAGE: 23
+
+// The provider's answer to `op` ("get", "set", "remove" or "clear") of
+// `key` (and `value`) in the page's `area` storage ("local" or "session");
+// None outside a page. The key's byte length leads it, so either may hold
+// any text.
+priv page_ask: fn(area: String, op: String, key: String, value: String) -> String? {
+    ui_rt.device(WEB_DEVICE_STORAGE, "{area} {op} {key.bytes().len()} {key}{value}")
+}
+
+// Whether a page answered, and the value its `area` storage holds for `key`.
+priv page_get: fn(area: String, key: String) -> {page: Bool, value: String?} {
+    said: page_ask(area, "get", key, "") ?? return {page: false, value: None}
+    fields: ui.host.provider_record_fields(said) ?? [String]{}
+    {page: true, value: if fields.len() == 1 -> Val(fields[0].copy()) else -> None}
+}
 
 // Inside a deterministic world, local and session storage are the World's own
 // entries, starting empty, so a world and its tasks never read or change the
