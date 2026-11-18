@@ -8,7 +8,7 @@
 use {
     native_files: core.files
     native_math: core.math
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_trace_close, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_spawn, x64_trace_wait]
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_close, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_spawn, x64_trace_wait]
     jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
 }
 
@@ -27,11 +27,22 @@ native_debug_unavailable: fn(detail: String) -> Diagnostic Never! {
 }
 
 // One frame of a stop: the Jet function and its source position, or a frame
-// without line information (the runtime's start code) with line 0.
+// without line information (the runtime's start code) with line 0. An
+// `inlined` frame is code the optimizer inlined into the frame below it,
+// which shows the call at its line.
 NativeFrame: struct {
     function: String,
     file: String,
     line: Int,
+    inlined: Bool,
+}
+
+// One frame a backtrace shows, against the frames the unwinder found: the
+// unwound frame `frame`, and in it the inlined run `site` (a
+// NativeFunction.inlined index), -1 for the function's own frame.
+NativeLevel: struct {
+    frame: Int,
+    site: Int,
 }
 
 // One local of the selected frame, in Jet terms. A value the image's debug
@@ -108,6 +119,20 @@ NativeUnwound: struct {
     known: [Bool],
 }
 
+// The debug facts of the image `binary`, whose bytes are `elf`: its own, or,
+// when it keeps none (`debug_info: split`), those of the side file its
+// `.gnu_debuglink` names beside it. The link names a file, not a directory,
+// and the build makes that name a link to the symbol store's side file.
+native_image_load: fn(binary: String, elf: [U8]) -[FS.Read]> NativeImage? {
+    own: native_image_read(elf)
+    if own != None -> return own
+    link: native_elf_section(elf, ".gnu_debuglink") ?? return None
+    name: x64_jetline_text(link, 0)
+    if name.len() == 0 -> return None
+    side: native_files.read_bytes(native_files.join(native_files.dirname(binary), name)) ?? return None
+    native_image_read(side)
+}
+
 NativeSession: struct {
     binary: String,
     image: NativeImage,
@@ -122,12 +147,12 @@ NativeSession: struct {
     sites: [NativeSite],
     selected: Int,
 
-    // Load the debug facts of `binary` (a native image with debug info). The
-    // program's output is written to `output_path`; nothing runs until
-    // `launch`.
+    // Load the debug facts of `binary` (a native image with debug info, its
+    // own or in the side file its `.gnu_debuglink` names). The program's
+    // output is written to `output_path`; nothing runs until `launch`.
     start: fn(binary: String, output_path: String) -> NativeSession NativeDebugError! {
         elf: native_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{binary}`: {err}"})
-        image: native_image_read(elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
+        image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
         Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, breakpoints: [NativeBreakpoint]{}, numbered: 0, sites: [NativeSite]{}, selected: 0})
     }
@@ -228,12 +253,15 @@ NativeSession: struct {
         }
     }
 
-    // The selected thread's frames, innermost first.
+    // The selected thread's frames, innermost first, each inlined run its
+    // own frame above the frame it is inlined into.
     backtrace: fn(&self) -> [NativeFrame] NativeDebugError! {
         frames: self.unwind() ?? return Err(err)
         shown := [NativeFrame]{}
         loop (index, frame) in frames {
-            shown.push(native_frame_at(self.image, if index == 0 -> frame.pc else -> frame.pc - 1))
+            loop found in native_frames_at(self.image, native_lookup(index, frame.pc)) {
+                shown.push(found)
+            }
         }
         Ok(shown)
     }
@@ -243,14 +271,17 @@ NativeSession: struct {
     locals: fn(&self) -> [NativeLocal] NativeDebugError! {
         frames: self.unwind() ?? return Err(err)
         if frames.len() == 0 -> return Ok([NativeLocal]{})
-        index: if self.selected < frames.len() -> self.selected else -> 0
+        levels: native_levels(self.image, frames)
+        level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
+        index: level.frame
         memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
-        lookup: if index == 0 -> frames[index].pc else -> frames[index].pc - 1
-        shown := native_frame_locals(self.image, memory, frames[index], lookup)
+        lookup: native_lookup(index, frames[index].pc)
+        shown := native_frame_locals(self.image, memory, frames[index], lookup, level.site)
         function: native_function_at(self.image, lookup) ?? return Ok(shown)
         // The variables native_frame_locals shows, in its order.
         at := 0
         loop variable in function.variables {
+            if variable.site != level.site -> next
             located := NativeRange?{None}
             if variable.list >= 0 {
                 located = native_variable_covering(self.image, variable, lookup)
@@ -326,10 +357,10 @@ NativeSession: struct {
         true
     }
 
-    // Select frame `index` of the current thread (0 is innermost).
+    // Select frame `index` of the current thread's backtrace (0 is innermost).
     select_frame: fn(&self, index: Int) -> Bool NativeDebugError! {
         frames: self.unwind() ?? return Err(err)
-        if index < 0 || index >= frames.len() -> return Ok(false)
+        if index < 0 || index >= native_levels(self.image, frames).len() -> return Ok(false)
         self.selected = index
         Ok(true)
     }
@@ -475,7 +506,7 @@ NativeSession: struct {
             }
             .Signaled -> { text = "{text}Program stopped by {stop.reason}\n" }
             .Paused -> {
-                frame: stop.frame ?? NativeFrame{function: "?", file: "", line: 0}
+                frame: stop.frame ?? NativeFrame{function: "?", file: "", line: 0, inlined: false}
                 if stop.reason.starts_with("breakpoint") {
                     text = "{text}{NATIVE_DEBUG_BREAKPOINT_HIT}  {frame.file}:{frame.line}  in {frame.function}()\n"
                 }
@@ -679,10 +710,10 @@ NativeSession: struct {
         }
     }
 
-    // A pause for `reason` where the program is.
+    // A pause for `reason` where the program is, in the innermost frame there.
     paused: fn(self, reason: String) -> NativeStop NativeDebugError! {
         registers: self.registers() ?? return Err(err)
-        Ok(NativeStop{kind: NativeStopKind.Paused, reason: reason, code: 0, frame: Val(native_frame_at(self.image, registers[X64_TRACE_RIP]))})
+        Ok(NativeStop{kind: NativeStopKind.Paused, reason: reason, code: 0, frame: Val(native_frames_at(self.image, registers[X64_TRACE_RIP])[0])})
     }
 
     // Run the program until the frame whose canonical frame address is `cfa`
@@ -1022,10 +1053,63 @@ native_frame_at: fn(image: NativeImage, lookup: Int) -> NativeFrame Never! {
     index: x64_jetline_find(image.lines, lookup)
     if index >= 0 {
         function: image.lines.functions[index]
-        return NativeFrame{function: function.name, file: native_files.basename(function.file), line: x64_jetline_line(image.lines, function, lookup) ?? 0}
+        return NativeFrame{function: function.name, file: native_files.basename(function.file), line: x64_jetline_line(image.lines, function, lookup) ?? 0, inlined: false}
     }
-    named: native_function_at(image, lookup) ?? return NativeFrame{function: "?", file: "", line: 0}
-    NativeFrame{function: named.name, file: "", line: 0}
+    named: native_function_at(image, lookup) ?? return NativeFrame{function: "?", file: "", line: 0, inlined: false}
+    NativeFrame{function: named.name, file: "", line: 0, inlined: false}
+}
+
+// The address a frame's code is looked up at: the stop itself for the
+// innermost frame (`index` 0), else the call before its return address `pc`.
+native_lookup: fn(index: Int, pc: Int) -[]> Int { if index == 0 -> pc else -> pc - 1 }
+
+// The frames `lookup` stands for, innermost first: one per inlined run that
+// holds it, named by its abstract subprogram, then the function's own frame.
+// The innermost shows the line at `lookup`; each frame below shows the line
+// of the call the frame above it was inlined for.
+native_frames_at: fn(image: NativeImage, lookup: Int) -[]> [NativeFrame] {
+    frame: native_frame_at(image, lookup)
+    function: native_function_at(image, lookup) ?? return [NativeFrame]{frame}
+    shown := [NativeFrame]{}
+    line := frame.line
+    loop site in native_inline_chain(function, lookup) {
+        run: function.inlined[site]
+        shown.push(NativeFrame{function: image.abstracts.get(run.origin) ?? "?", file: frame.file, line: line, inlined: true})
+        line = run.call_line
+    }
+    shown.push(NativeFrame{function: frame.function, file: frame.file, line: line, inlined: false})
+    shown
+}
+
+// The inlined runs of `function` that hold `lookup`, innermost first. Runs
+// nest as their sites do and each follows the run it is nested in, so the
+// last run holding `lookup` is the innermost.
+native_inline_chain: fn(function: NativeFunction, lookup: Int) -[]> [Int] {
+    innermost := -1
+    loop (index, run) in function.inlined {
+        if lookup >= run.low && lookup < run.high -> innermost = index
+    }
+    chain := [Int]{}
+    loop innermost >= 0 {
+        chain.push(innermost)
+        innermost = function.inlined[innermost].parent
+    }
+    chain
+}
+
+// The frames a backtrace of the unwound `frames` shows, in its order.
+native_levels: fn(image: NativeImage, frames: [NativeUnwound]) -[]> [NativeLevel] {
+    levels := [NativeLevel]{}
+    loop (index, frame) in frames {
+        lookup: native_lookup(index, frame.pc)
+        if native_function_at(image, lookup) == .Val(function) {
+            loop site in native_inline_chain(function, lookup) {
+                levels.push(NativeLevel{frame: index, site: site})
+            }
+        }
+        levels.push(NativeLevel{frame: index, site: -1})
+    }
+    levels
 }
 
 // The name of signal `signal`.
@@ -1158,13 +1242,14 @@ native_debug_print: fn(locals: [NativeLocal], name: String) -> String Never! {
     "`{name}` is not a local here"
 }
 
-// The Jet frames, innermost first.
+// The Jet frames, innermost first; an inlined frame says so.
 native_debug_backtrace: fn(frames: [NativeFrame]) -> String Never! {
     text := ""
     index := 0
     loop frame in frames {
         if !native_debug_jet_frame(frame) -> next
-        text = "{text}#{index}  {frame.function}()  at {frame.file}:{frame.line}\n"
+        inlined: if frame.inlined -> "  [inlined]" else -> ""
+        text = "{text}#{index}  {frame.function}()  at {frame.file}:{frame.line}{inlined}\n"
         index += 1
     }
     text
@@ -1190,12 +1275,14 @@ NativeBlock: struct {
     bytes: [U8],
 }
 
-// The parameters and locals live at `lookup` in `frame`, rendered as Jet
-// values; a variable the image gives no location shows as unavailable.
-native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, lookup: Int) -> [NativeLocal] Never! {
+// The parameters and locals live at `lookup` in `frame` that belong to the
+// inlined run `site` (-1: the function's own frame), rendered as Jet values;
+// a variable the image gives no location shows as unavailable.
+native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, lookup: Int, site: Int) -> [NativeLocal] Never! {
     locals := [NativeLocal]{}
     function: native_function_at(image, lookup) ?? return locals
     loop variable in function.variables {
+        if variable.site != site -> next
         type_name: native_type_name(image, variable.ty)
         if variable.list < 0 {
             locals.push(NativeLocal{name: variable.name, type_name: type_name, value: NATIVE_DEBUG_UNAVAILABLE})
@@ -1601,7 +1688,7 @@ native_debug_view_at: fn(image: NativeImage, ty: Int) -> Int? Never! {
         parameters := 0
         matched := false
         loop variable in function.variables {
-            if variable.role != NativeVariableRole.Parameter -> next
+            if variable.role != NativeVariableRole.Parameter || variable.site >= 0 -> next
             parameters += 1
             typed: image.types.get(variable.ty) ?? next
             if variable.name == "self" && typed.name == found.name -> matched = true

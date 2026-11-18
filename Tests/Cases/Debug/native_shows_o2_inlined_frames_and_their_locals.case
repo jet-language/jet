@@ -1,0 +1,24 @@
+# jet debug's own engine reads an O2 image's inlined code. `sum_squares` is
+# inlined into `run`, so its code has no function of its own; the DWARF makes
+# each inlined copy an inlined subroutine of an abstract `sum_squares`, with
+# the call's line and the inlined locals inside it. Stopped on a line of the
+# inlined loop's body, the stop is in a `sum_squares` frame inlined into
+# `run`, above `run`'s own frame at the call, and `locals` reads that frame's
+# live locals. The fixture is the lldb interop case's and must stay in jet
+# fmt form.
+fixture: LldbShowsO2InlinedFramesAndTheirLocals.fixture
+env: NO_COLOR=1
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:6
+stdin: native_shows_o2_inlined_frames_and_their_locals.stdin
+exit: any # `quit` ends the session; only the frames and the locals are the subject
+stdout+stderr: ~ "Breakpoint hit  prog.jet:6  in sum_squares()" # the stop is in the inlined copy, named as its function
+stdout+stderr: ~ "#0  sum_squares()  at prog.jet:6  [inlined]" # its frame says it is inlined
+stdout+stderr: ~ "#1  run()  at prog.jet:14" # and the caller's frame is at the call
+stdout+stderr: ~ "total: Int = " # the inlined function's locals are in its frame
+stdout+stderr: ~ "i: Int = " # the loop's variable too
+stdout+stderr: !~ "= <" # with values, not unavailable
+step: {work}/.jet/build/prog
+exit: 0
+stdout: = "332833500\n" # the image runs unchanged
