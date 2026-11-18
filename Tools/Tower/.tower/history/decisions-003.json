@@ -57154,6 +57154,162 @@
       "outcome": "C",
       "ratifiedAt": "2026-11-06",
       "retiredAt": "2026-11-18T03:11:58.908Z"
+    },
+    {
+      "id": "D-NATIVE-GAPS1",
+      "cardId": "c086hhzb",
+      "group": "architecture",
+      "title": "What happens when a native runtime feature is missing",
+      "situation": "A native build uses Jet's replacement runtime, but some existing features still have no native implementation. Today a UDP program can reach the linker before a missing-provider error names an internal symbol instead of explaining the unavailable feature. This leaves application authors unsure whether their code is wrong or the runtime is incomplete. You choose clear compiler refusals, today's linker errors, or delaying the entire cutover; we recommend clear refusals for each missing feature.",
+      "gist": "Should missing native features be rejected clearly before linking?",
+      "lesson": "A compiler checks code before the linker assembles the executable. Some native runtime features are still missing. A explains each missing feature at compile time, B keeps the generic linker error, and C waits for every feature before cutover. No option may pretend missing features work.",
+      "explainer": "This vote chooses how unavailable features are reported and whether they block the whole cutover. It does not authorize reducing any feature's behavior or decide which implementation to port first.",
+      "story": "Nora receives a UDP packet in her program. Today her native build fails with a missing symbol; she needs an error that explains the unavailable feature and her next step.",
+      "inWild": "// Go rejects files requiring a disabled implementation using build constraints.\n// https://pkg.go.dev/cmd/go#hdr-Build_constraints\n//go:build linux\n// Rust provides an explicit compile-time error for unsupported configurations.\n// https://doc.rust-lang.org/std/macro.compile_error.html\n#[cfg(not(any(feature = \"foo\", feature = \"bar\")))]\ncompile_error!(\"enable foo or bar\");",
+      "detail": "The source ballot lists service authority, workflows, HTTP server, WebSocket, UI host, browser, Raylib, devtools, process pipelines, sandboxed launches and UDP as incomplete. TLS is decided separately in D-NATIVE-TLS1. Today's missing-provider linker diagnostic is E2104. New per-family codes must enter the diagnostic catalog and documentation.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Clear compiler refusal for each feature",
+          "detail": "Reject each unavailable runtime family at compile time. Name the family, explain why this build lacks it, and give the fallback or next step. Register and document every new diagnostic code.",
+          "technical": "One availability list drives both the native checker and runtime pack. Each excluded family has one canonical diagnostic.",
+          "code": "use core.net as net\npkt :: net.udp_recv_from(socket, 1500)\n// Compiler: native UDP is unavailable; explains the next step."
+        },
+        {
+          "key": "B",
+          "name": "Keep the generic linker error",
+          "detail": "Keep today's behavior. Linking fails with the generic missing-provider error and an internal symbol name. No new compiler refusal is added.",
+          "technical": "The existing native link path reports E2104. No fake provider is introduced.",
+          "code": "use core.net as net\npkt :: net.udp_recv_from(socket, 1500)\n// Linker: E2104, missing provider."
+        },
+        {
+          "key": "C",
+          "name": "Wait for every native feature",
+          "detail": "Block the cutover until every listed runtime family is implemented natively. Programs retain the full feature set at cutover, but complete features cannot ship ahead of unfinished ones.",
+          "technical": "The native runtime pack's exclusion list must be empty before cutover.",
+          "code": "use core.net as net\npkt :: net.udp_recv_from(socket, 1500)\n// Cutover waits until UDP and every other family work."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "A explains missing features before linking and lets completed native work ship without pretending the rest works.",
+        "gains": [
+          "Users learn which feature is missing and what to do next."
+        ],
+        "losses": [
+          {
+            "loss": "New diagnostic codes must remain correct and documented.",
+            "mitigation": "Drive compiler refusals and the runtime pack from one availability list, and register each code in the catalog."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B gives users an internal symbol name late in the build instead of an actionable explanation."
+          },
+          {
+            "key": "C",
+            "reason": "C holds the entire cutover behind every remaining feature even when unrelated native programs already work."
+          }
+        ],
+        "tradeoff": "Keep a small set of documented refusals rather than delay all completed native functionality."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": null,
+      "checkInstructions": "For each excluded family, verify one canonical compiler diagnostic and its documented next step. Confirm the checker and runtime pack read the same availability list and that implemented families are not refused.",
+      "surface": {
+        "gist": "How should a native build report an unavailable feature?",
+        "lesson": "Some runtime features are not native yet. Today the linker names a missing symbol. A gives a clear compiler refusal, B keeps that error, and C delays cutover until every feature works. Missing behavior must never be faked.",
+        "trio": {
+          "current": {
+            "note": "The linker reports an internal missing symbol.",
+            "code": "pkt :: net.udp_recv_from(socket, 1500)\n// Linker: E2104, missing provider."
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "Unsupported configurations can produce a clear compiler error; source is in the long form.",
+            "code": "#[cfg(not(any(feature = \"foo\", feature = \"bar\")))]\ncompile_error!(\"enable foo or bar\");"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Clear compiler refusal",
+            "gist": "Explain the unavailable feature before linking.",
+            "gains": [
+              "Early, actionable explanation."
+            ],
+            "losses": [
+              "Diagnostic codes need documentation."
+            ],
+            "proposed": {
+              "code": "pkt :: net.udp_recv_from(socket, 1500)\n// Compiler names UDP and the next step."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Generic linker error",
+            "gist": "Keep today's missing-symbol report.",
+            "gains": [
+              "No new diagnostic codes."
+            ],
+            "losses": [
+              "Late error with an internal symbol."
+            ],
+            "proposed": {
+              "code": "pkt :: net.udp_recv_from(socket, 1500)\n// Linker: E2104, missing provider."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Wait for all features",
+            "gist": "Do not cut over with any missing family.",
+            "gains": [
+              "Full feature set at cutover."
+            ],
+            "losses": [
+              "Every unfinished family delays cutover."
+            ],
+            "proposed": {
+              "code": "pkt :: net.udp_recv_from(socket, 1500)\n// Cutover waits until all families work."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A tells users what is missing without holding completed native programs behind unrelated ports.",
+          "gains": [
+            "Clear errors without fake behavior."
+          ],
+          "losses": [
+            {
+              "loss": "More diagnostic codes to maintain.",
+              "mitigation": "Use one availability list for compiler refusals and the runtime pack."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B reports an internal symbol too late to explain the missing feature well."
+            },
+            {
+              "key": "C",
+              "reason": "C delays every native program behind every unfinished family."
+            }
+          ],
+          "tradeoff": "Maintain documented refusals while completed native features ship."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-10T10:41:32.223Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-10",
+      "retiredAt": "2026-11-18T03:45:50.551Z"
     }
   ]
 }

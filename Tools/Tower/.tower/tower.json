@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112135,
+    "rev": 112137,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -50857,123 +50857,6 @@
       "completedAt": "2026-11-18T01:38:01.466Z"
     },
     {
-      "id": "c086hhzb",
-      "num": 4954,
-      "title": "Interim native behavior for runtime families without a native provider",
-      "body": "Overnight 2026-10-10 the provisional behavior for non-native runtime families (TLS keeps its canonical E2104 refusal; the others hit the generic missing runtime symbol -> E2104 at link) was chosen without a ballot. Ballot D-NATIVE-GAPS1 decides the real policy.",
-      "kind": "task",
-      "track": "sidequest",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-1",
-          "text": "Map card distributed 2026-11-15 and closed: c1 to #6628, c3 merged into #6447 c3, c5 merged into #6884 c2, c8 to #3594 (D-SH-RUN1=A). D-NATIVE-GAPS1=A is ratified (2026-10-10), so the interim policy question is settled."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4953 \"Native UDP after Rust removal (packet schema)\" (CardTrim 2026-10-28: single-root task step of map #4954 (Interim native behavior for runtime families without a); 0 criteria, 1 ratified decisions). Body: UDP stays non-native (provisional, 2026-10-10): the legacy JetUDPPacket return ABI has no canonical native schema matching the source Core Packet (data/host/port/original_len/truncated). Six UDP exports were written as groundwork (e9cd09e79), excluded from the pack. Ballot D-NATIVE-UDP1."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4952 \"Native process pipelines (__pipeline_run) after Rust removal\" (CardTrim 2026-10-28: single-root task step of map #4954 (Interim native behavior for runtime families without a); 0 criteria, 1 ratified decisions). Body: Non-native tonight (CliCoreFinish, 2026-10-10 ~04:40). Rust Process.rs ~2051-2455 is a separate ~405-line pipeline engine: shared stage budgets, direct-pipe vs bounded-relay transaction, per-stage process-group cleanup and cancellation. It has no faithful native port yet; a serial run or an all-relay approximation would change semantics. The public source pipeline wrapper stays source-owned and the private launch is refused natively (generic missing-provider E2104) until ported. Also non-native: sandbox-bound ProcessSpec (ProcessSandbox.rs, ~1,059 lines: bwrap probe/profiles/secure output dirs). Plain unbound run/spawn/capture IS being ported natively (the native CLI needs it). Tests to rest"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4951 \"Native UI host, browser and Raylib/devtools providers after Rust removal\" (CardTrim 2026-10-28: single-root task step of map #4954 (Interim native behavior for runtime families without a); 0 criteria, 1 ratified decisions). Body: Found 2026-10-10 ~03:30 (PortUiBrowser). These runtime families stay entirely non-native tonight (excluded from the Rust-free pack; canonical native refusal): Raylib 7 (dynamic C calls exist, but window open/frame begin/close also call jet_devtools_native_* hooks from the Rust trait registry in jet-foundation DevtoolsNative.rs); UI host 2 (__attach/__dispatch need the scoped JetUiHost capability/binding state, HostServices.rs ~1766-1836); browser 2 (__command needs the shared JetBrowser protocol/event/trace state plus the WS live-writer/TCP authority). Landed natively: UI accessibility/shortcut transfers (757b0e051). Fact sheet with subsystems, source sizes, dependent APIs/tests/examples and"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4927 \"Native Dyn bridge: project Dyn DateTime (ZonedDateTime) instead of raising E3001\" (CardTrim 2026-10-28: single-root task step of map #4954 (Interim native behavior for runtime families without a); 0 criteria, 0 ratified decisions). Body: RtPortMath (d1cdc1f6b, 2026-10-09) made the native Dyn bridge raise registered E3001 'Dyn DateTime is not yet bridged natively', because compiler JSON never produces DateTime and the Lower/Dyn.jet schema row for DateTime has only tag/offset/boxed/payload_bytes. Core Dyn.DateTime is a ZonedDateTime (inline instant DateTime + zone value), not the raw 32-byte Rust DynDateTime (secs/nanos/leap/offset). Add the schema projection for the date and zone fields and a faithful bridge, with a native roundtrip fixture; then remove the E3001 path. Also: the stale jet_datatree_{at,bool,field,float,int,text,to_text} LowerRoutes route names have no providers (DynRename report): rename or remove them with th"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4897 \"E2: canonical typed identity for the published native runtime pack (consumed by CLI build receipts)\" (CardTrim 2026-10-28: single-root task step of map #4954 (Interim native behavior for runtime families without a); 0 criteria, 0 ratified decisions). Body: Found by CLIParity3 (goal 4, build / link receipt rows) via RtLand1-2: there is no typed identity or approval receipt for a published native runtime pack. Today the cutover proof reads a native.key PATH selector -> <key>/{jet_runtime.pack.o, libjet_runtime_native.rlib} plus separate generation.json / generated.sha / full36 checks; paths are not authority. Define ONE canonical typed pack identity record as part of E2's publication (content digests of the pack object(s), the generating source revision, generator / route identities, approval receipt reference), produced by the E2 publication step and consumed by the CLI BuildRecord link receipts and run10 / native golden runs. Reuse the existin"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "Main",
-          "text": "Destination: Every runtime family has a native provider; none answers E2104 or a stub.\nNotes: Batch R02 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: goldens net/*, ui/*, io/process_* and the services cases on o0,o1. Order: #4957 #4635 #4897 #4927 #4951 #4952 #4953.\nDecisions so far: D-NATIVE-GAPS1 (ratified=A) on #4954; D-NATIVE-UIHOST1 (ratified=A) on #4951; D-NATIVE-PROCESS1 (ratified=C) on #4952; D-NATIVE-UDP1 (ratified=A) on #4953; D-HTTP-DATE1 (ratified=A) on #4635; D-HTTP-REQMEM1 (ratified=A) on #4635\nFog: no criteria yet on #4954 #4951 #4952 #4953 #4927 #4897 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "(was #4897) E2: canonical typed identity for the published native runtime pack (consumed by CLI build receipts)",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6628 c2: runtime pack identity is runtime-pack build work (#6628)",
-          "at": "2026-11-15T03:42:32.845Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 2,
-          "text": "(was #4927) Native Dyn bridge: project Dyn DateTime (ZonedDateTime) instead of raising E3001",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 8be29ffe9a with gate-p141: jet test Compiler --profile golden --filter Data/Dyn/BytesDateTime -> PASS 3 (o0, o1, o2), FAIL 0.",
-          "at": "2026-11-15T03:43:10.988Z"
-        },
-        {
-          "n": 3,
-          "text": "(was #4951) Native UI host, browser and Raylib/devtools providers after Rust removal",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Merged into #6447 c3: native ui host, browser and devtools providers are the core.ui.host providers; no raylib (owner 2026-11-08); windows are #6701",
-          "at": "2026-11-15T03:42:34.523Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 5,
-          "text": "(was #4953) Native UDP after Rust removal (packet schema)",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Merged into #6884 c2: native UDP with its packet schema is the UDP criterion on the sockets card",
-          "at": "2026-11-15T03:42:36.098Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 8,
-          "text": "If D-SH-RUN1 = A: `Sh{\"git log --oneline {rev}\"}.text()` runs with no shell and returns stdout; a literal `|` word inside `Sh{…}` pipes to the next command, natively; a hole that contains `|` or `;` stays one argv item; the Exec prompt under #5949 names each program. The 10 shell tasks in the D-SH-RUN1 ballot total fewer characters than their zx and Bun Shell versions (counting script checked in).",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #3594 c18: D-SH-RUN1=A is ratified (2026-10-29); process pipelines live on #3594 next to c16",
-          "at": "2026-11-15T03:42:37.735Z",
-          "closure": "obsolete"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "wayfinder:map"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-10T10:41:20.799Z",
-      "updated": "2026-11-15T03:43:12.449Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 9,
-      "completedAt": "2026-11-15T03:43:12.449Z"
-    },
-    {
       "id": "c0acg7c2",
       "num": 5005,
       "title": "Close Jai's build-option families in the one option table",
@@ -54040,187 +53923,6 @@
       "updated": "2026-11-17T01:41:07.714Z",
       "updatedBy": "Main",
       "criteriaLastN": 2
-    },
-    {
-      "id": "c03pc5la",
-      "num": 5089,
-      "title": "Implement the ratified Core APIs the Jetpack port needs (process fds/exec, byte I/O, seek, net inheritance, pinned HTTP, json limits, streaming archives)",
-      "body": "Found by lane CliFoundation porting the Rust Jetpack fetch/add/remove/update/init/split/fold closure (Store, Provider, Nix, Publication, Environment). Each item is used by the Rust reference and has no Jet Core equivalent; each is new public Core API (owner ratification).\n1. ProcessSpec: pass an open FileReader/Directory/RuntimeLock fd to the child at a fixed descriptor slot (Rust clears CLOEXEC; CacheLease, NixProjection); exec-replace the current process (Rust CommandExt::exec; ShellEnv).\n2. Process byte I/O: ProcessStdin.write_all([U8]); byte reads on ProcessStdoutStream (today only write(String) and lines()). CacheEndpoints, LeaseSnapshot. (Also needed by script ports: invalid UTF-8 child output.)\n3. FileReader.seek.\n4. core.net: socket-activation listeners and unix peer credentials (Store Broker).\n5. HTTP fetch pinned to a pre-resolved, public-checked address set (Rust jet_net::get_stream_pinned + resolve_public_addresses; Publication already calls a nonexistent core.http.client.jet_http_build_resolve) and streaming Body reads.\n6. json.parse with caller limits (Nix index needs 256 MiB / depth 16; Core caps at 16 MiB).\n7. core.archive streaming tar and zstd readers (RegistryFetch, NixClosureAdmission).",
-      "kind": "task",
-      "track": "sidequest",
-      "epoch": "e5",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-1",
-          "text": "Where it went (criterion numbers): #3593 c21 (seek), c22 (Jetpack files); #6884 c9 (inherited listeners), c10 (peer credentials); #3280 c59 (JSON limits); #6888 c7 (streaming), c8 (zstd RFC 8878), c9 (zstd bomb kind); #6632 c105 (concurrent store open), c106 (parallel verify); #6893 c1-c2 (plugin load)."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-1",
-          "text": "Map card distributed 2026-11-15 and closed: c1 umbrella merged into #3594 c2 (other items: #3593 SEEK and JPKFILES, #6884 NETINH and NETPEER, #3665 c5, #3280 JSONLIM, #6888 ARCSTREAM, ZSTDFULL and ZSTDBOMB, #6632 STORECONC and PARFAN, #6893); core.models is deleted by D-CORE-MODELDESC1=D."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Merged #4697 \"Jetpack files: implement #3593 Core files API, then rejoin cut files\" into this card (ratified Core APIs the Jetpack port needs); its 1 open item(s) are carried as \"(was #4697)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
-        },
-        {
-          "at": "2026-10-30",
-          "by": "Main",
-          "text": "Owner unfroze #3594 on 2026-10-30; the core.process work is tracked there again, so this fold copy is moot."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5490 \"core.archive: a zstd 'declared output bomb' reports Malformed where the golden expects Unsupported\" (CardTrim 2026-10-28: single-root bug step of map #5089 (Implement the ratified Core APIs the Jetpack port); 0 criteria, 0 ratified decisions). Body: Found by RustTests (2026-10-23): Examples golden io/archive_hostile line 15 expects Unsupported for the zstd declared output bomb; Core (both before and after ArchiveNamesLinear) gives Malformed. Decide which is right from the archive error contract, then fix Core or the golden, on every tier."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5083 \"Core has no way to hand a held file lock to a child process (RuntimeLock.keep_open_for never compiled)\" (CardTrim 2026-10-28: single-root bug step of map #5089 (Implement the ratified Core APIs the Jetpack port); 0 criteria, 0 ratified decisions). Body: Jetpack/Foundation/Source/ProjectLock.jet RuntimeLock.keep_open_for called spec.keep_open(^self.owner), but ProcessSpec has no keep_open (nor any file-descriptor inheritance other than with_directory for held directories) in Core or its history; the method never compiled (the Jetpack assembled unit has been broken since before a0_007). It was ported from Rust acquire_lease_lock + set_inheritable: the launched process tree inherits the lease lock so the kernel lock stays held until the last descendant exits. Its only caller is Jetpack/Environment/Source/Shell/ShellEnv.jet:113 (cache lease handed to a shell). B2 (2026-10-20) made Jetpack/Foundation a real package (jetpack_foundation), so the m"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4687 \"jet store: fresh-store open is idempotent under concurrent runs\" (CardTrim 2026-10-28: single-root bug step of map #5089 (Implement the ratified Core APIs the Jetpack port); 1 criteria, 0 ratified decisions). Body: Concurrent jet runs that open a fresh store must not fail. ensure_dir checks before creating, so the loser fails with AlreadyExists. The Jet-owned store must treat AlreadyExists as success after verifying the directory layout. Criteria: a concurrency test starts N jet processes on an empty store. The Rust store code is removed with #4717; the fix lands on the Jet store path. Earlier text, kept for reference (Rust-era homes such as Rust crates, TIR/MIR/LIR, the JIT and generated Rust are retired): Found by GateTriage in tonight's gate ($JET_SCRATCH_ROOT/gate/595e0dca3/TRIAGE.md): crates/jet-store/src/lib.rs:2180 ensure_dir checks before creating, so concurrent jet runs opening a fresh store fai"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #3598 \"Core small gaps for Jetpack: isatty, OS-thread parallelism, JSON byte-limited parse, dynamic plugin load, models runtime\" (CardTrim 2026-10-28: single-root task step of map #5089 (Implement the ratified Core APIs the Jetpack port); 3 criteria, 6 ratified decisions). Body: Found by the Jetpack Rust-to-Jet port mapping (#3590; mapping receipts ~/.cache/jet-luna/jetpack-port/mapping-{A,B,C}.json). The Rust Jetpack uses these through std or crates; the Jet port cannot express them with current Core. Per the owner rule the port does not work around a missing Core API inside Jetpack. Each item is new public Core API, so it needs an owner ballot (AGENTS.md owner gates) with exact names, signatures, errors, effects and tier behavior before implementation. Prove each on AOT and default jet run (I9). Needed: 1. core.term: is_terminal for stdin/stdout/stderr (CLI output, prompts). 2. core.tasks: OS-thread parallelism (cooperative only today) for Store verification/hashi"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #3596 \"core.archive: full streaming zstd decoder, streaming gunzip, tar with mode/type/link headers for Jetpack\" (CardTrim 2026-10-28: single-root task step of map #5089 (Implement the ratified Core APIs the Jetpack port); 3 criteria, 3 ratified decisions). Body: Found by the Jetpack Rust-to-Jet port mapping (#3590; mapping receipts ~/.cache/jet-luna/jetpack-port/mapping-{A,B,C}.json). The Rust Jetpack uses these through std or crates; the Jet port cannot express them with current Core. Per the owner rule the port does not work around a missing Core API inside Jetpack. Each item is new public Core API, so it needs an owner ballot (AGENTS.md owner gates) with exact names, signatures, errors, effects and tier behavior before implementation. Prove each on AOT and default jet run (I9). Needed: 1. core.archive.zstd decodes only raw/RLE blocks, whole-buffer, capped at 64 MiB. Store/NixCache.rs streams real zstd NARs (Rust uses the zstd crate approved by D-"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #3594 \"core.process: binary streams, exec, process groups, fd inheritance, scoped signals for Jetpack\" (CardTrim 2026-10-28: single-root task step of map #5089 (Implement the ratified Core APIs the Jetpack port); 2 criteria, 7 ratified decisions). Body: Found by the Jetpack Rust-to-Jet port mapping (#3590; mapping receipts ~/.cache/jet-luna/jetpack-port/mapping-{A,B,C}.json). The Rust Jetpack uses these through std or crates; the Jet port cannot express them with current Core. Per the owner rule the port does not work around a missing Core API inside Jetpack. Each item is new public Core API, so it needs an owner ballot (AGENTS.md owner gates) with exact names, signatures, errors, effects and tier behavior before implementation. Prove each on AOT and default jet run (I9). Needed: 1. Binary stdin/stdout/stderr streaming on ProcessChild (today only line streams); Provider and Store feed and read NAR/tar bytes through child processes. 2. exec:"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "Main",
-          "text": "Destination: Every Core API Jetpack calls exists, is ratified and tested (fds, exec, streaming archives, SSRF pin).\nNotes: Batch J03 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && JET=$JET Tools/agent/jet-env jet test Core (files, process, archive, http suites); Jetpack call sites compile. Order: #3593 #3594 #3596 #3598 #4687 #4896 #4895 #5083 #5490.\nDecisions so far: D-CORE-FILEERROR1 (ratified=A) on #3593; D-CORE-FILESTAT1 (ratified=A) on #3593; D-CORE-FILEOPEN1 (ratified=A) on #3593; D-CORE-FILERENAME1 (ratified=A) on #3593; D-CORE-FILEDIR1 (ratified=A) on #3593; D-CORE-FILELOCK1 (ratified=A) on #3593; D-CORE-FILEXATTR1 (ratified=A) on #3593; D-CORE-HANDLEFD1 (ratified=A) on #3593; D-CORE-DELREBOOT1 (ratified=A) on #3593; D-CORE-PROCBYTES1 (ratified=A) on #3594; D-CORE-PROCREPLACE1 (ratified=A) on #3594; D-CORE-PROCGROUP1 (ratified=A) on #3594; D-CORE-PROCIDENT1 (ratified=A) on #3594; D-CORE-PROCINHERIT1 (ratified=A) on #3594; D-CORE-PROCSIGNAL1 (ratified=A) on #3594; D-CORE-PROCFILE1 (ratified=A) on #3594; D-CORE-CODECSTREAM1 (ratified=A) on #3596; D-CORE-ZSTDSOURCE1 (ratified=A) on #3596; D-CORE-TARSTREAM1 (ratified=A) on #3596; D-CORE-TERMSTDIN1 (ratified=A) on #3598; D-CORE-JSONLIMIT1 (ratified=A) on #3598; D-CORE-PLUGINPATH1 (ratified=A) on #3598; D-CORE-PLUGINLIMITS1 (ratified=A) on #3598; D-CORE-MODELDESC1 (ratified=D) on #3598; D-CORE-TERMRAW1 (ratified=A) on #3598; D-CORE-PRIVATE-SEAM1 (open) on #4896\nFog: no criteria yet on #5089 #4895 #5083 #4896 #4687 #5490 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "Main",
-          "text": "Consolidation 2026-10-28 (TowerDedup): merged #5935 (duplicate). Same list of Core APIs Jetpack needs (fd inheritance/keep_open, exec, streaming tar/gzip, net/HTTP pinning); #5935 is the later U7 census of the same gap and adds SSRF pinning, socket activation and delete_at_reboot. | #5935 \"Core gaps the Jet-hosted jetpack needs: SSRF destination pinning, fd inheritance, exec, socket activation/peer creds, delete_at_reboot, streaming tar/gzip\" (planning, P1, epoch -). Body: Found 2026-10-24 by O0Image-3 during the U7 port (#4589); detail in $JET_SCRATCH_ROOT/lanes/O0Image/u7/CORE-GAPS.md. Jetpack calls six Core APIs that never existed in Core: (1) HTTPDestinations/Client.destinations, the SSRF pin for registry fetches (SECURITY: currently unenforced); (2) ProcessSpec.keep_open(handle, at:) plus RuntimeLock.keep_open_for, to pass fds to a child (8 sites); (3) ProcessSpec.replace_process (exec); (4) net.inherited_listeners and unix_peer, for broker socket activation and peer-uid authz; (5) files.delete_at_reboot (Windows); (6) streaming gzip.reader, archive.tar_reader and TarKind. Interim handling (Main ruling): (2)/(4) fail closed with a typed 'not supported yet' error; (3) is emulated as spawn+wait+exit status; (5) is dropped; (6) uses in-memory bounded gzip plus a strict local ustar parser with a malicious-tar case; (1) is removed and listed as a security gap. Each of these is new public Core API, so each needs an owner ballot with exact syntax before it's built. Acceptance: ballots ratified, the Core APIs implemented with goldens, and Jetpack's interim code replaced. Log 2026-10-25 agent: Gap 12 (U7 CLI): there is no runtime-path wasm component load with a digest pin and Limits (fuel/memory/tables/timeout). The Jetpack compiler-extension and build-plugin hosts fail closed; this is owned by #5487 (own wasm engine). Log 2026-10-24 agent: More gaps from U7 Services, approved as Jetpack-local interim measures (Main 2026-10-24); each needs a Core ballot item. (9a) Process start identity: read /proc/<pid>/stat locally, parsing from the last ')' (field 22), and emit the same 'linux-proc-start:<starttime>' token as Rust; other hosts fail closed. (9b) process.find(identity) plus kill/terminate: alive means the identity matches and the state is not Z; the signal goes through the existing group kill path, with the identity rechecked first. (9c) Child stdout/stderr to log files: Core ProcessStreamMode has no File mode, so the unix path wraps argv in an sh exec redirect that keeps the pid and process-group leader. (9d) The Windows guardian Job Object needs Core containment, so it fails closed. Log 2026-10-24 agent: Two more gaps from the U7 Engine port (O0Image-3): (7) no client redirect/proxy policy in Core HTTP; Jetpack follows redirects by hand per hop after the allowlist and refuses relative Locations other than root/scheme-relative. (8) no Directory dup; RemoteCheckout reopens by path and fails closed unless the inode matches. Both need owner-ballot API before Core grows them."
-        },
-        {
-          "at": "2026-10-23",
-          "by": "agent",
-          "text": "Board burndown 2026-10-22: Not a ballot: every item is already ratified: D-CORE-PROCINHERIT1, D-CORE-PROCREPLACE1, D-CORE-PROCBYTES1, D-FSOPS1 (seek), D-CORE-NETINHERIT1, D-CORE-NETPEER1, D-CORE-HTTPDEST1, D-CORE-HTTPBODYLIMIT1, D-CORE-JSONLIMIT1, D-CORE-TARSTREAM1, D-CORE-ZSTDSOURCE1, D-CORE-CODECSTREAM1. Open point for the owner: this card spells the fd slot as an Int (pass_to(spec, at: Int)) while D-CORE-PROCINHERIT1 says no raw number appears in safe code; implement the decision spelling."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "Core lane spelling (CorePort5) for item 1 fd passing, Directory: directory.pass_to(spec: ProcessSpec, at: Int) -[FS, Exec, Env]> ProcessSpec IOError!. Mirrors the Rust CacheLease handle passing (CLOEXEC cleared on a held handle): the held directory is duplicated into the ProcessSpec at descriptor slot at (3 or more), so renaming or closing it here afterwards never changes what the child sees; a slot the spec already passes, or a stdio slot, is IOError.InvalidInput. Shares one implementation with the compiler store bridge (compiler_with_process_directory). Golden io/process_pass_directory: the child reads marker.txt through /proc/self/fd/9 after the directory was closed and renamed; reused slot 9 and slot 2 give InvalidInput."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "Core lane spelling (CorePort4) for item 7 zstd: zstd.decompress(data) now decodes every RFC 8878 frame form (compressed blocks, Huffman literals, FSE sequences, repeat offsets and tables, skippable and concatenated frames, windowed frames; dictionaries Unsupported; 64 MiB whole-buffer budget). Streaming: zstd.decoder() -> ZstdDecoder with feed(&self, bytes), read(&self, limit) -> [U8] ZstdFileError! (at most limit bytes; [] when more input is needed or all frames are done), finish(self) ZstdFileError! (Malformed on a truncated frame); zstd.reader(^file: FileReader) -> ZstdReader with read(&self, limit) -[FS.Read]> [U8] ZstdFileError! ([] at end of file). Byte-source design: push decoder (feed/read) for any source, plus an owning FileReader puller; no trait. Window limit 2^27 like the reference decoder default. Golden io/compress_zstd_stream; queued 1792605634-CorePort4."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "Core lane spellings (CorePort3): (1) files.stat(path, links: LinkPolicy?{None}) -> Stat IOError!: default describes a final link itself, .Follow describes its target (std::fs::metadata, target nlink), .Refuse is IOError.InvalidInput on a final link; golden io/files_stat_links. (2) json.parse_with_limits(text, limits: EncodingLimits) -> Dyn EncodingError!: caller max_item_bytes and max_depth, mirrors patch_with_limits; golden serde/json_parse_limits. (3) FileReader.seek(position: Int) IOError!: absolute SeekFrom::Start, drops read-ahead; golden io/files_reader_seek. (4) ProcessStdin.write_all(bytes: [U8]) IOError! and ProcessStdoutStream/ProcessStderrStream.read(max: Int) -> [U8] IOError! (empty at EOF, mirrors FileReader.read); native golden pending the ProcessChild.stdout O0 field lowering. Bootstrap note: Core source cannot call new host rows until the next seed (seed E1004), so new native APIs are compiler handle methods or live in new Core modules outside the compiler closure."
-        },
-        {
-          "at": "2026-10-21",
-          "by": "agent",
-          "text": "Owner approved the batch in principle (2026-10-21): the Core lane designs each of the 7 capabilities to mirror the Rust capability with idiomatic Jet spelling, proves each with goldens, and records each as a ratified decision on this card; the owner may veto any spelling after the fact."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "[from #5935 body] ballots ratified, the Core APIs implemented with goldens, and Jetpack's interim code replaced.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Merged into #3594 c2: umbrella; each item now has its own criterion: process fds, exec and byte I/O #3594 c2; FileReader.seek #3593; inherited listeners and peer credentials #6884; pinned HTTP #3665 c5; JSON limits #3280; streaming archives #6888",
-          "at": "2026-11-15T03:40:50.138Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 3,
-          "text": "(was #3596) core.archive: full streaming zstd decoder, streaming gunzip, tar with mode/type/link headers for Jetpack",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6888 c7: streaming codecs belong on the codecs card (#6888); frozen #3596 holds the original",
-          "at": "2026-11-15T03:40:51.076Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 4,
-          "text": "(was #3598) Core small gaps for Jetpack: isatty, OS-thread parallelism, JSON byte-limited parse, dynamic plugin load, models runtime",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6893 c1: split: plugin load to the plugin card; JSON limits to #3280; isatty is #6315 c4; OS-thread fan-out to #6632; core.models is deleted by D-CORE-MODELDESC1=D. Frozen #3598 holds the original",
-          "at": "2026-11-15T03:40:51.965Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 5,
-          "text": "jet store: opening a fresh store is idempotent under concurrent runs. A concurrency test starts N jet processes on an empty store and all succeed with one consistent store (`jet test Compiler --profile packages --filter Store`).",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6632 c105: store behaviour is Jetpack package-manager work (#6632)",
-          "at": "2026-11-15T03:40:52.842Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 7,
-          "text": "(was #5490) core.archive: a zstd 'declared output bomb' reports Malformed where the golden expects Unsupported",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6888 c9: zstd error kinds belong on the codecs card (#6888)",
-          "at": "2026-11-15T03:40:53.716Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 8,
-          "text": "(was #4697) ballot posted and ratified; then either the Core API lands on every tier with goldens, or the Jetpack files are rewritten to D-FSOPS1's surface; the cut files rejoin the block with the unit isocheck at 0 errors.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #3593 c22: the files API and the Jetpack files that need it are #3593",
-          "at": "2026-11-15T03:40:54.624Z",
-          "closure": "obsolete"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "ballot",
-        "core",
-        "jetpack",
-        "wayfinder:map"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-21T16:12:00.588Z",
-      "updated": "2026-11-15T03:41:10.880Z",
-      "updatedBy": "TowerKeeper-1",
-      "criteriaLastN": 8,
-      "completedAt": "2026-11-15T03:41:03.104Z"
     },
     {
       "id": "c07kbx9u",
@@ -58667,172 +58369,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 21,
       "completedAt": "2026-11-17T01:23:04.715Z"
-    },
-    {
-      "id": "c0j8ez91",
-      "num": 6004,
-      "title": "Unit family: the five known-failing unit cases pass (conversions, UnitConvert lowering, derived units)",
-      "body": "Destination: The Unit family testkit cases and dimensional goldens pass; then re-triage the stream-predicate-only rows (#5811).\nNotes: Batch G14 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && TESTKIT_ARGS=\"--cases $JET_SCRATCH_ROOT/lanes/Audit/consol/cases/G14.golden.txt --tier o0,o1\" JET=$JET Tools/agent/jet-env jet test Tools/testkit \"suite golden\". Order: #5586 #5809 #5804 #5805 #5806 #5807 #5811.\nDecisions so far: none linked to member cards.\nFog: no criteria yet on #5804 #5805 #5806 #5807 #5809 #5811 #5586 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-1",
-          "text": "Cleaned in place: c4, c6 and c7 now name the five #6004 rows of tests/known-failing.tsv on dev 72a8142651. physical_unit_codable_round_trips_as_its_concrete_type is #6843's row, and tests/ui/unit_family_unknown_header_field is #6425's."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 5 criteria from archived #1268, #1901, #2803: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        },
-        {
-          "at": "2026-11-01",
-          "by": "Main",
-          "text": "generic lists with `Q: Quantity<Dim, .Kind>` bounds parse (parser_parse_quantity_bound); no Quantity bound fails \"Expected `,` between generic parameters\" any more. quantity_generic_bound_preserves_concrete_unit_and_kind, fmt_preserves_quantity_dimension_kind_bound and quantity_generic_bound_rejects_wrong_dimension_and_kind pass (known-failing rows removed); user_dimensions_compose_… now fails only on E0112 derived-to-Newton conversion and E0433 (criterion 4 area) Landed in wave 31 as dev 360e470044 (IrTypes-55)."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5811 \"Unit family and marker groups: 13 cases fail only their stream predicates (no replayable first error)\" (CardTrim 2026-10-28: golden/test-gap step of map #6004). Body: Rust-test port SA4 (kit SA4J on dev HEAD cc02218111; per-case first errors $JET_RUN_ROOT/RustTestsA/SA4/firsterr-dev.tsv): 13 cases exit as expected but their stdout or stderr predicate fails. Per-case expected and actual are in kit-SA4J.json; triage each against the original .rs before fixing."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5809 \"Unit family: backend gaps and crashes (E2104 UnitConvert, SIGILL in exactness, two sema ICEs)\" (CardTrim 2026-10-28: golden/test-gap step of map #6004). Body: Rust-test port SA4 (kit SA4J on dev HEAD cc02218111; per-case first errors $JET_RUN_ROOT/RustTestsA/SA4/firsterr-dev.tsv): 4 cases: poundforce_uses_the_exact... (E2104 backend cannot build UnitConvert), exactness_uses_rational_math... (SIGILL at run), codegen_controls... (ICE: body rechecking did not return a complete package graph), explicit_units_policy_requires_destination_owned_conversion (ICE in declaration checking, exit 101 where 1 expected). ICEs violate I2."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5807 \"Unit family: currency Usd arithmetic and display not supported (E0360 no * or + for Usd, E0112 print)\" (CardTrim 2026-10-28: golden/test-gap step of map #6004). Body: Rust-test port SA4 (kit SA4J on dev HEAD cc02218111; per-case first errors $JET_RUN_ROOT/RustTestsA/SA4/firsterr-dev.tsv): 3 unit_family cases: currency_keeps_nominal_arithmetic_behavior, same_unit_arithmetic_compiles, quantities_display...."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5806 \"Unit family: conversion checks wrong (E0112 Meter vs Millimeter, E0127 implicit rounding, E0113 [Int] vs [Int#5])\" (CardTrim 2026-10-28: golden/test-gap step of map #6004). Body: Rust-test port SA4 (kit SA4J on dev HEAD cc02218111; per-case first errors $JET_RUN_ROOT/RustTestsA/SA4/firsterr-dev.tsv): 4 unit_family cases: exact_concrete_coercion_uses_the_value..., symbolic_and_measured_standard_scales..., exact_same_dimension..., measure_rules_cover_fixed_lengths...."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5805 \"Unit family: unit constructors and members not found (E0107/E0405/E0311: Meter.from_float after ??, CelsiusPoint, MPerS, .raw())\" (CardTrim 2026-10-28: golden/test-gap step of map #6004). Body: Rust-test port SA4 (kit SA4J on dev HEAD cc02218111; per-case first errors $JET_RUN_ROOT/RustTestsA/SA4/firsterr-dev.tsv): 7 unit_family cases: explicit_unit_conversion_is_fallible_and_rounded_spelling_is_real, rounded_conversion x2, affine_point_delta_algebra..., multi_word_member MPerS, omitted_base_defaults..., unit_scalar_rewrap...."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5804 \"Unit family: generic parameter lists with dimension bounds fail to parse (E0003 'Expected , between generic parameters')\" (CardTrim 2026-10-28: golden/test-gap step of map #6004). Body: Rust-test port SA4 (kit SA4J on dev HEAD cc02218111; per-case first errors $JET_RUN_ROOT/RustTestsA/SA4/firsterr-dev.tsv): 3 unit_family cases (user_dimensions_compose..., quantity_generic_bound_preserves_concrete_unit_and_kind, ...)."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5586 \"golden: derived dimension quantity prints 6.0, want `6 meter*kilogram/ns^2`\" (CardTrim 2026-10-28: golden/test-gap step of map #6004; full-run.json: Examples/features/types/dimensional_quantities_mass.jet=no-match). Body: - Root: no-match (output differs from golden, no diagnostic) - Triage: CARD sema/IR: derived dimension quantity prints 6.0, want `6 meter*kilogram/ns^2` - Raised at: - - Examples: types/dimensional_quantities_mass (Examples/features/types/dimensional_quantities_mass.jet) Found by the 2026-10-23 base34ad golden census (O0Load roots table)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Examples/features/types/dimensional_quantities_mass.jet pass o0+o1 goldens (was #5586: golden: derived dimension quantity prints 6.0, want `6 meter*kilogram/ns^2`)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "golden o1 PASS (testkit golden --tier o1, rg16a = dev a9be739dae tree, 2026-10-29) and o0 PASS per run-tier census: types/dimensional_quantities_mass",
-          "at": "2026-10-30T00:24:51.281Z"
-        },
-        {
-          "n": 2,
-          "text": "(was #5804) Unit family: generic parameter lists with dimension bounds fail to parse (E0003 'Expected , between generic parameters')",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "IrTypes-55 landed on dev 360e470044 (wave 31). Generic parameter lists with `Quantity<Dimension, .Kind>` bounds now parse; before, they failed with E0003. The bounds are checked at calls (E0905), and an unknown kind is rejected. Wave 31 (bb770de593 + 9 patches) cases now pass: fmt_preserves_quantity_dimension_kind_bound, quantity_generic_bound_preserves_concrete_unit_and_kind, quantity_generic_bound_rejects_wrong_dimension_and_kind, imported_explicit_quantity_argument_checks_its_bound, imported_quantity_generic_preserves_concrete_type and quantity_bounds_accept_open_dimensions_but_reject_unknown_kind. ui quantity_unknown_kind went from FAIL to PASS. The wave's lost rows all trace to the patches held back (CardClose-62 and IrTypes-49), none to IrTypes-55. The 2 user_dimensions rows now fail later, on E0112 (derived-to-named unit conversion), which is c4's scope.",
-          "at": "2026-11-01T20:15:13.666Z"
-        },
-        {
-          "n": 3,
-          "text": "(was #5805) Unit family: unit constructors and members not found (E0107/E0405/E0311: Meter.from_float after ??, CelsiusPoint, MPerS, .raw())",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 4b0e37a662 (GoalsA-1-3 unit-family-display-exact). p140 batch compiler (dev fa5d990a8c), 2026-11-14 21:45: jet test Compiler --profile cases --filter unit_family -> PASS 51 FAIL 0 KF 6 (was 43/14). Passing for this criterion: unit_family/multi_word_member_pascal_cases and unit_family/exact_concrete_coercion_uses_the_value_not_only_the_scale_denominator (constructors and members resolve). The remaining 6 KF rows are c4, c6 and #6843.",
-          "at": "2026-11-15T02:46:03.893Z"
-        },
-        {
-          "n": 4,
-          "text": "Unit conversions check right: a fixed-length measure keeps its `[Int#5]` shape through `join` (today E0113), and a rounded conversion refuses float precision loss and bounds huge digits without a false overflow (today E0127). Proof: `jet test Compiler --profile cases --filter measure_rules_cover_fixed_lengths_and_matrix_shapes` and `--filter rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits` pass, and their rows leave tests/known-failing.tsv.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev e8fff00023 (GoalsA-1-3 unit-family-rounded-r3). p142 batch compiler (built from dev 0487a6552b), 2026-11-14 22:40: jet test Compiler --profile cases --filter unit_family -> PASS 56 FAIL 0 KF 1 (only #6843's codec row). measure_rules_cover_fixed_lengths_and_matrix_shapes and rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits pass, and their rows left tests/known-failing.tsv; the neigh step keeps every 2001-digit unit.",
-          "at": "2026-11-15T03:40:30.609Z"
-        },
-        {
-          "n": 5,
-          "text": "(was #5807) Unit family: currency Usd arithmetic and display not supported (E0360 no * or + for Usd, E0112 print)",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 4b0e37a662 (GoalsA-1-3 unit-family-display-exact). p140 batch compiler (dev fa5d990a8c), 2026-11-14 21:45: jet test Compiler --profile cases --filter unit_family -> PASS 51 FAIL 0 KF 6 (was 43/14). Passing for this criterion: unit_family/currency_keeps_nominal_arithmetic_behavior (Usd arithmetic and display).",
-          "at": "2026-11-15T02:46:05.764Z"
-        },
-        {
-          "n": 6,
-          "text": "The back end lowers UnitConvert: the poundforce case builds and uses the exact defined ratio on O0, O1 and O2 (today E2104 'expression UnitConvert'). Proof: `jet test Compiler --profile cases --filter poundforce_uses_the_exact_defined_ratio_across_execution_tiers` passes and its row leaves tests/known-failing.tsv.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev b6d47b0df9 (GoalsA-1-3 unit-derived-fixtures). p140 batch compiler (dev fa5d990a8c), 2026-11-14 22:00: jet test Compiler --profile cases --filter poundforce_uses_the_exact_defined_ratio_across_execution_tiers -> PASS 1 FAIL 0 (o0/o1/o2 each print 44482216152605.0; Main probe on p140 too); its row left tests/known-failing.tsv. The whole unit_family filter is PASS 54 FAIL 0 KF 3 (c4's E0113 and E0127, and #6843).",
-          "at": "2026-11-15T02:57:31.151Z"
-        },
-        {
-          "n": 7,
-          "text": "A derived quantity converts to the named derived unit of the same dimension (Time^-2 * Length * Mass accepted as Newton; D-DERIVED-DIMENSION-CLAIM1), on O0, O1 and O2. The second case is renamed to drop its interpreter and JIT wording (there is no interpreter tier, D-EXEC2=A). Proof: `jet test Compiler --profile cases --filter user_dimensions_` passes both cases (user_dimensions_compose_and_named_derived_units_share_the_structure and the renamed user_dimensions_keep_interpreter_and_resident_jit_parity) and their rows leave tests/known-failing.tsv.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev b6d47b0df9 (GoalsA-1-3 unit-derived-fixtures). p140 batch compiler (dev fa5d990a8c), 2026-11-14 22:00: jet test Compiler --profile cases --filter user_dimensions_ -> PASS 2 FAIL 0 (compose_and_named_derived_units, and the renamed keep_parity_across_optimization_levels); both rows left tests/known-failing.tsv.",
-          "at": "2026-11-15T02:57:32.051Z"
-        },
-        {
-          "n": 8,
-          "text": "(was #1268 c1) Default print/Display shows magnitude + unit for quantity and unit-family values (12 meter, 4 meter/second, 766 px); hand-written Display overrides [precut audit: failing on 9c7ddf1359: C:unit_family/quantities_display_units_styles_and_explicit_overrides KNOWN-FAILING #6004 Error [E0112]: `print` doesn't know how to show `Usd`: exit 1; expected 0 (known-failing #6004: Error [E0112]: `print` doesn't know how to show `Usd`)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 4b0e37a662 (GoalsA-1-3 unit-family-display-exact). p140 batch compiler (dev fa5d990a8c), 2026-11-14 21:45: jet test Compiler --profile cases --filter unit_family -> PASS 51 FAIL 0 KF 6 (was 43/14). Passing for this criterion: unit_family/quantities_display_units_styles_and_explicit_overrides (default Display shows magnitude + unit; hand-written override).",
-          "at": "2026-11-15T02:46:06.862Z"
-        },
-        {
-          "n": 9,
-          "text": "(was #1268 c2) Explicit style controls from option D ship in the same slice: format-syntax selection of symbol vs long name vs bare number (working spelling {value#Unit(name)} / {value#Unit(bare)}; symbol is the default), one Display mechanism underneath [precut audit: failing on 9c7ddf1359: C:unit_family/quantities_display_units_styles_and_explicit_overrides KNOWN-FAILING #6004 Error [E0112]: `print` doesn't know how to show `Usd`: exit 1; expected 0 (known-failing #6004: Error [E0112]: `print` doesn't know how to show `Usd`)]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 4b0e37a662 (GoalsA-1-3 unit-family-display-exact). p140 batch compiler (dev fa5d990a8c), 2026-11-14 21:45: jet test Compiler --profile cases --filter unit_family -> PASS 51 FAIL 0 KF 6 (was 43/14). Passing for this criterion: unit_family/quantities_display_units_styles_and_explicit_overrides (symbol, long name and bare styles).",
-          "at": "2026-11-15T02:46:07.901Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "wayfinder:map",
-        "consolidation-2026-10-28",
-        "wayfinder:task"
-      ],
-      "parentId": "c0max8v8",
-      "needsAcceptance": false,
-      "created": "2026-10-28T11:42:14.354Z",
-      "updated": "2026-11-15T03:42:39.444Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 12,
-      "completedAt": "2026-11-15T03:42:39.444Z"
     },
     {
       "id": "c0kob6cb",
@@ -92195,11 +91731,11 @@
         {
           "n": 5,
           "text": "jet perf and jet debug work on the self-hosted toolchain end to end: the Examples/Tooling/Debugging and Performance examples pass their goldens on O0, O1 and O2 (the Compiler/JetDebug package check is #6730 c25).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:38:19.301Z",
+          "evidence": "p291 batch compiler (dev fddd5c3723; DeclTypes-6-1-6841-c5-package-goldens landed d276b65d40): golden Tooling/Performance n=9 PASS, and every Examples/Tooling/Debugging and Performance golden row in the full golden suite PASSES on o0, o1 and o2 (24 rows, 0 FAIL).",
+          "at": "2026-11-18T03:45:50.417Z",
           "proof": {
             "profile": "golden",
             "filter": "Tooling/"
@@ -92460,11 +91996,11 @@
         {
           "n": 30,
           "text": "The symbol table carries Jet names for functions, so lldb, perf and gdb show Jet names.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-18T01:48:08.437Z",
+          "evidence": "p291 batch compiler (dev fddd5c3723; DeclTypes-6-1-6841-c30-jet-symbols landed 8825231509): cases Debug/symbols_carry_jet_names PASS; Tools/Perf/HotText/run.jet --check PASS and its tests PASS; Tools/Perf/CodegenCeiling.jet PASS. The SingleThreadRc rows failed the same way on p290, before this change.",
+          "at": "2026-11-18T03:45:52.312Z",
           "movedFrom": {
             "card": 6918,
             "n": 8
@@ -92502,7 +92038,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-18T02:42:58.428Z",
+      "updated": "2026-11-18T03:45:52.312Z",
       "updatedBy": "Main",
       "criteriaLastN": 32
     },
@@ -141671,161 +141207,6 @@
       "ratifiedAt": "2026-10-10"
     },
     {
-      "id": "D-NATIVE-GAPS1",
-      "cardId": "c086hhzb",
-      "group": "architecture",
-      "title": "What happens when a native runtime feature is missing",
-      "situation": "A native build uses Jet's replacement runtime, but some existing features still have no native implementation. Today a UDP program can reach the linker before a missing-provider error names an internal symbol instead of explaining the unavailable feature. This leaves application authors unsure whether their code is wrong or the runtime is incomplete. You choose clear compiler refusals, today's linker errors, or delaying the entire cutover; we recommend clear refusals for each missing feature.",
-      "gist": "Should missing native features be rejected clearly before linking?",
-      "lesson": "A compiler checks code before the linker assembles the executable. Some native runtime features are still missing. A explains each missing feature at compile time, B keeps the generic linker error, and C waits for every feature before cutover. No option may pretend missing features work.",
-      "explainer": "This vote chooses how unavailable features are reported and whether they block the whole cutover. It does not authorize reducing any feature's behavior or decide which implementation to port first.",
-      "story": "Nora receives a UDP packet in her program. Today her native build fails with a missing symbol; she needs an error that explains the unavailable feature and her next step.",
-      "inWild": "// Go rejects files requiring a disabled implementation using build constraints.\n// https://pkg.go.dev/cmd/go#hdr-Build_constraints\n//go:build linux\n// Rust provides an explicit compile-time error for unsupported configurations.\n// https://doc.rust-lang.org/std/macro.compile_error.html\n#[cfg(not(any(feature = \"foo\", feature = \"bar\")))]\ncompile_error!(\"enable foo or bar\");",
-      "detail": "The source ballot lists service authority, workflows, HTTP server, WebSocket, UI host, browser, Raylib, devtools, process pipelines, sandboxed launches and UDP as incomplete. TLS is decided separately in D-NATIVE-TLS1. Today's missing-provider linker diagnostic is E2104. New per-family codes must enter the diagnostic catalog and documentation.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Clear compiler refusal for each feature",
-          "detail": "Reject each unavailable runtime family at compile time. Name the family, explain why this build lacks it, and give the fallback or next step. Register and document every new diagnostic code.",
-          "technical": "One availability list drives both the native checker and runtime pack. Each excluded family has one canonical diagnostic.",
-          "code": "use core.net as net\npkt :: net.udp_recv_from(socket, 1500)\n// Compiler: native UDP is unavailable; explains the next step."
-        },
-        {
-          "key": "B",
-          "name": "Keep the generic linker error",
-          "detail": "Keep today's behavior. Linking fails with the generic missing-provider error and an internal symbol name. No new compiler refusal is added.",
-          "technical": "The existing native link path reports E2104. No fake provider is introduced.",
-          "code": "use core.net as net\npkt :: net.udp_recv_from(socket, 1500)\n// Linker: E2104, missing provider."
-        },
-        {
-          "key": "C",
-          "name": "Wait for every native feature",
-          "detail": "Block the cutover until every listed runtime family is implemented natively. Programs retain the full feature set at cutover, but complete features cannot ship ahead of unfinished ones.",
-          "technical": "The native runtime pack's exclusion list must be empty before cutover.",
-          "code": "use core.net as net\npkt :: net.udp_recv_from(socket, 1500)\n// Cutover waits until UDP and every other family work."
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "why": "A explains missing features before linking and lets completed native work ship without pretending the rest works.",
-        "gains": [
-          "Users learn which feature is missing and what to do next."
-        ],
-        "losses": [
-          {
-            "loss": "New diagnostic codes must remain correct and documented.",
-            "mitigation": "Drive compiler refusals and the runtime pack from one availability list, and register each code in the catalog."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B gives users an internal symbol name late in the build instead of an actionable explanation."
-          },
-          {
-            "key": "C",
-            "reason": "C holds the entire cutover behind every remaining feature even when unrelated native programs already work."
-          }
-        ],
-        "tradeoff": "Keep a small set of documented refusals rather than delay all completed native functionality."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 4,
-      "reviewPasses": null,
-      "checkInstructions": "For each excluded family, verify one canonical compiler diagnostic and its documented next step. Confirm the checker and runtime pack read the same availability list and that implemented families are not refused.",
-      "surface": {
-        "gist": "How should a native build report an unavailable feature?",
-        "lesson": "Some runtime features are not native yet. Today the linker names a missing symbol. A gives a clear compiler refusal, B keeps that error, and C delays cutover until every feature works. Missing behavior must never be faked.",
-        "trio": {
-          "current": {
-            "note": "The linker reports an internal missing symbol.",
-            "code": "pkt :: net.udp_recv_from(socket, 1500)\n// Linker: E2104, missing provider."
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "Unsupported configurations can produce a clear compiler error; source is in the long form.",
-            "code": "#[cfg(not(any(feature = \"foo\", feature = \"bar\")))]\ncompile_error!(\"enable foo or bar\");"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Clear compiler refusal",
-            "gist": "Explain the unavailable feature before linking.",
-            "gains": [
-              "Early, actionable explanation."
-            ],
-            "losses": [
-              "Diagnostic codes need documentation."
-            ],
-            "proposed": {
-              "code": "pkt :: net.udp_recv_from(socket, 1500)\n// Compiler names UDP and the next step."
-            }
-          },
-          {
-            "key": "B",
-            "name": "Generic linker error",
-            "gist": "Keep today's missing-symbol report.",
-            "gains": [
-              "No new diagnostic codes."
-            ],
-            "losses": [
-              "Late error with an internal symbol."
-            ],
-            "proposed": {
-              "code": "pkt :: net.udp_recv_from(socket, 1500)\n// Linker: E2104, missing provider."
-            }
-          },
-          {
-            "key": "C",
-            "name": "Wait for all features",
-            "gist": "Do not cut over with any missing family.",
-            "gains": [
-              "Full feature set at cutover."
-            ],
-            "losses": [
-              "Every unfinished family delays cutover."
-            ],
-            "proposed": {
-              "code": "pkt :: net.udp_recv_from(socket, 1500)\n// Cutover waits until all families work."
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A tells users what is missing without holding completed native programs behind unrelated ports.",
-          "gains": [
-            "Clear errors without fake behavior."
-          ],
-          "losses": [
-            {
-              "loss": "More diagnostic codes to maintain.",
-              "mitigation": "Use one availability list for compiler refusals and the runtime pack."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B reports an internal symbol too late to explain the missing feature well."
-            },
-            {
-              "key": "C",
-              "reason": "C delays every native program behind every unfinished family."
-            }
-          ],
-          "tradeoff": "Maintain documented refusals while completed native features ship."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-10T10:41:32.223Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-10"
-    },
-    {
       "id": "D-NATIVE-PROCESS1",
       "cardId": "c0yp2785",
       "group": "architecture",
@@ -186412,6 +185793,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T03:45:52.312Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#30"
+    },
+    {
+      "at": "2026-11-18T03:45:50.417Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#5"
+    },
     {
       "at": "2026-11-18T03:19:31.651Z",
       "by": "Main",
