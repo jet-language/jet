@@ -1,0 +1,15 @@
+# `jet perf run` measures what sampling cost and reports it as the profile's
+# overhead: the time the sampler's handlers ran plus, for each sample's
+# signal, the kernel's delivery and return, which the runtime times as
+# sampling starts. Four tasks calling fib at -O2 for two seconds of CPU time
+# pay under 2% of it, 40 ms.
+requires: os-name:linux
+fixture: EveryThreadKeepsWholeStacks.fixture
+env: NO_COLOR=1
+step: jet perf run -O2 burn.jet --out {work}/burn.jettrace
+exit: 0
+stdout: = "burned=true\n"
+json: file burn.jettrace doc $.content.profile.overhead_status = "measured" # the overhead is measured, not assumed
+json: file burn.jettrace doc $.content.profile.overhead_ns >= 1 # the sampler's time is counted
+json: file burn.jettrace doc $.content.profile.overhead_ns <= 40000000 # and is under 2% of the two seconds sampled
+json: file burn.jettrace doc $.content.profile.overhead_reason ~ " microseconds of CPU time sampled: " # the receipt gives its share

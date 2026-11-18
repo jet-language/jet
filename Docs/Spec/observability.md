@@ -129,8 +129,12 @@ at the Jet line that called it, and the `reason` counts those samples.
 counts and, for samples outside every Jet function, names by the image's
 `.symtab` function, hottest first, as `perf report` names them. The `reason`
 also gives how many samples the CPU time sampled should give beside how many
-the session kept, and counts any sample in Jet code that kept no stack. `jet
-perf view` sums them per function with its share of the
+the session kept, and counts any sample in Jet code that kept no stack. The
+profile's overhead is `measured`: `overhead_ns` is the time the sampler's
+handlers ran plus, for each sample's signal, the kernel's delivery and
+return, which the runtime times as sampling starts by sending its own thread
+64 signals; `overhead_reason` gives it as a share of the CPU time sampled.
+`jet perf view` sums the rows per function with its share of the
 samples, then its hottest lines with their exclusive and inclusive samples and
 allocations (`line 7 samples=12 inclusive=40 allocations=300`). A run whose
 samples never reach the checked source (a short program, `jet perf test`, `jet

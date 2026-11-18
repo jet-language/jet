@@ -53,8 +53,9 @@ JetCLIPerfSampledLine: struct {
 // names them. `helpers` counts the samples in a compiler-emitted helper
 // (JET_CLI_PERF_HELPER_PREFIX), which count at the Jet line that called it
 // and not outside, and `stackless` the samples in Jet code that kept their
-// program counter alone. `cpu_ns` is the CPU time the process used while
-// sampled, when its runtime recorded it. `sited` says whether the samples
+// program counter alone. `signals` counts every sample's record, a
+// counter's too, each a signal the sampler took; `cost` is what sampling
+// cost, when its runtime recorded it. `sited` says whether the samples
 // held an allocations' record:
 // a runtime that records no allocation sites counts no line's allocations.
 // `periods` holds each counter's sampling period, 0 for one the run did
@@ -68,13 +69,24 @@ JetCLIPerfSamples: struct {
     outside: U64,
     helpers: U64,
     stackless: U64,
-    cpu_ns: U64?,
+    signals: U64,
+    cost: JetCLIPerfCost?,
     functions: [X64ImageFunction],
     natives: [JetCLIPerfNative],
     sited: Bool,
     periods: [U64],
     spawns: [U64:U64],
     joins: [JetCLIPerfJoin],
+}
+
+// The clock record (PerfSamples.jet perf_samples_exit), in nanoseconds: the
+// CPU time the process used while sampled, the time the sampler's handlers
+// ran, and the kernel's time to deliver one signal and return from its
+// handler, which the runtime timed as sampling started.
+JetCLIPerfCost: struct {
+    cpu_ns: U64,
+    handler_ns: U64,
+    delivery_ns: U64,
 }
 
 // A join's wait (PerfSamples.jet perf_samples_join): the joining and the
@@ -167,8 +179,8 @@ jet_cli_perf_samples_owned: fn(table: X64Jetline, source: String) -[FS]> [Bool] 
 // 62: 0 for a CPU-time sample, a counter's index plus one for that
 // counter's sample, JET_CLI_PERF_SPAWN_KIND for a task's spawn,
 // JET_CLI_PERF_JOIN_KIND for a join's wait, whose first words hold a task
-// id in place of the program counter, and JET_CLI_PERF_CLOCK_KIND for the
-// CPU time sampled. Bit 63 marks an allocations' record,
+// id in place of the program counter, and JET_CLI_PERF_CLOCK_KIND for what
+// sampling cost. Bit 63 marks an allocations' record,
 // whose count runs up to bit 62 (PerfSamples.jet PERF_SAMPLES_ADDRESS_BITS).
 JET_CLI_PERF_ADDRESS_BITS: 48
 
@@ -204,9 +216,9 @@ JET_CLI_PERF_HELPER_PREFIX: "jet_ir_"
 // of its stack, its program counter's included, and no CPU time. A spawn's
 // record names its task's spawn by the innermost such line of its stack,
 // and a join's record is its wait; neither counts time. The clock record,
-// the last one the runtime wrote, gives the CPU time sampled.
+// the last one the runtime wrote, gives what sampling cost.
 jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFunction], owned: [Bool], periods: &&[U64], words: [U8]) -> JetCLIPerfSamples Never! {
-    sampled := JetCLIPerfSamples{table: table, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, cpu_ns: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [U64:U64]{}, joins: [JetCLIPerfJoin]{}}
+    sampled := JetCLIPerfSamples{table: table, lines: [JetCLIPerfSampledLine]{}, total: U64{0}, outside: U64{0}, helpers: U64{0}, stackless: U64{0}, signals: U64{0}, cost: None, functions: functions, natives: [JetCLIPerfNative]{}, sited: false, periods: periods, spawns: [U64:U64]{}, joins: [JetCLIPerfJoin]{}}
     // One key per function and line; a line number stays below 2^32.
     places := [Int:Int]{}
     // Each address's entry in `lines`, -1 outside every Jet function.
@@ -261,13 +273,20 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             next
         }
         if kind == JET_CLI_PERF_CLOCK_KIND {
-            if record == 2 && at + 16 <= words.len() {
-                sampled.cpu_ns = checked(U64{link_debug_addr(words, at + 8)})
+            if record == 4 && at + 32 <= words.len() {
+                if checked(U64{link_debug_addr(words, at + 8)}) == .Val(cpu) {
+                    if checked(U64{link_debug_addr(words, at + 16)}) == .Val(handler) {
+                        if checked(U64{link_debug_addr(words, at + 24)}) == .Val(delivery) {
+                            sampled.cost = .Val(JetCLIPerfCost{cpu_ns: cpu, handler_ns: handler, delivery_ns: delivery})
+                        }
+                    }
+                }
             }
             at += record * 8
             next
         }
         if kind > 0 {
+            sampled.signals += U64{1}
             // A counter the session did not ask for has no period to weigh.
             counter: kind - 1
             loop k in 0..<record {
@@ -283,6 +302,7 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
         }
         sample += 1
         sampled.total += U64{1}
+        sampled.signals += U64{1}
         place := jet_cli_perf_samples_place(sampled, places, resolved, owned, pc)
         if place < 0 {
             if !native_at.has_key(pc) {
@@ -377,7 +397,8 @@ jet_cli_perf_samples_own_line: fn(table: X64Jetline, owned: [Bool], address: Int
 // and in its reason the hottest image functions outside Jet code, by their
 // symbols, the samples in compiler-emitted helpers, the samples in Jet
 // code that kept no stack, and how many samples the CPU time sampled
-// should give. None when no sample landed in it.
+// should give; and, when the runtime recorded it, what sampling cost as
+// its overhead. None when no sample landed in it.
 jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSamples) -> TraceProfile? Never! {
     rows := [TraceProfileRow]{}
     elsewhere := sampled.outside
@@ -437,12 +458,30 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     natives: if named.len() == 0 -> "" else -> "; outside Jet functions: {named.join(", ")}"
     helpers: if sampled.helpers == (U64{0}) -> "" else -> "; {sampled.helpers} samples in compiler-emitted helpers, such as stop polls, count at the line that called them"
     stackless: if sampled.stackless == (U64{0}) -> "" else -> "; {sampled.stackless} samples in Jet code kept no stack: their frames could not be walked, or other threads' samples held every record buffer"
-    nominal: if sampled.cpu_ns == .Val(cpu_ns) -> "; {sampled.total} of the {cpu_ns / U64{JET_CLI_PERF_SAMPLE_US * 1000}} samples {cpu_ns / U64{1000000}} ms of CPU time under sampling gives" else -> ""
+    nominal: if sampled.cost == .Val(cost) -> "; {sampled.total} of the {cost.cpu_ns / U64{JET_CLI_PERF_SAMPLE_US * 1000}} samples {cost.cpu_ns / U64{1000000}} ms of CPU time under sampling gives" else -> ""
     sites: if sampled.sited -> "; each allocation counts at the innermost line of {source.identity.path} on its stack" else -> ""
     timed: "one CPU-time sample per {JET_CLI_PERF_SAMPLE_US} microseconds of each thread's CPU time, at the function and source line its program counter is in and, inclusive, once at each line on its stack; {elsewhere} of {sampled.total} samples are outside {source.identity.path}"
     // The memory lens without the cpu lens takes no CPU-time samples.
     reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under the memory lens alone: each row holds its counters' events{natives}{sites}" else -> "{timed}{natives}{helpers}{stackless}{nominal}{sites}"
-    Val(TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: truncated, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "a matched unprofiled run was not captured", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"})
+    profile := TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: truncated, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "the runtime recorded no sampling cost", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
+    if sampled.cost == .Val(cost) {
+        // Each signal pays the kernel's delivery and return besides the
+        // handler's own time.
+        took: cost.handler_ns + sampled.signals * cost.delivery_ns
+        profile.overhead_ns = Val(took)
+        profile.overhead_status = "measured"
+        profile.overhead_reason = "the sampler took {took / U64{1000}} microseconds, {jet_cli_perf_hundredths(took, cost.cpu_ns)} of the {cost.cpu_ns / U64{1000}} microseconds of CPU time sampled: {cost.handler_ns / U64{1000}} in its handlers and {sampled.signals} signals at the {cost.delivery_ns} nanoseconds the kernel took to deliver and return from one as sampling started"
+    }
+    Val(profile)
+}
+
+// `part` as a percentage of `whole`, to two decimals: "1.25%".
+jet_cli_perf_hundredths: fn(part: U64, whole: U64) -> String Never! {
+    if whole == (U64{0}) -> return "0.00%"
+    basis: part * U64{10000} / whole
+    cents: basis % U64{100}
+    pad: if cents < (U64{10}) -> "0" else -> ""
+    "{basis / U64{100}}.{pad}{cents}%"
 }
 
 // The events of counter `counter` (an index of TRACE_COUNTERS) at line

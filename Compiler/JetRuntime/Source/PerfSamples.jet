@@ -89,6 +89,14 @@ PERF_LENS_CPU: I64{1}
 
 PERF_LENS_MEMORY: I64{2}
 
+// The SIGPROFs the start sends its own thread to time the kernel's part of
+// one sample (perf_samples_delivery).
+PERF_SAMPLES_CALIBRATIONS: I64{64}
+
+// The interrupted thread's two TCB words (Thread.jet) the handler reads
+// the monotonic clock into (perf_samples_clock).
+PERF_SAMPLES_TCB_CLOCK: I64{744}
+
 // The samples file, -1 until the start opens it, and the bias its addresses
 // are taken less.
 perf_samples_fd := I64{-1}
@@ -105,15 +113,20 @@ perf_samples_code_high := I64{0}
 // The record buffer: its first word is 1 while a handler fills the
 // PERF_SAMPLES_DEPTH words after it; 0 when the start could not map it.
 // After them come the PERF_COUNTERS_COUNT counters' descriptors, -1 for
-// one that is not open.
+// one that is not open, then the nanoseconds every handler has run
+// (perf_samples_charge).
 perf_samples_buffer := I64{0}
 
 // PERF_SAMPLES_SLOTS more record buffers (perf_samples_claim), 0 when the
-// start could not map them, and the process's CPU time in nanoseconds when
-// sampling started (perf_samples_exit).
+// start could not map them; the process's CPU time in nanoseconds when
+// sampling started; and the nanoseconds the kernel takes to deliver one
+// SIGPROF and return from its handler (perf_samples_delivery), each for
+// perf_samples_exit.
 perf_samples_slots := I64{0}
 
 perf_samples_cpu_start := I64{0}
+
+perf_samples_delivery_ns := I64{0}
 
 // The lenses the start found (perf_samples_lenses): under `cpu` each
 // thread arms its timer (perf_samples_thread_start); under `memory` alone
@@ -153,18 +166,15 @@ perf_samples_start: fn() {
     low: perf_samples_code_edge(image, false)
     high: perf_samples_code_edge(image, true)
     perf_cfi_start(image)
-    buffer: alloc_map_try(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) * I64{8}))
+    buffer: alloc_map_try(wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) + I64{1}) * I64{8}))
     slots: alloc_map_try(wrapping(PERF_SAMPLES_SLOTS * perf_samples_slot_bytes()))
-    cpu: perf_samples_process_cpu_ns()
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
         perf_samples_bias = bias
         perf_samples_code_low = low
         perf_samples_code_high = high
         perf_samples_buffer = buffer
         perf_samples_slots = slots
-        perf_samples_cpu_start = cpu
         perf_samples_lens_mask = lenses
-        perf_samples_fd = fd
     }
     status := I64{0}
     // sa_flags SA_SIGINFO | SA_RESTORER | SA_ONSTACK | SA_RESTART: the
@@ -172,6 +182,16 @@ perf_samples_start: fn() {
     // signal stack where it has one, and an interrupted system call resumes.
     #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
         status = os_syscall_stack4_i64(I64{13}, PERF_SAMPLES_SIGNAL, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
+    }
+    if (status >= I64{0}) {
+        // While the descriptor is still -1 the handler returns at once.
+        delivery: perf_samples_delivery()
+        cpu: perf_samples_process_cpu_ns()
+        #Unsafe("no timer is armed yet, so no handler reads these before they are set") {
+            perf_samples_delivery_ns = delivery
+            perf_samples_cpu_start = cpu
+            perf_samples_fd = fd
+        }
     }
     if (status >= I64{0} && (lenses & PERF_LENS_CPU) != I64{0}) {
         // This thread's own timer; each thread spawned from now on arms its
@@ -189,6 +209,46 @@ perf_samples_start: fn() {
     perf_counters_start(buffer, counters)
     // The record of the CPU time sampled, written at exit.
     observe_exit_install()
+}
+
+// The nanoseconds the kernel takes to deliver one SIGPROF to this thread
+// and return from a handler that returns at once: PERF_SAMPLES_CALIBRATIONS
+// signals the thread sends itself (tgkill) timed together, each also paying
+// the call that sends it, as a timer's expiry pays the kernel's tick.
+perf_samples_delivery: fn() -> I64 {
+    pid: host_call(I64{39}, I64{0}, I64{0}, I64{0})
+    tid: thread_tid()
+    began: sync_now_ns()
+    index := I64{0}
+    loop index < PERF_SAMPLES_CALIBRATIONS {
+        #Unsafe("tgkill takes this process's and thread's ids and a signal whose handler returns at once") {
+            _ := os_syscall_i64(I64{234}, pid, tid, PERF_SAMPLES_SIGNAL, I64{0}, I64{0}, I64{0})
+        }
+        index = wrapping(index + I64{1})
+    }
+    wrapping(sync_now_ns() - began) / PERF_SAMPLES_CALIBRATIONS
+}
+
+// The monotonic clock in nanoseconds, for the handler: read into the
+// interrupted thread's PERF_SAMPLES_TCB_CLOCK words, which nothing else
+// uses, so it never overwrites the clock words the interrupted code may be
+// reading (sync_now_ns's).
+perf_samples_clock: fn() -> I64 {
+    scratch := I64{0}
+    #Unsafe("clock_gettime writes the sampler's two words of the thread-owned TCB; no pointer escapes") {
+        scratch = wrapping(os_tls_base_i64() + PERF_SAMPLES_TCB_CLOCK)
+        sync_clock_read(I64{1}, scratch)
+    }
+    wrapping(wrapping(rt_text_word(scratch) * I64{1000000000}) + rt_text_word(wrapping(scratch + I64{8})))
+}
+
+// Add the nanoseconds since `began` (perf_samples_clock) to those every
+// handler has run, the record buffer's last word.
+perf_samples_charge: fn(buffer: I64, began: I64) {
+    if (buffer == I64{0}) {
+        return
+    }
+    _ := sync_add(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) * I64{8})), wrapping(perf_samples_clock() - began))
 }
 
 // Arm a timer on this thread's CPU clock (CLOCK_THREAD_CPUTIME_ID) that
@@ -255,19 +315,26 @@ perf_samples_process_cpu_ns: fn() -> I64 {
 }
 
 // At exit (Observe.jet jet_rt_observe_exit), under `jet perf run`: the
-// record of the CPU time the process used since sampling started, so that
-// the session can say how many of the samples that time should give it
-// kept. A second exit writes a later one.
+// record of what sampling cost, so that the session can say how many of the
+// samples the CPU time should give it kept and what the sampler took of
+// that time. Its words after the first: the CPU time the process used since
+// sampling started, the time every handler ran (perf_samples_charge) and
+// the kernel's time for one signal (perf_samples_delivery), each in
+// nanoseconds. A second exit writes a later one.
 perf_samples_exit: fn() {
     fd: perf_samples_fd
     if (fd < I64{0}) {
         return
     }
-    record: jet_rt_alloc(I64{16}, I64{8})
-    rt_text_store(record, (I64{2} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
+    buffer: perf_samples_buffer
+    handlers: if (buffer == I64{0}) -> I64{0} else -> sync_load(wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) * I64{8})))
+    record: jet_rt_alloc(I64{32}, I64{8})
+    rt_text_store(record, (I64{4} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_CLOCK << PERF_SAMPLES_KIND_BITS))
     rt_text_store(wrapping(record + I64{8}), wrapping(perf_samples_process_cpu_ns() - perf_samples_cpu_start))
-    _ := host_write_all(fd, record, I64{16})
-    jet_rt_free(record, I64{16}, I64{8})
+    rt_text_store(wrapping(record + I64{16}), handlers)
+    rt_text_store(wrapping(record + I64{24}), perf_samples_delivery_ns)
+    _ := host_write_all(fd, record, I64{32})
+    jet_rt_free(record, I64{32}, I64{8})
 }
 
 // The bytes of one of perf_samples_slots' record buffers.
@@ -1152,6 +1219,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     fd: perf_samples_fd
     if (fd < I64{0} || context == I64{0}) { return I64{0} }
     buffer: perf_samples_buffer
+    began: perf_samples_clock()
     counter := I64{-1}
     if (signal == PERF_COUNTERS_SIGNAL) {
         counter = perf_counter_of(info, buffer)
@@ -1166,6 +1234,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
             _ := os_write_word_i64(fd, (pc & PERF_SAMPLES_ADDRESS_MASK) | (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind, I64{8})
         }
         perf_counter_rearm(buffer, counter)
+        perf_samples_charge(buffer, began)
         return I64{0}
     }
     count := I64{1}
@@ -1227,5 +1296,6 @@ perf_cfi_sort: fn(table: I64, count: I64) {
     }
     sync_store(slot, I64{0})
     perf_counter_rearm(buffer, counter)
+    perf_samples_charge(buffer, began)
     I64{0}
 }

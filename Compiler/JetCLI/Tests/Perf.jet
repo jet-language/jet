@@ -173,13 +173,14 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     bytes
 }
 
-#Test("perf samples charge compiler helpers to the calling line and read the sampled CPU time") {
+#Test("perf samples charge compiler helpers to the calling line and read what sampling cost") {
     // fib's code at 0x1000, its one row at its declaration's line 5; the
     // stop poll and a runtime function beside it in the symbol table.
     table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
     functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}, X64ImageFunction{start: 8192, size: 512, name: "jet_ir_stop_turn"}, X64ImageFunction{start: 12288, size: 16, name: "jet_rt_alloc"}}
     one: 1 << 48
     two: 2 << 48
+    four: 4 << 48
     words: jet_cli_perf_test_words(
         [Int]{
             // In the stop poll fib called from 0x1040: fib's line.
@@ -189,9 +190,12 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             12292 | one,
             // In fib with no stack.
             4112 | one,
-            // The clock record: 4 ms of CPU sampled.
-            (13 << 59) | two,
+            // The clock record: 4 ms of CPU sampled, 6 microseconds in the
+            // handlers, 1 microsecond for each signal's delivery.
+            (13 << 59) | four,
             4000000,
+            6000,
+            1000,
         },
     )
     sampled: jet_cli_perf_samples_count(table, functions, [Bool]{true}, [U64]{}, words)
@@ -199,7 +203,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(sampled.outside, U64{1})
     assert_eq(sampled.helpers, U64{1})
     assert_eq(sampled.stackless, U64{1})
-    assert_eq(sampled.cpu_ns, Val(U64{4000000}))
+    assert_eq(sampled.signals, U64{3})
     assert_eq(sampled.lines[0].line, 5)
     assert_eq(sampled.lines[0].count, U64{2})
     assert_eq(sampled.lines[0].inclusive, U64{2})
@@ -211,4 +215,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert(profile.reason.contains("; 1 samples in Jet code kept no stack"))
     assert(profile.reason.contains("; 3 of the 4 samples 4 ms of CPU time under sampling gives"))
     assert(!profile.reason.contains("jet_ir_"))
+    assert_eq(profile.overhead_status, "measured")
+    assert_eq(profile.overhead_ns, Val(U64{9000}))
+    assert_eq(profile.overhead_reason, "the sampler took 9 microseconds, 0.22% of the 4000 microseconds of CPU time sampled: 6 in its handlers and 3 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started")
 }
