@@ -1111,13 +1111,13 @@ pack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     remove_tree(built)
     // s2 rebuilds the toolchain by the chain's own recipe: `-O1`, behind the
     // dev shell with no Rust tool on PATH, under the keep-going collector
-    // (Chain.jet stage vars set JET_KEEP_GOING=1). The jet it builds is s2's
-    // bytes at the fixed point, and the runtime pack beside it is that jet's
-    // lowering. A build without keep-going loads only the reached Core bodies
-    // and today lowers some Core functions differently, so a different recipe
-    // would compare two lowerings, not reproduce one.
-    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree), set_var("JET_KEEP_GOING", "1")})
-    argv: in_dev_shell(ctx.candidate.jet, ctx.tree, true, [String]{ctx.candidate.jet.copy(), "build", "-O1", "Compiler"})
+    // (every chain stage builds with it). The jet it builds is s2's bytes at
+    // the fixed point, and the runtime pack beside it is that jet's lowering.
+    // A build without keep-going loads only the reached Core bodies and today
+    // lowers some Core functions differently, so a different recipe would
+    // compare two lowerings, not reproduce one.
+    vars: with_vars(ctx.vars, [Var]{set_var("JET_COMPILER_IDENTITY", ctx.candidate.identity), set_var("JET_TOOLCHAIN_ROOT", ctx.tree)})
+    argv: in_dev_shell(ctx.candidate.jet, ctx.tree, true, [String]{ctx.candidate.jet.copy(), "build", "-O1", "--keep-going", "Compiler"})
     result: run_logged(argv, ctx.tree, vars, log, 3600)
     pack: files.join(built, "jet-runtime")
     if result.rc != 0 || !files.exists(files.join(pack, "native.key")) {
