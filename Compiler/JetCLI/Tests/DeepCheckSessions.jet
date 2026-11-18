@@ -25,9 +25,9 @@ deep_sessions_refusal: fn(argv: [String]) -> String {
         assert(!options.deep_checks.all, "scopes alone select no other deep check")
         assert_eq(options.deep_checks.scopes, [String]{"tree", "shop"})
     } else { panic("`jet repl --deep-checks=tree` plans a session") }
-    assert_eq(deep_sessions_refusal([String]{"repl", "--deep-checks=tree.run"}), "E2119 exit {JET_DRIVER_EXIT_USAGE}")
+    assert_eq(deep_sessions_refusal([String]{"repl", "--deep-checks=tree..run"}), "E2119 exit {JET_DRIVER_EXIT_USAGE}")
 }
 
 #Test("a_debug_build_refuses_a_malformed_deep_check_scope_before_it_starts") {
-    assert_eq(deep_sessions_refusal([String]{"debug", "--deep-checks=tree.run", "missing.jet"}), "E2119 exit {JET_DRIVER_EXIT_USAGE}")
+    assert_eq(deep_sessions_refusal([String]{"debug", "--deep-checks=tree..run", "missing.jet"}), "E2119 exit {JET_DRIVER_EXIT_USAGE}")
 }

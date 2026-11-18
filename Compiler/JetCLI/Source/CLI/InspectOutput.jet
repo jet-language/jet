@@ -39,7 +39,9 @@ jet_cli_output_report: fn(query: JetDriverOutputQueryResult, output: ResolvedOut
         }
     } ?? panic("selected Output lost its canonical module projection")
     projection: query.compile.doc_modules[module_index]
-    identity: "{projection.module_name}.{output.semantic_name}"
+    // The entry's identity in the semantic index's kind-prefix scheme: an
+    // Output entry is a module-level function.
+    identity: "fn:{projection.module_name}.{output.semantic_name}"
     // Output.source_path is the registration module key (`run`); the report
     // names the declaring file the projection loaded.
     source_path: projection.physical_path

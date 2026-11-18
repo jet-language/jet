@@ -3157,11 +3157,13 @@ Its body is parsed and type-checked in every build, and emits code only in a
 function the compile's `--deep-checks` request selects. A bare
 `--deep-checks` keeps every deep check. `--deep-checks=<scope>`, repeatable,
 keeps those of one package, or of one module, type or function in it. A scope
-is `<package>` or `<package>::<name>(.<name>)*`: the declared package name,
-then, after one `::`, dotted names (`tree`, `tree::run`,
-`tree::balance.rebuild`, `tree::balance.Tree.rebalance`). Repeated scopes are a
-union. An empty or malformed scope, such as `tree.run`, is E2119, one that
-names no declaration is E2120, and one that keeps no deep check is E2121.
+is a dotted path, `<package>(.<name>)*`: the declared package name, then its
+module, type and function names (`tree`, `tree.run`, `tree.balance.rebuild`,
+`tree.balance.Tree.rebalance`), read at its longest prefix that names one
+module of the program, as every dotted path is. Repeated scopes are a union.
+An empty or malformed scope, such as `tree::run` or `tree..run`, is E2119,
+one whose prefix names no one module is E2122, one that names no declaration
+is E2120, and one that keeps no deep check is E2121.
 Selection does not depend on the profile, so `--release` keeps a
 selected deep check. Required contracts and safety checks are not deep checks
 and stay on either way. The body reads the state around it but may not change

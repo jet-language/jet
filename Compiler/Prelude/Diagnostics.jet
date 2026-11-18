@@ -20299,20 +20299,20 @@ DeepCheckScopeMalformed: struct {
         code: "E2119",
         safety_class: .Soundness,
         safety_reason: "The text is no scope, so it selects nothing.",
-        expert_path: "none: the scope is a package name, then `::` and dotted names",
+        expert_path: "none: the scope is a package name, alone or then dotted names",
         stage: [.Jet],
-        meaning: "A `--deep-checks=<scope>` flag names no scope, or one that isn't a package name, alone or then `::` and names joined by `.`",
+        meaning: "A `--deep-checks=<scope>` flag names no scope, or one that isn't a package name, alone or then `.` and more names",
         detail: true,
         no_fix: .Ambiguous,
 
         what: fn(self) -> String { "`{self.argument}` isn't a deep-check scope." }
 
         why: fn(self) -> String {
-            "A deep-check scope is a package name, alone or then `::` and module, type and function names joined by `.`; a package name is letters, digits, `_` and `-`, and every other name letters, digits and `_`."
+            "A deep-check scope is a dotted path: a package name, alone or then module, type and function names, joined by `.`; a package name is letters, digits, `_` and `-`, and every other name letters, digits and `_`."
         }
 
         fix: fn(self) -> String {
-            "Write `--deep-checks` for every deep check, or name a scope, such as `--deep-checks=tree::run`."
+            "Write `--deep-checks` for every deep check, or name a scope, such as `--deep-checks=tree.run`."
         }
     }
 }

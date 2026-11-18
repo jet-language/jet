@@ -5488,7 +5488,11 @@ bounds event history and does not include channel values, task locals,
 environment, or credentials. Observation is pay-for-use (D-SIZE-PAYUSE1): a
 program built without tasks, channels, live values or events links no writer,
 so `JET_OBSERVE=1` publishes nothing for it; `jet run --observe` links the
-writer into any program and runs it with `JET_OBSERVE=1`. The public API is
+writer into any program and runs it with `JET_OBSERVE=1`. A live value is
+named by the identity of the module-level static it carries, `static:` and its
+dotted module path and name (`static:app.counter`), the kind-prefix scheme of
+the semantic index and `jet expand`; a snapshot with any other value id is
+refused. The public API is
 [`Core/Event/Event.jet`](../../Core/Event/Event.jet); the executable event
 example has no running test since the Rust-era `Canvas*.jet` transliterations
 were removed (#6650). (D-OBSERVE-LIVE1, D-OBSERVE-TASK1)
@@ -5963,16 +5967,20 @@ run`, `jet dev`, `jet test`, `jet build`, `jet debug` and `jet repl` take
 `--deep-checks`: the bare
 flag keeps every deep check of the program and its Jet libraries, and
 `--deep-checks=<scope>` keeps those of one declaration and everything under
-it. A scope is `<package>` or `<package>::<name>(.<name>)*`: the package's
-declared `package.jet` name, then, after one `::`, its module, type and
-function names joined by `.` (`--deep-checks=tree`, `tree::run`,
-`tree::balance.rebuild`, `tree::balance.Tree.rebalance`). Code outside a
-named package has no scope, so only the bare flag keeps its deep checks.
-The flag repeats, and the scopes add up. An empty or malformed scope, such
-as `tree.run`, is E2119 before the compile starts. After checking, a scope
-that names no declaration is E2120, and one whose declarations hold no deep
-check is E2121, even beside a bare flag or another scope that keeps one; their fix
-offers the scopes that do. The selection is part of the compile's identity,
+it. A scope is a dotted path, `<package>(.<name>)*`: the package's declared
+`package.jet` name, then its module, type and function names, all joined by
+`.` (`--deep-checks=tree`, `tree.run`, `tree.balance.rebuild`,
+`tree.balance.Tree.rebalance`). Code outside a named package has no scope,
+so only the bare flag keeps its deep checks. The flag repeats, and the
+scopes add up. An empty or malformed scope, such as `tree::run` or
+`tree..run`, is E2119 before the compile starts. After checking, a scope is
+read as every dotted path is, at its longest prefix that names one module of
+the program (the package, or the package and its file and inline modules):
+a scope whose prefix names no module or more than one is E2122, one that
+names no declaration is E2120, and one whose declarations hold no deep
+check is E2121, even beside a bare flag or another scope that keeps one; the
+E2120 and E2121 fix offers the scopes that do. The selection is part of the
+compile's identity,
 so a cached image built with one selection never serves another; equal
 selections written in any order share it. Example:
 [`Tests/UI/deep_checks_unmatched_scope`](../../Tests/UI/deep_checks_unmatched_scope.jet).

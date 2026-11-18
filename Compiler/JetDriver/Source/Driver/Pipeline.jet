@@ -169,6 +169,7 @@ use {
         deep_checks_selects,
         deep_checks_unselected,
         deep_checks_unselected_report,
+        NameModule,
         authority_covers_any,
         authority_expert_answer,
         AuthorityVerdict,
@@ -4368,20 +4369,28 @@ JetDriverDeepChecks: struct {
 // functions. A function holds a deep check when a statement of its body tree,
 // its lambdas' included, is an `#On(.Deep)` body. A bare flag keeps every
 // holder; a scope keeps each holder whose path it selects
-// (deep_checks_selects): outside Core, its declared package name, `::`, then
-// its file module, inline module, owner type and name joined by `.`
-// (`tree::balance.Tree.fix`). A function outside a named package has no path,
-// so only a bare flag keeps its deep checks. A scope that keeps no holder is
-// reported (deep_checks_unselected).
+// (deep_checks_selects): outside Core, its declared package name, then its
+// file module, inline module, owner type and name, joined by `.`
+// (`tree.balance.Tree.fix`). The package name and its file and inline modules
+// name the program's modules, over which a scope splits at its longest module
+// prefix. A function outside a named package has no path, so only a bare
+// flag keeps its deep checks. A scope that keeps no holder is reported
+// (deep_checks_unselected).
 jet_driver_deep_checks: fn(load: JetDriverLoadResult, functions: [FnBody], request: DeepChecks) -> JetDriverDeepChecks Never! {
     found := JetDriverDeepChecks{selected: [String]{}, diagnostics: [Diagnostic]{}}
     if deep_checks_off(request) -> return found
     packages := [String:String]{}
     loop package in load.packages -> packages[package.identity] = package.name.copy()  // copy: the load keeps its package rows.
     modules := [U32:Int]{}
+    names := [NameModule]{}
     loop (index, loaded) in load.modules {
         if !jet_driver_unit_is_core(load.source_units[loaded.source_unit_index]) {
             modules[loaded.module_identity.id] = index
+            package: packages.get(loaded.package_identity) ?? ""
+            if package != "" {
+                alias: if loaded.declared_module == "" -> package else -> "{package}.{loaded.declared_module}"
+                jet_driver_deep_check_module(names, alias, loaded.package_identity)
+            }
         }
     }
     paths := [String]{}
@@ -4403,14 +4412,15 @@ jet_driver_deep_checks: fn(load: JetDriverLoadResult, functions: [FnBody], reque
         name: parts[parts.len() - 1]
         owner: parts[parts.len() - 2]
         lifted: if owner == "" -> name else -> owner
-        prefix: [String]{loaded.declared_module.copy(), sema_inline_member_module(lifted)}
-        words := [String]{}
-        loop word in prefix {
-            if word != "" -> words.push(word.copy())  // copy: the path owns its words.
+        home: if loaded.declared_module == "" -> package else -> "{package}.{loaded.declared_module}"
+        inline: sema_inline_member_module(lifted)
+        if inline != "" {
+            jet_driver_deep_check_module(names, "{home}.{inline}", loaded.package_identity)
         }
+        words := [String]{if inline == "" -> home else -> "{home}.{inline}"}
         if owner != "" -> words.push(sema_inline_member_source_name(owner))
-        words.push(if owner == "" -> sema_inline_member_source_name(name) else -> name.copy())
-        path: "{package}::{words.join(".")}"
+        words.push(if owner == "" -> sema_inline_member_source_name(name) else -> name)
+        path: words.join(".")
         if held {
             if !request.all {
                 kept := false
@@ -4423,10 +4433,21 @@ jet_driver_deep_checks: fn(load: JetDriverLoadResult, functions: [FnBody], reque
         }
         paths.push(path)
     }
-    loop row in deep_checks_unselected(request, paths, holders) {
-        found.diagnostics.push(deep_checks_unselected_report(row, holders))
+    loop row in deep_checks_unselected(request, names, paths, holders) {
+        found.diagnostics.push(deep_checks_unselected_report(row, names, load.package_identity, holders))
     }
     found
+}
+
+// Names the module `alias` of the package `identity` for the deep-check scope
+// split, once: the root files of a package share its name.
+jet_driver_deep_check_module: fn(names: &[NameModule], alias: String, identity: String) -[]> Never! {
+    loop row in names {
+        if row.alias == alias && row.package == identity {
+            return
+        }
+    }
+    names.push(NameModule{alias: alias, path: alias, package: identity})
 }
 
 // The native Test harness plan over the checked functions `functions`: the

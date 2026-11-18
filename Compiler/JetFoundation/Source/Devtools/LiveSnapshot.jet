@@ -198,6 +198,30 @@ jet_live_contains: fn(raw: [U8], word: String) -> Bool Never! {
     false
 }
 
+// A live value is a module-level static that a hot reload carries, so its id
+// is that static's identity in the one kind-prefix scheme of the semantic
+// index and `jet expand`: `static:` and the dotted path of its module and
+// name (`static:app.counter`), each name letters, digits and `_`.
+JET_LIVE_VALUE_KIND: "static:"
+
+jet_live_value_identity: fn(value_id: String) -> Bool Never! {
+    if !value_id.starts_with(JET_LIVE_VALUE_KIND) -> return false
+    bytes: value_id.bytes()
+    names := 1
+    length := 0
+    loop at in JET_LIVE_VALUE_KIND.bytes().len()..<bytes.len() {
+        byte: Int{bytes[at]}
+        if byte == 46 {
+            if length == 0 -> return false
+            names += 1
+            length = 0
+        } else if (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || byte == 95 {
+            length += 1
+        } else { return false }
+    }
+    names > 1 && length > 0
+}
+
 jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     cursor := JetLiveCursor{bytes: bytes, at: 0}
     if jet_live_word(cursor) != JET_LIVE_MAGIC {
@@ -291,6 +315,9 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                 disposition: jet_live_read_text(cursor, "live value `disposition`")
                 reason: jet_live_read_text(cursor, "live value `reason`")
                 rendered: jet_live_read_optional(cursor, "live value `rendered_value`")
+                if !jet_live_value_identity(value_id) {
+                    return Err(jet_live_error("live value `value_id` is not a `{JET_LIVE_VALUE_KIND}` dotted path"))
+                }
                 if (![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition)) {
                     return Err(jet_live_error("live value has an unsupported disposition"))
                 }
