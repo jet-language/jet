@@ -422,7 +422,7 @@ jet_cli_perf_receipt_lines: fn(trace: CanonicalJSON) -> [String] Never! {
 }
 
 // `counter <name> captured period=<events>` or `counter <name> unavailable
-// errno=<errno>` for each counter of a memory-method profile.
+// errno=<errno>` for each counter of a profile the memory lens took.
 jet_cli_perf_counter_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     profile: jet_cli_perf_profile(trace) ?? return [String]{}
     at: jet_cli_perf_key(profile, "counters") ?? return [String]{}
@@ -437,7 +437,7 @@ jet_cli_perf_counter_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     lines
 }
 
-// One source line of a memory-method profile: its function, and its
+// One source line of a profile the memory lens took: its function, and its
 // sampled count of each of TRACE_COUNTERS (None for a counter the profile
 // did not capture).
 JetCLIPerfMemoryLine: struct {
@@ -447,15 +447,18 @@ JetCLIPerfMemoryLine: struct {
     events: [Int?],
 }
 
-// The memory table of a memory-method profile: each function and source
-// line that counted events, where its loads missed. `l1d_misses` are loads
-// that left the L1D cache, `llc_misses` the ones the last-level cache missed
-// too, served from RAM, and `page_faults` the points that fell to the page
-// cache or disk. The lines with the most RAM loads come first, then the most
-// L1D misses; at most 16 lines.
+// The memory table of a profile the memory lens took, which lists its
+// counters: each function and source line that counted events, where its
+// loads missed. `l1d_misses` are loads that left the L1D cache,
+// `llc_misses` the ones the last-level cache missed too, served from RAM,
+// and `page_faults` the points that fell to the page cache or disk. The
+// lines with the most RAM loads come first, then the most L1D misses; at
+// most 16 lines.
 jet_cli_perf_memory_lines: fn(trace: CanonicalJSON) -> [String] Never! {
     profile: jet_cli_perf_profile(trace) ?? return [String]{}
-    if jet_cli_perf_field_text(profile, "method") != .Val("memory") -> return [String]{}
+    counters_at: jet_cli_perf_key(profile, "counters") ?? return [String]{}
+    counters: jettrace_array(profile[counters_at].value, "content.profile.counters") ?? return [String]{}
+    if counters.len() == 0 -> return [String]{}
     rows: jet_cli_perf_profile_rows(trace) ?? return [String]{}
     found := [JetCLIPerfMemoryLine]{}
     loop row in rows {

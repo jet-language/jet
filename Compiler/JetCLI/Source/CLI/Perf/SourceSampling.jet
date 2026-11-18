@@ -2,7 +2,7 @@
 // invocation counts. A `jet perf run` program's CPU-time samples (the
 // runtime's PerfSamples.jet) are program counters, which its image's location
 // table names by function and source line, and its allocations' records the
-// call sites of their stacks. Under the memory method its counters' samples
+// call sites of their stacks. Under the memory lens its counters' samples
 // are records like the CPU-time ones. Beside them the program keeps a row
 // for each core.log span it closes.
 use {
@@ -109,8 +109,8 @@ jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCoun
     Val(jet_cli_perf_samples_count(table, functions, owned, periods, words))
 }
 
-// The counters `jet perf run --method=memory` asked for, from the file the
-// runtime keeps beside the `samples` file (PerfSamples.jet
+// The counters the `memory` lens of `jet perf run` asked for, from the file
+// the runtime keeps beside the `samples` file (PerfSamples.jet
 // perf_counters_start): two words per counter of TRACE_COUNTERS, in order,
 // its period or 0, then the errno the kernel refused it with or 0. A
 // counter the file does not hold, as for a run that kept no samples, is
@@ -284,9 +284,17 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
         }
         at += record * 8
     }
-    sampled.lines.sort_by(fn(left: JetCLIPerfSampledLine, right: JetCLIPerfSampledLine) { (right.count <=> left.count).then(right.inclusive <=> left.inclusive).then(right.allocations <=> left.allocations).then(left.function <=> right.function).then(left.line <=> right.line) })
+    sampled.lines.sort_by(fn(left: JetCLIPerfSampledLine, right: JetCLIPerfSampledLine) { (right.count <=> left.count).then(right.inclusive <=> left.inclusive).then(jet_cli_perf_line_counted(right, 1) <=> jet_cli_perf_line_counted(left, 1)).then(jet_cli_perf_line_counted(right, 0) <=> jet_cli_perf_line_counted(left, 0)).then(right.allocations <=> left.allocations).then(left.function <=> right.function).then(left.line <=> right.line) })
     sampled.natives.sort_by(fn(left: JetCLIPerfNative, right: JetCLIPerfNative) { (right.count <=> left.count).then(left.function <=> right.function) })
     sampled
+}
+
+// The events line `line` counted of counter `counter` (an index of
+// TRACE_COUNTERS: 1 is LLC misses, 0 L1D misses), 0 for a counter the run
+// did not ask for.
+jet_cli_perf_line_counted: fn(line: JetCLIPerfSampledLine, counter: Int) -> U64 Never! {
+    if counter >= line.events.len() -> return U64{0}
+    line.events[counter]
 }
 
 // The entry in `sampled.lines` of the function and line that hold link
@@ -361,13 +369,20 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
             },
         )
     }
-    // The rows are hottest first, by their own samples and then by the ones
-    // they hold: a first row with neither means every sample landed
-    // elsewhere. A row may hold samples with none of its own, as a line
-    // whose time goes to library code does.
-    if rows.len() == 0 || (rows[0].sample_count == (U64{0}) && (rows[0].inclusive_count ?? U64{0}) == (U64{0})) {
-        return None
+    // The rows are hottest first, by their own samples, then by the ones
+    // they hold, then by their LLC and L1D misses: when no row holds a
+    // sample or a counter's event, every sample landed elsewhere. A row may
+    // hold samples with none of its own, as a line whose time goes to
+    // library code does, and under the memory lens alone, with no CPU-time
+    // samples, a row holds only its counters' events.
+    held := false
+    loop row in rows {
+        if row.sample_count > (U64{0}) || (row.inclusive_count ?? U64{0}) > (U64{0}) || (row.l1d_miss_count ?? U64{0}) > (U64{0}) || (row.llc_miss_count ?? U64{0}) > (U64{0}) || (row.dtlb_miss_count ?? U64{0}) > (U64{0}) || (row.page_fault_count ?? U64{0}) > (U64{0}) {
+            held = true
+            break
+        }
     }
+    if !held -> return None
     status: if truncated -> "truncated" else -> "captured"
     coverage: if elsewhere == (U64{0}) -> "complete" else -> "partial"
     named := [String]{}
@@ -377,7 +392,9 @@ jet_cli_perf_samples_profile: fn(source: JetCLIPerfSource, sampled: JetCLIPerfSa
     }
     natives: if named.len() == 0 -> "" else -> "; outside Jet functions: {named.join(", ")}"
     sites: if sampled.sited -> "; each allocation counts at the innermost line of {source.identity.path} on its stack" else -> ""
-    reason: "one CPU-time sample per {JET_CLI_PERF_SAMPLE_US} microseconds of process CPU, at the function and source line its program counter is in and, inclusive, once at each line on its stack; {elsewhere} of {sampled.total} samples are outside {source.identity.path}{natives}{sites}"
+    timed: "one CPU-time sample per {JET_CLI_PERF_SAMPLE_US} microseconds of process CPU, at the function and source line its program counter is in and, inclusive, once at each line on its stack; {elsewhere} of {sampled.total} samples are outside {source.identity.path}"
+    // The memory lens without the cpu lens takes no CPU-time samples.
+    reason: if sampled.total == (U64{0}) -> "no CPU-time samples, as under the memory lens alone: each row holds its counters' events{natives}{sites}" else -> "{timed}{natives}{sites}"
     Val(TraceProfile{method: "sampling", counters: [TraceCounter]{}, status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: truncated, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "a matched unprofiled run was not captured", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"})
 }
 
@@ -388,11 +405,10 @@ jet_cli_perf_line_events: fn(sampled: JetCLIPerfSamples, place: JetCLIPerfSample
     Val(place.events[counter])
 }
 
-// A memory-method `profile`: its method, the `counters` the run asked for,
-// and in its reason how each counter's samples count and why each one it
-// lacks is unavailable.
+// The memory lens's `profile`: the `counters` the run asked for, and in its
+// reason how each counter's samples count and why each one it lacks is
+// unavailable.
 jet_cli_perf_counters_profile: fn(profile: &TraceProfile, counters: &&[TraceCounter]) Never! {
-    profile.method = "memory"
     notes := [String]{}
     loop counter in counters {
         if counter.period == .Val(period) {

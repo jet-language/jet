@@ -45,7 +45,7 @@ TraceProfileSource: struct {
 // that hold the range anywhere on it, once each however often;
 // `allocation_count`, when the sampler records allocations, the allocations
 // whose stack holds the range innermost of the profiled source's ranges.
-// Under the memory method each counter's count is the events of its
+// Under the memory lens each counter's count is the events of its
 // samples whose stack holds the range innermost of the profiled source's
 // ranges, each sample weighing the counter's period; None when the profile
 // did not capture that counter, or the row is not one the samples name.
@@ -64,7 +64,7 @@ TraceProfileRow: struct {
     symbol: JetSymbolRef,
 }
 
-// The counters the memory method samples, in the order the runtime opens
+// The counters the memory lens samples, in the order the runtime opens
 // them (PerfSamples.jet perf_counter_config) and a profile lists them.
 TraceCounterName: enum {
     L1dMisses,
@@ -94,8 +94,8 @@ trace_counter_key: fn(name: TraceCounterName) -> String Never! {
     }
 }
 
-// One counter of a memory-method profile: captured with a sample every
-// `period` events, or unavailable because the kernel refused it with
+// One counter of a profile the memory lens took: captured with a sample
+// every `period` events, or unavailable because the kernel refused it with
 // `errno`. An unavailable counter has no count in any row.
 TraceCounter: struct {
     name: TraceCounterName,

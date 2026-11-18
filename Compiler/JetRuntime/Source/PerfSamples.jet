@@ -1,33 +1,36 @@
-// `jet perf run` (JetCLI CLI/Perf/Session.jet): the program's CPU-time
-// samples. When JET_PERF_SAMPLES names a file, the observation start
-// (ObserveLive.jet jet_rt_observe_runtime_start_from_env) opens it and arms
-// the process's profiling timer (setitimer ITIMER_PROF), which sends SIGPROF
-// for each PERF_SAMPLES_INTERVAL_US of CPU time the process uses, to the
-// thread that was running. Each SIGPROF appends one record: the program
-// counter it interrupted, then the call site of each caller, innermost
-// first, each less the image's load bias: by the image's call frame
-// information through frames without a frame pointer, then up the frame
-// pointer chain. Each is a link-time address in the image `jet run` writes
-// beside the file, where the image's location table names its function and
-// line, as Linux perf names the same image's samples. A record is one write
-// of little-endian words; its first word holds the record's word count in
-// bits 48..58 above the program counter's low 48, and its kind in bits
-// 59..62: 0 for a CPU-time sample, a counter's index plus one for that
-// counter's sample, PERF_SAMPLES_SPAWN for a task's spawn and
-// PERF_SAMPLES_JOIN for a join's wait. The handler allocates nothing and
-// never waits. Beside the samples, `<samples>.spans` keeps a row for each
-// core.log span the program closes (RouteALog.jet log_span_row_write).
+// `jet perf run` (JetCLI CLI/Perf/Session.jet): the program's samples. When
+// JET_PERF_SAMPLES names a file, the observation start (ObserveLive.jet
+// jet_rt_observe_runtime_start_from_env) opens it and, under the `cpu` lens
+// (JET_PERF_LENSES), arms the process's profiling timer (setitimer
+// ITIMER_PROF), which sends SIGPROF for each PERF_SAMPLES_INTERVAL_US of
+// CPU time the process uses, to the thread that was running. Each SIGPROF
+// appends one record: the program counter it interrupted, then the call
+// site of each caller, innermost first, each less the image's load bias:
+// by the image's call frame information through frames without a frame
+// pointer, then up the frame pointer chain. Each is a link-time address in
+// the image `jet run` writes beside the file, where the image's location
+// table names its function and line, as Linux perf names the same image's
+// samples. A record is one write of little-endian words; its first word
+// holds the record's word count in bits 48..58 above the program counter's
+// low 48, and its kind in bits 59..62: 0 for a CPU-time sample, a
+// counter's index plus one for that counter's sample, PERF_SAMPLES_SPAWN
+// for a task's spawn and PERF_SAMPLES_JOIN for a join's wait. The handler
+// allocates nothing and never waits. Beside the samples, `<samples>.spans`
+// keeps a row for each core.log span the program closes (RouteALog.jet
+// log_span_row_write).
 //
-// `jet perf run --method=memory` sets JET_PERF_COUNTERS too: the start
-// opens four counters of the thread that starts the observation, the
-// program's main thread, each with perf_event_open to count in user mode
-// only, and has each signal that thread with PERF_COUNTERS_SIGNAL, its
+// Under the `memory` lens, which JET_PERF_LENSES names as it names `cpu`,
+// the start opens four counters of the thread that starts the observation,
+// the program's main thread, each with perf_event_open to count in user
+// mode only, and has each signal that thread with PERF_COUNTERS_SIGNAL, its
 // descriptor in the siginfo, once per its period of events. The same
 // handler appends a record like a CPU-time sample's for it, of the
 // counter's kind, then arms the counter for its next period
 // (PERF_EVENT_IOC_REFRESH). `<samples>.counters` keeps two words for each
 // counter in order: its period, or 0, and the errno the kernel refused it
-// with, or 0. Other threads' events are not counted.
+// with, or 0. Other threads' events are not counted. The `memory` lens
+// without `cpu` arms no profiling timer, so the file holds no CPU-time
+// sample.
 
 // O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC.
 PERF_SAMPLES_OPEN: I64{525377}
@@ -65,6 +68,13 @@ PERF_COUNTERS_SIGNAL: I64{63}
 // L1D, LLC and dTLB read misses, and page faults.
 PERF_COUNTERS_COUNT: I64{4}
 
+// The lenses JET_PERF_LENSES names, one bit each: `cpu`, the CPU-time
+// samples, and `memory`, the counters. The session writes `cpu`, `memory`
+// or `cpu,memory`; a run without it samples CPU time alone.
+PERF_LENS_CPU: I64{1}
+
+PERF_LENS_MEMORY: I64{2}
+
 // The samples file, -1 until the start opens it, and the bias its addresses
 // are taken less.
 perf_samples_fd := I64{-1}
@@ -96,6 +106,7 @@ perf_samples_start: fn() {
     if (path == I64{0}) {
         return
     }
+    lenses: perf_samples_lenses()
     fd := I64{-1}
     counters := I64{-1}
     if (rt_text_len(path) != I64{0}) {
@@ -104,7 +115,7 @@ perf_samples_start: fn() {
         fd_c_path_drop(name, path)
         if (fd >= I64{0}) {
             perf_spans_fd_set(perf_samples_open_beside(path, rt_static_text(".spans")))
-            counters = perf_counters_open(path)
+            counters = perf_counters_open(path, lenses)
         }
     }
     jet_rt_string_drop(path)
@@ -131,7 +142,7 @@ perf_samples_start: fn() {
     #Unsafe("rt_sigaction borrows the four-word action on the stack; the handler is this runtime's three-word C-ABI export and the restorer its rt_sigreturn rail") {
         status = os_syscall_stack4_i64(I64{13}, PERF_SAMPLES_SIGNAL, rt_perf_samples_signal_address(), I64{469762052}, rt_process_signal_restore_address(), I64{0}, I64{8})
     }
-    if (status >= I64{0}) {
+    if (status >= I64{0} && (lenses & PERF_LENS_CPU) != I64{0}) {
         // The itimerval: the interval, then the first expiry, each as
         // seconds and microseconds; no old value is read back.
         #Unsafe("setitimer borrows the four-word itimerval on the stack") {
@@ -223,12 +234,27 @@ perf_samples_join: fn(joiner: I64, awaited: I64, start: I64) {
     jet_rt_free(record, I64{32}, I64{8})
 }
 
-// `<samples>.counters` when JET_PERF_COUNTERS asks for the counters, else
-// -1.
-perf_counters_open: fn(samples: I64) -> I64 {
-    flag: rt_env_get(env_name_jet_perf_counters())
-    if (flag == I64{0}) { return I64{-1} }
-    jet_rt_string_drop(flag)
+// The lenses JET_PERF_LENSES names: `cpu` when it starts with `cpu`,
+// `memory` when it ends with `memory`; `cpu` alone when it is unset.
+perf_samples_lenses: fn() -> I64 {
+    value: rt_env_get(env_name_jet_perf_lenses())
+    if (value == I64{0}) { return PERF_LENS_CPU }
+    len: rt_text_len(value)
+    data: rt_text_data(value)
+    lenses := I64{0}
+    if (len >= I64{3} && rt_text_equal_bytes(data, rt_text_data(rt_static_text("cpu")), I64{3})) {
+        lenses = wrapping(lenses + PERF_LENS_CPU)
+    }
+    if (len >= I64{6} && rt_text_equal_bytes(wrapping(data + wrapping(len - I64{6})), rt_text_data(rt_static_text("memory")), I64{6})) {
+        lenses = wrapping(lenses + PERF_LENS_MEMORY)
+    }
+    jet_rt_string_drop(value)
+    lenses
+}
+
+// `<samples>.counters` when `lenses` hold the memory lens, else -1.
+perf_counters_open: fn(samples: I64, lenses: I64) -> I64 {
+    if ((lenses & PERF_LENS_MEMORY) == I64{0}) { return I64{-1} }
     perf_samples_open_beside(samples, rt_static_text(".counters"))
 }
 

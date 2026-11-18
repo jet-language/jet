@@ -1,8 +1,8 @@
 // `jet perf run|test`: run the exact `jet run` or `jet test` intent with the
 // runtime's live observation on, read the runtime-published snapshots while it
 // runs and once after it exits, and write one verified `.jettrace`; a run's
-// profile rows are its program's CPU-time samples, and under
-// `--method=memory` its memory counters' too. The child keeps this
+// profile rows are its program's CPU-time samples under the `cpu` lens, the
+// default, and its memory counters' under `memory`. The child keeps this
 // process's terminal.
 use {
     perf_files: core.files
@@ -15,7 +15,7 @@ use {
         CanonicalJSONField,
         DEFAULT_EXCLUSIONS,
         ENV_JET_OBSERVE,
-        ENV_JET_PERF_COUNTERS,
+        ENV_JET_PERF_LENSES,
         ENV_JET_PERF_SAMPLES,
         SourceIdentity,
         TraceCounter,
@@ -36,19 +36,19 @@ use {
 JET_CLI_PERF_TRACE_LIMIT: 268435456
 
 // `SessionArgs`: the perf-only flags, and the base intent's argv after its
-// action name with those flags removed. `memory` is `--method=memory`, the
-// default `--method=sampling` samples CPU time alone.
+// action name with those flags removed. `lenses` are what `--lens` names,
+// in the order `cpu`, `memory`; the default is `cpu`, CPU time alone.
 JetCLIPerfSessionArgs: struct {
     out: String?,
     source: String?,
     allowlist: [String],
-    memory: Bool,
+    lenses: [String],
     child_args: [String],
 }
 
 // `parse_session_args`. Words after `--` belong to the program.
 jet_cli_perf_session_args: fn(args: [String]) -> JetCLIPerfSessionArgs JetCLIReadError! {
-    parsed := JetCLIPerfSessionArgs{out: None, source: None, allowlist: [String]{}, memory: false, child_args: [String]{}}
+    parsed := JetCLIPerfSessionArgs{out: None, source: None, allowlist: [String]{}, lenses: [String]{"cpu"}, child_args: [String]{}}
     passthrough := false
     skip := false
     loop (index, arg) in args {
@@ -85,15 +85,15 @@ jet_cli_perf_session_args: fn(args: [String]) -> JetCLIPerfSessionArgs JetCLIRea
             skip = true
             next
         }
-        if arg.starts_with("--method=") {
-            parsed.memory = jet_cli_perf_session_method(arg.slice(9..<arg.len()))
+        if arg.starts_with("--lens=") {
+            parsed.lenses = jet_cli_perf_session_lenses(arg.slice(7..<arg.len()))
             next
         }
-        if arg == "--method" {
+        if arg == "--lens" {
             if index + 1 >= args.len() {
-                return Err(jet_cli_read_error("`--method` needs `sampling` or `memory`"))
+                return Err(jet_cli_read_error("`--lens` needs `cpu`, `memory` or both, comma-separated"))
             }
-            parsed.memory = jet_cli_perf_session_method(args[index + 1])
+            parsed.lenses = jet_cli_perf_session_lenses(args[index + 1])
             skip = true
             next
         }
@@ -107,11 +107,26 @@ jet_cli_perf_session_args: fn(args: [String]) -> JetCLIPerfSessionArgs JetCLIRea
     Ok(parsed)
 }
 
-// Whether `--method` word `method` is `memory`; `sampling` is not.
-jet_cli_perf_session_method: fn(method: String) -> Bool JetCLIReadError! {
-    if method == "memory" -> return Ok(true)
-    if method == "sampling" -> return Ok(false)
-    Err(jet_cli_read_error("`--method` is `sampling` or `memory`, not `{method}`"))
+// `--lens` list `raw`: the lenses the run takes, comma-separated, each `cpu`
+// (its CPU time) or `memory` (its memory counters), in that order and without
+// repeats.
+jet_cli_perf_session_lenses: fn(raw: String) -> [String] JetCLIReadError! {
+    asked := [String]{}
+    loop part in raw.split(",") {
+        item: part.trim()
+        if item == "" -> next
+        if item != "cpu" && item != "memory" {
+            return Err(jet_cli_read_error("`--lens` item `{item}` is not a lens; lenses: cpu, memory"))
+        }
+        if !asked.contains(item) -> asked.push(item)
+    }
+    lenses := [String]{}
+    if asked.contains("cpu") -> lenses.push("cpu")
+    if asked.contains("memory") -> lenses.push("memory")
+    if lenses.len() == 0 {
+        return Err(jet_cli_read_error("`--lens` needs `cpu`, `memory` or both, comma-separated"))
+    }
+    Ok(lenses)
 }
 
 // `parse_capture_allowlist`: privacy fields the trace may keep, each one of
@@ -136,9 +151,10 @@ jet_cli_perf_capture_allowlist: fn(raw: String) -> [String] JetCLIReadError! {
 // `run_session`. The exit code is the child's.
 jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
-    parsed := jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet> [--method=sampling|memory] [--out <path{extension}>]`", color)
-    if parsed.memory && action != "run" {
-        return jet_cli_perf_error("`--method=memory` samples a program's counters, which only `jet perf run` samples", "run `jet perf run <file.jet> --method=memory`", color)
+    parsed := jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet> [--lens=cpu,memory] [--out <path{extension}>]`", color)
+    memory: parsed.lenses.contains("memory")
+    if memory && action != "run" {
+        return jet_cli_perf_error("the `memory` lens samples a program's counters, which only `jet perf run` samples", "run `jet perf run <file.jet> --lens=memory`", color)
     }
     exe: perf_sys.executable()
     if exe == "" {
@@ -157,17 +173,17 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
         argv.push(arg.copy())
     }
     spec := perf_process.cmd(argv).stdin(.Inherit).stdout(.Inherit).stderr(.Inherit)
-    // A run's program samples its CPU time into a file of this session's
-    // (the runtime's PerfSamples.jet), beside which `jet run` writes the
-    // program's image (Host.jet jet_cli_perf_samples_image), and under
-    // `--method=memory` its counters' samples too.
+    // A run's program samples into a file of this session's (the runtime's
+    // PerfSamples.jet), beside which `jet run` writes the program's image
+    // (Host.jet jet_cli_perf_samples_image): its CPU time under the `cpu`
+    // lens, its counters under `memory`.
     samples := String?{None}
     if observed_run {
         spec = spec.env_remove(ENV_JET_OBSERVE)
         if parsed.source != None {
             path: perf_files.join(perf_sys.temp_dir(), "jet-perf-{perf_process.current_pid()}-{perf_time.unix_ns()}.samples")
             spec = spec.env(ENV_JET_PERF_SAMPLES, path)
-            if parsed.memory -> spec = spec.env(ENV_JET_PERF_COUNTERS, "1")
+            spec = spec.env(ENV_JET_PERF_LENSES, parsed.lenses.join(","))
             samples = Val(path)
         }
     } else {
@@ -210,7 +226,7 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     // root publishes its own compile, never the tests.
     observations: if observed.program.len() > 0 -> observed.program.move() else if observed_run -> observed.root.move() else -> [JetCLIPerfObservation]{}
     counters := [TraceCounter]{}
-    if parsed.memory -> counters = jet_cli_perf_counters_read(samples)
+    if memory -> counters = jet_cli_perf_counters_read(samples)
     sampled := JetCLIPerfSamples?{None}
     if samples == .Val(file) {
         sampled = jet_cli_perf_samples_read(file, parsed.source ?? "", counters)
@@ -225,9 +241,9 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
             }
         }
     }
-    if parsed.memory -> jet_cli_perf_counters_profile(capture.profile, counters)
+    if memory -> jet_cli_perf_counters_profile(capture.profile, counters)
     // The receipt reads the allowlist before the policy takes it.
-    stamped: jet_cli_perf_session_receipt(action, argv, parsed.source, parsed.allowlist, samples != None, parsed.memory) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+    stamped: jet_cli_perf_session_receipt(action, argv, parsed.source, parsed.allowlist, samples != None, parsed.lenses) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     capture.receipts.push(stamped)
     capture.policy.allowlist = parsed.allowlist.move()
     // The core.log spans the program closed, which its runtime keeps beside
@@ -465,13 +481,13 @@ jet_cli_perf_session_target: fn() -[Env]> String Never! {
 // program under, its profile and every build option's resolved value, as
 // the run resolves its words and its source's profiles
 // (jet_cli_build_options), and the capture's settings: the privacy fields
-// it keeps, and, where the program `sampled`, its CPU-time sampling, every
-// JET_CLI_PERF_SAMPLE_US of CPU time, with each allocation's call sites,
-// and its method, `memory` when it sampled its memory counters too. A
+// it keeps, and, where the program `sampled`, its `lenses`, with each
+// allocation's call sites and, under the `cpu` lens, its CPU-time sampling
+// every JET_CLI_PERF_SAMPLE_US of CPU time. A
 // `jet test` resolves its build through its settings layers too
 // (jet_cli_test_file), which the session does not, so its build is null, as
 // is the build of words the run refused.
-jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?, allowlist: [String], sampled: Bool, memory: Bool) -[FS, Env]> TraceReceiptSection JetCLIReadError! {
+jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?, allowlist: [String], sampled: Bool, lenses: [String]) -[FS, Env]> TraceReceiptSection JetCLIReadError! {
     build := CanonicalJSON.Null
     if action == "run" {
         file: source ?? ""
@@ -489,12 +505,18 @@ jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?
     }
     sampling := CanonicalJSON.Null
     if sampled {
+        cpu: lenses.contains("cpu")
+        // The lenses are cpu and memory, in that order
+        // (jet_cli_perf_session_lenses), so each row is written from its name.
+        named := [CanonicalJSON]{}
+        if cpu -> named.push(CanonicalJSON.String("cpu"))
+        if lenses.contains("memory") -> named.push(CanonicalJSON.String("memory"))
         sampling = CanonicalJSON.Object(
             [CanonicalJSONField]{
                 {key: "allocations", value: CanonicalJSON.String("call-sites")},
-                {key: "clock", value: CanonicalJSON.String("cpu")},
-                {key: "interval_us", value: CanonicalJSON.Integer("{JET_CLI_PERF_SAMPLE_US}")},
-                {key: "method", value: CanonicalJSON.String(if memory -> "memory" else -> "sampling")},
+                {key: "clock", value: if cpu -> CanonicalJSON.String("cpu") else -> CanonicalJSON.Null},
+                {key: "interval_us", value: if cpu -> CanonicalJSON.Integer("{JET_CLI_PERF_SAMPLE_US}") else -> CanonicalJSON.Null},
+                {key: "lenses", value: CanonicalJSON.Array(named)},
             },
         )
     }

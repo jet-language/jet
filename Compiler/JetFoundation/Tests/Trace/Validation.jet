@@ -138,10 +138,10 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     assert(jettrace_test_error(skeleton).contains("truncated profile must retain bounded rows"))
 }
 
-#Test("JetTrace memory profile counters are captured with counts or unavailable with an errno") {
+#Test("JetTrace memory lens counters are captured with counts or unavailable with an errno") {
     skeleton := jettrace_test_profile_skeleton()
-    skeleton.profile.method = "memory"
-    assert(jettrace_test_error(skeleton).contains("must hold the memory method's 4 counters"))
+    skeleton.profile.counters = [TraceCounter]{TraceCounter{name: TraceCounterName.L1dMisses, period: Val(U64{1000}), errno: None}}
+    assert(jettrace_test_error(skeleton).contains("must hold all 4 counters of the memory lens, or none"))
     skeleton.profile.counters = [TraceCounter]{
         TraceCounter{name: TraceCounterName.L1dMisses, period: Val(U64{1000}), errno: None},
         TraceCounter{name: TraceCounterName.LlcMisses, period: None, errno: Val(U64{2})},
@@ -167,8 +167,8 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     skeleton.profile.counters[3].name = TraceCounterName.L1dMisses
     assert(jettrace_test_error(skeleton).contains("counters[3].name must be page_faults"))
     skeleton.profile.counters[3].name = TraceCounterName.PageFaults
-    skeleton.profile.method = "sampling"
-    assert(jettrace_test_error(skeleton).contains("must hold the sampling method's 0 counters"))
+    skeleton.profile.method = "memory"
+    assert(jettrace_test_error(skeleton).contains("content.profile.method must be sampling"))
 }
 
 #Test("JetTrace receipt sections enforce UTF8 byte caps and digest") {

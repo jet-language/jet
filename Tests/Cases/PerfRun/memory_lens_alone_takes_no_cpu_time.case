@@ -1,0 +1,28 @@
+# `jet perf run --lens=memory` takes the memory lens without the cpu lens:
+# the program samples its four counters and arms no profiling timer, so no
+# row holds a CPU-time sample, while every line of walk.jet still has its
+# counters' events. The walk a page and a line apart (line 30) misses L1D at
+# nearly every one of its 16 million reads. The profile's reason says the
+# rows hold only counter events, and the receipt names the one lens, with no
+# CPU-time clock or interval.
+requires: os-name:linux
+requires: arch:x86_64
+fixture: MemoryCountersPerLine.fixture
+env: NO_COLOR=1
+step: jet perf run --lens=memory walk.jet --out {work}/walk.jettrace
+exit: 0
+stdout: = "lines=35184363700224 pages=35184363700224 hops=35183996698624\n"
+json: file walk.jettrace doc $.content.profile.method = "sampling"
+json: file walk.jettrace doc $.content.profile.counters #= 4
+json: file walk.jettrace doc $.content.profile.counters[?name="l1d_misses"][?status="captured"] #= 1
+json: file walk.jettrace doc $.content.profile.rows[?sample_count>=1] #= 0 # no CPU-time sample without the cpu lens
+json: file walk.jettrace doc $.content.profile.rows[?source.start_line=30][?l1d_miss_count>=100000] #= 1 # an L1D miss at nearly every read
+json: file walk.jettrace doc $.content.profile.reason ~ "no CPU-time samples, as under the memory lens alone"
+json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses #= 1
+json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses[0] = "memory"
+json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.clock = null
+json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.interval_us = null
+step: jet perf view {work}/walk.jettrace
+exit: 0
+stdout: ~ "memory by line:"
+stdout: ~ " l1d_misses="

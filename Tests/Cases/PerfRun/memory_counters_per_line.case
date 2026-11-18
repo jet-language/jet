@@ -1,4 +1,4 @@
-# `jet perf run --method=memory` samples four counters of the program's
+# `jet perf run --lens=cpu,memory` samples four counters of the program's
 # main thread beside its CPU time: L1D read misses, LLC read misses, dTLB
 # read misses and page faults. Each counter sample counts at the innermost
 # line of walk.jet on the stack it interrupted, weighted by the counter's
@@ -17,10 +17,13 @@ requires: os-name:linux
 requires: arch:x86_64
 fixture: MemoryCountersPerLine.fixture
 env: NO_COLOR=1
-step: jet perf run --method=memory walk.jet --out {work}/walk.jettrace
+step: jet perf run --lens=cpu,memory walk.jet --out {work}/walk.jettrace
 exit: 0
 stdout: = "lines=35184363700224 pages=35184363700224 hops=35183996698624\n"
-json: file walk.jettrace doc $.content.profile.method = "memory"
+json: file walk.jettrace doc $.content.profile.method = "sampling"
+json: file walk.jettrace doc $.content.profile.rows[?sample_count>=1] #>= 1 # the cpu lens's CPU-time samples, beside the counters
+json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses #= 2
+json: file walk.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses[1] = "memory"
 json: file walk.jettrace doc $.content.profile.counters #= 4
 json: file walk.jettrace doc $.content.profile.counters[?name="l1d_misses"][?status="captured"] #= 1
 json: file walk.jettrace doc $.content.profile.counters[?name="dtlb_misses"][?status="captured"] #= 1
