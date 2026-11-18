@@ -2549,6 +2549,22 @@ sema_registration_import_binding_named: fn(module_row: SemaRegistrationModule, n
     sema_registration_import_binding_at(module_row, name, name_rows_hash(name))
 }
 
+// The E0105 for import `declaration` binding `local` a second time. A
+// re-export (a public row; a `use` row is never public) of a name a `use` row
+// already binds gets the fix that deletes the name from that row, since the
+// re-export binds it in this module too.
+sema_registration_import_twice: fn(module_row: SemaRegistrationModule, declaration: ImportDecl, local: String, span: Span) -[]> Diagnostic {
+    if (declaration.is_pub || declaration.is_package_pub) && !sema_registration_module_has_name(module_row, local) {
+        if sema_registration_import_binding_named(module_row, local) == .Val(earlier) {
+            used: module_row.imports[earlier.import_index].declaration
+            if !used.is_pub && !used.is_package_pub {
+                return sema_error("E0105", span, "`{local}` is both imported and re-exported", "a `use` row binds `{local}` in this module, and the re-export binds it again", "delete `{local}` from the `use` line; the re-export already binds it here")
+            }
+        }
+    }
+    sema_defined_twice(local, "imported names share the module namespace", span)
+}
+
 sema_registration_push_import_binding: fn(graph: &SemaRegistrationGraph, module_index: Int, import_index: Int, binding: SemaRegistrationImportBinding) Never! {
     if !sema_registration_module_has_import_name(graph.modules[module_index], binding.local) {
         packed: import_index * SEMA_IMPORT_BINDING_STRIDE + graph.modules[module_index].imports[import_index].bindings.len()
@@ -4984,7 +5000,8 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                     submodule: "{target_name}.{item.original}"
                     if (target_name == "core" || target_name.starts_with("core.")) && core_module_export(submodule) != None {
                         if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) {
-                            sema_registration_push_graph_diagnostic(graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
+                            twice: sema_registration_import_twice(graph.modules[module_index], declaration, local, declaration.span)
+                            sema_registration_push_graph_diagnostic(graph, module_index, twice)
                             next
                         }
                         import_visibility: graph.modules[module_index].imports[import_index].visibility
@@ -5015,7 +5032,8 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                             duplicate: sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_function_conflict(graph, module_index, local, item.original, export.source_module_identity))
                             if {
                                 duplicate -> {
-                                    sema_registration_push_graph_diagnostic(graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
+                                    twice: sema_registration_import_twice(graph.modules[module_index], declaration, local, declaration.span)
+                                    sema_registration_push_graph_diagnostic(graph, module_index, twice)
                                 }
                                 else -> {
                                     imported_symbol := export.symbol
@@ -5038,7 +5056,8 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                             // the module's Core call records (Calls/Direct.jet).
                             if (target_name == "core" || target_name.starts_with("core.")) && core_module_has_member(target_name, item.original) && sema_registration_direct_symbol(graph.modules[target_index], item.original) == None {
                                 if sema_registration_module_has_name(graph.modules[module_index], local) || sema_registration_module_has_import_name(graph.modules[module_index], local) || (namespace_binds && sema_registration_namespace_function_owner(graph, module_index, local)) {
-                                    sema_registration_push_graph_diagnostic(graph, module_index, sema_defined_twice(local, "imported names share the module namespace", declaration.span))
+                                    twice: sema_registration_import_twice(graph.modules[module_index], declaration, local, declaration.span)
+                                    sema_registration_push_graph_diagnostic(graph, module_index, twice)
                                     next
                                 }
                                 leaf_identity: graph.modules[target_index].module_identity
@@ -5089,7 +5108,8 @@ sema_registration_populate_imports: fn(graph: &SemaRegistrationGraph, module_ind
                     duplicate: sema_registration_module_has_name(graph.modules[module_index], declaration.alias) || sema_registration_module_has_import_name(graph.modules[module_index], declaration.alias)
                     if {
                         duplicate -> {
-                            sema_registration_push_graph_diagnostic(graph, module_index, sema_defined_twice(declaration.alias, "imported names share the module namespace", declaration.alias_span))
+                            twice: sema_registration_import_twice(graph.modules[module_index], declaration, declaration.alias, declaration.alias_span)
+                            sema_registration_push_graph_diagnostic(graph, module_index, twice)
                         }
                         else -> {
                             import_visibility: graph.modules[module_index].imports[import_index].visibility

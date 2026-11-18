@@ -1178,6 +1178,9 @@ parser_parse_program: fn(state: &JetParserState) -> Program {
                     parser_add_error_code(state, "E0003", start, "module globals bind one name at a time", "a module binding is a named value available to every function in the file", "write `name: value` or `name := value`")
                     parser_sync_top(state)
                 } else if parser_error_since(state, errors_before) { parser_sync_top(state) } else if item == .Val(value) {
+                    if value == .Const(definition) {
+                        parser_report_parenthesized_reexport(state, definition)
+                    }
                     program.items.push(value)
                 } else { parser_sync_top(state) }
                 if state.position == before -> parser_bump(state)

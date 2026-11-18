@@ -17,8 +17,22 @@
 // and after `use bank_file: "bank.jet"`, `bank: bank_file` re-exports that
 // file module. A one-word path that no `use` binds stays a binding (a module
 // alias, a constant). A type name re-exports through the alias rule
-// (`Point: geo.Point`), and a parenthesized path stays a constant.
-use jet_foundation.[ConstDef, Expr, ImportDecl, ImportKind, ImportedItem, Item, Span, expr_span, member_import_local]
+// (`Point: geo.Point`). A dotted path in parentheses still re-exports, and
+// the parse refuses the parentheses (parser_report_parenthesized_reexport).
+use jet_foundation.[ConstDef, Expr, ImportDecl, ImportKind, ImportedItem, Item, Span, TextEdit, expr_span, member_import_local]
+
+// `name: (core.math.sqrt)`: a re-export target written in parentheses, with
+// the edit that drops them. The line still re-exports (parser_reexport_import),
+// so this is its one error.
+parser_report_parenthesized_reexport: fn(state: &JetParserState, definition: ConstDef) -[]> {
+    if definition.mutable || definition.is_comptime || definition.markers.len() > 0 || !parser_reexport_value_word(definition.name) {
+        return
+    }
+    if definition.value == .Paren(inner, span, _) && inner == .Field(_, _, _, _) {
+        path: parser_reexport_target(inner, [ImportDecl]{}, false) ?? return
+        parser_add_error_code_edit(state, "E0003", span, "a re-export's target is written in parentheses", "a re-export names its target as a bare path; in parentheses the line is a constant, and a constant holds a value, not a function or a module", "drop the parentheses: `{definition.name}: {path}`", TextEdit{span: span, new_text: path})
+    }
+}
 
 // `items` with each re-exporting binding moved out, as a public import, to
 // the end of `imports`; the items as they are when none re-exports.
@@ -50,20 +64,31 @@ parser_reexport_declarations: fn(items: &&[Item], imports: &[ImportDecl]) -> [It
 // binding. A re-export whose name repeats the member of a two-word path
 // (`launch: bank.launch`) is the member import `use bank.launch` written as
 // a declaration, so it is that import's row and binds as that row binds,
-// through a module beside it in the same file too.
+// through a module beside it in the same file too. A dotted target written
+// in parentheses, which the constant parse refuses (parser_parse_const),
+// still re-exports, so that refusal is the line's one error.
 parser_reexport_import: fn(definition: ConstDef, imports: [ImportDecl]) -> ImportDecl? Never! {
     if definition.mutable || definition.is_comptime || definition.is_persist || definition.ty != None || definition.meta != None || definition.ct != None || definition.attrs.len() > 0 || definition.markers.len() > 0 {
         return None
     }
     if !parser_reexport_value_word(definition.name) -> return None
+    if definition.value == .Paren(inner, _, _) && inner == .Field(_, _, _, _) {
+        return parser_reexport_path_import(definition, inner, imports)
+    }
     file: parser_reexport_file(definition.value, imports)
     if file == .Val(path) {
         return Val(ImportDecl{kind: ImportKind.File{path: path, span: expr_span(definition.value)}, alias: definition.name, alias_span: definition.name_span, span: parser_cover(definition.span, expr_span(definition.value)), item_spans: [Span]{}, local_spans: [Span]{}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None})
     }
-    target: parser_reexport_target(definition.value, imports, true) ?? return None
-    path: parser_cover(parser_reexport_head_span(definition.value), expr_span(definition.value))
+    parser_reexport_path_import(definition, definition.value, imports)
+}
+
+// The import re-exporting binding `definition` means when its target is the
+// bare path `value`, or None when `value` is no such path.
+parser_reexport_path_import: fn(definition: ConstDef, value: Expr, imports: [ImportDecl]) -[]> ImportDecl? {
+    target: parser_reexport_target(value, imports, true) ?? return None
+    path: parser_cover(parser_reexport_head_span(value), expr_span(value))
     span: parser_cover(definition.span, path)
-    if definition.value == .Field(base, member, member_span, _) && base == .Ident(head, head_span, _) && member == definition.name {
+    if value == .Field(base, member, member_span, _) && base == .Ident(head, head_span, _) && member == definition.name {
         bound: parser_reexport_bound(head, imports) ?? ""
         if bound == "" || bound == head {
             return Val(ImportDecl{kind: ImportKind.Unqualified{module_alias: head, module_alias_span: head_span, items: [ImportedItem]{ImportedItem{original: member, alias: None}}, items_span: member_span, span: span}, alias: definition.name, alias_span: definition.name_span, span: span, item_spans: [Span]{member_span}, local_spans: [Span]{definition.name_span}, is_pub: definition.is_pub, is_package_pub: definition.is_package_pub, inline_version: None})

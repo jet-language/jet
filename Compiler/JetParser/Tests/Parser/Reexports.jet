@@ -32,7 +32,6 @@ fs: files
 read: files.read
 LIMIT: other.LIMIT
 Point: geo.Point
-grouped: (core.math.clamp)
 forward: again
 
 run: fn() {}
@@ -44,6 +43,18 @@ run: fn() {}
     assert_eq(reexport_test_row(program.imports, "fs"), "export core.files")
     assert_eq(reexport_test_row(program.imports, "read"), "export core.files.read")
     assert_eq(reexport_test_names(program.items), [String]{"LIMIT", "Point", "forward", "run"})
+}
+
+#Test("a re-export target in parentheses is refused with the edit that drops them") {
+    source: "root: (core.math.sqrt)\n\nrun: fn() {{}}\n"
+    errors: parser_test_errors(source)
+    assert_eq(errors.len(), 1)
+    assert_eq(errors[0].code, "E0003")
+    assert_eq(errors[0].fix, "Drop the parentheses: `root: core.math.sqrt`")
+    // The line still re-exports, so the parentheses are its one error.
+    assert_eq(reexport_test_row(parser_test_result(source).program.imports, "root"), "export core.math.sqrt")
+    kept: parser_test_program("Pair: (Int, Int)\n\nrun: fn() {{}}\n")
+    assert_eq(kept.imports.len(), 0)
 }
 
 #Test("a re-export names the binding a re-export before it declares") {
