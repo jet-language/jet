@@ -4931,13 +4931,14 @@ package source is [`Core/Log/Log.jet`](../../../Core/Log/Log.jet).
 | `float(key: String, value: Float) -> LogField` | field | Create a floating-point field. |
 | `bool(key: String, value: Bool) -> LogField` | field | Create a Boolean field. |
 | `redact(key: String) -> LogField` | field | Mark a key as redacted. |
-| `span(name: String) -[Log]> LogSpan` | span | Open a named span. |
-| `enter(span: LogSpan) -[Log]>` / `close(span: LogSpan) -[Log]>` | — | Enter or close a span. |
+| `span(name: String) -[Log]> LogSpan` | span | Open a named span and enter it; the calling thread's records carry it until it closes. |
+| `close(span: &&LogSpan) -[Log]>` | — | Close a span before its block ends; it takes the span. |
 | `set_sink(kind: String, path: String) -[Log]>` | — | Select the output. |
 | `set_level(level: LogLevel, path: String{""}) -[Log]>` | — | Set the code's level for the module at `path` and every module under it; `""` is every module. |
 | `sample_every(n: Int) -[Log]>` | — | Sample every positive number of records. |
 | `counter(name: String, value: Int) -> LogField` | field | Build a counter field. |
 | `otlp_file(path: String) -[Log, FS]>` | — | Select a file sink for OTLP output. |
+| `otlp_traces_json(service: String, spans: [TraceSpan]) -> String` | text | The OTLP/HTTP JSON export request that carries finished `spans` for `service`, each with its `parentSpanId`; a redacted attribute exports `[redacted]`. |
 | `set_trace_id(id: String) -[Log]>` | — | Attach a trace identifier to later records. |
 | `setup(spec: String) -[Log]>` | — | Apply comma-separated `key=value` settings; a bare `auto`, `json` or `text` selects the format. |
 | `enabled(level: LogLevel) -[Log]> Bool` | Boolean | Test whether a record at `level` from the calling module would be written. |
@@ -4946,6 +4947,15 @@ package source is [`Core/Log/Log.jet`](../../../Core/Log/Log.jet).
 
 The emitting functions, `handle`, `set_level` and `enabled` also take a
 trailing `at: SourceLocation{#caller}`; callers leave it to the compiler.
+
+**Spans.** A span closes when the block that holds it ends, on every way out
+of the block: a normal end, an early return, a failure that propagates and a
+stop. `close` ends it sooner and takes it, so a second close is a use after
+move. A span still open when its thread ends, or when the process exits on
+its thread, is reported as one `warn` record that names it (Log span
+\`name\` was never closed), never dropped in silence. Under `jet perf run`
+each closed span is a `log_span` row of the `.jettrace` `spans`, named by the
+span and timed on the trace's monotonic clock.
 
 **Level filter.** A filter is comma-separated pairs: a bare `level` covers
 every module, and `module=level` covers that dotted module path and every
@@ -5810,7 +5820,7 @@ tasks never read or change the process registry. The module source is
 | `graph.app_links(domain: String) -> App` | graph | Make the web links of `domain` the app's own: `https://{domain}/tasks/7` opens what `/tasks/7` opens; give back the graph. See below. |
 | `graph.open_link(link: String) -[Net, FS.Read]> Bool` | opened | Open the screen state `link` addresses through the graph's route set, or the not-found state; true when a screen opened. See below. |
 | `graph.lost_link() -> String?` | link | The link the not-found state shows; `None` while a screen is open. |
-| `graph.launch() -[Browser, Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. In a page, start the app's run and follow the page's lifecycle, and be true. See below. |
+| `graph.launch() -[Browser, Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. In a page, start the app's run, follow the page's lifecycle, draw the screen at the page's address into the page, and be true. See below. |
 | `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
@@ -6492,9 +6502,13 @@ there is no phase (`None`).
 
 In a page (a web build), `graph.launch()` starts the app's run and
 follows the page's lifecycle into it: there is no other copy, desktop
-entry or window, and the launch is true. The run starts `Unknown` and
-hears at once whether the document shows. The document is `Visible`
-while the browser shows it and `Hidden` while it doesn't
+entry or window, and the launch is true. A graph with screens opens the
+page's address, unless a screen is open already, and draws its screen
+into the page as a window's frame draws it; after each of the page's
+handlers it opens the screen again and draws it when another screen
+opened or a live binding the screen read changed. The run starts
+`Unknown` and hears at once whether the document shows. The document is
+`Visible` while the browser shows it and `Hidden` while it doesn't
 (`visibilitychange`). The page is `Suspending` from the Page Lifecycle
 API's `freeze`, or a `pagehide` that keeps the page in the back-forward
 cache, until its `resume` or the `pageshow` that gives it back, which is
@@ -6546,12 +6560,13 @@ running its handler; Tab moves the focus through the buttons and text
 inputs in order; a key pressed with exactly a button's `shortcut:`
 modifiers clicks it (a command shortcut takes Control or Super); Enter or
 space with no modifier clicks the focused button; typed text and Backspace
-edit the focused text input; and a drop on a text input with `on_drop:`
-gives its handler each text and URI item. The window draws again when
-another screen opens, typing changes the tree, or it takes another size,
-and shows an empty box for the not-found state. Closing the window ends
-the process with status 0. A desktop with no display, or a display that
-fails, adds a notice. A side below one pixel panics.
+edit the focused text input, and one built with `on_change:` runs its
+handler on its new text after each edit; and a drop on a text input with
+`on_drop:` gives its handler each text and URI item. The window draws
+again when another screen opens, typing changes the tree, or it takes
+another size, and shows an empty box for the not-found state. Closing the
+window ends the process with status 0. A desktop with no display, or a
+display that fails, adds a notice. A side below one pixel panics.
 
 `app.ask(permission)` asks the person for a device permission and gives
 their answer. `Permission` is `.Camera`, `.Location` or `.Notifications`;
@@ -8149,6 +8164,15 @@ fails only its message; the worker begins again from its `state:` value
 within the tree's restart budget. With `batch:` and `wait:`, a `[Q]`
 handler takes up to `batch` waiting messages, waiting at most `wait` for a
 batch to fill; a failed batch is handed over again on each restart.
+Under `delivery_durable()`, `tree.send_durable(endpoint, message, key: k)`
+keeps a message whose type is `Encode` and `Decode` (E0112 otherwise) as
+JSON in the authority until the worker's handler succeeds on it. Each
+receipt reaches the worker once while the worker takes messages: when it is
+sent, when the tree starts, and when `runtime.retry(delivery)` accepts it
+again; a handler that succeeds makes it `Delivered`, and one that fails
+leaves it for `retry`. A key already used answers its first receipt, a full
+mailbox is `ServiceError.Full` before the authority keeps anything, and a
+kept message that no longer decodes is dead-lettered.
 
 ```jet
 email: tree.worker("email", send_email, capacity: 64) ?? return
@@ -8167,6 +8191,7 @@ total: tree.call(pricing, Quote{items: 3}) ?? 0
 | `tree.worker(name: String, handler: fn([Q]), batch: Int, wait: Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError!` | endpoint | Register a typed worker that hands its handler up to `batch` waiting messages. |
 | `tree.send(endpoint: Endpoint<Q, ()>, message: Q) ServiceError!` | — | Queue a message for a typed worker that answers nothing. |
 | `tree.call(endpoint: Endpoint<Q, R>, message: Q) -> R ServiceError!` | answer | Send a message and wait for the handler's answer. |
+| `tree.send_durable(endpoint: Endpoint<Q, R>, message: Q, key: String) -> Delivery ServiceError!` | receipt | Durably queue an `Encode` and `Decode` message for a typed worker under an idempotency key. |
 | `tree.start()` / `tree.stop()` | — | Start or stop the service tree. |
 | `tree.show() -> Dyn` | tree | Inspect topology and delivery state. |
 | `tree.set_restart(strategy: ServiceRestart)` | — | Select one-for-one, all-for-one, or rest-for-one restart. |

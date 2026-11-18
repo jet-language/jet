@@ -184,6 +184,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
         jet_cli_perf_io_summary(trace),
         jet_cli_perf_native_summary(trace),
         jet_cli_perf_span_summary(trace),
+        jet_cli_perf_log_span_summary(trace),
     }
     loop summary in summaries {
         if summary == .Val(line) -> out = "{out}{line}\n"
@@ -618,27 +619,63 @@ jet_cli_perf_native_summary: fn(trace: CanonicalJSON) -> String? Never! {
     None
 }
 
+// The task spans (`task_observed` rows): their state, or how many, how many
+// have a parent, and the window they cover.
 jet_cli_perf_span_summary: fn(trace: CanonicalJSON) -> String? Never! {
     items: jet_cli_perf_rows(trace, "spans") ?? return None
-    if items.len() == 0 -> return None
-    status: jet_cli_perf_member_text(items[0], "status") ?? return None
-    symbol: jet_cli_perf_member_symbol(items[0]) ?? "?"
+    first := -1
+    loop (index, item) in items {
+        if (jet_cli_perf_member_text(item, "kind") ?? "") == "task_observed" {
+            first = index
+            break
+        }
+    }
+    if first < 0 -> return None
+    status: jet_cli_perf_member_text(items[first], "status") ?? return None
+    symbol: jet_cli_perf_member_symbol(items[first]) ?? "?"
     if status == "unavailable" {
-        reason: jet_cli_perf_member_text(items[0], "reason") ?? return None
+        reason: jet_cli_perf_member_text(items[first], "reason") ?? return None
         return Val("spans unavailable reason={reason} · {symbol}")
     }
     if status != "captured" -> return None
+    count := 0
     start := 0
     end := 0
     children := 0
-    loop (index, item) in items {
+    loop item in items {
+        if (jet_cli_perf_member_text(item, "kind") ?? "") != "task_observed" -> next
         item_start: jet_cli_perf_member_number(item, "start_ns") ?? return None
         item_end: jet_cli_perf_member_number(item, "end_ns") ?? return None
-        if index == 0 || item_start < start -> start = item_start
+        if count == 0 || item_start < start -> start = item_start
         if item_end > end -> end = item_end
         if !jet_cli_perf_member_is_null(item, "parent_task_id") -> children += 1
+        count += 1
     }
-    Val("spans count={items.len()} children={children} window={start}..{end}ns · {symbol}")
+    Val("spans count={count} children={children} window={start}..{end}ns · {symbol}")
+}
+
+// The closed core.log spans (`log_span` rows): how many, the window they
+// cover, and the first to close.
+jet_cli_perf_log_span_summary: fn(trace: CanonicalJSON) -> String? Never! {
+    items: jet_cli_perf_rows(trace, "spans") ?? return None
+    count := 0
+    start := 0
+    end := 0
+    symbol := "?"
+    loop item in items {
+        if (jet_cli_perf_member_text(item, "kind") ?? "") != "log_span" -> next
+        item_start: jet_cli_perf_member_number(item, "start_ns") ?? return None
+        item_end: jet_cli_perf_member_number(item, "end_ns") ?? return None
+        if count == 0 {
+            start = item_start
+            symbol = jet_cli_perf_member_symbol(item) ?? "?"
+        }
+        if item_start < start -> start = item_start
+        if item_end > end -> end = item_end
+        count += 1
+    }
+    if count == 0 -> return None
+    Val("log spans count={count} window={start}..{end}ns · {symbol}")
 }
 
 // Whether the object `value` has `key` set to null.
@@ -650,7 +687,7 @@ jet_cli_perf_member_is_null: fn(value: CanonicalJSON, key: String) -> Bool Never
 
 // Whether the trace holds any typed evidence a summary reads.
 jet_cli_perf_has_evidence: fn(trace: CanonicalJSON) -> Bool Never! {
-    jet_cli_perf_first_sample(trace) != None || jet_cli_perf_profile_summary(trace) != None || jet_cli_perf_allocation_summary(trace) != None || jet_cli_perf_browser_summary(trace) != None || jet_cli_perf_task_summary(trace) != None || jet_cli_perf_lock_summary(trace) != None || jet_cli_perf_io_summary(trace) != None || jet_cli_perf_native_summary(trace) != None || jet_cli_perf_span_summary(trace) != None
+    jet_cli_perf_first_sample(trace) != None || jet_cli_perf_profile_summary(trace) != None || jet_cli_perf_allocation_summary(trace) != None || jet_cli_perf_browser_summary(trace) != None || jet_cli_perf_task_summary(trace) != None || jet_cli_perf_lock_summary(trace) != None || jet_cli_perf_io_summary(trace) != None || jet_cli_perf_native_summary(trace) != None || jet_cli_perf_span_summary(trace) != None || jet_cli_perf_log_span_summary(trace) != None
 }
 
 // A bar of `count` marks, 1 to 40 wide.

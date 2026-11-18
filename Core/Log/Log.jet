@@ -19,7 +19,8 @@ use {
 //
 // Levels are the typed `LogLevel`, `.Debug` through `.Fatal`. Fields are
 // typed (`field` / `int` / `float` / `bool`); `redact` marks a key so sinks
-// must not print its value. Spans are `span` + `enter` / `close`. Every
+// must not print its value. `span` opens and enters a span, which its
+// block's end closes (or `close`, early). Every
 // record's first field is `module`: the dotted module of the call
 // (SourceLocation.module). This is not a tracing SDK: OTLP file export of
 // records, and `otlp_traces_json` for finished `TraceSpan`s, are the bridges.
@@ -44,7 +45,8 @@ LogField: struct {
     redacted: Bool,
 }
 
-// Readable but not constructible outside this module.
+// Readable but not constructible outside this module. The block that holds
+// a span closes it when it ends (its Close), or `close` takes it first.
 LogSpan: struct {
     id: Int,
     name: String,
@@ -52,6 +54,10 @@ LogSpan: struct {
     id: fn(self) -> Int Never! { self.id }
 
     name: fn(self) -> String Never! { self.name }
+
+    impl Close {
+        close: fn(&&self) { rt.span_close(self) }
+    }
 }
 
 /// A record's severity, least to most severe.
@@ -129,14 +135,19 @@ redact: fn(key: String) -> LogField Never! {
     LogField{key: key, value: "[redacted]", kind: "redacted", redacted: true}
 }
 
+/// Open the span `name` and enter it: the calling thread's records carry it
+/// until the block that holds the returned span ends, on every path out of
+/// it (an early return or a failure too), or until `close` takes it.
 span: fn(name: String) -[Log]> LogSpan Never! {
     allocated: rt.span_allocate(name)
-    LogSpan{id: allocated.id, name: allocated.name}
+    opened: LogSpan{id: allocated.id, name: allocated.name}
+    rt.span_enter(opened)
+    opened
 }
 
-enter: fn(span: LogSpan) -[Log]> Never! { rt.span_enter(span) }
-
-close: fn(span: LogSpan) -[Log]> Never! { rt.span_close(span) }
+/// End `span` before its block does; it takes the span, so a span closes
+/// once.
+close: fn(span: &&LogSpan) -[Log]> Never! {}
 
 /// Select the record sink. `stderr` (JSON lines on stderr) and the `json`,
 /// `jsonl` and `text` file sinks are supported. An unsupported kind, or a

@@ -266,6 +266,23 @@ jettrace_test_window: fn(status: &&String, wall: U64?, cpu: U64?) -> Bool Never!
     _: jettrace_test_valid(skeleton)
 }
 
+#Test("log_spans_are_captured_rows_of_no_task_beside_the_task_spans") {
+    skeleton := jettrace_sample_skeleton()
+    skeleton.spans.push(TraceSpan{clock: "monotonic", end_ns: Val(U64{30}), kind: "log_span", parent_task_id: None, reason: "", start_ns: Val(U64{10}), status: "captured", symbol: jettrace_test_symbol(), task_id: None})
+    assert(jettrace_test_text(skeleton).contains("\"kind\":\"log_span\""))
+    _: jettrace_test_valid(skeleton)
+    skeleton.spans.push(TraceSpan{clock: "monotonic", end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", start_ns: None, status: "unavailable", symbol: jettrace_test_symbol(), task_id: None})
+    _: jettrace_test_valid(skeleton)
+    skeleton.spans[0].task_id = Val(U64{1})
+    assert(jettrace_test_error(skeleton).contains("log span must not claim a task"))
+    skeleton.spans[0].task_id = None
+    skeleton.spans[0].status = "unavailable"
+    assert(jettrace_test_error(skeleton).contains("must be captured for a log span"))
+    skeleton.spans[0].status = "captured"
+    skeleton.spans[0].kind = "guessed"
+    assert(jettrace_test_error(skeleton).contains("kind must be task_observed or log_span"))
+}
+
 #Test("capture_policy_audits_fixed_row_caps_and_truncation") {
     skeleton := jettrace_sample_skeleton()
     skeleton.capture_policy.io_rows_truncated = true

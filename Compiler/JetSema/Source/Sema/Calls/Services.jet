@@ -540,8 +540,10 @@ sema_services_answers_nothing: fn(ret: Type?) -> Bool Never! {
 // The labels pick it: `state:` keeps the value the handler's `&S` first
 // parameter edits (stateful_worker); `batch:` with `wait:` hands a `[Q]`
 // handler up to `batch` waiting messages (batched_worker); otherwise the
-// handler runs once per message (typed_worker). The name, capacity and
-// handler keep the builder shape of every worker (sema_services_worker_shape).
+// handler runs once per message (typed_worker). A message type that is
+// Decode takes the durable form of each, whose handler also receives the
+// receipts send_durable keeps. The name, capacity and handler keep the
+// builder shape of every worker (sema_services_worker_shape).
 sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_ret: Type?, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     api: "ServiceTree.worker"
     failed: SemaMethodSpecialCheck{handled: true, value: None}
@@ -601,9 +603,14 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
         diagnostics.push(sema_error("E0112", handler_span, "service worker handler has no checked top-level function identity", "service handlers must resolve to registered top-level function bodies", "pass a registered top-level function"))
         return failed
     }
+    handled: if stateful -> handler_params[1] else -> handler_params[0]
+    durable: if batched && handled == .List(element) -> sema_services_type_meets(element, "Decode", environment, program) else -> sema_services_type_meets(handled, "Decode", environment, program)
     member: if {
+        batched && durable -> "durable_batched_worker"
         batched -> "batched_worker"
+        stateful && durable -> "durable_stateful_worker"
         stateful -> "stateful_worker"
+        durable -> "durable_worker"
         else -> "typed_worker"
     }
     // The handler's name follows the handler, as Core's declaration takes it.
@@ -617,22 +624,48 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
     sema_services_source_call(api, member, [Type]{}, receiver, AccessConvention.Write, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
 }
 
-// `tree.send(endpoint, message)` and `tree.call(endpoint, message)` on a
-// typed Endpoint<Q, R>: the source calls typed_send and call at the
-// endpoint's Q and R, so a message of another type is a mismatch with the
-// endpoint (E0112). A worker that answers is reached by `call`, since `send`
-// has no place for its answer. None leaves the call to the String endpoint.
+// Whether `ty` meets the compiler-owned `bound` where the call is written; a
+// type parameter is not known to.
+sema_services_type_meets: fn(ty: Type, bound: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if program.registration_graph == .Val(graph) {
+        return sema_type_bound_satisfied_at(graph, ty, bound, sema_scope_caller_row(environment, graph), environment.generic_params) ?? false
+    }
+    false
+}
+
+// `tree.send(endpoint, message)`, `tree.call(endpoint, message)` and
+// `tree.send_durable(endpoint, message, key: k)` on a typed Endpoint<Q, R>:
+// the source calls typed_send, call and typed_send_durable at the endpoint's
+// Q and R, so a message of another type is a mismatch with the endpoint
+// (E0112). A worker that answers is reached by `call`, since `send` has no
+// place for its answer; a durable message is kept as JSON, so its type is
+// Encode and Decode. None leaves the call to the String endpoint.
 sema_services_typed_delivery: fn(method: String, receiver: Expr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
-    if args.len() != 2 -> return None
+    durable: method == "send_durable"
+    if args.len() != (if durable -> 3 else -> 2) -> return None
     endpoint: sema_expr_probe_type(args[0].expr, false, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     if endpoint == .Apply(name, endpoint_args) && endpoint_args.len() == 2 && core_identity_is(name, "core.service", "Endpoint") {
+        rejected: SemaMethodSpecialCheck{handled: true, value: None}
         if method == "send" && !sema_services_is_unit(endpoint_args[1]) {
             diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "service send reaches a worker that answers", "this worker answers each message with {type_name(endpoint_args[1])}, and `send` has no place for the answer", "use `tree.call(endpoint, message)`, which returns the answer"))
             sema_services_check_untyped_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
-            return Val(SemaMethodSpecialCheck{handled: true, value: None})
+            return Val(rejected)
         }
-        member: if method == "send" -> "typed_send" else -> "call"
-        return Val(sema_services_source_call("ServiceTree.{method}", member, endpoint_args, receiver, AccessConvention.Write, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics))
+        if !durable {
+            member: if method == "send" -> "typed_send" else -> "call"
+            return Val(sema_services_source_call("ServiceTree.{method}", member, endpoint_args, receiver, AccessConvention.Write, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics))
+        }
+        updated_args := args
+        if !sema_services_bind_labels("ServiceTree.send_durable", updated_args, [String]{"", "", "key"}, span, diagnostics) {
+            sema_services_check_untyped_args(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
+            return Val(rejected)
+        }
+        if !sema_services_type_meets(endpoint_args[0], "Encode", environment, program) || !sema_services_type_meets(endpoint_args[0], "Decode", environment, program) {
+            diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "durable service send needs a message that encodes and decodes", "send_durable keeps {type_name(endpoint_args[0])} as JSON until the worker's handler succeeds on it", "derive `Encode` and `Decode` on the worker's message type, or use `tree.send`"))
+            sema_services_check_untyped_args(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
+            return Val(rejected)
+        }
+        return Val(sema_services_source_call("ServiceTree.send_durable", "typed_send_durable", endpoint_args, receiver, AccessConvention.Write, updated_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics))
     }
     None
 }
@@ -698,7 +731,7 @@ sema_check_service_tree_method: fn(method: String, receiver: Expr, receiver_valu
         fallbacks := [AccessConvention]{AccessConvention.Write, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read}
         return Val(sema_services_core_call(record, core_args, fallbacks, true, false, sema_services_result_type(Type.Named{name: "ServiceEndpoint"}), expected, span, environment, program, scopes, context, diagnostics))
     }
-    if method == "send" || method == "call" {
+    if method == "send" || method == "call" || method == "send_durable" {
         typed: sema_services_typed_delivery(method, receiver, updated_args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
         if typed == .Val(checked) -> return Val(checked)
     }

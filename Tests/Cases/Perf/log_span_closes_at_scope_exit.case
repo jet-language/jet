@@ -1,0 +1,31 @@
+# A core.log span closes when the block that holds it ends: on an early
+# return, on a failure that propagates, at an explicit `close`, and at the
+# end of its function. A span kept in module state past the end of run is
+# reported when the process exits, never dropped in silence. Under
+# `jet perf run` each closed span is a `log_span` row of the .jettrace.
+fixture: LogSpanClosesAtScopeExit.fixture
+env: NO_COLOR=1
+step o0: jet run -A -O0 main.jet
+exit: 0
+stdout: = log_span_closes_at_scope_exit.out
+stderr: empty
+file: events.jsonl ~ "\"level\":\"warn\",\"body\":\"Log span `kept` was never closed\""
+step o2: jet run -A -O2 main.jet
+exit: 0
+stdout: = log_span_closes_at_scope_exit.out
+stderr: empty
+file: events.jsonl ~ "\"level\":\"warn\",\"body\":\"Log span `kept` was never closed\""
+step: jet perf run main.jet --out spans.jettrace
+exit: 0
+stdout: = log_span_closes_at_scope_exit.out
+stderr: ~ "Trace:"
+file: spans.jettrace ~ "\"kind\":\"log_span\""
+file: spans.jettrace ~ "\"name\":\"frame\""
+file: spans.jettrace ~ "\"name\":\"query\""
+file: spans.jettrace ~ "\"name\":\"inner\""
+file: spans.jettrace ~ "\"name\":\"request\""
+file: spans.jettrace !~ "\"name\":\"kept\""
+step: jet perf view spans.jettrace
+exit: 0
+stdout: ~ "log spans count=4 "
+stdout: ~ "main.jet#frame"

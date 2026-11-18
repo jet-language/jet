@@ -13,6 +13,7 @@ use {
     core: core
     service_sys: core.sys
     service_encoding: core.encoding
+    service_json: core.encoding.json
     service_crypto: core.crypto
     service_files: core.files
     service_actor: core.actor
@@ -1227,6 +1228,48 @@ authority_update: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared<S
         return Err(ServiceError.Partitioned("service endpoint authority is partitioned"))
     }
     registry_write_generation(registry.value.endpoints[index], endpoint.generation, started, channel)
+}
+
+// Process feed registry: the wake of each typed worker whose message
+// decodes. Releasing it has the worker's feeder hand over the endpoint's
+// pending durable receipts.
+priv EndpointFeed: struct {
+    endpoint: ServiceEndpoint,
+    wake: service_tasks.Semaphore,
+}
+
+priv FeedRegistry: struct {
+    feeds: [EndpointFeed],
+}
+
+init_feed_registry: fn() -> Shared<FeedRegistry> Never! {
+    Shared{FeedRegistry{feeds: [EndpointFeed]{}}}
+}
+
+feed_registry: fn() -> Shared<FeedRegistry> Never! { core.mem.__process_shared(init_feed_registry) }
+
+feed_register: fn(endpoint: ServiceEndpoint, wake: service_tasks.Semaphore) Never! {
+    registry := feed_registry().guard_edit()
+    registry.value.feeds.push(EndpointFeed{endpoint: endpoint, wake: wake})
+}
+
+// Wakes the feeder of the typed worker behind `endpoint`, when it has one.
+feed_wake: fn(endpoint: ServiceEndpoint) Never! {
+    registry := feed_registry().guard_read()
+    loop feed in registry.value.feeds {
+        if feed.endpoint == endpoint {
+            feed.wake.release()
+            return
+        }
+    }
+}
+
+// Whether `endpoint`'s worker takes messages: started and not partitioned.
+feed_open: fn(endpoint: ServiceEndpoint) -> Bool Never! {
+    registry := service_registry().guard_read()
+    index: registry_index(registry.value.endpoints, endpoint.authority, endpoint.worker, endpoint.generation)
+    if index < 0 -> return false
+    registry.value.endpoints[index].started && !registry.value.endpoints[index].partitioned
 }
 
 authority_update_partitioned: fn(endpoint: ServiceEndpoint, partitioned: Bool) ServiceError! {
@@ -4507,8 +4550,20 @@ runtime_send: fn(runtime: ServiceRuntime, endpoint: ServiceEndpoint, message: St
 }
 
 // The one explicit operation that may reset a receipt already handed to a
-// worker but not committed.
+// worker but not committed. A typed worker takes the retried receipt at once.
 runtime_retry: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery ServiceError! {
+    entry: retry_accept(runtime, delivery)
+    // A typed worker's feeder hands the retried receipt over; a receipt whose
+    // worker no longer resolves stays queued for its next endpoint.
+    if authority_current_endpoint(runtime, entry) == {
+        .Ok(endpoint) -> { feed_wake(endpoint) }
+        .Err(_) -> {}
+    }
+    Ok(delivery_for_entry(runtime, entry, false))
+}
+
+// Accepts `delivery` again and queues it; answers its receipt as it was.
+retry_accept: fn(runtime: ServiceRuntime, delivery: Delivery) -> DeliveryEntry ServiceError! {
     authority_validate_runtime(runtime)
     delivery_validate_runtime(runtime, delivery)
     id: delivery.id
@@ -4529,28 +4584,31 @@ runtime_retry: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery Servi
     if entry.state == DeliveryState.Cancelled {
         return Err(ServiceError.Policy("canceled delivery cannot be retried"))
     }
-    if entry.delivered && entry.retained_until == None {
-        return Ok(delivery_for_entry(runtime, entry, false))
-    }
+    if entry.delivered && entry.retained_until == None -> return Ok(entry)
     authority_append_event(runtime, entry, DeliveryState.Accepted, service_saturating_add(entry.attempts, 1), now)
     authority_enqueue_entry(runtime, entry)
-    Ok(delivery_for_entry(runtime, entry, false))
+    Ok(entry)
 }
 
 runtime_dead_letter: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery ServiceError! {
     authority_validate_runtime(runtime)
     delivery_validate_runtime(runtime, delivery)
-    id: delivery.id
+    entry: authority_dead_letter(runtime, delivery.id)
+    Ok(delivery_for_entry(runtime, entry, false))
+}
+
+// Dead-letters receipt `id`; answers the receipt as it was.
+authority_dead_letter: fn(runtime: ServiceRuntime, id: String) -> DeliveryEntry ServiceError! {
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
     gate := authority_gate().guard_edit()
     entries: authority_load(runtime)
     index: delivery_entry_index(entries, id) ?? return Err(ServiceError.Unknown("service id `{id}` is unknown"))
     entry: entries[index]
-    if entry.dead -> return Ok(delivery_for_entry(runtime, entry, false))
+    if entry.dead -> return Ok(entry)
     authority_append_event(runtime, entry, DeliveryState.DeadLettered, entry.attempts, service_now())
     pending_remove_entry(runtime, entry)
-    Ok(delivery_for_entry(runtime, entry, false))
+    Ok(entry)
 }
 
 runtime_retain: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery ServiceError! {
@@ -4578,7 +4636,10 @@ runtime_retain: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery Serv
 runtime_commit: fn(runtime: ServiceRuntime, delivery: Delivery) ServiceError! {
     authority_validate_runtime(runtime)
     delivery_validate_runtime(runtime, delivery)
-    id: delivery.id
+    authority_commit(runtime, delivery.id)
+}
+
+authority_commit: fn(runtime: ServiceRuntime, id: String) ServiceError! {
     authority_validate_text(id, "service id", 1024, false)
     operation: authority_operation_lock(runtime, id)
     gate := authority_gate().guard_edit()
@@ -4964,41 +5025,72 @@ Endpoint: struct<Q, R> {
     priv room: service_tasks.Semaphore,
 }
 
-// One queued message, with the asker's reply place when it came by `call`.
-// A batched worker's timer also queues the flush of a waiting batch.
+// One queued message, with the asker's reply place when it came by `call`
+// and its durable receipt when it came from the authority. A batched
+// worker's timer also queues the flush of a waiting batch.
 priv Job: enum<Q, R> {
-    Message(message: Q, reply: service_actor.Reply<R>?),
+    Message(message: Q, reply: service_actor.Reply<R>?, receipt: PendingEntry?),
     Flush(round: Int),
 }
 
-// A batched worker's messages waiting for their batch; `round` counts the
-// batches handed over, so a late timer flushes nothing.
+// A batched worker's messages waiting for their batch, with the durable
+// receipts among them; `round` counts the batches handed over, so a late
+// timer flushes nothing.
 priv BatchState: struct<Q> {
     pending: [Q],
+    receipts: [PendingEntry],
     round: Int,
 }
 
 /// Declares a worker whose handler takes each message: `fn(q: Q)` or, for
 /// a worker that answers `call`, `fn(q: Q) -> R`.
 typed_worker: fn<Q, R>(tree: &ServiceTree, name: String, handler: &&fn(Q) -> R Err!, handler_name: String, capacity: Int) -> Endpoint<Q, R> ServiceError! {
-    typed_declare(tree, name, handler_name, capacity, false, fn(state: &Bool, message: Q) -> R Err! { handler(message) })
+    typed_declare(tree, name, handler_name, capacity, false, fn(state: &Bool, message: Q) -> R Err! { handler(message) }, None)
 }
 
 /// Declares a worker whose task keeps `state` for its handler `fn(s: &S,
 /// q: Q) -> R`; a restart begins again from `state`.
 stateful_worker: fn<S, Q, R>(tree: &ServiceTree, name: String, handler: &&fn(&S, Q) -> R Err!, handler_name: String, state: &&S, capacity: Int) -> Endpoint<Q, R> ServiceError! {
-    typed_declare(tree, name, handler_name, capacity, state, handler)
+    typed_declare(tree, name, handler_name, capacity, state, handler, None)
 }
 
 /// Declares a worker whose handler takes a list of up to `batch` messages:
 /// once a message arrives, the worker waits at most `wait` for the rest of
 /// its batch. A failed batch is handed over again on each restart.
 batched_worker: fn<Q>(tree: &ServiceTree, name: String, handler: &&fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError! {
+    batched_declare(tree, name, handler, handler_name, batch, wait, capacity, None)
+}
+
+/// The worker forms whose message decodes: the endpoint's pending durable
+/// receipts reach the handler too. `tree.worker` picks these for a message
+/// type that is Decode, the only kind send_durable can have queued.
+durable_worker: fn<Q: Decode, R>(tree: &ServiceTree, name: String, handler: &&fn(Q) -> R Err!, handler_name: String, capacity: Int) -> Endpoint<Q, R> ServiceError! {
+    typed_declare(tree, name, handler_name, capacity, false, fn(state: &Bool, message: Q) -> R Err! { handler(message) }, Val(message_decoder<Q>()))
+}
+
+durable_stateful_worker: fn<S, Q: Decode, R>(tree: &ServiceTree, name: String, handler: &&fn(&S, Q) -> R Err!, handler_name: String, state: &&S, capacity: Int) -> Endpoint<Q, R> ServiceError! {
+    typed_declare(tree, name, handler_name, capacity, state, handler, Val(message_decoder<Q>()))
+}
+
+durable_batched_worker: fn<Q: Decode>(tree: &ServiceTree, name: String, handler: &&fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError! {
+    batched_declare(tree, name, handler, handler_name, batch, wait, capacity, Val(message_decoder<Q>()))
+}
+
+priv message_decoder: fn<Q: Decode>() -> (fn(String) -> Q ServiceError!) Never! {
+    fn(text: String) -> Q ServiceError! {
+        decoded: service_json.decode<Q>(text) ?? return Err(ServiceError.Policy("durable service message no longer decodes as its worker's message"))
+        Ok(decoded)
+    }
+}
+
+priv batched_declare: fn<Q>(tree: &ServiceTree, name: String, handler: &&fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int, decoder: &&(fn(String) -> Q ServiceError!)?) -> Endpoint<Q, ()> ServiceError! {
     if batch < 1 || batch > capacity {
         return Err(ServiceError.Policy("batch must be positive and no larger than the mailbox capacity"))
     }
     id: declare_worker(tree, name, handler_name, capacity)
     room: service_tasks.Semaphore.new(capacity)
+    starved: Shared<Bool>{false}
+    wake: service_tasks.Semaphore.new(0)
     // The timer reaches the worker through its own mailbox, which exists
     // only once the actor does.
     timer_inbox: Shared<service_actor.Actor<Job<Q, ()>>?>{None}
@@ -5006,9 +5098,10 @@ batched_worker: fn<Q>(tree: &ServiceTree, name: String, handler: &&fn([Q]) Err!,
     step: fn(state: BatchState<Q>, job: Job<Q, ()>) -> BatchState<Q> Err! {
         current := state
         if job == {
-            .Message(message, _) -> {
-                room.release()
+            .Message(message, _, receipt) -> {
+                room_free(room, starved, wake)
                 current.pending.push(message.copy())
+                if receipt == .Val(entry) -> current.receipts.push(entry.copy())  // copy: the job lends its receipt
                 if current.pending.len() >= batch -> hand_over(current, handler, attempts) else if current.pending.len() == 1 {
                     arm_flush(timer_inbox, wait, current.round)
                 }
@@ -5021,9 +5114,10 @@ batched_worker: fn<Q>(tree: &ServiceTree, name: String, handler: &&fn([Q]) Err!,
         }
         current
     }
-    inbox: service_actor.spawn(BatchState<Q>{pending: [Q]{}, round: 0}, step) ?? return Err(worker_task_failed(name))
+    inbox: service_actor.spawn(BatchState<Q>{pending: [Q]{}, receipts: [PendingEntry]{}, round: 0}, step) ?? return Err(worker_task_failed(name))
     slot := timer_inbox.guard_edit()
     slot.value = Val(inbox)
+    feed_start(id, inbox, room, starved, wake, decoder)
     Ok(Endpoint<Q, ()>{id: id, inbox: inbox, room: room})
 }
 
@@ -5033,31 +5127,118 @@ priv worker_task_failed: fn(name: String) -> ServiceError Never! {
 
 // Registers the worker and starts its task over `state`. Each message
 // leaves the mailbox before the handler runs, so a failing handler frees
-// its place too; the answer goes to the asker of a `call`.
-priv typed_declare: fn<S, Q, R>(tree: &ServiceTree, name: String, handler_name: String, capacity: Int, state: &&S, handler: &&fn(&S, Q) -> R Err!) -> Endpoint<Q, R> ServiceError! {
+// its place too; the answer goes to the asker of a `call`, and a durable
+// receipt is committed once its handler succeeds.
+priv typed_declare: fn<S, Q, R>(tree: &ServiceTree, name: String, handler_name: String, capacity: Int, state: &&S, handler: &&fn(&S, Q) -> R Err!, decoder: &&(fn(String) -> Q ServiceError!)?) -> Endpoint<Q, R> ServiceError! {
     id: declare_worker(tree, name, handler_name, capacity)
     room: service_tasks.Semaphore.new(capacity)
+    starved: Shared<Bool>{false}
+    wake: service_tasks.Semaphore.new(0)
     step: fn(held: S, job: Job<Q, R>) -> S Err! {
         current := held
         if job == {
-            .Message(message, reply) -> {
-                room.release()
+            .Message(message, reply, receipt) -> {
+                room_free(room, starved, wake)
                 answer: handler(current, message)
                 if reply == .Val(asker) -> asker.answer(answer)
+                if receipt == .Val(entry) -> receipt_commit(entry)
             }
             .Flush(_) -> {}
         }
         current
     }
     inbox: service_actor.supervise(fn() -> S { state }, step, .Restart{limit: tree.budget_max}) ?? return Err(worker_task_failed(name))
+    feed_start(id, inbox, room, starved, wake, decoder)
     Ok(Endpoint<Q, R>{id: id, inbox: inbox, room: room})
 }
 
+// A handled receipt is Delivered. One whose commit fails stays handed over
+// and not Delivered: runtime.retry hands it to the worker again.
+priv receipt_commit: fn(entry: PendingEntry) Never! {
+    authority_commit(ServiceRuntime{store: entry.store, retention_ms: 0}, entry.id).drop("an uncommitted receipt waits for runtime.retry")
+}
+
+// Frees a mailbox place, and wakes the feeder when it waits for one.
+priv room_free: fn(room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore) Never! {
+    flag := starved.guard_edit()
+    room.release()
+    if flag.value {
+        flag.value = false
+        wake.release()
+    }
+}
+
+// Takes a mailbox place for the feeder; with none free, the next freed
+// place wakes it.
+priv room_take: fn(room: service_tasks.Semaphore, starved: Shared<Bool>) -> Bool Never! {
+    flag := starved.guard_edit()
+    if room.try_acquire() -> return true
+    flag.value = true
+    false
+}
+
+// Starts the feeder of a typed worker whose message decodes: on each wake
+// it hands the worker the endpoint's pending durable receipts while the
+// worker takes messages and its mailbox has places. A worker without a
+// decoder has no feeder.
+priv feed_start: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore, decoder: &&(fn(String) -> Q ServiceError!)?) Never! {
+    decode: decoder ?? return
+    feed_register(id, wake)
+    feeder: task feed_wait(id, inbox, room, starved, wake, decode)
+    feeder.detach()
+}
+
+priv feed_wait: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore, decode: fn(String) -> Q ServiceError!) Never! {
+    loop {
+        if !wake.acquire() {
+            return
+        }
+        feed(id, inbox, room, starved, decode).drop("a receipt not handed over stays in the authority for the next wake")
+    }
+}
+
+priv feed: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, decode: fn(String) -> Q ServiceError!) ServiceError! {
+    loop {
+        if !feed_open(id) || !room_take(room, starved) -> return Ok()
+        if feed_one(id, inbox, decode) == {
+            .Ok(handed) -> {
+                if !handed {
+                    room.release()
+                    return Ok()
+                }
+            }
+            .Err(error) -> {
+                room.release()
+                return Err(error)
+            }
+        }
+    }
+}
+
+// Queues the next pending receipt that decodes, marked handed to the
+// worker; false when none is pending. A receipt that no longer decodes is
+// dead-lettered.
+priv feed_one: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, decode: fn(String) -> Q ServiceError!) -> Bool ServiceError! {
+    loop {
+        taken: authority_take_pending(id, 1, [String]{})
+        if taken.len() == 0 -> return Ok(false)
+        entry: taken[0]
+        message: decode(entry.message) ?? {
+            _: authority_dead_letter(ServiceRuntime{store: entry.store, retention_ms: 0}, entry.id)
+            next
+        }
+        authority_mark_delivered(entry.store, entry.id)
+        inbox.send(Job<Q, R>.Message{message: message, reply: None, receipt: Val(entry)}) ?? return Err(ServiceError.Unavailable("worker `{id.worker}` stopped after its restart budget"))
+        return Ok(true)
+    }
+}
+
 // Hands the waiting batch to the handler, again after each failure up to
-// `attempts` runs, then starts the next batch.
+// `attempts` runs, then starts the next batch. A handled batch commits its
+// durable receipts.
 priv hand_over: fn<Q>(state: &BatchState<Q>, handler: fn([Q]) Err!, attempts: Int) {
+    handled := false
     loop _ in 1..attempts {
-        handled := false
         task.group group {
             attempt: task handler(state.pending)
             if attempt.join() == {
@@ -5067,7 +5248,11 @@ priv hand_over: fn<Q>(state: &BatchState<Q>, handler: fn([Q]) Err!, attempts: In
         }
         if handled -> break
     }
+    if handled {
+        loop entry in state.receipts -> receipt_commit(entry)
+    }
     state.pending.clear()
+    state.receipts.clear()
     state.round += 1
 }
 
@@ -5105,7 +5290,7 @@ priv typed_queue: fn<Q, R>(tree: ServiceTree, endpoint: Endpoint<Q, R>) -> TreeW
 /// handler on it after every message sent before.
 typed_send: fn<Q, R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q) ServiceError! {
     worker: typed_queue(tree, endpoint)
-    endpoint.inbox.send(Job<Q, R>.Message{message: message, reply: None}) ?? {
+    endpoint.inbox.send(Job<Q, R>.Message{message: message, reply: None, receipt: None}) ?? {
         endpoint.room.release()
         return Err(ServiceError.Unavailable("worker `{worker.name}` stopped after its restart budget"))
     }
@@ -5115,9 +5300,34 @@ typed_send: fn<Q, R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q)
 /// fails while handling it leaves the outcome unknown: Ambiguous.
 call: fn<Q, R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q) -> R ServiceError! {
     worker: typed_queue(tree, endpoint)
-    answer: endpoint.inbox.ask<R, Never>(fn(reply: service_actor.Reply<R>) -> Job<Q, R> Never! { Job<Q, R>.Message{message: message, reply: Val(reply)} })
+    answer: endpoint.inbox.ask<R, Never>(fn(reply: service_actor.Reply<R>) -> Job<Q, R> Never! { Job<Q, R>.Message{message: message, reply: Val(reply), receipt: None} })
     handled: answer ?? return Err(ServiceError.Ambiguous("worker `{worker.name}` failed while handling the call"))
     Ok(handled)
+}
+
+/// Durably queues `message` under the idempotency `key`: the authority keeps
+/// it as JSON until the worker's handler succeeds on it, across restarts. A
+/// key already used answers its first receipt; a full mailbox is Full before
+/// the authority keeps anything.
+typed_send_durable: fn<Q: [Encode, Decode], R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q, key: String) -> Delivery ServiceError! {
+    if tree.delivery != ServiceDelivery.DurableAtLeastOnce {
+        return Err(ServiceError.Policy("send_durable requires DurableAtLeastOnce delivery"))
+    }
+    authority: tree.state_authority ?? return Err(ServiceError.Policy("durable service delivery needs its injected authority"))
+    runtime: ServiceRuntime{store: delivery_store(authority.store), retention_ms: 0}
+    if !valid_service_text(key, 256) {
+        return Err(ServiceError.Policy("durable send requires a non-empty idempotency key"))
+    }
+    text: service_json.stringify(message)
+    if !valid_record_payload(text) {
+        return Err(ServiceError.Policy("service message exceeds the 1 MiB limit"))
+    }
+    worker: typed_gate(tree, endpoint.id)
+    if !endpoint.room.try_acquire() -> return Err(full_tree_mailbox(worker.name, worker.capacity))
+    endpoint.room.release()
+    delivery: runtime_send(runtime, endpoint.id, text, key)
+    feed_wake(endpoint.id)
+    Ok(delivery)
 }
 
 #Test("a typed worker runs its handler once per message in send order and answers a call") {
@@ -5224,6 +5434,51 @@ call: fn<Q, R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q) -> R 
     _: done.acquire()
     log: sizes.guard_read()
     assert_eq(log.value, [Int]{2, 1})
+}
+
+#Test("a durable typed send reaches the handler once, a failed message waits for retry, and a handled one is Delivered") {
+    dir: service_files.mkdtemp("typed-durable") ?? panic("temp dir")
+    path: "{dir}/state.log"
+    seen: Shared<[Int]>{[Int]{}}
+    failed: Shared<Bool>{false}
+    done: service_tasks.Semaphore.new(0)
+    services := tree("typed-durable")
+    set_delivery(services, delivery_durable()) ?? panic("durable delivery")
+    store: state_store(path) ?? panic("state store")
+    set_state_event_log(services, store, "events", 1, "reversible") ?? panic("state adapter")
+    record: durable_worker(
+        services,
+        "record",
+        fn(n: Int) -> Int Err! {
+            flag := failed.guard_edit()
+            if n == 2 && !flag.value {
+                flag.value = true
+                done.release()
+                return Err("the first try fails")
+            }
+            log := seen.guard_edit()
+            log.value.push(n)
+            done.release()
+            n
+        },
+        "record",
+        8,
+    ) ?? panic("durable worker must declare")
+    start(services) ?? panic("durable tree must start")
+    first: typed_send_durable(services, record, 1, "one") ?? panic("send 1")
+    _: done.acquire()
+    again: typed_send_durable(services, record, 1, "one") ?? panic("send 1 again")
+    assert(again.duplicate)
+    second: typed_send_durable(services, record, 2, "two") ?? panic("send 2")
+    _: done.acquire()
+    runtime: ServiceRuntime{store: delivery_store(path), retention_ms: 0}
+    _: runtime_retry(runtime, second) ?? panic("retry 2")
+    _: done.acquire()
+    // The worker handles in order, so message 1 committed before 2 ran.
+    assert((delivery_status(first) ?? panic("status")) == DeliveryState.Delivered)
+    log: seen.guard_read()
+    assert_eq(log.value, [Int]{1, 2})
+    stop(services) ?? panic("stop")
 }
 
 worker_contains: fn(names: [String], name: String) -> Bool Never! {
@@ -5559,8 +5814,8 @@ start_activate: fn(tree: ServiceTree, index: Int, published: Bool, running: Bool
     if running -> bind_delivery_endpoint(tree, endpoint)
 }
 
-// Start reopens every mailbox and publishes each worker route. Handlers run
-// through endpoint receive; start invokes none.
+// Start reopens every mailbox and publishes each worker route, then hands
+// each typed worker the durable receipts its endpoint still owes it.
 start: fn(tree: &ServiceTree) ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("service tree is already started"))
     lock: rollout_operation_lock(tree)
@@ -5617,6 +5872,7 @@ start: fn(tree: &ServiceTree) ServiceError! {
         }
         .Ok(_) -> {}
     }
+    loop worker in tree.workers -> feed_wake(worker.endpoint)
 }
 
 // Stop retracts every route. Durable delivery keeps queued mail for the next

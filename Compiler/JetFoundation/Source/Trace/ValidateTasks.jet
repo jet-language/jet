@@ -173,6 +173,9 @@ jettrace_validate_native: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact]
     return
 }
 
+// A span row is a task's observed span (`task_observed`), whose unavailable
+// state is the only task row, or a closed core.log span (`log_span`):
+// captured, timed, and of no task.
 jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact], limit: Int) JetTraceError! {
     items: jettrace_array(value, "content.spans")
     if items.len() > limit {
@@ -186,13 +189,29 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
         if jettrace_text(fields[jettrace_get(fields, "clock")].value, "{label}.clock") != "monotonic" {
             return Err(jettrace_error("{label}.clock must be monotonic"))
         }
-        if jettrace_text(fields[jettrace_get(fields, "kind")].value, "{label}.kind") != "task_observed" {
-            return Err(jettrace_error("{label}.kind must be task_observed"))
-        }
+        kind: jettrace_text(fields[jettrace_get(fields, "kind")].value, "{label}.kind")
         reason: jettrace_text(fields[jettrace_get(fields, "reason")].value, "{label}.reason")
         status: jettrace_text(fields[jettrace_get(fields, "status")].value, "{label}.status")
         symbol: fields[jettrace_get(fields, "symbol")].value
         jettrace_validate_symbol(symbol, "{label}.symbol")
+        if kind == "log_span" {
+            if status != "captured" {
+                return Err(jettrace_error("{label}.status must be captured for a log span"))
+            }
+            start: jettrace_unsigned(fields[jettrace_get(fields, "start_ns")].value, "{label}.start_ns")
+            end: jettrace_unsigned(fields[jettrace_get(fields, "end_ns")].value, "{label}.end_ns")
+            if end < start -> return Err(jettrace_error("{label} ends before it starts"))
+            if fields[jettrace_get(fields, "task_id")].value != CanonicalJSON.Null || fields[jettrace_get(fields, "parent_task_id")].value != CanonicalJSON.Null {
+                return Err(jettrace_error("{label} log span must not claim a task"))
+            }
+            if reason.len() != 0 {
+                return Err(jettrace_error("{label}.reason must be empty when captured"))
+            }
+            next
+        }
+        if kind != "task_observed" {
+            return Err(jettrace_error("{label}.kind must be task_observed or log_span"))
+        }
         if {
             status == "captured" -> {
                 captured += 1
@@ -232,7 +251,7 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
         }
     }
     if unavailable > 1 || (unavailable == 1 && captured != 0) {
-        return Err(jettrace_error("content.spans unavailable state must be the only row"))
+        return Err(jettrace_error("content.spans unavailable state must be the only task row"))
     }
     return
 }

@@ -138,20 +138,42 @@ failfast_cell: fn() {
     }
 }
 
-shielded: fn() -> Int {
-    #Shield {
-        time.sleep(20ms)
-        print("shield: committed inside shield")
+// A child of a group the race's loser opened outside its shield: the cancel
+// of the loser reaches it at its sleep. Its 5s sleep caps the wait.
+cancel_sentinel: fn() -> Int {
+    time.sleep(5s)
+    0
+}
+
+// The race's loser enters its shield before the winner returns (`quick`
+// waits for it), and stays inside until the race's cancel has reached it,
+// however late the race sees its winner: the sentinel ends canceled only
+// then. The held cancel then stops the loser at the shield's exit.
+shielded: fn(entered: Sender<Int>) -> Int {
+    task.group watch {
+        sentinel: task cancel_sentinel()
+        #Shield {
+            entered.send(1)
+            if sentinel.join() == {
+                .Err(.Cancelled) -> { print("shield: committed inside shield") }
+                .Err(_) -> { print("shield: the sentinel failed") }
+                .Ok(_) -> print("shield: no cancel reached the shield within 5s")
+            }
+        }
+        print("shield: after shield (must not print)")
     }
-    print("shield: after shield (must not print)")
     1
 }
 
-quick: fn() -> Int { 7 }
+quick: fn(entered: Receiver<Int>) -> Int {
+    entered.receive() ?? 0
+    7
+}
 
 shield_cell: fn() {
+    { sender: entered_tx, receiver: entered }: channel<Int>(capacity: 1)
     task.group g {
-        winner: task.race {shielded(), quick()} ?? panic("race")
+        winner: task.race {shielded(entered_tx), quick(entered)} ?? panic("race")
         print("shield: winner {winner}")
     }
 }

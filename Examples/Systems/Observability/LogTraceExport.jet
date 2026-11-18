@@ -1,0 +1,180 @@
+// One finite exported-trace job through `core.log`, then its replay. Nested
+// spans carry typed and redacted fields under one trace id; the file sink
+// selected by `log.otlp_file` writes one JSON line per record, which the
+// program reads back. Each record keeps the caller's span names (outer to
+// inner), trace id and field keys; the redacted field keeps only its marker.
+// `sample_every(1)` keeps every record, so the file holds exactly the emitted
+// count. The wall-clock `ts` member is masked so the output is deterministic.
+//
+// The replay rebuilds the spans from the records alone: a span's parent is
+// the span around it in a record's `spans`, and its attributes are the fields
+// of the records it holds directly, a redacted one still only its marker. The
+// replayed spans pass through a buffer of SPAN_BUFFER_CAPACITY that counts
+// what it cannot hold, and the kept ones export as one OTLP/HTTP JSON
+// request, a record's place in the file standing in for its masked time.
+package: {
+    name: "log_trace_export"
+    authority: { allow: [FS, FS.Read, FS.Write, IO, Log, Mem.Alloc] }
+}
+
+use {
+    files: core.files
+    jsonl: core.encoding.jsonl
+    log: core.log
+}
+
+TRACE_ID: "4bf92f3577b34da6a3ce929d0e0e4736"
+
+SPAN_BUFFER_CAPACITY: 3
+
+// The members every record has; the rest are its fields.
+RECORD_MEMBERS: [String]{"level", "body", "ts", "trace_id", "module", "spans"}
+
+// A bounded span buffer: it keeps the first `capacity` spans and counts the
+// rest as dropped, so a burst of spans never grows it.
+SpanBuffer: struct {
+    capacity: Int,
+    spans: [TraceSpan],
+    dropped: Int,
+}
+
+offer: fn(buffer: &SpanBuffer, span: &&TraceSpan) {
+    if buffer.spans.len() >= buffer.capacity {
+        buffer.dropped += 1
+        return
+    }
+    buffer.spans.push(span)
+}
+
+// One replayed span: where its name path sits, and its first and last record.
+Replayed: struct {
+    path: String,
+    name: String,
+    parent: String,
+    first: Int,
+    last: Int,
+    attributes: [LogField],
+}
+
+without_ts: fn(line: String) -> String {
+    kept := [String]{}
+    loop piece in line.split(",") {
+        if piece.starts_with("\"ts\":") {
+            if piece.ends_with("}}") && kept.len() > 0 {
+                last: kept.len() - 1
+                kept[last] = "{kept[last]}}}"
+            }
+            next
+        }
+        kept.push(piece)
+    }
+    kept.join(",")
+}
+
+// A record's own fields as typed log fields; a redacted one stays redacted.
+record_fields: fn(row: Dyn) -> [LogField] {
+    fields := [LogField]{}
+    loop key in row.keys() {
+        if RECORD_MEMBERS.contains(key) -> next
+        if row[key] == {
+            .Int(number) -> { fields.push(log.int(key, number)) }
+            .Number(_) -> {
+                // A JSON number reads back as a Number; the log wrote an Int.
+                number: row[key].int() ?? next
+                fields.push(log.int(key, number))
+            }
+            .Bool(flag) -> { fields.push(log.bool(key, flag)) }
+            .Text(text) -> {
+                fields.push(if text == "[redacted]" -> log.redact(key) else -> log.field(key, text))
+            }
+            .Null | .Float(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> next
+        }
+    }
+    fields
+}
+
+// The 16-hex-digit id of the replay's `index`th span.
+span_id: fn(index: Int) -> String { "{"0".repeat(15)}{index + 1}" }
+
+replay: fn(rows: [Dyn]) -> [Replayed] {
+    spans := [Replayed]{}
+    loop (at, row) in rows {
+        names := [String]{}
+        if row.get("spans") == .Val(.Array(items)) {
+            loop item in items {
+                if item == .Text(name) -> names.push(name)
+            }
+        }
+        parent := ""
+        loop depth in 0..<names.len() {
+            path: if parent == "" -> names[depth] else -> "{parent}/{names[depth]}"
+            found := -1
+            loop (index, span) in spans {
+                if span.path == path -> found = index
+            }
+            if found < 0 {
+                spans.push(Replayed{path: path, name: names[depth], parent: parent, first: at, last: at, attributes: [LogField]{}})
+                found = spans.len() - 1
+            }
+            spans[found].last = at
+            if depth == names.len() - 1 {
+                loop item in record_fields(row) -> spans[found].attributes.push(item)
+            }
+            parent = path
+        }
+    }
+    spans
+}
+
+run: fn() {
+    scratch: files.temp_dir("jet-log-trace") ?? panic("temp dir")
+    path: "{scratch.path}/trace.jsonl"
+    log.otlp_file(path)
+    log.sample_every(1)
+    log.set_trace_id("trace-42")
+
+    emitted := 0
+    request: log.span("request")
+    log.info_fields("received", [log.field("route", "/login"), log.redact("password")])
+    emitted += 1
+    query: log.span("db.query")
+    log.info_fields("queried", [log.int("rows", 3), log.bool("cached", false)])
+    emitted += 1
+    log.close(query)
+    log.warn("slow response")
+    emitted += 1
+    fill: log.span("cache.fill")
+    log.info_fields("filled", [log.int("entries", 2)])
+    emitted += 1
+    log.close(fill)
+    retry: log.span("db.retry")
+    log.info("retried")
+    emitted += 1
+    log.close(retry)
+    log.close(request)
+    log.info("idle")
+    emitted += 1
+    log.flush()
+
+    text: files.read(path) ?? panic("read trace")
+    records := 0
+    loop line in text.split("\n") {
+        if line.len() == 0 -> next
+        records += 1
+        print(without_ts(line))
+    }
+    print("emitted={emitted} exported={records}")
+
+    rows: jsonl.parse(text) ?? panic("parse trace")
+    replayed: replay(rows)
+    buffer := SpanBuffer{capacity: SPAN_BUFFER_CAPACITY, spans: [TraceSpan]{}, dropped: 0}
+    loop (index, span) in replayed {
+        parent := ""
+        loop (other, around) in replayed {
+            if around.path == span.parent -> parent = span_id(other)
+        }
+        offer(buffer, TraceSpan{trace_id: TRACE_ID, span_id: span_id(index), parent_span_id: parent, name: span.name, kind: .Internal, start_ns: span.first, end_ns: span.last + 1, attributes: span.attributes, status: .Ok})
+    }
+    print("replayed={replayed.len()} kept={buffer.spans.len()} dropped={buffer.dropped}")
+    print(log.otlp_traces_json("log_trace_export", buffer.spans))
+}

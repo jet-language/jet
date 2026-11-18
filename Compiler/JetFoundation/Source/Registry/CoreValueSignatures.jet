@@ -1317,8 +1317,8 @@ core_value_fixed_signature: fn(module_name: String, member: String) -> CoreTyped
         if member == "span" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_named("LogSpan"))))
         }
-        if core_sig_one_of(member, [String]{"enter", "close"}) {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("LogSpan"), read)}, None))
+        if member == "close" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("LogSpan"), AccessConvention.Move)}, None))
         }
         if member == "set_sink" {
             return Val(core_sig(

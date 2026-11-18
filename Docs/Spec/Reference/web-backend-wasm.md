@@ -98,11 +98,14 @@ replaces the children of `#jet-app`, which the host creates in `document.body`
 if the page has none: one element per leaf, placed absolutely at its frame (a
 `button` for a button, an `input` for a text input, a `span` for text, a `div`
 for any other node; a box stacks its children and adds no element). A click on
-a button runs its Jet handler once the program's `run` has returned 0. A drop
-on a text input built with `on_drop:` runs its handler once per dropped item,
-in the order `core.ui.host.drag_drop` reads a drop: nonempty `text/plain` as a
-`UIDropItem.Text`, then each `text/uri-list` line that is neither empty nor a
-`#` comment as a `UIDropItem.URI`. A drop of files on the element of an
+a button runs its Jet handler once the program's `run` has returned 0. Each
+edit of a text input built with `on_change:` (the browser's `input`) runs its
+handler on the input's value; the input the repaint puts in its place keeps
+the focus and the selection. A drop on a text input built with `on_drop:`
+runs its handler once per dropped item, in the order `core.ui.host.drag_drop`
+reads a drop: nonempty `text/plain` as a `UIDropItem.Text`, then each
+`text/uri-list` line that is neither empty nor a `#` comment as a
+`UIDropItem.URI`. A drop of files on the element of an
 `app.drop_files` body hands them to the page's UI provider, which keeps
 them, then runs the body's handler, which takes them from the provider as
 picked files. The elements of an `app.draggable` body are `draggable`, and
@@ -116,8 +119,12 @@ the next or the previous one, Enter moves it there and Escape puts it
 back; its `contextmenu` offers a move to each drop zone of its kind after
 any `app.context_menu` entries. The paint a handler causes (for example a
 `ui.reactive_render` effect re-running on a signal it read) replaces the
-elements again. Under `node app.js` there is no document and nothing is
-recorded.
+elements again. An app whose graph has screens draws them the same way:
+`graph.launch()` opens the page's address (`location.pathname` and
+`location.search`, else `/`) and paints its screen, and after each handler
+the host runs the app's draw hook, which opens the screen again and paints
+it when another screen opened or a live binding the screen read changed.
+Under `node app.js` there is no document and nothing is recorded.
 
 ## Partition and ABI
 

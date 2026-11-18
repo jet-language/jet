@@ -1,7 +1,8 @@
 // The canonical parser supplies byte spans. Observation counts are not function
 // invocation counts. A `jet perf run` program's CPU-time samples (the
 // runtime's PerfSamples.jet) are program counters, which its image's location
-// table names by function and source line.
+// table names by function and source line. Beside them the program keeps a
+// row for each core.log span it closes.
 use {
     perf_files: core.files
     jet_backend.[X64Jetline, link_debug_addr, x64_jetline_find, x64_jetline_line, x64_jetline_read]
@@ -11,6 +12,8 @@ use {
         TraceProfile,
         TraceProfileRow,
         TraceProfileSource,
+        TraceSpan,
+        TRACE_SPAN_ROW_LIMIT,
         trace_profile_unsupported,
         SourceIdentity,
         sha256_hex,
@@ -226,4 +229,38 @@ jet_cli_perf_window: fn(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow)
     profile.window_wall_ns = Val(window.elapsed_ns)
     profile.window_cpu_ns = window.cpu_ns
     profile.window_reason = "runtime-published monotonic run window"
+}
+
+// The log spans file `path` of a `jet perf run` program (the runtime's
+// RouteALog.jet log_span_row_write): per closed span its start and end on the
+// monotonic clock and its name's byte length, each a little-endian word, then
+// the name. Each becomes a `log_span` row of `capture`, timed from
+// `origin_ns`, the session's start on that clock, and named by the span in
+// `source`, within the span row limit. The file is removed once read; a row
+// cut short ends the read.
+jet_cli_perf_log_spans_read: fn(capture: &JetCLIPerfCapture, path: String, source: String, origin_ns: Int) -[FS]> Never! {
+    bytes: perf_files.read_bytes(path) ?? [U8]{}
+    perf_files.remove(path).drop("the session reads its log spans once")
+    at := 0
+    loop at + 24 <= bytes.len() {
+        start: link_debug_addr(bytes, at)
+        end: link_debug_addr(bytes, at + 8)
+        length: link_debug_addr(bytes, at + 16)
+        if length < 0 || at + 24 + length > bytes.len() -> break
+        name: String.from_bytes(bytes.slice(at + 24, at + 24 + length)) ?? break
+        at += 24 + length
+        if (U64{capture.spans.len()}) >= TRACE_SPAN_ROW_LIMIT {
+            capture.policy.span_rows_truncated = true
+            break
+        }
+        symbol: JetSymbolRef{path: source, name: name}
+        capture.spans.push(TraceSpan{clock: "monotonic", start_ns: Val(jet_cli_perf_since(start, origin_ns)), end_ns: Val(jet_cli_perf_since(end, origin_ns)), kind: "log_span", parent_task_id: None, reason: "", status: "captured", symbol: symbol, task_id: None})
+    }
+}
+
+// `at_ns` less `origin_ns`, both on the monotonic clock; 0 for a moment
+// before the origin.
+jet_cli_perf_since: fn(at_ns: Int, origin_ns: Int) -> U64 Never! {
+    if at_ns <= origin_ns -> return U64{0}
+    checked(U64{at_ns - origin_ns}) ?? U64{0}
 }

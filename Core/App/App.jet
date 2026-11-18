@@ -2699,14 +2699,16 @@ App: struct {
     // window, and is true. That link is the first argument that is one, as
     // the desktop passes the link the entry's `%u` names. In a page there
     // is no other copy, desktop entry or window to open: a launch starts
-    // the app's run and follows the page's lifecycle into it
-    // (`app_launch_page`), and is true.
+    // the app's run and follows the page's lifecycle into it, and a graph
+    // with screens opens the page's address and draws its screen into the
+    // page, again after each of the page's turns that changed what it shows
+    // (`app_launch_page`); it is true.
     launch: fn(self) -[Browser, Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool Never! {
         #if #build.target.os == {
             .Linux -> { return app_launch_desktop(self) }
             .MacOS -> { return app_launch_desktop(self) }
             .Windows -> { return app_launch_desktop(self) }
-            .Web -> { return app_launch_page() }
+            .Web -> { return app_launch_page(self) }
             .Wasm -> { return app_launch_desktop(self) }
             .Freestanding -> { return app_launch_desktop(self) }
         }
@@ -4236,12 +4238,49 @@ priv app_launch_desktop: fn(graph: App) -[Env, Exec.Args, Exec.Exit, FS.Read, FS
 
 // `App.launch` in a page: starts the app's run, its visibility unknown
 // until the page says, and has the page tell it each change of its
-// lifecycle (`app_page_moments`).
-priv app_launch_page: fn() -[Browser, Net, Time]> Bool Never! {
+// lifecycle (`app_page_moments`). A graph with screens opens the page's
+// address, unless a screen is open already, draws that screen into the
+// page, and has the page run its draw hook after each of its turns
+// (`app_page_redraw`).
+priv app_launch_page: fn(graph: App) -[Browser, FS.Read, Net, Time]> Bool Never! {
     app_lifecycle_start(true)
     hook: ui.button("", fn() { app_page_moments() })
     _: ui_rt.device(WEB_DEVICE_LIFECYCLE, "{hook.__click_slot()}")
     app_page_moments()
+    if graph.__screens().len() == 0 -> return true
+    draw: ui.button("", fn() { app_page_redraw() })
+    address: ui_rt.device(WEB_DEVICE_DRAW, "{draw.__click_slot()}") ?? "/"
+    if app_graph_current() == None -> _: graph.open_link(address)
+    app_page_redraw()
+    true
+}
+
+// The page's draw hook, which the page runs after each of its turns (and
+// `app_launch_page` once): when another screen opened since the page last
+// drew, or a live binding of the screen it shows changed
+// (`app_window_wake`), it opens the screen again as a window's frame does
+// (`app_window_tree`) and lays it out within the graph's window size, else
+// a desktop's (`ui.desktop`); the page then shows what it painted.
+priv app_page_redraw: fn() -[Browser, FS.Read, Net]> Never! {
+    now: app_graph_current()
+    if !app_page_due(now) {
+        return
+    }
+    tree: app_window_tree(now)
+    desktop: ui.desktop()
+    size: app_graph_window() ?? AppWindow{width: desktop.width, height: desktop.height}
+    ui.null_backend().mount(tree, ui.constraint(0.0, 0.0, Float{size.width}, Float{size.height}))
+}
+
+// Whether the page's draw is due for the screen `now` (`app_page_redraw`),
+// which it then takes as drawn. From the first call on, a change to the
+// data the screen shows marks it due (`app_window_wake`).
+priv app_page_due: fn(now: AppCurrent?) -> Bool Never! {
+    held := APP_WINDOW_WAKE.guard_edit()
+    held.value.page = true
+    if !held.value.stale && held.value.drawn == now -> return false
+    held.value.stale = false
+    held.value.drawn = now.copy()
     true
 }
 
@@ -5055,6 +5094,8 @@ priv WEB_DEVICE_LIFECYCLE: 16
 priv WEB_DEVICE_MOMENT: 17
 
 priv WEB_DEVICE_POST: 18
+
+priv WEB_DEVICE_DRAW: 19
 
 // The `size` bytes of the file a page holds under `number` for the app.
 priv app_page_whole: fn(number: Int, name: String, size: Int) -> [U8] IOError! {
@@ -7161,7 +7202,9 @@ priv app_window_lost: fn(why: String) Never! {
 // pastes other tasks wait on (`paste_text`), and the newest notice a
 // resume failed with (`App.lifecycle`), all taken by `app_window_take`;
 // whether a wake waits for that frame; and the window itself and the task
-// its frames run in (`app_window_keep`).
+// its frames run in (`app_window_keep`). In a page, whether the page draws
+// the app's screens and the screen it last drew (`app_page_due`), with
+// `stale` taken there.
 priv AppWindowWake: struct {
     wakes: [Sender<Int>],
     stale: Bool,
@@ -7174,9 +7217,11 @@ priv AppWindowWake: struct {
     woken: Bool,
     window: ui.Window?,
     task: TaskID?,
+    page: Bool,
+    drawn: AppCurrent?,
 }
 
-priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, copied: None, shared: false, pastes: [Sender<String?>]{}, resumed: None, woken: false, window: None, task: None}}
+priv APP_WINDOW_WAKE: Shared{AppWindowWake{wakes: [Sender<Int>]{}, stale: false, noticed: false, acts: [MenuItem]{}, copied: None, shared: false, pastes: [Sender<String?>]{}, resumed: None, woken: false, window: None, task: None, page: false, drawn: None}}
 
 // Keeps `window`, whose frames run in this task, for the clipboard
 // (`copy_text`, `paste_text`).
@@ -7344,12 +7389,17 @@ priv app_window_clipboard: fn(window: ui.Window) -[Env, Net, Time]> String? Neve
 // Wakes the window's frames when one of the bindings `ids`, just
 // invalidated or given a new value, is route data of the screen it shows
 // (app_graph_route_data): its next frame opens the screen again, which
-// reads them anew. Without a window it does nothing.
+// reads them anew. In a page, the page's next draw does (`app_page_due`).
+// Without a window or a page it does nothing.
 priv app_window_wake: fn(ids: [Int]) Never! {
     if !app_graph_shows(ids) {
         return
     }
     held := APP_WINDOW_WAKE.guard_edit()
+    if held.value.page {
+        held.value.stale = true
+        return
+    }
     if held.value.wakes.len() == 0 {
         return
     }

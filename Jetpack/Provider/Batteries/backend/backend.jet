@@ -312,7 +312,6 @@ configure_trace: fn(path: String, format: String, trace_id: String) -> TraceRece
     if format != "otlp" -> log.set_sink(format, path)
     log.set_trace_id(trace_id)
     span: log.span("backend.request")
-    log.enter(span)
     log.info_fields(
         "backend.started",
         [
@@ -336,7 +335,6 @@ configure_trace: fn(path: String, format: String, trace_id: String) -> TraceRece
 emit_trace: fn(trace_id: String, route_name: String, status: Int, requests: Int, errors: Int, sink: String) -> TraceReceipt {
     log.set_trace_id(trace_id)
     span: log.span("backend.request")
-    log.enter(span)
     log.info_fields(
         "backend.request",
         [

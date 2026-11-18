@@ -134,7 +134,8 @@ InputEvent: enum {
 // One node of the portable tree: its label, its size in cells, and what
 // hosts and assistive tech read. A box stacks its children top to bottom;
 // a button built with a handler (`button(display, () -> { … })`) holds its click
-// slot, and a text input built with `on_drop:` its drop slot.
+// slot, and a text input built with `on_drop:` its drop slot and one built
+// with `on_change:` its change slot.
 UINode: struct {
     label: String,
     width: Float,
@@ -150,6 +151,9 @@ UINode: struct {
     priv click: Int,
     // The id the runtime's drop registry keeps the handler under; 0 for none.
     priv drop: Int,
+    // The id the runtime's click registry keeps the change handler under; 0
+    // for none.
+    priv change: Int,
     // The id the app keeps the handler of files dropped on the node under
     // (`__taking_files`); 0 for none.
     priv files: Int,
@@ -195,8 +199,9 @@ UINode: struct {
     // pointer and clicks a button; Tab moves the focus along the ring; a
     // key with the modifiers of a button's shortcut clicks it, Enter or
     // space with none clicks the focused button; typed text and Backspace
-    // edit the focused text input; a drop on a text input that takes drops
-    // gives it each text and URI item. A click and a drop run the handler
+    // edit the focused text input and run its change handler, if it has
+    // one, on its new text; a drop on a text input that takes drops gives it
+    // each text and URI item. A click, a change and a drop run the handler
     // the runtime keeps for the node's slot.
     __input: fn(&self, frame: Frame, event: UIEvent, focused: &Int) -> Bool Never! {
         internal.window_input(self, frame, event, focused)
@@ -334,8 +339,8 @@ UINode: struct {
     }
 
     // Makes `text` the text of the text input that is node `focused` of the
-    // tree's focus ring (`__input`); whether one is, which then needs
-    // drawing again.
+    // tree's focus ring (`__input`), and runs its change handler, as typing
+    // does; whether one is, which then needs drawing again.
     __set_focused_text: fn(&self, focused: Int, text: String) -> Bool Never! {
         internal.set_focused_input(self, focused, text)
     }
@@ -384,6 +389,7 @@ box: fn(children: [UINode]) -> UINode Never! {
         color: None,
         click: 0,
         drop: 0,
+        change: 0,
         files: 0,
         menu: 0,
         drag: 0,
@@ -421,7 +427,8 @@ __button_click: fn(display: String, shortcut: UIShortcut?, label: String?, click
 }
 
 // A text input over `state`, one cell per scalar, with its IME mode. The
-// `on_drop:` form is `text_input_drop`.
+// `on_drop:` form is `text_input_drop`; the `on_change:` form, with or
+// without `on_drop:`, is `text_input_change`.
 text_input: fn(state: String, ime: UIIMEMode) -> UINode Never! {
     result := leaf(state, Float{state.chars().len()}, 1.0, Val(UIAriaRole.TextInput), UINodeKind.TextInput, None)
     result.ime = Val(ime)
@@ -435,6 +442,18 @@ text_input: fn(state: String, ime: UIIMEMode) -> UINode Never! {
 // labeled case payloads, and the drop adapter builds the item from them.
 #Builtin.Role(.TextInputDrop) priv text_input_drop: fn(state: String, ime: UIIMEMode, drop: Int) -> UINode Never! {
     result := text_input(state, ime)
+    result.drop = drop
+    result
+}
+
+// `text_input(state, ime, on_change: (text: String) -> { … })`: the compiler
+// registers the handler with the runtime's click registry as slot
+// `change`, and an `on_drop:` handler beside it with the drop registry as
+// slot `drop` (0 for none), then builds the input here. Typing in it runs
+// the change handler on the input's new text.
+#Builtin.Role(.TextInputChange) priv text_input_change: fn(state: String, ime: UIIMEMode, change: Int, drop: Int) -> UINode Never! {
+    result := text_input(state, ime)
+    result.change = change
     result.drop = drop
     result
 }
@@ -2001,6 +2020,7 @@ priv internal: module {
             color: color,
             click: 0,
             drop: 0,
+            change: 0,
             files: 0,
             menu: 0,
             drag: 0,
@@ -2191,8 +2211,7 @@ priv internal: module {
                     bytes: node.label.bytes()
                     last: "{chars[chars.len() - 1]}".bytes().len()
                     kept: String.from_bytes(bytes[0..<bytes.len() - last]) ?? return false
-                    seen := 0
-                    tree = retyped(tree, ring[focused], seen, kept)
+                    edited(tree, leaves, ring[focused], kept)
                     return true
                 }
                 if node.click != 0 && held == 0 && (key == .Enter || key == .Char(' ')) {
@@ -2204,8 +2223,7 @@ priv internal: module {
                 if focused < 0 -> return false
                 node: leaves[ring[focused]].node
                 if node.kind != .TextInput -> return false
-                seen := 0
-                tree = retyped(tree, ring[focused], seen, "{node.label}{typed}")
+                edited(tree, leaves, ring[focused], "{node.label}{typed}")
                 true
             }
             .Drop(x, y, items) -> {
@@ -2273,9 +2291,18 @@ priv internal: module {
         leaves := [UIPlaced]{}
         placed_leaves(tree, Rect{x: 0.0, y: 0.0, width: tree.width, height: tree.height}, leaves)
         ring: focus_ring_of(leaves)
-        seen := 0
-        tree = retyped(tree, ring[focused], seen, text)
+        edited(tree, leaves, ring[focused], text)
         true
+    }
+
+    // Makes `text` the text of the text input that is leaf `index` of
+    // `tree`'s `leaves`, and runs the input's change handler, if it has one,
+    // on it: typing, Backspace and an edit menu's Cut all edit it so.
+    edited: fn(tree: &UINode, leaves: [UIPlaced], index: Int, text: String) Never! {
+        change: leaves[index].node.change
+        seen := 0
+        tree = retyped(tree, index, seen, text)
+        if change != 0 -> core.ui.__change(change, text)
     }
 
     // The index in `ring` of the leaf whose frame holds the point (x, y), in
@@ -2524,19 +2551,19 @@ priv internal: module {
 
     // A leaf's record in a paint's web scene, which has one per leaf in paint
     // order (`placed_leaves`), as the bodies `held` hold it. A record is its
-    // fields separated by tabs, kind (`scene_kind`), click slot, drop slot
-    // and the click slot of the innermost body that takes files and holds
-    // it (`files`) (each 0 for none), the number of entries of the context
-    // menu the page opens on it (`menu`, the entries of the innermost body
-    // with a web menu that holds it), the click slot and kind of the
-    // innermost body a person drags in a page that holds it (`web_drag`)
-    // and those of the innermost body that takes what is moved onto it in a
-    // page that holds it (`web_zone`) (each slot 0 for none), x, y, width,
-    // height, color (its `to_hex` text, empty for none) and the label's
-    // UTF-8 byte length, then the label and a newline; then, for a body a
-    // person drags and then for a body that takes what is moved, one line
-    // of its name's byte length and a tab, then its name and a newline; then
-    // one line for each menu entry, in order: its kind, click slot and
+    // fields separated by tabs, kind (`scene_kind`), click slot, drop slot,
+    // change slot and the click slot of the innermost body that takes files
+    // and holds it (`files`) (each 0 for none), the number of entries of
+    // the context menu the page opens on it (`menu`, the entries of the
+    // innermost body with a web menu that holds it), the click slot and kind
+    // of the innermost body a person drags in a page that holds it
+    // (`web_drag`) and those of the innermost body that takes what is moved
+    // onto it in a page that holds it (`web_zone`) (each slot 0 for none),
+    // x, y, width, height, color (its `to_hex` text, empty for none) and the
+    // label's UTF-8 byte length, then the label and a newline; then, for a
+    // body a person drags and then for a body that takes what is moved, one
+    // line of its name's byte length and a tab, then its name and a newline;
+    // then one line for each menu entry, in order: its kind, click slot and
     // label's byte length, separated by tabs, then the label and a newline.
     // A web build's host (JetWeb Host.jet) turns it into the page's
     // elements.
@@ -2546,7 +2573,7 @@ priv internal: module {
         moving: held.web_drag ?? UIWebMove{click: 0, kind: 0, label: ""}
         taking: held.web_zone ?? UIWebMove{click: 0, kind: 0, label: ""}
         moves: "{moving.click}\t{moving.kind}\t{taking.click}\t{taking.kind}"
-        record := "{scene_kind(node)}\t{node.click}\t{node.drop}\t{held.files}\t{held.menu.len()}\t{moves}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n"
+        record := "{scene_kind(node)}\t{node.click}\t{node.drop}\t{node.change}\t{held.files}\t{held.menu.len()}\t{moves}\t{place}\t{color}\t{node.label.bytes().len()}\t{node.label}\n"
         if moving.click != 0 -> record = "{record}{moving.label.bytes().len()}\t{moving.label}\n"
         if taking.click != 0 -> record = "{record}{taking.label.bytes().len()}\t{taking.label}\n"
         loop entry in held.menu {
