@@ -100,17 +100,22 @@ WebAssembly.promising)`.
 When the page has a `document`, the host shows what the program's `core.ui`
 backend paints. Each paint (a `ui.mount`, or a `paint` after `layout`)
 replaces the children of `#jet-app`, which the host creates in `document.body`
-if the page has none: one element per leaf, placed absolutely at its frame (a
-`button` for a button, an `input` for a text input, a `span` for text, a `div`
-for any other node; a box stacks its children and adds no element). A click on
-a button runs its Jet handler once the program's `run` has returned 0. Each
-edit of a text input built with `on_change:` (the browser's `input`) runs its
-handler on the input's value; the input the repaint puts in its place keeps
-the focus and the selection. A drop on a text input built with `on_drop:`
-runs its handler once per dropped item, in the order `core.ui.host.drag_drop`
-reads a drop: nonempty `text/plain` as a `UIDropItem.Text`, then each
-`text/uri-list` line that is neither empty nor a `#` comment as a
-`UIDropItem.URI`. A drop of files on the element of an
+if the page has none, so an entry that paints twice shows its last paint: one
+element per leaf, placed absolutely at its frame (a `button` for a button, an
+`input` for a text input, a `span` for text, a `div` for any other node; a box
+stacks its children and adds no element). A leaf with an accessibility role
+carries it as the element's ARIA `role` (`button`, `group`, `label` or
+`textbox`) and its accessible name (its `ui.accessibility` name, else its
+label) as its `aria-label`; a leaf without one has neither. The element a
+repaint puts in the focused element's place, when it is of the same kind,
+takes the focus. A click on a button runs its Jet handler once the program's
+`run` has returned 0. Each edit of a text input built with `on_change:` (the
+browser's `input`) runs its handler on the input's value; the input the
+repaint puts in its place keeps the focus and the selection. A drop on a
+text input built with `on_drop:` runs its handler once per dropped item, in
+the order `core.ui.host.drag_drop` reads a drop: nonempty `text/plain` as a
+`UIDropItem.Text`, then each `text/uri-list` line that is neither empty nor
+a `#` comment as a `UIDropItem.URI`. A drop of files on the element of an
 `app.drop_files` body hands them to the page's UI provider, which keeps
 them, then runs the body's handler, which takes them from the provider as
 picked files. The elements of an `app.draggable` body are `draggable`, and

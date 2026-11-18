@@ -1470,22 +1470,25 @@ class Host {
   // The scene the runtime's last core.ui paint recorded (UiBackends.jet), as
   // the children of `#jet-app`: a button for a Button, an input for a
   // TextInput, a span for a Text and a div for any other leaf, each placed
-  // at its frame. An element with a click slot runs its handler on click; one
-  // with a drop slot accepts drops and runs its handler on each dropped item;
-  // an input with a change slot runs its handler on its value at each input,
-  // and keeps the focus and selection across the repaint that may follow;
-  // one with a files slot accepts a drop of files, which the provider keeps
-  // (filesDropped) for the handler it then clicks to take (deviceRequest);
-  // one with context menu entries opens them (openMenu) on contextmenu in
-  // place of the browser's own menu. An element of a body a person drags
-  // (app.draggable) drags; one of a body that takes what is moved
-  // (app.drop_zone) takes a drop, which moves what the person drags there
-  // (move) and refuses anything else. The move needs no drag: the first
-  // such element of each dragged body is focusable, and Space picks it up,
-  // the arrow keys step it through the bodies that take what is moved,
-  // Enter drops it on the one outlined and Escape puts it back (pickKey);
-  // its contextmenu (a long press on a touch screen, or the menu key)
-  // offers a move to each body that takes its kind, after its own entries.
+  // at its frame, with its ARIA role and accessible name when it has a role.
+  // The element in the focused element's place, when of its kind, takes the
+  // focus. An element with a click slot runs its handler on click; one with
+  // a drop slot accepts drops and runs its handler on each dropped item; an
+  // input with a change slot runs its handler on its value at each input,
+  // and keeps the selection across the repaint that may follow; one with a
+  // files slot accepts a drop of files,
+  // which the provider keeps (filesDropped) for the handler it then clicks
+  // to take (deviceRequest); one with context menu entries opens them
+  // (openMenu) on contextmenu in place of the browser's own menu. An
+  // element of a body a person drags (app.draggable) drags; one of a body
+  // that takes what is moved (app.drop_zone) takes a drop, which moves what
+  // the person drags there (move) and refuses anything else. The move needs
+  // no drag: the first such element of each dragged body is focusable, and
+  // Space picks it up, the arrow keys step it through the bodies that take
+  // what is moved, Enter drops it on the one outlined and Escape puts it
+  // back (pickKey); its contextmenu (a long press on a touch screen, or the
+  // menu key) offers a move to each body that takes its kind, after its own
+  // entries.
   paintScene() {
     if (!this.dom || this.rt.jet_ui_web_scene_take() === 0n) return;
     const doc = globalThis.document;
@@ -1496,7 +1499,10 @@ class Host {
       root.style.position = "relative";
       doc.body.appendChild(root);
     }
-    for (const child of Array.from(root.children)) child.remove();
+    const before = Array.from(root.children);
+    const focusAt = before.indexOf(doc.activeElement);
+    const focusTag = focusAt >= 0 ? before[focusAt].tagName : "";
+    for (const child of before) child.remove();
     const at = Number(this.rt.jet_ui_web_scene_data());
     const bytes = this.u8().slice(at, at + Number(this.rt.jet_ui_web_scene_length()));
     let offset = 0;
@@ -1529,8 +1535,9 @@ class Host {
     this.picked = null;
     this.dragging = 0;
     while (offset < bytes.length) {
-      const [kind, slot, dropSlot, changeSlot, filesSlot, entries, pickSlot, pickKind, takeSlot, takeKind, x, y, width, height, color, length] = fields(16);
+      const [kind, slot, dropSlot, changeSlot, filesSlot, entries, pickSlot, pickKind, takeSlot, takeKind, x, y, width, height, color, role, length] = fields(17);
       const text = label(length);
+      const name = role !== "" ? label(fields(1)[0]) : "";
       const pick = Number(pickSlot);
       const take = Number(takeSlot);
       const dragName = pick !== 0 ? label(fields(1)[0]) : "";
@@ -1550,6 +1557,10 @@ class Host {
       if (color !== "" && tag !== "span") element.style.background = color;
       if (tag === "input") element.value = text;
       else element.textContent = text;
+      if (role !== "") {
+        element.role = role;
+        element.ariaLabel = name;
+      }
       const id = Number(slot);
       if (id !== 0) element.addEventListener("click", () => this.click(id));
       const changeId = Number(changeSlot);
@@ -1603,6 +1614,8 @@ class Host {
       root.appendChild(element);
     }
     this.zones = [...zones.values()];
+    const again = focusAt >= 0 ? root.children[focusAt] : undefined;
+    if (again?.tagName === focusTag) again.focus();
   }
 
   // Moves what the dragged body whose pick slot is `pick` holds onto the
@@ -1790,8 +1803,9 @@ class Host {
   // An input in `element`, a scene element with change slot `id`: once the
   // program's run returned 0, the element's handler runs on its value as the
   // next entry (turn), and the page shows what it changed (show). That
-  // repaint replaces the elements, so the element in the input's place
-  // takes the focus and selection it had. A promise of the handler's end.
+  // repaint replaces the elements: the element in the input's place takes
+  // the focus (paintScene) and the selection it had. A promise of the
+  // handler's end.
   change(id, element) {
     const value = element.value;
     return this.turn(async () => {
@@ -1801,15 +1815,11 @@ class Host {
       this.u8().set(bytes, at);
       await this.waitableCall(this.rt.jet_ui_web_change, BigInt(id));
       const doc = globalThis.document;
-      const root = doc.getElementById("jet-app");
-      const focused = root && doc.activeElement === element ? Array.from(root.children).indexOf(element) : -1;
+      const focused = doc.activeElement === element;
       const [start, end] = [element.selectionStart, element.selectionEnd];
       await this.show();
-      const again = focused >= 0 ? root.children[focused] : null;
-      if (again && again !== element && again.tagName === "INPUT") {
-        again.focus();
-        again.setSelectionRange?.(start, end);
-      }
+      const again = doc.activeElement;
+      if (focused && again && again !== element && again.tagName === "INPUT") again.setSelectionRange?.(start, end);
     });
   }
 

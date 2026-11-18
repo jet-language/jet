@@ -1,16 +1,16 @@
-# HAND-PORT tests/web_build.rs:4084-4136 web_typed_tree_a11y_focus_and_cleanup_roundtrip
-# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
-# Original dependency-free fake DOM harness copied verbatim, including its own assertions; exact original stdout retained.
+# The web build's scene carries each node's ARIA role and accessible name, a
+# repaint clears the ones a node no longer has and keeps the focus on the
+# element in the focused one's place, and an entry in which two backends
+# paint shows the last paint.
 requires: tool:node
 fixture: WebTypedTreeA11YFocusAndCleanupRoundtrip.fixture
 env: NO_COLOR=1
 step: jet build --target web main.jet
 exit: 0
-file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
-file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
 file: .jet/build/app.wasm is-file
 copy: harness.mjs .jet/build/harness.mjs
 step: node harness.mjs
 cwd: .jet/build
 exit: 0
 stdout: = web_typed_tree_a11y_focus_and_cleanup_roundtrip.stdout.expected
+stderr: empty

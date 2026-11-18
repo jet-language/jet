@@ -1,8 +1,12 @@
 #Target(Web)
 
-use ui: core.ui
+use {
+    ui: core.ui
+    host: core.browser.host
+}
 
-#Target(JS)
+// A node with a role paints with its ARIA role and its label as its
+// accessible name; one without paints with neither.
 render_tree: fn(with_role: Bool) {
     tree := ui.node("plain", 80.0, 24.0)
     if with_role -> tree = ui.node_role("Named", 80.0, 24.0, ui.aria_role_label())
@@ -12,7 +16,6 @@ render_tree: fn(with_role: Bool) {
     backend.paint(tree)
 }
 
-#Target(JS)
 render_focus_tree: fn() {
     tree := ui.box([ui.button("Save"), ui.button("Cancel")])
     backend := ui.null_backend()
@@ -21,7 +24,7 @@ render_focus_tree: fn() {
     backend.paint(tree)
 }
 
-#Target(JS)
+// Two backends paint in one entry: the page shows the last paint.
 render_two_backends: fn() {
     first := ui.null_backend()
     first_tree := ui.button("Backend A")
@@ -34,4 +37,9 @@ render_two_backends: fn() {
     second.paint(second_tree)
 }
 
-run: fn() {}
+run: fn() {
+    render_tree(true)
+    host.on("#plain", "click", fn(_ev) { render_tree(false) })
+    host.on("#focus", "click", fn(_ev) { render_focus_tree() })
+    host.on("#backends", "click", fn(_ev) { render_two_backends() })
+}
