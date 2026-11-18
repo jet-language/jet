@@ -141,7 +141,7 @@ PackageTargets: struct {
                 return Err(TargetProfileError{detail: "target profile `{selection.profile.as_str()}` is selected more than once"})
             }
             profiles.push(selection.profile.as_str())
-            by_name[name] = TargetProfileSelection{name: name, profile: selection.profile}
+            by_name[name] = TargetProfileSelection{name: name.copy(), profile: selection.profile}
         }
         Ok(PackageTargets{selections: by_name})
     }
@@ -176,7 +176,7 @@ pkg_target_profile_entries: fn(body: String) -> [ManifestEntry] PackageParseErro
     loop piece in pkg_top_level_lines_or_commas(body) {
         entry: piece.trim()
         if entry == "" -> next
-        parts: entry.split_once(":") ?? return Err(PackageParseError.Composition("malformed target profile field `{entry}`"))
+        parts: entry.copy().split_once(":") ?? return Err(PackageParseError.Composition("malformed target profile field `{entry}`"))
         entries.push(ManifestEntry{key: parts.before.trim(), value: parts.after.trim()})
     }
     Ok(entries)
@@ -225,19 +225,19 @@ pkg_parse_packages: fn(body: String) -> [PackageEntry] PackageParseError! {
     loop piece in pkg_top_level_commas(body) {
         entry: piece.trim()
         if entry == "" -> next
-        if entry.split_once(":") == {
+        if entry.copy().split_once(":") == {
             .Val(parts) -> {
                 name: parts.before.trim()
                 value: parts.after.trim()
                 if value.starts_with("{{") {
                     rest: value.removeprefix("{{").trim_end()
                     inner: if rest.ends_with("}}") -> rest.removesuffix("}}") else -> rest
-                    packages.push(PackageEntry{name: name, targets: pkg_parse_package_entry_block(name, inner)})
+                    packages.push(PackageEntry{name: name.copy(), targets: pkg_parse_package_entry_block(name, inner)})
                 } else {
-                    packages.push(PackageEntry{name: name, targets: [PackageTarget]{pkg_parse_target(name, value)}})
+                    packages.push(PackageEntry{name: name.copy(), targets: [PackageTarget]{pkg_parse_target(name, value)}})
                 }
             }
-            .None -> { packages.push(PackageEntry{name: entry, targets: [PackageTarget]{}}) }
+            .None -> { packages.push(PackageEntry{name: entry.copy(), targets: [PackageTarget]{}}) }
         }
     }
     Ok(packages)
@@ -320,7 +320,7 @@ pkg_parse_targets_list: fn(name: String, value: String) -> [PackageTarget] Packa
     loop piece in pkg_top_level_commas(inner) {
         entry: piece.trim()
         if entry == "" -> next
-        targets.push(pkg_parse_target(name, entry))
+        targets.push(pkg_parse_target(name, entry.copy()))
     }
     Ok(targets)
 }

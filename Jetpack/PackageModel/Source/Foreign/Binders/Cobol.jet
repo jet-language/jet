@@ -362,7 +362,7 @@ pkg_cobol_parse_program_id: fn(source: String) -> String ForeignBindError! {
         if trimmed == "" || trimmed.starts_with("*") -> next
         bytes: raw.bytes()
         if bytes.len() > 6 && (Int{bytes[6]} == 42 || Int{bytes[6]} == 47) -> next
-        code: (trimmed.split_once("*>")?.before ?? trimmed).trim()
+        code: (trimmed.copy().split_once("*>")?.before ?? trimmed.copy()).trim()
         upper: pkg_binder_ascii_upper(code)
         if !upper.starts_with("PROGRAM-ID.") -> next
         words: pkg_binder_words(upper.removeprefix("PROGRAM-ID."))
@@ -492,7 +492,7 @@ pkg_cobol_launder: fn(stderr: [U8]) -> String Never! {
     loop raw in pkg_binder_lines(String.from_bytes_lossy(stderr)) {
         line: raw.trim()
         if line == "" -> next
-        if line.split_once("error:") == {
+        if line.copy().split_once("error:") == {
             .Val(parts) -> {
                 detail: parts.after.trim()
                 if detail != "" {
@@ -501,9 +501,9 @@ pkg_cobol_launder: fn(stderr: [U8]) -> String Never! {
             }
             .None -> {}
         }
-        at: pkg_binder_find(line, "undefined reference to", 0)
+        at: pkg_binder_find(line.copy(), "undefined reference to", 0)
         if at >= 0 {
-            return "the linker reported: {pkg_binder_take_chars(pkg_binder_tail(line, at), 160)}"
+            return "the linker reported: {pkg_binder_take_chars(pkg_binder_tail(line.copy(), at), 160)}"
         }
     }
     BINDER_TOOL_FAILURE_DETAIL

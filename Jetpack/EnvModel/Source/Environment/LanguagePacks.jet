@@ -226,7 +226,7 @@ LanguagePackCatalog: struct {
         expansion := LanguageExpansion{}
         loop selection in selections {
             pack: self.get(selection.name) ?? return Err(EnvironmentFactError.new("language pack '{selection.name}' is not in the catalog"))
-            normalized := selection
+            normalized := selection.copy()
             normalized.name = pack.name
             duplicate := false
             loop existing in expansion.selections {

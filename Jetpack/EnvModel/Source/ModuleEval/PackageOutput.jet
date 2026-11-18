@@ -268,7 +268,7 @@ envmodel_project_services: fn(value: OutputPayload?, path: String) -> [ServicePl
         extra := [ServicePlanExtra]{}
         loop field in envmodel_sorted_payload_keys(fields) {
             if field != SERVICE_FIELD_ENABLE {
-                extra.push(ServicePlanExtra{key: field, value: envmodel_payload_display(fields[field])})
+                extra.push(ServicePlanExtra{key: field.copy(), value: envmodel_payload_display(fields[field])})
             }
         }
         projected.push(ServicePlan{name: name, enable: enable, extra: extra})
@@ -349,7 +349,7 @@ envmodel_payload_ct_value: fn(value: OutputPayload) -> CtValue Never! {
         }
         .String(text) -> CtValue.Str{value: text}
         .Array(items) -> CtValue.List{values: loop item in items -> envmodel_payload_ct_value(item)}
-        .Object(fields) -> CtValue.Map{entries: loop key in envmodel_sorted_payload_keys(fields) -> CtMapEntry{key: CtKey.Str{value: key}, value: envmodel_payload_ct_value(fields[key])}}
+        .Object(fields) -> CtValue.Map{entries: loop key in envmodel_sorted_payload_keys(fields) -> CtMapEntry{key: CtKey.Str{value: key.copy()}, value: envmodel_payload_ct_value(fields[key])}}
     }
 }
 

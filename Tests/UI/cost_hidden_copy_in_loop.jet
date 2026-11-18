@@ -1,0 +1,32 @@
+// L2511: a hidden copy that a loop repeats on every turn is a
+// tidy error. `jet check` and `jet build` list it with its repair named; `jet
+// run` and `jet dev` never stop for it. Here a string view is stored into an
+// owned slot, and a String that the loop reads again is copied as it is
+// handed on.
+Tag: struct {
+    name: String,
+    turn: Int,
+}
+
+keep_trimmed: fn(lines: [String]) -> [String] {
+    out := [String]{}
+    loop line in lines {
+        trimmed: line.trim()
+        out.push(trimmed)
+    }
+    out
+}
+
+tags: fn(turns: Int) -> [Tag] {
+    label: "turn"
+    out := [Tag]{}
+    loop turn in 0..<turns {
+        out.push(Tag{name: label, turn: turn})
+    }
+    out
+}
+
+run: fn() {
+    print(keep_trimmed([String]{" a ", "b "}).len())
+    print(tags(2).len())
+}

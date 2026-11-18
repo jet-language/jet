@@ -158,7 +158,7 @@ cli_build_plugin_manifest_capabilities: fn(value: String) -> [BuildEffect] Build
     loop part in inner.split(",") {
         item: part.trim()
         if item == "" -> next
-        name: cli_build_plugin_manifest_string(item, "abilities") ?? return Err(err)
+        name: cli_build_plugin_manifest_string(item.copy(), "abilities") ?? return Err(err)
         capability: BuildEffect.parse(name) ?? return Err(cli_build_plugin_error("unknown build ability {name}"))
         if capabilities.contains(capability) -> next
         index := capabilities.len()

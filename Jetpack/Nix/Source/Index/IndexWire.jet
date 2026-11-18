@@ -201,7 +201,7 @@ NixIndexRecordWire: struct {
         outputs := [NixIndexOutputWire]{}
         names: nixeval_sorted(record.outputs.keys().to_list())
         loop name in names {
-            outputs.push(NixIndexOutputWire{name: name, store_path: record.outputs[name]})
+            outputs.push(NixIndexOutputWire{name: name.copy(), store_path: record.outputs[name]})
         }
         NixIndexRecordWire{attrpath: record.attrpath, version: record.version, drv_path: record.drv_path, outputs: outputs}
     }

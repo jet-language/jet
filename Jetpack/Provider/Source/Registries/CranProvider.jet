@@ -208,7 +208,7 @@ provider_cran_parse_packages: fn(raw: String) -> [String:CranRecord] RegistryErr
             return Err(RegistryError.Reason("CRAN metadata contains unsafe package identity `{name}` version `{version}`"))
         }
         dependencies: provider_cran_record_dependencies(fields)
-        records[name] = CranRecord{name: name, version: version, dependencies: dependencies}
+        records[name] = CranRecord{name: name.copy(), version: version, dependencies: dependencies}
     }
     if records.len() == 0 {
         return Err(RegistryError.Reason("CRAN PACKAGES metadata contained no package records"))

@@ -22,7 +22,7 @@ pkg_fetch: fn(verification: &StoreVerification, project_root: String, manifest: 
     resolver.registry_plan = pkg_fetch_registry_plan(resolver, manifest)
     direct: pkg_lock_manifest_dependency_names(manifest)
     loop name in direct {
-        pkg_fetch_resolve(verification, roots, context, resolver, name, manifest.dependencies[name], root, [String]{"{manifest.package.name} (root)", name})
+        pkg_fetch_resolve(verification, roots, context, resolver, name, manifest.dependencies[name], root, [String]{"{manifest.package.name} (root)", name.copy()})
     }
     lock := existing ?? LockFile.empty()
     lock.version = PKG_LOCK_VERSION

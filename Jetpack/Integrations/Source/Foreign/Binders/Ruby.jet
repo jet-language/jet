@@ -130,16 +130,16 @@ pkg_ruby_parse_function_names: fn(bytes: [U8]) -> [String] ForeignBindError! {
     loop line in pkg_binder_lines(text) {
         name: line.trim()
         if name == "" -> next
-        if !pkg_binder_is_ident(name) {
+        if !pkg_binder_is_ident(name.copy()) {
             return Err(ForeignBindError.Source("Ruby function `{name}` cannot be projected as a Jet identifier"))
         }
-        if pkg_ruby_reserved(name) {
+        if pkg_ruby_reserved(name.copy()) {
             return Err(ForeignBindError.Source("Ruby function `{name}` uses a reserved generated binding name"))
         }
-        if out.contains(name) {
+        if out.contains(name.copy()) {
             return Err(ForeignBindError.Source("Ruby function `{name}` is declared more than once"))
         }
-        out.push(name)
+        out.push(name.copy())
     }
     if out.len() == 0 {
         return Err(ForeignBindError.Source("no top-level named Ruby functions were found"))

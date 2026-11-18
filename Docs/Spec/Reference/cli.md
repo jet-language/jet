@@ -1449,7 +1449,15 @@ with E2104; it never produces a clean-cost claim. The collector retains nested
 loop depth through control flow and closure bodies. `lint --cost` reports each retained
 cost inside a loop once per site and operation as L2510 (view
 materialization included) and omits optimizer-proven removals; `jet check`
-does not report L2510. Findings exit 1 on stderr (diagnostic JSON Lines under
+does not report L2510. Without `--cost`, `jet check` and `jet build` list each
+hidden copy a loop repeats (a view made owned, or an implicit copy whose type's
+clone allocates: a `String`, `List`, `Map` or a value holding one; never a
+bitwise copy, a `Shared` share, or a copy the source writes as `.copy()`)
+once per site as the L2511 tidy error
+`hidden_copy_in_loop`, which fails them and never stops `jet run` or `jet
+dev`. A view local read only as the receiver of a builtin scalar read
+(`trimmed.len()`, `is_empty`, `index_of`, …) is read in place, never made
+owned. `lint --cost` findings exit 1 on stderr (diagnostic JSON Lines under
 `--json`) with a `N hidden dynamic cost warnings found` line; clean
 invocations exit 0. `explain --cost` lists every cost site, removed ones
 included, one `file:line fn name — kind — state (loop depth N;

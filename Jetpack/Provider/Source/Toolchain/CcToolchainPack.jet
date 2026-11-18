@@ -878,10 +878,10 @@ provider_cc_pack_build_musl: fn(tools: CcPackTools, target: CcPackTarget, lib: S
     loop line in text.split("\n").to_list() {
         source: line.trim()
         if source == "" -> next
-        provider_cc_validate_relative_path(source)
-        object: "{source.replace("/", "_")}.o"
+        provider_cc_validate_relative_path(source.copy())
+        object: "{source.copy().replace("/", "_")}.o"
         objects.push(object.copy())
-        specs.push(provider_cc_pack_compile(clang, flags, files.join(source_root, source), files.join(scratch, object), false))
+        specs.push(provider_cc_pack_compile(clang, flags, files.join(source_root, source.copy()), files.join(scratch, object), false))
     }
     if objects.len() == 0 {
         return Err(CcToolchainError.Invalid("musl source list for {target.arch} is empty"))

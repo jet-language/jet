@@ -944,8 +944,8 @@ provider_registry_tar_members: fn(stream: [U8]) -> [RegistryTarMember] RegistryE
     loop members.len() <= PROVIDER_MAX_ARCHIVE_ENTRIES {
         if at + PROVIDER_TAR_BLOCK > stream.len() -> return Err(unreadable)
         header: stream[at..<(at + PROVIDER_TAR_BLOCK)]
-        if provider_registry_tar_zero(header) -> break
-        if !provider_registry_tar_checksum_valid(header) -> return Err(unreadable)
+        if provider_registry_tar_zero(header.copy()) -> break
+        if !provider_registry_tar_checksum_valid(header.copy()) -> return Err(unreadable)
         stored: provider_registry_tar_number(header[124..<136])
         start: at + PROVIDER_TAR_BLOCK
         if stored > PROVIDER_MAX_ARCHIVE_ENTRY_BYTES || stored > stream.len() - start {
@@ -956,24 +956,24 @@ provider_registry_tar_members: fn(stream: [U8]) -> [RegistryTarMember] RegistryE
         payload: stream[start..<(start + stored)]
         if flag == {
             120 -> {
-                named: provider_registry_pax_path(payload)
+                named: provider_registry_pax_path(payload.copy())
                 if named != None -> pending_name = named
                 next
             }
             76 -> {
-                pending_name = Val(provider_registry_tar_text(payload))
+                pending_name = Val(provider_registry_tar_text(payload.copy()))
                 next
             }
             103 | 75 -> next
             else -> {}
         }
-        name: pending_name ?? provider_registry_tar_header_name(header)
+        name: pending_name ?? provider_registry_tar_header_name(header.copy())
         pending_name = None
         if name.bytes().len() > PROVIDER_MAX_ARCHIVE_PATH_BYTES {
             return Err(RegistryError.Reason("source archive path exceeds {PROVIDER_MAX_ARCHIVE_PATH_BYTES} bytes"))
         }
         mode: provider_registry_tar_number(header[100..<108])
-        members.push(RegistryTarMember{entry: RegistryTarEntry{name: name, kind: provider_registry_tar_kind(flag, name), size: stored}, mode: mode, start: start})
+        members.push(RegistryTarMember{entry: RegistryTarEntry{name: name.copy(), kind: provider_registry_tar_kind(flag, name), size: stored}, mode: mode, start: start})
     }
     if pending_name != None -> return Err(unreadable)
     Ok(members)

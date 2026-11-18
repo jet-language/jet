@@ -26,12 +26,12 @@ trust_canonical_targets: fn(targets: TargetsMetadata) -> String Never! {
         meta: targets.targets[path]
         hash: meta.hashes.get("sha256") ?? ""
         out.push("target.{path}={meta.length}:{hash}\n")
-        trust_append_framed(out, "target-meta", [String]{path, "{meta.length}"})
+        trust_append_framed(out, "target-meta", [String]{path.copy(), "{meta.length}"})
         loop algorithm in trust_sorted_text_keys(meta.hashes) {
-            trust_append_framed(out, "target-hash", [String]{path, algorithm, meta.hashes[algorithm]})
+            trust_append_framed(out, "target-hash", [String]{path.copy(), algorithm.copy(), meta.hashes[algorithm]})
         }
         loop name in trust_sorted_text_keys(meta.custom) {
-            trust_append_framed(out, "target-custom", [String]{path, name, meta.custom[name]})
+            trust_append_framed(out, "target-custom", [String]{path.copy(), name.copy(), meta.custom[name]})
         }
     }
     out.join("")
@@ -45,9 +45,9 @@ trust_canonical_snapshot: fn(snapshot: SnapshotMetadata) -> String Never! {
         entry: snapshot.meta[name]
         hash: entry.hashes.get("sha256") ?? ""
         out.push("meta.{name}={entry.version}:{hash}:{entry.length}\n")
-        trust_append_framed(out, "snapshot-meta", [String]{name, "{entry.version}", "{entry.length}"})
+        trust_append_framed(out, "snapshot-meta", [String]{name.copy(), "{entry.version}", "{entry.length}"})
         loop algorithm in trust_sorted_text_keys(entry.hashes) {
-            trust_append_framed(out, "snapshot-hash", [String]{name, algorithm, entry.hashes[algorithm]})
+            trust_append_framed(out, "snapshot-hash", [String]{name.copy(), algorithm.copy(), entry.hashes[algorithm]})
         }
     }
     out.join("")
@@ -59,7 +59,7 @@ trust_canonical_timestamp: fn(timestamp: TimestampMetadata) -> String Never! {
     out := [String]{"jet-tuf-timestamp-v1\nversion={timestamp.version}\nexpires={timestamp.expires_unix}\nsnapshot={entry.version}:{hash}:{entry.length}\n"}
     trust_append_framed(out, "timestamp-snapshot", [String]{"{entry.version}", "{entry.length}"})
     loop algorithm in trust_sorted_text_keys(entry.hashes) {
-        trust_append_framed(out, "timestamp-hash", [String]{algorithm, entry.hashes[algorithm]})
+        trust_append_framed(out, "timestamp-hash", [String]{algorithm.copy(), entry.hashes[algorithm]})
     }
     out.join("")
 }

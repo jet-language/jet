@@ -389,8 +389,8 @@ core_decl_coverage: fn(expression: String, context: String) -> CoreCallCoverage 
     loop raw in call.args[0].split("|") {
         part: raw.trim()
         if part.starts_with("CoreCallCoverage.") {
-            name: part.removeprefix("CoreCallCoverage.")
-            bit: core_decl_coverage_bit(name)
+            name: part.after("CoreCallCoverage.")
+            bit: core_decl_coverage_bit(name.copy())
             if bit < 0 {
                 return Err(core_decl_fail("CoreCallCoverage.{name} has no Jet coverage bit in {context}"))
             }

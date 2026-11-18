@@ -62,8 +62,8 @@ envmodel_extract_packages: fn(value: Expr, src: String) -> ExtractedPackages Env
     loop piece in envmodel_sugar_split_top_level(body) {
         item: piece.trim()
         if item == "" -> next
-        if item.starts_with(PKG_ADAPT) -> out.adapters.push(envmodel_parse_adapter(item)) else {
-            plain.push(item)
+        if item.starts_with(PKG_ADAPT) -> out.adapters.push(envmodel_parse_adapter(item.copy())) else {
+            plain.push(item.copy())
         }
     }
     out.packages = Pkg.parse_list(plain.join(", "))
@@ -168,7 +168,7 @@ envmodel_parse_build_steps: fn(args: String) -> [BuildStep] EnvModelEvalError! {
     loop piece in envmodel_sugar_split_top_level(body) {
         item: piece.trim()
         if item == "" -> next
-        steps.push(envmodel_parse_build_step(item))
+        steps.push(envmodel_parse_build_step(item.copy()))
     }
     if steps.len() == 0 -> return Err(envmodel_adapter_shape())
     Ok(steps)
@@ -225,7 +225,7 @@ envmodel_sugar_named_fields: fn(args: String) -> [SugarField]? Never! {
     loop piece in envmodel_sugar_split_top_level(args) {
         item: piece.trim()
         if item == "" -> next
-        halves: item.split_once(":") ?? return None
+        halves: item.copy().split_once(":") ?? return None
         name: halves.before.trim()
         value: halves.after.trim()
         if name == "" || value == "" -> return None
@@ -279,7 +279,7 @@ envmodel_sugar_named_raw: fn(args: String, key: String) -> String? Never! {
     loop piece in envmodel_sugar_split_top_level(args) {
         item: piece.trim()
         if item.starts_with(needle) {
-            rest := item.removeprefix(needle).trim()
+            rest := item.copy().removeprefix(needle).trim()
             loop rest.ends_with(",") -> rest = rest.removesuffix(",")
             return Val(rest)
         }

@@ -6582,10 +6582,11 @@ sema_expr_check_copy_typed: fn(checked: TExpr, span: Span, expected: Type?, envi
     if sema_copy_memory_operation(facts) != None && effect_name == None {
         context.copy_events.push(SemaCopyEvent{span: span, facts: facts})
     }
-    result_kind := if share -> TExprKind.Clone{value: checked, fact: CopyFact.Share} else -> TExprKind.ExplicitCopy{value: checked}
+    share_fact: sema_copy_hidden_fact(facts, CopyFact.Share)
+    result_kind := if share -> TExprKind.Clone{value: checked, fact: share_fact} else -> TExprKind.ExplicitCopy{value: checked}
     if facts.lowering == {
         .Clone -> {
-            result_kind = TExprKind.Clone{value: checked, fact: if share -> CopyFact.Share else -> CopyFact.Explicit}
+            result_kind = TExprKind.Clone{value: checked, fact: if share -> share_fact else -> CopyFact.Explicit}
         }
         .MaterializeView -> { result_kind = TExprKind.MaterializeView{value: checked} }
         .ExplicitCopy -> {}

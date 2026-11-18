@@ -123,7 +123,7 @@ cli_cmd_env_project: fn(verification: &StoreVerification, cache: &WorkspaceDecla
     cli_env_timing_mark(timing, ready_started, "plan-loaded")
     // U16: ad-hoc `-p` packages become ordinary Jetpack refs in the same plan.
     loop name in parsed.flags.packages {
-        plan.refs.push(RefSpec{source: RefSource.Jetpack, package: name, raw: "{name}{REF_PROVIDER_AT}{REF_SOURCE_JETPACK}"})
+        plan.refs.push(RefSpec{source: RefSource.Jetpack, package: name.copy(), raw: "{name}{REF_PROVIDER_AT}{REF_SOURCE_JETPACK}"})
     }
     cli_apply_locked_channels(theme, project_dir, plan.table, flags) ?? return cli_exit_for(theme, err)
     // U19: `jet env` never runs a project function, but it realizes the
@@ -278,7 +278,7 @@ cli_replay_locked_nix: fn(verification: &StoreVerification, theme: Theme, roots:
     }
     checked := [VerifiedRealization]{}
     loop spec in locked {
-        realized: store_realize_verified(verification, roots, ctx, RealizeRequest.Package{spec: spec, table: table}) ?? {
+        realized: store_realize_verified(verification, roots, ctx, RealizeRequest.Package{spec: spec.copy(), table: table}) ?? {
             return Err(CLIError.Other("could not verify locked Nix admission for `{spec.raw}`: {err.message()}"))
         }
         checked.push(realized)
@@ -598,7 +598,7 @@ cli_enter_foreign_flake: fn(verification: &StoreVerification, theme: Theme, proj
     }
     plan := RunPlan.empty(cli_current_dir(), cli_builtin_table())
     loop package in facts.packages {
-        plan.refs.push(RefSpec{source: RefSource.Jetpack, package: package, raw: "{package}@{REF_SOURCE_JETPACK}"})
+        plan.refs.push(RefSpec{source: RefSource.Jetpack, package: package.copy(), raw: "{package}@{REF_SOURCE_JETPACK}"})
     }
     theme.status("entering native projection of foreign shell: {theme.bold(flake_path)}")
     env := cli_compose_env(verification, theme, pkg_resolve_roots(), parsed.flags, plan) ?? return cli_exit_for(theme, err)

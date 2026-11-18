@@ -305,13 +305,13 @@ cli_newest_tag: fn(lines: [String], mask: String?) -> String? Never! {
     loop line in lines {
         tail: line.split_once("refs/tags/")?.after ?? next
         release_tag: tail.trim()
-        nums: cli_semver_nums(release_tag) ?? next
+        nums: cli_semver_nums(release_tag.copy()) ?? next
         if major == .Val(wanted) {
             if nums.len() == 0 || nums[0] != wanted -> next
         }
         if best == None || cli_version_greater(nums, best_nums) {
             best_nums = nums
-            best = Val(release_tag)
+            best = Val(release_tag.copy())
         }
     }
     best

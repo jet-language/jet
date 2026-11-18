@@ -129,7 +129,7 @@ cli_test_registry_server: fn(listener: net.TCPListener, expected_requests: Int) 
         }
         if header_end < 0 -> next
         header_text: String.from_bytes(request.slice(0, header_end)) ?? ""
-        lines: header_text.lines()
+        lines: header_text.split(cli_test_crlf()).to_list()
         request_parts: (lines.get(0) ?? "").split(" ").to_list()
         method: request_parts.get(0) ?? ""
         path: request_parts.get(1) ?? ""

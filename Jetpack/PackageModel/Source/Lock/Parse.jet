@@ -1082,7 +1082,7 @@ pkg_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
     loop part_text in parts {
         part: part_text.trim()
         if !part.starts_with(key) -> next
-        rest: part.removeprefix(key).trim()
+        rest: part.copy().removeprefix(key).trim()
         if !rest.starts_with("=") -> return None
         value: rest.removeprefix("=").trim()
         if value.starts_with("\"") -> return Val(pkg_lock_unescape(value))

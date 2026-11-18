@@ -220,9 +220,9 @@ module_value_refusal_head: fn(rendered: String) -> String {
     head := [String]{}
     loop line in rendered.split("\n") {
         trimmed: line.trim()
-        if trimmed.starts_with("Error") -> head.push(trimmed)
+        if trimmed.starts_with("Error") -> head.push(trimmed.copy())
         if trimmed.starts_with("-->") {
-            parts: trimmed.split("/").to_list()
+            parts: trimmed.copy().split("/").to_list()
             head.push("--> {parts[parts.len() - 1].removeprefix("--> ")}")
         }
         if head.len() == 2 -> break

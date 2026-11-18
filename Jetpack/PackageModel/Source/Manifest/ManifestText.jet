@@ -57,7 +57,7 @@ pkg_key_value_entries: fn(body: String) -> [ManifestEntry] PackageParseError! {
     loop piece in pkg_top_level_entries(body) {
         entry: piece.trim()
         if entry == "" -> next
-        parts: entry.split_once(":") ?? return Err(PackageParseError.Composition("malformed metadata field `{entry}`"))
+        parts: entry.copy().split_once(":") ?? return Err(PackageParseError.Composition("malformed metadata field `{entry}`"))
         entries.push(ManifestEntry{key: parts.before.trim(), value: parts.after.trim()})
     }
     Ok(entries)
@@ -445,7 +445,7 @@ pkg_parse_string_list: fn(value: String) -> [String]? Never! {
     loop piece in pkg_top_level_commas(inner) {
         entry: piece.trim()
         if entry == "" -> next
-        out.push(pkg_unquote(entry))
+        out.push(pkg_unquote(entry.copy()))
     }
     Val(out)
 }

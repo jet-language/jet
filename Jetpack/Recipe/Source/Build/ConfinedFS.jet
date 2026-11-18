@@ -68,7 +68,7 @@ PinnedRecipeDirectory: struct {
         loop _ in 0..<RECIPE_EXCLUSIVE_ATTEMPTS {
             name: recipe_random_name(prefix)
             if self.directory.create_directory(name, mode: Val(RECIPE_PRIVATE_MODE)) == {
-                .Ok(_) -> return Ok(RecipeChildDir{name: name, path: files.join(self.path, name)})
+                .Ok(_) -> return Ok(RecipeChildDir{name: name.copy(), path: files.join(self.path, name)})
                 .Err(error) -> {
                     if !store_io_is_already_exists(error) -> return Err(RecipeError.IO(error))
                 }

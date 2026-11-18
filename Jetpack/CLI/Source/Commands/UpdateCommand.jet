@@ -199,7 +199,7 @@ cli_plan_project_update: fn(cache: &WorkspaceDeclarationCache, theme: Theme, par
                 loop spec in plan.refs {
                     if spec.source.label() == source.name -> package_count += 1
                 }
-                updates.push(ProjectSourceUpdate{source: source, before: before, after: exact, package_count: package_count, download_bytes: cli_channel_download_size_from_fixture(source, flags_eff)})
+                updates.push(ProjectSourceUpdate{source: source.copy(), before: before, after: exact, package_count: package_count, download_bytes: cli_channel_download_size_from_fixture(source, flags_eff)})
             }
             .Err(error) -> {
                 error.report(theme)

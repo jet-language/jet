@@ -209,7 +209,7 @@ pkg_fortran_parse_routines: fn(source: String) -> [FortranRoutine] ForeignBindEr
         names := [String]{}
         loop raw_name in pkg_binder_slice(header, open + 1, close).split(",") {
             name: raw_name.trim()
-            if name != "" -> names.push(name)
+            if name != "" -> names.push(name.copy())
         }
         symbol: pkg_fortran_parse_bind_name(header) ?? return Err(ForeignBindError.Source("function `{jet_name}` must declare `bind(C, name=\"...\")`"))
         result_name: pkg_fortran_parse_result_name(header) ?? jet_name

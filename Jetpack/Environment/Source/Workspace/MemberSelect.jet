@@ -190,7 +190,7 @@ env_load_member_input_hashes: fn(root: String) -[FS]> [String:String] Never! {
     loop raw_line in text.split("\n") {
         line: raw_line.trim()
         if line == "" || line.starts_with("#") -> next
-        pair: line.split_once("=") ?? next
+        pair: line.copy().split_once("=") ?? next
         hash: pkg_binder_trim_matches(pair.after.trim(), "\"")
         if hash != "" -> out[pair.before.trim()] = hash
     }
@@ -266,7 +266,7 @@ env_suggest_git_refs: fn(root: String, query: String) -[FS, Exec, Time.Wait]> [S
     labels := [String]{}
     loop line in receipt.output.split("\n") {
         label: line.trim()
-        if label != "" -> labels.push(label)
+        if label != "" -> labels.push(label.copy())
     }
     pkg_ref_nearest(query, labels)
 }

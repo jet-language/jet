@@ -346,7 +346,7 @@ pkg_cbind_generate_with_descriptor_and_overlay: fn(header_src: String, lib: Stri
     loop raw_decl in pkg_opaque_split_declarations(cleaned) {
         decl: raw_decl.trim()
         if decl == "" -> next
-        proto: pkg_cbind_parse_prototype(decl) ?? next
+        proto: pkg_cbind_parse_prototype(decl.copy()) ?? next
         if pkg_cbind_render_binding(proto, used_names, contract, discovery, catalog) == {
             .Ok(line) -> {
                 bound.push(proto.name)

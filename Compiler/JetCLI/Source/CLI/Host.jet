@@ -4155,7 +4155,7 @@ jet_cli_external_fmt_changed: fn(root: String, changed: &[String]) -> String? {
         loop part in query -> argv.push(part)
         receipt: cli_process.cmd(argv).run() ?? return Val(jet_cli_io_error_text(err))
         if !receipt.success && query[0] == "diff" -> return Val(receipt.errors.trim())
-        loop line in receipt.output.lines() {
+        loop line in receipt.output.split("\n") {
             relative: line.trim().replace("\\", "/")
             if relative != "" && cli_files.is_file(jet_cli_authority_path(root, relative)) && !changed.contains(relative) {
                 changed.push(relative)

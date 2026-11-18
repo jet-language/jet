@@ -111,7 +111,7 @@ store_decode_diagnostics: fn(origins: [RecordValue], diagnostics: [RecordValue],
             .Val(text) -> text
             .None -> source_for_revision(revision) ?? return Err(store_diagnostic_error("diagnostic origin `{path}` is not in the closure"))
         }
-        decoded: DiagnosticOrigin{display: display, path: path, source: source, revision: sha256_hex(source)}
+        decoded: DiagnosticOrigin{display: display, path: path, source: source.copy(), revision: sha256_hex(source)}
         if decoded.revision != revision {
             return Err(store_diagnostic_error("diagnostic origin `{decoded.path}` revision mismatch"))
         }

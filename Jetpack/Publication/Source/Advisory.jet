@@ -241,7 +241,7 @@ publication_parse_advisory_feed: fn(text: String) -> PublicationAdvisoryFeed Pub
         number += 1
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
-        magic = line
+        magic = line.copy()
         magic_line = number
         break
     }
@@ -256,7 +256,7 @@ publication_parse_advisory_feed: fn(text: String) -> PublicationAdvisoryFeed Pub
         number += 1
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
-        header = line
+        header = line.copy()
         header_line = number
         break
     }
@@ -285,7 +285,7 @@ publication_parse_advisory_feed: fn(text: String) -> PublicationAdvisoryFeed Pub
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
         line_number: number
-        record: line.split("|").to_list()
+        record: line.copy().split("|").to_list()
         if record[0] == "release" && record.len() == 4 {
             target: publication_advisory_exact_target(record[1], line_number)
             seen: publication_advisory_number(record[2], "advisory feed", line_number, "release timestamp")
@@ -460,7 +460,7 @@ publication_parse_advisory_trust: fn(text: String) -> PublicationAdvisoryTrustRo
         number += 1
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
-        parts: line.split_once("=") ?? return Err(PublicationDiagnosticError{diagnostic: publication_e2607("advisory trust root", "line {number} is not key=value")})
+        parts: line.copy().split_once("=") ?? return Err(PublicationDiagnosticError{diagnostic: publication_e2607("advisory trust root", "line {number} is not key=value")})
         key: parts.before.trim()
         value: parts.after.trim()
         if key != "revoked_key" && seen.contains(key) {

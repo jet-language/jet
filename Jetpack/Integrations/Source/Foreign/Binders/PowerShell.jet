@@ -176,11 +176,11 @@ pkg_powershell_parse_function_names: fn(bytes: [U8]) -> [PwshBoundFunction] Fore
     loop line in pkg_binder_lines(text) {
         name: line.trim()
         if name == "" -> next
-        if !pkg_powershell_ident(name) {
+        if !pkg_powershell_ident(name.copy()) {
             return Err(ForeignBindError.Source("PowerShell function `{name}` cannot be projected as a Jet identifier"))
         }
         parts := [String]{}
-        loop part in name.split("-") -> parts.push(pkg_ascii_lower(part))
+        loop part in name.copy().split("-") -> parts.push(pkg_ascii_lower(part))
         jet: parts.join("_")
         if pkg_powershell_reserved(jet) {
             return Err(ForeignBindError.Source("PowerShell function `{name}` projects to reserved Jet name `{jet}`"))
@@ -190,7 +190,7 @@ pkg_powershell_parse_function_names: fn(bytes: [U8]) -> [PwshBoundFunction] Fore
                 return Err(ForeignBindError.Source("PowerShell function `{name}` collides with another generated Jet function `{jet}`"))
             }
         }
-        out.push(PwshBoundFunction{pwsh: name, jet: jet})
+        out.push(PwshBoundFunction{pwsh: name.copy(), jet: jet})
     }
     if out.len() == 0 {
         return Err(ForeignBindError.Source("no top-level PowerShell functions were found"))

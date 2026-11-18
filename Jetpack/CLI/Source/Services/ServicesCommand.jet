@@ -185,7 +185,7 @@ cli_report_service_start_error: fn(theme: Theme, title: String, error: String) -
 // Run every `before_start` job; false after the first failure is reported.
 cli_run_before_start_jobs: fn(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, roots: HangarRoots, project_dir: String, entry: String, service: DevServicePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Bool Never! {
     loop job in service.before_start {
-        job_parsed: CLIParsed{flags: parsed.flags, positional: [String]{job}, command: None}
+        job_parsed: CLIParsed{flags: parsed.flags, positional: [String]{job.copy()}, command: None}
         code: cli_run_project_job(verification, cache, theme, job_parsed, roots, project_dir, entry, job)
         if code != 0 {
             theme.error("service `{service.name}` prerequisite job `{job}` failed", "the service was not started because its declared finite job did not complete.", "fix the job, then run the service again.")
@@ -226,7 +226,7 @@ cli_run_lifecycle_hooks_with_mode: fn(verification: &StoreVerification, cache: &
     loop hook in hooks {
         if hook.action == {
             .Task(job) -> {
-                job_parsed: CLIParsed{flags: parsed.flags, positional: [String]{job}, command: None}
+                job_parsed: CLIParsed{flags: parsed.flags, positional: [String]{job.copy()}, command: None}
                 code: cli_run_project_job_with_mode(verification, cache, theme, job_parsed, roots, project_dir, entry, job, mode.clean, mode.silent)
                 if code != 0 {
                     theme.error("lifecycle {phase} job `{job}` failed", "the job returned exit code {code}", "fix the job or remove it from the environment lifecycle.")

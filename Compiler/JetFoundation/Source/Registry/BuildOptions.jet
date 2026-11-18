@@ -451,7 +451,7 @@ log_filter_bad_pair: fn(text: String) -> String? {
     loop raw in text.split(",") {
         pair: raw.trim()
         if pair == "" -> next
-        parts: pair.split("=").to_list()
+        parts: pair.copy().split("=").to_list()
         valid: if parts.len() == 1 -> log_filter_level(pair.copy()) else -> parts.len() == 2 && log_filter_module(parts[0].trim()) && log_filter_level(parts[1].trim())
         if !valid -> return Val(pair.copy())
     }

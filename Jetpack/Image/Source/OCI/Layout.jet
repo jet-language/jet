@@ -765,7 +765,7 @@ image_sorted_env: fn(entries: [ImageEnvVar]) -> [ImageEnvVar] Never! {
     loop entry in entries -> by_key[entry.key] = entry.value
     keys := by_key.keys().to_list()
     keys.sort()
-    loop key in keys -> ImageEnvVar{key: key, value: by_key[key]}
+    loop key in keys -> ImageEnvVar{key: key.copy(), value: by_key[key]}
 }
 
 image_sorted_unique_ints: fn(values: [Int]) -> [Int] Never! {

@@ -85,7 +85,7 @@ sema_core_error_family_names: fn(source: String) -> [String] Never! {
     loop line in source.split("\n") {
         declared: line.trim()
         if declared.starts_with("impl ") && declared.ends_with(" -> Err {{") {
-            names.push(declared.removeprefix("impl ").removesuffix(" -> Err {{"))
+            names.push(declared.after("impl ").removesuffix(" -> Err {{"))
         }
     }
     names

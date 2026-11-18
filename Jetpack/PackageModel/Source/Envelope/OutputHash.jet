@@ -250,7 +250,7 @@ pkg_envelope_hangar_admits: fn(root: String, hangar_root: String, link: Envelope
     loop candidate in hangars {
         local_cas: pkg_envelope_canonical_real_directory(files.join(candidate, "cas"))
         excluded := [String]{root}
-        pool_values: [String?]{local_cas, shared_cas}
+        pool_values: [String?]{local_cas.copy(), shared_cas.copy()}
         loop pool in pool_values {
             pool_path: pool ?? next
             if pkg_authority_path_within(pool_path, candidate) && pool_path != candidate {

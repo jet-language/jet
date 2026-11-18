@@ -939,11 +939,17 @@ loop item in items {
 }
 ```
 
-Cost lints are opt-in: `jet check` keeps ordinary code quiet and never reports
-L2510. `jet lint --cost file.jet` reports the semantic remainders a loop repeats.
+Cost lints are opt-in: `jet check` never reports L2510. `jet lint --cost
+file.jet` reports the semantic remainders a loop repeats.
 `jet explain --cost file.jet` reports semantic remainders and
 optimizer-proven removals, so a missing lint row is explainable rather than
-silent.
+silent. A hidden copy that a loop repeats is the one exception: a view made
+owned or an allocating implicit copy (a `String`, `List`, `Map` or a value
+holding one) inside a loop, which the source does not write, is the L2511
+(`HiddenCopyInLoop`) tidy error that `jet check` and `jet build` list and
+fail on; `jet run` and `jet dev` never stop for it. A bitwise copy, a
+`Shared` share, a copy written as `.copy()`, or one outside any loop, is no
+L2511.
 
 ## Precedence
 

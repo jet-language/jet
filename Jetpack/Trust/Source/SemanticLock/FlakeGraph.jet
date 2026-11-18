@@ -517,7 +517,7 @@ FlakeGraph: struct {
         project_root: files.canonicalize(project_dir) ?? return Err(TrustError.IO("couldn't resolve flake-parts project root `{project_dir}`: {err}"))
         pending := [FlakeModuleVisit]{}
         loop module_path in composition.modules {
-            pending.push(FlakeModuleVisit{module_path: module_path, base_dir: project_dir, root_module: true})
+            pending.push(FlakeModuleVisit{module_path: module_path, base_dir: project_dir.copy(), root_module: true})
         }
         visited := [String]{}
         module_sources := [String]{}
@@ -546,7 +546,7 @@ FlakeGraph: struct {
             parent: files.dirname(canonical)
             base: if parent == "" -> project_root else -> parent
             loop imported_path in trust_flake_module_imports(module_text) {
-                pending.push(FlakeModuleVisit{module_path: imported_path, base_dir: base, root_module: false})
+                pending.push(FlakeModuleVisit{module_path: imported_path, base_dir: base.copy(), root_module: false})
             }
         }
         self.attach_module_facts(module_sources, imported)

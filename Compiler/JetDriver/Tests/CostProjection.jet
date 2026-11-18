@@ -3,7 +3,8 @@
 // function's once per specialization it is called at, the gap a reachable
 // callee without a checked body leaves, a captured report's lines and L2510
 // lints, the implicit copy a loop repeats, the String copy `lines()` makes,
-// and the Int arithmetic a range loop's counter keeps on the packed rail.
+// the Int arithmetic a range loop's counter keeps on the packed rail, a view
+// read in place as a receiver, and a plain check's L2511 tidy errors.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -231,4 +232,71 @@ cost_projection_view_receiver_source: fn() -> String {
         }
     }
     assert_eq(copies, [String]{"ViewMaterialization `String` main.jet:5 depth 1"})
+}
+
+// Hidden copies inside loops beside copies the source writes, copies that
+// allocate nothing (a struct of Ints, a Shared handle) and one outside any
+// loop: a plain check lists an L2511 tidy error for each hidden copy a loop
+// repeats that allocates, and nothing for the rest.
+cost_projection_hidden_copy_source: fn() -> String {
+    [String]{
+        "Tag: struct {{ name: String, turn: Int }}",
+        "Extent: struct {{ start: Int, end: Int }}",
+        "Box: struct {{ n: Int }}",
+        "Holder: struct {{ cell: Shared<Box>?, extent: Extent }}",
+        "keep: fn(lines: [String]) -> [String] {{",
+        "    out := [String]{{}}",
+        "    loop line in lines {{",
+        "        trimmed: line.trim()",
+        "        out.push(trimmed)",
+        "        out.push(trimmed.copy())",
+        "    }}",
+        "    first: lines[0].trim()",
+        "    out.push(first)",
+        "    out",
+        "}}",
+        "tags: fn(turns: Int) -> [Tag] {{",
+        "    label: \"turn\"",
+        "    out := [Tag]{{}}",
+        "    loop turn in 0..<turns {{",
+        "        out.push(Tag{{name: label, turn: turn}})",
+        "    }}",
+        "    out",
+        "}}",
+        "written: fn(turns: Int) -> [Tag] {{",
+        "    label: \"turn\"",
+        "    out := [Tag]{{}}",
+        "    loop turn in 0..<turns {{",
+        "        out.push(Tag{{name: label.copy(), turn: turn}})",
+        "    }}",
+        "    out",
+        "}}",
+        "holders: fn(turns: Int) -> [Holder] {{",
+        "    cell: Shared{{Box{{n: 1}}}}",
+        "    extent: Extent{{start: 0, end: 1}}",
+        "    out := [Holder]{{}}",
+        "    loop turn in 0..<turns {{",
+        "        held := extent",
+        "        held.end = turn",
+        "        out.push(Holder{{cell: Val(cell), extent: held}})",
+        "    }}",
+        "    out",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+#Test("a plain check lists an L2511 tidy error for each allocating hidden copy a loop repeats, and none for a written, bitwise or shared-handle copy or one outside a loop") {
+    compiled := jet_driver_compile(cost_projection_request(cost_projection_hidden_copy_source()))
+    assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
+    if compiled.cost_report == .Val(_) -> panic("a plain check keeps no cost report")
+    tidy := [String]{}
+    loop row in compiled.diagnostics {
+        if row.code == "L2511" -> tidy.push("{row.what} | {row.fix}")
+        assert(row.code != "L2510", "a plain check lists no L2510 lint: {row.what}")
+    }
+    assert_eq(tidy, [String]{
+        "This copy of `String` view into an owned slot inside a loop | To keep the copy out of the loop, keep the value in its view form, or make the copy explicit outside the loop.",
+        "Implicitly copying a `String` inside a loop | To keep the copy out of the loop, hand the value over with `.move()` at its last use, or make the copy explicit outside the loop.",
+    })
 }

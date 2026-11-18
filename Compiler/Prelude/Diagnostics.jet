@@ -22117,6 +22117,31 @@ HiddenCostInLoop: struct {
     }
 }
 
+HiddenCopyInLoop: struct {
+    operation: String,
+    fix_text: String,
+
+    impl Diagnostic {
+        code: "L2511",
+        meaning: "A hidden copy repeated on every turn of a loop",
+        severity: .Lint,
+        tier: .Tidy,
+        lint_name: "hidden_copy_in_loop",
+        stage: [.Compile],
+        detail: true,
+        no_fix: .Behavior,
+        fix_next: "Hand the value over with `.move()`, keep it in its view form, or write the copy explicitly.",
+
+        what: fn(self) -> String { "{self.operation} inside a loop" }
+
+        why: fn(self) -> String {
+            "The loop pays for this copy on every turn and the source doesn't show it, so the loop's cost grows with the copied value's size."
+        }
+
+        fix: fn(self) -> String { "To keep the copy out of the loop, {self.fix_text}." }
+    }
+}
+
 ReduceMarkerOutsideReduce: struct {
     impl Diagnostic {
         code: "E2510",

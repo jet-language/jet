@@ -348,7 +348,7 @@ provider_luarocks_parse_dependencies: fn(raw: String) -> [LuaRocksDependency] Re
         loop piece in pieces {
             requirement: piece.trim()
             if requirement == "" -> next
-            parts: provider_registry_words(requirement)
+            parts: provider_registry_words(requirement.copy())
             operator: if parts.len() > 0 -> parts[0] else -> ""
             wanted: if parts.len() > 1 -> parts[1] else -> ""
             known: if operator == {
@@ -708,7 +708,7 @@ provider_luarocks_keyed_strings: fn(raw: String) -> [String:String] RegistryErro
         if line == "" || line.starts_with("--") -> next
         pair: line.split_once("=") ?? return Err(RegistryError.Reason("unsupported module entry `{line}`"))
         written_key: pair.before.trim()
-        key := written_key
+        key := written_key.copy()
         if written_key.starts_with("[") {
             unbracketed := written_key
             loop unbracketed.starts_with("[") -> unbracketed = unbracketed.removeprefix("[")

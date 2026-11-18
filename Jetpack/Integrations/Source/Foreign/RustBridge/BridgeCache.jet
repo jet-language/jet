@@ -595,8 +595,8 @@ pkg_ffi_cargo_lock_bridge_packages: fn(raw: String, bridge_identity: String, out
         if package.checksum == .Val(checksum) -> content_hash = Val("sha256-{checksum}")
         packages.push(
             LockedPackage{
-                name: name,
-                version: version,
+                name: name.copy(),
+                version: version.copy(),
                 source: LockSource.Foreign{language: KW_RUST, reference: "{name}@{version}", output: output},
                 fingerprint: content_hash ?? "",
                 content_hash: content_hash,
@@ -628,7 +628,7 @@ pkg_ffi_parse_cargo_lock: fn(raw: String) -> [CargoLockPackage] ForeignBridgeErr
         }
         package := current ?? next
         if in_dependencies {
-            if line == "]" -> in_dependencies = false else if pkg_ffi_cargo_lock_quoted_value(line) == .Val(dependency) {
+            if line == "]" -> in_dependencies = false else if pkg_ffi_cargo_lock_quoted_value(line.copy()) == .Val(dependency) {
                 name: if dependency.split_once(" ") == {
                     .Val(parts) -> parts.before
                     .None -> dependency
@@ -644,11 +644,11 @@ pkg_ffi_parse_cargo_lock: fn(raw: String) -> [CargoLockPackage] ForeignBridgeErr
             in_dependencies = true
             next
         }
-        if pkg_ffi_cargo_lock_field(line, "name") == .Val(value) -> package.name = Val(value) else if pkg_ffi_cargo_lock_field(line, "version") == .Val(value) {
+        if pkg_ffi_cargo_lock_field(line.copy(), "name") == .Val(value) -> package.name = Val(value) else if pkg_ffi_cargo_lock_field(line.copy(), "version") == .Val(value) {
             package.version = Val(value)
-        } else if pkg_ffi_cargo_lock_field(line, "source") == .Val(value) {
+        } else if pkg_ffi_cargo_lock_field(line.copy(), "source") == .Val(value) {
             package.source = Val(value)
-        } else if pkg_ffi_cargo_lock_field(line, "checksum") == .Val(value) {
+        } else if pkg_ffi_cargo_lock_field(line.copy(), "checksum") == .Val(value) {
             package.checksum = Val(value)
         }
         current = Val(package)

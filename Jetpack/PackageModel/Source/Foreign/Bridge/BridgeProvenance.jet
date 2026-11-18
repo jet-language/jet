@@ -320,7 +320,7 @@ pkg_bridge_tool_identity: fn(tool: String) -[FS, Env, Exec, Time.Wait]> String N
             rows := [String]{}
             loop line in pkg_bridge_text_lines("{receipt.output}{receipt.errors}") {
                 trimmed: line.trim()
-                if trimmed != "" -> rows.push(trimmed)
+                if trimmed != "" -> rows.push(trimmed.copy())
             }
             joined: rows.join(" | ")
             if joined != "" -> version = joined

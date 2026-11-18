@@ -84,7 +84,7 @@ env_script_lock_parse: fn(raw: String) -> ScriptLockFile EnvironmentError! {
             in_dep = true
             next
         }
-        pair: line.split_once("=") ?? return Err(EnvironmentError.InvalidData("malformed line in script lock: `{line}`"))
+        pair: line.copy().split_once("=") ?? return Err(EnvironmentError.InvalidData("malformed line in script lock: `{line}`"))
         key: pair.before.trim()
         value: pkg_binder_trim_matches(pair.after.trim(), "\"")
         if in_dep {

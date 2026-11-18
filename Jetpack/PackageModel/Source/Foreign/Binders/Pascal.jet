@@ -321,10 +321,10 @@ pkg_pascal_parse_routine: fn(header: String, is_procedure: Bool) -> PascalRoutin
         kind: PascalScalar.parse(raw_kind) ?? return Err(ForeignBindError.Source("routine `{name}` uses unsupported parameter type `{raw_kind.trim()}`"))
         loop raw_item in value_names.split(",") {
             item: raw_item.trim()
-            if !pkg_binder_is_ident(item) {
+            if !pkg_binder_is_ident(item.copy()) {
                 return Err(ForeignBindError.Source("routine `{name}` has invalid parameter `{item}`"))
             }
-            params.push(PascalParam{name: item, kind: kind})
+            params.push(PascalParam{name: item.copy(), kind: kind})
         }
     }
     if is_procedure {

@@ -180,7 +180,7 @@ jet_driver_cost_report: fn(functions: [FnBody], covered: [JetDriverCostCovered])
     report := TCostReport{}
     loop row in covered {
         report.functions.push(row.name)
-        jet_driver_cost_function_sites(functions[row.position], row.name, jet_driver_cost_nodes(functions[row.position]), report.sites)
+        jet_driver_cost_function_sites(functions[row.position], row.name, jet_driver_cost_nodes(functions[row.position]), jet_driver_cost_loop_depths(functions[row.position].tree), report.sites)
     }
     report
 }
@@ -211,6 +211,37 @@ jet_driver_cost_lints: fn(load: JetDriverLoadResult, report: TCostReport) -> [Di
         lints.push(jet_driver_diagnostic_at_loaded_site(load, site.module_identity, "L2510", site.span, "{operation} inside a loop", "A repeated copy or representation fallback can make a growing value's cost super-linear.", "To keep the loop's cost linear, {jet_driver_cost_fix(site.kind)}."))
     }
     lints
+}
+
+// The L2511 tidy errors of `functions`: one per distinct hidden copy
+// (jet_driver_cost_hidden_copy) that a loop of a function the program wrote
+// repeats. A plain check lists them without keeping a cost report, and a
+// function without a loop is not walked.
+jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -> [Diagnostic] {
+    sites := [TCostSite]{}
+    loop function in functions {
+        if !jet_driver_cost_reports(function) -> next
+        depths: jet_driver_cost_loop_depths(function.tree)
+        if depths.len() == 0 -> next
+        jet_driver_cost_function_sites(function, function.name, jet_driver_cost_nodes(function), depths, sites)
+    }
+    lints := [Diagnostic]{}
+    seen := [String:Bool]{}
+    loop site in sites {
+        if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || !jet_driver_cost_hidden_copy(site.kind) -> next
+        operation: jet_driver_cost_operation(site)
+        key: "{site.module_identity:Debug} {site.span.start} {site.span.end} {operation}"
+        if seen.get(key) != None -> next
+        seen[key] = true
+        lints.push(jet_driver_diagnostic_at_loaded_site(load, site.module_identity, "L2511", site.span, "{operation} inside a loop", "The loop pays for this copy on every turn and the source doesn't show it, so the loop's cost grows with the copied value's size.", "To keep the copy out of the loop, {jet_driver_cost_fix(site.kind)}."))
+    }
+    lints
+}
+
+// The cost kinds L2511 lists: a copy sema made that the source doesn't
+// write, a view made owned or an implicit copy.
+jet_driver_cost_hidden_copy: fn(kind: TCostKind) -> Bool Never! {
+    kind == TCostKind.ViewMaterialization || kind == TCostKind.ImplicitCopy
 }
 
 // What a cost kind is, as `explain --cost` names it.
@@ -361,12 +392,12 @@ jet_driver_cost_consumed: fn(tree: BodyTree, consumed: &[Int:Bool], removed: &[I
 }
 
 // Pushes onto `sites` the cost sites of `function`, reported as `name`:
-// those of its expressions `nodes`, in order, then those of its assignments.
+// those of its expressions `nodes`, in order, then those of its assignments,
+// each at its loop depth in `depths` (jet_driver_cost_loop_depths).
 // An Outcome a `??` takes apart is optimizer-removed; one the enclosing code
 // consumes otherwise is no site.
-jet_driver_cost_function_sites: fn(function: FnBody, name: String, nodes: [Int], sites: &[TCostSite]) Never! {
+jet_driver_cost_function_sites: fn(function: FnBody, name: String, nodes: [Int], depths: [Int:Int], sites: &[TCostSite]) Never! {
     tree: function.tree
-    depths: jet_driver_cost_loop_depths(tree)
     consumed := [Int:Bool]{}
     removed := [Int:Bool]{}
     jet_driver_cost_consumed(tree, consumed, removed)

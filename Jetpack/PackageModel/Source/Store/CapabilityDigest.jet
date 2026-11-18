@@ -48,15 +48,15 @@ pkg_capability_snapshot_parse: fn(raw: String) -> PackageCapabilitySnapshot? Nev
         line: raw_line.trim()
         if line == "" -> next
         if {
-            line.starts_with("api_version = ") -> version = Val(pkg_lock_parse_unsigned(line.removeprefix("api_version = "), 4294967295) ?? return None)
-            line.starts_with("package = ") -> package = Val(line.removeprefix("package = "))
-            line.starts_with("published_version = ") -> published = Val(line.removeprefix("published_version = "))
-            pkg_api_snapshot_line_name(line) != None -> signatures.push(line)
+            line.starts_with("api_version = ") -> version = Val(pkg_lock_parse_unsigned(line.copy().removeprefix("api_version = "), 4294967295) ?? return None)
+            line.starts_with("package = ") -> package = Val(line.copy().removeprefix("package = "))
+            line.starts_with("published_version = ") -> published = Val(line.copy().removeprefix("published_version = "))
+            pkg_api_snapshot_line_name(line.copy()) != None -> signatures.push(line.copy())
             line.contains(": fn") -> {
                 name := line
-                if line.split_once(": fn") == .Val(pair) -> name = pair.before
+                if line.copy().split_once(": fn") == .Val(pair) -> name = pair.before
                 if name.trim() == "" -> return None
-                signatures.push(line)
+                signatures.push(line.copy())
             }
             else -> return None
         }

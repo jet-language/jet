@@ -188,7 +188,7 @@ jet_cli_expand_derive: fn(index: SemIndex, modules: [JetDriverDocModule]) -> [Je
             },
         )
         text := "{row.name}: {definition.derives.join(", ")} [{row.identity}]"
-        loop line in forwarded.lines() -> text = "{text}\n    {line}".trim_end()
+        loop line in forwarded.split("\n") -> text = "{text}\n    {line}".trim_end()
         output.push(JetCLIExpandFact{source: row.module_path, offset: row.def_span.start, name: row.name, text: text, value: value})
     }
     jet_cli_expand_sort_facts(output)
@@ -246,7 +246,7 @@ jet_cli_expand_templates: fn(modules: [JetDriverDocModule]) -> [JetCLIExpandFact
     output := [JetCLIExpandFact]{}
     loop unit in modules {
         has_loop := false
-        loop line in unit.source.lines() {
+        loop line in unit.source.split("\n") {
             if line.trim_start().starts_with("#loop") -> has_loop = true
         }
         if !has_loop -> next

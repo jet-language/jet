@@ -172,7 +172,7 @@ pkg_parse_common: fn(text: String, origin: String, config: Bool) -> PackageFacts
             if facts.outputs.has_key(field) {
                 return Err(PackageParseError.Composition("output `{field}` is declared more than once"))
             }
-            facts.outputs[field] = output
+            facts.outputs[field] = output.copy()
             pkg_record_output_provenance(facts.provenance, "outputs.{field}", facts.origin, output)
             next
         }

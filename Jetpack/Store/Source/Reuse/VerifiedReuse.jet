@@ -344,7 +344,7 @@ store_reuse_verified_environment_members: fn(verification: &StoreVerification, r
         // member proof has no prior digest for those auxiliary paths. The
         // primary output is covered by output_digest; opaque dependencies
         // stay on the ordinary path.
-        external: store_external_output_paths(roots, [StoreEntry]{entry})
+        external: store_external_output_paths(roots, [StoreEntry]{entry.copy()})
         auxiliary := false
         loop path in external {
             if !store_reuse_same_path(path, entry.out) -> auxiliary = true

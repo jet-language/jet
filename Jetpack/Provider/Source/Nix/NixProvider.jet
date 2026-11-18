@@ -175,7 +175,7 @@ NixProvider: struct {
         roots: ctx.nix_roots ?? return Err(ProviderError.BadOutput("index-backed Nix realization has no Hangar roots for closure admission"))
         requests := [NixOutputRequest]{}
         loop name in provider_sorted_keys(verified.record.outputs) {
-            requests.push(NixOutputRequest{name: name, store_path: verified.record.outputs[name]})
+            requests.push(NixOutputRequest{name: name.copy(), store_path: verified.record.outputs[name]})
         }
         admitted: store_admit_nix_closure_with_progress(verification, roots, requests, ctx.offline, None, ctx.progress) ?? return Err(provider_nix_cache_error(verification, roots, err))
         realized: provider_realization_from_index(spec, key, verified, admitted)

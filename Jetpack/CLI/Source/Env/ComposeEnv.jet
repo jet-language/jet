@@ -393,7 +393,7 @@ cli_compose_env_scoped_with_warm: fn(verification: &StoreVerification, theme: Th
                     raw: lease.read_output(meta.file) ?? next
                     value: raw.trim()
                     if value == "" -> next
-                    if cli_resolve_provider_paths(leased_output, meta.file, value) == {
+                    if cli_resolve_provider_paths(leased_output, meta.file, value.copy()) == {
                         .Val(resolved) -> {
                             values := provider_vars.get(meta.variable) ?? [LeaseText]{}
                             if values.len() == 0 -> provider_var_order.push(meta.variable)

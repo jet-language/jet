@@ -116,7 +116,7 @@ pkg_binder_capture_env: fn(argv: [String], cwd: String?, env: [{name: String, va
 pkg_binder_launder_first_line: fn(bytes: [U8]) -> String Never! {
     loop line in pkg_binder_lines(String.from_bytes_lossy(bytes)) {
         trimmed: line.trim()
-        if trimmed != "" -> return pkg_binder_take_chars(trimmed, 160)
+        if trimmed != "" -> return pkg_binder_take_chars(trimmed.copy(), 160)
     }
     BINDER_TOOL_FAILURE_DETAIL
 }

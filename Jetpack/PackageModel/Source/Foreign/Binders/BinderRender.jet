@@ -158,7 +158,7 @@ pkg_binder_tool_root: fn(tool: String) -[FS, Env]> String? Never! {
 pkg_binder_launder_last_detail: fn(bytes: [U8]) -> String Never! {
     loop line in pkg_binder_lines(String.from_bytes_lossy(bytes)) {
         trimmed: line.trim()
-        if trimmed != "" -> return pkg_binder_take_chars(pkg_binder_after_last(trimmed, ": "), 160)
+        if trimmed != "" -> return pkg_binder_take_chars(pkg_binder_after_last(trimmed.copy(), ": "), 160)
     }
     BINDER_TOOL_FAILURE_DETAIL
 }

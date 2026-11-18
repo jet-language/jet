@@ -167,7 +167,7 @@ pkg_parse_package_policy_surface: fn(body: String) -> PackagePolicySurface Packa
                 unsafe_seen = true
                 value: raw.trim()
                 if value == ".Deny" -> surface.unsafe_paths = Val([String]{}) else {
-                    list: pkg_strip_wrapped(value, ".Paths(", ")") ?? return Err(pkg_bad_policy("`policy.unsafe` must be `.Deny` or `.Paths([\"src/audited\"])`"))
+                    list: pkg_strip_wrapped(value.copy(), ".Paths(", ")") ?? return Err(pkg_bad_policy("`policy.unsafe` must be `.Deny` or `.Paths([\"src/audited\"])`"))
                     surface.unsafe_paths = Val(pkg_parse_policy_path_list(list, "policy.unsafe"))
                 }
             }
@@ -333,7 +333,7 @@ pkg_parse_policy_path_list: fn(raw: String, field: String) -> [String] PackagePa
     loop piece in pkg_top_level_commas(inner) {
         entry: piece.trim()
         if entry == "" -> return Err(pkg_bad_policy("`{field}` cannot contain an empty path"))
-        path: pkg_parse_policy_path(entry, field)
+        path: pkg_parse_policy_path(entry.copy(), field)
         if !paths.contains(path) -> paths.push(path)
     }
     Ok(pkg_manifest_sorted(paths))
@@ -347,7 +347,7 @@ pkg_parse_dependency_policy_list: fn(raw: String) -> [String] PackageParseError!
         if entry == "" {
             return Err(pkg_bad_policy("`policy.deps` cannot contain an empty dependency"))
         }
-        dependency: pkg_unquote(entry)
+        dependency: pkg_unquote(entry.copy())
         if !pkg_validate_dependency_name(dependency) {
             return Err(pkg_bad_policy("`policy.deps` name `{dependency}` must be one safe path component"))
         }
@@ -364,7 +364,7 @@ pkg_parse_policy_exceptions: fn(raw: String) -> [PackagePolicyException] Package
     loop piece in pkg_top_level_commas(inner) {
         entry: piece.trim()
         if entry == "" -> next
-        body: pkg_strip_wrapped(entry, "{POLICY_EXCEPTION_TYPE}{{", "}}") ?? return Err(pkg_bad_policy("`policy.exceptions` entries must use `PolicyException{{ id: \"…\", scope: \"package#version\", reason: \"…\", expires: … }}`"))
+        body: pkg_strip_wrapped(entry.copy(), "{POLICY_EXCEPTION_TYPE}{{", "}}") ?? return Err(pkg_bad_policy("`policy.exceptions` entries must use `PolicyException{{ id: \"…\", scope: \"package#version\", reason: \"…\", expires: … }}`"))
         id_value := String?{None}
         scope_value := String?{None}
         reason_value := String?{None}
