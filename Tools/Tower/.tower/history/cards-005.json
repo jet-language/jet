@@ -3614,6 +3614,611 @@
       "completedAt": "2026-11-15T01:10:55.274Z",
       "questions": [],
       "retiredAt": "2026-11-18T07:24:49.155Z"
+    },
+    {
+      "id": "c08s0ppt",
+      "num": 5971,
+      "title": "Map: Wrong-meaning bugs: values, patterns, comparisons and checked arithmetic",
+      "body": "Destination: Each listed program computes the documented value on every tier.\nNotes: Batch B04 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && JET=$JET Tools/agent/jet-env jet test Tools/testkit \"suite cases\" with one regression case per card (o0,o1,o2 agree). Order: #3838 #4909 #4679 #4726 #4906 #4929 #5020 #5940 #5941 #4156 #4721 #4745 #4976 #4977 #5037.\nDecisions so far: D-PAT-NAMED-NEST1 (ratified=A) on #3838\nFog: no criteria yet on #5940 #5941 #4929 #4679 #5020 #4976 #4977 #4745 #4721 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "I1 defect found 2026-11-15 03:23: tests/cases/closures/escaping_lambda_owns_the_file_reader_it_reads_on_every_tier.case hangs (TIMEOUT 600 s, 0.9 s cpu) on p154 through p159. strace of jet run -O0 shows openat(lines.txt)=4, then close(4) at once, then a FUTEX_WAIT forever on the main thread before the first print: the FileReader moved into the escaping lambda is dropped when line_reader ends, and the lambda then locks freed memory. Owner GoalsB-5-2 (top priority): a capture by move clears the local's drop; a drop-counter case without I/O proves it on every tier."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed (Map card): the G3Core lanes landed nearly every item on dev; each is now met with its commit and a passing case on dev 168e1e9e92. c10's two remaining Jetpack workaround sites went to #6661 (#6661 c6); the streamed chars() gate from c18 went to #3262 (#3262 c33)."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c34 decisions (Main, 2026-11-13, for G3Core-2): (1) D-FIXED-WRAP1 A (ratified 2026-11-04) outranks the older D-POLICY-FILE1. The block marker is #Overflow(.Stop|.Wrapping|.Saturating), which replaces #Policy(arithmetic: .Checked|.Wrapping|.Saturating), and arithmetic is no longer a #Policy setting; placement rules are unchanged. The Data/Syntax row and syntax-decisions.md change in the same SUB. (2) Seed gate: part A (the integer from_* and receiver methods retired, about 3,150 callers rewritten) is seed-safe and lands now. Step (a) makes the compiler accept #Overflow and lands now. Step (b) moves every site and deletes the #Policy(arithmetic:) parser; it needs a seed that knows #Overflow and lands right after the next admit. The gap between (a) and (b) is the bootstrap seam only, as with the @T cutover in #4500. (3) Float-to-integer conversions (from_float, from_f32, from_decimal, from_fraction) are not part of D-FIXED-WRAP1; #6313 owns them."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c4 ruling (Main, 2026-11-13): the canonical typed comparison (equal_unordered, used by core.testing.compare and the history supplier) compares two Dyn.Number lexemes by exact decimal value, with arbitrary precision and never through binary64: \"1.0\" equals \"1.00\", \"1e2\" equals \"100.0\", \"-0.0\" equals \"0.0\", and \"1e400\" equals \"10e399\". Int, Float and Number stay distinct variants. Dyn == stays exact. Spelling preservation (encoding-decisions, JSON numbers) governs rendering only. Found by G12Docs-4 on b14, where these pairs compared unequal."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c29 decision (Main, 2026-11-13): the plugin wire budget is PG_MAX_WIRE = 1 MiB per string argument and result. It is declared beside PG_FUEL, PG_MAX_PAGES (256 pages, 16 MiB), PG_MAX_TABLE and PG_MAX_FRAMES in PluginHost.jet and enforced the same way (pg_failure, Budget(.Wire), PG_LIMIT_WIRE), so it adds no second mechanism. 1 MiB is 1/16 of the memory budget, so an over-budget result is still in bounds and only the wire budget refuses it. Neither the criterion nor spec.md named a number; spec.md now records this one (SUB G3Core-c29-wire)."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c25/c27: ballot D-COMPONENT-TUPLE1 posted (author G12Docs-4; non-author adversarial review ReviewComponentTuple, Claude Opus, which respelled A from _0/_1 to part0/part1 after probes showed _0 fails E0357 and breaks D-NAME-SIGIL1, and rebuilt D on the #Import overlay model). Recommendation A (part0, part1). c25b needs four edits if A is ratified."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c8 reproduces on seed-b13 (D-SCRIPT-HELPERS1 authoring, 2026-11-12, probes in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-SCRIPT-HELPERS1): a closure that writes a captured := local loses the write when passed as a callback, so each(...) leaves the value at 0 (p13, q09). A task that calls such a closure compiles and loses the write (q12), while writing the name directly in the task is refused with E1101 (q11), so the same write is refused in one spelling and silently dropped in the other. Closures also copy values they only read (q16, q18), against spec.md 'shared read access' (Docs/spec/spec.md:1167-1181). Rerun: sh run.sh p13.jet q09.jet q11.jet q12.jet q16.jet q18.jet in that directory."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c2 items 1-4 are proved by G3Core-t1b (7dfa3007a5, PASS 1 each); item 5 (files.map(p).path ICE) is still open with G12Docs-4. c10 items b and c pass as fallback_break_keeps_later_locals_in_scope_on_every_tier and equality_with_a_constant_payload_compares_on_every_tier."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "G3Core-t1 (tests only, direct land) map from G12Docs-4. c2, the #4721 CliSeams1 items: 1 resource_returned_from_a_temporary_result_match_stays_open_on_every_tier; 2 advisory_lock_closes_through_a_moved_value_on_every_tier; 3 borrowed_file_writer_writes_through_a_fallible_function_on_every_tier; 4 optional_success_result_fallback_agrees_across_execution_tiers. Item 5 (MappedFile path field) still fails on seed-b13: files.map(p).path is an ICE, \"ir.build unlowered: field of core.files.MappedFile\", at O0/O1/O2, so c2 stays open until G12Docs-4 lands that fix. c3: the bare_none case covers a bare None returned from a T? E! function. `?? None` refused on T? E! is the spec rule (spec.md:1408-1412, ?? yields the innermost payload and its right side must be that payload), not this bug. c35 is covered by the recursion-stop case."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c38 shares its root with #6281 c41: a flat 1024-arm match is refused with E1403 (nests 257 levels) because arm chains reach sema as nested Expr.If. One iterative else-chain walk in sema, lowering and IR closes both."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 7 criteria from archived #1897, #2398, #4236, #4422: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Main-13 scope note (Builder3, 2026-11-04): the seed compiles Core and the compiler, and it rejects wrapping(T{x}) with E1005, so Main-13 moves only the 33 runtime narrowing sites. The 10 Core sites stay plain T{x}. Each narrows a value that is masked or built to fit, so the new E3010 stop never fires and their meaning is unchanged. The census found no compiler sites. The Core sites move under c34, once the seed has rotated past Main-13."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "Held-work citation moved into the repo (#6563 c2, landed 446b49726a; see Tools/tower/held/README.md). The scratch patch lanes/Main/unitarg/Main-13-parked.patch now lives at Tools/tower/held/5971/."
+        },
+        {
+          "at": "2026-11-03",
+          "by": "Main",
+          "text": "c12 wrap-around spelling moved from a card question to ballot D-FIXED-WRAP1 (recommends T.wrapping_from(x), destination-owned per S42). Parked patch Main-13 waits on its ratification."
+        },
+        {
+          "at": "2026-11-03",
+          "by": "Main",
+          "text": "c12 patch (Main-13: sema routes an unheld fixed-to-fixed narrowing through the exact Int and CheckedIntToFixed; case tests/cases/numeric_widening/fixed_narrowing_stops_like_int; golden Examples/features/math/fixed_narrowing_stop.jet) is PARKED, not landed: wave 37 on 26fa6cd102 found 2 real regressions. tests/cases/web_build/web_decimal_and_grouped_formatters_use_shared_helpers and tests/cases/checked_text/html_composition_matches_aot_jit_interpreter_and_web fail on the wave and pass on base (rerun on both). Root, from the node wasm stack: Compiler/JetRuntime/Source/Int.jet:146 int_fits does U64{int_limb(value, at)} (an I64 to U64 conversion), which is now checked and calls jet_int_checked_fixed, which calls int_fits: infinite recursion. Native passed only because its runtime pack is still built by the older compiler; the next seed would break native too. Verified correct: I64{U64{max}} stops with E3010 on none, basic and full. To finish c12: (1) the runtime's own bit-pattern conversions (about 35 non-literal fixed conversions in Compiler/JetRuntime, e.g. Int.jet:146, Iter.jet:697, IterNumeric.jet:4-8, NativeByteList.jet:12-17) need an explicit wrap-around conversion, and Jet has none (to_bits/from_bits are Float-only; wrapping(...) is ratified for arithmetic operators only), so this needs an owner-ratified spelling or a sanctioned runtime-internal raw cast; (2) the widen-to-Int-plus-runtime-call lowering should become an inline bounds check so hot paths do not pay a call per conversion. Parked patch: $JET_SCRATCH_ROOT/lanes/Main/unitarg/Main-13-parked.patch."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6260 \"Plugin engine: f32.convert_i64_u / f32.convert_i64_s round twice\" into this card (wrong-meaning bugs: each program computes the documented value on every tier); its 14 open item(s) are carried as \"(was #6260)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #4156 \"checked_add and checked(...) on fixed-width ints return null even when the result fits\" into this card (wrong-meaning bugs: each program computes the documented value on every tier); its 3 open item(s) are carried as \"(was #4156)\" criteria, and its 5 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6318 \"Scalar Type{x} narrowing between fixed-width integers silently wraps instead of stopping with E3010\" into this card (wrong-meaning bugs: each program computes the documented value on every tier); its 4 open item(s) are carried as \"(was #6318)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5941 \"Sema's loop-never-exits verdict can disagree with the lowered CFG and silently drop the code after the loop\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 1 criteria, 0 ratified decisions). Body: Found by O0Load-3 on 2026-10-24 while chasing the serde/encoding_canonical and encoding_xml_projection SIGILL at XmlEngine.jet:712. Before 1158a1548f (#5940 b), sema_stmt_refutable_expr_can_break did not walk the arm values of a value-position if/match, so a loop whose only exit is a 'break' inside a value match arm ('event :: if &scanner.next() == { .Val(v) -> ^v .None -> { break } ... }') was judged exitless. Everything after the loop was treated as dead, and IR put a trap there. Minimal repro ($JET_SCRATCH_ROOT/lanes/Main/repros/loop-exit-value-match-break.jet): on base 3703 it prints NOTHING and exits 0, so the post-loop code is silently dropped; Core's XML parser hit SIGILL. The walk was "
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5940 \"Compiler defects found porting Jetpack (U7): ?? break scoping, == Val(CONST) silently binds, lambda moves, and 5 more\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 1 criteria, 0 ratified decisions). Body: Found by O0Image-3 on 2026-10-24 while porting the Jetpack Engine area (#4589); each one was worked around in Jetpack. Triage and fix each at the root, with a UI snapshot or case per item. (a) http_server.static_files: E0904 'no fixed source typed call contract'. (b) 'a ?? b ?? break', or '?? break' inside an if-arm in a loop, makes later locals E0107 'Nothing named'. (c) P1, correctness: 'x == Val(CONST)' parses as a binding pattern (E0357), so '== Val(local)' SILENTLY BINDS instead of comparing. (d) An escaping lambda that owns a FileReader/ZstdReader gives E0212, but the spec (lines 787-799) says it should move. (e) A lambda body 'if f() == {.Ok(b) -> Ok(b) ...}' stored in a fn-typed fiel"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5037 \"Prove Jet rejects or traps every V safety failure observed on 2026-10-16 (null field, unfilled ref list, int-to-pointer cast, silent overflow, mismatched C declaration)\" (CardTrim 2026-10-28: single-root task step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 2 criteria, 0 ratified decisions). Body: Source: mine-for-jet V report; live probes on V 0.5.2 (9e0a651) under target-mine-vlang/probes. V still: (p2/p7) accepts []&int{len: n} with a warning and crashes with 'invalid memory access'; (p5) accepts voidptr(123) cast to &Something without unsafe and crashes; (p3) wraps i32 overflow silently; (p9) accepts a C declaration that disagrees with the header and surfaces only raw TinyCC output on generated src.c. Now fixed in V: null refs in struct literals, immutable-to-mutable aliasing, division by zero, bounds. Jet claims each of these is impossible or trapped (no null; D-UNINIT1 write-before-read; D-CAP9 raw pointers only inside #Unsafe; D-NUMOPS1 fixed-width traps; I2 + E3208 for foreign"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5020 \"Native correctness batch: closure capture snapshot loses writes; method vs field call; containers' close; sort_key_panic; runtime_unicode; query_lifecycle; fn_value_carrier/anonymous_unions SEGV; E3001 in derive without prep loop\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: CorrectAudit 2026-10-16 ranked list (agent://CorrectAudit): basics/closure_capture_snapshot prints 10 not 12; callable/member_namespaces counter.step(4) calls the field; memory/resource_close_containers 6 missing closes; collections/sort_key_panic; text/runtime_unicode null vs -1; web/query_lifecycle 2 vs 1; callable/fn_value_carrier and types/anonymous_unions SEGV (root unknown); derive body without prep loop -> E3001 'E0999 has no Source edit registry channel'. Fixed: Core/time floor double-subtract d048fbb77 (mem-safety)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4977 \"codegen: trait default-body call on a concrete receiver lowers as a dynamic trait call\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: A call to a trait default method on a concrete receiver becomes a dynamic trait call in Jet codegen; Rust generates a per-type copy of the default body. Port the Rust instantiation so both tiers lower the same call the same way. Found by CgAuditA."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4976 \"codegen: IndexMut lookup for a concrete owner matches any trait named IndexMut\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: Compiler/JetCodegen/Source/Codegen/Statements.jet ~1628-1635: for a concrete owner, any trait named IndexMut in any module matches, so two declarations panic as \"ambiguous\". Resolve by the checked trait identity as Rust does. Found by the codegen panic audit (CgAuditA)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4929 \"Latent power-vs-XOR bugs fixed by the bit-operator migration: add regression tests\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: BitOpsMigration (2026-10-09, commits e5f136064 Compiler, 9a889eb7b Core, 5ee8b5733 Jetpack) found 27 sites where Rust-origin code used ^ meaning XOR, but in Jet ^ is power (D-SIGIL-ALGEBRA1): 24 infix + 3 compound, mostly JetRuntime (unsigned ordering/overflow sign tests, FNV and address hashes, xorshift PRNG) plus 1 Jetpack ArtifactStore tamper byte. They computed powers until now; they now use bit_xor. Per-site reasons: $JET_STATE_ROOT/scratch/BitOpsMigration/caret-sites.reviewed.tsv. Add a regression fixture per affected routine (hash vectors, PRNG sequence, unsigned compare at sign boundary). Also: integer ! (bit-not) is E0109 'use bit_not' in the Jet sema (Sema/Expressions.jet:3178) bu"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4906 \"Comparison equality must use canonical typed facts on every tier\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 3 criteria, 0 ratified decisions). Body: D-TEST-COMPARE1 and I9 already require one observation meaning. Current Rust and Jet classifiers compare rendered strings in affected paths instead of consuming the existing declared_equal fact. Source-grounded counterexamples include NaN, signed zero and object ordering; these are not new runtime observations. Completed delivery cards #2950 and #4323 remain historical. This new defect stream is separate from JSON wire-schema and fallible Receipt API owner choices."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4745 \"Four compiler bugs found porting core.auth: default args resolve in the caller's scope; implicit Err loses Result; bare None mistyped in `T? E!`; trim().bytes() emits non-compiling Rust\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: Found by CorelibPort3 (2026-10-07) on corelib/port3 @ e37c8e768; worked around in Core source, not fixed. 1. Default argument expressions resolve in the CALLER's scope: verify_jwt's default `clock_skew: Duration{0ms}` fails E0134 \"`ms` isn't a unit in scope\" when a caller omits the argument. Defaults must resolve in the callee's module. 2. A Core function with an implicit Err loses its Result type at import (crates/... Imports.rs core_source_sig_map), so matching .Ok/.Err on it crashed the compiler; session APIs now spell `T Err!` explicitly as a workaround. 3. A bare `None` returned from a `T? E!` function gets the wrong type (workaround: `?? return Ok(None)`). 4. `trim()` followed by `.byt"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4721 \"Compiler defects found porting CLI rooted store (CliSeams1, 2026-10-07)\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: Found by CliSeams1 on port/cli-seams1 @ 1fa76f8a5 (repros in $JET_STATE_ROOT/scratch/CliSeams1/HANDOFF.md): 1. Returning a resource out of a match on a temporary result releases it: `.Ok(held) -> return Ok(held)` dropped a directory lock (binding with `??` works). Resource-safety defect (I1). 2. close(^lock) on AdvisoryLock ICEs: missing checked function target `AdvisoryLock::close`. 3. A fallible fn taking a borrowed FileWriter and calling write_all ICEs with `MIR place is not writable` instead of a type error. 4. `??` on `T? E!` also catches None (should only catch the error); Jetpack EntryCarrier relies on it for no-workspace and will misbehave once the D-FSDIR1 authority files return to"
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4679 \"Int * Decimal is rejected and unary minus refuses Decimal values\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: Proven: hours :: 3; rate :: 2.5; hours * rate gives E0133 \"`*` isn't defined between Int and Decimal\" with fix \"use .add(other)\" (a04_int_float_mix). print(-rate) and print(-(2.5)) give E0109 \"Only Int and Float values can be negated\" while -2.5 works (e01_decimal, f01). D-TYPE2-DEFAULT1 makes decimal literals exact Decimal; the spec and syntax-surface still say Float. Fix the operators under D-TYPE2-NUM1/D-NUMJOIN1 and correct the spec text."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "(was #4679) Int * Decimal is rejected and unary minus refuses Decimal values",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 0d4560cc63 (GoldenRoots3): Int * Decimal is accepted (qty * price with an Int variable), unary minus negates a Decimal, and Decimal / Int gives a Fraction; case exact_number_tiers/decimal_mixes_with_int_and_negates. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
+          "at": "2026-11-06T05:01:27.381Z"
+        },
+        {
+          "n": 2,
+          "text": "(was #4721) Compiler defects found porting CLI rooted store (CliSeams1, 2026-10-07)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Items 1-4: G3Core-t1b 7dfa3007a5 regression cases. Item 5 (files.map(p).path ICE): c08bb8c6ad. On dev 6aaa5c8879, `jet test Compiler --profile cases --filter resource_close/mapped_file_reads_its_path` PASS 1.",
+          "at": "2026-11-15T03:10:59.603Z"
+        },
+        {
+          "n": 3,
+          "text": "(was #4745) Three compiler bugs found porting core.auth are fixed, each with a regression case on O0, O1 and O2: default args resolve in the caller's scope; implicit Err loses Result; bare None is mistyped in `T? E!`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G3Core-t1b landed 7dfa3007a5 (tested on fb1b8faef1 plus the patch, seed-b13; output $JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G3Core-t1b/): jet test Compiler --profile cases --filter default_arguments_resolve_in_the_callee_module_on_every_tier PASS 1 (default args resolve in the declaring scope); imported_fallible_function_keeps_its_result_on_every_tier PASS 1 (an implicit Err keeps its Result); bare_none_from_an_optional_fallible_function_is_none_on_every_tier PASS 1 (bare None in T? E!). Each case runs O0, O1 and O2. LaneCheck rc 0; 0 FAIL, KF, SKIP, ERROR or TIMEOUT.",
+          "at": "2026-11-12T20:06:53.222Z"
+        },
+        {
+          "n": 4,
+          "text": "(was #4906) Comparison equality uses canonical typed facts on every tier: the Jet classifiers consume the existing declared_equal fact, and every runtime, history and compile-time supplier uses canonical typed comparison.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 0ec31b69b6 (classifiers read declared_equal) and 9cf1e7f361 (runtime and history suppliers; Dyn.equal_unordered compares Number lexemes by exact decimal value per Main's 2026-11-13 ruling). On dev 168e1e9e92, `jet test Compiler --profile cases --filter encoding_parity/dyn_number_equal_unordered` PASS 1.",
+          "at": "2026-11-15T03:11:00.558Z"
+        },
+        {
+          "n": 5,
+          "text": "(was #4929) Latent power-vs-XOR bugs fixed by the bit-operator migration: add regression tests",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 8caed4f145: census of the 27 power-vs-XOR sites; the one any program reaches (Alloc.jet alloc_unsigned_less under the counting allocator) is pinned; the others are unreachable from Jet programs, covered by a C witness, or already tested (commit message lists each). On dev 168e1e9e92, `jet test Compiler --profile cases --filter allocator_families/counting_program_allocator_refuses` PASS 1.",
+          "at": "2026-11-15T03:11:01.657Z"
+        },
+        {
+          "n": 6,
+          "text": "(was #4976) codegen: IndexMut lookup for a concrete owner matches any trait named IndexMut",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 8823426873 (GoldenRoots3): a user trait named IndexMut no longer routes g[k] = v; only the core IndexMut does. ui index_hook_ignores_user_trait_named_indexmut. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
+          "at": "2026-11-06T05:01:28.076Z"
+        },
+        {
+          "n": 7,
+          "text": "(was #4977) codegen: trait default-body call on a concrete receiver lowers as a dynamic trait call",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 38725500cb (GoldenRoots3): a default-body trait call on a concrete receiver calls the body directly; ir_trait_call is used only for TraitObject receivers. A new case pins it. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
+          "at": "2026-11-06T05:01:28.804Z"
+        },
+        {
+          "n": 8,
+          "text": "(was #5020) Native correctness batch: closure capture snapshot loses writes; method vs field call; containers' close; sort_key_panic; runtime_unicode; query_lifecycle; fn_value_carrier/anonymous_unions SEGV; E3001 in derive without prep loop",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 4dff8b1e09 (G3Core-c8-pins): every program the c8 audit names gives its recorded output. On seed-b14, the 7 existing goldens give PASS 3 each (o0, o1, o2), the new Examples/Comptime/MarkerTemplateWithoutLoop golden (E3001 in derive without a prep loop) gives PASS 3, the containers close cases resource_close/generic_container_close_runs_once_* give PASS 1 each with O1 and O2 run steps, and DiagnosticRows --check is rc 0. Lander ran all of them.",
+          "at": "2026-11-13T06:49:09.069Z"
+        },
+        {
+          "n": 9,
+          "text": "(was #5037) Prove Jet rejects or traps every V safety failure observed on 2026-10-16 (null field, unfilled ref list, int-to-pointer cast, silent overflow, mismatched C declaration): One example per case",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev e27083a780. On dev 168e1e9e92 with the gate-p141 compiler, `jet test Compiler --profile cases --filter unsafe_and_runtime/v_safety_failures` PASS 1 (one fixture per V failure).",
+          "at": "2026-11-15T03:11:02.623Z"
+        },
+        {
+          "n": 10,
+          "text": "(was #5940) Compiler defects found porting Jetpack (U7), as named by the workaround comments in Jetpack sources: (a) http_server.static_files E0904; (b) a ?? b ?? break scoping (E0107); (c) x == Val(CONST) binds instead of comparing; (d, e) an escaping closure owning a FileReader or ZstdReader; (g) inline #run {} values; (h) a lambda moving a locked value. Each item is fixed, or confirmed as intended with a clear diagnostic, with a UI snapshot or case per item, and its Jetpack workaround comment is removed or rewritten. Item (f) text is lost: if it resurfaces, it gets its own criterion.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6661 c6: items a, b, c, g and most of (h) landed in 33cd0d50c3 and 62e933686a (b and c also pass as control_and_data cases); two workaround sites remain on dev 168e1e9e92",
+          "at": "2026-11-15T03:11:03.558Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 11,
+          "text": "(was #5941) Sema's loop-never-exits verdict can disagree with the lowered CFG and silently drop the code after the loop",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev ce38120fe8 (GoldenRoots3): a break inside a #Shield or other marker block, or a comptime arm, within a loop now counts as exiting it, so sema's never-exits verdict matches the lowered CFG and code after the loop is kept (it used to be dropped and the program hit SIGILL). Case control_and_data/break_inside_marker_block_keeps_code_after_loop passes under jet run and --release and errored with a signal on base. A/B vs 6bee890a10: ui 2378, golden loop/control/switch/match/option/files/resource/own 739, cases core_files/ownership/control_and_data/loop/bind 452, 0 lost.",
+          "at": "2026-11-06T05:27:53.600Z"
+        },
+        {
+          "n": 12,
+          "text": "(was #6318) Every fixed-width to fixed-width Type{x} narrowing whose value does not fit (I32{I64}, U8{U16}, I8{I16}, U8{I32{-1}}, U32{I64{-1}}, I64{U64{max}}) stops with E3010 on o0, o1 and o2, exactly as narrowing from Int does; a golden example and a case cover each width pair class (signed to signed, unsigned to unsigned, signed to unsigned, unsigned to signed).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "cc0615c8da (Builder3, Main-13): a narrowing fixed-width conversion stops like one from Int, and the overflow words choose its outcome; the 33 runtime sites that relied on low bits now use wrapping(T{x}). Proof: FIXED_POINT on t5971b (94d68dcf2afa3067) and rebased t5971h (651f7aeab1650012); lane-check CHECK OK on the whole compiler; golden lost 0 (3 new math/fixed_narrowing_stop rows pass; process_run_all o2 crashes on the base too), cases lost 0 (+2 new pass), ui lost 0 (+2 new pass); E1005 registry row and diagnostic page regenerated. The 10 Core sites stay T{x} because the seed rejects wrapping(T{x}) (E1005); each narrows a value already in range, so meaning is unchanged; they are listed with file:line in the receipt and move under #5971 c34.",
+          "at": "2026-11-04T23:30:24.086Z"
+        },
+        {
+          "n": 13,
+          "text": "(was #6318) approx(x) results passed to a Float parameter or combined with a Float follow D-NUMWIDEN-CROSS1's expert path without E3010, with a golden example on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed a4bbbbe987 (Main-14): Examples/features/math/approx_into_float.jet with Examples/features/expected/math/approx_into_float.out. With D-NUMWIDEN-CROSS1=E, braces and implicit crossings are checked and approx(n) is the expert escape. approx(2^53 + 1) passed to a Float parameter (half), added to a Float, and multiplied by a Float rounds to the nearest Float (9007199254740992.0, 4503599627370496.0, 9007199254740992.0, 2251799813685248.0) with no E3010. testkit golden suite --filter Examples/features/math/approx_into_float: 1 passed on o0, o1 and o2; run-feature-examples --filter math/approx_into_float passed 1; lane-check CHECK OK.",
+          "at": "2026-11-03T02:52:05.232Z"
+        },
+        {
+          "n": 14,
+          "text": "(was #6318) The E3010 text for Int to Float names the actual target and problem (no 'into the decimal'), generated from the registry, with its UI snapshot updated from real output.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev afca271c7e (GoldenRoots3): the E3010 text for a checked Int to Float crossing reads 'whole number has no exact Float; approx(x) rounds it to the nearest Float' (the F32 form for an F32 target); the inline lowering and the runtime leaf produce the same text, rendered by the E3010 registry row through {{msg}}. Snapshot Examples golden types/typed_literal_whole_value_lossy.err.out regenerated from real output. Golden numeric_widening, exact_number and math/numeric/approx 229 pass, the 4 failures identical to base; int-widen and numeric C fixtures CHECK OK.",
+          "at": "2026-11-06T05:33:22.349Z"
+        },
+        {
+          "n": 15,
+          "text": "(was #6318) Float.from_int and Float{n} agree for whole numbers with no exact Float (2^53+1): both follow the one ratified rule, proven by an example on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 90f5740d04 (GoldenRoots3): under ratified D-NUMWIDEN-CROSS1=E, Float.from_int(2^53+1) stops with the same E3010 at the call line as Float{n} on o0, o1 and o2, and a literal gets E1003 for both. Case numeric_widening/float_from_int_and_float_braces_follow_one_crossing_rule passes. Full A/B against base: no case regressions (every PASS to non-PASS row reran PASS, the rest fail on base); golden and ui identical apart from one timeout flake.",
+          "at": "2026-11-06T06:19:30.277Z"
+        },
+        {
+          "n": 16,
+          "text": "(was #4156) [#4515] D-FLOAT-BITS1=A: math.f32_to_bits and math.f32_from_bits are exact and allocation-free on every tier, with NaN and sign-bit parity.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev c752c8a0dc: math.f32_to_bits and f32_from_bits with a #Test covering quiet and signaling NaN payloads, both signs, negative zero, infinity and the largest subnormal (Core/Math/Math.jet). On dev 168e1e9e92, `jet test Compiler --profile core --filter Core/Math/Math.jet`: 114 rows, 114 passed.",
+          "at": "2026-11-15T03:11:04.482Z"
+        },
+        {
+          "n": 17,
+          "text": "(was #4156) [#4434] D-STATS-CANONICAL1=A: overflow-safe, infinity, NaN and tie semantics for core.math.stats have one source meaning, and native routes migrate.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev c50c58d7d5. On dev 168e1e9e92, `jet test Compiler --profile cases --filter core_math_stats_follow_one_rule` PASS 1.",
+          "at": "2026-11-15T03:11:05.396Z"
+        },
+        {
+          "n": 18,
+          "text": "(was #4156) [#4514] D-CHAR-SCALAR1=A: Char.from_u32 and U32.from_char. Streamed chars() lowering is gated on the paired time/allocation win.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 9f5adae6f2 (Char.from_u32, U32.from_char). On dev 168e1e9e92, `jet test Compiler --profile cases --filter char_scalar_conversions_agree_on_every_tier` PASS 1. The streamed chars() gate moved to #3262 as its own criterion.",
+          "at": "2026-11-15T03:11:06.315Z"
+        },
+        {
+          "n": 19,
+          "text": "(was #6260) f32.convert_i64_u and f32.convert_i64_s give the IEEE round-to-nearest-even f32 for every input; tests cover 2^24+1, 2^53+1, 0x8000_0080_0000_0001, u64 max and i64 min, on `jet run` and `jet run --release`.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 9e4a59cc4d. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_float_conversions_from_64_bit_integers_round_once_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:07.293Z"
+        },
+        {
+          "n": 20,
+          "text": "(was #6260) The L2 disclosure \"u64→f32 rounds twice\" no longer holds and is removed.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 9e4a59cc4d (G3Core-c19, c20): conversions round once, so the disclosure is gone; `git grep -n -i 'rounds twice'` on dev 168e1e9e92 finds only two unrelated math comments.",
+          "at": "2026-11-15T03:11:08.287Z"
+        },
+        {
+          "n": 21,
+          "text": "(was #6260) (from #6259 Plugin host imports are not checked against the loading pack) plugin.load refuses, as PluginError.Denied and before any guest code runs, a component whose host import's right is not in the loading package's `authority.needs`, on `jet run` and `jet run --release`.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 1ec7bbbc0a (c21-c23). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_load_denies_a_host_import_its_package_does_not_need_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:09.221Z"
+        },
+        {
+          "n": 22,
+          "text": "(was #6260) (from #6259 Plugin host imports are not checked against the loading pack) A package with no `needs` loads only import-free components; the existing FS.Read text-import cases declare `needs: [FS.Read]` and still pass.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 1ec7bbbc0a (c21-c23). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
+          "at": "2026-11-15T03:11:10.162Z"
+        },
+        {
+          "n": 23,
+          "text": "(was #6260) (from #6259 Plugin host imports are not checked against the loading pack) spec.md's plugin section matches the behaviour.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 1ec7bbbc0a (c21-c23) updates spec.md's plugin section. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
+          "at": "2026-11-15T03:11:11.134Z"
+        },
+        {
+          "n": 24,
+          "text": "(was #6260) (from #6261 Plugin engine: support multi-value functions) A component using multi-value blocks and multi-result internal functions loads and returns correct results on both hosted tiers.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 0c60c9d673 (c24, c26). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_multi_value_functions_and_blocks_return_correct_results_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:12.060Z"
+        },
+        {
+          "n": 25,
+          "text": "(was #6260) (from #6261 Plugin engine: support multi-value functions) A lifted export returning a tuple<s64, s64> works through the return area.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev f32fac9fa6. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_export_returns_a_tuple_through_the_return_area_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:13.011Z"
+        },
+        {
+          "n": 26,
+          "text": "(was #6260) (from #6261 Plugin engine: support multi-value functions) The Component.jet multi-value refusal is gone.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 0c60c9d673 removes the Component.jet multi-value refusal. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
+          "at": "2026-11-15T03:11:14.003Z"
+        },
+        {
+          "n": 27,
+          "text": "(was #6260) (from #6262 Plugin engine: enforce a wall-clock budget per call (PluginL) A guest that runs past the call deadline fails as PluginError.Budget(.Time, fault) with fault.export set and 1-32 frames, on both hosted tiers; the host keeps running.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 40ce58f31e (c27, c28). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_call_fails_past_its_time_budget_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:14.970Z"
+        },
+        {
+          "n": 28,
+          "text": "(was #6260) (from #6262 Plugin engine: enforce a wall-clock budget per call) spec.md lists the time budget beside the others.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 40ce58f31e (c27, c28) lists the time budget in spec.md. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
+          "at": "2026-11-15T03:11:15.967Z"
+        },
+        {
+          "n": 29,
+          "text": "(was #6260) (from #6263 Plugin engine: enforce a size limit on values crossing the w) A result or argument over the wire budget fails as PluginError.Budget(.Wire, fault) before the host allocates it, on both hosted tiers.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 79ddd5e328 (c29, c30; PG_MAX_WIRE = 1 MiB per Main's 2026-11-13 decision). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_call_fails_a_string_over_the_wire_budget_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:17.016Z"
+        },
+        {
+          "n": 30,
+          "text": "(was #6260) (from #6263 Plugin engine: enforce a size limit on values crossing the wire) spec.md lists the wire budget.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 79ddd5e328 (c29, c30) records the wire budget in spec.md. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
+          "at": "2026-11-15T03:11:18.069Z"
+        },
+        {
+          "n": 31,
+          "text": "(was #6260) (from #6264 Clear the 23 L0507 lint warnings in Compiler/JetPlugin Trans) `jet check` of the JetPlugin package reports no L0507 in Translate.jet.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Main-1: `jet check Compiler/JetPlugin` reports 0 L0507 in Translate.jet (was 23): the 23 flagged if/else-if chains are ordered arm tables; lane-check Compiler/JetPlugin CHECK OK Landed in wave 34 as dev f2898ba8d5 (2026-11-02). Wave run on 190f826022: goldens 1206/1206, 0 regressions. The 4 lost ui/cases rows were bisected to the deferred IrTypes-64b, IrTypes-65b and DeclTypes-32, which did not land.",
+          "at": "2026-11-02T23:57:34.226Z"
+        },
+        {
+          "n": 32,
+          "text": "(was #6260) (from #6264 Clear the 23 L0507 lint warnings in Compiler/JetPlugin) The 23 L0507 warnings are gone and behaviour is unchanged: the plugin cases and the plugin_failure/sandbox_mathkit goldens pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev f2898ba8d5 (JetPlugin Translate.jet uses ordered arm tables; L0507 is gone). Main ran on dev fd79906166 with seed-b14, 2026-11-13: jet check Compiler/JetPlugin/Source/Plugin/Translate.jet rc 0 with 0 L0507 lines; jet test Compiler --profile cases --filter authority/plugin_ PASS 8 FAIL 0; golden Examples/Modules/Packages/PluginFailure PASS 1; golden Examples/Modules/Packages/SandboxMathKit PASS 1.",
+          "at": "2026-11-13T05:52:40.406Z"
+        },
+        {
+          "n": 33,
+          "text": "A user trait method named encode is not refused with a misleading E0105 'defined twice'; a case shows the trait and its impl compile and run (found by Prep 2026-11-04).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev c2635c41a7 (GoldenRoots3): impl Point.Codec { fn encode } compiles and runs beside #Codable with no E0105; case auto_derive_policy/user_trait_method_named_encode_compiles_and_runs passes under jet run and --release. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
+          "at": "2026-11-06T05:01:26.655Z"
+        },
+        {
+          "n": 34,
+          "text": "D-FIXED-WRAP1 A is fully cut over in one batch: the from_* conversion methods and the receiver methods it retires are gone, #Arithmetic is renamed #Overflow, every in-repo caller (about 3,000 calls) is rewritten in the same batch by a one-time in-repo script (no shipped jet fix rule, owner order 2026-11-06), and no old spelling, alias or shim remains. Main-13 lands only the conversion part first (wrapping, saturating and checked around T{x}, a word around a widening refused, runtime and Core narrowings moved to wrapping(T{x})).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 0a551202cf (part A: integer from_* and fixed receiver overflow methods retired), 5b04c1faf4 (step a: #Overflow accepted), a1fd654036 (every site written #Overflow) and 15ed40b712 (#Policy(arithmetic:) retired). On dev 168e1e9e92, `git grep -l '#Policy(arithmetic' -- '*.jet'` prints nothing, and `jet test Compiler --profile cases --filter non_arithmetic_checks_remain_checked_inside_wrapping` PASS 1.",
+          "at": "2026-11-15T03:11:19.037Z"
+        },
+        {
+          "n": 35,
+          "text": "(was #1897 c1) The recursion probe prints a registered Jet stop that names the recursing function and source line, exit 70, on O0, O1 and O2 (I9) [precut audit: failing on 9c7ddf1359: probe p1897_stack_overflow o0=70 o1=70 o2=70]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G3Core-t1b landed 7dfa3007a5 (tested on fb1b8faef1 plus the patch, seed-b13): jet test Compiler --profile cases --filter unbounded_recursion_stops_naming_the_function_and_line_on_every_tier PASS 1. The case runs the recursion probe on O0, O1 and O2 and asserts exit 70 and a registered stop naming the recursing function and its source line. 0 FAIL, KF, SKIP, ERROR or TIMEOUT.",
+          "at": "2026-11-12T20:06:54.711Z"
+        },
+        {
+          "n": 37,
+          "text": "(was #2398 c1) Statement-position if checks every condition, body, tail effect and flow fact, returns Unit without branch-value unification, and direct and parenthesized forms agree [precut audit: failing on 9c7ddf1359: C:control_and_data/discarded_if_does_not_unify_mixed_tail_values FAIL exit 1; expected 0]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On dev e4096a0f3b, the precut audit's failing proof tests/cases/control_and_data/discarded_if_does_not_unify_mixed_tail_values.case PASSes in the Lander's fR3 fullprof run. A statement-position if whose arms end in Int and Unit tails checks, runs (jet run, and the jet build binary) and prints the expected output, with no branch-value unification error. c38 (deep else-if worklist; see #5910) and c39 (O2 fall-through) stay open: this case does not prove them.",
+          "at": "2026-11-10T02:03:36.146Z"
+        },
+        {
+          "n": 38,
+          "text": "(was #2398 c2) Discarded Result handlers evaluate the subject once, and deep else-if lowering uses an iterative worklist without false else-if classification [precut audit: failing on 9c7ddf1359: C:control_and_data/discarded_if_does_not_unify_mixed_tail_values FAIL exit 1; expected 0]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G1Lead-3-g6arms. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md). long_arm_chain_256_arms and _1024_arms PASS; deeply_nested_expression_gets_diagnostic PASS (real nesting stays E1403).",
+          "at": "2026-11-10T05:06:31.394Z"
+        },
+        {
+          "n": 39,
+          "text": "(was #2398 c3) A false statement-position if with no else emits no else body, never lowers `Expr.NoElse` to Unreachable, and falls through on all applicable execution tiers [precut audit: failing on 9c7ddf1359: C:control_and_data/discarded_if_does_not_unify_mixed_tail_values FAIL exit 1; expected 0]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "d6e24a4836: false_if_without_else_falls_through_on_every_tier passes at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
+          "at": "2026-11-10T03:58:25.139Z"
+        },
+        {
+          "n": 42,
+          "text": "E0313 fix text names a valid rename for every tuple destructure: it fills in the member names the user wrote, in order, and never offers a pattern that repeats one binding name (today it offers `{ _0: name, _1: name }`, which is E0118). A ui snapshot shows the fixed text for a two-member tuple.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev f32fac9fa6 (E0313 fix text). On dev 168e1e9e92, `jet test Compiler --profile ui --filter tuple_destructure_rename_keeps_written_names` PASS.",
+          "at": "2026-11-15T03:11:20.062Z"
+        },
+        {
+          "n": 43,
+          "text": "E0357 fix text for a name like `_0` states the real rule broken (a leading underscore followed by a digit is not a valid binding name), not \"a name cannot end with `_`\". A ui snapshot covers `_0`.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev f32fac9fa6 (E0357 text). On dev 168e1e9e92, `jet test Compiler --profile ui --filter casing_underscore_digit` PASS.",
+          "at": "2026-11-15T03:11:21.020Z"
+        },
+        {
+          "n": 44,
+          "text": "D-COMPONENT-TUPLE1=A is built (ratified 2026-11-13). A plugin tuple's part N is the member `partN`, counting from 0 in the plugin's order, nested tuples and lists of tuples included. Interface.jet names each part part{index} and records its Component position; descriptor fields are ordered by that position, not by name; ir_plugin_invoke_words passes member labels, and ir_route_store_tuple stores by label. The ballot program prints `7 -9` on O0, O1, O2, and the `_0` spelling is gone.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev f32fac9fa6 (D-COMPONENT-TUPLE1=A: part0, part1, ...). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_export_returns_a_tuple_through_the_return_area_on_all_hosted_tiers.",
+          "at": "2026-11-15T03:11:21.986Z"
+        },
+        {
+          "n": 45,
+          "text": "A loop statement whose body holds an expression-position `?? break` (`sum += Int{r.read_u16_le() ?? break}`) keeps every statement after the loop: the program prints both lines at O0, O1 and O2 (today the names declared after the loop report UnknownName). Proof: a case in tests/cases with both loop spellings and exact stdout.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 9fd95d380b (a diverging fallback in any nested expression is a loop exit). On dev 168e1e9e92, `jet test Compiler --profile cases --filter fallback_exit_in_nested_expression_keeps_the_block_after_the_loop` PASS 1.",
+          "at": "2026-11-15T03:11:22.984Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:map",
+        "consolidation-2026-10-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T11:17:59.631Z",
+      "updated": "2026-11-15T08:23:48.206Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 45,
+      "completedAt": "2026-11-15T03:11:29.222Z",
+      "questions": [
+        {
+          "id": "q0bdg3v5",
+          "cardId": "c08s0ppt",
+          "decisionId": "D-FIXED-WRAP1",
+          "by": "owner",
+          "kind": "question",
+          "text": "im sure there's a better name for this that is more idiomatic jet and cohesive, \"wrapping from\" is long and doesnt sound great, things need to be easy to reason about",
+          "status": "answered",
+          "answer": "Agreed, and the redesign drops the new name entirely. Jet already has three overflow words for arithmetic: wrapping(a + b), saturating(a + b), checked(a + b). The revised recommendation lets wrapping and saturating also cover a conversion written as their operand: low :: wrapping(U32{state}) keeps the low bits, shade :: saturating(U8{level}) clamps. So there is one rule everywhere: plain stops on overflow, and the word you write picks wrap or clamp. The checked conversion stays U8.from_int(x), so checked(U8{x}) is refused with that fix, and E3010's fix text shows the gate forms. This is Swift's proven model (UInt32(x) traps; truncatingIfNeeded: and clamping: variants) in Jet's existing words. Names I ruled out: wrap (already a Jet keyword, the policy wrap(call) boundary), truncate (already means rounding on Float and dates), bits/from_bits (already means reinterpreting a Float's bits). The alternatives become U32.low_bits(x) and mask-then-convert. The revised ballot is written ($JET_SCRATCH_ROOT/lanes/Main/ballot-wrap.json), but Tower refuses the update without a fresh-agent adversarial review, and the no-subagents order blocks that. One reviewer agent would unblock it.",
+          "created": "2026-11-04T11:21:16.435Z",
+          "answeredAt": "2026-11-04",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q1ljdl1e",
+          "cardId": "c08s0ppt",
+          "decisionId": "D-FIXED-WRAP1",
+          "by": "owner",
+          "kind": "question",
+          "text": "We want beauty, elegance, cohesion, and idiomatic consistency. Reengineer until we have that",
+          "status": "answered",
+          "answer": "Re-engineered. The real problem was wider than the wrap name: one idea, what a fixed-width operation does when the result does not fit, had five spellings (one-operator gates, receiver methods like wrapping_add, the #Arithmetic block, U8{x} vs U8.from_int(x), Int{b} vs Int.from_u8(b)), and conversions were outside all of them. New A is one rule: plain stops; wrapping(e), saturating(e) and checked(e) cover everything inside their parentheses up to a call, so gates never nest; #Overflow(.Wrapping|.Saturating|.Stop) is the same rule for a block (renamed from #Arithmetic, whose .Checked meant stop while checked() meant None). Conversions T{x} and division are just more fixed-width operations under that rule. T{x} is the only integer conversion; the integer from_* and receiver overflow methods retire, and jet fix rewrites the ~3,000 calls. The ballot is updated.",
+          "created": "2026-11-04T12:29:20.694Z",
+          "answeredAt": "2026-11-04",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q3x2rmu6",
+          "cardId": "c08s0ppt",
+          "decisionId": "D-COMPONENT-TUPLE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "i thought jet tuples ARE positional with optional names? is that not the latest guidance? also, the recommended option does not have downsides engineered away so it is immediately rejected on both grounds",
+          "status": "answered",
+          "answer": "No. The latest guidance is the pair of record votes you ratified on 2026-11-06. Every group of values names its members and is written in braces, {min: 1, max: 9}. Paren tuples retire, and a destructure binds by name: {min, max}: bounds(xs). Written member order is now part of the type and decides comparison and printing. Neither vote adds positional binding or optional names. Neither is built yet: on today's compiler the brace spelling is still a parse error, and the old paren form (left: 7, right: -9) still works and destructures by name. You were right that the ballot was stale. It predated both votes, and with them two of A's costs disappear. Parts keep the plugin's order, so part10 no longer sorts before part2, and a one-part tuple becomes the one-member record {part0: 7}. The ballot now says record for Jet's side and tuple only for the plugin's positional group. One cost remains, and no named-only design can remove it: the plugin supplies no names, so the host types the names it wants once, {part0: left, part1: right}: guest.pair(). Writing {left, right} gets an error whose fix writes that line, and jet fix applies it. If you want Jet records to be positional with optional names everywhere, that reopens the brace-record vote for every program, so it needs its own ballot. Say so and it will be drafted; this question then goes away.",
+          "created": "2026-11-13T01:04:06.327Z",
+          "answeredAt": "2026-11-13",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-18T08:30:44.207Z"
     }
   ]
 }

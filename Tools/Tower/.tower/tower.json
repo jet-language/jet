@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112188,
+    "rev": 112194,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -55538,569 +55538,6 @@
       "criteriaLastN": 7
     },
     {
-      "id": "c08s0ppt",
-      "num": 5971,
-      "title": "Map: Wrong-meaning bugs: values, patterns, comparisons and checked arithmetic",
-      "body": "Destination: Each listed program computes the documented value on every tier.\nNotes: Batch B04 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && JET=$JET Tools/agent/jet-env jet test Tools/testkit \"suite cases\" with one regression case per card (o0,o1,o2 agree). Order: #3838 #4909 #4679 #4726 #4906 #4929 #5020 #5940 #5941 #4156 #4721 #4745 #4976 #4977 #5037.\nDecisions so far: D-PAT-NAMED-NEST1 (ratified=A) on #3838\nFog: no criteria yet on #5940 #5941 #4929 #4679 #5020 #4976 #4977 #4745 #4721 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e3",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P0",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-15",
-          "by": "Main",
-          "text": "I1 defect found 2026-11-15 03:23: tests/cases/closures/escaping_lambda_owns_the_file_reader_it_reads_on_every_tier.case hangs (TIMEOUT 600 s, 0.9 s cpu) on p154 through p159. strace of jet run -O0 shows openat(lines.txt)=4, then close(4) at once, then a FUTEX_WAIT forever on the main thread before the first print: the FileReader moved into the escaping lambda is dropped when line_reader ends, and the lambda then locks freed memory. Owner GoalsB-5-2 (top priority): a capture by move clears the local's drop; a drop-counter case without I/O proves it on every tier."
-        },
-        {
-          "at": "2026-11-15",
-          "by": "TowerKeeper-1",
-          "text": "Closed (Map card): the G3Core lanes landed nearly every item on dev; each is now met with its commit and a passing case on dev 168e1e9e92. c10's two remaining Jetpack workaround sites went to #6661 (#6661 c6); the streamed chars() gate from c18 went to #3262 (#3262 c33)."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c34 decisions (Main, 2026-11-13, for G3Core-2): (1) D-FIXED-WRAP1 A (ratified 2026-11-04) outranks the older D-POLICY-FILE1. The block marker is #Overflow(.Stop|.Wrapping|.Saturating), which replaces #Policy(arithmetic: .Checked|.Wrapping|.Saturating), and arithmetic is no longer a #Policy setting; placement rules are unchanged. The Data/Syntax row and syntax-decisions.md change in the same SUB. (2) Seed gate: part A (the integer from_* and receiver methods retired, about 3,150 callers rewritten) is seed-safe and lands now. Step (a) makes the compiler accept #Overflow and lands now. Step (b) moves every site and deletes the #Policy(arithmetic:) parser; it needs a seed that knows #Overflow and lands right after the next admit. The gap between (a) and (b) is the bootstrap seam only, as with the @T cutover in #4500. (3) Float-to-integer conversions (from_float, from_f32, from_decimal, from_fraction) are not part of D-FIXED-WRAP1; #6313 owns them."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c4 ruling (Main, 2026-11-13): the canonical typed comparison (equal_unordered, used by core.testing.compare and the history supplier) compares two Dyn.Number lexemes by exact decimal value, with arbitrary precision and never through binary64: \"1.0\" equals \"1.00\", \"1e2\" equals \"100.0\", \"-0.0\" equals \"0.0\", and \"1e400\" equals \"10e399\". Int, Float and Number stay distinct variants. Dyn == stays exact. Spelling preservation (encoding-decisions, JSON numbers) governs rendering only. Found by G12Docs-4 on b14, where these pairs compared unequal."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c29 decision (Main, 2026-11-13): the plugin wire budget is PG_MAX_WIRE = 1 MiB per string argument and result. It is declared beside PG_FUEL, PG_MAX_PAGES (256 pages, 16 MiB), PG_MAX_TABLE and PG_MAX_FRAMES in PluginHost.jet and enforced the same way (pg_failure, Budget(.Wire), PG_LIMIT_WIRE), so it adds no second mechanism. 1 MiB is 1/16 of the memory budget, so an over-budget result is still in bounds and only the wire budget refuses it. Neither the criterion nor spec.md named a number; spec.md now records this one (SUB G3Core-c29-wire)."
-        },
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "c25/c27: ballot D-COMPONENT-TUPLE1 posted (author G12Docs-4; non-author adversarial review ReviewComponentTuple, Claude Opus, which respelled A from _0/_1 to part0/part1 after probes showed _0 fails E0357 and breaks D-NAME-SIGIL1, and rebuilt D on the #Import overlay model). Recommendation A (part0, part1). c25b needs four edits if A is ratified."
-        },
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "c8 reproduces on seed-b13 (D-SCRIPT-HELPERS1 authoring, 2026-11-12, probes in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/D-SCRIPT-HELPERS1): a closure that writes a captured := local loses the write when passed as a callback, so each(...) leaves the value at 0 (p13, q09). A task that calls such a closure compiles and loses the write (q12), while writing the name directly in the task is refused with E1101 (q11), so the same write is refused in one spelling and silently dropped in the other. Closures also copy values they only read (q16, q18), against spec.md 'shared read access' (Docs/spec/spec.md:1167-1181). Rerun: sh run.sh p13.jet q09.jet q11.jet q12.jet q16.jet q18.jet in that directory."
-        },
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "c2 items 1-4 are proved by G3Core-t1b (7dfa3007a5, PASS 1 each); item 5 (files.map(p).path ICE) is still open with G12Docs-4. c10 items b and c pass as fallback_break_keeps_later_locals_in_scope_on_every_tier and equality_with_a_constant_payload_compares_on_every_tier."
-        },
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "G3Core-t1 (tests only, direct land) map from G12Docs-4. c2, the #4721 CliSeams1 items: 1 resource_returned_from_a_temporary_result_match_stays_open_on_every_tier; 2 advisory_lock_closes_through_a_moved_value_on_every_tier; 3 borrowed_file_writer_writes_through_a_fallible_function_on_every_tier; 4 optional_success_result_fallback_agrees_across_execution_tiers. Item 5 (MappedFile path field) still fails on seed-b13: files.map(p).path is an ICE, \"ir.build unlowered: field of core.files.MappedFile\", at O0/O1/O2, so c2 stays open until G12Docs-4 lands that fix. c3: the bare_none case covers a bare None returned from a T? E! function. `?? None` refused on T? E! is the spec rule (spec.md:1408-1412, ?? yields the innermost payload and its right side must be that payload), not this bug. c35 is covered by the recursion-stop case."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "c38 shares its root with #6281 c41: a flat 1024-arm match is refused with E1403 (nests 257 levels) because arm chains reach sema as nested Expr.If. One iterative else-chain walk in sema, lowering and IR closes both."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "#6563 c1 precut audit re-added 7 criteria from archived #1897, #2398, #4236, #4422: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "Main-13 scope note (Builder3, 2026-11-04): the seed compiles Core and the compiler, and it rejects wrapping(T{x}) with E1005, so Main-13 moves only the 33 runtime narrowing sites. The 10 Core sites stay plain T{x}. Each narrows a value that is masked or built to fit, so the new E3010 stop never fires and their meaning is unchanged. The census found no compiler sites. The Core sites move under c34, once the seed has rotated past Main-13."
-        },
-        {
-          "at": "2026-11-04",
-          "by": "Main",
-          "text": "Held-work citation moved into the repo (#6563 c2, landed 446b49726a; see Tools/tower/held/README.md). The scratch patch lanes/Main/unitarg/Main-13-parked.patch now lives at Tools/tower/held/5971/."
-        },
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "c12 wrap-around spelling moved from a card question to ballot D-FIXED-WRAP1 (recommends T.wrapping_from(x), destination-owned per S42). Parked patch Main-13 waits on its ratification."
-        },
-        {
-          "at": "2026-11-03",
-          "by": "Main",
-          "text": "c12 patch (Main-13: sema routes an unheld fixed-to-fixed narrowing through the exact Int and CheckedIntToFixed; case tests/cases/numeric_widening/fixed_narrowing_stops_like_int; golden Examples/features/math/fixed_narrowing_stop.jet) is PARKED, not landed: wave 37 on 26fa6cd102 found 2 real regressions. tests/cases/web_build/web_decimal_and_grouped_formatters_use_shared_helpers and tests/cases/checked_text/html_composition_matches_aot_jit_interpreter_and_web fail on the wave and pass on base (rerun on both). Root, from the node wasm stack: Compiler/JetRuntime/Source/Int.jet:146 int_fits does U64{int_limb(value, at)} (an I64 to U64 conversion), which is now checked and calls jet_int_checked_fixed, which calls int_fits: infinite recursion. Native passed only because its runtime pack is still built by the older compiler; the next seed would break native too. Verified correct: I64{U64{max}} stops with E3010 on none, basic and full. To finish c12: (1) the runtime's own bit-pattern conversions (about 35 non-literal fixed conversions in Compiler/JetRuntime, e.g. Int.jet:146, Iter.jet:697, IterNumeric.jet:4-8, NativeByteList.jet:12-17) need an explicit wrap-around conversion, and Jet has none (to_bits/from_bits are Float-only; wrapping(...) is ratified for arithmetic operators only), so this needs an owner-ratified spelling or a sanctioned runtime-internal raw cast; (2) the widen-to-Int-plus-runtime-call lowering should become an inline bounds check so hot paths do not pay a call per conversion. Parked patch: $JET_SCRATCH_ROOT/lanes/Main/unitarg/Main-13-parked.patch."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Merged #6260 \"Plugin engine: f32.convert_i64_u / f32.convert_i64_s round twice\" into this card (wrong-meaning bugs: each program computes the documented value on every tier); its 14 open item(s) are carried as \"(was #6260)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Merged #4156 \"checked_add and checked(...) on fixed-width ints return null even when the result fits\" into this card (wrong-meaning bugs: each program computes the documented value on every tier); its 3 open item(s) are carried as \"(was #4156)\" criteria, and its 5 met criteria stay met history. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
-        },
-        {
-          "at": "2026-10-31",
-          "by": "Main",
-          "text": "Merged #6318 \"Scalar Type{x} narrowing between fixed-width integers silently wraps instead of stopping with E3010\" into this card (wrong-meaning bugs: each program computes the documented value on every tier); its 4 open item(s) are carried as \"(was #6318)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5941 \"Sema's loop-never-exits verdict can disagree with the lowered CFG and silently drop the code after the loop\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 1 criteria, 0 ratified decisions). Body: Found by O0Load-3 on 2026-10-24 while chasing the serde/encoding_canonical and encoding_xml_projection SIGILL at XmlEngine.jet:712. Before 1158a1548f (#5940 b), sema_stmt_refutable_expr_can_break did not walk the arm values of a value-position if/match, so a loop whose only exit is a 'break' inside a value match arm ('event :: if &scanner.next() == { .Val(v) -> ^v .None -> { break } ... }') was judged exitless. Everything after the loop was treated as dead, and IR put a trap there. Minimal repro ($JET_SCRATCH_ROOT/lanes/Main/repros/loop-exit-value-match-break.jet): on base 3703 it prints NOTHING and exits 0, so the post-loop code is silently dropped; Core's XML parser hit SIGILL. The walk was "
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5940 \"Compiler defects found porting Jetpack (U7): ?? break scoping, == Val(CONST) silently binds, lambda moves, and 5 more\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 1 criteria, 0 ratified decisions). Body: Found by O0Image-3 on 2026-10-24 while porting the Jetpack Engine area (#4589); each one was worked around in Jetpack. Triage and fix each at the root, with a UI snapshot or case per item. (a) http_server.static_files: E0904 'no fixed source typed call contract'. (b) 'a ?? b ?? break', or '?? break' inside an if-arm in a loop, makes later locals E0107 'Nothing named'. (c) P1, correctness: 'x == Val(CONST)' parses as a binding pattern (E0357), so '== Val(local)' SILENTLY BINDS instead of comparing. (d) An escaping lambda that owns a FileReader/ZstdReader gives E0212, but the spec (lines 787-799) says it should move. (e) A lambda body 'if f() == {.Ok(b) -> Ok(b) ...}' stored in a fn-typed fiel"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5037 \"Prove Jet rejects or traps every V safety failure observed on 2026-10-16 (null field, unfilled ref list, int-to-pointer cast, silent overflow, mismatched C declaration)\" (CardTrim 2026-10-28: single-root task step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 2 criteria, 0 ratified decisions). Body: Source: mine-for-jet V report; live probes on V 0.5.2 (9e0a651) under target-mine-vlang/probes. V still: (p2/p7) accepts []&int{len: n} with a warning and crashes with 'invalid memory access'; (p5) accepts voidptr(123) cast to &Something without unsafe and crashes; (p3) wraps i32 overflow silently; (p9) accepts a C declaration that disagrees with the header and surfaces only raw TinyCC output on generated src.c. Now fixed in V: null refs in struct literals, immutable-to-mutable aliasing, division by zero, bounds. Jet claims each of these is impossible or trapped (no null; D-UNINIT1 write-before-read; D-CAP9 raw pointers only inside #Unsafe; D-NUMOPS1 fixed-width traps; I2 + E3208 for foreign"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #5020 \"Native correctness batch: closure capture snapshot loses writes; method vs field call; containers' close; sort_key_panic; runtime_unicode; query_lifecycle; fn_value_carrier/anonymous_unions SEGV; E3001 in derive without prep loop\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: CorrectAudit 2026-10-16 ranked list (agent://CorrectAudit): basics/closure_capture_snapshot prints 10 not 12; callable/member_namespaces counter.step(4) calls the field; memory/resource_close_containers 6 missing closes; collections/sort_key_panic; text/runtime_unicode null vs -1; web/query_lifecycle 2 vs 1; callable/fn_value_carrier and types/anonymous_unions SEGV (root unknown); derive body without prep loop -> E3001 'E0999 has no Source edit registry channel'. Fixed: Core/time floor double-subtract d048fbb77 (mem-safety)."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4977 \"codegen: trait default-body call on a concrete receiver lowers as a dynamic trait call\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: A call to a trait default method on a concrete receiver becomes a dynamic trait call in Jet codegen; Rust generates a per-type copy of the default body. Port the Rust instantiation so both tiers lower the same call the same way. Found by CgAuditA."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4976 \"codegen: IndexMut lookup for a concrete owner matches any trait named IndexMut\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: Compiler/JetCodegen/Source/Codegen/Statements.jet ~1628-1635: for a concrete owner, any trait named IndexMut in any module matches, so two declarations panic as \"ambiguous\". Resolve by the checked trait identity as Rust does. Found by the codegen panic audit (CgAuditA)."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4929 \"Latent power-vs-XOR bugs fixed by the bit-operator migration: add regression tests\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: BitOpsMigration (2026-10-09, commits e5f136064 Compiler, 9a889eb7b Core, 5ee8b5733 Jetpack) found 27 sites where Rust-origin code used ^ meaning XOR, but in Jet ^ is power (D-SIGIL-ALGEBRA1): 24 infix + 3 compound, mostly JetRuntime (unsigned ordering/overflow sign tests, FNV and address hashes, xorshift PRNG) plus 1 Jetpack ArtifactStore tamper byte. They computed powers until now; they now use bit_xor. Per-site reasons: $JET_STATE_ROOT/scratch/BitOpsMigration/caret-sites.reviewed.tsv. Add a regression fixture per affected routine (hash vectors, PRNG sequence, unsigned compare at sign boundary). Also: integer ! (bit-not) is E0109 'use bit_not' in the Jet sema (Sema/Expressions.jet:3178) bu"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4906 \"Comparison equality must use canonical typed facts on every tier\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 3 criteria, 0 ratified decisions). Body: D-TEST-COMPARE1 and I9 already require one observation meaning. Current Rust and Jet classifiers compare rendered strings in affected paths instead of consuming the existing declared_equal fact. Source-grounded counterexamples include NaN, signed zero and object ordering; these are not new runtime observations. Completed delivery cards #2950 and #4323 remain historical. This new defect stream is separate from JSON wire-schema and fallible Receipt API owner choices."
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4745 \"Four compiler bugs found porting core.auth: default args resolve in the caller's scope; implicit Err loses Result; bare None mistyped in `T? E!`; trim().bytes() emits non-compiling Rust\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: Found by CorelibPort3 (2026-10-07) on corelib/port3 @ e37c8e768; worked around in Core source, not fixed. 1. Default argument expressions resolve in the CALLER's scope: verify_jwt's default `clock_skew: Duration{0ms}` fails E0134 \"`ms` isn't a unit in scope\" when a caller omits the argument. Defaults must resolve in the callee's module. 2. A Core function with an implicit Err loses its Result type at import (crates/... Imports.rs core_source_sig_map), so matching .Ok/.Err on it crashed the compiler; session APIs now spell `T Err!` explicitly as a workaround. 3. A bare `None` returned from a `T? E!` function gets the wrong type (workaround: `?? return Ok(None)`). 4. `trim()` followed by `.byt"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4721 \"Compiler defects found porting CLI rooted store (CliSeams1, 2026-10-07)\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: Found by CliSeams1 on port/cli-seams1 @ 1fa76f8a5 (repros in $JET_STATE_ROOT/scratch/CliSeams1/HANDOFF.md): 1. Returning a resource out of a match on a temporary result releases it: `.Ok(held) -> return Ok(held)` dropped a directory lock (binding with `??` works). Resource-safety defect (I1). 2. close(^lock) on AdvisoryLock ICEs: missing checked function target `AdvisoryLock::close`. 3. A fallible fn taking a borrowed FileWriter and calling write_all ICEs with `MIR place is not writable` instead of a type error. 4. `??` on `T? E!` also catches None (should only catch the error); Jetpack EntryCarrier relies on it for no-workspace and will misbehave once the D-FSDIR1 authority files return to"
-        },
-        {
-          "at": "2026-10-28",
-          "by": "CardTrim",
-          "text": "Folded #4679 \"Int * Decimal is rejected and unary minus refuses Decimal values\" (CardTrim 2026-10-28: single-root bug step of map #5971 (Map: Wrong-meaning bugs: values, patterns, comparisons and checked); 0 criteria, 0 ratified decisions). Body: Proven: hours :: 3; rate :: 2.5; hours * rate gives E0133 \"`*` isn't defined between Int and Decimal\" with fix \"use .add(other)\" (a04_int_float_mix). print(-rate) and print(-(2.5)) give E0109 \"Only Int and Float values can be negated\" while -2.5 works (e01_decimal, f01). D-TYPE2-DEFAULT1 makes decimal literals exact Decimal; the spec and syntax-surface still say Float. Fix the operators under D-TYPE2-NUM1/D-NUMJOIN1 and correct the spec text."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "(was #4679) Int * Decimal is rejected and unary minus refuses Decimal values",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 0d4560cc63 (GoldenRoots3): Int * Decimal is accepted (qty * price with an Int variable), unary minus negates a Decimal, and Decimal / Int gives a Fraction; case exact_number_tiers/decimal_mixes_with_int_and_negates. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
-          "at": "2026-11-06T05:01:27.381Z"
-        },
-        {
-          "n": 2,
-          "text": "(was #4721) Compiler defects found porting CLI rooted store (CliSeams1, 2026-10-07)",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Items 1-4: G3Core-t1b 7dfa3007a5 regression cases. Item 5 (files.map(p).path ICE): c08bb8c6ad. On dev 6aaa5c8879, `jet test Compiler --profile cases --filter resource_close/mapped_file_reads_its_path` PASS 1.",
-          "at": "2026-11-15T03:10:59.603Z"
-        },
-        {
-          "n": 3,
-          "text": "(was #4745) Three compiler bugs found porting core.auth are fixed, each with a regression case on O0, O1 and O2: default args resolve in the caller's scope; implicit Err loses Result; bare None is mistyped in `T? E!`.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G3Core-t1b landed 7dfa3007a5 (tested on fb1b8faef1 plus the patch, seed-b13; output $JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G3Core-t1b/): jet test Compiler --profile cases --filter default_arguments_resolve_in_the_callee_module_on_every_tier PASS 1 (default args resolve in the declaring scope); imported_fallible_function_keeps_its_result_on_every_tier PASS 1 (an implicit Err keeps its Result); bare_none_from_an_optional_fallible_function_is_none_on_every_tier PASS 1 (bare None in T? E!). Each case runs O0, O1 and O2. LaneCheck rc 0; 0 FAIL, KF, SKIP, ERROR or TIMEOUT.",
-          "at": "2026-11-12T20:06:53.222Z"
-        },
-        {
-          "n": 4,
-          "text": "(was #4906) Comparison equality uses canonical typed facts on every tier: the Jet classifiers consume the existing declared_equal fact, and every runtime, history and compile-time supplier uses canonical typed comparison.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 0ec31b69b6 (classifiers read declared_equal) and 9cf1e7f361 (runtime and history suppliers; Dyn.equal_unordered compares Number lexemes by exact decimal value per Main's 2026-11-13 ruling). On dev 168e1e9e92, `jet test Compiler --profile cases --filter encoding_parity/dyn_number_equal_unordered` PASS 1.",
-          "at": "2026-11-15T03:11:00.558Z"
-        },
-        {
-          "n": 5,
-          "text": "(was #4929) Latent power-vs-XOR bugs fixed by the bit-operator migration: add regression tests",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 8caed4f145: census of the 27 power-vs-XOR sites; the one any program reaches (Alloc.jet alloc_unsigned_less under the counting allocator) is pinned; the others are unreachable from Jet programs, covered by a C witness, or already tested (commit message lists each). On dev 168e1e9e92, `jet test Compiler --profile cases --filter allocator_families/counting_program_allocator_refuses` PASS 1.",
-          "at": "2026-11-15T03:11:01.657Z"
-        },
-        {
-          "n": 6,
-          "text": "(was #4976) codegen: IndexMut lookup for a concrete owner matches any trait named IndexMut",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 8823426873 (GoldenRoots3): a user trait named IndexMut no longer routes g[k] = v; only the core IndexMut does. ui index_hook_ignores_user_trait_named_indexmut. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
-          "at": "2026-11-06T05:01:28.076Z"
-        },
-        {
-          "n": 7,
-          "text": "(was #4977) codegen: trait default-body call on a concrete receiver lowers as a dynamic trait call",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 38725500cb (GoldenRoots3): a default-body trait call on a concrete receiver calls the body directly; ir_trait_call is used only for TraitObject receivers. A new case pins it. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
-          "at": "2026-11-06T05:01:28.804Z"
-        },
-        {
-          "n": 8,
-          "text": "(was #5020) Native correctness batch: closure capture snapshot loses writes; method vs field call; containers' close; sort_key_panic; runtime_unicode; query_lifecycle; fn_value_carrier/anonymous_unions SEGV; E3001 in derive without prep loop",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 4dff8b1e09 (G3Core-c8-pins): every program the c8 audit names gives its recorded output. On seed-b14, the 7 existing goldens give PASS 3 each (o0, o1, o2), the new Examples/Comptime/MarkerTemplateWithoutLoop golden (E3001 in derive without a prep loop) gives PASS 3, the containers close cases resource_close/generic_container_close_runs_once_* give PASS 1 each with O1 and O2 run steps, and DiagnosticRows --check is rc 0. Lander ran all of them.",
-          "at": "2026-11-13T06:49:09.069Z"
-        },
-        {
-          "n": 9,
-          "text": "(was #5037) Prove Jet rejects or traps every V safety failure observed on 2026-10-16 (null field, unfilled ref list, int-to-pointer cast, silent overflow, mismatched C declaration): One example per case",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev e27083a780. On dev 168e1e9e92 with the gate-p141 compiler, `jet test Compiler --profile cases --filter unsafe_and_runtime/v_safety_failures` PASS 1 (one fixture per V failure).",
-          "at": "2026-11-15T03:11:02.623Z"
-        },
-        {
-          "n": 10,
-          "text": "(was #5940) Compiler defects found porting Jetpack (U7), as named by the workaround comments in Jetpack sources: (a) http_server.static_files E0904; (b) a ?? b ?? break scoping (E0107); (c) x == Val(CONST) binds instead of comparing; (d, e) an escaping closure owning a FileReader or ZstdReader; (g) inline #run {} values; (h) a lambda moving a locked value. Each item is fixed, or confirmed as intended with a clear diagnostic, with a UI snapshot or case per item, and its Jetpack workaround comment is removed or rewritten. Item (f) text is lost: if it resurfaces, it gets its own criterion.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "Moved to #6661 c6: items a, b, c, g and most of (h) landed in 33cd0d50c3 and 62e933686a (b and c also pass as control_and_data cases); two workaround sites remain on dev 168e1e9e92",
-          "at": "2026-11-15T03:11:03.558Z",
-          "closure": "obsolete"
-        },
-        {
-          "n": 11,
-          "text": "(was #5941) Sema's loop-never-exits verdict can disagree with the lowered CFG and silently drop the code after the loop",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev ce38120fe8 (GoldenRoots3): a break inside a #Shield or other marker block, or a comptime arm, within a loop now counts as exiting it, so sema's never-exits verdict matches the lowered CFG and code after the loop is kept (it used to be dropped and the program hit SIGILL). Case control_and_data/break_inside_marker_block_keeps_code_after_loop passes under jet run and --release and errored with a signal on base. A/B vs 6bee890a10: ui 2378, golden loop/control/switch/match/option/files/resource/own 739, cases core_files/ownership/control_and_data/loop/bind 452, 0 lost.",
-          "at": "2026-11-06T05:27:53.600Z"
-        },
-        {
-          "n": 12,
-          "text": "(was #6318) Every fixed-width to fixed-width Type{x} narrowing whose value does not fit (I32{I64}, U8{U16}, I8{I16}, U8{I32{-1}}, U32{I64{-1}}, I64{U64{max}}) stops with E3010 on o0, o1 and o2, exactly as narrowing from Int does; a golden example and a case cover each width pair class (signed to signed, unsigned to unsigned, signed to unsigned, unsigned to signed).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "cc0615c8da (Builder3, Main-13): a narrowing fixed-width conversion stops like one from Int, and the overflow words choose its outcome; the 33 runtime sites that relied on low bits now use wrapping(T{x}). Proof: FIXED_POINT on t5971b (94d68dcf2afa3067) and rebased t5971h (651f7aeab1650012); lane-check CHECK OK on the whole compiler; golden lost 0 (3 new math/fixed_narrowing_stop rows pass; process_run_all o2 crashes on the base too), cases lost 0 (+2 new pass), ui lost 0 (+2 new pass); E1005 registry row and diagnostic page regenerated. The 10 Core sites stay T{x} because the seed rejects wrapping(T{x}) (E1005); each narrows a value already in range, so meaning is unchanged; they are listed with file:line in the receipt and move under #5971 c34.",
-          "at": "2026-11-04T23:30:24.086Z"
-        },
-        {
-          "n": 13,
-          "text": "(was #6318) approx(x) results passed to a Float parameter or combined with a Float follow D-NUMWIDEN-CROSS1's expert path without E3010, with a golden example on o0, o1 and o2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed a4bbbbe987 (Main-14): Examples/features/math/approx_into_float.jet with Examples/features/expected/math/approx_into_float.out. With D-NUMWIDEN-CROSS1=E, braces and implicit crossings are checked and approx(n) is the expert escape. approx(2^53 + 1) passed to a Float parameter (half), added to a Float, and multiplied by a Float rounds to the nearest Float (9007199254740992.0, 4503599627370496.0, 9007199254740992.0, 2251799813685248.0) with no E3010. testkit golden suite --filter Examples/features/math/approx_into_float: 1 passed on o0, o1 and o2; run-feature-examples --filter math/approx_into_float passed 1; lane-check CHECK OK.",
-          "at": "2026-11-03T02:52:05.232Z"
-        },
-        {
-          "n": 14,
-          "text": "(was #6318) The E3010 text for Int to Float names the actual target and problem (no 'into the decimal'), generated from the registry, with its UI snapshot updated from real output.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev afca271c7e (GoldenRoots3): the E3010 text for a checked Int to Float crossing reads 'whole number has no exact Float; approx(x) rounds it to the nearest Float' (the F32 form for an F32 target); the inline lowering and the runtime leaf produce the same text, rendered by the E3010 registry row through {{msg}}. Snapshot Examples golden types/typed_literal_whole_value_lossy.err.out regenerated from real output. Golden numeric_widening, exact_number and math/numeric/approx 229 pass, the 4 failures identical to base; int-widen and numeric C fixtures CHECK OK.",
-          "at": "2026-11-06T05:33:22.349Z"
-        },
-        {
-          "n": 15,
-          "text": "(was #6318) Float.from_int and Float{n} agree for whole numbers with no exact Float (2^53+1): both follow the one ratified rule, proven by an example on o0, o1 and o2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev 90f5740d04 (GoldenRoots3): under ratified D-NUMWIDEN-CROSS1=E, Float.from_int(2^53+1) stops with the same E3010 at the call line as Float{n} on o0, o1 and o2, and a literal gets E1003 for both. Case numeric_widening/float_from_int_and_float_braces_follow_one_crossing_rule passes. Full A/B against base: no case regressions (every PASS to non-PASS row reran PASS, the rest fail on base); golden and ui identical apart from one timeout flake.",
-          "at": "2026-11-06T06:19:30.277Z"
-        },
-        {
-          "n": 16,
-          "text": "(was #4156) [#4515] D-FLOAT-BITS1=A: math.f32_to_bits and math.f32_from_bits are exact and allocation-free on every tier, with NaN and sign-bit parity.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev c752c8a0dc: math.f32_to_bits and f32_from_bits with a #Test covering quiet and signaling NaN payloads, both signs, negative zero, infinity and the largest subnormal (Core/Math/Math.jet). On dev 168e1e9e92, `jet test Compiler --profile core --filter Core/Math/Math.jet`: 114 rows, 114 passed.",
-          "at": "2026-11-15T03:11:04.482Z"
-        },
-        {
-          "n": 17,
-          "text": "(was #4156) [#4434] D-STATS-CANONICAL1=A: overflow-safe, infinity, NaN and tie semantics for core.math.stats have one source meaning, and native routes migrate.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev c50c58d7d5. On dev 168e1e9e92, `jet test Compiler --profile cases --filter core_math_stats_follow_one_rule` PASS 1.",
-          "at": "2026-11-15T03:11:05.396Z"
-        },
-        {
-          "n": 18,
-          "text": "(was #4156) [#4514] D-CHAR-SCALAR1=A: Char.from_u32 and U32.from_char. Streamed chars() lowering is gated on the paired time/allocation win.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 9f5adae6f2 (Char.from_u32, U32.from_char). On dev 168e1e9e92, `jet test Compiler --profile cases --filter char_scalar_conversions_agree_on_every_tier` PASS 1. The streamed chars() gate moved to #3262 as its own criterion.",
-          "at": "2026-11-15T03:11:06.315Z"
-        },
-        {
-          "n": 19,
-          "text": "(was #6260) f32.convert_i64_u and f32.convert_i64_s give the IEEE round-to-nearest-even f32 for every input; tests cover 2^24+1, 2^53+1, 0x8000_0080_0000_0001, u64 max and i64 min, on `jet run` and `jet run --release`.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 9e4a59cc4d. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_float_conversions_from_64_bit_integers_round_once_on_all_hosted_tiers.",
-          "at": "2026-11-15T03:11:07.293Z"
-        },
-        {
-          "n": 20,
-          "text": "(was #6260) The L2 disclosure \"u64→f32 rounds twice\" no longer holds and is removed.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 9e4a59cc4d (G3Core-c19, c20): conversions round once, so the disclosure is gone; `git grep -n -i 'rounds twice'` on dev 168e1e9e92 finds only two unrelated math comments.",
-          "at": "2026-11-15T03:11:08.287Z"
-        },
-        {
-          "n": 21,
-          "text": "(was #6260) (from #6259 Plugin host imports are not checked against the loading pack) plugin.load refuses, as PluginError.Denied and before any guest code runs, a component whose host import's right is not in the loading package's `authority.needs`, on `jet run` and `jet run --release`.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 1ec7bbbc0a (c21-c23). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_load_denies_a_host_import_its_package_does_not_need_on_all_hosted_tiers.",
-          "at": "2026-11-15T03:11:09.221Z"
-        },
-        {
-          "n": 22,
-          "text": "(was #6260) (from #6259 Plugin host imports are not checked against the loading pack) A package with no `needs` loads only import-free components; the existing FS.Read text-import cases declare `needs: [FS.Read]` and still pass.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 1ec7bbbc0a (c21-c23). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
-          "at": "2026-11-15T03:11:10.162Z"
-        },
-        {
-          "n": 23,
-          "text": "(was #6260) (from #6259 Plugin host imports are not checked against the loading pack) spec.md's plugin section matches the behaviour.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 1ec7bbbc0a (c21-c23) updates spec.md's plugin section. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
-          "at": "2026-11-15T03:11:11.134Z"
-        },
-        {
-          "n": 24,
-          "text": "(was #6260) (from #6261 Plugin engine: support multi-value functions) A component using multi-value blocks and multi-result internal functions loads and returns correct results on both hosted tiers.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 0c60c9d673 (c24, c26). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_multi_value_functions_and_blocks_return_correct_results_on_all_hosted_tiers.",
-          "at": "2026-11-15T03:11:12.060Z"
-        },
-        {
-          "n": 25,
-          "text": "(was #6260) (from #6261 Plugin engine: support multi-value functions) A lifted export returning a tuple<s64, s64> works through the return area.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev f32fac9fa6. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_export_returns_a_tuple_through_the_return_area_on_all_hosted_tiers.",
-          "at": "2026-11-15T03:11:13.011Z"
-        },
-        {
-          "n": 26,
-          "text": "(was #6260) (from #6261 Plugin engine: support multi-value functions) The Component.jet multi-value refusal is gone.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 0c60c9d673 removes the Component.jet multi-value refusal. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
-          "at": "2026-11-15T03:11:14.003Z"
-        },
-        {
-          "n": 27,
-          "text": "(was #6260) (from #6262 Plugin engine: enforce a wall-clock budget per call (PluginL) A guest that runs past the call deadline fails as PluginError.Budget(.Time, fault) with fault.export set and 1-32 frames, on both hosted tiers; the host keeps running.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 40ce58f31e (c27, c28). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_call_fails_past_its_time_budget_on_all_hosted_tiers.",
-          "at": "2026-11-15T03:11:14.970Z"
-        },
-        {
-          "n": 28,
-          "text": "(was #6260) (from #6262 Plugin engine: enforce a wall-clock budget per call) spec.md lists the time budget beside the others.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 40ce58f31e (c27, c28) lists the time budget in spec.md. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
-          "at": "2026-11-15T03:11:15.967Z"
-        },
-        {
-          "n": 29,
-          "text": "(was #6260) (from #6263 Plugin engine: enforce a size limit on values crossing the w) A result or argument over the wire budget fails as PluginError.Budget(.Wire, fault) before the host allocates it, on both hosted tiers.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 79ddd5e328 (c29, c30; PG_MAX_WIRE = 1 MiB per Main's 2026-11-13 decision). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_call_fails_a_string_over_the_wire_budget_on_all_hosted_tiers.",
-          "at": "2026-11-15T03:11:17.016Z"
-        },
-        {
-          "n": 30,
-          "text": "(was #6260) (from #6263 Plugin engine: enforce a size limit on values crossing the wire) spec.md lists the wire budget.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 79ddd5e328 (c29, c30) records the wire budget in spec.md. On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16.",
-          "at": "2026-11-15T03:11:18.069Z"
-        },
-        {
-          "n": 31,
-          "text": "(was #6260) (from #6264 Clear the 23 L0507 lint warnings in Compiler/JetPlugin Trans) `jet check` of the JetPlugin package reports no L0507 in Translate.jet.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Main-1: `jet check Compiler/JetPlugin` reports 0 L0507 in Translate.jet (was 23): the 23 flagged if/else-if chains are ordered arm tables; lane-check Compiler/JetPlugin CHECK OK Landed in wave 34 as dev f2898ba8d5 (2026-11-02). Wave run on 190f826022: goldens 1206/1206, 0 regressions. The 4 lost ui/cases rows were bisected to the deferred IrTypes-64b, IrTypes-65b and DeclTypes-32, which did not land.",
-          "at": "2026-11-02T23:57:34.226Z"
-        },
-        {
-          "n": 32,
-          "text": "(was #6260) (from #6264 Clear the 23 L0507 lint warnings in Compiler/JetPlugin) The 23 L0507 warnings are gone and behaviour is unchanged: the plugin cases and the plugin_failure/sandbox_mathkit goldens pass.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev f2898ba8d5 (JetPlugin Translate.jet uses ordered arm tables; L0507 is gone). Main ran on dev fd79906166 with seed-b14, 2026-11-13: jet check Compiler/JetPlugin/Source/Plugin/Translate.jet rc 0 with 0 L0507 lines; jet test Compiler --profile cases --filter authority/plugin_ PASS 8 FAIL 0; golden Examples/Modules/Packages/PluginFailure PASS 1; golden Examples/Modules/Packages/SandboxMathKit PASS 1.",
-          "at": "2026-11-13T05:52:40.406Z"
-        },
-        {
-          "n": 33,
-          "text": "A user trait method named encode is not refused with a misleading E0105 'defined twice'; a case shows the trait and its impl compile and run (found by Prep 2026-11-04).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "dev c2635c41a7 (GoldenRoots3): impl Point.Codec { fn encode } compiles and runs beside #Codable with no E0105; case auto_derive_policy/user_trait_method_named_encode_compiles_and_runs passes under jet run and --release. A/B vs 55b3322ee1: ui, cases exact/numeric/auto_derive/decimal and golden decimal/exact/numeric/index/serde/codable/math lose 0.",
-          "at": "2026-11-06T05:01:26.655Z"
-        },
-        {
-          "n": 34,
-          "text": "D-FIXED-WRAP1 A is fully cut over in one batch: the from_* conversion methods and the receiver methods it retires are gone, #Arithmetic is renamed #Overflow, every in-repo caller (about 3,000 calls) is rewritten in the same batch by a one-time in-repo script (no shipped jet fix rule, owner order 2026-11-06), and no old spelling, alias or shim remains. Main-13 lands only the conversion part first (wrapping, saturating and checked around T{x}, a word around a widening refused, runtime and Core narrowings moved to wrapping(T{x})).",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 0a551202cf (part A: integer from_* and fixed receiver overflow methods retired), 5b04c1faf4 (step a: #Overflow accepted), a1fd654036 (every site written #Overflow) and 15ed40b712 (#Policy(arithmetic:) retired). On dev 168e1e9e92, `git grep -l '#Policy(arithmetic' -- '*.jet'` prints nothing, and `jet test Compiler --profile cases --filter non_arithmetic_checks_remain_checked_inside_wrapping` PASS 1.",
-          "at": "2026-11-15T03:11:19.037Z"
-        },
-        {
-          "n": 35,
-          "text": "(was #1897 c1) The recursion probe prints a registered Jet stop that names the recursing function and source line, exit 70, on O0, O1 and O2 (I9) [precut audit: failing on 9c7ddf1359: probe p1897_stack_overflow o0=70 o1=70 o2=70]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "G3Core-t1b landed 7dfa3007a5 (tested on fb1b8faef1 plus the patch, seed-b13): jet test Compiler --profile cases --filter unbounded_recursion_stops_naming_the_function_and_line_on_every_tier PASS 1. The case runs the recursion probe on O0, O1 and O2 and asserts exit 70 and a registered stop naming the recursing function and its source line. 0 FAIL, KF, SKIP, ERROR or TIMEOUT.",
-          "at": "2026-11-12T20:06:54.711Z"
-        },
-        {
-          "n": 37,
-          "text": "(was #2398 c1) Statement-position if checks every condition, body, tail effect and flow fact, returns Unit without branch-value unification, and direct and parenthesized forms agree [precut audit: failing on 9c7ddf1359: C:control_and_data/discarded_if_does_not_unify_mixed_tail_values FAIL exit 1; expected 0]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On dev e4096a0f3b, the precut audit's failing proof tests/cases/control_and_data/discarded_if_does_not_unify_mixed_tail_values.case PASSes in the Lander's fR3 fullprof run. A statement-position if whose arms end in Int and Unit tails checks, runs (jet run, and the jet build binary) and prints the expected output, with no branch-value unification error. c38 (deep else-if worklist; see #5910) and c39 (O2 fall-through) stay open: this case does not prove them.",
-          "at": "2026-11-10T02:03:36.146Z"
-        },
-        {
-          "n": 38,
-          "text": "(was #2398 c2) Discarded Result handlers evaluate the subject once, and deep else-if lowering uses an iterative worklist without false else-if classification [precut audit: failing on 9c7ddf1359: C:control_and_data/discarded_if_does_not_unify_mixed_tail_values FAIL exit 1; expected 0]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Landed on dev 973d760c89 (train t4a, 63944380ec..973d760c89), SUB G1Lead-3-g6arms. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t4a/REPORT.md). long_arm_chain_256_arms and _1024_arms PASS; deeply_nested_expression_gets_diagnostic PASS (real nesting stays E1403).",
-          "at": "2026-11-10T05:06:31.394Z"
-        },
-        {
-          "n": 39,
-          "text": "(was #2398 c3) A false statement-position if with no else emits no else body, never lowers `Expr.NoElse` to Unreachable, and falls through on all applicable execution tiers [precut audit: failing on 9c7ddf1359: C:control_and_data/discarded_if_does_not_unify_mixed_tail_values FAIL exit 1; expected 0]",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "d6e24a4836: false_if_without_else_falls_through_on_every_tier passes at O0, O1 and O2. It landed in train t3c (dev c057ea659d..63944380ec). The SUB's tests line passed with the compiler built from the landed tree (Lander t3c run, rc 0), and the census and ratchets were rc 0.",
-          "at": "2026-11-10T03:58:25.139Z"
-        },
-        {
-          "n": 42,
-          "text": "E0313 fix text names a valid rename for every tuple destructure: it fills in the member names the user wrote, in order, and never offers a pattern that repeats one binding name (today it offers `{ _0: name, _1: name }`, which is E0118). A ui snapshot shows the fixed text for a two-member tuple.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev f32fac9fa6 (E0313 fix text). On dev 168e1e9e92, `jet test Compiler --profile ui --filter tuple_destructure_rename_keeps_written_names` PASS.",
-          "at": "2026-11-15T03:11:20.062Z"
-        },
-        {
-          "n": 43,
-          "text": "E0357 fix text for a name like `_0` states the real rule broken (a leading underscore followed by a digit is not a valid binding name), not \"a name cannot end with `_`\". A ui snapshot covers `_0`.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev f32fac9fa6 (E0357 text). On dev 168e1e9e92, `jet test Compiler --profile ui --filter casing_underscore_digit` PASS.",
-          "at": "2026-11-15T03:11:21.020Z"
-        },
-        {
-          "n": 44,
-          "text": "D-COMPONENT-TUPLE1=A is built (ratified 2026-11-13). A plugin tuple's part N is the member `partN`, counting from 0 in the plugin's order, nested tuples and lists of tuples included. Interface.jet names each part part{index} and records its Component position; descriptor fields are ordered by that position, not by name; ir_plugin_invoke_words passes member labels, and ir_route_store_tuple stores by label. The ballot program prints `7 -9` on O0, O1, O2, and the `_0` spelling is gone.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev f32fac9fa6 (D-COMPONENT-TUPLE1=A: part0, part1, ...). On dev 168e1e9e92, `jet test Compiler --profile cases --filter authority/plugin_` PASS 16, including plugin_export_returns_a_tuple_through_the_return_area_on_all_hosted_tiers.",
-          "at": "2026-11-15T03:11:21.986Z"
-        },
-        {
-          "n": 45,
-          "text": "A loop statement whose body holds an expression-position `?? break` (`sum += Int{r.read_u16_le() ?? break}`) keeps every statement after the loop: the program prints both lines at O0, O1 and O2 (today the names declared after the loop report UnknownName). Proof: a case in tests/cases with both loop spellings and exact stdout.",
-          "status": "met",
-          "metBy": "TowerKeeper-1",
-          "verifiedBy": null,
-          "evidence": "dev 9fd95d380b (a diverging fallback in any nested expression is a loop exit). On dev 168e1e9e92, `jet test Compiler --profile cases --filter fallback_exit_in_nested_expression_keeps_the_block_after_the_loop` PASS 1.",
-          "at": "2026-11-15T03:11:22.984Z"
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "wayfinder:map",
-        "consolidation-2026-10-28"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-28T11:17:59.631Z",
-      "updated": "2026-11-15T08:23:48.206Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 45,
-      "completedAt": "2026-11-15T03:11:29.222Z"
-    },
-    {
       "id": "c00e9u2p",
       "num": 5989,
       "title": "Close always runs exactly once: fields drop in order, and a Close during unwinding or cancellation follows the spec",
@@ -62658,8 +62095,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-18T01:37:44.495Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-18T08:31:49.711Z",
+      "updatedBy": "Main",
       "criteriaLastN": 6
     },
     {
@@ -87340,11 +86777,11 @@
         {
           "n": 4,
           "text": "Debugger display and watch expressions come from the compiler's type facts (reflection), so every Jet type shows as its Jet value in jet debug and over DAP, with no hand-written per-type formatter. Proof: `jet test Compiler --profile cases --filter Debug/type_facts_display_every_kind` on the native tier (with #6730 c2/c3 met).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:17.155Z"
+          "evidence": "p294 batch compiler (gate-p294, dev 3c593a7f16), cases suite run 2026-11-18: row PASS Debug/type_facts_display_every_kind (native tier; #6730 c2/c3 met)",
+          "at": "2026-11-18T08:30:44.069Z"
         },
         {
           "n": 5,
@@ -87380,11 +86817,11 @@
         {
           "n": 8,
           "text": "Inclusive and exclusive time are both reported per source location, and a recursive fib reports inclusive time without double counting. Proof: `jet test Compiler --profile cases --filter Perf/recursive_inclusive_time`. (was #4632 c2)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:06:20.167Z"
+          "evidence": "p294 batch compiler (gate-p294, dev 3c593a7f16), cases suite run 2026-11-18: row PASS Perf/recursive_inclusive_time",
+          "at": "2026-11-18T08:30:45.779Z"
         },
         {
           "n": 9,
@@ -87727,7 +87164,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-18T08:12:09.601Z",
+      "updated": "2026-11-18T08:30:45.779Z",
       "updatedBy": "Main",
       "criteriaLastN": 39
     },
@@ -97440,11 +96877,11 @@
         {
           "n": 7,
           "text": "`jet build --lib` produces the archive and .jet/build/<name>.h. Proof: `jet test Compiler --profile cases --filter LibraryOutputs/guest_import_library_calls_native_c_and_cpp_hosts` on every applicable tier, with the `jet build --lib` known-failing rows removed. (was #6418 c35)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:12:22.092Z"
+          "evidence": "p294 batch compiler (gate-p294, dev 3c593a7f16), cases suite run 2026-11-18: row PASS LibraryOutputs/guest_import_library_calls_native_c_and_cpp_hosts; the case carries no known-failing row",
+          "at": "2026-11-18T08:30:48.493Z"
         },
         {
           "n": 8,
@@ -97464,7 +96901,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:58:25.159Z",
-      "updated": "2026-11-17T01:49:37.561Z",
+      "updated": "2026-11-18T08:30:48.493Z",
       "updatedBy": "Main",
       "criteriaLastN": 8
     },
@@ -98002,11 +97439,11 @@
         {
           "n": 12,
           "text": "Every existing Canvas edit protocol name, schema version, JSON field, error and source result is unchanged through `apply_transaction_json`. Proof: `jet test Compiler --profile cases --filter CanvasCLILifecycle/jet_dev_canvas_applies_and_refuses_source_transactions`. (was #6618 c57)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:12:38.635Z"
+          "evidence": "p294 batch compiler (gate-p294, dev 3c593a7f16), cases suite run 2026-11-18: row PASS CanvasCLILifecycle/jet_dev_canvas_applies_and_refuses_source_transactions",
+          "at": "2026-11-18T08:30:47.150Z"
         },
         {
           "n": 13,
@@ -98035,7 +97472,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:03:20.822Z",
-      "updated": "2026-11-17T01:49:45.265Z",
+      "updated": "2026-11-18T08:30:47.150Z",
       "updatedBy": "Main",
       "criteriaLastN": 14
     },
@@ -156147,174 +155584,6 @@
       "ratifiedAt": "2026-11-02"
     },
     {
-      "id": "D-FIXED-WRAP1",
-      "cardId": "c08s0ppt",
-      "group": "language",
-      "title": "One overflow rule for every fixed-width operation, conversions included",
-      "situation": "Fixed-width overflow in Jet has grown five spellings. Gates such as wrapping(a + b) cover one operator, receiver methods such as a.wrapping_add(b) repeat them, and #Arithmetic covers a block. Conversions sit outside all three. U8{x} stops, U8.from_int(x) returns a Result, and nothing keeps the low bits. Int{b} and Int.from_u8(b) are two spellings of one widening. The owner asked for one beautiful, cohesive rule. The vote picks it.",
-      "gist": "Should every fixed-width operation, conversions included, follow one overflow rule with one spelling each?",
-      "lesson": "A fixed-width integer such as U8 or U32 holds a limited range. When a result does not fit, Jet stops the program unless the code chose another outcome. The outcomes are wrap around, clamp to the range, or give no value.",
-      "explainer": "",
-      "story": "Dana writes a 32-bit hash. Its loop keeps a U64 state, mixes in bytes and stores the result in a U32. She wants to say \"wrap here\" once, the same way for the multiply and for the conversion.",
-      "inWild": "Compiler/JetRuntime/Source/Iter.jet:696 state = wrapping(wrapping(state * U64{6364136223846793005}) + U64{1}) nests gates, because each gate covers one operator.\nExamples/features/lowlevel/fixed_overflow_modes.jet:30-38 the gates and the #Arithmetic block side by side.\nCore/Data/Sketch.jet:102 hash = (hash.bit_xor(U64.from_u8(byte))).wrapping_mul(U64{1099511628211}) mixes a receiver method with a widening method.\nCensus of this tree: 2,622 integer from_* conversion calls (2,195 are Int.from_u8) and 365 receiver overflow methods.\nSwift: UInt32(x) traps, UInt32(truncatingIfNeeded: x) wraps, UInt32(clamping: x) clamps; &+ wraps one operator.",
-      "detail": "THE RULE UNDER A\n\nA fixed-width operation is +, -, *, unary -, pow, / and a conversion T{x}. Plain, each one stops the program when its result does not fit. Three words choose another outcome, and they mean the same thing everywhere.\n\nwrapping(e) keeps the low bits. saturating(e) clamps to the range. checked(e) gives T?, which is None when anything inside would have stopped. A word covers every fixed-width operation inside its parentheses, up to a function call, so one word is enough per expression.\n\n#Overflow(.Wrapping), #Overflow(.Saturating) and #Overflow(.Stop) set the same outcome for a function, method or block. A word is that block rule at expression scope, so the two never disagree. The innermost one wins, and neither crosses a call.\n\nONE SPELLING EACH\n\nT{x} is the only integer conversion. Widening, such as Int{b}, never stops. Narrowing follows the rule above. The integer from_* methods retire, so U8.from_int(x) becomes checked(U8{x}) and Int.from_u8(b) becomes Int{b}. jet fix rewrites all 2,622 calls.\n\nThe receiver methods retire too, such as a.wrapping_add(b) and a.checked_div(b). jet fix writes wrapping(a + b) and checked(a / b). #Arithmetic is renamed #Overflow, because it now covers conversions, which are not arithmetic.\n\nIts explicit default .Checked becomes .Stop. Today .Checked means \"stop\", while checked(e) means \"give None\". After the change, each word has one meaning.\n\nWHAT STAYS\n\nExact Int arithmetic never overflows. Named conversions that are not about range keep their names: Float rounding methods, from_bits, Char.from_u32 and parse. Shifts, indexing and bounds keep their rules. No new keyword or name is added except the .Stop case.\n\nEDGE CASES\n\nA word or block around an operation that cannot overflow, such as a widening, is refused, as a gate around such an operation is today. A written literal that does not fit is refused even inside a word, and the fix names the value it would become: wrapping(I8{200}) says to write I8{-56}.\n\nDivision by zero is not overflow. It still stops under wrapping and saturating, and checked(a / b) gives None, as checked_div does today. Sign changes count as narrowing: wrapping(U64{i}) keeps the two`s-complement bits. A negative v makes saturating(U8{v}) zero.\n\nExisting gates change meaning only where an inner operation would have stopped the program: wrapping(a * b + c) now wraps the multiply too. jet fix flattens nested gates such as wrapping(wrapping(x * k) + 1) into one word.\n\nRESEARCH\n\nSwift traps on a plain conversion and names truncating and clamping variants. It renamed truncatingBitPattern after readers misread it (SE-0104). Zig separates the checked @intCast from @truncate. Rust`s silent as is the known mistake, which Clippy lints. Rust`s Wrapping<T> wraps every operation on a value, which is the scoped behavior A gives a word.\n\nCOST\n\nSema treats a conversion as one more fixed-width operation and lets a word cover its whole operand. The marker and its enum are renamed, and the lexical policy gains conversions and division. jet fix gains the conversion, method and nested-gate rewrites. Every caller migrates in one cutover, with the E3010 and E0930 texts updated.",
-      "options": [
-        {
-          "key": "A",
-          "name": "One overflow rule, one spelling each",
-          "detail": "Plain stops. wrapping, saturating and checked cover everything inside their parentheses, and #Overflow covers a block, for arithmetic and conversions alike. T{x} is the only integer conversion, and the receiver methods and from_* methods retire.",
-          "technical": "Sema gives conversions and division the fixed-width overflow policy, and a word sets the policy for its operand up to a call. #Arithmetic becomes #Overflow with modes Stop, Wrapping and Saturating. jet fix rewrites the retired spellings.",
-          "code": "// A: one overflow rule for every fixed-width operation, conversions included\nfn mix(state: U64, byte: U8) -> U32 {\n    next :: wrapping(state * U64{6364136223846793005} + U64{byte})\n    wrapping(U32{next})\n}\n\nfn shade(level: Int) -> U8 { saturating(U8{level}) }\n\nfn slot(index: Int) -> U16? { checked(U16{index}) }\n\n#Overflow(.Wrapping)\nfn hash(data: [U8]) -> U32 {\n    h := U32{2166136261}\n    loop byte in data -> h = (h.bit_xor(U32{byte})) * U32{16777619}\n    h\n}"
-        },
-        {
-          "key": "B",
-          "name": "Conversions join the gates only",
-          "detail": "wrapping, saturating and checked also accept a conversion as their operand. Gates still cover one operator. The receiver methods, the from_* methods and #Arithmetic stay as they are.",
-          "technical": "Sema lets a gate hold a conversion. No retirement and no rename.",
-          "code": "// B: conversions join the gates; everything else stays\nfn mix(state: U64, byte: U8) -> U32 {\n    next :: wrapping(wrapping(state * U64{6364136223846793005}) + U64.from_u8(byte))\n    wrapping(U32{next})\n}\n\nfn shade(level: Int) -> U8 { saturating(U8{level}) }\n\nfn slot(index: Int) -> U16? { checked(U16{index}) }\n\n#Arithmetic(.Wrapping)\nfn hash(data: [U8]) -> U32 {\n    h := U32{2166136261}\n    loop byte in data -> h = h.bit_xor(U32.from_u8(byte)).wrapping_mul(U32{16777619})\n    h\n}"
-        },
-        {
-          "key": "C",
-          "name": "A low_bits method",
-          "detail": "Each fixed-width type gains low_bits(x), which keeps the low bits. Clamping uses clamp. Everything else stays as it is.",
-          "technical": "One static method per fixed-width type, lowering to the truncating cast.",
-          "code": "// C: a named low-bits method; the rest stays\nfn mix(state: U64, byte: U8) -> U32 {\n    next :: wrapping(wrapping(state * U64{6364136223846793005}) + U64.from_u8(byte))\n    U32.low_bits(next)\n}\n\nfn shade(level: Int) -> U8 { U8{clamp(level, 0, 255)} }\n\nfn slot(index: Int) -> U16? { U16.from_int(index).ok() }\n\n#Arithmetic(.Wrapping)\nfn hash(data: [U8]) -> U32 {\n    h := U32{2166136261}\n    loop byte in data -> h = h.bit_xor(U32.from_u8(byte)).wrapping_mul(U32{16777619})\n    h\n}"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "A turns five overlapping spellings into one rule. Plain stops, a word picks another outcome for an expression, and #Overflow picks it for a block, the same for arithmetic and conversions. Every outcome then has exactly one spelling, and each word has one meaning.",
-        "gains": [
-          "One overflow rule for arithmetic and conversions, with one spelling each.",
-          "One word covers a whole expression, so gates no longer nest."
-        ],
-        "losses": [
-          {
-            "loss": "About 3,000 call sites move to the new spellings.",
-            "mitigation": "jet fix rewrites every one mechanically in the same cutover, and the meaning of each call stays the same."
-          },
-          {
-            "loss": "A word now covers inner operations that stopped before.",
-            "mitigation": "That changes only paths that crashed, and the word now means what readers already assumed."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B keeps five spellings and the nested gates, and adds conversions to only one of them."
-          },
-          {
-            "key": "C",
-            "reason": "C adds a new name and leaves every existing overlap in place."
-          }
-        ],
-        "tradeoff": "A one-time migration of about 3,000 calls, in exchange for one overflow rule with one spelling each."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: BallotReader. Two earlier passes checked the conversion facts and Swift research. The owner then asked for full cohesion, so A now unifies words, blocks and conversions and retires the duplicate spellings."
-      },
-      "checkInstructions": null,
-      "surface": {
-        "gist": "Should every fixed-width operation, conversions included, follow one overflow rule?",
-        "lesson": "A fixed-width integer such as U8 holds a limited range. When a result does not fit, Jet stops unless the code chose to wrap, clamp or give no value.",
-        "trio": {
-          "current": {
-            "note": "Today one idea has five spellings, and conversions have none of them.",
-            "code": "next :: wrapping(wrapping(state * k) + U64.from_u8(b))\nlow :: U32{next}   // stops; nothing wraps it"
-          },
-          "wild": {
-            "lang": "Swift",
-            "note": "Swift traps on a plain conversion and names the wrap and clamp forms.",
-            "code": "let low = UInt32(truncatingIfNeeded: x)\nlet shade = UInt8(clamping: level)"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "One overflow rule, one spelling each",
-            "gist": "Words cover expressions, #Overflow covers blocks.",
-            "gains": [
-              "One spelling per outcome."
-            ],
-            "losses": [
-              "About 3,000 calls migrate."
-            ],
-            "proposed": {
-              "code": "next :: wrapping(state * k + U64{b})\nlow :: wrapping(U32{next})\nshade :: saturating(U8{level})"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Conversions join the gates only",
-            "gist": "Gates accept conversions; nothing retires.",
-            "gains": [
-              "Small change."
-            ],
-            "losses": [
-              "Five spellings stay."
-            ],
-            "proposed": {
-              "code": "next :: wrapping(wrapping(state * k) + U64.from_u8(b))\nlow :: wrapping(U32{next})"
-            }
-          },
-          {
-            "key": "C",
-            "name": "A low_bits method",
-            "gist": "A new method keeps the low bits.",
-            "gains": [
-              "No sema change."
-            ],
-            "losses": [
-              "A new name; overlaps stay."
-            ],
-            "proposed": {
-              "code": "low :: U32.low_bits(next)\nshade :: U8{clamp(level, 0, 255)}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "One rule: plain stops, a word picks an outcome, and #Overflow sets it for a block.",
-          "gains": [
-            "One spelling per overflow outcome.",
-            "No more nested gates."
-          ],
-          "losses": [
-            {
-              "loss": "About 3,000 calls move to new spellings.",
-              "mitigation": "jet fix rewrites each one, and its meaning stays the same."
-            },
-            {
-              "loss": "A word now covers inner operations too.",
-              "mitigation": "Only paths that used to crash change."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B keeps five spellings and nested gates."
-            },
-            {
-              "key": "C",
-              "reason": "C adds a name and keeps every overlap."
-            }
-          ],
-          "tradeoff": "A one-time migration for one overflow rule."
-        }
-      },
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-03T09:54:57.986Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-04"
-    },
-    {
       "id": "D-WEB-NAME1",
       "cardId": "c0vxf4u0",
       "group": "web",
@@ -164420,257 +163689,6 @@
       "ratifiedAt": "2026-11-13"
     },
     {
-      "id": "D-COMPONENT-TUPLE1",
-      "cardId": "c08s0ppt",
-      "group": "design",
-      "title": "Names for the parts of a plugin's tuple result",
-      "situation": "A Jet program can load a WebAssembly plugin and call the functions it exports. A plugin built in another language may return a tuple, such as a pair of numbers, whose parts have no names. Jet has no tuples like that. Every Jet record names its members, written in braces as {min: 1, max: 9}, and a destructure binds each member by its name. Ratified rules keep that, and make written member order part of a record's type. So a host can't read a plugin's tuple result today. This vote decides how that result appears in Jet. We recommend naming the parts part0 and part1, in the plugin's order, which the host renames in one line.",
-      "gist": "How should a Jet program read a plugin result that is a tuple whose parts have no names?",
-      "lesson": "WebAssembly components describe their functions in WIT. WIT has records, whose fields have names, and tuples, whose parts are known only by position. Jet has records only: every member has a name. So a WIT tuple needs names before Jet can read it. Rust, JavaScript and Python read such tuples by position, because their own tuples are positional. Go, C and C# give the parts made-up names, such as F0, f0 and Item1. The Component Model itself labels tuple parts 0, 1, and so on.",
-      "explainer": "A plugin is a WebAssembly component that a Jet program loads and calls like an object. WIT is the language that lists a component's functions and types. A WIT tuple, written `tuple<s64, s64>`, is a fixed group of values known by position; `s64` is a 64-bit integer, Jet's `Int`. A WIT record is a group whose fields have names.\n\nA Jet record, written `{left: Int, right: Int}`, is a group whose members have names, kept in the order written. This ballot says record for Jet's side and tuple only for the plugin's positional group. A destructure, written `{left, right}: value`, binds each member by its name. `{part0: left}: value` binds the member part0 to the new name left.",
-      "story": "Ana's Jet program loads a geometry plugin written in Rust. Its function `pair` returns `tuple<s64, s64>`, two corner values, 7 and -9. Ana wants to print them. Every option below uses her program and the same plugin. Options A, B and D print `7 -9`. Option C refuses the call until the plugin's author changes `pair` to return a record.",
-      "inWild": "Rust (wasmtime `bindgen!` on the host, wit-bindgen in the guest): `tuple<s64, s64>` becomes `(i64, i64)`, read as `.0` and `.1` or by a positional pattern. Checked in the wasmtime-wit-bindgen 25.0.3 source; wasmtime 48 ran the test guest and printed `(7, -9)`.\nJavaScript (jco): a tuple becomes an array such as `[7n, -9n]`, read by index. Checked in jco's generator source, not run.\nPython (componentize-py): a tuple becomes a Python tuple, read by index or unpacking. From documentation only, not checked.\nGo (wit-bindgen-go, package cm): a tuple becomes `cm.Tuple[int64, int64]`, a struct whose fields are named `F0` and `F1`. Checked in the cm package source, which stops at 16 parts.\nC# (wit-bindgen): a tuple becomes a value tuple `(long, long)`, whose members are `Item1` and `Item2`. Checked in the generator source; a one-part tuple becomes its bare value.\nC (wit-bindgen): a tuple becomes a struct whose fields are named `f0` and `f1`. Checked in the generator source, not run.",
-      "detail": "Scope. This vote decides one rule: the Jet type a host sees for a Component tuple, wherever a tuple appears in a plugin export's signature. It does not change tuples written in Jet source. It does not change what a Jet sandbox exports either. Jet sandboxes cannot export tuples (D-PLUGIN-EXPORT1), so tuples reach a host only from components built in other languages.\n\nThe rule today. S73 says tuples have named members only, with no positional tuples and no `.0` (Docs/spec/syntax-decisions.md:1254-1255). A tuple destructure selects each member by name (Compiler/JetSema/Source/Sema/Statements.jet:5182-5198). Its E0313 text says \"a tuple destructure binds each member by its name, never by position\" (:5270). The ratified naming ladder, D-NAME-SIGIL1, gives a leading `_` one meaning, internal or discarded. It says compiler-made visible names use `__jet_` (syntax-decisions.md:7862-7869).\n\nThe rule being built. D-RECORD-BRACE1 A (2026-11-06) moves every record to braces, `{x: 1}`, retires paren tuples and makes one-member records legal. D-RECORD-ORDER1 A, the same day, makes written member order part of a record's type, and uses it for comparison, printing and encoding. Neither adds positional binding or optional names.\n\nNeither is built yet: on seed-b14 the brace type `{part0: Int, part1: Int}` is a parse error (E0080), and `{part0: 7}` is E0119 (probes t1 and t2). The paren record `(left: 7, right: -9)` still destructures by name and prints `7 -9` (probe t4). The S73 text in the spec still describes paren tuples sorted by name.\n\nWhat the probe showed. Before card #5971 c25, the plugin interface reader refused a tuple result as E1260 (unsupported Component value `tuple`). The first c25 draft gave the tuple's members empty names. Probe g3-fold3 then failed `(left, right): guest.pair()` with E0313 \"`left` isn't a member of (: Int, : Int)\". Its fix text offered `(, ): …`, which nobody can write. The output is in $JET_SCRATCH_ROOT/lanes/Lander/probe/out/g3-fold3/7.out.\n\nCode. The interface reader maps each export's Component types to Jet types (Compiler/JetPlugin/Source/Plugin/Interface.jet, staged in G3Core-golden1b-r2 and not yet on dev). The checker turns that Jet type into a descriptor that tells code generation where each value lands (Compiler/JetSema/Source/Sema/Calls/Plugin.jet).\n\nThe runtime writes one word per tuple part in Component order. Code generation stores each word into the member its label names (Compiler/JetIR/Source/BuildRoutes.jet, ir_route_tuple_order). Today a record sorts its members by name (S73), so every option with names needs that label map, and it already exists. Under D-RECORD-ORDER1 the members keep Component order instead, and the label map still places each word.\n\nReview probes. These ran on the seed-b13 compiler in $JET_SCRATCH_ROOT/lanes/Main/probe/ReviewComponentTuple. The first draft spelled the parts `_0` and `_1`. Member access `pair._0` and the rename `{ _0: left, _1: right }: …` work and print `7 -9`. A local named `_0` fails E0357, so `(_0, _1): …` and `loop (_0, _1) in list` don't compile. A signature that writes `(_0: Int, _1: Int)` draws two L0601 warnings, because `_0` reads as soft-public.\n\nThe E0313 fix text for that tuple offers `(_0, _1): …`, which fails E0357. It also offers `{ _0: name, _1: name }: …`, which fails E0118 because `name` repeats, a fault for every tuple. The same probes spelled `part0` and `part1` pass `jet check` with no warnings. `(part0, part1): …`, the rename, a loop over a list of pairs and nested access all print the expected values.\n\nOther evidence. The renaming destructure `{ x: a, y: b }: p` ships in Examples/Basics/Tuples.jet:13. A loop header can't rename members, so a list of tuples destructures there only under the given names. The only positional destructure is the built-in VJPRun pair, and the checker names its parts `value` and `pull` (Statements.jet:5155-5165 and 5239-5250). That precedent uses ordinary words, not `_` names. The draft cited EditActions.jet:364 for `_0`; that devserver file is untranslated and proves nothing, so the probes replace it.\n\nEdge cases. Each row is one plugin signature. Every option is proposed and UNCHECKED except where a row cites a probe or today. Card #5971 c25 builds only a top-level result tuple of scalars. Nested tuples, lists of tuples and tuple parameters stay E1260 until built, and each option fixes the type they will get then.\n\n```\ncase                                 A (part0, part1)                          B (positional)            C (records only)            D (host struct)\n1 tuple<s64, s64> result             {part0: Int, part1: Int}                  (Int, Int)                E1260: return a record      Corners { left, right }\n2 tuple<s64>, one part               {part0: Int}, a one-member record         (Int), clashes with ( )   E1260                       a one-field struct\n3 tuple<>, no parts                  refused by the Component Model, which requires at least one part (every option)\n4 tuple<tuple<s64, s64>, s64>        {part0: {part0: Int, part1: Int}, part1: Int}  nested positional  E1260                  nested structs\n5 list<tuple<string, string>>        [{part0: String, part1: String}]          [(String, String)]        E1260                       [Entry]\n6 tuple parameter                    host passes {part0: 1, part1: 2}          host passes (1, 2)        E1260                       host passes a struct\n7 destructure with the wrong count   E0315 count mismatch                      E0315                     not reached                 struct fields, no count\n8 declared shape differs from guest  does not arise                            does not arise            does not arise              new compile error, like E3205\n9 tuple of 11 or more parts          kept in Component order                   works                     E1260                       works\n10 record { left: s64, right: s64 }  E1260, separate work                      E1260, separate work      {left: Int, right: Int}     E1260, separate work\n11 record with a field named part0   mapped by Component position, not name   same                      same                        same\n12 Jet sandbox exports a tuple       E1260 (D-PLUGIN-EXPORT1)                  same                      same                        same\n```\n\nRow notes. Row 2: today a one-member record can't be written: `{part0: 7}` is E0119 on seed-b14 (probe t2), and a paren literal needs two members (E0003). D-RECORD-BRACE1 makes `{part0: 7}` legal, so a one-part result is read and built like any record. Row 9: under D-RECORD-ORDER1 the members keep Component order, so `part2` prints before `part10`. Today's rule sorts members by name instead (S73). Each value lands in its own member either way, because code generation stores by label.\n\nBeginners and experts. Under A a beginner sees `{part0: Int, part1: Int}` in hover and errors; hover was not run. The repaired E0313 fix text offers `{ part0: left, part1: right }: …`, filled with the names the user wrote. An expert reads `pair.part0` directly.\n\nUnder B a beginner writes `(left, right)` as in Rust or Python. An expert must remember that positional tuples exist only at this boundary and convert before passing one on. The VJPRun exemption keys on a type the compiler owns by name. A plugin tuple is structural, so it can't reuse that exemption without a new wrapper type.\n\nUnder C a beginner who can't change the plugin is stuck. An expert can wrap the plugin in a second component that returns a record. Under D everyone declares a struct and an overlay before the first call, and gets meaningful names and a checked contract.\n\nPeers. Rust, JavaScript and Python read WIT tuples by position because their own tuples are positional. Go, C and C# have no positional form in their structs, so their bindings invent names. The Component Model defines a tuple as a record labeled \"0\", \"1\" (CanonicalABI.md, despecialize), which `part0` mirrors as a legal Jet name. None of the peers asks the host to restate names. Jet's C boundary does, through an `#Import c.<lib>` overlay (D-FFI-UNIFY1), which D reuses.\n\nWhere tuples appear. WASI 0.2.12 uses tuples in 9 function signatures and 2 type aliases. Examples are environment variables and HTTP header lists as `list<tuple<string, string>>`, and `insecure-seed` returning `tuple<u64, u64>`. All are host imports, not plugin exports, so none is in this vote's scope today. How often hand-written plugin exports return tuples was not measured. Jet's C boundary already refuses tuples outright (E3203), a precedent for C.\n\nShared work. Every option needs c25's lift through the return area, staged as G3Core-c25b and held for this vote. Its case covers member access only. It has not run, and no case tests a destructure. The staged patch spells the parts `_0`. Moving to `part0` changes Interface.jet's name text, the checker's position decoding, one spec sentence and the case's `pair._0`.\n\nA as repaired carries each part's Component position in the interface fact instead of decoding it from the name. Records need that fact anyway, since a WIT record may legally name a field `part0`. The staged runtime already lifts records of scalars. A also repairs E0313's fix text to fill in the user's own names in order.\n\nB needs a positional tuple kind in types, destructure by position, hover text and UI snapshots. C needs new E1260 fix text and the reader's record mapping; the runtime record lift is already staged. D needs an `#Import plugin.<artifact>` root, a check of the overlay against the component, the tuple-to-struct mapping, a mismatch error and UI snapshots.\n\nREVISION AFTER THE OWNER'S QUESTION (2026-11-12)\n\nThe owner asked whether Jet tuples are positional with optional names. They are not. The latest ratified guidance is D-RECORD-BRACE1 A and D-RECORD-ORDER1 A, both 2026-11-06. Every group of values names its members, in braces, and a destructure binds by name. Written member order becomes part of the type. The earlier draft predated both and spelled records with parentheses; it now uses braces.\n\nWhat was designed away. Two of A's four costs came from rules those votes replace. `part10` sorting before `part2` is gone, because members keep the plugin's order. A one-part tuple that could be read but not built is gone, because one-member records become legal. Learning one more naming rule is not a separate cost: part N is the Component Model's own label N with a word in front.\n\nTerms. The ballot now says record for Jet's side and tuple only for the plugin's positional group, so the two never share a word.\n\nWhat remains. The plugin carries no names, so the parts can't say what they mean. Under named-only records the host must type the names it wants once. A makes that one line, `{part0: left, part1: right}: guest.pair()`. When a host writes `{left, right}: guest.pair()`, E0313's repaired fix text offers exactly that line, and jet fix applies it. This is the floor for any named-only design: the names have to come from somewhere, and only the host or the plugin's author has them.\n\nOutside this vote. If Jet's records became positional with optional names everywhere, plugin tuples would need no names at all. That reopens D-RECORD-BRACE1 for every Jet program, so it needs its own ballot; it can't be decided here for plugins alone. B shows why a plugin-only exception is worse: it creates two kinds of group with two destructure rules.\n\nAttack on the revision. A now depends on D-RECORD-ORDER1 for Component order in printing and comparison. Until that lands, the label map still stores each word correctly, and only printed and sorted order differ. The `part` prefix can't clash with a WIT record field, because record fields map by Component position, not by name (row 11).",
-      "options": [
-        {
-          "key": "A",
-          "name": "Parts are named part0, part1, and so on",
-          "gist": "A Component tuple becomes a Jet named tuple whose members are `part0`, `part1`, in Component order.",
-          "detail": "The part at position N is the member `partN`, counting from 0 as the Component Model's own labels do, and the members keep the plugin's order. Ana writes `{part0: left, part1: right}: guest.pair()`, or `{part0, part1}: guest.pair()`, or reads `pair.part0`. The program prints `7 -9`. Nested tuples and lists of tuples follow the same rule, as Go's and C's bindings do. The names are ordinary snake_case words, so they pass every naming rule and lint.\n\nBeginners meet `part0` in hover and in the E0313 fix text, which writes the rename with their own names. Experts read members directly. Gain: one rule for every tuple, any length, in the plugin's order, with no new syntax. Loss: the names say nothing about meaning, so a host renames them in one line.",
-          "technical": "Staged as G3Core-c25b with the spelling `_0`, held. That spelling broke D-NAME-SIGIL1, where a leading `_` means internal. It also drew L0601 in signatures and failed E0357 as a local, so `(_0, _1): …` could not compile.\n\nRepair: Interface.jet names each part `part{index}` and records its Component position in the interface fact. The checker orders the descriptor's fields by that position, not by decoding names, so a WIT record field named `part0` can't be misread. ir_plugin_invoke_words passes the member names as labels, and ir_route_store_tuple stores each word in the member its label names. E0313's fix text fills in the user's own names in order, and jet fix applies it.\n\nThe member order follows D-RECORD-ORDER1 once built; the label map stores each word correctly before then.",
-          "code": "use plugin: core.plugin\n\n// guest WIT: pair: func() -> tuple<s64, s64>\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\".\\\")\"])\n    guest: plugin.load(\"guest.wasm\", policy)\n    { part0: left, part1: right }: guest.pair() ?? panic(\"pair failed\")\n    print(\"{left} {right}\")\n}\n// Proposed output: 7 -9\n// {part0, part1}: guest.pair() ?? panic(\"pair failed\") also works\n// pair: guest.pair() ?? panic(\"pair failed\")\n// print(\"{pair.part0}\")   // also 7"
-        },
-        {
-          "key": "B",
-          "name": "Positional tuples for plugin results only",
-          "gist": "A Component tuple becomes a positional Jet tuple `(Int, Int)` that destructures by position.",
-          "detail": "Plugin results get a tuple kind with unnamed parts. Ana writes `(left, right): guest.pair()` and the program prints `7 -9`, as in Rust. The kind exists only for values that come from a plugin, so S73 gains an exception.\n\nBeginners write what Rust and Python users expect. Experts learn that a destructure means two things: by name for Jet tuples, by position for plugin tuples. A plugin tuple can't be passed where a named tuple is expected without rebuilding it. Gain: no invented names. Loss: two tuple kinds, and the rule that destructures never bind by position breaks.",
-          "technical": "Proposed, UNCHECKED. The type system gains a positional tuple kind, or a flag on Type.Tuple, that only the interface reader creates. The destructure in Statements.jet binds such a tuple by position instead of by name. Hover, error text and the type printer need a spelling for it, such as `(Int, Int)`; a one-part `(Int)` reads as plain grouping. Member access stays refused, since S73 bans `.0`. Code generation can reuse the same word layout.\n\nStatements.jet already exempts one pair from the by-name rule: VJPRun, a type the compiler owns by name (:5155-5165). A plugin tuple is structural and looks like any Jet tuple of the same shape, so B can't reuse that exemption. It needs a new type kind.",
-          "code": "use plugin: core.plugin\n\n// guest WIT: pair: func() -> tuple<s64, s64>\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\".\\\")\"])\n    guest: plugin.load(\"guest.wasm\", policy)\n    (left, right): guest.pair() ?? panic(\"pair failed\")\n    print(\"{left} {right}\")\n}\n// Proposed output: 7 -9\n// pair is (Int, Int); pair.0 stays refused"
-        },
-        {
-          "key": "C",
-          "name": "Refuse tuples; plugins return records",
-          "gist": "A Component tuple stays E1260; a guest returns a WIT record, whose field names Jet uses.",
-          "detail": "A tuple anywhere in an export's signature stays E1260, and the fix text asks for a record. A WIT record such as `record corners { left: s64, right: s64 }` becomes the Jet record `{left: Int, right: Int}`. Ana's program fails until the plugin's author changes `pair`. Then `{left, right}: guest.pair()` prints `7 -9`.\n\nBeginners who own the plugin get the best names. Beginners using someone else's plugin can't fix it. Experts can wrap the plugin in a component that returns a record. Gain: every name comes from the plugin's author. Loss: a host that can't change the plugin has no fix, and card #5971 c25 as written can't be met.",
-          "technical": "Proposed, UNCHECKED. The interface reader keeps tuple as an unsupported kind, so the E1260 text names `tuple` and its fix suggests a record. Jet's C boundary already refuses tuples the same way (E3203). The staged c25b runtime already lifts a record of scalars. The remaining work is the reader's mapping from a WIT record's fields to a Jet record, folding `-` to `_` as export names already do. Card #5971 c25's criterion would be amended to the refusal.\n\nWASI's own tuples, such as HTTP header lists, are host imports and outside this vote. How many real plugin exports return tuples was not measured.",
-          "code": "use plugin: core.plugin\n\n// guest WIT: pair: func() -> tuple<s64, s64>\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\".\\\")\"])\n    guest: plugin.load(\"guest.wasm\", policy)\n    {left, right}: guest.pair() ?? panic(\"pair failed\")\n    print(\"{left} {right}\")\n}\n// Proposed: E1260 Plugin export `pair` uses unsupported Component value `tuple`\n// Fix: return a record, such as record corners { left: s64, right: s64 }\n// With that guest the same program prints 7 -9"
-        },
-        {
-          "key": "D",
-          "name": "The host declares a struct for the result",
-          "gist": "The host declares a struct and an overlay; the plugin's tuple fills the struct's fields in declaration order.",
-          "detail": "Jet hosts have no declaration of a plugin's signatures today; the checker reads them from the component. D adds an optional overlay, like the `#Import c.<lib>` overlay that already lets a host override a generated C binding. Ana declares a struct `Corners` with fields `left` and `right`, then writes `#Import plugin.guest: module { pair: fn() -> Corners }`. The tuple fills the fields in declaration order, and the program prints `7 -9`.\n\nBeginners must write the struct and overlay before the first call. Experts get meaningful names and a contract checked against the component. Gain: no invented names. Loss: two sources for one interface and new syntax. Without an overlay a tuple still needs A, B or C.",
-          "technical": "Proposed, UNCHECKED. The draft mapped a trait method's tuple result by written order. Under D-RECORD-ORDER1 a record's written order will be part of its type, but D still uses a struct, which gives the result a name and a place to check the contract. A struct's declaration order already does: the checker maps struct fields to Component record fields by declaration index (Calls/Plugin.jet:134-143).\n\nReused: the overlay model of D-FFI-UNIFY1, where an overlay wins over the generated binding and an incompatible one is E3205. New: an `#Import plugin.<artifact>` root naming guest.wasm, the check against the component, and the tuple-to-struct mapping. D could also be added later on top of A, as an optional overlay.",
-          "code": "use plugin: core.plugin\n\n// guest WIT: pair: func() -> tuple<s64, s64>\nCorners: struct {\n    left: Int\n    right: Int\n}\n#Import plugin.guest: module { pair: fn() -> Corners }\n\nrun: fn() {\n    policy: Authority.from_rights([\"FS.Read(\\\".\\\")\"])\n    guest: plugin.load(\"guest.wasm\", policy)\n    corners: guest.pair() ?? panic(\"pair failed\")\n    print(\"{corners.left} {corners.right}\")\n}\n// Proposed output: 7 -9"
-        }
-      ],
-      "comparisons": [],
-      "rec": "A",
-      "recommendation": {
-        "rec": "A",
-        "why": "A keeps Jet's record rule whole: every member has a name, from one fixed rule with no new syntax. The names follow the Component Model's own labels and Go's and C's bindings, and pass every naming rule. They keep the plugin's order, so any tuple reads and prints as the plugin wrote it.",
-        "gains": [
-          "No new syntax, no exception to the record rule, and no naming-rule exception",
-          "One naming rule for every tuple, any length, in the plugin's order",
-          "One-part tuples are ordinary one-member records"
-        ],
-        "losses": [
-          {
-            "loss": "The names `part0` and `part1` say nothing about what the values mean.",
-            "mitigation": "One line renames them, `{part0: left, part1: right}: guest.pair()`. Writing `{left, right}` gets a fix that writes that line, and jet fix applies it. The plugin carries no names to use instead."
-          }
-        ],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "It adds a second kind of group and makes a destructure bind by position in one place, breaking the ratified rule that every member is named."
-          },
-          {
-            "key": "C",
-            "reason": "A host that can't change the plugin has no fix, and card #5971 c25 as written can't be met. WASI's own tuples are host imports, so the cost to real plugin exports is unmeasured."
-          },
-          {
-            "key": "D",
-            "reason": "It adds a second source for the plugin's interface and new syntax, and without an overlay a tuple still needs another rule. It can be added later on top of A as an optional overlay."
-          }
-        ],
-        "tradeoff": "One cost remains: the host types the names it wants once, because the plugin has none. In exchange, one rule reads every tuple, in the plugin's order, with no new syntax."
-      },
-      "hybrid": null,
-      "ballotMode": "full",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: ReviewComponentTuple. Seed probes showed `_0` breaks D-NAME-SIGIL1, draws L0601 and fails E0357 as a local, so A became `part0` with a repaired fix text. D became a struct overlay because S73 erases written order, and C's wasi-http claim and several citations were corrected."
-      },
-      "checkInstructions": "The current-behavior evidence is the g3-fold3 probe output in $JET_SCRATCH_ROOT/lanes/Lander/probe/out/g3-fold3/7.out (E0313 on the empty member names) and the cited source lines on dev. Option A is staged as $JET_SCRATCH_ROOT/lanes/Main/inbox/G3Core-c25b with the spelling `_0`. Its case tests/cases/authority/plugin_export_returns_a_tuple_through_the_return_area_on_all_hosted_tiers has not run; it should print `pair:7 -9 sum=-2` once built.\n\nThe review probes ran on the seed-b13 compiler. They are in $JET_SCRATCH_ROOT/lanes/Main/probe/ReviewComponentTuple: names.jet, fixtext.jet, dupfix.jet, underscore_loop.jet, snake.jet, rows.jet and one.jet. wasm-tools 1.256 printed the test guest's WIT, and wasmtime 48 ran it, printing `(7, -9)` for `pair`.\n\nThe Rust, Go, C, C# and jco rows were checked in generator source, not run. The Python row is documentation only. Hover was not run. Options B, C and D are proposed and UNCHECKED. After implementation, prove every edge-case row on every tier with cases and UI snapshots. Validate this payload with Tools/agent/ballots/Validate.jet.\n\nThe 2026-11-12 revision ran probes t1 to t5 on seed-b14. They are in $JET_SCRATCH_ROOT/lanes/Main/ballots/probes/answers-2026-11-12, with results.txt beside them. Component order and one-member records under A wait on the two 2026-11-06 record votes being built, and are UNCHECKED.",
-      "surface": {
-        "gist": "How should Jet name the parts of a plugin's tuple result, which has no names of its own?",
-        "lesson": "A plugin can return a tuple, a group of values known only by position. Jet has records only, and every record names its members. So these parts need names. Go and C plugin tools invent names like F0. Rust and JavaScript read the parts by position.",
-        "trio": {
-          "current": {
-            "note": "Refused today: Jet can't read a tuple with unnamed parts.",
-            "code": "// plugin WIT: pair: func() -> tuple<s64, s64>\nguest: plugin.load(\"guest.wasm\", policy)\n(left, right): guest.pair() ?? panic(\"pair failed\")\n// error: `left` isn't a member of the result"
-          },
-          "wild": {
-            "lang": "Rust",
-            "note": "Rust tuples are positional, so the parts are read by position.",
-            "code": "// wasmtime bindgen: pair returns (i64, i64)\nlet (left, right) = guest.call_pair(&mut store)?;\nprintln!(\"{left} {right}\");"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Parts are named part0, part1",
-            "gist": "The part at position N is the member `partN`, in the plugin's order.",
-            "gains": [
-              "No new syntax",
-              "Any length, in the plugin's order"
-            ],
-            "losses": [
-              "Names say nothing about meaning"
-            ],
-            "proposed": {
-              "code": "{part0: left, part1: right}: guest.pair() ?? panic(\"pair failed\")\nprint(\"{left} {right}\")   // 7 -9\n// pair is {part0: Int, part1: Int}\n// {left, right}: guest.pair() gets a fix that writes line 1"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Positional tuples for plugins only",
-            "gist": "Plugin tuples bind by position, as in Rust.",
-            "gains": [
-              "Reads like Rust and Python"
-            ],
-            "losses": [
-              "Two kinds of group",
-              "Breaks the rule that members are named"
-            ],
-            "proposed": {
-              "code": "(left, right): guest.pair() ?? panic(\"pair failed\")\nprint(\"{left} {right}\")   // 7 -9"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Plugins must return records",
-            "gist": "Tuples stay refused; a record's field names are used.",
-            "gains": [
-              "Every name comes from the plugin's author"
-            ],
-            "losses": [
-              "No fix without changing the plugin",
-              "The planned tuple support is dropped"
-            ],
-            "proposed": {
-              "code": "{left, right}: guest.pair() ?? panic(\"pair failed\")\n// error: tuple is unsupported; return a record\n// guest WIT: record corners { left: s64, right: s64 }"
-            }
-          },
-          {
-            "key": "D",
-            "name": "The host declares a struct",
-            "gist": "A declared struct names the parts, filled in field order.",
-            "gains": [
-              "Meaningful names",
-              "A contract checked against the plugin"
-            ],
-            "losses": [
-              "New syntax and a struct to write first",
-              "Two sources for one interface"
-            ],
-            "proposed": {
-              "code": "Corners: struct {\n    left: Int\n    right: Int\n}\n#Import plugin.guest: module { pair: fn() -> Corners }\ncorners: guest.pair() ?? panic(\"pair failed\")\nprint(\"{corners.left} {corners.right}\")   // 7 -9"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "It keeps every Jet record named, with one fixed rule and no new syntax. Parts keep the plugin's order, so any tuple reads and prints as the plugin wrote it.",
-          "gains": [
-            "No new syntax",
-            "Every plugin tuple gets the same names"
-          ],
-          "losses": [
-            {
-              "loss": "The names say nothing about meaning.",
-              "mitigation": "One line renames them, and the error's fix writes that line for you."
-            }
-          ],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "Two kinds of group, and one breaks Jet's naming rule."
-            },
-            {
-              "key": "C",
-              "reason": "No fix for users who can't change the plugin."
-            },
-            {
-              "key": "D",
-              "reason": "Every host restates the plugin's interface; it can come later on top of A."
-            }
-          ],
-          "tradeoff": "The host names the parts once, in exchange for one rule with no new syntax."
-        }
-      },
-      "reports": [
-        {
-          "title": "Component Model: WIT reference, tuples and records",
-          "url": "https://component-model.bytecodealliance.org/design/wit.html",
-          "note": "A tuple is an ordered group of unnamed values; a record names its fields."
-        },
-        {
-          "title": "Component Model explainer",
-          "url": "https://github.com/WebAssembly/component-model/blob/main/design/mvp/Explainer.md",
-          "note": "Defines tuple and record value types; a tuple is a record with integer labels."
-        },
-        {
-          "title": "Component Model Canonical ABI",
-          "url": "https://github.com/WebAssembly/component-model/blob/main/design/mvp/CanonicalABI.md",
-          "note": "despecialize turns a tuple into a record whose field labels are \"0\", \"1\", and so on."
-        },
-        {
-          "title": "wasmtime component bindgen! macro",
-          "url": "https://docs.rs/wasmtime/latest/wasmtime/component/macro.bindgen.html",
-          "note": "Generates Rust host bindings; WIT tuples become Rust tuples."
-        },
-        {
-          "title": "jco: JavaScript toolchain for components",
-          "url": "https://github.com/bytecodealliance/jco",
-          "note": "Transpiled bindings represent a WIT tuple as a JavaScript array."
-        },
-        {
-          "title": "Go package go.bytecodealliance.org/cm, type Tuple",
-          "url": "https://pkg.go.dev/go.bytecodealliance.org/cm#Tuple",
-          "note": "A WIT tuple is a struct with fields F0, F1; the package defines tuples up to 16 parts."
-        },
-        {
-          "title": "wit-bindgen: guest bindings for Rust, C, C# and more",
-          "url": "https://github.com/bytecodealliance/wit-bindgen",
-          "note": "The C generator names tuple fields f0, f1; the C# generator uses value tuples and unwraps a one-part tuple."
-        },
-        {
-          "title": ".NET ValueTuple<T1,T2>",
-          "url": "https://learn.microsoft.com/dotnet/api/system.valuetuple-2",
-          "note": "Members are Item1 and Item2 unless the source names them."
-        },
-        {
-          "title": "wasi-http types.wit",
-          "url": "https://github.com/WebAssembly/wasi-http/blob/main/wit/types.wit",
-          "note": "Header entries are a list of tuples of name and value; these are host imports, outside this vote's export scope."
-        },
-        {
-          "title": "WASI random: insecure-seed.wit",
-          "url": "https://github.com/WebAssembly/wasi-random/blob/main/wit/insecure-seed.wit",
-          "note": "insecure-seed returns tuple<u64, u64>, WASI 0.2's only top-level tuple of scalars; a host import."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-11-12T22:42:58.919Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-11-13"
-    },
-    {
       "id": "D-CONTEXT-CALLBACK1",
       "cardId": "c0dhc7rh",
       "group": "effects",
@@ -166124,24 +165142,38 @@
       "id": "D-GUARD-LINT1",
       "cardId": "c06he0ee",
       "group": "syntax",
-      "title": "Single-case checks stay free; wider enum decisions require named cases or #Rest",
-      "situation": "An enum has named cases, such as Circle, Square, Line and Dot. Jet currently rejects even a one-case table with else, while an equivalent if/else-if chain runs. A fallback can hide a case added later, but listing every case makes small checks noisy. The owner wants single-case checks free and incomplete wider decisions rejected unless their fallback explicitly opts in.",
-      "gist": "Should wider enum decisions require named cases or an explicit #Rest fallback?",
-      "lesson": "A single-case check asks about one enum case. A wider decision tests at least two distinct cases of the same enum value. Naming the remaining cases makes enum growth request review; #Rest deliberately accepts future cases too.",
+      "title": "Single-case checks stay free; wider enum decisions require named cases or an #Unlisted fallback",
+      "situation": "An enum has named cases, such as Circle, Square, Line and Dot. Jet currently rejects even a one-case table with else, while an equivalent if/else-if chain runs. A fallback can hide a case added later, but listing every case makes small checks noisy. The owner wants single-case checks free and incomplete wider decisions rejected unless their fallback explicitly opts in. r3 (owner, 2026-11-18): the owner rejected the name #Rest (\"sounds like data at rest or sleeping, not the rest of them\") and asked for at least two better names. The rule is unchanged; A, B and C differ only in the marker's word, D keeps named-only coverage. No candidate collides with a registered marker (Compiler/Prelude/Markers.jet, dev 3c593a7f16).",
+      "gist": "Should wider enum decisions require named cases or a marked fallback, and what should the marker be called?",
+      "lesson": "A single-case check asks about one enum case. A wider decision tests at least two distinct cases of the same enum value. Naming the remaining cases makes enum growth request review; #Unlisted deliberately accepts future cases too.",
       "explainer": "One case stays easy. Two or more distinct cases require complete coverage, or a marked fallback; this is a hard error before execution, not a tidy check reserved for shipping.",
       "story": "Area handles circles and squares and deliberately returns zero for every other shape. Saving must handle each shape by name. Adding Triangle must stop saving, but may use area's explicitly marked fallback.",
       "inWild": "Odin documents #partial switch as an explicit escape from exhaustive enum checking. That is a precedent for explicit intent, not identical placement or semantics.",
-      "detail": "r2 corrects r1's violation of BRIEF.md: 'tidy error, still runs' weakens the owner's default ERROR. The proposed error stops run, dev, test, check and build, cannot be downgraded by lint policy, and offers both repairs. D-NO-WARNINGS1 only categorizes lint checks; it does not require semantic errors to become tidy errors. Earlier answers proposing unrestricted else or shipping-only checks are superseded by the latest owner direction. A remains A; B retains named-only coverage; the old permissive option is removed because it does not implement the requested default.\n\nReplayed on gate-p275 with nice -n 19. The probe review-single.jet fails E0641 and names .Square(_) | .Line | .Dot. The probe e2.jet fails E0641 for multi-arm and or-pattern fallbacks. The probe e3.jet shows the coarse nested .Val(_) | .None repair. The probe review-chain.jet runs and prints 0.\n\nprobes/t1.jet runs, while check exits 1 with L0101, demonstrating why the tidy tier is not this contract. These observations establish the present discrepancy, not the proposed behavior. The author's e1.jet has main rather than run and cannot establish its claimed output.\n\nMarker audit: Compiler/Prelude/Markers.jet registers Through at the Arm site; Compiler/JetFoundation/Data/Syntax/Markers.jet delegates marker names to that registry. Compiler/JetParser/Source/Parser/Statements.jet:1098-1103 requires an arrow immediately after else, and :1125-1140 recognizes #Through after the arm body. Neither 'else #Rest ->' nor a post-body #Rest is accepted today: the isolated review-marker probes fail E0003.\n\nUse the existing #Name vocabulary and post-body Arm position: 'else -> { body } #Rest'. Register Rest with site Arm, legal only on a final else; generalize the existing arm-marker reader instead of adding a special else-head grammar. Regular chain tails use the same post-body attachment. Both parser paths and the registry fixture are required implementation work, not an existing feature.\n\nThe research report Docs/Research/2026-11-16-enum-branching-in-real-code.md uses heuristic scans, not a reproduced frequency measurement. It distinguishes short tests from longer fallbacks; Java/TypeScript/Go and Jet/Rust do not have the same distribution. This recommendation follows the owner's distinction, not a claim that single checks dominate every corpus. Odin's official overview, #partial-switch, documents an explicit exhaustive-check escape. Swift @unknown default is not a synonym for silently accepting unlisted known and future cases, so that comparison is removed.\n\nD-IFHOLE2's once-evaluated table subject stays intact. D-LANG-MIGRATE1 requires behavior-preserving registered edits. Chains are checked in place: no rewrite may cache a repeatedly read mutable subject merely to enable this check.",
+      "detail": "r3 renames the marker only. Each name sits where #Rest sat, after the final else arm's body, like the existing arm marker #Through. The name must say \"this fallback also takes cases nobody listed, including ones added later\":\n- #Unlisted says exactly that.\n- #Others is plain English, but else already means \"the others\", so it signals no future-case intent.\n- #AnyOther hints at future cases through \"any\", but runs two words together.\n\nr2 corrects r1's violation of BRIEF.md: 'tidy error, still runs' weakens the owner's default ERROR. The proposed error stops run, dev, test, check and build, cannot be downgraded by lint policy, and offers both repairs. D-NO-WARNINGS1 only categorizes lint checks; it does not require semantic errors to become tidy errors. Earlier answers proposing unrestricted else or shipping-only checks are superseded by the latest owner direction. A remains A; B retains named-only coverage; the old permissive option is removed because it does not implement the requested default.\n\nReplayed on gate-p275 with nice -n 19. The probe review-single.jet fails E0641 and names .Square(_) | .Line | .Dot. The probe e2.jet fails E0641 for multi-arm and or-pattern fallbacks. The probe e3.jet shows the coarse nested .Val(_) | .None repair. The probe review-chain.jet runs and prints 0.\n\nprobes/t1.jet runs, while check exits 1 with L0101, demonstrating why the tidy tier is not this contract. These observations establish the present discrepancy, not the proposed behavior. The author's e1.jet has main rather than run and cannot establish its claimed output.\n\nMarker audit: Compiler/Prelude/Markers.jet registers Through at the Arm site; Compiler/JetFoundation/Data/Syntax/Markers.jet delegates marker names to that registry. Compiler/JetParser/Source/Parser/Statements.jet:1098-1103 requires an arrow immediately after else, and :1125-1140 recognizes #Through after the arm body. Neither 'else #Unlisted ->' nor a post-body #Unlisted is accepted today: the isolated review-marker probes fail E0003.\n\nUse the existing #Name vocabulary and post-body Arm position: 'else -> { body } #Unlisted'. Register Rest with site Arm, legal only on a final else; generalize the existing arm-marker reader instead of adding a special else-head grammar. Regular chain tails use the same post-body attachment. Both parser paths and the registry fixture are required implementation work, not an existing feature.\n\nThe research report Docs/Research/2026-11-16-enum-branching-in-real-code.md uses heuristic scans, not a reproduced frequency measurement. It distinguishes short tests from longer fallbacks; Java/TypeScript/Go and Jet/Rust do not have the same distribution. This recommendation follows the owner's distinction, not a claim that single checks dominate every corpus. Odin's official overview, #partial-switch, documents an explicit exhaustive-check escape. Swift @unknown default is not a synonym for silently accepting unlisted known and future cases, so that comparison is removed.\n\nD-IFHOLE2's once-evaluated table subject stays intact. D-LANG-MIGRATE1 requires behavior-preserving registered edits. Chains are checked in place: no rewrite may cache a repeatedly read mutable subject merely to enable this check.",
       "options": [
         {
           "key": "A",
-          "name": "Free single checks; explicit wider fallbacks",
-          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Rest. An unmarked incomplete decision is a hard error, even when only one case remains.",
-          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Rest or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Rest for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Rest lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
-          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Rest\n}"
+          "name": "Free single checks; fallback marked #Unlisted",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Unlisted. An unmarked incomplete decision is a hard error, even when only one case remains. #Unlisted names what the arm takes: every case not listed above, including cases added later.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Unlisted or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Unlisted for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Unlisted lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Unlisted\n}"
         },
         {
           "key": "B",
+          "name": "The same rule; fallback marked #Others",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Others. An unmarked incomplete decision is a hard error, even when only one case remains. #Others names what the arm takes: every case not listed above, including cases added later. Plain English, but it restates else and does not say future cases are included.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Others or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Others for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Others lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Others\n}"
+        },
+        {
+          "key": "C",
+          "name": "The same rule; fallback marked #AnyOther",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #AnyOther. An unmarked incomplete decision is a hard error, even when only one case remains. #AnyOther names what the arm takes: every case not listed above, including cases added later. Hints at future cases through \"any\"; two words run together.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #AnyOther or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #AnyOther for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #AnyOther lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #AnyOther\n}"
+        },
+        {
+          "key": "D",
           "name": "Always name every case",
           "detail": "Keep the table's strict named-case rule and extend it consistently to wider chains. This exposes future additions without a marker escape, but even a one-case table must list its remainder.",
           "technical": "Strongest benefit: every exhaustive table is reviewed after enum growth and there is no new marker. Single-case ordinary if checks remain ordinary control flow, but tables retain today's E0641 restriction. This does not meet the owner's requested free one-case table and deliberate inclusive fallback.",
@@ -166157,7 +165189,7 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "It implements the latest owner direction without converting a semantic error into optional tidiness.",
+        "why": "Same rule as r2. #Unlisted is the only name that says what the marked arm deliberately takes: every case not listed, including future ones. It cannot be read as data at rest or idleness.",
         "gains": [
           "Single-case checks stay free; alternatives cannot bypass the wider-case rule.",
           "Named cases force review; one registered marker expresses deliberate future fallback."
@@ -166168,28 +165200,36 @@
             "mitigation": "One selectable local edit adds it; named repair is the default. No repeated guards or subject evaluation are introduced."
           },
           {
-            "loss": "#Rest gives up future-case review at that site, by design.",
-            "mitigation": "That is the owner's requested meaning. jet fix defaults to naming the cases, and hover on #Rest lists every case it covers today."
+            "loss": "#Unlisted gives up future-case review at that site, by design.",
+            "mitigation": "That is the owner's requested meaning. jet fix defaults to naming the cases, and hover on #Unlisted lists every case it covers today."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "Strong audit guarantee, but cannot express the owner's deliberate inclusive fallback and retains noisy one-case tables."
+            "reason": "#Others restates else; a reader cannot tell the marker opts into future cases."
+          },
+          {
+            "key": "C",
+            "reason": "#AnyOther carries the meaning less directly and reads as two words run together."
+          },
+          {
+            "key": "D",
+            "reason": "Strong audit guarantee, but cannot express the owner's deliberate inclusive fallback and keeps noisy one-case tables."
           }
         ],
-        "tradeoff": "#Rest deliberately forgoes future-case review at that site; it must never be inserted without choosing that intent."
+        "tradeoff": "#Unlisted deliberately forgoes future-case review at that site; it is never inserted without choosing that intent."
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. Verdict: ready to post as a proposed contract with a hard error, post-body #Rest and named-case default repair, not an implemented feature."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. Verdict: ready to post as a proposed contract with a hard error, post-body #Unlisted and named-case default repair, not an implemented feature. r3 (Main, 2026-11-18): rename only, answering owner question q6eygb5d; the names were checked against Markers.jet for collisions."
       },
-      "checkInstructions": "Implementation acceptance, not run in this review. Registry and parser fixtures cover #Rest on tables and chains. The error is hard in every command. Fixtures cover alternatives, guards, nested and imported coverage, one-remaining-case and missing-else chains, and mutable reads. Selectable Safe edits preserve output and effects. No benchmark claim is made.",
+      "checkInstructions": "Implementation acceptance, not run in this review. Registry and parser fixtures cover #Unlisted on tables and chains. The error is hard in every command. Fixtures cover alternatives, guards, nested and imported coverage, one-remaining-case and missing-else chains, and mutable reads. Selectable Safe edits preserve output and effects. No benchmark claim is made.",
       "surface": {
-        "gist": "Should wider enum decisions require named cases or an explicit #Rest fallback?",
+        "gist": "Should wider enum decisions require named cases or a marked fallback, and what should the marker be called?",
         "lesson": "An enum has named cases. A one-case check stays free. Testing two or more distinct cases requires complete coverage; a marked fallback deliberately accepts future cases too.",
         "trio": {
           "current": {
@@ -166205,21 +165245,53 @@
         "options": [
           {
             "key": "A",
-            "name": "Free single checks; explicit rest",
+            "name": "#Unlisted fallback",
             "gist": "A wider incomplete decision is a hard error before execution, not a tidy check.",
             "gains": [
               "Names force review after enum growth.",
-              "#Rest deliberately accepts future cases."
+              "#Unlisted deliberately accepts future cases."
             ],
             "losses": [
               "Inclusive wider fallbacks need one marker; a selectable edit supplies it."
             ],
             "proposed": {
-              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Rest"
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Unlisted"
             }
           },
           {
             "key": "B",
+            "name": "#Others fallback",
+            "gist": "A wider incomplete decision is a hard error before execution, not a tidy check.",
+            "gains": [
+              "Names force review after enum growth.",
+              "#Others deliberately accepts future cases."
+            ],
+            "losses": [
+              "Inclusive wider fallbacks need one marker; a selectable edit supplies it.",
+              "Restates else; does not signal future cases."
+            ],
+            "proposed": {
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Others"
+            }
+          },
+          {
+            "key": "C",
+            "name": "#AnyOther fallback",
+            "gist": "A wider incomplete decision is a hard error before execution, not a tidy check.",
+            "gains": [
+              "Names force review after enum growth.",
+              "#AnyOther deliberately accepts future cases."
+            ],
+            "losses": [
+              "Inclusive wider fallbacks need one marker; a selectable edit supplies it.",
+              "Less direct; two words run together."
+            ],
+            "proposed": {
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #AnyOther"
+            }
+          },
+          {
+            "key": "D",
             "name": "Always name every case",
             "gist": "Keep strict named tables; no inclusive marker escape.",
             "gains": [
@@ -166235,23 +165307,31 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Matches the owner's latest direction exactly: free single checks, ERROR by default, two explicit repairs.",
+          "why": "Free single checks, error by default, and the one marker name that says it takes every case not listed, now or later.",
           "gains": [
             "Same rule for tables and wider chains; no adjacency guesses."
           ],
           "losses": [
             {
-              "loss": "#Rest gives up future-case review at that site, by design.",
-              "mitigation": "Naming cases stays the default repair; #Rest appears only where a writer chose it, and hover lists the cases it covers."
+              "loss": "#Unlisted gives up future-case review at that site, by design.",
+              "mitigation": "Naming cases stays the default repair; #Unlisted appears only where a writer chose it, and hover lists the cases it covers."
             }
           ],
           "whyNot": [
             {
               "key": "B",
+              "reason": "Restates else."
+            },
+            {
+              "key": "C",
+              "reason": "Less direct."
+            },
+            {
+              "key": "D",
               "reason": "Cannot express the requested deliberate fallback."
             }
           ],
-          "tradeoff": "Choose named cases for review, #Rest for an inclusive fallback."
+          "tradeoff": "Named cases for review, #Unlisted for a deliberate inclusive fallback."
         }
       },
       "draft": false,
@@ -166262,7 +165342,7 @@
         "Reuse the registered marker mechanism and post-body Arm position; do not pretend Rest already parses.",
         "Count discriminants and preserve nested residual coverage.",
         "Check chains without changing repeated reads or grouping separate guards.",
-        "Hover on #Rest lists the cases it covers; jet fix defaults to naming them."
+        "Hover on #Unlisted lists the cases it covers; jet fix defaults to naming them."
       ]
     },
     {
@@ -177128,32 +176208,6 @@
       "answeredBy": "Main"
     },
     {
-      "id": "q0bdg3v5",
-      "cardId": "c08s0ppt",
-      "decisionId": "D-FIXED-WRAP1",
-      "by": "owner",
-      "kind": "question",
-      "text": "im sure there's a better name for this that is more idiomatic jet and cohesive, \"wrapping from\" is long and doesnt sound great, things need to be easy to reason about",
-      "status": "answered",
-      "answer": "Agreed, and the redesign drops the new name entirely. Jet already has three overflow words for arithmetic: wrapping(a + b), saturating(a + b), checked(a + b). The revised recommendation lets wrapping and saturating also cover a conversion written as their operand: low :: wrapping(U32{state}) keeps the low bits, shade :: saturating(U8{level}) clamps. So there is one rule everywhere: plain stops on overflow, and the word you write picks wrap or clamp. The checked conversion stays U8.from_int(x), so checked(U8{x}) is refused with that fix, and E3010's fix text shows the gate forms. This is Swift's proven model (UInt32(x) traps; truncatingIfNeeded: and clamping: variants) in Jet's existing words. Names I ruled out: wrap (already a Jet keyword, the policy wrap(call) boundary), truncate (already means rounding on Float and dates), bits/from_bits (already means reinterpreting a Float's bits). The alternatives become U32.low_bits(x) and mask-then-convert. The revised ballot is written ($JET_SCRATCH_ROOT/lanes/Main/ballot-wrap.json), but Tower refuses the update without a fresh-agent adversarial review, and the no-subagents order blocks that. One reviewer agent would unblock it.",
-      "created": "2026-11-04T11:21:16.435Z",
-      "answeredAt": "2026-11-04",
-      "answeredBy": "Main"
-    },
-    {
-      "id": "q1ljdl1e",
-      "cardId": "c08s0ppt",
-      "decisionId": "D-FIXED-WRAP1",
-      "by": "owner",
-      "kind": "question",
-      "text": "We want beauty, elegance, cohesion, and idiomatic consistency. Reengineer until we have that",
-      "status": "answered",
-      "answer": "Re-engineered. The real problem was wider than the wrap name: one idea, what a fixed-width operation does when the result does not fit, had five spellings (one-operator gates, receiver methods like wrapping_add, the #Arithmetic block, U8{x} vs U8.from_int(x), Int{b} vs Int.from_u8(b)), and conversions were outside all of them. New A is one rule: plain stops; wrapping(e), saturating(e) and checked(e) cover everything inside their parentheses up to a call, so gates never nest; #Overflow(.Wrapping|.Saturating|.Stop) is the same rule for a block (renamed from #Arithmetic, whose .Checked meant stop while checked() meant None). Conversions T{x} and division are just more fixed-width operations under that rule. T{x} is the only integer conversion; the integer from_* and receiver overflow methods retire, and jet fix rewrites the ~3,000 calls. The ballot is updated.",
-      "created": "2026-11-04T12:29:20.694Z",
-      "answeredAt": "2026-11-04",
-      "answeredBy": "Main"
-    },
-    {
       "id": "q0ckxpnq",
       "cardId": "c0r02x8n",
       "decisionId": "D-WRITE-TAKE1",
@@ -177437,19 +176491,6 @@
       "answer": "You're right, and the recommendation (A, a report) was wrong. Reporting the cost leaves it in place. Here is the full answer, and what changes.\n\n1. This program shouldn't carry the data at all. It only uses the two lengths. Hand-written machine code for it prints 100000000 and holds no string bytes. Zig, Rust and C++ get there as well: the length of a constant is itself a constant, so the bytes nothing reads are never emitted. Jet today stores both 50 MB runs and then rescans them at run time to count characters. That's an optimizer defect, not a policy question, so it gets fixed without a ballot: #6769 c4 (fold the length) and a new c5 (bytes no run-time code reads are not emitted; this program's binary must come out about as small as the version that reads the size at run time, 136 KB).\n\n2. Data the program really reads goes in read-only pages, raw. That's what every peer does (C, C++, Rust, Go, Zig): constants sit uncompressed in .rodata. The kernel maps those pages from the file on demand, so only the pages actually touched use RAM, they're shared between processes running the same binary, and they can be dropped and reloaded without swap. Today Jet puts them in writable .data, which loses the sharing; #6769 c3 fixes that.\n\n3. Compression is not part of building a binary in any mainstream toolchain. Compilers and linkers don't compress code or data; the one exception is debug sections (`--compress-debug-sections=zstd`), which never load at run time. Packers like UPX are a separate, opt-in step. The trade-offs:\n- Size: large wins on repetitive data (50 MB of \"x\" compresses to a few bytes), about 2-4x on typical tables, nothing on data that's already dense.\n- Speed: the data must be decoded before use. zstd decodes at roughly 1-2 GB/s per core and LZ4 at about 4 GB/s, so 50 MB costs tens of milliseconds at startup or at first use.\n- Memory: decoded data lives in private anonymous memory. It's always resident, counted in RSS, never shared between processes, and can't be dropped without swap. Raw read-only data can be all of those things.\nSo compression swaps disk bytes for RAM and startup time. Under the gate (Jet must match hand-optimized code on cycles and bytes), it loses for data that is read, except where disk or download size is the actual target, such as embedded or web.\n\n4. How the peers handle huge compile-time values: C++ can't keep a compile-time heap string at run time at all (allocations during constant evaluation must be freed before evaluation ends), and clang and GCC cap evaluation steps. Rust's const evaluation can't build a String. Zig can build a large array at compile time, needs an explicit evaluation budget for long loops, and stores the result raw. None compress it.\n\nWhat I'm doing: c3, c4 and c5 on #6769 are built as fixes, with no vote. I'm withdrawing this ballot's current options and rewriting it around the only real choice left: whether Jet offers compressed storage for large read data, for size-targeted builds only (embedded, web), and how that's switched on. It comes back to you with measured numbers for each option, after an adversarial review.",
       "created": "2026-11-12T11:20:18.865Z",
       "answeredAt": "2026-11-12",
-      "answeredBy": "Main"
-    },
-    {
-      "id": "q3x2rmu6",
-      "cardId": "c08s0ppt",
-      "decisionId": "D-COMPONENT-TUPLE1",
-      "by": "owner",
-      "kind": "question",
-      "text": "i thought jet tuples ARE positional with optional names? is that not the latest guidance? also, the recommended option does not have downsides engineered away so it is immediately rejected on both grounds",
-      "status": "answered",
-      "answer": "No. The latest guidance is the pair of record votes you ratified on 2026-11-06. Every group of values names its members and is written in braces, {min: 1, max: 9}. Paren tuples retire, and a destructure binds by name: {min, max}: bounds(xs). Written member order is now part of the type and decides comparison and printing. Neither vote adds positional binding or optional names. Neither is built yet: on today's compiler the brace spelling is still a parse error, and the old paren form (left: 7, right: -9) still works and destructures by name. You were right that the ballot was stale. It predated both votes, and with them two of A's costs disappear. Parts keep the plugin's order, so part10 no longer sorts before part2, and a one-part tuple becomes the one-member record {part0: 7}. The ballot now says record for Jet's side and tuple only for the plugin's positional group. One cost remains, and no named-only design can remove it: the plugin supplies no names, so the host types the names it wants once, {part0: left, part1: right}: guest.pair(). Writing {left, right} gets an error whose fix writes that line, and jet fix applies it. If you want Jet records to be positional with optional names everywhere, that reopens the brace-record vote for every program, so it needs its own ballot. Say so and it will be drafted; this question then goes away.",
-      "created": "2026-11-13T01:04:06.327Z",
-      "answeredAt": "2026-11-13",
       "answeredBy": "Main"
     },
     {
@@ -177836,9 +176877,11 @@
       "by": "owner",
       "kind": "question",
       "text": "Rest is a terrible name and sounds like data at rest or sleeping/relaxing not \"the rest of them\". Give at least two options with better names to choose from for the marker",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-18T01:37:44.495Z"
+      "status": "answered",
+      "answer": "Revised to r3 (reposted). The rule is unchanged. The marker now has three name options plus named-only. A, recommended: #Unlisted, which says exactly what the arm takes: every case not listed, including ones added later. B: #Others, which is plain English but restates else. C: #AnyOther. D: name every case. #Rest is gone.",
+      "created": "2026-11-18T01:37:44.495Z",
+      "answeredAt": "2026-11-18",
+      "answeredBy": "Main"
     },
     {
       "id": "q77siog1",
@@ -178682,6 +177725,48 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T08:31:49.711Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q6eygb5d",
+      "note": ""
+    },
+    {
+      "at": "2026-11-18T08:31:36.021Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-GUARD-LINT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-18T08:30:48.493Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0wowe4m",
+      "note": "#7"
+    },
+    {
+      "at": "2026-11-18T08:30:47.150Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0qetodj",
+      "note": "#12"
+    },
+    {
+      "at": "2026-11-18T08:30:45.779Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#8"
+    },
+    {
+      "at": "2026-11-18T08:30:44.069Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0nwrfck",
+      "note": "#4"
+    },
     {
       "at": "2026-11-18T08:12:09.603Z",
       "by": "Main",
