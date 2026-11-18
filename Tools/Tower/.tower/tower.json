@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112013,
+    "rev": 112017,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65199,11 +65199,11 @@
         {
           "n": 6,
           "text": "A failing lambda passed through an implicit-contract &&fn([Q]) parameter and called from a task runs, or stops with its error, on every tier; today it dies with SIGILL in fn_widen (found by DeclTypes building #6048 c2 step 1; worked around there by spelling Err!). Proof: a Concurrency case with that shape on O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T23:46:36.120Z"
+          "evidence": "Landed in bccd1b2738 (dev, p284). On the p284 batch compiler: `jet test Compiler --profile cases --filter failing_function_values_stop_in_slots_that_cannot_fail` passes 1/1. A failing lambda passed through a narrowing fn slot and called from a task stops with its error on O0, O1 and O2, with no SIGILL in fn_widen.",
+          "at": "2026-11-18T00:37:53.949Z"
         },
         {
           "n": 7,
@@ -65223,7 +65223,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-18T00:37:35.758Z",
+      "updated": "2026-11-18T00:37:53.949Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -94819,6 +94819,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T23:34:01.760Z"
+        },
+        {
+          "n": 8,
+          "text": "RuntimeStops/stack_overflow_under_jet_run_stops_within_a_second_and_4_gib holds its one-second bound under suite load, or measures CPU time instead of wall time. It failed in the p282 and p284 suites and passed alone both times. Proof: it passes in 5 consecutive full cases suites.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T00:38:11.274Z"
         }
       ],
       "refs": [],
@@ -94826,9 +94835,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-12T10:41:23.645Z",
-      "updated": "2026-11-17T01:45:23.596Z",
+      "updated": "2026-11-18T00:38:11.274Z",
       "updatedBy": "Main",
-      "criteriaLastN": 7
+      "criteriaLastN": 8
     },
     {
       "id": "c0wcqb47",
@@ -95014,7 +95023,7 @@
       "track": "epoch",
       "epoch": "e24",
       "milestoneId": null,
-      "phase": "ready",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -95022,16 +95031,22 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "c1 met: r5 2a383826f1 and fallout adb1249dae; proofs pass on p284."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
           "text": "ir_route_can_stop answers from a stops receipt built from the runtime IR at library build (the closure of routes that can publish a stop, with allocation failure, capacity panic and invalid layout declared fatal), and the hand-kept list and the uncalled RUNTIME_STOP_EXPORTS are deleted. Proof: `jet test Compiler --profile cases --filter stop_poll_follows_the_runtime_stops_receipt` (a call to a pure scalar runtime route has no stop poll after it in the lowered IR; a call to jet_time_sleep_until has one), and the cancellation and deadline cases pass at O0, O1 and O2.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-15T11:38:12.537Z"
+          "evidence": "Landed in 2a383826f1 (r5, p282) and adb1249dae (fallout, p284). On the p284 batch compiler bccd1b2738: `--filter stop_poll_follows_the_runtime_stops_receipt` passes 1/1, the context_allocator_panic and bounds_stop_names cases pass, `jet -A Tools/Perf/CodegenCeiling.jet --check` passes (main_gather_sum 253 instructions against a ceiling of 255), and Tools/Agent/RuntimeGenerators.jet --check passes.",
+          "at": "2026-11-18T00:38:01.802Z"
         }
       ],
       "refs": [],
@@ -95039,9 +95054,10 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-13T10:15:23.686Z",
-      "updated": "2026-11-17T01:45:28.819Z",
+      "updated": "2026-11-18T00:38:10.031Z",
       "updatedBy": "Main",
-      "criteriaLastN": 1
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-18T00:38:10.030Z"
     },
     {
       "id": "c0awq7vy",
@@ -214810,6 +214826,41 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T00:38:11.274Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0gy2j07",
+      "note": "8 criteria, soft limit 6: a load-sensitive timing case seen twice"
+    },
+    {
+      "at": "2026-11-18T00:38:11.274Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0gy2j07",
+      "note": "#8 RuntimeStops/stack_overflow_under_jet_run_stops_within_a_sec"
+    },
+    {
+      "at": "2026-11-18T00:38:10.031Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0g4h3r9",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-18T00:38:01.802Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0g4h3r9",
+      "note": "#1"
+    },
+    {
+      "at": "2026-11-18T00:37:53.949Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0mhdm27",
+      "note": "#6"
+    },
     {
       "at": "2026-11-18T00:37:35.758Z",
       "by": "Main",
