@@ -392,26 +392,26 @@ NativeSession: struct {
         ""
     }
 
-    // Run the program to the start of its `run`, in the Jet source `file`
-    // whose text is `lines`. None when the program has no `run`.
-    open: fn(&self, file: String, lines: [String]) -> NativeDebugStep? NativeDebugError! {
+    // Run the program with `args` to the start of its `run`, in the Jet
+    // source `file` whose text is `lines`. None when the program has no `run`.
+    open: fn(&self, file: String, lines: [String], args: [String]) -> NativeDebugStep? NativeDebugError! {
         start := -1
         if self.break_in("run") == {
             .Ok(placed) -> start = placed ?? -1
             .Err(failure) -> return Err(failure)
         }
         if start < 0 -> return Ok(None)
-        first: self.launch([String]{}) ?? return Err(err)
+        first: self.launch(args) ?? return Err(err)
         self.delete_breakpoint(start) ?? return Err(err)
         text: self.report(first, file, lines) ?? return Err(err)
         Ok(Val(NativeDebugStep{text: text, stop: first}))
     }
 
-    // Place a breakpoint on each of `breaks`, then run the program to the
-    // first it reaches, or to its end: the first stop of
+    // Place a breakpoint on each of `breaks`, then run the program with
+    // `args` to the first it reaches, or to its end: the first stop of
     // `jet debug --break`. A break on a line with no code is named and left
     // out.
-    run_to: fn(&self, breaks: [NativeBreak], file: String, lines: [String]) -> NativeDebugStep NativeDebugError! {
+    run_to: fn(&self, breaks: [NativeBreak], file: String, lines: [String], args: [String]) -> NativeDebugStep NativeDebugError! {
         text := ""
         loop wanted in breaks {
             placed := -1
@@ -421,7 +421,7 @@ NativeSession: struct {
             }
             text = if placed < 0 -> "{text}No code on {wanted.file}:{wanted.line}\n" else -> "{text}Breakpoint set  {wanted.file}:{wanted.line}\n"
         }
-        first: self.launch([String]{}) ?? return Err(err)
+        first: self.launch(args) ?? return Err(err)
         shown: self.report(first, file, lines) ?? return Err(err)
         Ok(NativeDebugStep{text: "{text}{shown}", stop: first})
     }
@@ -752,8 +752,11 @@ NativeSession: struct {
     }
 
     // Step to the next line of this frame, or into the next Jet call's first
-    // line when `calls` is Into. A call it does not enter runs to its
-    // return; a return out of this frame stops in the caller.
+    // line when `calls` is Into. The step ends on a row of another line: a
+    // loop that turns back onto this line runs on, so a one-line loop is
+    // stepped over whole. Over runs to that row (line_over); Into
+    // single-steps, and a call into code without Jet lines runs to its
+    // return. A return out of this frame stops in the caller.
     line_step: fn(&self, calls: NativeStepCalls) -> NativeStop NativeDebugError! {
         self.ready() ?? return Err(err)
         reason: if calls == {
@@ -767,6 +770,7 @@ NativeSession: struct {
         line: x64_jetline_line(self.image.lines, self.image.lines.functions[function], start) ?? 0
         low_start: self.image.lines.functions[function].low
         base: native_frame_base(self.code(low_start, NATIVE_DEBUG_PROLOGUE), low_start, registers, start, self.code(start, 1))
+        if calls == NativeStepCalls.Over -> return self.line_over(function, line, base, reason)
         loop _ in 0..<NATIVE_DEBUG_MOST_STEPS {
             before: registers
             event: self.go(X64TraceResume.Step) ?? return Err(err)
@@ -778,7 +782,7 @@ NativeSession: struct {
                 from: before[X64_TRACE_RIP]
                 if pushed > from && pushed <= from + NATIVE_DEBUG_LONGEST_CALL && pc != pushed {
                     callee: x64_jetline_find(self.image.lines, pc)
-                    if calls == NativeStepCalls.Over || callee < 0 {
+                    if callee < 0 {
                         returned: self.run_to_return(pushed, registers[X64_TRACE_RSP] + 8) ?? return Err(err)
                         if returned == .Stopped(stop) -> return Ok(stop)
                         registers = self.registers() ?? return Err(err)
@@ -796,11 +800,109 @@ NativeSession: struct {
             if frame > base -> return self.paused(reason)
             if pc == low || !native_row_start(self.image, here, pc) -> next
             if frame < base -> return self.paused(reason)
-            if (x64_jetline_line(self.image.lines, self.image.lines.functions[here], pc) ?? 0) != line || pc <= start {
+            if (x64_jetline_line(self.image.lines, self.image.lines.functions[here], pc) ?? 0) != line {
                 return self.paused(reason)
             }
         }
         self.paused(reason)
+    }
+
+    // `next` on `line` of function `index`, whose frame's canonical frame
+    // address is `base`: a temporary trap on each row of the function on
+    // another line and on the frame's return address, then one run, so a
+    // line that loops a million times costs one stop, not one per
+    // instruction. The traps are lifted again however the run stops.
+    line_over: fn(&self, index: Int, line: Int, base: Int, reason: String) -> NativeStop NativeDebugError! {
+        returned: native_debug_word(self.trace, base - 8) ?? 0
+        targets := native_step_targets(self.image, index, line)
+        if returned > 0 -> targets.push(returned)
+        owned := [Int]{}
+        loop address in targets {
+            if !self.has_site(address) -> owned.push(address)
+        }
+        if self.line_over_run(index, line, base, returned, owned, reason) == {
+            .Ok(stop) -> {
+                self.lift_owned(owned)
+                return Ok(stop)
+            }
+            .Err(failure) -> {
+                self.lift_owned(owned)
+                return Err(failure)
+            }
+        }
+    }
+
+    // Trap each of line_over's own addresses `owned`.
+    plant_owned: fn(&self, owned: [Int]) NativeDebugError! {
+        loop address in owned {
+            if !self.plant(address) {
+                return Err(NativeDebugError{detail: "couldn't write a breakpoint at {native_debug_hex(address)}"})
+            }
+        }
+        Ok()
+    }
+
+    // Lift line_over's traps `owned`, unless the program has ended and taken
+    // them with it.
+    lift_owned: fn(&self, owned: [Int]) Never! {
+        if !self.alive() -> return
+        loop at in owned -> self.lift(at)
+    }
+
+    // Run under line_over's traps until one stops the step: the frame's
+    // return reached with the frame gone, or a row of this frame on another
+    // line. A trap in a deeper call of the same function (recursion) lifts
+    // the traps and runs that call out to this frame, so a recursive call
+    // costs two stops, not one per row it runs. A breakpoint, a trap the
+    // program made itself or its end stops the run first.
+    line_over_run: fn(&self, index: Int, line: Int, base: Int, returned: Int, owned: [Int], reason: String) -> NativeStop NativeDebugError! {
+        low: self.image.lines.functions[index].low
+        high: self.image.lines.functions[index].high
+        prologue: self.code(low, NATIVE_DEBUG_PROLOGUE)
+        self.plant_owned(owned) ?? return Err(err)
+        loop {
+            event: self.go(X64TraceResume.Run) ?? return Err(err)
+            if event.kind != NativeStopKind.Paused -> return self.stopped(event)
+            registers := self.registers() ?? return Err(err)
+            at: registers[X64_TRACE_RIP] - 1
+            if !self.has_site(at) -> return self.paused("signal SIGTRAP")
+            registers[X64_TRACE_RIP] = at
+            if !x64_trace_set_registers(self.trace, registers) {
+                return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+            }
+            if self.breakpoint_at(at) == .Val(number) -> return self.paused("breakpoint {number}.1")
+            if at == returned && registers[X64_TRACE_RSP] >= base -> return self.paused(reason)
+            if at < low || at >= high -> next
+            frame: native_frame_base(prologue, low, registers, at, self.code(at, 1))
+            if frame > base -> return self.paused(reason)
+            if frame < base {
+                self.lift_owned(owned)
+                back: self.run_out_to(base) ?? return Err(err)
+                if back == .Stopped(stop) -> return Ok(stop)
+                pc: (self.registers() ?? return Err(err))[X64_TRACE_RIP]
+                if pc >= low && pc < high && pc != low && native_row_start(self.image, index, pc) && (x64_jetline_line(self.image.lines, self.image.lines.functions[index], pc) ?? 0) != line {
+                    return self.paused(reason)
+                }
+                self.plant_owned(owned) ?? return Err(err)
+                next
+            }
+            if (x64_jetline_line(self.image.lines, self.image.lines.functions[index], at) ?? 0) != line {
+                return self.paused(reason)
+            }
+        }
+    }
+
+    // Run the call the frame at canonical frame address `base` made out to
+    // its return there, or to the stop that comes first. A stack too deep
+    // to find that call in leaves the program where it is, as Returned.
+    run_out_to: fn(&self, base: Int) -> NativeReturn NativeDebugError! {
+        frames: self.unwind() ?? return Err(err)
+        loop k in 0..<frames.len() {
+            if k + 1 < frames.len() && frames[k + 1].cfa == base {
+                return self.run_to_return(frames[k + 1].pc, frames[k].cfa)
+            }
+        }
+        Ok(NativeReturn.Returned)
     }
 
     // The stack's frames, innermost first, unwound through the prologue each
@@ -1031,6 +1133,24 @@ native_body_start: fn(image: NativeImage, index: Int) -> Int Never! {
         if address > function.low -> return address
     }
     function.low
+}
+
+// The rows of function `index` a `next` on `line` may stop at: each on
+// another line. The function's first address, which only a deeper call
+// reaches, is left out.
+native_step_targets: fn(image: NativeImage, index: Int, line: Int) -> [Int] Never! {
+    function: image.lines.functions[index]
+    targets := [Int]{}
+    at := function.rows
+    address := function.low
+    current := 1
+    loop at < function.rows_end {
+        address += link_debug_uleb(image.lines.table, at)
+        current += x64_jetline_sleb(image.lines.table, at)
+        if address == function.low -> next
+        if current != line -> targets.push(address)
+    }
+    targets
 }
 
 // Whether `pc` starts a row of function `index`.

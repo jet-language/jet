@@ -483,7 +483,7 @@ native_debug_run: fn(session: &DebugSession, commands: [String], run_to_end: Boo
     transcript := ""
     if session.native_live == None {
         live := NativeSession.start(native.binary, canvas_files.join(native.dir, "output.txt")) ?? return Err(debug_unavailable(err))
-        opened: if live.open(native.jet_file, native.jet_lines) == {
+        opened: if live.open(native.jet_file, native.jet_lines, [String]{}) == {
             .Ok(step) -> step
             .Err(failure) -> {
                 return Err(debug_unavailable(failure))

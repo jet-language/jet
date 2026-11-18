@@ -1,0 +1,20 @@
+# The words after `--` are the debugged program's arguments, as they are
+# for `jet run`: the console's first stop and a breakpoint run alike start
+# the program with them. Under `--dap` the editor's launch request carries
+# the arguments, so words after `--` there are refused, never dropped.
+fixture: ProgramArgumentsReachTheProgram.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet -- alpha beta
+stdin: program_arguments_reach_the_program.stdin
+exit: 0 # `c` runs the program to its end
+stdout+stderr: ~ "last=beta" # the last word after `--` reached the program
+stdout+stderr: ~ "Program finished"
+step: jet debug prog.jet --break prog.jet:6 -- gamma
+stdin: program_arguments_reach_the_program.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  prog.jet:6  in run()"
+stdout+stderr: ~ "last=gamma" # a `--break` run gets the arguments too
+step: jet debug prog.jet --dap -- alpha
+exit: 2
+stdout+stderr: ~ "E2102"
+stdout+stderr: ~ "`--dap` takes them from the editor" # refused, not dropped

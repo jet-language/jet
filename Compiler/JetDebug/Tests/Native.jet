@@ -146,6 +146,11 @@ NATIVE_TEST_INLINED: "use process: core.process\n\nsum_squares: fn(n: Int) -> In
 
 NATIVE_TEST_SPLIT: "sum_squares: fn(n: Int) -> Int {{\n    total := 0\n    loop i in 0..<n -> total += i * i\n    return total\n}}\n\nrun: fn() {{ print(\"{{sum_squares(1000)}}\") }}\n"
 
+// A one-line loop, then a recursive call: `next` must run the loop whole
+// and, in fib's outer frame, run past the traps its deeper calls reach.
+// fib's argument depends on the loop, so the call is not folded away.
+NATIVE_TEST_LOOP: "fib: fn(n: Int) -> Int {{\n    if n < 2 -> return n\n    left: fib(n - 1)\n    right: fib(n - 2)\n    left + right\n}}\n\nrun: fn() {{\n    total := 0\n    loop i in 0..<3000000 -> total += i\n    answer: fib(15 + total % 2)\n    print(\"{{total}} {{answer}}\")\n}}\n"
+
 // A ring buffer whose view lists its items in order. The program calls the
 // view itself, so the image has it whether or not the build keeps views.
 NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String,\n    value: String,\n}}\n\nRing: struct {{\n    items: [Int],\n    start: Int,\n    count: Int,\n\n    debug_view: fn(self) -> [DebugItem] {{\n        loop k in 0..<self.count -> DebugItem{{label: \"{{k}}\", value: \"{{self.items[(self.start + k) % self.items.len()]}}\"}}\n    }}\n}}\n\nrun: fn() {{\n    ring: Ring{{items: [Int]{{5, 0, 3, 4}}, start: 2, count: 3}}\n    print(\"items {{ring.debug_view().len()}}\")\n}}\n"
@@ -154,7 +159,7 @@ NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String,\n    value: String,\
     scratch: native_test_files.temp_dir("jet-debug-view") ?? panic("scratch: {err}")
     root: scratch.path
     session := native_test_session(root, NATIVE_TEST_RING, [String]{"-O0"})
-    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 18}}, "prog.jet", NATIVE_TEST_RING.split("\n").to_list()) ?? panic("run_to: {err.detail}")
+    paused: session.run_to([NativeBreak]{{file: "prog.jet", line: 18}}, "prog.jet", NATIVE_TEST_RING.split("\n").to_list(), [String]{}) ?? panic("run_to: {err.detail}")
     assert(native_debug_hit_breakpoint(paused.stop) != None, paused.text)
     locals: session.locals() ?? panic("locals: {err.detail}")
     shown := ""
@@ -208,7 +213,7 @@ NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String,\n    value: String,\
     root: scratch.path
     session := native_test_session(root, NATIVE_TEST_INLINED, [String]{"-O2"})
     lines: NATIVE_TEST_INLINED.split("\n").to_list()
-    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 6}}, "prog.jet", lines) ?? panic("run_to: {err.detail}")
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 6}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     assert(first.text.contains("Breakpoint hit  prog.jet:6  in sum_squares()"), first.text)
     shown: session.command("bt", first.stop, "prog.jet", lines) ?? panic("bt: {err.detail}")
     assert(shown.text.starts_with("#0  sum_squares()  at prog.jet:6  [inlined]\n#1  run()  at prog.jet:14\n"), shown.text)
@@ -251,7 +256,7 @@ NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String,\n    value: String,\
     root: scratch.path
     session := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
     lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
-    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 40}, {file: "prog.jet", line: 9}}, "prog.jet", lines) ?? panic("run_to: {err.detail}")
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 40}, {file: "prog.jet", line: 9}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     assert(first.text.contains("No code on prog.jet:40\n"))
     assert(first.text.contains("Breakpoint set  prog.jet:9\n"))
     assert(first.text.contains("Breakpoint hit  prog.jet:9  in run()"))
@@ -267,7 +272,7 @@ NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String,\n    value: String,\
     root: scratch.path
     session := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
     lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
-    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines) ?? panic("run_to: {err.detail}")
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
     session.clear_breakpoints() ?? panic("clear: {err.detail}")
     entered: session.command("s", first.stop, "prog.jet", lines) ?? panic("step: {err.detail}")
     assert(entered.text.contains("2 |     y: x * 2        <- here\n"), entered.text)
@@ -282,6 +287,34 @@ NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String,\n    value: String,\
     assert(line == 8 || line == 9, "next stops at the loop or the call, not in double: {line}")
     rest: session.command("c", over.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
     assert(rest.text.contains("count 2\nProgram finished\n"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+#Test("next_runs_a_one_line_loop_whole_and_steps_over_recursion_in_its_frame") {
+    scratch: native_test_files.temp_dir("jet-debug-next-loop") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_LOOP, [String]{"-O0"})
+    lines: NATIVE_TEST_LOOP.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 10}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    assert(first.text.contains("Breakpoint hit  prog.jet:10  in run()"), first.text)
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    looped: session.command("n", first.stop, "prog.jet", lines) ?? panic("next: {err.detail}")
+    assert(looped.text.contains("11 |     answer: fib(15 + total % 2)        <- here\n"), looped.text)
+    assert(looped.text.contains("total = 4499998500000"), looped.text)
+    if session.break_at("prog.jet", 3) == {
+        .Ok(number) -> assert_eq(number ?? -1, 2)
+        .Err(failure) -> panic("break: {failure.detail}")
+    }
+    called: session.command("c", looped.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(called.text.contains("3 |     left: fib(n - 1)        <- here\n"), called.text)
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    over: session.command("n", called.stop, "prog.jet", lines) ?? panic("next: {err.detail}")
+    assert(over.text.contains("4 |     right: fib(n - 2)        <- here\n"), over.text)
+    assert(over.text.contains("left = 377"), over.text)
+    assert(over.text.contains("n = 15"), over.text)
+    rest: session.command("c", over.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("4499998500000 610\nProgram finished\n"), rest.text)
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }

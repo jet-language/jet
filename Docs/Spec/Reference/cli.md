@@ -237,7 +237,7 @@ jet fix <file.jet|dir>               Apply safe automatic fixes, including `fix 
 jet os <command>                     Manage Jetos machines and images
 jet prove [args]                     Create a proof report for code and tests
 jet fetch [args]                     Download locked dependencies
-jet debug [<file.jet|image>]         Debug a program from Jet source
+jet debug [<file.jet|image>] [-- <args>] Debug a program from Jet source
 jet new <name> [--template cli|ui|web|overrides] Create a Jet project
 jet registry <command>               Publish and manage packages
 jet perf <command>                   Collect and inspect performance traces
