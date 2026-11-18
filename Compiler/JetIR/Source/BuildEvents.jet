@@ -411,9 +411,11 @@ ir_event_lent_payload: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, arg: Int) -
 
 // Hook.run(payload, fallback): the payload is lent to every handler, the
 // fallback moves to the provider, and the result R comes back in frame
-// storage.
+// storage. A run of a point no handler can reach (IRProgram.quiet_points)
+// is its fallback: no call, no hook and no cell.
 ir_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 2 -> return ir_fail_slot(b, span, "Hook.run with {args.len()} arguments")
+    if ir_quiet_point_read(p, b, receiver) -> return ir_quiet_hook_run(m, p, b, ty, args, span)
     hook: ir_expr(m, p, b, receiver)
     if ir_failed(b) || hook < 0 -> return -1
     payload: ir_event_lent_payload(m, p, b, args[0])
@@ -430,6 +432,33 @@ ir_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: I
     ir_release(m, b, payload.value)
     ir_release(m, b, hook)
     result
+}
+
+// Whether node `receiver` reads a declared point no handler can reach
+// (IRProgram.quiet_points).
+ir_quiet_point_read: fn(p: IRProgram, b: IRBuilder, receiver: Int) -[]> Bool {
+    if p.quiet_points.len() == 0 -> return false
+    if ir_body_node(p, b, receiver).kind == .ConstRef(symbol) {
+        return p.quiet_points.get(ir_body_symbol_key(p, b, symbol)) != None
+    }
+    false
+}
+
+// A quiet point's run(payload, fallback): the payload is evaluated and
+// dropped, as the provider would after a run no handler hears, and the
+// result is the owned fallback.
+ir_quiet_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args: [Int], span: Span) -[]> Int {
+    payload: ir_expr(m, p, b, args[0])
+    if ir_failed(b) -> return -1
+    fallback: ir_expr(m, p, b, args[1])
+    if ir_failed(b) -> return -1
+    ir_release(m, b, payload)
+    if ir_unit_type(ty) -> return -1
+    if fallback < 0 -> return -1
+    owned: if b.fresh[fallback] -> fallback else -> ir_copy_value(m, p, b, fallback, span)
+    if ir_failed(b) -> return -1
+    b.fresh[owned] = true
+    owned
 }
 
 // The (variant index, single payload offset) of `variant` in enum row

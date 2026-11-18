@@ -5785,7 +5785,9 @@ A hook point's fallback and a decision point's policy are literal data the
 build keeps. `NAME: event.new<T>()` as a module binding's whole value still
 declares an event point while Core's own `app.LIFECYCLE` is written that way.
 Any other module value that holds an event is refused as one the build cannot
-compute.
+compute. A hook point that the program reads only to `run` it can have no
+handler, so it costs nothing: each `run` evaluates its payload and returns its
+fallback, with no call, no hook and no carrier.
 
 Provider event handles expose `.on`, `.emit`, `.listener_count`, and `.close`;
 subscriptions expose `.is_active`. Async events expose `.emit_async` and a

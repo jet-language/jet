@@ -1,0 +1,21 @@
+# A run-time typed hook point costs nothing when no handler is attached: a
+# run of a declared hook point that no code can attach to is its fallback,
+# with no call, no hook and no process cell in the generated IR. A point a
+# handler is attached to keeps its dispatch, and every tier prints the same.
+fixture: HookRuntimeZeroCost.fixture
+env: NO_COLOR=1
+step: jet emit --ir main.jet --fn size
+exit: 0
+stdout: !~ "call_runtime" # no call at all: the run is its fallback
+stdout: !~ "jet_hook_run" # no dispatch
+stdout: !~ "jet_hook_new" # no hook is made
+stdout: !~ "jet_rt_move_enter" # no process cell is opened for the point
+step: jet emit --ir main.jet --fn double
+exit: 0
+stdout: ~ "call_runtime jet_hook_run" # an attached point dispatches
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "60 8\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "60 8\n"

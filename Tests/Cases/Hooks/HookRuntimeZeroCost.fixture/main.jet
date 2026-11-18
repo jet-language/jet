@@ -1,0 +1,18 @@
+// A declared hook point no code attaches a handler to costs nothing: each
+// run is its fallback, with no call, no hook and no cell. A point a handler
+// is attached to keeps its dispatch.
+use event: core.event
+
+page_size: event.hook_point<Int, Int>(50)
+
+doubled: event.hook_point<Int, Int>(0)
+
+size: fn(n: Int) -> Int { page_size.run(n, 60) }
+
+double: fn(n: Int) -> Int { doubled.run(n, 1) }
+
+run: fn() {
+    scope: event.scope()
+    doubled.on(scope, fn(n: Int) { n * 2 })
+    print("{size(3)} {double(4)}")
+}
