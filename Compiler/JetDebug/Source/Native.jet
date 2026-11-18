@@ -1325,14 +1325,56 @@ native_debug_read: fn(memory: NativeMemory, address: Int, size: Int, count: Int)
     Val(loop k in 0..<count -> native_number(bytes, k * size, size, encoding))
 }
 
-// The Jet name of type `ty`: its name past any module path, `Pointer` for
+// The Jet name of type `ty`: its name without module paths, `Pointer` for
 // an unnamed pointer.
 native_type_name: fn(image: NativeImage, ty: Int) -> String Never! {
     found: image.types.get(ty) ?? return "?"
     if found.name == "" -> return "Pointer"
-    if !found.name.contains("::") -> return found.name
-    parts: found.name.split("::").to_list()
-    parts[parts.len() - 1].copy()
+    native_jet_spelling(found.name)
+}
+
+// `name` without the module path before each `::` in it: `[main::Point]`
+// is `[Point]`, `<corelib>/core.math::Decimal` is `Decimal`.
+native_jet_spelling: fn(name: String) -> String Never! {
+    bytes: name.bytes()
+    corelib: "<corelib>".bytes()
+    colon: U8{58}
+    kept := [U8]{}
+    // Where in `kept` the run of path bytes before the next `::` starts.
+    run := 0
+    k := 0
+    loop k < bytes.len() {
+        if k + 1 < bytes.len() && bytes[k] == colon && bytes[k + 1] == colon {
+            loop kept.len() > run -> _: kept.pop()
+            if native_bytes_end_with(kept, corelib) {
+                loop _ in 0..<corelib.len() -> _: kept.pop()
+            }
+            run = kept.len()
+            k += 2
+            next
+        }
+        kept.push(bytes[k])
+        if !native_path_byte(bytes[k]) -> run = kept.len()
+        k += 1
+    }
+    String.from_bytes(kept) ?? "{name}"
+}
+
+// Whether `bytes` ends with `suffix`.
+native_bytes_end_with: fn(bytes: [U8], suffix: [U8]) -> Bool Never! {
+    if bytes.len() < suffix.len() -> return false
+    from: bytes.len() - suffix.len()
+    loop k in 0..<suffix.len() {
+        if bytes[from + k] != suffix[k] -> return false
+    }
+    true
+}
+
+// Whether `byte` may be part of a module path: a letter, digit, `_`, `.`
+// or `/`.
+native_path_byte: fn(byte: U8) -> Bool Never! {
+    code: Int{byte}
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 46 || code == 47
 }
 
 // The byte size of type `ty`, through typedefs.
@@ -1372,19 +1414,24 @@ native_render: fn(image: NativeImage, memory: NativeMemory, ty: Int, bytes: [U8]
             }
             .Char -> native_debug_char(native_number(bytes, at, 4, X64DebugEncoding.Unsigned))
         }
-        found.tag == NATIVE_TAG_POINTER -> Val(native_debug_hex(word))
+        found.tag == NATIVE_TAG_POINTER -> {
+            // A typed pointer shows what it points to; an untyped or null
+            // one its address.
+            size: native_type_size(image, found.target)
+            if found.target < 0 || word == 0 || size <= 0 -> return Val(native_debug_hex(word))
+            pointed: native_debug_bytes(memory, word, size) ?? return Val(native_debug_hex(word))
+            native_render(image, memory, found.target, pointed, 0, depth + 1)
+        }
+        found.tag == NATIVE_TAG_STRUCT && found.variants >= 0 -> native_debug_variant(image, memory, image.variants[found.variants], bytes, at, depth)
         found.tag == NATIVE_TAG_STRUCT && found.group >= 0 -> {
             group: found.group
             if found.name.starts_with("[") && found.name.ends_with("]") {
                 return native_debug_list(image, memory, image.members[group], bytes, at, depth)
             }
-            fields := [String]{}
-            loop member in image.members[group] {
-                size: native_type_size(image, member.ty)
-                if at + member.offset + size > bytes.len() -> return None
-                shown: native_render(image, memory, member.ty, bytes, at + member.offset, depth + 1) ?? NATIVE_DEBUG_UNAVAILABLE
-                fields.push("{member.name}: {shown}")
-            }
+            fields: native_debug_fields(image, memory, image.members[group], bytes, at, depth) ?? return None
+            // A record or tuple type is spelled by its fields, so its value
+            // is too.
+            if found.name.starts_with("{{") -> return Val("{{{fields.join(", ")}}}")
             Val("{native_type_name(image, ty)}{{{fields.join(", ")}}}")
         }
         found.tag == NATIVE_TAG_ENUM -> {
@@ -1399,6 +1446,56 @@ native_render: fn(image: NativeImage, memory: NativeMemory, ty: Int, bytes: [U8]
         // A union or an opaque struct has no Jet value to show.
         else -> None
     }
+}
+
+// Each of `members` of the value at `at` in `bytes`, as `name: value`, or
+// the value alone for an unnamed member.
+native_debug_fields: fn(image: NativeImage, memory: NativeMemory, members: [NativeMember], bytes: [U8], at: Int, depth: Int) -> [String]? Never! {
+    fields := [String]{}
+    loop member in members {
+        size: native_type_size(image, member.ty)
+        if at + member.offset + size > bytes.len() -> return None
+        shown: native_render(image, memory, member.ty, bytes, at + member.offset, depth + 1) ?? NATIVE_DEBUG_UNAVAILABLE
+        fields.push(if member.name == "" -> shown else -> "{member.name}: {shown}")
+    }
+    Val(fields)
+}
+
+// The value at `at` in `bytes` of a type with a variant part, as Jet
+// spells the variant its discriminant selects: the payload alone for an
+// unnamed variant (a present Option's value, a union's member), the
+// variant's name for one without a payload, `Name(a, b)` for positional
+// payloads and `Name{f: a}` for named ones.
+native_debug_variant: fn(image: NativeImage, memory: NativeMemory, part: NativeVariants, bytes: [U8], at: Int, depth: Int) -> String? Never! {
+    selector: part.discriminant
+    width: native_type_size(image, selector.ty)
+    if width <= 0 || at + selector.offset + width > bytes.len() -> return None
+    selected: native_number(bytes, at + selector.offset, width, X64DebugEncoding.Signed)
+    chosen: loop variant in part.arms {
+        if variant.value == .Val(value) && value == selected {
+            break variant.member
+        }
+    } ?? loop variant in part.arms {
+        if variant.value == None {
+            break variant.member
+        }
+    } ?? return None
+    if chosen.ty < 0 -> return None
+    if chosen.name == "" {
+        if at + chosen.offset + native_type_size(image, chosen.ty) > bytes.len() -> return None
+        return native_render(image, memory, chosen.ty, bytes, at + chosen.offset, depth)
+    }
+    payload: image.types.get(chosen.ty) ?? return None
+    shown: native_jet_spelling(chosen.name)
+    if payload.group < 0 || image.members[payload.group].len() == 0 -> return Val(shown)
+    fields: native_debug_fields(image, memory, image.members[payload.group], bytes, at + chosen.offset, depth + 1) ?? return None
+    positional: loop member in image.members[payload.group] {
+        if member.name != "" {
+            break false
+        }
+    } ?? true
+    if positional -> return Val("{shown}({fields.join(", ")})")
+    Val("{shown}{{{fields.join(", ")}}}")
 }
 
 // A List whose inline header [len, cap, data] starts at `at` in `bytes`: its

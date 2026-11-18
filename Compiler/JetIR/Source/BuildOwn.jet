@@ -287,6 +287,88 @@ ir_box_payload: fn(m: IRModule, row: Int, offset: Int) -> [IRMember] Never! {
     members
 }
 
+// The variants of every enum, union, Option and Result row of `m` not
+// described yet (IRModule.debug_variants), for their DWARF types. A part's
+// build runs it once its functions are built and before their drop glue,
+// so a row it lays out gets its glue too.
+ir_debug_variants: fn(m: &IRModule, p: IRProgram) Never! {
+    row := 0
+    loop row < m.types.len() {
+        if m.debug_variants.get(row) == None {
+            found := ir_debug_variants_of(m, p, row)
+            if found.variants.len() > 0 {
+                m.debug_variants[row] = m.variant_lists.len()
+                m.variant_lists.push(found.move())
+            }
+        }
+        row += 1
+    }
+}
+
+// The variants of type row `row` as its layout holds them (ir_box_shapes,
+// ir_option_none_word); none when it is no enum, union, Option or Result,
+// or a payload does not lay out.
+ir_debug_variants_of: fn(m: &IRModule, p: IRProgram, row: Int) -> IRDebugVariants Never! {
+    none: IRDebugVariants{selector: IRDebugSelector.Word, variants: [IRDebugVariant]{}}
+    ty: ir_untag(m.types[row].ty)
+    if ty == .Option(inner) {
+        payload: ir_value_type(m, p, inner) ?? return none
+        members := [IRMember]{}
+        if m.types[payload].kind != .Unit {
+            members.push(IRMember{name: "", offset: 0, ty: payload})
+        }
+        absent: IRDebugVariant{name: "None", selector: ir_option_none_word(m, row), members: [IRMember]{}}
+        present: IRDebugVariant{name: "", selector: -1, members: members}
+        // An inline Option's word or a nullable one's pointer is its value;
+        // a boxed one's value lies in its box.
+        inline: ir_option_inline(m, row) || m.types[row].option_null
+        selector: if inline -> IRDebugSelector.Word else -> IRDebugSelector.Pointer
+        return IRDebugVariants{selector: selector, variants: [IRDebugVariant]{absent, present}}
+    }
+    if ty == .Result(_, _) {
+        if !ir_box_row(m, row) -> return none
+        shapes := ir_box_shapes(m, p, row) ?? return none
+        variants := [IRDebugVariant]{}
+        loop shape in shapes.move() {
+            members := shape.members.move()
+            loop at in 0..<members.len() -> members[at].name = ""
+            name: if shape.selector == 1 -> "Ok" else -> "Err"
+            variants.push(IRDebugVariant{name: name, selector: shape.selector, members: members.move()})
+        }
+        return IRDebugVariants{selector: IRDebugSelector.Box, variants: variants}
+    }
+    definition: ir_enum_def(m, p, row) ?? return none
+    union: ty == .Union(_)
+    owner: p.types[definition].name
+    if p.types[definition].kind == .Enum(declared, _) {
+        variants := [IRDebugVariant]{}
+        if m.types[row].kind == .Word {
+            // A payload-free enum: its word is the variant index.
+            loop (index, variant) in declared {
+                variants.push(IRDebugVariant{name: "{owner}.{variant.name}", selector: index, members: [IRMember]{}})
+            }
+            return IRDebugVariants{selector: IRDebugSelector.Word, variants: variants}
+        }
+        if !ir_box_row(m, row) -> return none
+        shapes := ir_box_shapes(m, p, row) ?? return none
+        index := 0
+        loop shape in shapes.move() {
+            members := shape.members.move()
+            // A union's member, or a variant's one unnamed payload, is
+            // positional.
+            positional: union || declared[index].payload == .Single(_)
+            if positional {
+                loop at in 0..<members.len() -> members[at].name = ""
+            }
+            name: if union -> "" else -> "{owner}.{declared[index].name}"
+            variants.push(IRDebugVariant{name: name, selector: index, members: members.move()})
+            index += 1
+        }
+        return IRDebugVariants{selector: IRDebugSelector.Box, variants: variants}
+    }
+    none
+}
+
 // The bytes a box of row `row` was allocated with (ir_box_alloc sizes); for
 // an enum whose variants' boxes differ in size (ir_box_variant_sizes), the
 // widest variant's, which ir_box_size_slot narrows to a box's own.

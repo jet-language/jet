@@ -438,8 +438,9 @@ ir_wave_found: fn(m: IRModule, part: Int, before: Int) -> [IRWaveJob] Never! {
     found
 }
 
-// Builds the drop glue of every part's types (ir_drop_glues), then the
-// part's merge input (ir_merge_prepare), a task per part from `at` on.
+// Describes every part's variant types (ir_debug_variants), builds their
+// drop glue (ir_drop_glues), then the part's merge input
+// (ir_merge_prepare), a task per part from `at` on.
 ir_waves_glues: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], at: Int) -> Int {
     if at >= slots.len() -> return 0
     if at == slots.len() - 1 -> return ir_wave_glues(inputs, slots[at])
@@ -455,6 +456,7 @@ ir_waves_glues: fn(inputs: Shared<IRWaveInputs>, slots: [Shared<IRWaveWorker>], 
 ir_wave_glues: fn(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>) -> Int {
     reads: inputs.guard_read()
     held := slot.guard_edit()
+    ir_debug_variants(held.value.modules[0], reads.value.programs[0])
     ir_drop_glues(held.value.modules[0], reads.value.programs[0])
     held.value.preps.push(ir_merge_prepare(held.value.modules[0]))
     1

@@ -254,6 +254,39 @@ IRType: struct {
     option_null: Bool{false},
 }
 
+// Where a value of an enum, union, Option or Result row keeps the selector
+// that picks its variant (IRModule.debug_variants).
+IRDebugSelector: enum {
+    // The value's own word: a payload-free enum's variant index, an inline
+    // Option's word (its niche when absent), or a nullable Option's
+    // pointer (null when absent), the present value itself.
+    Word,
+    // Word 0 of the box the value points at: an enum's or union's variant
+    // index, a Result's Ok 1 or Err 0.
+    Box,
+    // The value's own box pointer, null when absent: a boxed Option, whose
+    // present payload lies in the box.
+    Pointer,
+}
+
+// One variant of a value, as the debugger shows it: `name` is how Jet spells
+// it (`Shape.Rect`, `Ok`, `None`; "" shows its one payload member bare, as
+// a present Option or a union's member is), `selector` the selector value
+// that picks it (-1: every value no other variant's selector names), and
+// `members` its payload where its layout puts it (in the box for a Box
+// selector, else in the value); a positional payload member is named "".
+IRDebugVariant: struct {
+    name: String,
+    selector: Int,
+    members: [IRMember],
+}
+
+// The variants of one row, and where its values keep their selector.
+IRDebugVariants: struct {
+    selector: IRDebugSelector,
+    variants: [IRDebugVariant],
+}
+
 IRSlotKind: enum {
     Param,
     Local,
@@ -516,14 +549,17 @@ IRDataReloc: struct {
 // `field <identity> <offset> <size> <member> <type>` line per stored member
 // of each struct the program reached (BuildMerge.jet ir_merge), for the
 // emission log; `<type>` is the member's checked type (`box` for a boxed
-// one), last since it may hold spaces. `debug_members`: by each struct row,
-// the index in `member_lists` of its members as its layout placed them
-// (BuildTypes.jet ir_struct_row_laid; a boxed member names no row); in the
-// merged module by merged row, each member's type a merged row (-1 when the
-// program never reached it), for the DWARF struct types (X64Module.jet
-// ir_x64_debug_types). `list_elements`: a List row's element row, for the
-// DWARF list types (none for a list laid out only inside a struct's
-// layout); merged rows in the merged module.
+// one), last since it may hold spaces. `debug_members`: by each struct or
+// tuple row, the index in `member_lists` of its members as its layout
+// placed them (BuildTypes.jet ir_debug_members_keep; a boxed member names no
+// row); in the merged module by merged row, each member's type a merged row
+// (-1 when the program never reached it), for the DWARF struct types
+// (X64Module.jet ir_x64_debug_types). `list_elements`: a List row's element
+// row, for the DWARF list types (none for a list laid out only inside a
+// struct's layout); merged rows in the merged module. `debug_variants`: by
+// each enum, union, Option and Result row, the index in `variant_lists` of
+// its variants (BuildOwn.jet ir_debug_variants), for their DWARF variant
+// parts; merged as `debug_members` is.
 IRModule: struct {
     types: [IRType],
     type_keys: [String],
@@ -577,6 +613,8 @@ IRModule: struct {
     struct_fields: [String]{[String]{}},
     debug_members: [Int:Int]{[Int:Int]{}},
     list_elements: [Int:Int]{[Int:Int]{}},
+    debug_variants: [Int:Int]{[Int:Int]{}},
+    variant_lists: [IRDebugVariants]{[IRDebugVariants]{}},
     // The data rows that are Core cells of the runtime image the program
     // binds to (BuildCore.jet ir_core_cells_bind), by row: the symbol of
     // the image's cell, which x86-64 selection addresses instead of the

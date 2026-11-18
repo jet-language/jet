@@ -180,11 +180,12 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
         out.types.push(parts[part].types[local].copy())
         out.type_keys.push(parts[part].type_keys[local].copy())
     }
-    // Each struct row's members as its layout placed them (BuildTypes.jet
-    // ir_struct_row_laid) and each List row's element row, for the DWARF
-    // types, from the first part that holds them: the parts that interned
-    // one key laid it out alike, and a member's or element's row is the
-    // merged row of its sharing group, whichever part reached it, so neither
+    // Each struct or tuple row's members as its layout placed them
+    // (BuildTypes.jet ir_debug_members_keep), each variant row's variants
+    // (BuildOwn.jet ir_debug_variants) and each List row's element row, for
+    // the DWARF types, from the first part that holds them: the parts that
+    // interned one key laid it out alike, and a member's or element's row is
+    // the merged row of its sharing group, whichever part reached it, so none
     // depends on which part built what. Each struct's members are also one
     // line each as the emission log prints them (X64Module.jet
     // ir_x64_log_fields), in merged row order.
@@ -227,6 +228,27 @@ ir_merge: fn(built: &&[IRModule], prepared: &&[IRMergePrep], roots: [IRMergeRoot
             reached: ir_merge_reached_type(g, part, element)
             if row < 0 || reached < 0 || out.list_elements.get(row) != None -> next
             out.list_elements[row] = reached
+        }
+        // The part's variant lists the merged rows take, by list.
+        shaped := [Int:Int]{}
+        loop (local, list) in parts[part].debug_variants {
+            row: ir_merge_reached_type(g, part, local)
+            if row < 0 || out.debug_variants.get(row) != None -> next
+            out.debug_variants[row] = -1
+            shaped[list] = row
+        }
+        described := compiler_take_rows<IRDebugVariants>(parts[part].variant_lists)
+        loop described.len() > 0 {
+            list: described.len() - 1
+            found := described.pop() ?? panic("a nonempty variant list failed to pop")
+            row: shaped.get(list) ?? next
+            loop variant in 0..<found.variants.len() {
+                loop index in 0..<found.variants[variant].members.len() {
+                    found.variants[variant].members[index].ty = ir_merge_reached_type(g, part, found.variants[variant].members[index].ty)
+                }
+            }
+            out.debug_variants[row] = out.variant_lists.len()
+            out.variant_lists.push(found.move())
         }
     }
     loop lines in logged.move() -> out.struct_fields.extend(lines.move())
