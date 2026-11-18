@@ -1123,8 +1123,15 @@ pack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     }
     compared: tree_differences(pack, ctx.candidate.runtime)
     if compared.differ.len() > 0 {
+        // Keep the rebuilt pack and the jet-bare that lowered it (its digest
+        // is the pack's IDENTITY) beside the report, since the tree goes
+        // when admit ends.
+        kept: files.join(ctx.work, "pack-rebuilt")
+        remove_tree(kept)
+        _: copy_tree(pack, files.join(kept, "jet-runtime"))
+        copy_file(files.join(built, "jet-bare"), files.join(kept, "jet-bare"), true) ?? ()
         shown: compared.differ[0..<if compared.differ.len() > 8 -> 8 else -> compared.differ.len()].join(", ")
-        row(ctx, "pack", "FAIL", "the rebuilt pack differs from pack2 in {compared.differ.len()} file(s): {shown}")
+        row(ctx, "pack", "FAIL", "the rebuilt pack differs from pack2 in {compared.differ.len()} file(s): {shown} (kept in {kept})")
         return
     }
     row(ctx, "pack", "PASS", "rebuilt by s2 without Rust, byte-identical to pack2 ({compared.files} files, {result.wall}s)")
