@@ -9,13 +9,13 @@ AppError: enum {
     FailedToFetch(url: String, cause: FetchError),
 }
 
-fetch: fn(raw: String) -> String AppError! {
+query: fn(raw: String) -> String AppError! {
     if raw == "" -> return Err(AppError.FailedToFetch{url: raw, cause: FetchError.BadURL("empty")})
     Ok(raw)
 }
 
 run: fn() {
-    if fetch("") == {
+    if query("") == {
         .Ok(page) -> { print(page) }
         .Err(.FailedToFetch{link, ..}) -> print("failed")
     }

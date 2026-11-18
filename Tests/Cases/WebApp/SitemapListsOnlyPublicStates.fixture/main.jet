@@ -28,7 +28,7 @@ inboxes: fn() -> [InboxView] Never! { [InboxView{box: "mine"}] }
 
 // Serves one GET of `path` and prints its status and body, with the
 // address the server listens at written HOST.
-fetch: fn(served: web.App, path: String) {
+query: fn(served: web.App, path: String) {
     listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr: listener.local_addr()
     serving: task { served.serve_once(listener) ?? panic("serve") }
@@ -45,6 +45,6 @@ run: fn() {
         .sitemap(guides)
         .sitemap(inboxes)
     served: web.app()
-    fetch(served.copy(), "/sitemap.xml")
-    fetch(served, "/robots.txt")
+    query(served.copy(), "/sitemap.xml")
+    query(served, "/robots.txt")
 }

@@ -11,11 +11,11 @@ Buf: struct {
 
 make: fn(tag: I64) -> Buf? { .Val(Buf{data: [I64]{tag}}) }
 
-keep: fn(buf: &&Buf) { print("kept {buf.data[0]}") }
+hold: fn(buf: &&Buf) { print("kept {buf.data[0]}") }
 
 run: fn() {
     if make(1) == .Val(b) -> print("bound {b.data[0]}")
-    if make(2) == .Val(b) -> keep(b)
+    if make(2) == .Val(b) -> hold(b)
     if make(4) == {
         .Val(b) -> { print("arm {b.data[0]}") }
         .None -> {}

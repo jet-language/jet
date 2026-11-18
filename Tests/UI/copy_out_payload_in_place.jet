@@ -11,12 +11,12 @@ Res: struct {
     }
 }
 
-keep: fn(r: &&Res) -> Int { r.name.len() }
+hold: fn(r: &&Res) -> Int { r.name.len() }
 
 from_param: fn(env: Res?) -> Int {
     if env == .Val(held) {
         applied := held
-        return keep(applied)
+        return hold(applied)
     }
     0
 }
@@ -24,7 +24,7 @@ from_param: fn(env: Res?) -> Int {
 from_element: fn(items: [Res?]) -> Int {
     if items[0] == .Val(held) {
         applied := held
-        return keep(applied)
+        return hold(applied)
     }
     0
 }

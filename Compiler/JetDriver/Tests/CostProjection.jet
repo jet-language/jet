@@ -108,7 +108,7 @@ cost_projection_held: fn(source: String) -> JetDriverHeldState {
 // of `row` on every turn, since `row` is still used after it.
 cost_projection_copy_source: fn() -> String {
     [String]{
-        "keep: fn() -> Int {{",
+        "hold: fn() -> Int {{",
         "    row: [Int]{{1, 2}}",
         "    count := Int{{0}}",
         "    loop index in 0..<3 {{",
@@ -134,7 +134,7 @@ cost_projection_copy_source: fn() -> String {
             copies.push("{site.function} {site.view} {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}")
         }
     }
-    assert_eq(copies, [String]{"keep [Int] SemanticRemainder main.jet:5 depth 1"})
+    assert_eq(copies, [String]{"hold [Int] SemanticRemainder main.jet:5 depth 1"})
     lints := [String]{}
     loop row in compiled.diagnostics {
         if row.code == "L2510" -> lints.push(row.what)

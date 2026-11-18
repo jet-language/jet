@@ -6,32 +6,32 @@ Reply: enum {
     Err(String),
 }
 
-fetch: fn(v: Int) -> Reply {
+query: fn(v: Int) -> Reply {
     if v > 0 -> return Reply.Ok(v)
     Reply.Err("none")
 }
 
 table_value: fn(v: Int) -> Int {
-    return if fetch(v) == {
+    return if query(v) == {
         .Ok(got) -> got
         .Err(_) -> 0
     }
 }
 
 table_statement: fn(v: Int) {
-    if fetch(v) == {
+    if query(v) == {
         .Ok(got) -> { print("ok {got}") }
         .Err(why) -> print("err {why}")
     }
 }
 
 test_form: fn(v: Int) -> Int {
-    if fetch(v) == .Ok(got) -> return got
+    if query(v) == .Ok(got) -> return got
     99
 }
 
 test_bind: fn(v: Int) -> String {
-    fetch(v) == .Err(why) ?? return "not an error"
+    query(v) == .Err(why) ?? return "not an error"
     why
 }
 

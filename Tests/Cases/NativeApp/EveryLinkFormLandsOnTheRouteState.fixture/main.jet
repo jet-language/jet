@@ -28,7 +28,7 @@ open_now: fn(graph: app.App) -> String Never! {
 }
 
 // GET `path` from the served web app, and print its status and body.
-fetch: fn(addr: String, path: String) HTTPError! {
+query: fn(addr: String, path: String) HTTPError! {
     answer: http.send_request(http.request_with(.Get, "http://{addr}{path}", http.headers(), http.body_text("")))
     print("web {path}: {answer.status} {answer.text()}")
 }
@@ -51,7 +51,7 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
     serving: task {
         loop _ in 0..<2 { served.serve_once(listener) }
     }
-    fetch(addr, "/tasks/{id}")
-    fetch(addr, "/projects/{id}")
+    query(addr, "/tasks/{id}")
+    query(addr, "/projects/{id}")
     serving.join()
 }

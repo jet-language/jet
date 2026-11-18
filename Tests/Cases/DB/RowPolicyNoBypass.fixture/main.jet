@@ -191,13 +191,13 @@ deliver: fn(addr: String, project: String, key: String, body: String) -> String 
 
 step: fn(label: String, outcome: String) { print("{label}: {outcome}") }
 
-keep: fn(store: db.Store) {
+hold: fn(store: db.Store) {
     notes := NOTES.guard_edit()
     notes.value.store = Val(store.copy())
 }
 
 run: fn() (HTTPError | NetError | TaskFailure)! {
-    keep(db.open_memory())
+    hold(db.open_memory())
     step("ann adds her plan", app.as_caller(ann(), fn() { added(Note{id: 1, owner: ann(), text: "plan"}) }))
     step("ann adds her diary", app.as_caller(ann(), fn() { added(Note{id: 2, owner: ann(), text: "diary"}) }))
     step("ann reads her notes", app.as_caller(ann(), fn() { texts_now() }))

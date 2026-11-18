@@ -1,10 +1,10 @@
-Error [jet.ProhibitedEffectReached]: `keep` reaches the library effect `Disk`, which it prohibits with `-[!Disk.Write]>`
+Error [jet.ProhibitedEffectReached]: `hold` reaches the library effect `Disk`, which it prohibits with `-[!Disk.Write]>`
   --> Tests/UI/Effects/library_effect_case_denial_whole_is_e0749.jet:13:27
     |
- 13 | keep: fn(path: String) -[!Disk.Write]> String { load(path) }
+ 13 | hold: fn(path: String) -[!Disk.Write]> String { load(path) }
     |                           ^^^^^^^^^^
  Why: A `-[!Disk.Write]>` row means the function and every callee it can reach must not use `Disk.Write`; a function uses a library effect when its row names the effect or one of its cases
  Fix: Remove the call that introduces `Disk`, or drop the `-[!Disk.Write]>` prohibition
  Denial: invocation
- Call chain: keep
+ Call chain: hold
 More: jet-lang.dev/e/E0749

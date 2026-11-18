@@ -10,13 +10,13 @@ AppError: enum {
     Offline,
 }
 
-fetch: fn(raw: String) -> String AppError! {
+query: fn(raw: String) -> String AppError! {
     if raw == "" -> return Err(.Offline)
     Ok(raw)
 }
 
 run: fn() {
-    if fetch("") == {
+    if query("") == {
         .Ok(page) -> { print(page) }
         .Err(.FailedToFetch{url, ..}) -> print(url)
     }

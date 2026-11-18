@@ -30,7 +30,7 @@ measure: fn(value: Int | String) -> Int {
     }
 }
 
-keep: fn(value: Int | String) -> Int | String { value.copy() }
+hold: fn(value: Int | String) -> Int | String { value.copy() }
 
 status_kb: fn(field: String) -[FS.Read]> Int {
     status: files.read("/proc/self/status") ?? panic("read /proc/self/status")
@@ -81,6 +81,6 @@ run: fn() {
     print("lent text not copied: true")
     print("plain value: {measure(7)}")
     word: "kept".repeat(2)
-    kept: keep(word)
+    kept: hold(word)
     print("kept copy: {measure(kept)}, holder still {word}")
 }

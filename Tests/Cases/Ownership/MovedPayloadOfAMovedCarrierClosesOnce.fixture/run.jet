@@ -30,7 +30,7 @@ Failure: enum {
 
 held: fn(name: String) -> Held Never! { Held{name: name, lock: None, tag: Tag{name: name}} }
 
-keep: fn(items: &&[Held]) -> Int {
+hold: fn(items: &&[Held]) -> Int {
     count: items.len()
     loop item in items.move() { print("keep {item.name}") }
     count
@@ -39,7 +39,7 @@ keep: fn(items: &&[Held]) -> Int {
 // The Option's payload moves on in one arm of a valued match.
 pick: fn(warm: &&[Held]?) -> Int {
     count: if warm.move() == {
-        .Val(list) -> keep(list)
+        .Val(list) -> hold(list)
         .None -> 0
     }
     print("picked {count}")
@@ -50,7 +50,7 @@ pick: fn(warm: &&[Held]?) -> Int {
 maybe: fn(warm: &&[Held]?, moving: Bool) -> Int {
     if warm.move() == {
         .Val(list) -> {
-            if moving -> return keep(list)
+            if moving -> return hold(list)
         }
         .None -> {}
     }
@@ -61,7 +61,7 @@ maybe: fn(warm: &&[Held]?, moving: Bool) -> Int {
 // A Result's Ok payload moves on the same way.
 settle: fn(got: &&[Held] Failure!) -> Int {
     if got.move() == {
-        .Ok(list) -> return keep(list)
+        .Ok(list) -> return hold(list)
         .Err(_) -> {}
     }
     print("failed")

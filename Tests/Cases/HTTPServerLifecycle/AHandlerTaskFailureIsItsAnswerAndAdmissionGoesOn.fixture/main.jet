@@ -18,7 +18,7 @@ use {
 crlf: fn() -> String { "\r\n" }
 
 // The status code and the body of one request on its own connection.
-fetch: fn(addr: String, path: String) -> String {
+query: fn(addr: String, path: String) -> String {
     client: net.tcp_connect(addr) ?? return "connect failed"
     client.write_bytes("GET {path} HTTP/1.1{crlf()}Host: local{crlf()}Connection: close{crlf()}{crlf()}".bytes()) ?? return "write failed"
     parts := [String]{}
@@ -79,10 +79,10 @@ run: fn() (HTTPError | RangeError | TaskFailure)! {
     server: app.bind("127.0.0.1:0") ?? panic("bind")
     addr: server.local_addr() ?? panic("address")
     serving: task { server.serve() ?? panic("serve") }
-    print("deadline: {fetch(addr, "/deadline")}")
-    print("next: {fetch(addr, "/")}")
-    print("panic: {fetch(addr, "/panic")}")
-    print("next: {fetch(addr, "/")}")
+    print("deadline: {query(addr, "/deadline")}")
+    print("next: {query(addr, "/")}")
+    print("panic: {query(addr, "/panic")}")
+    print("next: {query(addr, "/")}")
     report: server.shutdown(100ms) ?? panic("shutdown")
     serving.join() ?? panic("serve task")
     print("accepted {report.accepted}, completed {report.completed}, canceled {report.canceled}")
