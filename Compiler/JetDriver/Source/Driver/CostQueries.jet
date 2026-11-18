@@ -6,6 +6,7 @@ use {
     jet_foundation.[
         BodyPlace,
         BodyTree,
+        CopyFact,
         DeclID,
         DeclTable,
         Diagnostic,
@@ -29,6 +30,7 @@ use {
         body_node,
         body_stmt,
         body_type,
+        checked_builtin_mutates_receiver,
         checked_cost_combine_bounds,
         checked_cost_int_fact,
         decl_table_find,
@@ -49,6 +51,10 @@ TCostSite: struct {
     // The type a ViewMaterialization or an ImplicitCopy copies; empty for
     // every other kind.
     view: String,
+    // Whether a loop that repeats this CollectionCopyOnWrite edit also shares
+    // the edited map each turn (jet_driver_cost_shared_edits); false for
+    // every other kind.
+    shared: Bool{false},
     // The source file the site is in and the 1-based line it starts on
     // (jet_driver_cost_place); empty and 0 until the site is placed.
     path: String{""},
@@ -228,7 +234,7 @@ jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -
     lints := [Diagnostic]{}
     seen := [String:Bool]{}
     loop site in sites {
-        if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || !jet_driver_cost_hidden_copy(site.kind) -> next
+        if site.loop_depth == 0 || site.state != TCostState.SemanticRemainder || !jet_driver_cost_hidden_copy(site) -> next
         operation: jet_driver_cost_operation(site)
         key: "{site.module_identity:Debug} {site.span.start} {site.span.end} {operation}"
         if seen.get(key) != None -> next
@@ -238,10 +244,12 @@ jet_driver_cost_copy_lints: fn(load: JetDriverLoadResult, functions: [FnBody]) -
     lints
 }
 
-// The cost kinds L2511 lists: a copy sema made that the source doesn't
-// write, a view made owned or an implicit copy.
-jet_driver_cost_hidden_copy: fn(kind: TCostKind) -> Bool Never! {
-    kind == TCostKind.ViewMaterialization || kind == TCostKind.ImplicitCopy
+// The cost sites L2511 lists: a copy sema made that the source doesn't
+// write (a view made owned or an implicit copy), and a map edit whose loop
+// shares the map each turn, so the edit clones it each turn. An edit of a
+// map the loop doesn't share clones it at most once.
+jet_driver_cost_hidden_copy: fn(site: TCostSite) -> Bool Never! {
+    site.kind == TCostKind.ViewMaterialization || site.kind == TCostKind.ImplicitCopy || (site.kind == TCostKind.CollectionCopyOnWrite && site.shared)
 }
 
 // What a cost kind is, as `explain --cost` names it.
@@ -401,6 +409,7 @@ jet_driver_cost_function_sites: fn(function: FnBody, name: String, nodes: [Int],
     consumed := [Int:Bool]{}
     removed := [Int:Bool]{}
     jet_driver_cost_consumed(tree, consumed, removed)
+    shared: jet_driver_cost_shared_edits(tree)
     loop id in nodes {
         node: body_node(tree, id)
         fact: body_cost_fact(tree, node) ?? next
@@ -418,14 +427,89 @@ jet_driver_cost_function_sites: fn(function: FnBody, name: String, nodes: [Int],
         } else if node.kind == .BuiltinMethod(receiver, _, _) && fact.kind == TCostKind.ViewMaterialization {
             view = type_name(body_type(tree, receiver))
         }
-        sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(id) ?? 0, kind: fact.kind, state: state, view: view})
+        sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(id) ?? 0, kind: fact.kind, state: state, view: view, shared: shared.get(id) != None})
     }
     loop statement in tree.stmts {
         if statement == .Assign(place, op, value, _, span) {
             fact: jet_driver_cost_assign_fact(tree, place, op, value) ?? next
-            sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(value) ?? 0, kind: fact.kind, state: fact.state, view: ""})
+            edited := false
+            if place == .Expr(expression) -> edited = shared.get(expression) != None
+            sites.push(TCostSite{function: name, module_identity: function.module_identity, span: span, loop_depth: depths.get(value) ?? 0, kind: fact.kind, state: fact.state, view: "", shared: edited})
         }
     }
+}
+
+// The map edits of `tree` that a loop repeats while the same loop's body
+// shares the edited map, by the edit's node id (a map entry store's index or
+// a mutating builtin call). A share made each turn, before the edit or after
+// it for the next turn, leaves the map's backing store shared when the edit
+// runs, so the edit clones the whole map each turn. A share made before the
+// loop is cloned away by the first edit, at most once.
+jet_driver_cost_shared_edits: fn(tree: BodyTree) -> [Int:Bool] Never! {
+    edits := [Int:Bool]{}
+    loop statement in tree.stmts {
+        iterated := [Int]{}
+        jet_driver_cost_iterated(tree, statement, iterated)
+        shares := [String]{}
+        inside := [Int:Bool]{}
+        loop id in iterated {
+            inside[id] = true
+            copied: jet_driver_cost_shared_value(tree, id) ?? next
+            if jet_driver_cost_place_path(tree, copied) == .Val(path) -> shares.push(path)
+        }
+        if shares.len() == 0 -> next
+        loop id in iterated {
+            if body_node(tree, id).kind == .BuiltinMethod(receiver, operation, _) && checked_builtin_mutates_receiver(operation) && body_cost_type(tree, receiver) == .Val(receiver_type) {
+                if receiver_type == .Map(_, _, _) && jet_driver_cost_shares_place(tree, receiver, shares) -> edits[id] = true
+            }
+        }
+        loop row in tree.stmts {
+            if row == .Assign(place, _, value, _, _) && inside.get(value) != None {
+                if place == .Expr(expression) && body_node(tree, expression).kind == .Index(base, _, kind, _, _, _) {
+                    if (kind == TIndexKind.Map || kind == TIndexKind.MapOr) && jet_driver_cost_shares_place(tree, base, shares) -> edits[expression] = true
+                }
+            }
+        }
+    }
+    edits
+}
+
+// The value node `id` of `tree` shares: the operand of a written `copy`
+// or of a copy sema made, either of which shares a collection's backing
+// store; None for any other node, and for a bitwise or Shared handle copy.
+jet_driver_cost_shared_value: fn(tree: BodyTree, id: Int) -> Int? Never! {
+    node: body_node(tree, id)
+    if node.kind == .ExplicitCopy(value) -> return Val(value)
+    if node.kind == .Clone(value, fact) && fact != CopyFact.Scalar -> return Val(value)
+    None
+}
+
+// Whether the place node `id` of `tree` names overlaps one of `shares`
+// (jet_driver_cost_place_path): the same place, a part of a shared place, or
+// a place holding a shared part.
+jet_driver_cost_shares_place: fn(tree: BodyTree, id: Int, shares: [String]) -> Bool Never! {
+    path: jet_driver_cost_place_path(tree, id) ?? return false
+    loop share in shares {
+        if path == share || path.starts_with("{share}.") || path.starts_with("{share}[") || share.starts_with("{path}.") || share.starts_with("{path}[") -> return true
+    }
+    false
+}
+
+// The place node `id` of `tree` names, spelled from its local's symbol
+// through `.field` for each field and `[]` for each index; None for a node
+// that names no place, or a local with no symbol.
+jet_driver_cost_place_path: fn(tree: BodyTree, id: Int) -> String? Never! {
+    node: body_node(tree, id)
+    if node.kind == .Local(local) && local.symbol_id == .Val(symbol) -> return Val("{symbol:Debug}")
+    if node.kind == .Field(receiver, field) {
+        base: jet_driver_cost_place_path(tree, receiver) ?? return None
+        return Val("{base}.{field.name}")
+    }
+    if node.kind == .Index(base, _, _, _, _, _) {
+        root: jet_driver_cost_place_path(tree, base) ?? return None
+        return Val("{root}[]")
+    }
+    None
 }
 
 // The cost of assigning `value` to `place` with compound operator `op`: a

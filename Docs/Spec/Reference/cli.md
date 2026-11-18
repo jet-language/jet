@@ -1455,7 +1455,10 @@ clone allocates: a `String`, `List`, `Map` or a value holding one; never a
 bitwise copy, a `Shared` share, or a copy the source writes as `.copy()`)
 once per site as the L2511 tidy error
 `hidden_copy_in_loop`, which fails them and never stops `jet run` or `jet
-dev`. A view local read only as the receiver of a builtin scalar read
+dev`. A map edit is L2511 too when the same loop shares that map each turn
+(a `.copy()` or implicit copy of it, or of a value holding it), so every
+edit clones the whole map; an edit of a map the loop never shares clones it
+at most once and stays an L2510 row. A view local read only as the receiver of a builtin scalar read
 (`trimmed.len()`, `is_empty`, `index_of`, …) is read in place, never made
 owned. `lint --cost` findings exit 1 on stderr (diagnostic JSON Lines under
 `--json`) with a `N hidden dynamic cost warnings found` line; clean

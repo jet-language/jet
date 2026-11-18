@@ -4,7 +4,8 @@
 // callee without a checked body leaves, a captured report's lines and L2510
 // lints, the implicit copy a loop repeats, the String copy `lines()` makes,
 // the Int arithmetic a range loop's counter keeps on the packed rail, a view
-// read in place as a receiver, and a plain check's L2511 tidy errors.
+// read in place as a receiver, a plain check's L2511 tidy errors, and a map
+// edit's L2511 only where its loop shares the map each turn.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -20,7 +21,7 @@ use {
         jet_driver_cost_report,
     ]
     jet_cli.[jet_cli_driver_request]
-    jet_foundation.[FnBody, decl_table_key]
+    jet_foundation.[FnBody, TCostKind, decl_table_key]
 }
 
 // One function with an Int product, a generic one called at two types, and
@@ -299,4 +300,67 @@ cost_projection_hidden_copy_source: fn() -> String {
         "This copy of `String` view into an owned slot inside a loop | To keep the copy out of the loop, keep the value in its view form, or make the copy explicit outside the loop.",
         "Implicitly copying a `String` inside a loop | To keep the copy out of the loop, hand the value over with `.move()` at its last use, or make the copy explicit outside the loop.",
     })
+}
+
+// Map edits inside loops: one whose loop snapshots the map each turn, so the
+// edit clones it each turn, and three that clone at most once: a map the
+// loop never shares, one shared only before the loop, and one beside a
+// different map the loop shares.
+cost_projection_map_edit_source: fn() -> String {
+    [String]{
+        "history: fn(keys: [String]) -> [[String:Int]] {{",
+        "    counts := [String:Int]{{}}",
+        "    out := [[String:Int]]{{}}",
+        "    loop key in keys {{",
+        "        out.push(counts.copy())",
+        "        counts[key] = out.len()",
+        "    }}",
+        "    out",
+        "}}",
+        "tally: fn(keys: [String]) -> [String:Int] {{",
+        "    counts := [String:Int]{{}}",
+        "    loop key in keys {{",
+        "        counts[key] = (counts.get(key) ?? 0) + 1",
+        "    }}",
+        "    counts",
+        "}}",
+        "after_snapshot: fn(keys: [String]) -> Int {{",
+        "    counts := [String:Int]{{}}",
+        "    before: counts.copy()",
+        "    loop key in keys {{",
+        "        counts[key] = 1",
+        "    }}",
+        "    before.len() + counts.len()",
+        "}}",
+        "mirrored: fn(keys: [String]) -> Int {{",
+        "    seen := [String:Int]{{}}",
+        "    frozen: [String:Int]{{\"x\": 1}}",
+        "    out := [[String:Int]]{{}}",
+        "    loop key in keys {{",
+        "        out.push(frozen.copy())",
+        "        seen[key] = out.len()",
+        "    }}",
+        "    out.len() + seen.len()",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+#Test("a map edit is an L2511 tidy error only where its loop shares the map each turn") {
+    request := cost_projection_request(cost_projection_map_edit_source())
+    request.capture_cost_report = true
+    captured := jet_driver_compile(request)
+    assert(captured.complete, "the fixture checks: {captured.diagnostics.map(fn(row) { row.what })}")
+    report: captured.cost_report.move() ?? panic("a captured check keeps its cost report")
+    edits := [String]{}
+    loop site in report.sites {
+        if site.kind == TCostKind.CollectionCopyOnWrite -> edits.push("{site.function} main.jet:{site.line} shared {site.shared}")
+    }
+    assert_eq(edits, [String]{"history main.jet:6 shared true", "tally main.jet:13 shared false", "after_snapshot main.jet:21 shared false", "mirrored main.jet:31 shared false"})
+    compiled := jet_driver_compile(cost_projection_request(cost_projection_map_edit_source()))
+    tidy := [String]{}
+    loop row in compiled.diagnostics {
+        if row.code == "L2511" -> tidy.push("{row.what} | {row.fix}")
+    }
+    assert_eq(tidy, [String]{"Editing a shared map backing store inside a loop | To keep the copy out of the loop, mutate an exclusive map place, or move the edit outside the loop."})
 }

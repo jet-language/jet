@@ -949,7 +949,9 @@ holding one) inside a loop, which the source does not write, is the L2511
 (`HiddenCopyInLoop`) tidy error that `jet check` and `jet build` list and
 fail on; `jet run` and `jet dev` never stop for it. A bitwise copy, a
 `Shared` share, a copy written as `.copy()`, or one outside any loop, is no
-L2511.
+L2511. A map copy-on-write is L2511 only where the loop that repeats the
+edit also shares the map each turn, so each edit clones it; an edit of a map
+the loop never shares clones it at most once and stays an L2510 row.
 
 ## Precedence
 
