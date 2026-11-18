@@ -53,6 +53,7 @@ use jet_foundation.[
     core_call_typed_signature,
     core_call_typed_signature_for,
     core_receiver_method,
+    core_item_spelling,
     core_module_export,
     diagnostic_with_edit,
     expr_span,
@@ -638,7 +639,8 @@ sema_call_core_projection_error: fn(module_name: String, member: String, error: 
     }
 }
 
-sema_call_core_record: fn(module_name: String, member: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
+sema_call_core_record: fn(module_name: String, written: String, actual_arity: Int, span: Span, diagnostics: &[Diagnostic]) -> CoreCallRecord? {
+    member: core_item_spelling(module_name, written)
     typed_signature: core_call_typed_signature(module_name, member, actual_arity)
     if typed_signature != None -> return core_call(module_name, member)
     // A compiler query checks its own argument count against its contract,

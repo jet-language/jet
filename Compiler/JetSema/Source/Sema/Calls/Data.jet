@@ -19,6 +19,7 @@ use jet_foundation.[
     TypeTupleField,
     AST_EMPTY_CALL_ARG_FLAGS,
     core_receiver_method,
+    core_item_spelling,
     core_source_owns_type,
     expr_source_span,
     expr_span,
@@ -898,7 +899,7 @@ sema_call_try_data_method: fn(receiver: Expr, receiver_value: TExpr, method: Str
                     method == "next_deadline" && args.len() == 0 -> Val(Type.Named{name: "Instant"})
                     method == "receipt" && args.len() == 0 -> Val(Type.Named{name: "RealtimeReceipt"})
                     method == "cancel" && args.len() == 0 -> Val(Type.Named{name: "Unit"})
-                    method == "is_cancelled" && args.len() == 0 -> Val(Type.Bool)
+                    core_item_spelling(name, method) == "is_cancelled" && args.len() == 0 -> Val(Type.Bool)
                     else -> None
                 }
                 if ret != None {

@@ -47,8 +47,16 @@ task_failure_new: fn(kind: I64, owned_reason: I64) -> I64 {
     jet_rt_string_clone(sync_load(wrapping(failure + TASK_FAILURE_REASON)))
 }
 
-#Export(c) jet_rt_record_new_jet_task_failure_cancelled: fn() -> I64 {
+#Export(c) jet_rt_record_new_jet_task_failure_canceled: fn() -> I64 {
     task_failure_new(TASK_FAILURE_CANCELLED, I64{0})
+}
+
+// Seed bridge, deleted by the sweep that renames the remaining British case
+// names: this tree's Core still names `TaskFailure`'s case `Cancelled`, and a
+// record route is named from the written case, so the British atom reaches
+// the `Canceled` export too.
+#Export(c) jet_rt_record_new_jet_task_failure_cancelled: fn() -> I64 {
+    jet_rt_record_new_jet_task_failure_canceled()
 }
 
 #Export(c) jet_rt_record_new_jet_task_failure_deadline_blown: fn() -> I64 {

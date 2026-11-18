@@ -84,8 +84,16 @@ ws_deadline_passed: fn() -> Bool {
     ws_error_new(WS_ERROR_CLOSED, I64{0}, I64{0})
 }
 
-#Export(c) jet_rt_record_new_jet_ws_error_cancelled: fn() -> I64 {
+#Export(c) jet_rt_record_new_jet_ws_error_canceled: fn() -> I64 {
     ws_error_new(WS_ERROR_CANCELLED, I64{0}, I64{0})
+}
+
+// Seed bridge, deleted by the sweep that renames the remaining British case
+// names: this tree's Core still names `WsError`'s case `Cancelled`, and a
+// record route is named from the written case, so the British atom reaches
+// the `Canceled` export too.
+#Export(c) jet_rt_record_new_jet_ws_error_cancelled: fn() -> I64 {
+    jet_rt_record_new_jet_ws_error_canceled()
 }
 
 #Export(c) jet_rt_record_new_jet_ws_error_unsupported_target: fn() -> I64 {
