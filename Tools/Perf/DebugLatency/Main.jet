@@ -2,8 +2,10 @@
 // Debugger latency: the time `jet debug` takes to its first stop and per
 // step, against LLDB driving the same O0 image the same way.
 // Usage (from the repository root):
-//   jet run Tools/Perf/DebugLatency/Main.jet -- [--jet PATH] [--lldb PATH] [--functions N] [--steps K] [--runs R]
-// Defaults: the `jet` and `lldb` on PATH, 2000 functions, 20 steps, 5 runs.
+//   jet run Tools/Perf/DebugLatency/Main.jet -- [--jet PATH] [--lldb PATH] [--functions N] [--steps K] [--runs R] [--bar MS]
+// Defaults: the `jet` and `lldb` on PATH, 2000 functions, 20 steps, 5 runs,
+// no bar. With no LLDB on PATH and no `--lldb`, only `jet debug` is timed and
+// LLDB's column is `-`: the measurement needs nothing but jet.
 //
 // It writes a package whose program has N small functions, and whose `run`
 // calls each in turn one line at a time, to a temporary directory, and
@@ -22,7 +24,9 @@
 // L is the line of the first call in `run`. A debugger run whose output
 // does not report the breakpoint stop fails the measurement. It prints the
 // image's SHA-256, both tools' versions and the exact commands as `#`
-// lines, then one tab-separated row per measure in milliseconds.
+// lines, then one tab-separated row per measure in milliseconds. With
+// `--bar MS` it fails, after the rows, when `jet debug`'s first stop took
+// more than MS milliseconds.
 use {
     crypto: core.crypto
     files: core.files
@@ -33,25 +37,31 @@ use {
 
 LatencyOptions: struct {
     jet: String,
-    lldb: String,
+    lldb: String?,
     functions: Int,
     steps: Int,
     runs: Int,
+    bar: Int?,
+}
+
+// LLDB's version and timings, when LLDB was timed.
+LatencyLldb: struct {
+    version: String,
+    stop: Int,
+    steps: Int,
 }
 
 LatencyRuns: struct {
     image_sha256: String,
     jet_version: String,
-    lldb_version: String,
     build: Int,
     debug_stop: Int,
     debug_steps: Int,
-    lldb_stop: Int,
-    lldb_steps: Int,
+    lldb: LatencyLldb?,
 }
 
 usage: fn() -[IO]> Int Never! {
-    term.eprint("usage: jet run Tools/Perf/DebugLatency/Main.jet -- [--jet PATH] [--lldb PATH] [--functions N] [--steps K] [--runs R]")
+    term.eprint("usage: jet run Tools/Perf/DebugLatency/Main.jet -- [--jet PATH] [--lldb PATH] [--functions N] [--steps K] [--runs R] [--bar MS]")
     2
 }
 
@@ -172,56 +182,85 @@ latency_measure: fn(options: LatencyOptions, work: String) -[Exec, FS, Time, Tim
     debug_stopped: "Breakpoint hit  prog.jet:{line}"
     lldb_stopped: "stop reason = breakpoint"
     nexts: "n\n".repeat(options.steps)
+    lldb := LatencyLldb?{None}
+    if options.lldb == .Val(tool) {
+        timed: LatencyLldb{
+            version: latency_version(tool) ?? return Err(err),
+            stop: latency_median_time(latency_lldb_argv(tool, line, 0), work, "", lldb_stopped, options.runs) ?? return Err(err),
+            steps: latency_median_time(latency_lldb_argv(tool, line, options.steps), work, "", lldb_stopped, options.runs) ?? return Err(err),
+        }
+        lldb = Val(timed)
+    }
     Ok(
         LatencyRuns{
             image_sha256: crypto.sha256(image).hex(),
             jet_version: latency_version(options.jet) ?? return Err(err),
-            lldb_version: latency_version(options.lldb) ?? return Err(err),
             build: latency_median_time(build, work, "", "", options.runs) ?? return Err(err),
             debug_stop: latency_median_time(debug, work, "", debug_stopped, options.runs) ?? return Err(err),
             debug_steps: latency_median_time(debug, work, nexts, debug_stopped, options.runs) ?? return Err(err),
-            lldb_stop: latency_median_time(latency_lldb_argv(options.lldb, line, 0), work, "", lldb_stopped, options.runs) ?? return Err(err),
-            lldb_steps: latency_median_time(latency_lldb_argv(options.lldb, line, options.steps), work, "", lldb_stopped, options.runs) ?? return Err(err),
+            lldb: lldb,
         },
     )
 }
 
-// The report: the image, the tools and the commands, then the rows. Per
-// step is the extra time of K steps over the first stop, over K.
+// The report: the image, the tools and the commands, then the rows, then
+// the bar's verdict when there is one. Per step is the extra time of K steps
+// over the first stop, over K; LLDB's column is `-` when LLDB was not timed.
 latency_rows: fn(options: LatencyOptions, runs: LatencyRuns) -> [String] Never! {
     line: latency_break_line(options.functions)
     debug_step: (runs.debug_steps - runs.debug_stop) /% options.steps
-    lldb_step: (runs.lldb_steps - runs.lldb_stop) /% options.steps
-    [String]{
+    rows := [String]{
         "# image {LATENCY_IMAGE} sha256 {runs.image_sha256}",
         "# jet {runs.jet_version}",
-        "# lldb {runs.lldb_version}",
-        "# build: {latency_command_text(latency_build_argv(options.jet))}",
-        "# jet_debug first_stop: {latency_command_text(latency_debug_argv(options.jet, line))} < /dev/null",
-        "# jet_debug per_step: the same with {options.steps} `n` lines on stdin",
-        "# lldb first_stop: {latency_command_text(latency_lldb_argv(options.lldb, line, 0))}",
-        "# lldb per_step: {latency_command_text(latency_lldb_argv(options.lldb, line, options.steps))}",
-        "# {options.functions} functions, {options.steps} steps, median of {options.runs} runs, milliseconds",
-        "measure\tjet_debug\tlldb",
-        "build\t{runs.build}\t-",
-        "first_stop\t{runs.debug_stop}\t{runs.lldb_stop}",
-        "per_step\t{debug_step}\t{lldb_step}",
     }
+    lldb_line := "# lldb not timed: none on PATH and no `--lldb`"
+    lldb_stop := "-"
+    lldb_step := "-"
+    if runs.lldb == .Val(lldb) {
+        lldb_line = "# lldb {lldb.version}"
+        lldb_stop = "{lldb.stop}"
+        lldb_step = "{(lldb.steps - lldb.stop) /% options.steps}"
+    }
+    rows.push(lldb_line)
+    rows.push("# build: {latency_command_text(latency_build_argv(options.jet))}")
+    rows.push("# jet_debug first_stop: {latency_command_text(latency_debug_argv(options.jet, line))} < /dev/null")
+    rows.push("# jet_debug per_step: the same with {options.steps} `n` lines on stdin")
+    if options.lldb == .Val(tool) {
+        rows.push("# lldb first_stop: {latency_command_text(latency_lldb_argv(tool, line, 0))}")
+        rows.push("# lldb per_step: {latency_command_text(latency_lldb_argv(tool, line, options.steps))}")
+    }
+    rows.push("# {options.functions} functions, {latency_break_line(options.functions) + options.functions + 1} lines, {options.steps} steps, median of {options.runs} runs, milliseconds")
+    rows.push("measure\tjet_debug\tlldb")
+    rows.push("build\t{runs.build}\t-")
+    rows.push("first_stop\t{runs.debug_stop}\t{lldb_stop}")
+    rows.push("per_step\t{debug_step}\t{lldb_step}")
+    if options.bar == .Val(bar) {
+        verdict: if latency_bar_missed(options, runs) -> "missed" else -> "met"
+        rows.push("# bar: jet_debug first_stop at most {bar} ms: {verdict}")
+    }
+    rows
+}
+
+// Whether `jet debug`'s first stop took longer than the bar, if there is one.
+latency_bar_missed: fn(options: LatencyOptions, runs: LatencyRuns) -> Bool Never! {
+    if options.bar == .Val(bar) -> return runs.debug_stop > bar
+    false
 }
 
 debug_latency: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     args: process.args()
-    options := LatencyOptions{jet: process.which("jet") ?? "jet", lldb: process.which("lldb") ?? "lldb", functions: 2000, steps: 20, runs: 5}
+    options := LatencyOptions{jet: process.which("jet") ?? "jet", lldb: process.which("lldb"), functions: 2000, steps: 20, runs: 5, bar: None}
     at := 0
     loop at < args.len() {
         if at + 1 >= args.len() -> return usage()
         value: args[at + 1]
         if args[at] == {
             "--jet" -> options.jet = value.copy()
-            "--lldb" -> options.lldb = value.copy()
+            "--lldb" -> options.lldb = Val(value.copy())
             "--functions" -> options.functions = Int.parse(value) ?? return usage()
             "--steps" -> options.steps = Int.parse(value) ?? return usage()
             "--runs" -> options.runs = Int.parse(value) ?? return usage()
+            "--bar" -> options.bar = Val(Int.parse(value) ?? return usage())
             else -> return usage()
         }
         at += 2
@@ -239,6 +278,7 @@ debug_latency: fn() -[Env, Exec, FS, IO, Time, Time.Wait]> Int Never! {
     }
     files.remove_all(work.path).drop("a work directory left behind is only disk")
     loop row in latency_rows(options, runs) -> print(row)
+    if latency_bar_missed(options, runs) -> return 1
     0
 }
 
@@ -268,11 +308,31 @@ run: fn() {
 }
 
 #Test("the report names the image, the tools and the commands, then the rows") {
-    options: LatencyOptions{jet: "jet", lldb: "lldb", functions: 10, steps: 4, runs: 1}
-    rows: latency_rows(options, LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", lldb_version: "lldb version 21", build: 300, debug_stop: 900, debug_steps: 1300, lldb_stop: 400, lldb_steps: 480})
+    options: LatencyOptions{jet: "jet", lldb: Val("lldb"), functions: 10, steps: 4, runs: 1, bar: None}
+    lldb: LatencyLldb{version: "lldb version 21", stop: 400, steps: 480}
+    rows: latency_rows(options, LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 900, debug_steps: 1300, lldb: Val(lldb)})
     assert_eq(rows[0], "# image out/prog sha256 ab12")
     assert_eq(rows[4], "# jet_debug first_stop: jet debug --break prog.jet:53 out/prog < /dev/null")
     assert_eq(rows[6], "# lldb first_stop: lldb -b -o 'breakpoint set --file prog.jet --line 53' -o run -o continue out/prog")
+    assert_eq(rows[8], "# 10 functions, 64 lines, 4 steps, median of 1 runs, milliseconds")
     assert_eq(rows[11], "first_stop\t900\t400")
     assert_eq(rows[12], "per_step\t100\t20")
+    assert_eq(rows.len(), 13)
+}
+
+// c34: the measurement needs nothing but jet; the bar fails the run after
+// the rows are printed.
+#Test("without lldb only jet debug is timed, and the bar judges its first stop") {
+    options: LatencyOptions{jet: "jet", lldb: None, functions: 10, steps: 4, runs: 1, bar: Val(200)}
+    runs: LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 60, debug_steps: 100, lldb: None}
+    rows: latency_rows(options, runs)
+    assert_eq(rows[2], "# lldb not timed: none on PATH and no `--lldb`")
+    assert(!rows.join("\n").contains("# lldb first_stop"), rows.join("\n"))
+    assert_eq(rows[rows.len() - 3], "first_stop\t60\t-")
+    assert_eq(rows[rows.len() - 2], "per_step\t10\t-")
+    assert_eq(rows[rows.len() - 1], "# bar: jet_debug first_stop at most 200 ms: met")
+    assert(!latency_bar_missed(options, runs))
+    slow: LatencyRuns{image_sha256: "ab12", jet_version: "jet 0.1", build: 300, debug_stop: 201, debug_steps: 300, lldb: None}
+    assert(latency_bar_missed(options, slow))
+    assert_eq(latency_rows(options, slow)[latency_rows(options, slow).len() - 1], "# bar: jet_debug first_stop at most 200 ms: missed")
 }

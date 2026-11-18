@@ -20,7 +20,17 @@ It writes a package to a temporary directory. The program has 2000 small functio
 
 Both first-stop figures include the run from the stop to the program's end, and that run is the same for both debuggers. Per step subtracts it out. A debugger run counts only when its output reports the stop: `Breakpoint hit  prog.jet:L` from `jet debug`, `stop reason = breakpoint` from LLDB. Any other run fails the measurement.
 
-The tool prints the image hash, both tools' versions and the exact commands as `#` lines, followed by the table below.
+The tool prints the image hash, both tools' versions and the exact commands as `#` lines, followed by the table below. LLDB is the comparator only. When no `lldb` is on PATH and `--lldb` is not given, the tool times `jet debug` alone and prints `-` in LLDB's column, so the measurement itself needs nothing but jet (#6841 c34).
+
+## The first-stop bar (#6841 R11)
+
+On a prebuilt image of a 100,000-line program, `jet debug` reaches its first stop in under 200 ms. `--bar MS` makes the tool fail after printing the rows when the median first stop took more than MS milliseconds, and it prints the verdict as `# bar: jet_debug first_stop at most MS ms: met` or `missed`. With 20000 functions the program has 120,004 lines: 100,000 in the functions and 20,004 in `run`. The bar is measured with:
+
+```
+jet run Tools/Perf/DebugLatency/Main.jet -- --functions 20000 --runs 5 --bar 200
+```
+
+The first-stop figure still includes the run from the stop to the program's end, which here is 20000 cheap calls, so the bar is conservative.
 
 ## Result
 
