@@ -440,7 +440,7 @@ pipeline_text: fn(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_
     output_limit_exceeded := false
     resource_limit := I64{-1}
     wait_error := I64{0}
-    cancelled := false
+    canceled := false
     park: sync_park_new()
     wait: wrapping(scratch + I64{16384})
     index := I64{0}
@@ -534,7 +534,7 @@ pipeline_text: fn(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_
             }
             if !moved {
                 if (scheduler_yield(rt_static_text("process wait"), park, I64{10000000}) != I64{0}) {
-                    cancelled = true
+                    canceled = true
                     stop = true
                     break
                 }
@@ -543,10 +543,10 @@ pipeline_text: fn(builder: I64) -> I64 { rt_text_copy(rt_text_data(builder), rt_
         if stop -> break
         index += I64{1}
     }
-    if (cancelled || fd_word(top, I64{32}) != I64{0}) { pipeline_cleanup(rows, count, wait) }
+    if (canceled || fd_word(top, I64{32}) != I64{0}) { pipeline_cleanup(rows, count, wait) }
     pipeline_finish_io(top, rows, wrapping(scratch + I64{16440}))
     sync_park_drop(park)
-    if cancelled {
+    if canceled {
         jet_rt_handle_drop_io_error(wait_error)
         pipeline_free(top, rows)
         return I64{0}

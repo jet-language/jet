@@ -32,18 +32,18 @@ use files: core.files
     jetos_copy_generation_payload_deref(generation, installer) ?? panic("installer payload")
     os_release: files.read(files.join(generation, "etc/os-release")) ?? panic("generation os release")
     usr_os_release: files.read(files.join(generation, "usr/lib/os-release")) ?? panic("generation usr os release")
-    specialisation: files.read(files.join(generation, "boot/specialisations/plasmaBeta.conf")) ?? panic("specialisation")
+    specialization: files.read(files.join(generation, "boot/specialisations/plasmaBeta.conf")) ?? panic("specialization")
     wallpaper: files.read(files.join(generation, "share/backgrounds/jetos/apex.svg")) ?? panic("generation wallpaper")
     assert_eq(os_release, jetos_render_jetos_os_release(false))
     assert_eq(usr_os_release, os_release)
     assert_eq(wallpaper, JETOS_WALLPAPER_SVG)
-    assert(specialisation.contains("title jetos 26.10 (Apex) — devhost (plasmaBeta)"))
+    assert(specialization.contains("title jetos 26.10 (Apex) — devhost (plasmaBeta)"))
     assert(installed_limine.contains("/jetos 26.10 (Apex) — devhost verify"))
     assert(installer_limine.contains("/Install jetos 26.10 (Apex) — devhost"))
     assert_eq(files.read(files.join(installer, "etc/os-release")) ?? panic("installer os release"), os_release)
     assert_eq(files.read(files.join(installer, "usr/lib/os-release")) ?? panic("installer usr os release"), usr_os_release)
     assert_eq(files.read(files.join(installer, "share/backgrounds/jetos/apex.svg")) ?? panic("installer wallpaper"), wallpaper)
-    surfaces: [String]{os_release, usr_os_release, specialisation, wallpaper, installed_limine, installer_limine}
+    surfaces: [String]{os_release, usr_os_release, specialization, wallpaper, installed_limine, installer_limine}
     loop surface in surfaces -> assert(!surface.contains("NixOS") && !surface.contains("Yarara"))
     files.remove_all(root) ?? panic("remove identity scratch")
 }

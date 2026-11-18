@@ -36,12 +36,12 @@
 <h2>Fix</h2>
 <p class="diag-copy fix" data-registry-field="fix">Say why in the package&#39;s `purposes:` (for example `{lines}`), or remove the call.</p>
 <h2>Worked example</h2>
-<p>First UI snapshot mentioning <code>E-APP-PERMISSION-PURPOSE</code>: <code>Tests/UI/app_permission_without_a_purpose.stderr</code>.</p>
-<pre class="diag">Error [jet.AppPermissionPurpose]: `app.ask` may ask for the `camera` permission, but the package&#39;s `purposes:` doesn&#39;t say why.
-  --&gt; Tests/UI/app_permission_without_a_purpose.jet:3:43
+<p>First UI snapshot mentioning <code>E-APP-PERMISSION-PURPOSE</code>: <code>Tests/UI/app_device_bare_import_target.stderr</code>.</p>
+<pre class="diag">Error [jet.AppPermissionPurpose]: `app.take_photo` may ask for the `camera` permission, but the package&#39;s `purposes:` doesn&#39;t say why.
+  --&gt; Tests/UI/app_device_bare_import_target.jet:4:16
     |
-  3 | run: fn() -[Env, Net, Time]&gt; { _: app.ask(.Camera) }
-    |                                           ^^^^^^^
+  4 | run: fn() { _: take_photo() }
+    |                ^^^^^^^^^^
  Why: When the app asks for a device permission, the system shows the person why the app wants it, and a phone build writes the same text into its manifest; a permission the app asks for with no purpose has nothing to show. During `jet check`, Jet reports this diagnostic.
  Fix: Say why in the package&#39;s `purposes:` (for example `camera: &quot;…&quot;`), or remove the call.
 More: jet-lang.dev/e/E-APP-PERMISSION-PURPOSE

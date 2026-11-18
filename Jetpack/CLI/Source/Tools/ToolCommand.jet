@@ -26,7 +26,7 @@ ToolSourceUpdate: struct {
 
 UserToolsUpdateOutcome: enum {
     NoChange,
-    Cancelled,
+    Canceled,
     Applied(changed: Bool),
     Failed(Int),
 }
@@ -314,7 +314,7 @@ cli_update_user_tools_with_plan: fn(verification: &StoreVerification, theme: The
             if !has_other_plan -> theme.status("no moving user-tools channels to update")
             EXIT_OK
         }
-        .Cancelled -> if has_other_plan -> EXIT_USAGE else -> EXIT_OK
+        .Canceled -> if has_other_plan -> EXIT_USAGE else -> EXIT_OK
         .Failed(code) -> code
     }
 }
@@ -328,7 +328,7 @@ cli_update_user_tools_locked: fn(verification: &StoreVerification, theme: Theme,
     if !has_other_plan -> theme.status("Plan channel update")
     if refreshed.changed -> cli_render_tool_update_plan(theme, refreshed.updates)
     confirmed: confirmation.confirm(theme, parsed.flags.assume_yes)
-    if !confirmed -> return Ok(UserToolsUpdateOutcome.Cancelled)
+    if !confirmed -> return Ok(UserToolsUpdateOutcome.Canceled)
     other_code: apply_other()
     if other_code != 0 -> return Ok(UserToolsUpdateOutcome.Failed(other_code))
     if refreshed.changed -> cli_write_tool_manifest(manifest)

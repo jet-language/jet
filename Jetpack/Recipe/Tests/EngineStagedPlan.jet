@@ -105,8 +105,8 @@ engine_staged_failed_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragme
     Err(StagedPlanActionError.Failed("boom"))
 }
 
-engine_staged_cancelled_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
-    Err(StagedPlanActionError.Cancelled)
+engine_staged_canceled_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
+    Err(StagedPlanActionError.Canceled)
 }
 
 #Test("staged_plan_action_production_path_is_deterministic_and_complete") {
@@ -213,7 +213,7 @@ engine_staged_cancelled_emit: fn(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFra
     assert_eq(error10.code, "E1238")
     assert(error10.why.contains("failed before publication"))
     assert(!files.exists(artifacts))
-    error11: engine_staged_error(engine_staged_action("cancelled", digest), context, tools, StagedPlanEmitter{emit: engine_staged_cancelled_emit})
+    error11: engine_staged_error(engine_staged_action("canceled", digest), context, tools, StagedPlanEmitter{emit: engine_staged_canceled_emit})
     assert_eq(error11.code, "E1238")
     assert(error11.what.contains("canceled"))
     assert(!files.exists(artifacts))

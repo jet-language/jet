@@ -1,0 +1,30 @@
+use {
+    env: core.sys
+    services: core.service
+}
+
+worker: fn() {}
+
+run: fn() {
+    store: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    retention: Duration.seconds(86400) ?? panic("retention")
+    runtime := services.runtime(store, retention: retention)
+    tree := services.tree("cancel-restart")
+    endpoint: tree.worker("worker", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    if phase == "send" {
+        accepted: runtime.send(endpoint, "canceled", key: "canceled") ?? panic("send")
+        canceled: accepted.cancel() ?? panic("cancel")
+        state: canceled.status() ?? panic("cancel status")
+        print("send:{state.show()}")
+    } else {
+        recovered: runtime.send(endpoint, "canceled", key: "canceled") ?? panic("recover")
+        // copy: status consumes its handle and the events read below still needs it.
+        state: (recovered.copy()).status() ?? panic("recover status")
+        history: recovered.events() ?? panic("recover events")
+        print("recover:{state.show()}:{history.len()}")
+        tree.handoff_generation() ?? panic("handoff")
+        print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
+    }
+}

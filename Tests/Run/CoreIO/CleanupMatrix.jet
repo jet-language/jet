@@ -70,7 +70,7 @@ body: fn(path: String, ready: Sender<Int>?, blocked: Receiver<Int>?) -> Int Case
     Ok(1)
 }
 
-cancelled_body: fn(ready: Sender<Int>, blocked: Receiver<Int>) -> Int {
+canceled_body: fn(ready: Sender<Int>, blocked: Receiver<Int>) -> Int {
     body("cancel", Val(ready), Val(blocked)) ?? -1
 }
 
@@ -87,7 +87,7 @@ child: fn(path: String) CaseFail! {
     if path == "cancel" {
         { sender: ready_tx, receiver: ready_rx }: channel<Int>()
         { sender: block_tx, receiver: block_rx }: channel<Int>()
-        winner: task.race {cancelled_body(ready_tx, block_rx), quick(ready_rx)} ?? panic("race failed")
+        winner: task.race {canceled_body(ready_tx, block_rx), quick(ready_rx)} ?? panic("race failed")
         // Keep the unreleased wait's sender alive until the loser has drained.
         block_tx.close()
         print("race winner {winner}")

@@ -241,19 +241,28 @@ sema_services_check_core_method: fn(api: String, contract: SemaServiceCoreMethod
         return sema_services_source_call(api, contract.member, [Type]{}, receiver, contract.receiver_access, updated_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     values := [TExpr]{}
+    typed := [Bool]{}
     valid := true
     index := 0
     loop index < updated_args.len() {
-        value := sema_check_expression(updated_args[index].expr, Val(contract.parameters[index]), environment, program, scopes, state, tail_store, context, diagnostics)
+        endpoint := Type?{None}
+        if contract.parameters[index] == .Named(name) && name == "ServiceEndpoint" && sema_services_acts_on_worker(contract.member) {
+            endpoint = sema_services_typed_endpoint(updated_args[index].expr, environment, program, scopes, state, tail_store, context, diagnostics)
+        }
+        value := if endpoint == {
+            .Val(endpoint_type) -> sema_services_endpoint_id(updated_args[index].expr, endpoint_type, environment, program, scopes, state, tail_store, context, diagnostics)
+            .None -> sema_check_expression(updated_args[index].expr, Val(contract.parameters[index]), environment, program, scopes, state, tail_store, context, diagnostics)
+        }
+        typed.push(endpoint != None)
         if value == .Val(item) -> values.push(item) else -> valid = false
         index += 1
     }
     if !valid -> return SemaMethodSpecialCheck{handled: true, value: None}
-    core_arguments := [TExpr]{receiver_value}
-    loop value in values -> core_arguments.push(value)
-    record: sema_call_core_record("core.service", contract.member, core_arguments.len(), span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    record: sema_call_core_record("core.service", contract.member, values.len() + 1, span, diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     // An explicit contract access wins over the record's borrow mask: the
     // workflow run argument is read like the Core source's `run_id` parameter.
+    // A typed endpoint is only read for its `id`; a parameter that takes the
+    // id takes a copy of it.
     accesses := [AccessConvention]{}
     index = 0
     loop index < contract.parameters.len() {
@@ -261,7 +270,13 @@ sema_services_check_core_method: fn(api: String, contract: SemaServiceCoreMethod
         accesses.push(if index < contract.argument_accesses.len() -> contract.argument_accesses[index] else -> access)
         index += 1
     }
-    params := sema_services_method_params(contract.parameters, accesses)
+    written := [AccessConvention]{}
+    core_arguments := [TExpr]{receiver_value}
+    loop (at, value) in values {
+        written.push(if typed[at] -> AccessConvention.Read else -> accesses[at])
+        core_arguments.push(if typed[at] && accesses[at] != AccessConvention.Read -> sema_tree_node(value.ty, TExprKind.Clone{value: value, fact: CopyFact.Materialize}, value.span) else -> value)
+    }
+    params := sema_services_method_params(contract.parameters, written)
     sema_call_note_route_implicit_takes(params, updated_args, values, environment, program, scopes, state, context)
     ownership := sema_ownership_check_method_call(state, api, receiver, contract.receiver_access, params, updated_args, scopes, span, diagnostics)
     if !ownership.accepted || !ownership.complete {
@@ -270,6 +285,35 @@ sema_services_check_core_method: fn(api: String, contract: SemaServiceCoreMethod
     fallback_accesses := [AccessConvention]{contract.receiver_access}
     loop access in accesses -> fallback_accesses.push(access)
     sema_services_core_call(record, core_arguments, fallback_accesses, true, true, contract.result_type, expected, span, environment, program, scopes, context, diagnostics)
+}
+
+// The tree methods that act on one worker, which take its typed
+// Endpoint<Q, R> as well as its ServiceEndpoint.
+sema_services_acts_on_worker: fn(member: String) -> Bool Never! {
+    if member == {
+        "mailbox_depth" | "restarts" | "fail_worker" | "drain_worker" | "partition_worker" | "reconcile_worker" | "directory_register" -> true
+        else -> false
+    }
+}
+
+// The type of `argument` when it is a typed Endpoint<Q, R>.
+sema_services_typed_endpoint: fn(argument: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Type? {
+    probed: sema_expr_probe_type(argument, false, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    if probed == .Apply(name, endpoint_args) && endpoint_args.len() == 2 && core_identity_is(name, "core.service", "Endpoint") {
+        return Val(probed)
+    }
+    None
+}
+
+// The worker's identity in the tree, read from a typed endpoint: its `id`,
+// which only Core reads, as the compiler's own read of a Core field.
+sema_services_endpoint_id: fn(argument: Expr, endpoint_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    endpoint: sema_check_expression(argument, Val(endpoint_type), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    generated: context.compiler_generated
+    context.compiler_generated = true
+    id: sema_expression_field_checked(endpoint, "id", expr_span(argument), None, environment, program, scopes, context, diagnostics)
+    context.compiler_generated = generated
+    id
 }
 
 // The source call `core.service.<member>(receiver, args…)` at `type_args`, as
@@ -605,6 +649,11 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
     }
     handled: if stateful -> handler_params[1] else -> handler_params[0]
     durable: if batched && handled == .List(element) -> sema_services_type_meets(element, "Decode", environment, program) else -> sema_services_type_meets(handled, "Decode", environment, program)
+    // No program spells these names, so each is a Core source route
+    // (CoreReach JET_DRIVER_SOURCE_ROUTES) that the load keeps:
+    // ("core.service", "durable_batched_worker"), ("core.service", "batched_worker"),
+    // ("core.service", "durable_stateful_worker"), ("core.service", "stateful_worker"),
+    // ("core.service", "durable_worker"), ("core.service", "typed_worker").
     member: if {
         batched && durable -> "durable_batched_worker"
         batched -> "batched_worker"
@@ -651,6 +700,9 @@ sema_services_typed_delivery: fn(method: String, receiver: Expr, args: [CallArg]
             sema_services_check_untyped_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
             return Val(rejected)
         }
+        // A program spells only `send` and `send_durable`, so each source is
+        // a Core source route: ("core.service", "typed_send"),
+        // ("core.service", "typed_send_durable").
         if !durable {
             member: if method == "send" -> "typed_send" else -> "call"
             return Val(sema_services_source_call("ServiceTree.{method}", member, endpoint_args, receiver, AccessConvention.Write, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics))

@@ -131,7 +131,7 @@ pkg_source_store_ensure: fn(name: String, version: String, fingerprint: String, 
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> {}
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     return Err(pkg_source_store_io("checking store entry", destination, error))
                 }
             }
@@ -151,7 +151,7 @@ pkg_source_store_publish_copy: fn(parent: FoundationDirectoryAuthority, stage: F
     parent.rename(stage_name, destination_name) ?? {
         if err == {
             .AlreadyExists(_) -> {}
-            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> {
+            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> {
                 return Err(pkg_source_store_io("publishing store entry", destination, err))
             }
         }
@@ -261,7 +261,7 @@ pkg_source_store_view_into_project: fn(store_entry: String, view_root: String) -
                                 return Err(pkg_source_store_io("hashing dependency view", view_root, error))
                             }
                         }
-                        .NotFound(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                        .NotFound(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                             return Err(pkg_source_store_io("hashing dependency view", view_root, error))
                         }
                     }
@@ -272,7 +272,7 @@ pkg_source_store_view_into_project: fn(store_entry: String, view_root: String) -
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> {}
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     return Err(pkg_source_store_io("checking dependency view", view_root, error))
                 }
             }
@@ -300,7 +300,7 @@ pkg_source_store_publish_view: fn(parent: FoundationDirectoryAuthority, stage: F
     parent.rename(stage_name, view_name) ?? {
         if err == {
             .AlreadyExists(_) -> {}
-            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> {
+            .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> {
                 return Err(pkg_source_store_io("publishing dependency view", view_root, err))
             }
         }

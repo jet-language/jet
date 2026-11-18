@@ -200,7 +200,7 @@ static void scope_teardown(void) {
 }
 
 // A canceled scope returns an inactive subscription and releases the handler.
-static void cancelled_scope(void) {
+static void canceled_scope(void) {
     char log[64] = "";
     void *scope = jet_event_scope_new();
     jet_event_scope_cancel(scope);
@@ -314,7 +314,7 @@ typedef void (*Scenario)(void);
 int main(void) {
     assert(jet_rt_alloc_check_observe((int64_t)(uintptr_t)observe_alloc, (int64_t)(uintptr_t)observe_free) == 1);
     jet_rt_alloc_init();
-    Scenario scenarios[] = {goldens, once_and_unsubscribe, priority_order, scope_teardown, cancelled_scope, mutation_during_dispatch, nested_emit, event_drop_first, event_dropped_mid_emit};
+    Scenario scenarios[] = {goldens, once_and_unsubscribe, priority_order, scope_teardown, canceled_scope, mutation_during_dispatch, nested_emit, event_drop_first, event_dropped_mid_emit};
     goldens(); // warm any runtime-lifetime allocation before baselines
     for (size_t i = 0; i < sizeof scenarios / sizeof scenarios[0]; ++i) {
         size_t before = live_count;

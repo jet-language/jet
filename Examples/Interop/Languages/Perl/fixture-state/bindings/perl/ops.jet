@@ -25,7 +25,7 @@ Session: struct {
 PerlError: enum {
     NotRunning,
     Timeout,
-    Cancelled,
+    Canceled,
     Protocol,
     CommandFailed,
     Limit,
@@ -44,7 +44,7 @@ cancel: fn(session: Session) { abi.cancel(session.value) }
 decode_response: fn(raw: String, code: Int) -> Dyn PerlError! {
     if code == 1 -> return Err(PerlError.NotRunning)
     if code == 2 -> return Err(PerlError.Timeout)
-    if code == 3 -> return Err(PerlError.Cancelled)
+    if code == 3 -> return Err(PerlError.Canceled)
     if code == 5 -> return Err(PerlError.Limit)
     if code != 0 -> return Err(PerlError.Protocol)
     response := json.parse(raw) ?? return Err(PerlError.Protocol)

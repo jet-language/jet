@@ -750,14 +750,11 @@ priv policy_apply: fn(sql: SQL, policy: RowPolicy, user: String, allow_schema: B
     if policy.table == "" -> return Ok(sql.copy())
     target: sql_target_index(tokens, kind)
     table: sql_lower_text(policy.table)
-    // A row policy constrains the rows of its own table (#6070). SQL that
-    // targets no table (`SELECT 1`) or another table runs unchanged, unless it
-    // names the policy's table anywhere (a join, a subquery, a column read),
-    // which would read its rows past the policy.
+    // A row policy constrains the rows of its own table. SQL that targets no
+    // table (`SELECT 1`) or another table passes here unchanged; the scope's
+    // confinement (scope_confine) then refuses any that names a table outside
+    // the scope, or the policy's table other than as its target.
     if target < 0 || tokens[target].word != table {
-        if sql_word_index(tokens, table) >= 0 {
-            return Err(db_error("policy-scoped SQL that reads `{policy.table}` must target it as its one simple table"))
-        }
         // copy: the caller keeps its SQL value; the scope runs this one.
         return Ok(sql.copy())
     }
@@ -928,8 +925,11 @@ priv db_live_wrote: fn(driver: &DBDriver, table: String, rows: [String]?) Never!
     app.live_reads.invalidate(source, held)
 }
 
+// The fields of a Store and of a DBScope are `priv`: a scope is a
+// confinement boundary, so code holding one cannot rebuild the whole Store
+// (or a scope with another policy or user) from its connection.
 Store: struct {
-    state: Shared<DBState>,
+    priv state: Shared<DBState>,
 
     with_policy: fn(self, policy: RowPolicy, user: String) -[DB]> DBScope Never! {
         DBScope{state: self.state.copy(), policy: RowPolicy{table: policy.table.copy(), owner: policy.owner}, user: user.copy()}
@@ -992,9 +992,9 @@ Store: struct {
 }
 
 DBScope: struct {
-    state: Shared<DBState>,
-    policy: RowPolicy,
-    user: String,
+    priv state: Shared<DBState>,
+    priv policy: RowPolicy,
+    priv user: String,
 
     // A live binding over one policy-checked SELECT. `app.state` reads
     // it; each re-run applies this scope's policy again, and a write to the
@@ -2684,6 +2684,9 @@ priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBEr
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, scope.state, call) ?? return Err(err)
+    if scope_confine(guard.value.driver, scope.policy, scoped, allow_schema) == .Val(refused) {
+        return Err(refused)
+    }
     changed: __driver_execute(guard.value.driver, scoped.text, scoped.values) ?? return Err(err)
     if sql_table(scoped) == .Val(table) && (changed > 0 || sql_schema(scoped)) {
         guard.value.wrote(table, None)
@@ -2693,6 +2696,32 @@ priv scope_execute: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> Int DBEr
         guard.value.writes += 1
     }
     Ok(changed)
+}
+
+// A scope with a row policy is confined to the policy's table (E2477). The
+// tables a statement reads or writes come from the engine's compile of it,
+// so a join, a subquery and an INSERT ... SELECT each count. SQL that names
+// no table (`SELECT 1`) runs; SQL that names another table is refused, and
+// so is SQL that reads the policy's table without targeting it, past the
+// policy. db.migrate's steps (`allow_schema`) may change any table, so they
+// pass; a statement that does not compile is left for its run to report.
+// policy_apply has already refused every other statement kind.
+priv scope_confine: fn(driver: &DBDriver, policy: RowPolicy, scoped: SQL, allow_schema: Bool) -> DBError? Never! {
+    if policy.table == "" || allow_schema -> return None
+    tokens: sql_tokens(scoped.text.bytes())
+    if tokens.len() == 0 -> return None
+    tables: driver_tables(driver, scoped.text) ?? return None
+    table: sql_lower_text(policy.table)
+    loop name in tables {
+        if sql_lower_text(name) != table {
+            return Val(db_error("E2477: a scope over `{policy.table}` cannot reach `{name}`; query it through the store or a scope over it"))
+        }
+    }
+    target: sql_target_index(tokens, tokens[0].word)
+    if tables.len() > 0 && (target < 0 || tokens[target].word != table) {
+        return Val(db_error("policy-scoped SQL that reads `{policy.table}` must target it as its one simple table"))
+    }
+    None
 }
 
 // A read made while a live binding's source runs joins that binding's read
@@ -2705,6 +2734,9 @@ priv scope_query: fn(scope: DBScope, sql: SQL, allow_schema: Bool) -> [[String:D
     call: app.transactions.current() ?? 0
     guard.wait(db_ended(guard.value), fn(held) { db_free(held, call) }) ?? return Err(db_waited())
     db_join(guard.value, scope.state, call) ?? return Err(err)
+    if scope_confine(guard.value.driver, scope.policy, scoped, allow_schema) == .Val(refused) {
+        return Err(refused)
+    }
     if read == .Val(table) -> db_live_watch(guard.value, scope.state, table)
     __driver_query(guard.value.driver, scoped.text, scoped.values)
 }
@@ -3855,10 +3887,12 @@ decode: fn<T: Decode>(row: [String:DBValue], names: [{db_name: String, key: Stri
 }
 
 // One cached prepared statement: its engine statement slot (-1 when SQLite
-// prepared no statement, as for empty SQL) and the trimmed SQL it caches.
+// prepared no statement, as for empty SQL), the trimmed SQL it caches, and
+// the schema tables its compile found it reads or writes (scope_confine).
 CachedStatement: struct {
     stmt: Int,
     sql: String,
+    tables: [String]{[]},
 }
 
 // rusqlite 0.31.0: cache16,
@@ -3957,6 +3991,21 @@ __driver_reset: fn(driver: &DBDriver) -> Bool Never! {
 
 prepare: fn(driver: &DBDriver, sql: String) -> CachedStatement DBError! {
     driver.statements += 1
+    driver_compile(driver, sql)
+}
+
+// The tables `sql` reads or writes, from its compiled statement, which goes
+// back to the cache for the run that follows. It counts no statement.
+priv driver_tables: fn(driver: &DBDriver, sql: String) -> [String] DBError! {
+    statement: driver_compile(driver, sql) ?? return Err(err)
+    tables: statement.tables.copy()
+    release(driver, statement)
+    Ok(tables)
+}
+
+// The cached statement for `sql`, or a new one compiled under the engine's
+// table-recording authorizer.
+priv driver_compile: fn(driver: &DBDriver, sql: String) -> CachedStatement DBError! {
     // An unchanged template hits without allocating a trimmed String. Only a
     // different spelling needs the canonical trimmed-key comparison below.
     loop index in 0..<driver.cache.len() {
@@ -3976,7 +4025,7 @@ prepare: fn(driver: &DBDriver, sql: String) -> CachedStatement DBError! {
     if text.len() >= 2147483647 {
         return Err(db_error("Error code 18: String or BLOB exceeds size limit"))
     }
-    prepared: prep.prepare_v3(driver.database, text, 1)
+    prepared: prep.prepare_tables(driver.database, text, 1)
     if prepared.rc != base.OK {
         failure := error(driver)
         primary: prepared.rc & 255
@@ -3990,7 +4039,9 @@ prepare: fn(driver: &DBDriver, sql: String) -> CachedStatement DBError! {
         _: prep.finalize_stmt(driver.database, prepared.stmt)
         return Err(failure)
     }
-    Ok(CachedStatement{stmt: prepared.stmt, sql: key})
+    tables := [String]{}
+    loop name in prepared.tables -> tables.push(String.from_bytes(name) ?? "")
+    Ok(CachedStatement{stmt: prepared.stmt, sql: key, tables: tables})
 }
 
 release: fn(driver: &DBDriver, statement: &&CachedStatement) Never! {
@@ -4366,7 +4417,8 @@ priv driver_cache_parity_probe: fn() Never! {
     assert_eq(same.text, "SELECT * FROM tasks LIMIT 1")
     schema: policy_apply(sql_raw("CREATE TABLE tasks (owner TEXT)"), open, "alice", true) ?? panic("schema")
     assert_eq(schema.text, "CREATE TABLE tasks (owner TEXT)")
-    // SQL that targets no table or another table runs unchanged (#6070).
+    // SQL that targets no table or another table passes unchanged; the
+    // scope's confinement judges it when it runs (scope_confine).
     outside_sql: [String]{"SELECT 1", "SELECT title FROM other WHERE id = 1", "INSERT INTO other (title) VALUES ('x')"}
     loop text in outside_sql {
         outside: policy_apply(sql_raw(text), owned, "alice", false) ?? panic("outside `{text}`")
@@ -4374,9 +4426,6 @@ priv driver_cache_parity_probe: fn() Never! {
         assert_eq(outside.values.len(), 0)
     }
     rejected: [{sql: String, message: String}]{
-        {sql: "SELECT title FROM other JOIN tasks", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"},
-        {sql: "SELECT title FROM other WHERE owner IN (SELECT owner FROM tasks)", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"},
-        {sql: "SELECT 1 FROM main.tasks", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"},
         {sql: "SELECT 1 FROM tasks; DROP TABLE tasks", message: "policy-scoped SQL must be one statement without control characters"},
         {sql: "SELECT * FROM tasks -- note", message: "policy-scoped SQL cannot contain comments"},
         {sql: "CREATE TABLE tasks (x)", message: "schema and transaction-control SQL is only allowed in db.migrate or through the scope transaction controls"},
@@ -4394,6 +4443,38 @@ priv driver_cache_parity_probe: fn() Never! {
     assert(policy_allows(owned, user: "alice", owner: "alice"))
     assert(!policy_allows(owned, user: "alice", owner: "bob"))
     assert(policy_allows(open, user: "alice", owner: "bob"))
+}
+
+#Test("a policy scope reaches no table outside its own") {
+    store: open_memory()
+    _: migrate(store.all_rows(), "scope-v1", [SQL]{sql_raw("CREATE TABLE tasks (id INTEGER, owner TEXT, title TEXT)"), sql_raw("CREATE TABLE other (id INTEGER, owner TEXT, title TEXT)")}) ?? panic("migrate: {err}")
+    _: store.execute(sql_raw("INSERT INTO tasks (id, owner, title) VALUES (1, 'alice', 'a'), (2, 'bob', 'b')")) ?? panic("tasks: {err}")
+    _: store.execute(sql_raw("INSERT INTO other (id, owner, title) VALUES (1, 'bob', 'x')")) ?? panic("other: {err}")
+    scope: store.with_policy(RowPolicy{table: "tasks", owner: true}, "alice")
+    assert_eq((scope.query(sql_raw("SELECT 1 AS one")) ?? panic("select 1: {err}")).len(), 1)
+    assert_eq((scope.query(sql_raw("SELECT title FROM tasks")) ?? panic("tasks: {err}")).len(), 1)
+    outside: "E2477: a scope over `tasks` cannot reach `other`; query it through the store or a scope over it"
+    reads: [{sql: String, message: String}]{
+        {sql: "SELECT title FROM other", message: outside},
+        {sql: "SELECT other.title FROM other JOIN tasks", message: outside},
+        {sql: "SELECT title FROM other WHERE owner IN (SELECT owner FROM tasks)", message: outside},
+        {sql: "SELECT 1 FROM main.tasks", message: "policy-scoped SQL that reads `tasks` must target it as its one simple table"},
+    }
+    loop entry in reads {
+        if scope.query(sql_raw(entry.sql)) == .Err(failure) {
+            assert_eq(failure.message(), entry.message)
+        } else { panic("read `{entry.sql}`") }
+    }
+    writes: [String]{"INSERT INTO other (id, owner, title) VALUES (2, 'alice', 'y')", "UPDATE other SET title = 'z'", "DELETE FROM other"}
+    loop text in writes {
+        if scope.execute(sql_raw(text)) == .Err(failure) -> assert_eq(failure.message(), outside) else {
+            panic("wrote `{text}`")
+        }
+    }
+    kept: store.query(sql_raw("SELECT title FROM other")) ?? panic("other: {err}")
+    assert_eq(kept.len(), 1)
+    assert_eq(row_text(kept[0], "title") ?? panic("title"), "x")
+    assert(store.close())
 }
 
 #Test("an opened connection queries every row with no row policy, and schema changes stay in db.migrate") {

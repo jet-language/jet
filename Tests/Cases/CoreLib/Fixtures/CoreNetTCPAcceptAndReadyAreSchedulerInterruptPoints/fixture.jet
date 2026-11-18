@@ -5,23 +5,23 @@ use {
 }
 
 run: fn() {
-    cancelled_listener: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
-    cancelled_address: net.socket_to_string(net.listener_local_socket_addr(cancelled_listener) ?? panic("cancel address"))
+    canceled_listener: net.tcp_listen("127.0.0.1:0") ?? panic("cancel listen")
+    canceled_address: net.socket_to_string(net.listener_local_socket_addr(canceled_listener) ?? panic("cancel address"))
     { sender: accept_tx, receiver: accept_rx }: channel<Int>()
-    cancelled_accept: task {
+    canceled_accept: task {
         accept_tx.send(1)
-        if cancelled_listener.accept() == {
+        if canceled_listener.accept() == {
             .Ok(_) -> { print("accept unexpectedly succeeded") }
             .Err(error) -> print(net.error_message(error))
         }
     }
     _accept_ready: accept_rx.receive() ?? panic("accept ready")
     time.sleep(10ms)
-    cancelled_accept.cancel()
+    canceled_accept.cancel()
     time.sleep(10ms)
-    release_accept: net.tcp_connect(cancelled_address) ?? panic("release accept")
+    release_accept: net.tcp_connect(canceled_address) ?? panic("release accept")
     release_accept.close() ?? panic("release close")
-    cancelled_accept.join() ?? panic("canceled accept task failed")
+    canceled_accept.join() ?? panic("canceled accept task failed")
 
     ready_listener: net.tcp_listen("127.0.0.1:0") ?? panic("ready listen")
     ready_address: net.socket_to_string(net.listener_local_socket_addr(ready_listener) ?? panic("ready address"))

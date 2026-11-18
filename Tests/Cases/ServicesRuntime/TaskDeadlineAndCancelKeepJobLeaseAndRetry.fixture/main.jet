@@ -32,8 +32,8 @@ label: fn(error: TaskFailure) -> String {
         .DeadlineBlown -> {
             return "deadline"
         }
-        .Cancelled -> {
-            return "cancelled"
+        .Canceled -> {
+            return "canceled"
         }
     }
 }
@@ -73,9 +73,9 @@ run: fn() {
         .Err(_) -> print("the first claim's lease: refused")
     }
 
-    cancelled: task work()
-    cancelled.cancel()
-    if cancelled.join() == {
+    canceled: task work()
+    canceled.cancel()
+    if canceled.join() == {
         .Ok(_) -> { print("worker 2: finished") }
         .Err(error) -> print("worker 2: {label(error)}")
     }

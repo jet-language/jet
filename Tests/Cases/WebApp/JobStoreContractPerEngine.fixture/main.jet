@@ -64,9 +64,7 @@ noted: fn(store: db.Store) -> String { noted_from(store, 1) }
 
 // How many jobs the store's outbox keeps.
 kept_jobs: fn(store: db.Store) -> String {
-    policy: db.policy("notes", "true") ?? return "unreadable: {err.message()}"
-    scope: store.with_policy(policy, "test")
-    if scope.query_one(SQL{"SELECT count(*) AS n FROM __jet_jobs"}) == {
+    if store.query_one(SQL{"SELECT count(*) AS n FROM __jet_jobs"}) == {
         .Val(row) -> if row.get("n") == .Val(.Int(n)) -> "{n}" else -> "unreadable"
         .None -> "none"
         .Err(failure) -> "unreadable: {failure.message()}"

@@ -612,7 +612,7 @@ lk_wait: fn(look: I64, state: I64, interest: I64, milliseconds: I64) -> I64 {
         until: sync_now_ns() + budget
         deadline: net_word(look, LK_DEADLINE)
         loop {
-            if (scheduler_task_cancelled() && !scheduler_shielded()) {
+            if (scheduler_task_canceled() && !scheduler_shielded()) {
                 result = LK_CANCEL
                 break
             }

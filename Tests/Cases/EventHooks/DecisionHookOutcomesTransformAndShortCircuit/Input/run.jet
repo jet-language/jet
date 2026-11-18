@@ -24,13 +24,13 @@ run: fn() {
     })
     show(transformed.run("start"))
 
-    cancelled: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
-    cancelled.on_priority(scope, 10, fn(value: String) { HookDecision.Cancel })
-    cancelled.on(scope, fn(value: String) {
+    canceled: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+    canceled.on_priority(scope, 10, fn(value: String) { HookDecision.Cancel })
+    canceled.on(scope, fn(value: String) {
         print("must not run {value}")
         HookDecision.Continue
     })
-    show(cancelled.run("stop"))
+    show(canceled.run("stop"))
 
     failed: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
     failed.on_priority(scope, 10, fn(value: String) { HookDecision.Fail("denied {value}") })

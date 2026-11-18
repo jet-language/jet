@@ -22,9 +22,9 @@ RACERS: 50
 receiver: fn(rx: Receiver<Int>) -> Int { rx.receive() ?? 0 }
 
 // Cancel against send: the task either got the value or was canceled.
-cancel_vs_send: fn(rounds: Int) -> {received: Int, cancelled: Int} {
+cancel_vs_send: fn(rounds: Int) -> {received: Int, canceled: Int} {
     received := 0
-    cancelled := 0
+    canceled := 0
     loop i in 0..<rounds {
         { sender: tx, receiver: rx }: channel<Int>(capacity: 1)
         waiter: task receiver(rx)
@@ -33,10 +33,10 @@ cancel_vs_send: fn(rounds: Int) -> {received: Int, cancelled: Int} {
         waiter.cancel()
         if waiter.join() == {
             .Ok(value) -> { received += value }
-            .Err(_) -> cancelled += 1
+            .Err(_) -> canceled += 1
         }
     }
-    {received: received, cancelled: cancelled}
+    {received: received, canceled: canceled}
 }
 
 napper: fn() -> Int {
@@ -45,19 +45,19 @@ napper: fn() -> Int {
 }
 
 // Cancel against a timer: the sleep either ran out or was canceled.
-cancel_vs_timer: fn(rounds: Int) -> {woke: Int, cancelled: Int} {
+cancel_vs_timer: fn(rounds: Int) -> {woke: Int, canceled: Int} {
     woke := 0
-    cancelled := 0
+    canceled := 0
     loop i in 0..<rounds {
         sleeper: task napper()
         if i % 3 != 0 -> tasks.yield_now()
         sleeper.cancel()
         if sleeper.join() == {
             .Ok(value) -> { woke += value }
-            .Err(_) -> cancelled += 1
+            .Err(_) -> canceled += 1
         }
     }
-    {woke: woke, cancelled: cancelled}
+    {woke: woke, canceled: canceled}
 }
 
 deadline_receiver: fn(rx: Receiver<Int>) -> Int {
@@ -87,7 +87,7 @@ racer: fn() -> Int {
     a: cancel_vs_send(800)
     b: cancel_vs_timer(800)
     c: deadline_vs_send(400)
-    a.received + a.cancelled + b.woke + b.cancelled + c.received + c.expired
+    a.received + a.canceled + b.woke + b.canceled + c.received + c.expired
 }
 
 idler: fn(nap: Duration) -> Int {

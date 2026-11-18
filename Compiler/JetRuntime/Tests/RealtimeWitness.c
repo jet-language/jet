@@ -21,7 +21,7 @@ extern int64_t jet_rt_native_realtime_deadline_offset(int64_t, int64_t,
 extern uintptr_t jet_rt_handle_clone_jet_realtime_stream(uintptr_t);
 extern void jet_rt_handle_drop_jet_realtime_stream(uintptr_t);
 extern void jet_rt_cancel(uintptr_t);
-extern bool jet_rt_is_cancelled(uintptr_t);
+extern bool jet_rt_is_canceled(uintptr_t);
 extern int64_t jet_rt_next_deadline(uintptr_t);
 extern uintptr_t jet_rt_receipt(uintptr_t);
 extern uintptr_t jet_rt_handle_clone_jet_realtime_receipt(uintptr_t);
@@ -266,7 +266,7 @@ static void stream_case(unsigned mode, bool last_drop) {
     uintptr_t clone = jet_rt_handle_clone_jet_realtime_stream(stream);
     assert(clone == stream && word(stream, 8) == 2);
     jet_rt_handle_drop_jet_realtime_stream(clone);
-    assert(!jet_rt_is_cancelled(stream));
+    assert(!jet_rt_is_canceled(stream));
     atomic_store_explicit(&stats.ready, 1, memory_order_release);
     if (mode == 0) {
         for (unsigned i = 0; atomic_load_explicit(&stats.calls, memory_order_acquire) < 3; ++i) {
@@ -276,11 +276,11 @@ static void stream_case(unsigned mode, bool last_drop) {
         for (unsigned i = 0; !atomic_load_explicit(&stats.finalized, memory_order_acquire); ++i) {
             assert(i < 5000); pause_briefly();
         }
-        assert(jet_rt_is_cancelled(stream));
+        assert(jet_rt_is_canceled(stream));
     }
     if (!last_drop) {
         jet_rt_cancel(stream);
-        assert(jet_rt_is_cancelled(stream));
+        assert(jet_rt_is_canceled(stream));
         uintptr_t receipt = jet_rt_receipt(stream);
         uintptr_t copy = jet_rt_handle_clone_jet_realtime_receipt(receipt);
         assert(copy != receipt && jet_rt_handle_eq_jet_realtime_receipt(copy, receipt));

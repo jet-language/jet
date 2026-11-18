@@ -39,7 +39,7 @@ run: fn() -[Exec, FS, IO, Net, Time.Wait]> {
         .Err(error) -> {
             if error == {
                 .NotFound(context) -> print(context.resource ?? "missing-resource")
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     print("other")
                 }
             }
@@ -52,7 +52,7 @@ run: fn() -[Exec, FS, IO, Net, Time.Wait]> {
                 .Other(context) -> {
                     print(if operation_name(context.operation) == "write" -> "write" else -> "wrong-write-operation")
                 }
-                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     print("wrong-write-kind")
                 }
             }
@@ -65,7 +65,7 @@ run: fn() -[Exec, FS, IO, Net, Time.Wait]> {
                 .InvalidInput(context) -> {
                     print(if operation_name(context.operation) == "resolve" -> "empty-command" else -> "wrong-command-operation")
                 }
-                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     print("wrong-command-kind")
                 }
             }
@@ -78,7 +78,7 @@ run: fn() -[Exec, FS, IO, Net, Time.Wait]> {
                 .InvalidInput(context) -> {
                     print(if operation_name(context.operation) == "resolve" -> "empty-pipeline" else -> "wrong-pipeline-operation")
                 }
-                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     print("wrong-pipeline-kind")
                 }
             }
@@ -91,7 +91,7 @@ run: fn() -[Exec, FS, IO, Net, Time.Wait]> {
                 .InvalidInput(context) -> {
                     print(if operation_name(context.operation) == "resolve" -> context.resource ?? "missing-env-resource" else -> "wrong-env-operation")
                 }
-                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     print("wrong-env-kind")
                 }
             }

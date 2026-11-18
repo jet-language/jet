@@ -1,6 +1,6 @@
-# A row policy narrows its one table and nothing else: a scope over `notes`
-# runs `SELECT 1` and reads another table unchanged, narrows `notes` to its
-# user, and refuses a join that would read `notes` past the policy.
+# A row policy narrows its one table, and its scope reaches no other: a scope
+# over `notes` runs `SELECT 1`, which names no table, narrows `notes` to its
+# user, and refuses SQL that names another table (E2477), a join included.
 fixture: PolicyScopeSelect1.fixture
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache

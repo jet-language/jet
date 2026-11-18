@@ -1,0 +1,13 @@
+# A scope reads and writes no table outside its policy's: a scope over
+# `notes` that writes or queries `tags` is refused before the statement runs,
+# with the registered E2477, while the store itself reads `tags`. The table
+# set comes from the engine's compile of the statement.
+fixture: DBScopeOtherTableRefused.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet run main.jet
+exit: 1
+stdout: = db_scope_other_table_refused.stdout.expected
+stderr: ~ "Error: E2477: a scope over `notes` cannot reach `tags`" # the query's refusal, returned by the entry
+stderr: ~ "failed here: run (main.jet:17)" # the failure trail names the scoped query's line
+stderr: ~ "E2477" # the registered code

@@ -13,7 +13,7 @@ I built one file-backed backend package in `pkg/`: typed JSON HTTP routes, check
 - Durable local queue: `service.delivery_durable`, a state event log, bounded worker, `tree.send_durable`, typed delivery state, and receive ran. Output: `delivery:delivering`, `worker:order:3`.
 - OpenAPI artifact: `files.write` exported valid JSON at `Pkg/openapi.json`; `jq -e . .../openapi.json` parsed it. The in-program basic contract check printed `contract:openapi-basic-pass`.
 - Concurrent load smoke: 1,000 Jet tasks issued health requests and collected 1,000 timing samples; sorted p99 assertion passed. Output: `load:vus=1000 p99-ms=3`.
-- Graceful server shutdown: `server.shutdown(100ms)` and `serving.join()` completed. Output: `shutdown-cancelled:0`.
+- Graceful server shutdown: `server.shutdown(100ms)` and `serving.join()` completed. Output: `shutdown-canceled:0`.
 - Structured observability: release output included `trace_id:"backend-probe"` and `metric.counter.requests` / `metric.counter.errors` JSON fields.
 - Native release: `Tools/Agent/jet-env jet build --release .../pkg` -> `jet Built build/run in 32.7s`.
 
@@ -36,7 +36,7 @@ queued:true
 delivery:delivering
 load:vus=1000 p99-ms=3
 worker:order:3
-shutdown-cancelled:0
+shutdown-canceled:0
 {"level":"info","body":"backend.summary","trace_id":"backend-probe","ts":1788389211417,"metric.counter.requests":960,"metric.counter.errors":1}
 ```
 

@@ -4187,7 +4187,7 @@ and `freeze_capture.out`; UI fixtures are
 `handle.join()` consumes a task handle and returns `T TaskFailure!`. Calling
 `join()` twice is **E0121**. Dropping a bound `Task` without joining, using its
 result, or detaching it is the compile error **L1101**. A failure is `.Panicked(reason)`,
-`.Cancelled`, or `.DeadlineBlown`. An error that leaves a task body whose element
+`.Canceled`, or `.DeadlineBlown`. An error that leaves a task body whose element
 is not a `Result` or `Option` stops the task as a panic does: its join reports
 `.Panicked(reason)` with the error's text.
 
@@ -4225,7 +4225,7 @@ cleanup, so a loop or a recursion that only computes stops at its next
 iteration or call. A canceled
 receive unwinds instead of returning `Closed`. A busy race loser stops at its
 next iteration, so `task.race` returns once its winner does. A canceled
-`task.all` member reports `Cancelled`. Canceling a task also cancels every
+`task.all` member reports `Canceled`. Canceling a task also cancels every
 unfinished child of each `task.group` it has open outside `#Shield`, and
 through their own groups every unfinished descendant, even when the cancel
 arrives while the task waits at a group's closing brace (D-GROUP-CANCEL1=A).
@@ -4564,7 +4564,7 @@ arguments may be given, in either order, at most once each
 (D-THREAD-STACK1=A). The group owns and joins every child created in its
 body. A cancel of the task that opened a group reaches the group's unfinished
 children (see the cancellation rules above); the closing brace waits for all
-of them, and then the task unwinds as `Cancelled`. A `Group`
+of them, and then the task unwinds as `Canceled`. A `Group`
 may be passed directly as a free-function or method parameter:
 
 ```jet
@@ -4587,7 +4587,7 @@ lambda parameter, alias, or aggregate. A lambda cannot capture the group
 handle. A method receiver does not retain the group, and a spawn through a
 `Group` parameter still owns its captures (D-CONC-GROUP1=A).
 
-`join()` is `Task<T>.join() -> T TaskFailure!`; its failures are `.Cancelled`,
+`join()` is `Task<T>.join() -> T TaskFailure!`; its failures are `.Canceled`,
 `.DeadlineBlown`, and `.Panicked(reason)`. `TaskOutcome`, `TaskStatus`,
 `.trace()`, and `.exception()` are not part of this interface.
 

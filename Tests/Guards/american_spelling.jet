@@ -2,7 +2,8 @@
 // census reads every tracked text file (sources and their comments,
 // diagnostics, snapshots, docs, data) with `git grep` for the AS_WORDS
 // British spellings, whole words in any case, and names the American spelling
-// for each hit.
+// for each hit. In the code trees (AS_CODE_TREES) it reads identifiers too:
+// each part of `is_cancelled` or `TaskCancelled` is a word of its own.
 //
 // Three closed lists keep a British spelling, each row with its reason:
 // - AS_IDENTIFIERS: a Jet identifier or machine value whose rename is a
@@ -61,22 +62,21 @@ AS_SKIPPED: [SpellingSkip]{
     SpellingSkip{path: "Docs/Audits/RustExitParity/**", reason: "a closed ledger generated from its tsv rows, whose group names it repeats"},
     SpellingSkip{path: "Compiler/JetRuntime/Assets/MuslErrno1_2_5/COPYRIGHT", reason: "musl's license text, as published"},
     SpellingSkip{path: "Jetpack/Integrations/Source/Foreign/RustBridge/Runtime/public_suffix_list.dat", reason: "Mozilla's Public Suffix List, as published"},
+    SpellingSkip{path: "Compiler/Migrations/AmericanIdent1.jet", reason: "the rewrite's British words, the spellings it replaces"},
+    SpellingSkip{path: "Tests/Cases/Migrations/AmericanIdent1RenamesBritishNameParts/Input/**", reason: "the rewrite's input, an old program in the British spellings it replaces"},
 }
 
 AS_IDENTIFIERS: [SpellingIdentifier]{
-    SpellingIdentifier{spelling: "Cancelled", reason: "the stopped-from-outside case of TaskFailure, IOError, NetError, HTTPError, DataFreshness, the job and service states, and the other public Core enums"},
-    SpellingIdentifier{spelling: "cancelled", reason: "public fields and counters (HTTPShutdownReport.cancelled, the data stream and loader flags) and the `cancelled` status a JSON report writes"},
-    SpellingIdentifier{spelling: "metres", reason: "core.units' public alias of `meters`"},
-    SpellingIdentifier{spelling: "kilometres", reason: "core.units' public alias of `kilometers`"},
-    SpellingIdentifier{spelling: "METRE", reason: "core.units' public scale constant beside METER"},
-    SpellingIdentifier{spelling: "litre", reason: "the prelude's public volume unit"},
-    SpellingIdentifier{spelling: "millilitre", reason: "the prelude's public volume unit"},
+    SpellingIdentifier{spelling: "Cancelled", reason: "the `Cancelled` task outcome and delivery state tokens durable service logs hold"},
+    SpellingIdentifier{spelling: "cancelled", reason: "the `cancelled` wire and storage tokens (job queue SQL and JSON, workflow history, comparison status, jet.live.v1, paused-evaluate and jettrace keys, the UI host dialog answer) that the versioned converter migrates"},
+    SpellingIdentifier{spelling: "Marshalled", reason: "the `AdapterMarshalled` value of the jet-ffi-descriptor-v1 binding stamp, which stored bindings carry"},
     SpellingIdentifier{spelling: "specialisation", reason: "JetOS's system field and boot path, named as NixOS spells its `specialisation` option"},
     SpellingIdentifier{spelling: "specialisations", reason: "JetOS's system field and boot path, named as NixOS spells its `specialisation` option"},
 }
 
 AS_QUOTED: [SpellingQuote]{
-    SpellingQuote{path: "Compiler/JetRuntime/Tests/NetErrorsWitness.c", word: "cancelled", count: 1, reason: "the C name of the runtime's NetError `Cancelled` routes"},
+    SpellingQuote{path: "Compiler/JetDriver/Source/Driver/RustForeign.jet", word: "marshalled", count: 3, reason: "the `AdapterMarshalled` values of a jet-ffi-descriptor-v1 stamp"},
+    SpellingQuote{path: "Core/Time/Tzdb/tzdata.zi", word: "harbour", count: 1, reason: "the IANA zone name America/Coral_Harbour, as published"},
     SpellingQuote{path: "Core/Jobs/Jobs.jet", word: "cancelled", count: 1, reason: "the SQL column alias the queue status reads back as `cancelled`"},
     SpellingQuote{path: "Docs/Audits/2026-11-13-3078-c6-shared-operations-evidence.md", word: "marshalling", count: 1, reason: "a Tower criterion quoted verbatim"},
     SpellingQuote{path: "Docs/Audits/G15202611/RESULTS.md", word: "cancelled", count: 1, reason: "recorded test output"},
@@ -85,6 +85,8 @@ AS_QUOTED: [SpellingQuote]{
     SpellingQuote{path: "Docs/Audits/env-as-code-vs-declarative-2026-08-24.md", word: "specialisations", count: 1, reason: "a Tower card title quoted verbatim"},
     SpellingQuote{path: "Docs/Audits/mine-for-jet-2026-09-09.md", word: "cancelled", count: 4, reason: "Rust status names quoted from the mined sources"},
     SpellingQuote{path: "Docs/Audits/mine-for-jet-2026-09-09.md", word: "colour", count: 26, reason: "tqdm's `colour` parameter and the topic keys mined from it"},
+    SpellingQuote{path: "Docs/Audits/elegance-audit-2026-09-30.md", word: "kilometres", count: 2, reason: "a dated audit quoting core.units' former `kilometres` alias"},
+    SpellingQuote{path: "Docs/Audits/elegance-audit-2026-09-30.md", word: "metres", count: 1, reason: "a dated audit quoting core.units' former `metres` alias"},
     SpellingQuote{path: "Docs/Audits/syntax-roundtrip-census-2026-09-03.md", word: "cancelled", count: 1, reason: "a generated census row of compiler identifiers"},
     SpellingQuote{path: "Docs/Proposals/2026-11-13-web-app-framework-shape.md", word: "lustre", count: 6, reason: "the Lustre web framework's name and URL"},
     SpellingQuote{path: "Docs/Proposals/VisualAcceptance/Media/20260908T202558-receipt.json", word: "cancelled", count: 1, reason: "a recorded receipt"},
@@ -99,17 +101,12 @@ AS_QUOTED: [SpellingQuote]{
     SpellingQuote{path: "Docs/Spec/Reference/prior-art.md", word: "generalised", count: 2, reason: "a cited paper's title and URL"},
     SpellingQuote{path: "Docs/Spec/Reference/python-surface.json", word: "cancelling", count: 1, reason: "asyncio's `Task.cancelling` method in the surface census"},
     SpellingQuote{path: "Docs/Spec/syntax-decisions.md", word: "optimise", count: 1, reason: "the `nix store optimise` command"},
-    SpellingQuote{path: "Jetpack/Integrations/Source/Foreign/Binders/Lua.jet", word: "cancelled", count: 1, reason: "the generated binding's error enum declares Jet's `Cancelled` case"},
-    SpellingQuote{path: "Jetpack/Integrations/Source/Foreign/Binders/Perl.jet", word: "cancelled", count: 1, reason: "the generated binding's error enum declares Jet's `Cancelled` case"},
-    SpellingQuote{path: "Jetpack/Integrations/Source/Foreign/Binders/Php.jet", word: "cancelled", count: 1, reason: "the generated binding's error enum declares Jet's `Cancelled` case"},
-    SpellingQuote{path: "Jetpack/Integrations/Source/Foreign/Binders/R.jet", word: "cancelled", count: 1, reason: "the generated binding's error enum declares Jet's `Cancelled` case"},
-    SpellingQuote{path: "Jetpack/Integrations/Source/Foreign/Binders/Ruby.jet", word: "cancelled", count: 1, reason: "the generated binding's error enum declares Jet's `Cancelled` case"},
     SpellingQuote{path: "Jetpack/JetOS/Source/SystemFacts.jet", word: "specialisation", count: 1, reason: "the boot entry's `hardware-specialisation` proof tag, named after NixOS's `specialisation` option"},
     SpellingQuote{path: "Jetpack/Provider/Tests/Provider.jet", word: "optimise", count: 1, reason: "the `nix store optimise` command"},
     SpellingQuote{path: "Tests/CLI/unknown_flag.txt", word: "colour", count: 2, reason: "the misspelled `--colour` flag the unknown-flag test feeds"},
-    SpellingQuote{path: "Tests/Cases/CLIPartsBudget/budget_tty_confirmation_cancel_and_yes_control_mutation.case", word: "cancelled", count: 3, reason: "the ported Rust test's source, quoted"},
     SpellingQuote{path: "Tests/Cases/JetpackJetOS/os_import_live_semantic_eval_reports_omissions.case", word: "virtualisation", count: 1, reason: "the NixOS option `virtualisation.docker.enable`"},
-    SpellingQuote{path: "Tools/Editors/Zed/languages/jet/highlights.scm", word: "cancelled", count: 1, reason: "the generated literal list names the `Cancelled` case"},
+    SpellingQuote{path: "Tests/Cases/Cffi/ForeignActiveJSImportIsAcceptedWhilePlannedSwiftStaysReserved.fixture/.jet/bindings/js/plotly.jet", word: "marshalled", count: 3, reason: "the `AdapterMarshalled` values of the binding's jet-ffi-descriptor-v1 stamp"},
+    SpellingQuote{path: "Tests/Cases/Pkg/foreign_package_provider_fetch_lock_and_locked_round_trip.binding.template", word: "marshalled", count: 3, reason: "the `AdapterMarshalled` values of the binding's jet-ffi-descriptor-v1 stamp"},
     SpellingQuote{path: "Tools/Tower/Test/apply.test.mjs", word: "colour", count: 2, reason: "the unknown field the apply test feeds"},
 }
 
@@ -163,7 +160,7 @@ AS_WORDS: [AmericanSpelling]{
     AmericanSpelling{british: "rigour", american: "rigor"},
     AmericanSpelling{british: "centre", american: "center"},
     AmericanSpelling{british: "centres", american: "centers"},
-    AmericanSpelling{british: "centred", american: "centerd"},
+    AmericanSpelling{british: "centred", american: "centered"},
     AmericanSpelling{british: "centring", american: "centering"},
     AmericanSpelling{british: "metre", american: "meter"},
     AmericanSpelling{british: "metres", american: "meters"},
@@ -594,6 +591,17 @@ AS_WORDS: [AmericanSpelling]{
 // of its source, which the census reads there.
 AS_OUTPUT_SUFFIXES: [String]{".out", ".stdout", ".stderr", ".expected", ".rows"}
 
+// The code trees: there each part of an identifier is a word of its own
+// (`is_cancelled`, `TaskCancelled`), so a British part counts as well.
+AS_CODE_TREES: [String]{"Compiler/", "Core/", "Jetpack/", "Tools/", "Examples/", "Tests/"}
+
+as_code_tree: fn(path: String) -> Bool Never! {
+    loop tree in AS_CODE_TREES {
+        if path.starts_with(tree) -> return true
+    }
+    false
+}
+
 // The American spelling of each British word, keyed in lower case.
 as_word_map: fn() -> [String:String] Never! {
     map := [String:String]{}
@@ -605,6 +613,37 @@ as_word_map: fn() -> [String:String] Never! {
 // letter, digit or underscore.
 as_word_byte: fn(code: Int) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95
+}
+
+as_upper_byte: fn(code: Int) -> Bool Never! { code >= 65 && code <= 90 }
+
+as_lower_byte: fn(code: Int) -> Bool Never! { code >= 97 && code <= 122 }
+
+// The letter runs of identifier `word`: it splits at underscores and digits,
+// where a lower-case letter meets a capital, and before the last capital of a
+// run that starts a capitalized word (`HTTPServer` is `HTTP` and `Server`).
+as_word_parts: fn(word: String) -> [String] Never! {
+    bytes: word.bytes()
+    parts := [String]{}
+    start := -1
+    loop at in 0..<bytes.len() {
+        code: Int{bytes[at]}
+        if !as_upper_byte(code) && !as_lower_byte(code) {
+            if start >= 0 -> parts.push(String.from_bytes(bytes.slice(start, at)) ?? "")
+            start = -1
+            next
+        }
+        if start >= 0 && as_upper_byte(code) {
+            previous: as_byte_at(bytes, at - 1)
+            if as_lower_byte(previous) || (as_upper_byte(previous) && as_lower_byte(as_byte_at(bytes, at + 1))) {
+                parts.push(String.from_bytes(bytes.slice(start, at)) ?? "")
+                start = at
+            }
+        }
+        if start < 0 -> start = at
+    }
+    if start >= 0 -> parts.push(String.from_bytes(bytes.slice(start, bytes.len())) ?? "")
+    parts
 }
 
 // The byte at `at` as an Int, or 0 outside `bytes`.
@@ -695,7 +734,8 @@ as_token_edge: fn(bytes: [U8], at: Int, step: Int) -> Int Never! {
     0
 }
 
-// The British words of `text`, line `line` of the file at `path`.
+// The British words of `text`, line `line` of the file at `path`: whole
+// words, and in a code tree each British part of an identifier.
 as_line_hits: fn(path: String, line: String, text: String, words: [String:String], out: &[AmericanHit]) {
     bytes: text.bytes()
     mask: as_code_mask(path, text)
@@ -708,7 +748,12 @@ as_line_hits: fn(path: String, line: String, text: String, words: [String:String
         start: at
         loop at < bytes.len() && as_word_byte(Int{bytes[at]}) -> at += 1
         word: String.from_bytes(bytes.slice(start, at)) ?? ""
-        if words.get(word.to_lower()) == None -> next
+        parts: if as_code_tree(path) -> as_word_parts(word) else -> [String]{word}
+        british := [String]{}
+        loop part in parts {
+            if words.get(part.to_lower()) != None -> british.push(part.copy())
+        }
+        if british.is_empty() -> next
         before: as_byte_at(bytes, start - 1)
         after: as_byte_at(bytes, at)
         following: as_byte_at(bytes, at + 1)
@@ -717,7 +762,9 @@ as_line_hits: fn(path: String, line: String, text: String, words: [String:String
         right: as_token_edge(bytes, at, 1)
         token: (left == 34 || left == 39) && (right == 34 || right == 39)
         code: mask[start] || before == 46 || token || label
-        out.push(AmericanHit{path: path, line: line, word: word, code: code})
+        loop part in british {
+            out.push(AmericanHit{path: path.copy(), line: line.copy(), word: part.copy(), code: code})
+        }
     }
 }
 
@@ -769,13 +816,14 @@ as_findings: fn(hits: [AmericanHit], words: [String:String]) -> [String] Never! 
 }
 
 // `git grep` over the tracked text files for every AS_WORDS spelling, outside
-// AS_SKIPPED.
+// AS_SKIPPED: anywhere in a word, so a line with a British part of an
+// identifier reaches as_line_hits.
 as_grep: fn() -> [String] {
     pattern := ""
     loop row in AS_WORDS {
         pattern = if pattern == "" -> row.british else -> "{pattern}|{row.british}"
     }
-    argv := [String]{"git", "-c", "core.quotePath=false", "grep", "-I", "-n", "-P", "(?i)\\b(?:{pattern})\\b", "--", "."}
+    argv := [String]{"git", "-c", "core.quotePath=false", "grep", "-I", "-n", "-P", "(?i)(?:{pattern})", "--", "."}
     loop row in AS_SKIPPED -> argv.push(":(exclude,glob){row.path}")
     listed: as_process.cmd(argv).stdout(.Capture).stderr(.Capture).run() ?? panic("run git grep: {err}")
     assert(listed.code == 0 || listed.code == 1, "git grep failed: {as_process.combined_output(listed).trim()}")
@@ -806,6 +854,17 @@ as_stale_skips: fn() -> [String] {
     findings: as_findings(hits, words)
     assert(findings.contains("Docs/a.md:3: `Colour` is British; write `Color`"))
     assert(findings.contains("Docs/a.md:3: `behaviour` is British; write `behavior`"))
+}
+
+#Test("in a code tree each British part of an identifier is a hit") {
+    assert_eq(as_word_parts("is_colour2RecolourHTTPServer"), [String]{"is", "colour", "Recolour", "HTTP", "Server"})
+    words: as_word_map()
+    hits: as_hits([String]{"Core/a.jet:4:x_colour: RecolourHTTP + XMLColour", "Docs/a.md:4:x_colour: RecolourHTTP + XMLColour"}, words)
+    assert_eq(hits.len(), 3)
+    findings: as_findings(hits, words)
+    assert(findings.contains("Core/a.jet:4: `colour` is British; write `color`"))
+    assert(findings.contains("Core/a.jet:4: `Recolour` is British; write `Recolor`"))
+    assert(findings.contains("Core/a.jet:4: `Colour` is British; write `Color`"))
 }
 
 #Test("a Jet line's code is outside its comments and string text") {

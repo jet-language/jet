@@ -1876,12 +1876,12 @@ listener stays open, and each new connection within the limits is answered
 tell a draining server from a dead one. Then the listener closes, so the port
 is free and a new connect is refused (`local_addr()` then fails with an
 `HTTPError.IO`). Connections still
-open then count as `cancelled`, and one whose handler is still running never
+open then count as `canceled`, and one whose handler is still running never
 sends its response: its socket closes when the handler returns. A web app
 that mounts `#App.Job` methods then waits what is left of that time for the
 jobs its process runs, and leaves any still running unfinished (`#App.Job`).
 Every caller of `serve` and `shutdown` receives the same
-`HTTPShutdownReport{accepted, overloaded, completed, cancelled}`; a second
+`HTTPShutdownReport{accepted, overloaded, completed, canceled}`; a second
 `serve` is an `HTTPError.IO`. The connection deadline bounds each
 connection's reads and writes (30 seconds by default).
 
@@ -2097,13 +2097,14 @@ second, so it shows the latest run.
 ### `core.browser.host` — events and values in the page
 
 `core.browser.host` is the checked surface a web app's code uses inside the
-page. Both operations carry the `Browser` effect and are lowered by the web
-target; native codegen keeps them as inert checked calls.
+page. Both operations carry the `Browser` effect and ask the page's
+`core.ui.host` provider; outside a page no provider answers, so `on` binds
+nothing and `value` reads `""`.
 
 | Signature | Result | Description |
 |---|---|---|
-| `on(target: String, event: String, handler: fn(WebEvent)) -[Browser]>` | — | Register a DOM event handler on the selected element. |
-| `value(target: String) -[Browser]> String` | text | Read the selected input or element value. |
+| `on(target: String, event: String, handler: &&fn(WebEvent)) -[Browser]>` | — | Run `handler` for each `event` (a DOM event type) of the element the CSS selector `target` selects, once the program's `run` returned, as a click on a scene element runs its handler. The `WebEvent` carries `target` as `path`, `event` as `title`, and the value the element holds then as `payload`. |
+| `value(target: String) -[Browser]> String` | text | Read the selected input's value, else the element's text; `""` when nothing matches. |
 
 ### `core.browser.storage` — browser storage adapters
 
@@ -2125,6 +2126,10 @@ and scope.
 | `core.browser.storage.session.set(key: String, value: String)` | — | Write a session key. |
 | `core.browser.storage.session.remove(key: String)` / `clear()` | — | Remove one or all session keys. |
 | `core.browser.storage.session.get_or(key, fallback) -> String` / `has(key) -> Bool` | text/Boolean | Read with a fallback or test session presence. |
+
+In a page (a web build), `local` is the page's `localStorage` and `session`
+its `sessionStorage`, which the page's `core.ui.host` provider reads and
+writes.
 
 Outside a browser (`jet run`, a native build), each of `local` and `session`
 is one process-wide in-memory store, and the two stay separate: `set`
@@ -3068,7 +3073,7 @@ run: fn() -[Exec, Time.Wait]> {
 | `process.exit(code)` | `-[Exec.Exit]> Never` | Terminate the current process at the explicit process boundary. Status 101 is reserved for Jet defects, so `exit(101)` ends the process with the user-error status 1 (S36). Ending its own process is the narrow `Exec.Exit` leaf, so a caller bound to `-[Exec.Exit]>` checks clean without the whole `Exec` root. |
 | `#Unsafe process.exit_unmapped(code)` | `-[Exec.Exit]> Never` | Terminate at the same boundary with `code` unchanged, 101 included; for a tool that reports a Jet defect, such as a compiler's internal error. |
 | `process.fail(code, message)` | `-[Exec.Exit, IO, Time.Wait]> Never` | Write `message` and a newline to stderr, then end as `process.exit(code)` does (101 maps to 1): a script's `echo "$message" >&2; exit $code` in one call. |
-| `process.on_signal(signal)` | `-[Exec]>` | Register the process signal policy for one `ProcessSignal` value: once that signal arrives, the process is canceled. The entry's waits end without parking (a network wait as `NetError.Cancelled`, a sleep at once) and every live task is canceled, stopping at its next wait point or at its next loop iteration or recursive call when it never waits, with its cleanup run, so a serving `HTTPServer` returns its report and the program drains to its end (D-FOUND-LIFECYCLE1=A, D-TASK-SLICE1=A). |
+| `process.on_signal(signal)` | `-[Exec]>` | Register the process signal policy for one `ProcessSignal` value: once that signal arrives, the process is canceled. The entry's waits end without parking (a network wait as `NetError.Canceled`, a sleep at once) and every live task is canceled, stopping at its next wait point or at its next loop iteration or recursive call when it never waits, with its cleanup run, so a serving `HTTPServer` returns its report and the program drains to its end (D-FOUND-LIFECYCLE1=A, D-TASK-SLICE1=A). |
 | `process.signals(kinds)` | `-[Exec]> SignalSubscription IOError!` | Take every signal of `kinds` as a value on the subscription's `receiver`, as a shell `trap` does, until `close()`; at most one is pending per kind, and every open subscription that holds a signal receives it. An empty list is `InvalidInput`; a signal the host refuses is `Unsupported` or `Other` with its OS error. |
 | `process.signal_number(signal)` | `Int` | The signal's Linux number: `Hup` 1, `Int` 2, `Quit` 3, `Usr1` 10, `Usr2` 12, `Pipe` 13, `Alrm` 14, `Term` 15, `Chld` 17, `Cont` 18, `Tstp` 20, `Ttin` 21, `Ttou` 22, `Winch` 28. |
 | `process.list2cmdline(argv)` | `String` | Format an argument vector for display using Windows command-line quoting rules. |
@@ -3616,8 +3621,8 @@ another type, are error E0446. Float lanes have no bit operators (E0109).
 `core.units` supplies named SI and binary-unit scales over
 `Measurement<Float>`. It is a scalar conversion layer rather than a
 user-defined dimension system. The module-global scale names are uppercase
-(`NANO`, `MICRO`, `MILLI`, `CENTI`, `KILO`, `MEGA`, `GIGA`, `METER`, `METRE`,
-`GRAM`, `SECOND`, `BYTE_UNIT`, `KIBIBYTE`, `MEBIBYTE`, and `GIBIBYTE`).
+(`NANO`, `MICRO`, `MILLI`, `CENTI`, `KILO`, `MEGA`, `GIGA`, `METER`, `GRAM`,
+`SECOND`, `BYTE_UNIT`, `KIBIBYTE`, `MEBIBYTE`, and `GIBIBYTE`).
 
 ```jet
 use units: core.units
@@ -3641,8 +3646,8 @@ run: fn() {
 | `units.to_si(value)` | `Float` | Return the SI scalar value. |
 | `units.abs(value)` | `Measurement<Float>` | Take the absolute value while retaining uncertainty. |
 | `units.show(value)` | `String` | Format a measured value and its uncertainty. |
-| `units.meters(x)` / `metres(x)` | `Measurement<Float>` | Construct a meter-scale value. |
-| `units.kilometers(x)` / `kilometres(x)` | `Measurement<Float>` | Construct a kilometer-scale value. |
+| `units.meters(x)` | `Measurement<Float>` | Construct a meter-scale value. |
+| `units.kilometers(x)` | `Measurement<Float>` | Construct a kilometer-scale value. |
 | `units.grams(x)` / `kilograms(x)` | `Measurement<Float>` | Construct gram- or kilogram-scale values. |
 | `units.seconds(x)` / `milliseconds(x)` | `Measurement<Float>` | Construct second- or millisecond-scale values. |
 | `units.bytes_of(x)` / `kibibytes(x)` | `Measurement<Float>` | Construct byte or kibibyte-scale values. |
@@ -5529,7 +5534,7 @@ accessibility attach/project also enter their Jet public functions first.
 `UINode UIHostError!`, and propagates the typed host error on failure.
 `project` returns `UIAccessibilityProjection{node: UINodeID, metadata:
 UIAccessibility}` when the node carries metadata.
-`UIHostError` has the variants `Cancelled(UICancellation)`,
+`UIHostError` has the variants `Canceled(UICancellation)`,
 `CapabilityUnavailable(capability: String)`, `CapabilityDenied(capability:
 UICapability)`, `InvalidRequest(String)`, `HostFailure(service: String,
 message: String)`, `ResourceDenied(String)`, `ShortcutConflict(shortcut:
@@ -7699,11 +7704,16 @@ requires the explicit `SQL.raw` escape. Database operations carry `DB` (and,
 when they wait, `Time.Wait`) effects. The module source is
 [`Core/DB/DB.jet`](../../../Core/DB/DB.jet).
 The backend-neutral driver/policy boundary keeps query operations and the user policy attached to the typed scope (`D-DBDRIVER1=A`; `D-DBPOLICY-BIND1=A`).
-A row policy constrains only the rows of its own table: inside a policy scope,
-SQL that targets no table (`SELECT 1`) or another table runs unchanged, SQL on
-the policy's table must name it as its one simple target and gets the policy
-predicate, and SQL that reads the policy's table any other way (a join or
-subquery from another table) is refused.
+A policy scope is a confinement boundary. Its row policy constrains the rows
+of its own table: SQL on the policy's table must name it as its one simple
+target and gets the policy predicate. SQL that names no table (`SELECT 1`)
+runs, and SQL that names any other table, or reads the policy's table other
+than as its target, is refused before it runs with `E2477`. The tables a
+statement reads or writes come from the engine's compile of it, so a join, a
+subquery and an `INSERT ... SELECT` each count; `db.migrate`'s steps are not
+confined. A scope's connection, policy and user are private fields, so code
+holding a scope cannot rebuild the whole `Store`, or a scope for another
+user, from it.
 
 | Signature | Result | Description |
 |---|---|---|
@@ -8164,15 +8174,22 @@ fails only its message; the worker begins again from its `state:` value
 within the tree's restart budget. With `batch:` and `wait:`, a `[Q]`
 handler takes up to `batch` waiting messages, waiting at most `wait` for a
 batch to fill; a failed batch is handed over again on each restart.
+The tree's worker methods (`mailbox_depth`, `restarts`, `fail_worker`,
+`drain_worker`, `partition_worker`, `reconcile_worker`, `directory_register`)
+take a typed endpoint as they take a `ServiceEndpoint`. A typed worker's depth
+counts the messages waiting in its mailbox, not the one its handler runs; a
+drained typed worker refuses new messages and runs the waiting ones, and a
+handoff keeps it at its generation until they have run.
 Under `delivery_durable()`, `tree.send_durable(endpoint, message, key: k)`
 keeps a message whose type is `Encode` and `Decode` (E0112 otherwise) as
 JSON in the authority until the worker's handler succeeds on it. Each
 receipt reaches the worker once while the worker takes messages: when it is
 sent, when the tree starts, and when `runtime.retry(delivery)` accepts it
-again; a handler that succeeds makes it `Delivered`, and one that fails
-leaves it for `retry`. A key already used answers its first receipt, a full
-mailbox is `ServiceError.Full` before the authority keeps anything, and a
-kept message that no longer decodes is dead-lettered.
+again, at whichever generation a handoff has moved the worker to; a handler
+that succeeds makes it `Delivered`, and one that fails leaves it for `retry`.
+A key already used answers its first receipt, a full mailbox is
+`ServiceError.Full` before the authority keeps anything, and a kept message
+that no longer decodes is dead-lettered.
 
 ```jet
 email: tree.worker("email", send_email, capacity: 64) ?? return
@@ -8202,7 +8219,7 @@ total: tree.call(pricing, Quote{items: 3}) ?? 0
 
 A bounded mailbox makes admission visible. Delivery transitions are
 `Pending`, `Accepted`, `Delivering`, `Delivered`, `DeadLettered`, and
-`Cancelled`; durable delivery records the authority needed for replay and
+`Canceled`; durable delivery records the authority needed for replay and
 recovery. A restart strategy controls which siblings are restarted after a
 worker failure. A service handler must report or persist its outcome according
 to the selected delivery policy rather than assuming retries are free.

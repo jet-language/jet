@@ -1,0 +1,19 @@
+// A scope over `notes` reads and writes no other table: a write and a query
+// that name `tags` are refused before they run (E2477), and the entry
+// returns the refusal. The store itself reads `tags`.
+use db: core.db
+
+run: fn() {
+    store := db.open_memory()
+    _: db.migrate(store.all_rows(), "notes-v1", [SQL{"CREATE TABLE notes (owner TEXT, title TEXT)"}, SQL{"CREATE TABLE tags (tag TEXT)"}]) ?? panic("migrate: {err}")
+    _: store.execute(SQL{"INSERT INTO tags (tag) VALUES ('work')"}) ?? panic("tags: {err}")
+    owned: db.policy("notes", "owner == user") ?? panic("policy: {err}")
+    ann: store.with_policy(owned, "ann")
+    if ann.execute(SQL{"INSERT INTO tags (tag) VALUES ('home')"}) == .Err(failure) {
+        print("a write to tags: {failure.message()}")
+    }
+    tags: store.query(SQL{"SELECT tag FROM tags"}) ?? panic("tags: {err}")
+    print("the store reads tags: {tags.len()} row")
+    read: ann.query(SQL{"SELECT tag FROM tags"}) ?? return Err(err.message())
+    print("the scope read tags: {read.len()} row")
+}

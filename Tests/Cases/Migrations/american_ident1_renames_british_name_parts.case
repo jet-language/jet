@@ -1,0 +1,19 @@
+# The registered american-ident1 plan (toolchain a0.0.45) spells every name
+# the American way: each word of a name it lists takes the American word in
+# the case it is written in, in a field, a camel-case name, an enum case, a
+# local and its interpolation, a comment, a string, and a Markdown file's
+# prose and ```jet fence. A longer word that only contains one, such as a
+# foreign HTML attribute, stays. The old program is kept as `before.old`,
+# read as a Jet source through `--source-list`. A second run finds nothing
+# left to rewrite.
+fixture: AmericanIdent1RenamesBritishNameParts/Input
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-ident1 --write guide.md --source-list sources.txt
+exit: 0
+stdout: = "EDIT guide.md 4\nEDIT before.old 8\nTOTAL 12 sites in 2 files\n"
+file: before.old = AmericanIdent1RenamesBritishNameParts/before.out
+file: guide.md = AmericanIdent1RenamesBritishNameParts/guide.out
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-ident1 --write guide.md --source-list sources.txt
+exit: 0
+stdout: = "TOTAL 0 sites in 0 files\n"
+file: before.old = AmericanIdent1RenamesBritishNameParts/before.out
+file: guide.md = AmericanIdent1RenamesBritishNameParts/guide.out

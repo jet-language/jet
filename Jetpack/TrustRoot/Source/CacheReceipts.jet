@@ -287,7 +287,7 @@ trust_read_cache_key_pin: fn(path: String, role: String) -[FS]> String TrustRoot
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> return Err(TrustRootError.CacheKeyMissing{role: role})
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
             }
         }
     }
@@ -326,7 +326,7 @@ trust_pin_cache_key: fn(roots_dir: String, role: String, key: TrustKey) -[FS]> T
                         return Err(TrustRootError.CacheKeyChanged{role: role, expected: expected, actual: actual})
                     }
                 }
-                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
             }
         }
     }
@@ -357,7 +357,7 @@ trust_read_state_lines: fn(path: String, not_regular: String) -[FS]> [String]? T
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> return Ok(None)
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
             }
         }
     }
@@ -464,7 +464,7 @@ trust_ensure_real_dir: fn(path: String, not_real: String, parents: Bool) -[FS]> 
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> files.mkdir(path, parents)
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(TrustRootError.IO{detail: "{error}"})
             }
         }
     }

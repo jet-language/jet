@@ -63,7 +63,7 @@ DeliveryState: enum {
     Delivering,
     Delivered,
     DeadLettered,
-    Cancelled,
+    Canceled,
 }
 
 delivery_state_show: fn(state: DeliveryState) -> String Never! {
@@ -73,7 +73,7 @@ delivery_state_show: fn(state: DeliveryState) -> String Never! {
         .Delivering -> "Delivering"
         .Delivered -> "Delivered"
         .DeadLettered -> "DeadLettered"
-        .Cancelled -> "Cancelled"
+        .Canceled -> "Cancelled"
     }
 }
 
@@ -122,7 +122,7 @@ TaskOutcome: enum {
         debug: fn(&&self) -> String {
             if self == {
                 .Failed(.Panicked(reason)) -> "Panicked({reason:Debug})"
-                .Finished | .Failed(.Cancelled) | .Failed(.DeadlineBlown) -> task_outcome_show(self)
+                .Finished | .Failed(.Canceled) | .Failed(.DeadlineBlown) -> task_outcome_show(self)
             }
         }
     }
@@ -132,14 +132,14 @@ task_outcome_show: fn(outcome: TaskOutcome) -> String Never! {
     if outcome == {
         .Finished -> "Finished"
         .Failed(.Panicked(reason)) -> "Panicked({reason})"
-        .Failed(.Cancelled) -> "Cancelled"
+        .Failed(.Canceled) -> "Cancelled"
         .Failed(.DeadlineBlown) -> "DeadlineBlown"
     }
 }
 
 #Test("task outcome display and debug distinguish raw and quoted panic reasons") {
     assert(task_outcome_show(TaskOutcome.Finished) == "Finished")
-    assert(task_outcome_show(TaskOutcome.Failed(.Cancelled)) == "Cancelled")
+    assert(task_outcome_show(TaskOutcome.Failed(.Canceled)) == "Cancelled")
     assert(task_outcome_show(TaskOutcome.Failed(.DeadlineBlown)) == "DeadlineBlown")
     assert(task_outcome_show(TaskOutcome.Failed(.Panicked("a\"b"))) == "Panicked(a\"b)")
     outcome: TaskOutcome.Failed(.Panicked("a\"b"))
@@ -526,7 +526,7 @@ observe: fn(tree: ServiceTree) -> String Never! {
     pending := 0
     finished := 0
     panicked := 0
-    cancelled := 0
+    canceled := 0
     deadline_blown := 0
     loop workflow in tree.workflows {
         if workflow.status == {
@@ -538,7 +538,7 @@ observe: fn(tree: ServiceTree) -> String Never! {
             .None -> { pending += 1 }
             .Val(.Finished) -> { finished += 1 }
             .Val(.Failed(.Panicked(_))) -> { panicked += 1 }
-            .Val(.Failed(.Cancelled)) -> { cancelled += 1 }
+            .Val(.Failed(.Canceled)) -> { canceled += 1 }
             .Val(.Failed(.DeadlineBlown)) -> deadline_blown += 1
         }
     }
@@ -546,7 +546,7 @@ observe: fn(tree: ServiceTree) -> String Never! {
         .Val(receipt) -> receipt.rollback_available
         .None -> false
     }
-    "Observe(workers={tree.workers.len()}, started={tree.started}, generation={tree.generation}, dead_letters={tree.dead_letters.len()}, events={tree.event_log.len()}, chaos={tree.chaos_fails}, draining={tree.draining.len()}, partitions={tree.partitioned.len()}, rollback={rollback}, workflows={tree.workflows.len()},statuses={{running:{running},paused:{paused},cancel_requested:{cancel_requested}}},outcomes={{pending:{pending},finished:{finished},panicked:{panicked},cancelled:{cancelled},deadline_blown:{deadline_blown}}})"
+    "Observe(workers={tree.workers.len()}, started={tree.started}, generation={tree.generation}, dead_letters={tree.dead_letters.len()}, events={tree.event_log.len()}, chaos={tree.chaos_fails}, draining={tree.draining.len()}, partitions={tree.partitioned.len()}, rollback={rollback}, workflows={tree.workflows.len()},statuses={{running:{running},paused:{paused},cancel_requested:{cancel_requested}}},outcomes={{pending:{pending},finished:{finished},panicked:{panicked},canceled:{canceled},deadline_blown:{deadline_blown}}})"
 }
 
 #Test("service state records use UTF-8 byte lengths and exact corruption errors") {
@@ -667,6 +667,8 @@ priv TreeWorker: struct {
     endpoint: ServiceEndpoint,
     capacity: Int,
     channel: Shared<ServiceChannel>,
+    // The free places of a typed worker's mailbox; None for a String worker.
+    room: service_tasks.Semaphore?,
     restarts: [Int],
     running: Bool,
 }
@@ -1231,8 +1233,9 @@ authority_update: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared<S
 }
 
 // Process feed registry: the wake of each typed worker whose message
-// decodes. Releasing it has the worker's feeder hand over the endpoint's
-// pending durable receipts.
+// decodes, under the endpoint it was declared with. Releasing it has the
+// worker's feeder hand over the worker's pending durable receipts, at
+// whichever generation the worker runs now.
 priv EndpointFeed: struct {
     endpoint: ServiceEndpoint,
     wake: service_tasks.Semaphore,
@@ -1254,22 +1257,28 @@ feed_register: fn(endpoint: ServiceEndpoint, wake: service_tasks.Semaphore) Neve
 }
 
 // Wakes the feeder of the typed worker behind `endpoint`, when it has one.
+// A handoff or a rollback moves a worker to another generation, so the
+// feeder is found by its worker, not by the generation it was declared at.
 feed_wake: fn(endpoint: ServiceEndpoint) Never! {
     registry := feed_registry().guard_read()
     loop feed in registry.value.feeds {
-        if feed.endpoint == endpoint {
+        if feed.endpoint.authority == endpoint.authority && feed.endpoint.tree == endpoint.tree && feed.endpoint.worker == endpoint.worker {
             feed.wake.release()
-            return
         }
     }
 }
 
-// Whether `endpoint`'s worker takes messages: started and not partitioned.
-feed_open: fn(endpoint: ServiceEndpoint) -> Bool Never! {
+// The endpoint at which the worker declared as `endpoint` takes messages
+// now: its started row that is not partitioned, at any generation. None
+// while the worker takes none.
+feed_current: fn(endpoint: ServiceEndpoint) -> ServiceEndpoint? Never! {
     registry := service_registry().guard_read()
-    index: registry_index(registry.value.endpoints, endpoint.authority, endpoint.worker, endpoint.generation)
-    if index < 0 -> return false
-    registry.value.endpoints[index].started && !registry.value.endpoints[index].partitioned
+    loop state in registry.value.endpoints {
+        if state.authority == endpoint.authority && state.tree == endpoint.tree && state.worker == endpoint.worker && state.started && !state.partitioned {
+            return Val(ServiceEndpoint{tree: state.tree, worker: state.worker, generation: state.generation, authority: state.authority})
+        }
+    }
+    None
 }
 
 authority_update_partitioned: fn(endpoint: ServiceEndpoint, partitioned: Bool) ServiceError! {
@@ -1612,7 +1621,7 @@ authority_has_uncommitted: fn(endpoint: ServiceEndpoint) -> Bool ServiceError! {
     entries: authority_entries(runtime, authority_read(runtime))
     now: service_now()
     loop entry in entries {
-        if entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.state == DeliveryState.Cancelled {
+        if entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.state == DeliveryState.Canceled {
             next
         }
         if !delivery_routes_to_endpoint(runtime, entry, endpoint) -> next
@@ -1626,7 +1635,7 @@ authority_has_uncommitted: fn(endpoint: ServiceEndpoint) -> Bool ServiceError! {
 #Test("fresh service tree exposes every native seed without starting a task") {
     fresh: tree("seed")
     assert(tree_show(fresh) == "ServiceTree(name=seed, workers=0, handlers=[], started=false, restart=OneForOne, budget=5/60000ms, delivery=AtMostOnce)")
-    assert(observe(fresh) == "Observe(workers=0, started=false, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=0,statuses={{running:0,paused:0,cancel_requested:0}},outcomes={{pending:0,finished:0,panicked:0,cancelled:0,deadline_blown:0}})")
+    assert(observe(fresh) == "Observe(workers=0, started=false, generation=1, dead_letters=0, events=0, chaos=0, draining=0, partitions=0, rollback=false, workflows=0,statuses={{running:0,paused:0,cancel_requested:0}},outcomes={{pending:0,finished:0,panicked:0,canceled:0,deadline_blown:0}})")
     assert(directory_generation(fresh) == 1)
     assert(event_count(fresh) == 0)
     assert(dead_letter_count(fresh) == 0)
@@ -1730,7 +1739,7 @@ stat_cause: fn(error: IOError) -> String Never! {
         .NotFound(value) -> Val(value)
         .PermissionDenied(value) -> Val(value)
         .TimedOut(value) -> Val(value)
-        .Cancelled(value) -> Val(value)
+        .Canceled(value) -> Val(value)
         .Closed(value) -> Val(value)
         .Protocol(value) -> Val(value)
         .Other(value) -> Val(value)
@@ -2720,7 +2729,7 @@ workflow_token_valid: fn(text: String) -> Bool Never! {
 
 workflow_outcome_from_wire: fn(value: String) -> TaskOutcome ServiceError! {
     if value == "Finished" -> return Ok(TaskOutcome.Finished)
-    if value == "Cancelled" -> return Ok(TaskOutcome.Failed(.Cancelled))
+    if value == "Cancelled" -> return Ok(TaskOutcome.Failed(.Canceled))
     if value == "DeadlineBlown" -> return Ok(TaskOutcome.Failed(.DeadlineBlown))
     if !value.starts_with("Panicked:") -> return Err(state_error("unknown task outcome"))
     outcome: TaskOutcome.Failed(.Panicked(workflow_field(value.removeprefix("Panicked:"), "panic reason")))
@@ -2832,7 +2841,7 @@ workflow_apply: fn(workflows: &[TreeWorkflowState], payload: String) ServiceErro
         }
         workflows[index].history.push("sleep-cancelled")
         workflows[index].status = TaskStatus.CancelRequested
-        workflows[index].outcome = Val(TaskOutcome.Failed(.Cancelled))
+        workflows[index].outcome = Val(TaskOutcome.Failed(.Canceled))
     } else if payload.starts_with("workflow-wait-sleep-deadline:") {
         run_id: workflow_parse_int(payload.removeprefix("workflow-wait-sleep-deadline:"), "deadline sleep run id")
         if run_id < 1 -> return Err(state_error("workflow deadline sleep run id is invalid"))
@@ -3093,7 +3102,7 @@ workflow_sleep: fn(workflow: ServiceWorkflow, duration: Duration) ServiceError! 
             if state.value.history[cursor] == "sleep-cancelled" {
                 state.value.replay_cursor = cursor + 1
                 state.value.status = TaskStatus.CancelRequested
-                state.value.outcome = Val(TaskOutcome.Failed(.Cancelled))
+                state.value.outcome = Val(TaskOutcome.Failed(.Canceled))
                 return Err(ServiceError.Policy("workflow sleep was canceled"))
             }
             if state.value.history[cursor] == "sleep-deadline" {
@@ -3287,14 +3296,14 @@ workflow_frame: fn(text: String) -> String Never! { "{text.bytes().len()}:{text}
 workflow_valid_outcome: fn(outcome: TaskOutcome) -> Bool Never! {
     if outcome == {
         .Failed(.Panicked(reason)) -> reason.trim() != "" && workflow_visible(reason, 1048576)
-        .Finished | .Failed(.Cancelled) | .Failed(.DeadlineBlown) -> true
+        .Finished | .Failed(.Canceled) | .Failed(.DeadlineBlown) -> true
     }
 }
 
 workflow_outcome_wire: fn(outcome: TaskOutcome) -> String Never! {
     if outcome == {
         .Failed(.Panicked(reason)) -> "Panicked:{workflow_frame(reason)}"
-        .Finished | .Failed(.Cancelled) | .Failed(.DeadlineBlown) -> task_outcome_show(outcome)
+        .Finished | .Failed(.Canceled) | .Failed(.DeadlineBlown) -> task_outcome_show(outcome)
     }
 }
 
@@ -3962,10 +3971,10 @@ delivery_transition_allowed: fn(entry: DeliveryEntry, state: DeliveryState, atte
     }
     allowed: if entry.state == {
         .Pending -> state == DeliveryState.Accepted
-        .Accepted -> state == DeliveryState.Accepted || state == DeliveryState.Delivering || state == DeliveryState.DeadLettered || state == DeliveryState.Cancelled
-        .Delivering -> state == DeliveryState.Accepted || state == DeliveryState.Delivered || state == DeliveryState.DeadLettered || state == DeliveryState.Cancelled
+        .Accepted -> state == DeliveryState.Accepted || state == DeliveryState.Delivering || state == DeliveryState.DeadLettered || state == DeliveryState.Canceled
+        .Delivering -> state == DeliveryState.Accepted || state == DeliveryState.Delivered || state == DeliveryState.DeadLettered || state == DeliveryState.Canceled
         .Delivered -> state == DeliveryState.DeadLettered || (state == DeliveryState.Accepted && entry.retained_until != None)
-        .DeadLettered | .Cancelled -> false
+        .DeadLettered | .Canceled -> false
     }
     if !allowed {
         return Err(authority_error("delivery event contains an invalid lifecycle transition"))
@@ -4057,7 +4066,7 @@ authority_entries: fn(runtime: ServiceRuntime, records: [DeliveryRecord]) -> [De
 }
 
 delivery_entry_expired: fn(entry: DeliveryEntry, now: Int) -> Bool Never! {
-    if entry.state == DeliveryState.DeadLettered || entry.state == DeliveryState.Cancelled {
+    if entry.state == DeliveryState.DeadLettered || entry.state == DeliveryState.Canceled {
         return false
     }
     if entry.retained_until == {
@@ -4294,7 +4303,7 @@ authority_take_pending: fn(endpoint: ServiceEndpoint, capacity: Int, skip_ids: [
                 queued = true
             }
         }
-        if entry.authority == "" || entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.state == DeliveryState.Cancelled || entry.dead {
+        if entry.authority == "" || entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.state == DeliveryState.Canceled || entry.dead {
             next
         }
         if !delivery_routes_to_endpoint(runtime, entry, endpoint) -> next
@@ -4349,7 +4358,7 @@ authority_requeue_pending: fn(endpoint: ServiceEndpoint, entries: [PendingEntry]
         if receipt.dead {
             return Err(ServiceError.Unavailable("cannot requeue a dead-lettered service receipt"))
         }
-        if receipt.state == DeliveryState.Cancelled {
+        if receipt.state == DeliveryState.Canceled {
             return Err(ServiceError.Unavailable("cannot requeue a canceled service receipt"))
         }
         if delivery_entry_expired(receipt, service_now()) {
@@ -4388,7 +4397,7 @@ authority_mark_delivered: fn(store: String, id: String) ServiceError! {
         pending_remove_entry(runtime, entry)
         return Err(ServiceError.Unavailable("cannot deliver a dead-lettered service receipt"))
     }
-    if entry.state == DeliveryState.Cancelled {
+    if entry.state == DeliveryState.Canceled {
         pending_remove_entry(runtime, entry)
         return Err(ServiceError.Unavailable("cannot deliver a canceled delivery"))
     }
@@ -4505,8 +4514,8 @@ delivery_cancel: fn(delivery: Delivery) -> Delivery ServiceError! {
     if entry.state == DeliveryState.Delivered {
         return Err(ServiceError.Policy("delivered work cannot be canceled"))
     }
-    if entry.state != DeliveryState.Cancelled {
-        authority_append_event(runtime, entry, DeliveryState.Cancelled, entry.attempts, service_now())
+    if entry.state != DeliveryState.Canceled {
+        authority_append_event(runtime, entry, DeliveryState.Canceled, entry.attempts, service_now())
         pending_remove_entry(runtime, entry)
     }
     Ok(delivery)
@@ -4536,7 +4545,7 @@ runtime_send: fn(runtime: ServiceRuntime, endpoint: ServiceEndpoint, message: St
         if entry.tree != endpoint.tree || entry.worker != endpoint.worker || entry.message != message {
             return Err(ServiceError.Policy("idempotency key was already used by another service authority or delivery"))
         }
-        if !entry.dead && entry.expires > now && !entry.delivered && entry.state != DeliveryState.Cancelled {
+        if !entry.dead && entry.expires > now && !entry.delivered && entry.state != DeliveryState.Canceled {
             authority_enqueue_entry(runtime, entry)
         }
         return Ok(delivery_for_entry(runtime, entry, true))
@@ -4581,7 +4590,7 @@ retry_accept: fn(runtime: ServiceRuntime, delivery: Delivery) -> DeliveryEntry S
         return Err(ServiceError.Unavailable("service receipt has no endpoint authority"))
     }
     if entry.dead -> return Err(ServiceError.Unavailable("cannot retry a dead-lettered delivery"))
-    if entry.state == DeliveryState.Cancelled {
+    if entry.state == DeliveryState.Canceled {
         return Err(ServiceError.Policy("canceled delivery cannot be retried"))
     }
     if entry.delivered && entry.retained_until == None -> return Ok(entry)
@@ -4622,7 +4631,7 @@ runtime_retain: fn(runtime: ServiceRuntime, delivery: Delivery) -> Delivery Serv
     index: delivery_entry_index(entries, id) ?? return Err(ServiceError.Unknown("service id `{id}` is unknown"))
     entry: entries[index]
     if entry.dead -> return Ok(delivery_for_entry(runtime, entry, false))
-    if entry.state == DeliveryState.Cancelled {
+    if entry.state == DeliveryState.Canceled {
         return Err(ServiceError.Policy("canceled delivery cannot be retained"))
     }
     until: authority_retention_deadline(service_now(), runtime.retention_ms)
@@ -4714,7 +4723,7 @@ delivery_parse_state: fn(text: String) -> DeliveryState? Never! {
     if text == "Delivering" -> return Val(DeliveryState.Delivering)
     if text == "Delivered" -> return Val(DeliveryState.Delivered)
     if text == "DeadLettered" -> return Val(DeliveryState.DeadLettered)
-    if text == "Cancelled" -> return Val(DeliveryState.Cancelled)
+    if text == "Cancelled" -> return Val(DeliveryState.Canceled)
     None
 }
 
@@ -4977,11 +4986,11 @@ pending_rollback_error: fn(error: ServiceError, authority_error: ServiceError?, 
 // Workers are declared before start. The tree mailbox and the endpoint
 // registry share one bounded channel per worker.
 worker: fn(tree: &ServiceTree, name: String, handler: fn(), handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
-    declare_worker(tree, name, handler_name, capacity)
+    declare_worker(tree, name, handler_name, capacity, None)
 }
 
 // Checks a worker declaration and registers its route, not yet published.
-priv declare_worker: fn(tree: &ServiceTree, name: String, handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
+priv declare_worker: fn(tree: &ServiceTree, name: String, handler_name: String, capacity: Int, room: service_tasks.Semaphore?) -> ServiceEndpoint ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot add workers after start"))
     if capacity <= 0 || capacity > 1000000 {
         return Err(ServiceError.Policy("mailbox capacity must be positive and bounded"))
@@ -5004,8 +5013,15 @@ priv declare_worker: fn(tree: &ServiceTree, name: String, handler_name: String, 
     // The mailbox exists before the endpoint is published, so a failed
     // allocation never leaves a ghost authority in the registry.
     authority_register(endpoint, false, Val(channel))
-    tree.workers.push(TreeWorker{name: name, handler_name: handler_name, endpoint: endpoint, capacity: capacity, channel: channel, restarts: [Int]{}, running: false})
+    tree.workers.push(TreeWorker{name: name, handler_name: handler_name, endpoint: endpoint, capacity: capacity, channel: channel, room: room, restarts: [Int]{}, running: false})
     Ok(endpoint)
+}
+
+// The messages waiting in a worker's mailbox: a typed worker's are the
+// places its mailbox has taken.
+priv worker_depth: fn(worker: TreeWorker) -> Int Never! {
+    if worker.room == .Val(room) -> return worker.capacity - room.value()
+    channel_depth(worker.channel)
 }
 
 // --- Typed workers ---------------------------------------------------------
@@ -5087,8 +5103,8 @@ priv batched_declare: fn<Q>(tree: &ServiceTree, name: String, handler: &&fn([Q])
     if batch < 1 || batch > capacity {
         return Err(ServiceError.Policy("batch must be positive and no larger than the mailbox capacity"))
     }
-    id: declare_worker(tree, name, handler_name, capacity)
     room: service_tasks.Semaphore.new(capacity)
+    id: declare_worker(tree, name, handler_name, capacity, Val(room))
     starved: Shared<Bool>{false}
     wake: service_tasks.Semaphore.new(0)
     // The timer reaches the worker through its own mailbox, which exists
@@ -5130,8 +5146,8 @@ priv worker_task_failed: fn(name: String) -> ServiceError Never! {
 // its place too; the answer goes to the asker of a `call`, and a durable
 // receipt is committed once its handler succeeds.
 priv typed_declare: fn<S, Q, R>(tree: &ServiceTree, name: String, handler_name: String, capacity: Int, state: &&S, handler: &&fn(&S, Q) -> R Err!, decoder: &&(fn(String) -> Q ServiceError!)?) -> Endpoint<Q, R> ServiceError! {
-    id: declare_worker(tree, name, handler_name, capacity)
     room: service_tasks.Semaphore.new(capacity)
+    id: declare_worker(tree, name, handler_name, capacity, Val(room))
     starved: Shared<Bool>{false}
     wake: service_tasks.Semaphore.new(0)
     step: fn(held: S, job: Job<Q, R>) -> S Err! {
@@ -5178,9 +5194,9 @@ priv room_take: fn(room: service_tasks.Semaphore, starved: Shared<Bool>) -> Bool
 }
 
 // Starts the feeder of a typed worker whose message decodes: on each wake
-// it hands the worker the endpoint's pending durable receipts while the
-// worker takes messages and its mailbox has places. A worker without a
-// decoder has no feeder.
+// it hands the worker its pending durable receipts, at the generation it
+// runs now, while the worker takes messages and its mailbox has places. A
+// worker without a decoder has no feeder.
 priv feed_start: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore, decoder: &&(fn(String) -> Q ServiceError!)?) Never! {
     decode: decoder ?? return
     feed_register(id, wake)
@@ -5199,8 +5215,9 @@ priv feed_wait: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, 
 
 priv feed: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, decode: fn(String) -> Q ServiceError!) ServiceError! {
     loop {
-        if !feed_open(id) || !room_take(room, starved) -> return Ok()
-        if feed_one(id, inbox, decode) == {
+        current: feed_current(id) ?? return Ok()
+        if !room_take(room, starved) -> return Ok()
+        if feed_one(current, inbox, decode) == {
             .Ok(handed) -> {
                 if !handed {
                     room.release()
@@ -5481,6 +5498,141 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: &ServiceTree, endpoint: End
     stop(services) ?? panic("stop")
 }
 
+#Test("a durable typed worker keeps taking durable sends after a handoff moves it to the next generation") {
+    dir: service_files.mkdtemp("typed-durable-handoff") ?? panic("temp dir")
+    path: "{dir}/state.log"
+    seen: Shared<[Int]>{[Int]{}}
+    done: service_tasks.Semaphore.new(0)
+    services := tree("typed-durable-handoff")
+    set_delivery(services, delivery_durable()) ?? panic("durable delivery")
+    store: state_store(path) ?? panic("state store")
+    set_state_event_log(services, store, "events", 1, "reversible") ?? panic("state adapter")
+    record: durable_worker(
+        services,
+        "record",
+        fn(n: Int) -> Int Err! {
+            log := seen.guard_edit()
+            log.value.push(n)
+            done.release()
+            n
+        },
+        "record",
+        8,
+    ) ?? panic("durable worker must declare")
+    start(services) ?? panic("durable tree must start")
+    first: typed_send_durable(services, record, 1, "one") ?? panic("send 1")
+    // A handled receipt that is not yet Delivered would pin the worker at
+    // its generation through the handoff.
+    assert((delivery_settle(first) ?? panic("status 1")) == DeliveryState.Delivered)
+    assert_eq(handoff_generation(services) ?? panic("handoff"), 2)
+    assert_eq(services.workers[0].endpoint.generation, 2)
+    // The worker runs at generation 2 now; its endpoint there keeps the
+    // same mailbox.
+    moved: Endpoint<Int, Int>{id: services.workers[0].endpoint.copy(), inbox: record.inbox, room: record.room}
+    second: typed_send_durable(services, moved, 2, "two") ?? panic("send 2")
+    assert((delivery_settle(second) ?? panic("status 2")) == DeliveryState.Delivered)
+    log: seen.guard_read()
+    assert_eq(log.value, [Int]{1, 2})
+    stop(services) ?? panic("stop")
+}
+
+#Test("a retained durable typed receipt retried after a handoff reaches the worker at its next generation") {
+    dir: service_files.mkdtemp("typed-durable-handoff-retry") ?? panic("temp dir")
+    path: "{dir}/state.log"
+    seen: Shared<[Int]>{[Int]{}}
+    failed: Shared<Bool>{false}
+    services := tree("typed-durable-handoff-retry")
+    set_delivery(services, delivery_durable()) ?? panic("durable delivery")
+    store: state_store(path) ?? panic("state store")
+    set_state_event_log(services, store, "events", 1, "reversible") ?? panic("state adapter")
+    record: durable_worker(
+        services,
+        "record",
+        fn(n: Int) -> Int Err! {
+            flag := failed.guard_edit()
+            if n == 2 && !flag.value {
+                flag.value = true
+                return Err("the first try fails")
+            }
+            log := seen.guard_edit()
+            log.value.push(n)
+            n
+        },
+        "record",
+        8,
+    ) ?? panic("durable worker must declare")
+    start(services) ?? panic("durable tree must start")
+    first: typed_send_durable(services, record, 1, "one") ?? panic("send 1")
+    second: typed_send_durable(services, record, 2, "two") ?? panic("send 2")
+    third: typed_send_durable(services, record, 3, "three") ?? panic("send 3")
+    // The worker runs in send order, so 2 has failed once 3 is Delivered.
+    assert((delivery_settle(first) ?? panic("status 1")) == DeliveryState.Delivered)
+    assert((delivery_settle(third) ?? panic("status 3")) == DeliveryState.Delivered)
+    // A retained receipt does not pin the worker, so the handoff moves it.
+    runtime: ServiceRuntime{store: delivery_store(path), retention_ms: 86400000}
+    _: runtime_retain(runtime, second) ?? panic("retain 2")
+    assert_eq(handoff_generation(services) ?? panic("handoff"), 2)
+    assert_eq(services.workers[0].endpoint.generation, 2)
+    _: runtime_retry(runtime, second) ?? panic("retry 2")
+    assert((delivery_settle(second) ?? panic("status 2")) == DeliveryState.Delivered)
+    log: seen.guard_read()
+    assert_eq(log.value, [Int]{1, 3, 2})
+    stop(services) ?? panic("stop")
+}
+
+// Waits up to five seconds for `delivery` to be Delivered; its state then.
+priv delivery_settle: fn(delivery: Delivery) -> DeliveryState ServiceError! {
+    loop _ in 0..<500 {
+        if delivery_status(delivery) == DeliveryState.Delivered {
+            return Ok(DeliveryState.Delivered)
+        }
+        service_sleep_ms(10)
+    }
+    delivery_status(delivery)
+}
+
+#Test("a typed worker's mailbox depth counts its waiting messages, and a drain and a handoff wait for them") {
+    gate: service_tasks.Semaphore.new(0)
+    ran: service_tasks.Semaphore.new(0)
+    services := tree("typed-depth")
+    slow: typed_worker(
+        services,
+        "slow",
+        fn(n: Int) -> Int Err! {
+            ran.release()
+            _: gate.acquire()
+            n
+        },
+        "slow",
+        4,
+    ) ?? panic("typed worker must declare")
+    start(services) ?? panic("typed tree must start")
+    typed_send(services, slow, 1) ?? panic("send 1")
+    // A running message has left the mailbox.
+    _: ran.acquire()
+    typed_send(services, slow, 2) ?? panic("send 2")
+    typed_send(services, slow, 3) ?? panic("send 3")
+    assert_eq(mailbox_depth(services, slow.id) ?? panic("depth"), 2)
+    drain_worker(services, slow.id) ?? panic("drain")
+    assert(services.workers[0].running)
+    if typed_send(services, slow, 4) == {
+        .Ok(_) -> { panic("a draining worker takes no new message") }
+        .Err(_) -> {}
+    }
+    // The waiting messages pin the draining worker through the handoff.
+    assert_eq(handoff_generation(services) ?? panic("handoff"), 2)
+    assert_eq(services.workers[0].endpoint.generation, 1)
+    gate.release()
+    gate.release()
+    gate.release()
+    loop _ in 0..<500 {
+        if (mailbox_depth(services, slow.id) ?? panic("depth")) == 0 -> break
+        service_sleep_ms(10)
+    }
+    assert_eq(mailbox_depth(services, slow.id) ?? panic("depth"), 0)
+    stop(services) ?? panic("stop")
+}
+
 worker_contains: fn(names: [String], name: String) -> Bool Never! {
     loop existing in names {
         if existing == name -> return true
@@ -5688,7 +5840,7 @@ mailbox_depth: fn(tree: ServiceTree, endpoint: ServiceEndpoint) -> Int ServiceEr
     validate_tree_endpoint(tree, endpoint)
     loop worker in tree.workers {
         if worker.name == endpoint.worker && worker.endpoint.tree == endpoint.tree {
-            return Ok(channel_depth(worker.channel))
+            return Ok(worker_depth(worker))
         }
     }
     Err(ServiceError.Unknown("endpoint {endpoint.tree}/{endpoint.worker} is not in this tree"))
@@ -5837,7 +5989,7 @@ start: fn(tree: &ServiceTree) ServiceError! {
     loop index in 0..<tree.workers.len() {
         draining: worker_contains(tree.draining, tree.workers[index].name)
         partitioned: worker_contains(tree.partitioned, tree.workers[index].name)
-        running: !partitioned && (!draining || channel_depth(tree.workers[index].channel) > 0)
+        running: !partitioned && (!draining || worker_depth(tree.workers[index]) > 0)
         tree.workers[index].running = running
         if start_activate(tree, index, !partitioned && (running || draining), running) == {
             .Err(error) -> {
@@ -5974,7 +6126,7 @@ drain_worker: fn(tree: &ServiceTree, endpoint: ServiceEndpoint) ServiceError! {
     // the same gate, so none can enqueue after drain observes an empty mailbox.
     authority_update_draining(endpoint, true)
     index: find_worker(tree, endpoint)
-    empty: channel_depth(tree.workers[index].channel) == 0
+    empty: worker_depth(tree.workers[index]) == 0
     if empty -> tree.workers[index].running = false
     tree.draining.push(tree.workers[index].name)
     if rollout_store_write(tree) == {
@@ -6163,7 +6315,7 @@ handoff_generation: fn(tree: &ServiceTree) -> Int ServiceError! {
     }
     loop name in candidates {
         index: worker_named(tree, name) ?? next
-        if !worker_contains(tree.partitioned, name) && channel_depth(tree.workers[index].channel) == 0 && generation_is_pinned(tree, name, tree.workers[index].endpoint.generation) {
+        if !worker_contains(tree.partitioned, name) && worker_depth(tree.workers[index]) == 0 && generation_is_pinned(tree, name, tree.workers[index].endpoint.generation) {
             _: promote_worker_generation(tree, name)
         }
     }
@@ -6183,7 +6335,7 @@ handoff_generation: fn(tree: &ServiceTree) -> Int ServiceError! {
     pinned := [String]{}
     loop worker in tree.workers {
         uncommitted: authority_has_uncommitted(worker.endpoint)
-        if worker_contains(tree.partitioned, worker.name) || (worker_contains(tree.draining, worker.name) && channel_depth(worker.channel) > 0) || uncommitted {
+        if worker_contains(tree.partitioned, worker.name) || (worker_contains(tree.draining, worker.name) && worker_depth(worker) > 0) || uncommitted {
             pinned.push(worker.name)
         }
     }

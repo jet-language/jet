@@ -488,7 +488,7 @@ kit_steps_host_port_path: fn(port: Int) -> String { "/tmp/jet-host-port-{port}.l
 kit_steps_host_port_refusal: fn(port: Int, waited: Duration, error: IOError) -> KitVerdict {
     if error == {
         .TimedOut(_) -> kit_expect_verdict("TIMEOUT", "host port {port} lock: another run still held it after the {kit_exec_seconds(waited.ns)}s wall-clock guard")
-        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> kit_expect_verdict("ERROR", "host port {port} lock: {error}")
+        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> kit_expect_verdict("ERROR", "host port {port} lock: {error}")
     }
 }
 

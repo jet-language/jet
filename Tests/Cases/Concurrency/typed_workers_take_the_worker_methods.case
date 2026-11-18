@@ -1,0 +1,14 @@
+# The tree's worker methods (mailbox_depth, restarts, drain_worker, ...)
+# take a typed worker's Endpoint<Q, R> as they take a ServiceEndpoint, and a
+# drained typed worker refuses a new message.
+fixture: TypedWorkersTakeTheWorkerMethods.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "depth: 0\nrestarts: 0\ndrained\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "depth: 0\nrestarts: 0\ndrained\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "depth: 0\nrestarts: 0\ndrained\n"

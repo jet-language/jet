@@ -31,26 +31,26 @@ emit_expiring: fn(ev: AsyncEvent<Int, String>, n: Int) -> Task<DispatchReport<St
 
 run: fn() {
     cancel_scope: event.scope()
-    cancelled: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
+    canceled: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
     { sender: cancel_started_tx, receiver: cancel_started_rx }: channel<Int>()
     { sender: _cancel_release_tx, receiver: cancel_release_rx }: channel<Int>()
-    cancelled.on(cancel_scope, fn(n: Int) {
+    canceled.on(cancel_scope, fn(n: Int) {
         cancel_started_tx.send(n.copy()) ?? panic("cancel started send")
         released: cancel_release_rx.receive() ?? panic("release")
     })
-    cancel_running: cancelled.emit_async(1)
+    cancel_running: canceled.emit_async(1)
     _started: cancel_started_rx.receive() ?? panic("started")
-    cancel_queued: cancelled.emit_async(2)
-    cancel_pending: cancelled.emit_async(3)
-    print("before-cancel q={cancelled.queued_count()} r={cancelled.running_count()} p={cancelled.blocked_count()}")
+    cancel_queued: canceled.emit_async(2)
+    cancel_pending: canceled.emit_async(3)
+    print("before-cancel q={canceled.queued_count()} r={canceled.running_count()} p={canceled.blocked_count()}")
     cancel_scope.cancel()
     pending_report: cancel_pending.join() ?? panic("cancel pending join")
     queued_report: cancel_queued.join() ?? panic("cancel queued join")
     running_report: cancel_running.join() ?? panic("cancel running join")
-    print("cancel pending={!pending_report.accepted() && pending_report.state() == .Cancelled} trace={pending_report.trace().summary()}")
-    print("cancel queued={queued_report.accepted() && queued_report.state() == .Cancelled} trace={queued_report.trace().summary()}")
-    print("cancel running={running_report.accepted() && running_report.state() == .Cancelled} trace={running_report.trace().summary()}")
-    print("after-cancel q={cancelled.queued_count()} r={cancelled.running_count()} p={cancelled.blocked_count()}")
+    print("cancel pending={!pending_report.accepted() && pending_report.state() == .Canceled} trace={pending_report.trace().summary()}")
+    print("cancel queued={queued_report.accepted() && queued_report.state() == .Canceled} trace={queued_report.trace().summary()}")
+    print("cancel running={running_report.accepted() && running_report.state() == .Canceled} trace={running_report.trace().summary()}")
+    print("after-cancel q={canceled.queued_count()} r={canceled.running_count()} p={canceled.blocked_count()}")
 
     queued_scope: event.scope()
     queued_deadline: event.async_result<Int, String>(AsyncPolicy{capacity: 1, overflow: .Block}, .Collect) ?? panic("policy")
@@ -88,5 +88,5 @@ run: fn() {
 
     owner_task: owner_teardown_task()
     owner_report: owner_task.join() ?? panic("owner join")
-    print("owner teardown={owner_report.accepted() && owner_report.state() == .Cancelled} trace={owner_report.trace().summary()}")
+    print("owner teardown={owner_report.accepted() && owner_report.state() == .Canceled} trace={owner_report.trace().summary()}")
 }

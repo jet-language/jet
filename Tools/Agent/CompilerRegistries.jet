@@ -1605,11 +1605,11 @@ scheduler_verdict: fn(lane: &Lane, binary: String) -[Env, Exec, FS, IO, Time, Ti
         exact(ran, "", "") ?? return Err(problem("JET_SCHEDULER_THREADS={threads}: {err.message}"))
     }
     header: trap_literal(repo, "trap_msg_header_panic") ?? return Err(err)
-    cancelled: scheduler_literal(repo, "scheduler_msg_cancelled") ?? return Err(err)
+    canceled: scheduler_literal(repo, "scheduler_msg_canceled") ?? return Err(err)
     prelude: trap_literal(repo, "trap_msg_prelude_end") ?? return Err(err)
     footer: trap_literal(repo, "trap_footer_e3001") ?? return Err(err)
     panicked: execute(lane, binary, [String]{"root-panic"}, out, [Setting]{}, 70, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
-    exact(panicked, "", "{header}{cancelled}{prelude}{footer}")
+    exact(panicked, "", "{header}{canceled}{prelude}{footer}")
 }
 
 // The world/sentry host runs the world, sentry, test-scope and allocation
@@ -2696,7 +2696,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
     repo: test_repo()
     assert_eq(trap_literal(repo, "trap_msg_header_panic") ?? panic(err.message), "Stop [E3001]: `panic: ")
     assert_eq(trap_literal(repo, "trap_msg_prelude_end") ?? panic(err.message), "`\n  --> <core.prelude>:0\n")
-    assert_eq(scheduler_literal(repo, "scheduler_msg_cancelled") ?? panic(err.message), "task canceled at a cooperative wait point")
+    assert_eq(scheduler_literal(repo, "scheduler_msg_canceled") ?? panic(err.message), "task canceled at a cooperative wait point")
     assert((trap_literal(repo, "trap_footer_e3001") ?? panic(err.message)).starts_with(" Why: The program hit a `panic`"))
     assert_eq(static_text_literal("rt_static_text(\"a\\\\b\\\"c{{{{d}}}}\\n\")", "escapes") ?? panic(err.message), "a\\b\"c{{d}}\n")
     if trap_literal(repo, "trap_msg_no_such_literal") == {

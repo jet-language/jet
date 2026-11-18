@@ -357,7 +357,7 @@ exit_unmapped: fn(code: Int) -[Exec.Exit]> Never Never! {
 }
 
 /// Cancel the process when `signal` arrives: the entry's waits end without
-/// parking (a network wait as `NetError.Cancelled`, a sleep at once) and every
+/// parking (a network wait as `NetError.Canceled`, a sleep at once) and every
 /// live task is canceled, so a serving `HTTPServer` returns its report and
 /// the program drains to its end. `signals` takes a signal as a value instead.
 on_signal: fn(signal: ProcessSignal) -[Exec]> Never! {
@@ -409,10 +409,10 @@ run_all: fn(specs: [ProcessSpec], jobs: Int) -[Exec, Time.Wait]> [ProcessReceipt
     task.group pool(limit: jobs) {
         handles: loop spec in specs -> task run_all_job(core.process.__spec_parent_death(spec))
         loop handle in handles {
-            outcome: handle.join() ?? {receipt: None, error: Val(run_all_cancelled())}
+            outcome: handle.join() ?? {receipt: None, error: Val(run_all_canceled())}
             if outcome.receipt == {
                 .Val(receipt) -> { results.push(Ok(receipt)) }
-                .None -> results.push(Err(outcome.error ?? run_all_cancelled()))
+                .None -> results.push(Err(outcome.error ?? run_all_canceled()))
             }
         }
     }
@@ -426,8 +426,8 @@ run_all_job: fn(spec: ProcessSpec) -[Exec, Time.Wait]> {receipt: ProcessReceipt?
     }
 }
 
-run_all_cancelled: fn() -> IOError Never! {
-    IOError.Cancelled(
+run_all_canceled: fn() -> IOError Never! {
+    IOError.Canceled(
         IOContext{
             operation: .Resolve,
             resource: Val("process.run_all"),

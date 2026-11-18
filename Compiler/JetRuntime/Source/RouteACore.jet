@@ -56,11 +56,18 @@ packed_bytes_out: fn(bytes: I64, length: I64, output: I64) -> I64 {
 }
 
 // Whether the current host task is canceled; no task is None.
-#Export(c) jet_scheduler_task_cancelled_state: fn(some: I64) -> I64 {
+#Export(c) jet_scheduler_task_canceled_state: fn(some: I64) -> I64 {
     control: scheduler_control_current()
     if (control == I64{0}) { return I64{0} }
     rt_text_store(some, if (sync_load(wrapping(control + I64{16})) != I64{0}) -> I64{1} else -> I64{0})
     I64{1}
+}
+
+// Seed bridge, deleted once a seed built from this tree is the seed: the
+// seed that builds this runtime's compiler routes
+// `core.tasks.__task_canceled` to the British export name.
+#Export(c) jet_scheduler_task_cancelled_state: fn(some: I64) -> I64 {
+    jet_scheduler_task_canceled_state(some)
 }
 
 // core.tasks.quiesce: join the scheduler's carrier and timer threads

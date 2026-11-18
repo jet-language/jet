@@ -167,7 +167,7 @@ HTTPShutdownReport: struct {
     accepted: Int,
     overloaded: Int,
     completed: Int,
-    cancelled: Int,
+    canceled: Int,
 }
 
 /// Whether a server should be sent traffic, as `readiness()` and the built-in
@@ -459,7 +459,7 @@ HTTPServer: struct {
                     // A canceled accept (the serving task's cancel, or the
                     // process's on a delivered `process.on_signal` signal)
                     // stops serving as a shutdown does: the report stands.
-                    if accept_cancelled(error) -> running = false else if accept_transient(error) {
+                    if accept_canceled(error) -> running = false else if accept_transient(error) {
                         // A failed accept the listener recovers from waits,
                         // doubling from 5 ms to 1 s, instead of retrying at
                         // once; the connections being served go on.
@@ -523,7 +523,7 @@ HTTPServer: struct {
     shutdown: fn(self, grace: Duration{0ms}) -[Net]> HTTPShutdownReport HTTPError! {
         phase: server_request_stop(self, grace)
         if phase == 0 {
-            return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0})
+            return Ok(HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, canceled: 0})
         }
         if phase == 1 {
             _: self.__finished.receive() ?? 0
@@ -617,7 +617,7 @@ priv drain_budget: fn(state: Shared<HTTPServerState>, deadline: Duration?) -> In
 priv drain_close: fn(state: Shared<HTTPServerState>, accepted: Int, overloaded: Int) -> HTTPShutdownReport Never! {
     guard := state.guard_edit()
     guard.value.drained = true
-    HTTPShutdownReport{accepted: accepted, overloaded: overloaded, completed: guard.value.completed, cancelled: guard.value.live}
+    HTTPShutdownReport{accepted: accepted, overloaded: overloaded, completed: guard.value.completed, canceled: guard.value.live}
 }
 
 // Whether the drain of `server` (None: a lone `serve_once` connection, which
@@ -630,7 +630,7 @@ priv drain_ended: fn(server: Shared<HTTPServerState>?) -> Bool Never! {
 
 priv server_report: fn(server: HTTPServer) -> HTTPShutdownReport Never! {
     guard: server.__state.guard_read()
-    guard.value.report ?? HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, cancelled: 0}
+    guard.value.report ?? HTTPShutdownReport{accepted: 0, overloaded: 0, completed: 0, canceled: 0}
 }
 
 // The peer's address without its port: what the per-peer limit counts.
@@ -741,13 +741,13 @@ __live: fn(state: Shared<HTTPServerState>) -> Int Never! {
 priv accept_timed_out: fn(error: NetError) -> Bool Never! {
     if error == {
         .Timeout(_) -> true
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
 
-priv accept_cancelled: fn(error: NetError) -> Bool Never! {
+priv accept_canceled: fn(error: NetError) -> Bool Never! {
     if error == {
-        .Cancelled(_) -> true
+        .Canceled(_) -> true
         .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
@@ -761,7 +761,7 @@ priv accept_transient: fn(error: NetError) -> Bool Never! {
         .ConnectionReset(_) -> true
         .Other(detail) -> accept_transient_code(detail.os_code)
         .Protocol(detail) -> accept_transient_code(detail.os_code)
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .DNS(_) -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .DNS(_) -> false
     }
 }
 
@@ -1149,7 +1149,7 @@ priv error_response: fn(error: HTTPError) -> HTTPResponse Never! {
         .BodyTooLarge(_) -> empty_response(413)
         .InvalidFraming -> empty_response(400)
         .UnsupportedEncoding -> empty_response(415)
-        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .Cancelled | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> status_page(500)
+        .InvalidMethod | .InvalidURL | .InvalidHeader | .InvalidStatus | .BodyConsumed | .Canceled | .Resolve(_) | .Connect(_) | .TLS(_) | .Timeout(_) | .Proxy(_) | .Redirect(_) | .Protocol(_) | .IO(_) | .Policy(_) | .ResourceUnavailable(_) | .Internal(_) | .UnsupportedTarget(_) -> status_page(500)
     }
 }
 

@@ -1,6 +1,13 @@
-use core: core
+use {
+    core: core
+    ui: core.ui
+    ui_rt: jet.runtime.ui
+}
 
-// core.browser.host — the page host's DOM event route and value reads.
+// core.browser.host — the page's DOM event routes and value reads.
+//
+// Both ask the page's core.ui.host provider (JetWeb Host.jet deviceRequest).
+// Outside a page no provider answers, so `on` binds nothing and `value` is "".
 
 WebEvent: struct {
     path: String,
@@ -8,12 +15,29 @@ WebEvent: struct {
     payload: String,
 }
 
-// `jet_web_on` has registry entries but no implementation in this
-// repository: the generated web host binds no DOM route by path. This
-// forwarding declaration is not an implementation or cutover. Native
-// callback admission must keep the actual backend contract.
-on: fn(path: String, title: String, handler: fn(WebEvent)) -[Browser]> Never! {
-    core.browser.host.on(path, title, handler)
+// The provider's device kinds this module asks: a route's binding, the
+// payload of the event a route's handler runs for, and an element's value.
+priv WEB_DEVICE_ROUTE: 20
+
+priv WEB_DEVICE_EVENT: 21
+
+priv WEB_DEVICE_VALUE: 22
+
+// Runs `handler` for each `title` event (a DOM event type, "input" say) of
+// the page's element the CSS selector `path` selects, once the program's run
+// returned, as a click on a scene element runs its handler. The WebEvent
+// carries the route's `path` and `title`, and as its payload the value
+// (`value`) the event's element holds then.
+on: fn(path: String, title: String, handler: &&fn(WebEvent)) -[Browser]> Never! {
+    at: path.copy()
+    kind: title.copy()
+    route: ui.button("", fn() {
+        payload: ui_rt.device(WEB_DEVICE_EVENT, "") ?? ""
+        handler(WebEvent{path: at.copy(), title: kind.copy(), payload: payload})
+    })
+    _: ui_rt.device(WEB_DEVICE_ROUTE, "{route.__click_slot()} {title} {path}")
 }
 
-value: fn(key: String) -[Browser]> String Never! { core.browser.host.value(key) }
+// The value the page's element `key` (a CSS selector) selects holds: an
+// input's value, else its text; "" when no element matches.
+value: fn(key: String) -[Browser]> String Never! { ui_rt.device(WEB_DEVICE_VALUE, key) ?? "" }

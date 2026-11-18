@@ -4335,7 +4335,7 @@ validate_core_api_fixture_execution: fn(root: String, fixture: Dyn) -[FS]> Int L
 
 // Whether a line, after leading whitespace, reads `label` then a non-space
 // character and at least one more: /^\s*label \S.+/m.
-labelled_line: fn(line: String, label: String) -> Bool Never! {
+labeled_line: fn(line: String, label: String) -> Bool Never! {
     rest: line.trim_start().removesuffix("\r")
     if !rest.starts_with(label) -> return false
     after: byte_tail(rest, byte_len(label))
@@ -4353,7 +4353,7 @@ error_line: fn(line: String) -> Bool Never! {
     at += 1
     end: word_end(bytes, at)
     if end == at -> return false
-    labelled_line(byte_tail(String.from_bytes_lossy(bytes), end), "]: ")
+    labeled_line(byte_tail(String.from_bytes_lossy(bytes), end), "]: ")
 }
 
 // The blank-line-separated entries of a diagnostics stream.
@@ -4418,8 +4418,8 @@ validate_core_api_syntax_coverage: fn(root: String) -[FS]> Int LedgerError! {
             has_fix := false
             loop line in entry {
                 if error_line(line) -> has_error = true
-                if labelled_line(line, "Why: ") -> has_why = true
-                if labelled_line(line, "Fix: ") -> has_fix = true
+                if labeled_line(line, "Why: ") -> has_why = true
+                if labeled_line(line, "Fix: ") -> has_fix = true
             }
             complete = has_error && has_why && has_fix
         }

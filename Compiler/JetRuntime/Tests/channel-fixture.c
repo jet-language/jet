@@ -126,10 +126,10 @@ static void queue_tests(void) {
     jet_rt_channel_fixture_reservations(&word_meta);
     assert(jet_rt_channel_fixture_select_wake_handoff(&word_meta) == 1);
     puts("select wake handoff parity ok");
-    unsigned cancelled_drops = atomic_load(&drops);
+    unsigned canceled_drops = atomic_load(&drops);
     jet_rt_channel_fixture_stops(&word_meta, (W)jet_rt_channel_fixture_stop,
                                 &owned_meta, (W)inspect);
-    assert(atomic_load(&drops) == cancelled_drops + 1);
+    assert(atomic_load(&drops) == canceled_drops + 1);
     puts("reservations/stopped output/permit cleanup ok");
 #endif
 #if defined(JET_SEED) || defined(JET_CLOSED_CROSS)

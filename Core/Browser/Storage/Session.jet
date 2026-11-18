@@ -4,8 +4,8 @@ use {
     local_storage: core.browser.storage.local
 }
 
-// The shipped process-default store is separate from local storage. Web is
-// registered-unsupported, not a tab store.
+// The shipped process-default store is separate from local storage. In a
+// page, session storage is the page's sessionStorage (storage.page_ask).
 SessionStorage: struct {
     entries: [String:String],
 }
@@ -18,6 +18,8 @@ get: fn(key: String) -[Browser]> String? Never! {
     if storage.world_entries("core.browser.storage.session") == .Val(entries) {
         return entries.get(key)
     }
+    read: storage.page_get("session", key)
+    if read.page -> return read.value
     state: core.mem.__process_shared(init_session_storage)
     guard: state.guard_read()
     guard.value.entries.get(key)
@@ -25,6 +27,9 @@ get: fn(key: String) -[Browser]> String? Never! {
 
 set: fn(key: String, value: String) -[Browser]> Never! {
     if storage.world_set("core.browser.storage.session", key, value) {
+        return
+    }
+    if storage.page_ask("session", "set", key, value) != None {
         return
     }
     state: core.mem.__process_shared(init_session_storage)
@@ -36,6 +41,9 @@ remove: fn(key: String) -[Browser]> Never! {
     if storage.world_remove("core.browser.storage.session", key) {
         return
     }
+    if storage.page_ask("session", "remove", key, "") != None {
+        return
+    }
     state: core.mem.__process_shared(init_session_storage)
     guard := state.guard_edit()
     _: guard.value.entries.remove(key)
@@ -43,6 +51,9 @@ remove: fn(key: String) -[Browser]> Never! {
 
 clear: fn() -[Browser]> Never! {
     if storage.world_clear("core.browser.storage.session") {
+        return
+    }
+    if storage.page_ask("session", "clear", "", "") != None {
         return
     }
     state: core.mem.__process_shared(init_session_storage)

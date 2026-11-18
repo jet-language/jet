@@ -131,7 +131,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("boundary comparison canonical verdict vocabulary and assertion rendering") {
-    cases: [{status: ComparisonStatus, text: String}]{{status: ComparisonStatus.Matched, text: "matched"}, {status: ComparisonStatus.Mismatch, text: "mismatch"}, {status: ComparisonStatus.Empty, text: "empty"}, {status: ComparisonStatus.Unsupported, text: "unsupported"}, {status: ComparisonStatus.Unavailable, text: "unavailable"}, {status: ComparisonStatus.Timeout, text: "timeout"}, {status: ComparisonStatus.Cancelled, text: "cancelled"}, {status: ComparisonStatus.InvalidOracle, text: "invalid_oracle"}, {status: ComparisonStatus.Contaminated, text: "contaminated"}}
+    cases: [{status: ComparisonStatus, text: String}]{{status: ComparisonStatus.Matched, text: "matched"}, {status: ComparisonStatus.Mismatch, text: "mismatch"}, {status: ComparisonStatus.Empty, text: "empty"}, {status: ComparisonStatus.Unsupported, text: "unsupported"}, {status: ComparisonStatus.Unavailable, text: "unavailable"}, {status: ComparisonStatus.Timeout, text: "timeout"}, {status: ComparisonStatus.Canceled, text: "canceled"}, {status: ComparisonStatus.InvalidOracle, text: "invalid_oracle"}, {status: ComparisonStatus.Contaminated, text: "contaminated"}}
     loop row in cases {
         text: row.text
         assert_eq(comparison_status_as_str(row.status), text)
@@ -167,7 +167,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("boundary terminals retain exact status relation reason and deduplicate assumptions") {
-    statuses: [ComparisonStatus]{ComparisonStatus.Empty, ComparisonStatus.Unsupported, ComparisonStatus.Unavailable, ComparisonStatus.Timeout, ComparisonStatus.Cancelled, ComparisonStatus.InvalidOracle, ComparisonStatus.Contaminated}
+    statuses: [ComparisonStatus]{ComparisonStatus.Empty, ComparisonStatus.Unsupported, ComparisonStatus.Unavailable, ComparisonStatus.Timeout, ComparisonStatus.Canceled, ComparisonStatus.InvalidOracle, ComparisonStatus.Contaminated}
     loop status in statuses {
         contract := pkg_boundary_test_contract("py")
         record: pkg_boundary_test_terminal(ObservationRelation.Custom{name: "oracle"}, status, "terminal reason")
@@ -238,7 +238,7 @@ pkg_boundary_test_receipt_error: fn(receipt: ForeignSourceReceipt) -> String Nev
 }
 
 #Test("reasoned replacement refuses empty mismatched discarded and all terminal verdicts atomically") {
-    records: [ComparisonRecord]{pkg_boundary_test_comparison("43", false), pkg_boundary_test_compare(ObservationRelation.TypedEquality, [ComparisonSample]{}), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{pkg_boundary_test_sample("42", true)}, 1), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, 2), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unsupported, "unsupported"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unavailable, "unavailable"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Timeout, "timeout"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Cancelled, "cancelled"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.InvalidOracle, "invalid"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Contaminated, "contaminated")}
+    records: [ComparisonRecord]{pkg_boundary_test_comparison("43", false), pkg_boundary_test_compare(ObservationRelation.TypedEquality, [ComparisonSample]{}), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{pkg_boundary_test_sample("42", true)}, 1), testing_compare_samples_with_discarded(ObservationRelation.TypedEquality, [ComparisonSample]{}, 2), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unsupported, "unsupported"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Unavailable, "unavailable"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Timeout, "timeout"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Canceled, "canceled"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.InvalidOracle, "invalid"), pkg_boundary_test_terminal(ObservationRelation.TypedEquality, ComparisonStatus.Contaminated, "contaminated")}
     loop record in records {
         contract := pkg_boundary_test_contract("py")
         before: contract.copy()

@@ -10968,6 +10968,32 @@ LiveQueryNotTrackable: struct {
     }
 }
 
+ScopedQueryOutsideScope: struct {
+    scope: String,
+    table: String,
+
+    impl Diagnostic {
+        code: "E2477",
+        safety_class: .Soundness,
+        safety_reason: "A row-policy scope is the boundary of what its holder may touch, so a statement that reaches another table would read or write rows no policy admitted.",
+        expert_path: "none: the table is reached through the store or a scope over it",
+        stage: [.Runtime],
+        meaning: "A policy-scoped query names a table outside its scope",
+        moment: .Run,
+        fix_next: "Run the statement through the store, or through a scope whose policy names its table.",
+
+        what: fn(self) -> String { "A scope over `{self.scope}` cannot reach `{self.table}`" }
+
+        why: fn(self) -> String {
+            "A `DBScope` from `store.with_policy` is confined to its policy's table. The tables a statement reads or writes come from the database engine's compile of it, so a join, a subquery or a write that names another table is refused before it runs."
+        }
+
+        fix: fn(self) -> String {
+            "Query `{self.table}` through the store or a scope whose policy names it, and keep this scope's statements on `{self.scope}`."
+        }
+    }
+}
+
 Panic: struct {
     msg: String,
 
@@ -23758,7 +23784,7 @@ MixedTaskBranches: struct {
     }
 }
 
-TaskCancelled: struct {
+TaskCanceled: struct {
     impl Diagnostic {
         code: "E3004",
         status: .Retired,
@@ -23769,7 +23795,7 @@ TaskCancelled: struct {
         }
 
         why: fn(self) -> String {
-            "Cancellation is a value, not a stop: a canceled task's join gives `TaskFailure.Cancelled`, a canceled root drains its scope and exits, and an unhandled `Cancelled` reports through the ordinary failure report; the code is registered again if cancellation ever becomes a coded stop"
+            "Cancellation is a value, not a stop: a canceled task's join gives `TaskFailure.Canceled`, a canceled root drains its scope and exits, and an unhandled `Canceled` reports through the ordinary failure report; the code is registered again if cancellation ever becomes a coded stop"
         }
 
         fix: fn(self) -> String { "Do not use E3004" }

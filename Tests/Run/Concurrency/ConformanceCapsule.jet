@@ -16,8 +16,8 @@ failure_label: fn(error: TaskFailure) -> String {
         .DeadlineBlown -> {
             return "deadline"
         }
-        .Cancelled -> {
-            return "cancelled"
+        .Canceled -> {
+            return "canceled"
         }
     }
 }
@@ -155,7 +155,7 @@ shielded: fn(entered: Sender<Int>) -> Int {
         #Shield {
             entered.send(1)
             if sentinel.join() == {
-                .Err(.Cancelled) -> { print("shield: committed inside shield") }
+                .Err(.Canceled) -> { print("shield: committed inside shield") }
                 .Err(_) -> { print("shield: the sentinel failed") }
                 .Ok(_) -> print("shield: no cancel reached the shield within 5s")
             }

@@ -193,7 +193,7 @@ task_group_admit: fn(group: I64) -> I64 {
         sync_store(wrapping(group + I64{40}), node)
         sync_mutex_unlock(wrapping(group + I64{8}))
         status := scheduler_deadline_check(kind)
-        if (status == I64{0} && !scheduler_shielded() && scheduler_task_cancelled()) {
+        if (status == I64{0} && !scheduler_shielded() && scheduler_task_canceled()) {
             scheduler_deliver_cancel()
             status = jet_scheduler_native_status()
         }
@@ -241,7 +241,7 @@ task_group_close: fn(group: I64) {
     sync_store(wrapping(group + I64{16}), I64{1})
     task_group_waiters_wake(group)
     sync_mutex_unlock(wrapping(group + I64{8}))
-    cancel_children: jet_scheduler_native_status() == I64{2} || (scheduler_task_cancelled() && !scheduler_shielded())
+    cancel_children: jet_scheduler_native_status() == I64{2} || (scheduler_task_canceled() && !scheduler_shielded())
     if cancel_children -> task_group_cancel_children(group)
     // The children stay listed while they drain, so a cancel that reaches the
     // opener meanwhile still finds them.
@@ -269,9 +269,9 @@ task_group_close: fn(group: I64) {
     }
     if (capacity != I64{0}) { jet_rt_free(data, capacity * I64{8}, I64{8}) }
     task_group_unlist(group)
-    // A closer canceled and not shielded unwinds as `Cancelled` once every
+    // A closer canceled and not shielded unwinds as `Canceled` once every
     // child has ended.
-    if (scheduler_task_cancelled() && !scheduler_shielded() && jet_scheduler_native_status() == I64{0}) {
+    if (scheduler_task_canceled() && !scheduler_shielded() && jet_scheduler_native_status() == I64{0}) {
         scheduler_deliver_cancel()
     }
 }
@@ -305,7 +305,7 @@ task_order_before: fn(left: I64, right: I64) -> Bool {
 
 task_selection_wait_check: fn(kind: I64) -> I64 {
     if (scheduler_deadline_check(kind) != I64{0}) { return jet_scheduler_native_status() }
-    if scheduler_task_cancelled() && !scheduler_shielded() -> scheduler_deliver_cancel()
+    if scheduler_task_canceled() && !scheduler_shielded() -> scheduler_deliver_cancel()
     jet_scheduler_native_propagate()
 }
 

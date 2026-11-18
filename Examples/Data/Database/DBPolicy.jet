@@ -1,7 +1,7 @@
 // One explicit scope carries policy and user identity.
-// The row policy constrains the rows of its own table (#6070): SQL that
-// targets no table or another table runs unchanged, and SQL that reads the
-// policy's table any other way is refused.
+// The scope is confined to its policy's table: SQL that names no table runs,
+// the policy narrows its own table's rows, and SQL that names another table
+// is refused (E2477), so the notes are read through the connection.
 package: {
     name: "db_policy"
     authority: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc, Time.Wait] }
@@ -38,8 +38,12 @@ run: fn() {
     value: db.row_int(one, "one") ?? panic("one")
     print("select-1:{value}")
     body: "shared"
-    _note: scoped.execute(SQL{"INSERT INTO notes (body) VALUES ({body})"}) ?? panic("note")
-    notes: scoped.query(SQL{"SELECT body FROM notes"}) ?? panic("notes")
+    _note: conn.execute(SQL{"INSERT INTO notes (body) VALUES ({body})"}) ?? panic("note")
+    if scoped.query(SQL{"SELECT body FROM notes"}) == {
+        .Ok(_) -> { print("notes:read") }
+        .Err(failure) -> { print("notes:{failure.message()}") }
+    }
+    notes: conn.query(SQL{"SELECT body FROM notes"}) ?? panic("notes")
     print("notes:{notes.len()}")
     if scoped.query(SQL{"SELECT body FROM notes JOIN tasks"}) == {
         .Ok(_) -> { print("join:accepted") }

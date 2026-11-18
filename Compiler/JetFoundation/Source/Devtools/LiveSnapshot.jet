@@ -25,7 +25,7 @@ JetLiveTask: struct {
     state: String,
     wait: String,
     deadline_ms: Int?,
-    cancelled: Bool,
+    canceled: Bool,
 }
 
 JetLiveChannel: struct {
@@ -227,7 +227,7 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     effects := [String:Int]{}
     loop key in ([String]{"compute", "waiting", "channel", "time", "io"}) -> effects[key] = 0
     running := 0
-    cancelled := 0
+    canceled := 0
     seen := [Int]{}
     loop {
         section: jet_live_unsigned(cursor)
@@ -248,7 +248,7 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                 state_word: jet_live_word(cursor)
                 deadline_present: jet_live_word(cursor) != U64{0}
                 deadline: jet_live_signed(cursor)
-                task_cancelled: jet_live_word(cursor) != U64{0}
+                task_canceled: jet_live_word(cursor) != U64{0}
                 _: jet_live_raw(cursor)
                 wait_recorded: jet_live_raw(cursor)
                 wait_raw: wait_recorded ?? [U8]{}
@@ -266,9 +266,9 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                         effects["io"] = (effects.get("io") ?? 0) + 1
                     }
                 }
-                if task_cancelled -> cancelled += 1
+                if task_canceled -> canceled += 1
                 if state_word == (U64{1}) -> running += 1
-                tasks.push(JetLiveTask{id: id, parent: parent, state: state, wait: jet_live_shown(wait_raw, "live task `wait`"), deadline_ms: if deadline_present -> Val(deadline) else -> None, cancelled: task_cancelled})
+                tasks.push(JetLiveTask{id: id, parent: parent, state: state, wait: jet_live_shown(wait_raw, "live task `wait`"), deadline_ms: if deadline_present -> Val(deadline) else -> None, canceled: task_canceled})
             }
         } else if section == 2 {
             loop _ in 0..<count {
@@ -329,7 +329,7 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     if channels.len() > 4096 -> channels = channels[0..<4096].copy()
     effects["compute"] = tasks.len() - (effects.get("waiting") ?? 0)
     resources["running"] = running
-    resources["cancelled"] = cancelled
+    resources["cancelled"] = canceled
     Ok(JetLiveSnapshot{protocol: "jet.live.v1", session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: "", captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: JetLiveRuntime{elapsed_ns: elapsed_ns, cpu_ns: None, exit: exit}, event_records: events, events: None, boot_ns: boot_ns, start_ticks: start_ticks, clock_hz: clock_hz})
 }
 

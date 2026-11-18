@@ -1061,7 +1061,7 @@ write_atomic: fn(path: Path | String, bytes: [U8]) -[FS.Write]> IOError! {
             .Err(error) -> {
                 if error == {
                     .AlreadyExists(_) -> {}
-                    .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> {
+                    .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .Unsupported(_) -> {
                         return Err(error)
                     }
                 }
@@ -2989,7 +2989,7 @@ scoped_read: fn(scope: FileScope, path: String) -[FS.Read]> String IOError! {
                 .PermissionDenied(context) -> {
                     assert_eq(context.cause, Val("path is outside the granted FS.Read root"))
                 }
-                .InvalidInput(_) | .NotFound(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                .InvalidInput(_) | .NotFound(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     panic("outside the root is PermissionDenied")
                 }
             }
@@ -2997,7 +2997,7 @@ scoped_read: fn(scope: FileScope, path: String) -[FS.Read]> String IOError! {
     }
     if scope_input_error("x", "why") == {
         .PermissionDenied(context) -> assert_eq(context.cause, Val("why"))
-        .InvalidInput(_) | .NotFound(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+        .InvalidInput(_) | .NotFound(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
             panic("scope input errors are PermissionDenied")
         }
     }
@@ -3144,7 +3144,7 @@ trim_file_line: fn(bytes: &[U8]) Never! {
                 .Other(context) -> {
                     assert_eq(context.cause, Val("filesystem walk root is not a directory: {file.path}"))
                 }
-                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+                .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
                     assert(false)
                 }
             }
@@ -3305,7 +3305,7 @@ metadata_fault_fixture: fn(prefix: String) -[FS]> {root: TempDir, dir: String, f
 metadata_fault_seen: fn(probe: String, error: IOError) {
     if error == {
         .Other(context) -> assert_eq(context.cause, Val("fault injected: FS.Read"))
-        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
+        .InvalidInput(_) | .NotFound(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> {
             panic("{probe} expected the injected FS.Read fault, got {error:Debug}")
         }
     }

@@ -22,7 +22,7 @@ loader_error: fn(kind: DataErrorKind, reason: String, operation: String) -> Data
 // retain a known snapshot without falsely reporting a fresh one.
 
 bind: fn<T>(loader: &DataLoader<T>, payload: [U8]) DataError! {
-    if loader.cancelled {
+    if loader.canceled {
         return Err(loader_error(DataErrorKind.State, "loader was canceled", source_path<T>(loader)))
     }
     if !accepts_payload<T>(loader) {
@@ -62,11 +62,11 @@ authority: fn<T>(loader: DataLoader<T>) -> DataAuthority Never! { loader.authori
 status: fn<T>(loader: DataLoader<T>) -> DataLoaderStatus Never! { loader.status.copy() }
 
 ready: fn<T>(loader: DataLoader<T>) -> Bool Never! {
-    !loader.cancelled && !loader.status.backpressure
+    !loader.canceled && !loader.status.backpressure
 }
 
 needs_refresh: fn<T>(loader: DataLoader<T>) -> Bool Never! {
-    if loader.status.freshness == DataFreshness.Fresh || loader.status.freshness == DataFreshness.Offline || loader.status.freshness == DataFreshness.Cancelled {
+    if loader.status.freshness == DataFreshness.Fresh || loader.status.freshness == DataFreshness.Offline || loader.status.freshness == DataFreshness.Canceled {
         return false
     }
     true
@@ -79,9 +79,9 @@ snapshot_reusable: fn(previous: DataSnapshotIdentity, current: DataSnapshotIdent
 source_identity: fn<T>(loader: DataLoader<T>) -> DataSourceIdentity Never! { loader.source.copy() }
 
 cancel: fn<T>(loader: &DataLoader<T>) Never! {
-    loader.cancelled = true
+    loader.canceled = true
     if loader.source.kind != DataLoaderKind.Value -> loader.payload = None
-    loader.status.freshness = DataFreshness.Cancelled
+    loader.status.freshness = DataFreshness.Canceled
     loader.status.error = "loader was canceled"
     if loader.source.kind == DataLoaderKind.Value -> loader.status.cleanup = "retained" else {
         loader.status.cleanup = "payload-released"
@@ -121,7 +121,7 @@ mark_stale: fn<T>(loader: &DataLoader<T>, cause: DataInvalidationCause) Never! {
 }
 
 stream: fn<T: Decode>(loader: DataLoader<T>) -> DataStream<T> DataError! {
-    if loader.cancelled {
+    if loader.canceled {
         return Err(loader_error(DataErrorKind.State, "loader stream was canceled", source_path<T>(loader)))
     }
     bytes_opt := loader.payload

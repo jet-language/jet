@@ -36,14 +36,14 @@ run: fn() {
     }
     print(owned.emit(9).summary())
 
-    cancelled: event.scope()
+    canceled: event.scope()
     stopped: event.new<Int>()
-    cancelled.cancel()
-    stopped_sub: stopped.on(cancelled, fn(n) { print("canceled event {n}") })
-    print("cancelled-active={stopped_sub.is_active()}")
+    canceled.cancel()
+    stopped_sub: stopped.on(canceled, fn(n) { print("canceled event {n}") })
+    print("canceled-active={stopped_sub.is_active()}")
     print(stopped.emit(10).summary())
     stopped_hook: event.hook<Int, String>("base")
-    stopped_hook.on(cancelled, fn(n) { "canceled hook {n}" })
+    stopped_hook.on(canceled, fn(n) { "canceled hook {n}" })
     print(stopped_hook.run(10, "fallback"))
 
     order_scope: event.scope()

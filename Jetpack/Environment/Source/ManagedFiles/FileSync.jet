@@ -170,7 +170,7 @@ env_files_lstat: fn(path: String, what: String) -[FS]> Stat? EnvironmentError! {
         .Ok(info) -> Ok(Val(info))
         .Err(error) -> if error == {
             .NotFound(_) -> Ok(None)
-            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(env_files_error("couldn't inspect {what}: {error}"))
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(env_files_error("couldn't inspect {what}: {error}"))
         }
     }
 }
@@ -422,7 +422,7 @@ env_files_open_existing_object: fn(path: String) -[FS]> FileReader? EnvironmentE
         .Ok(reader) -> Ok(Val(reader))
         .Err(error) -> if error == {
             .NotFound(_) -> Ok(None)
-            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(env_files_error("couldn't open managed object `{path}`: {error}"))
+            .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> Err(env_files_error("couldn't open managed object `{path}`: {error}"))
         }
     }
 }
@@ -472,7 +472,7 @@ env_files_remove_destination: fn(path: String) -[FS]> IOError! {
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> {}
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(error)
             }
         }
     }
@@ -504,7 +504,7 @@ env_files_load_state: fn(path: String) -[FS]> ManagedFileState EnvironmentError!
         .Err(error) -> {
             if error == {
                 .NotFound(_) -> return Ok(ManagedFileState.empty())
-                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Cancelled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(env_files_error("couldn't read managed file state `{path}`: {error}"))
+                .InvalidInput(_) | .PermissionDenied(_) | .TimedOut(_) | .Canceled(_) | .Closed(_) | .Protocol(_) | .Other(_) | .ResourceLimit(_) | .AlreadyExists(_) | .Unsupported(_) -> return Err(env_files_error("couldn't read managed file state `{path}`: {error}"))
             }
         }
     }

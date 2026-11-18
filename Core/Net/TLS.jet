@@ -1218,7 +1218,7 @@ priv socket_status: fn(err: NetError, fallback: Int) -> Int Never! {
     if err == {
         .ConnectionReset(_) -> C_NET_CONN_RESET
         .Closed(_) -> C_NET_CONN_RESET
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .NotConnected(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> fallback
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .NotConnected(_) | .Timeout(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> fallback
     }
 }
 
@@ -1489,7 +1489,7 @@ priv await_each: fn(tls: &TLSState, status: Int, wait: Duration) -[Net]> Int Net
 
 priv stopped: fn(err: NetError) -> Bool Never! {
     if err == {
-        .Cancelled(_) -> true
+        .Canceled(_) -> true
         .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Timeout(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
@@ -1821,7 +1821,7 @@ priv send_close_notify: fn(tls: &TLSState, end_ns: Int, operation: String) -[Net
 priv not_connected: fn(err: NetError) -> Bool Never! {
     if err == {
         .NotConnected(_) -> true
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .Closed(_) | .Timeout(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .Closed(_) | .Timeout(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
 
@@ -1851,7 +1851,7 @@ priv ready_wait: fn(tcp: TCPStream, interest: NetReadyInterest, end_ns: Int, ope
 priv timed_out: fn(err: NetError) -> Bool Never! {
     if err == {
         .Timeout(_) -> true
-        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Cancelled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
+        .InvalidInput(_) | .PermissionDenied(_) | .AddressInUse(_) | .AddressUnavailable(_) | .ConnectionRefused(_) | .ConnectionReset(_) | .NotConnected(_) | .Closed(_) | .Canceled(_) | .Unsupported(_) | .TLS(_) | .Protocol(_) | .Other(_) | .DNS(_) -> false
     }
 }
 
@@ -1904,7 +1904,7 @@ priv io_error: fn(operation: IOOperation, message: String) -> IOError Never! {
     if message.contains("timed out") || message.contains("deadline") {
         return IOError.TimedOut(io_context(operation, message))
     }
-    if message.contains("canceled") -> return IOError.Cancelled(io_context(operation, message))
+    if message.contains("canceled") -> return IOError.Canceled(io_context(operation, message))
     IOError.Other(io_context(operation, message))
 }
 
@@ -1927,7 +1927,7 @@ priv net_to_io: fn(err: NetError) -> IOError Never! {
         .InvalidInput(detail) -> IOError.InvalidInput(net_io_context(detail))
         .PermissionDenied(detail) -> IOError.PermissionDenied(net_io_context(detail))
         .Timeout(detail) -> IOError.TimedOut(net_io_context(detail))
-        .Cancelled(detail) -> IOError.Cancelled(net_io_context(detail))
+        .Canceled(detail) -> IOError.Canceled(net_io_context(detail))
         .Closed(detail) -> IOError.Closed(net_io_context(detail))
         .NotConnected(detail) -> IOError.Closed(net_io_context(detail))
         .Protocol(detail) -> IOError.Protocol(net_io_context(detail))

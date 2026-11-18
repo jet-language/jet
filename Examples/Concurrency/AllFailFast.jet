@@ -15,7 +15,7 @@ slow_one: fn() -> Int {
 // `boom` panics outright: the `.Panicked(reason)` arm below gets a reason
 // naming `boom` and its message. `slow_one` is still sleeping when `boom`
 // fails; fail-fast does not wait for its 1. The `.Ok(_)`, `.DeadlineBlown`
-// and `.Cancelled` arms are routes this run does not take; the result table
+// and `.Canceled` arms are routes this run does not take; the result table
 // must still cover them.
 boom: fn() -> Int {
     panic("task failed")
@@ -29,7 +29,7 @@ run: fn() {
                 if error == {
                     .Panicked(reason) -> { panic(reason) }
                     .DeadlineBlown -> { panic("deadline") }
-                    .Cancelled -> { panic("cancelled") }
+                    .Canceled -> { panic("canceled") }
                 }
             }
             .Ok(_) -> { print("unexpected success") }

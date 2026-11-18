@@ -13,7 +13,7 @@ run: fn() {
     queue := api.queue() ?? panic("queue authority/provider rejected")
     completed: queue.enqueue(process, "complete", key: "conformance-complete") ?? panic("enqueue failed")
     failed: queue.enqueue(process, "fail", key: "conformance-fail") ?? panic("enqueue failed")
-    cancelled: queue.delay(process, "cancel", for: 1s) ?? panic("delay failed")
+    canceled: queue.delay(process, "cancel", for: 1s) ?? panic("delay failed")
     dead: queue.delay(process, "dead", for: 1s) ?? panic("delay failed")
     print(completed.queue)
     print((queue.receipt(completed.id) ?? panic("receipt missing")).state)
@@ -29,7 +29,7 @@ run: fn() {
     assert(retry.len() == 1)
     retry_active: retry[0]
     print((queue.fail(retry_active, JobError{type_id: "conformance-error", reason: "failure", detail: None}) ?? panic("fail failed")).state)
-    print((queue.cancel(cancelled.id, "conformance cancellation") ?? panic("cancel failed")).state)
+    print((queue.cancel(canceled.id, "conformance cancellation") ?? panic("cancel failed")).state)
     print((queue.dead_letter(dead.id, "conformance dead letter") ?? panic("dead letter failed")).state)
     queue.recover_expired() ?? panic("recovery failed")
     print("recovered")

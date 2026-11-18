@@ -43,7 +43,7 @@ SessionState: enum {
     Paused,
     Finished,
     Stale,
-    Cancelled,
+    Canceled,
 
     as_str: fn(self) -> String Never! {
         if self == {
@@ -51,7 +51,7 @@ SessionState: enum {
             .Paused -> "paused"
             .Finished -> "finished"
             .Stale -> "stale"
-            .Cancelled -> "cancelled"
+            .Canceled -> "cancelled"
         }
     }
 }
@@ -595,7 +595,7 @@ PausedSession: struct {
 
     cancel: fn(&self, reason: String) PausedEvaluateError! {
         self.cancellation = cancellation_requested(reason)
-        self.state = .Cancelled
+        self.state = .Canceled
         Ok()
     }
 
@@ -697,7 +697,7 @@ EvaluateRequest: struct {
 EvaluatorStatus: enum {
     Completed,
     Failed,
-    Cancelled,
+    Canceled,
 }
 
 ObservationFact: struct {
@@ -756,8 +756,8 @@ evaluator_failed: fn(identity: SessionIdentity, scope_id: String, message: Strin
     EvaluatorResult{identity: identity, scope_id: scope_id, status: .Failed, value: None, usage: usage, changed: false, observation: None, error: Val(message)}
 }
 
-evaluator_cancelled: fn(identity: SessionIdentity, scope_id: String, usage: EvaluationUsage) -> EvaluatorResult Never! {
-    EvaluatorResult{identity: identity, scope_id: scope_id, status: .Cancelled, value: None, usage: usage, changed: false, observation: None, error: None}
+evaluator_canceled: fn(identity: SessionIdentity, scope_id: String, usage: EvaluationUsage) -> EvaluatorResult Never! {
+    EvaluatorResult{identity: identity, scope_id: scope_id, status: .Canceled, value: None, usage: usage, changed: false, observation: None, error: None}
 }
 
 AuditOutcome: enum {
@@ -786,7 +786,7 @@ RejectReason: enum {
     ValueNotPublished,
     InsufficientAuthority,
     BudgetExceeded,
-    Cancelled,
+    Canceled,
     EvaluatorFailed,
     MutationNotAllowed,
     ObservationMissing,
@@ -806,7 +806,7 @@ RejectReason: enum {
             .ValueNotPublished -> "value_not_published"
             .InsufficientAuthority -> "insufficient_authority"
             .BudgetExceeded -> "budget_exceeded"
-            .Cancelled -> "cancelled"
+            .Canceled -> "cancelled"
             .EvaluatorFailed -> "evaluator_failed"
             .MutationNotAllowed -> "mutation_not_allowed"
             .ObservationMissing -> "observation_missing"
@@ -963,7 +963,7 @@ evaluate: fn(session: PausedSession, request: EvaluateRequest, result: Evaluator
     invalid_shape: if result.status == {
         .Completed -> result.error != None
         .Failed -> carries_payload || !evaluator_error_valid(result.error)
-        .Cancelled -> carries_payload || result.error != None
+        .Canceled -> carries_payload || result.error != None
     }
     if invalid_shape {
         return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .InvalidEvaluatorResult, usage))
@@ -971,8 +971,8 @@ evaluate: fn(session: PausedSession, request: EvaluateRequest, result: Evaluator
     if result.status == .Failed {
         return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .EvaluatorFailed, usage))
     }
-    if result.status == .Cancelled {
-        return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .Cancelled, usage))
+    if result.status == .Canceled {
+        return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .Canceled, usage))
     }
     if !request.budget.fits(usage) {
         return Err(reject("paused.evaluate", request.request_id, request.identity, request.scope_id, authority, .BudgetExceeded, usage))
@@ -1139,7 +1139,7 @@ evaluate_authority: fn(request: EvaluateRequest) -> [AuthorityRequirement] Never
 validate_common: fn(session: PausedSession, identity: SessionIdentity, request_id: String, scope_id: String, budget: EvaluationBudget, cancellation: Cancellation, authority: [AuthorityRequirement]) RejectReason! {
     if session.state == .Stale -> return Err(RejectReason.StaleSession)
     if session.state != .Paused {
-        return Err(if session.state == .Cancelled || cancellation.requested -> RejectReason.Cancelled else -> RejectReason.SessionNotPaused)
+        return Err(if session.state == .Canceled || cancellation.requested -> RejectReason.Canceled else -> RejectReason.SessionNotPaused)
     }
     if !request_shape_valid(identity, request_id, scope_id, budget, cancellation, authority) {
         return Err(RejectReason.InvalidRequest)
@@ -1156,9 +1156,7 @@ validate_common: fn(session: PausedSession, identity: SessionIdentity, request_i
     if identity.frame_id != session.identity.frame_id {
         return Err(RejectReason.FrameIdentityMismatch)
     }
-    if session.cancellation.requested || cancellation.requested {
-        return Err(RejectReason.Cancelled)
-    }
+    if session.cancellation.requested || cancellation.requested -> return Err(RejectReason.Canceled)
     if !session.budget.contains(budget) -> return Err(RejectReason.BudgetExceeded)
     loop requirement in authority {
         if !session.authority.allows(requirement) -> return Err(RejectReason.InsufficientAuthority)

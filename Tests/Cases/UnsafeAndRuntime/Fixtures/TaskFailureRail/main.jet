@@ -18,7 +18,7 @@ panic_rail: fn() {
                 if error == {
                     .Panicked(reason) -> { print("panic:{reason}") }
                     .DeadlineBlown -> { print("deadline") }
-                    .Cancelled -> { print("cancelled") }
+                    .Canceled -> { print("canceled") }
                 }
             }
             .Ok(_) -> { print("wrong panic variant") }
@@ -33,7 +33,7 @@ all_rail: fn() {
                 if error == {
                     .Panicked(reason) -> { print("panic:{reason}") }
                     .DeadlineBlown -> { print("deadline") }
-                    .Cancelled -> { print("cancelled") }
+                    .Canceled -> { print("canceled") }
                 }
             }
             .Ok(_) -> { print("wrong all variant") }
@@ -49,7 +49,7 @@ deadline_rail: fn() {
                 if error == {
                     .Panicked(reason) -> { print("panic:{reason}") }
                     .DeadlineBlown -> { print("deadline") }
-                    .Cancelled -> { print("cancelled") }
+                    .Canceled -> { print("canceled") }
                 }
             }
             .Ok(_) -> { print("wrong deadline variant") }
@@ -59,16 +59,16 @@ deadline_rail: fn() {
 
 cancel_rail: fn() {
     task.group workers {
-        cancelled: task {
+        canceled: task {
             time.sleep(1000ms)
         }
-        cancelled.cancel()
-        if cancelled.join() == {
+        canceled.cancel()
+        if canceled.join() == {
             .Err(error) -> {
                 if error == {
                     .Panicked(reason) -> { print("panic:{reason}") }
                     .DeadlineBlown -> { print("deadline") }
-                    .Cancelled -> { print("cancelled") }
+                    .Canceled -> { print("canceled") }
                 }
             }
             .Ok(_) -> { print("wrong cancel variant") }

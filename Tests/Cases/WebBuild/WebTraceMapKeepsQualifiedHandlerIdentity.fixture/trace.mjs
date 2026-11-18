@@ -1,8 +1,38 @@
-// Public traceMap projection equivalent to BrowserTrace.rs400-510; original unwrap success is retained.
-import assert from 'node:assert/strict';import{readFileSync}from'node:fs';import{createHash}from'node:crypto';
-const unhex=s=>{assert.equal(s.length%2,0);assert.match(s,/^(?:[0-9a-fA-F]{2})*$/);return new TextDecoder('utf-8',{fatal:true}).decode(Buffer.from(s,'hex'));};
-const manifest=readFileSync('web.manifest.json','utf8'),m=manifest.match(/"traceMap": "([^"]*)"/);assert.ok(m);const sources=[],symbols=[];
-for(const line of unhex(m[1]).split('\n')){const row=line.split('\t');if(row[0]==='source'){assert.equal(row.length,3);assert.match(row[2],/^[0-9a-f]{64}$/);sources.push({path:unhex(row[1]),sha256:row[2],symbols:[]});}else{assert.equal(row[0],'symbol');assert.equal(row.length,4);const name=unhex(row[2]);assert.ok(name.length);assert.ok(['fn','handler'].includes(row[3]));symbols.push([unhex(row[1]),name,row[3]]);}}
-assert.ok(sources.length);for(const[path,name,kind]of symbols){assert.ok(!sources.some(s=>s.symbols.some(([n])=>n===name)));const s=sources.find(s=>s.path===path);assert.ok(s);s.symbols.push([name,kind]);}
-const optional=manifest.match(/"sourceMap": "([^"]*)"/);if(optional)unhex(optional[1]);
-assert.ok(sources.some(s=>s.symbols.some(([n,k])=>n==='__jet_handlers__init$handler0'&&k==='handler')));assert.ok(!sources.some(s=>s.symbols.some(([n])=>n==='init$handler0')));
+// Prints the functions app.wasm's `jet.lines` section (the location table
+// a trace's frames read, JetWeb Module.jet web_location_table) names, each
+// with its file.
+import { readFileSync } from "node:fs";
+
+const module = new WebAssembly.Module(readFileSync("app.wasm"));
+const [section] = WebAssembly.Module.customSections(module, "jet.lines");
+const bytes = new Uint8Array(section);
+let at = 0;
+const leb = (signed) => {
+  let value = 0;
+  let shift = 0;
+  let byte = 0;
+  do {
+    byte = bytes[at++];
+    value |= (byte & 0x7f) << shift;
+    shift += 7;
+  } while (byte & 0x80);
+  return signed && shift < 32 && byte & 0x40 ? value | (-1 << shift) : value;
+};
+const text = () => {
+  const size = leb(false);
+  at += size;
+  return new TextDecoder().decode(bytes.subarray(at - size, at));
+};
+const files = [];
+for (let count = leb(false); count > 0; count -= 1) files.push(text());
+for (let count = leb(false); count > 0; count -= 1) {
+  leb(false);
+  const name = text();
+  const file = files[leb(false)];
+  leb(false); // its declaration line
+  for (let left = leb(false); left > 0; left -= 1) {
+    leb(false);
+    leb(true);
+  }
+  console.log(`fn ${name} ${file}`);
+}

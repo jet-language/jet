@@ -178,7 +178,7 @@ DataFreshness: enum {
     Stale,
     Error,
     Offline,
-    Cancelled,
+    Canceled,
 }
 
 #[Comparable, Equatable]
@@ -289,7 +289,7 @@ DataLoader: struct<T> {
     limits: DataLimits,
     payload: [U8]?,
     last_good: [U8]?,
-    cancelled: Bool,
+    canceled: Bool,
     offline: Bool,
     status: DataLoaderStatus,
 }
@@ -319,7 +319,7 @@ DataWatchStatus: struct {
     freshness_ms: Int,
     invalidation_cause: String,
     refreshing: Bool,
-    cancelled: Bool,
+    canceled: Bool,
 
     impl Display {
         display: fn(self) -> String { data_watch_status_text(self) }
@@ -331,7 +331,7 @@ DataWatchStatus: struct {
 }
 
 data_watch_status_text: fn(status: DataWatchStatus) -> String Never! {
-    "DataWatchStatus{{mode: {status.mode}, revision: {status.revision}, retained_rows: {status.retained_rows}, recomputations: {status.recomputations}, active: {status.active}, generation: {status.generation}, dirty: {status.dirty}, error: {status.error}, freshness_ms: {status.freshness_ms}, invalidation_cause: {status.invalidation_cause}, refreshing: {status.refreshing}, cancelled: {status.cancelled}}}"
+    "DataWatchStatus{{mode: {status.mode}, revision: {status.revision}, retained_rows: {status.retained_rows}, recomputations: {status.recomputations}, active: {status.active}, generation: {status.generation}, dirty: {status.dirty}, error: {status.error}, freshness_ms: {status.freshness_ms}, invalidation_cause: {status.invalidation_cause}, refreshing: {status.refreshing}, canceled: {status.canceled}}}"
 }
 
 // A stream is a one-shot cursor (core-library.md `core.data.stream`): the
@@ -339,7 +339,7 @@ data_watch_status_text: fn(status: DataWatchStatus) -> String Never! {
 DataStream: struct<T> {
     items: [T],
     index: Int,
-    cancelled: Bool,
+    canceled: Bool,
     __source: Shared<StreamSource<T>>?,
 }
 
@@ -812,7 +812,7 @@ __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
     }
     query_make<T>([String]{"stream"}, true, limits.copy(), fn() {
         reader := source.copy()
-        if reader.cancelled {
+        if reader.canceled {
             return Err(data_error(DataErrorKind.State, "stream was canceled", "data.stream"))
         }
         out := [T]{}
@@ -836,13 +836,13 @@ __query_stream: fn<T>(source: DataStream<T>) -> Query<T> Never! {
 // reads and decodes one row, `None` at the end of input.
 __stream_from: fn<T>(pull: &&fn() -> T? DataError!, limits: DataLimits) -> DataStream<T> Never! {
     source: Shared{StreamSource<T>{pull: pull, limits: limits, ahead: [T]{}, ahead_index: 0, terminal: None, done: false}}
-    DataStream<T>{items: [T]{}, index: 0, cancelled: false, __source: Val(source)}
+    DataStream<T>{items: [T]{}, index: 0, canceled: false, __source: Val(source)}
 }
 
 // The next row of a stream: its owned items first, then its pull source.
 // End of input is a stable `None`; a source failure stays latched.
 __stream_pull: fn<T>(stream: &DataStream<T>) -> T? DataError! {
-    if stream.cancelled {
+    if stream.canceled {
         return Err(data_error(DataErrorKind.State, "stream was canceled", "data.stream"))
     }
     if stream.index < 0 -> stream.index = 0
@@ -913,7 +913,7 @@ __stream_collect: fn<T>(stream: &DataStream<T>) -> [T] DataError! {
 // rows ahead into `ahead` so that no row changes owner; a failure while
 // reading ahead is latched for the pull after those rows.
 __stream_remaining: fn<T>(stream: DataStream<T>) -> Int Never! {
-    if stream.cancelled -> return 0
+    if stream.canceled -> return 0
     start: if stream.index < 0 -> 0 else -> stream.index
     remaining := stream.items.len() - start
     if remaining < 0 -> remaining = 0
@@ -1741,7 +1741,7 @@ data_limits_check: fn(limits: DataLimits) DataError! {
 // it parses by format, decodes to `T`, and commits as the new last-good
 // snapshot. Any failure is recorded in the loader status before it returns.
 snapshot: fn<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
-    if loader.cancelled {
+    if loader.canceled {
         return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was canceled before snapshot")))
     }
     data_loader_validate<T>(loader) ?? return Err(data_loader_fail<T>(loader, err))
@@ -2315,7 +2315,7 @@ make_loader: fn<T>(kind: DataLoaderKind, locator: String, member: String, parame
             limits: limits,
             payload: None,
             last_good: None,
-            cancelled: false,
+            canceled: false,
             offline: false,
             status: status,
         },
@@ -3310,7 +3310,7 @@ data_loader_fail: fn<T>(loader: &DataLoader<T>, error: DataError) -> DataError N
     }
     loader.status = DataLoaderStatus{
         identity: loader.status.identity.copy(),
-        freshness: if loader.cancelled -> DataFreshness.Cancelled else -> DataFreshness.Error,
+        freshness: if loader.canceled -> DataFreshness.Canceled else -> DataFreshness.Error,
         invalidated_by: loader.status.invalidated_by.copy(),
         error: data_loader_status_text("{error.operation}: {error.reason}"),
         cleanup: cleanup,
@@ -3355,7 +3355,7 @@ data_loader_validate: fn<T>(loader: DataLoader<T>) DataError! {
 // the loader status. `read` only reads, so a program reaches `FS.Read`
 // through it and no other FS capability.
 __read_file: fn<T>(loader: &DataLoader<T>, read: fn(String) -[FS.Read]> [U8] Err!) -[FS.Read]> DataError! {
-    if loader.cancelled {
+    if loader.canceled {
         return Err(data_loader_fail<T>(loader, data_loader_error(DataErrorKind.State, "data.loader", "loader was canceled before read")))
     }
     data_loader_validate<T>(loader) ?? return Err(data_loader_fail<T>(loader, err))
@@ -3651,7 +3651,7 @@ DataLoaderPortRecord: struct {
     assert_eq(loader.authority.scope, "local")
     assert_eq(loader.format, DataFormat.JSON)
     assert(loader.last_good == None)
-    assert(!loader.cancelled)
+    assert(!loader.canceled)
     assert(!loader.offline)
 
     limits := DataLimits.safe()

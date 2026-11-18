@@ -14,7 +14,7 @@ run: fn() {
 
     first: queue.enqueue(process, "now", key: "first") ?? return
     _failed: queue.enqueue(process, "fail", key: "failed") ?? return
-    cancelled: queue.delay(process, "cancel", for: 1s) ?? return
+    canceled: queue.delay(process, "cancel", for: 1s) ?? return
     deadlettered: queue.delay(process, "dead", for: 1s) ?? return
     receipt: queue.receipt(first.id) ?? return
     // The id is derived from the package authority, so it differs per queue.
@@ -44,7 +44,7 @@ run: fn() {
         }
     }
 
-    queue.cancel(cancelled.id, "teaching cancellation") ?? return
+    queue.cancel(canceled.id, "teaching cancellation") ?? return
     queue.dead_letter(deadlettered.id, "teaching dead letter") ?? return
     queue.recover_expired() ?? return
     queue.status() ?? return

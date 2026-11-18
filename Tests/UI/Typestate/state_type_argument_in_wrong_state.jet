@@ -1,10 +1,10 @@
 // A parameter typed by a state takes only values in that state.
 Order: struct {
     state {
-        Draft -> Confirmed, Cancelled
-        Confirmed -> Shipped, Cancelled
+        Draft -> Confirmed, Canceled
+        Confirmed -> Shipped, Canceled
         Shipped
-        Cancelled
+        Canceled
         Open: Draft | Confirmed
     }
 
@@ -16,7 +16,7 @@ Order: struct {
 
     ship: fn(self: &&Order.Confirmed) -> Order.Shipped { self }
 
-    cancel: fn(self: &&Order.Open) -> Order.Cancelled { self }
+    cancel: fn(self: &&Order.Open) -> Order.Canceled { self }
 }
 
 receipt: fn(order: Order.Shipped) -> String { "shipped {order.id}" }

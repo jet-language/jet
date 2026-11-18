@@ -21,16 +21,16 @@ run: fn() {
     duplicate.status() ?? panic("duplicate status")
     if tree.send_durable(worker, "different", key: "k1") == {
         .Ok(delivery) -> {
-            cancelled: delivery.cancel() ?? panic("unexpected conflict delivery")
-            cancelled.status() ?? panic("unexpected conflict status")
+            canceled: delivery.cancel() ?? panic("unexpected conflict delivery")
+            canceled.status() ?? panic("unexpected conflict status")
             print("conflict:accepted")
         }
         .Err(_) -> { print("conflict:rejected") }
     }
     if tree.send_durable(worker, "second", key: "k2") == {
         .Ok(delivery) -> {
-            cancelled: delivery.cancel() ?? panic("unexpected full delivery")
-            cancelled.status() ?? panic("unexpected full status")
+            canceled: delivery.cancel() ?? panic("unexpected full delivery")
+            canceled.status() ?? panic("unexpected full status")
             print("full:accepted")
         }
         .Err(_) -> { print("full:rejected") }

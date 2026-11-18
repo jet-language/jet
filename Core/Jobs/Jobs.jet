@@ -36,7 +36,7 @@ JobQueueState: enum {
     Completed,
     Failed,
     DeadLettered,
-    Cancelled,
+    Canceled,
 }
 
 JobPayload: struct {
@@ -113,7 +113,7 @@ JobQueueStatus: struct {
     completed: Int,
     failed: Int,
     dead_lettered: Int,
-    cancelled: Int,
+    canceled: Int,
     depth: Int,
     wait_ms: Int,
     throughput: Int,
@@ -338,7 +338,7 @@ queue_mkdir_error: fn(error: IOError) -> ServiceError Never! {
         .NotFound(context) -> context.cause ?? "{error}"
         .PermissionDenied(context) -> context.cause ?? "{error}"
         .TimedOut(context) -> context.cause ?? "{error}"
-        .Cancelled(context) -> context.cause ?? "{error}"
+        .Canceled(context) -> context.cause ?? "{error}"
         .Closed(context) -> context.cause ?? "{error}"
         .Protocol(context) -> context.cause ?? "{error}"
         .Other(context) -> context.cause ?? "{error}"
@@ -583,10 +583,10 @@ queue_transition_fields: fn(observation: QueueTransition) -> String Never! {
         .Running -> "started"
         .Retrying -> "retrying"
         .Completed -> "completed"
-        .Failed | .DeadLettered | .Cancelled -> "failed"
+        .Failed | .DeadLettered | .Canceled -> "failed"
     }
     failure := String?{None}
-    if observation.state == .Cancelled -> failure = Val("cancelled")
+    if observation.state == .Canceled -> failure = Val("cancelled")
     if observation.state == .Failed || observation.state == .DeadLettered {
         failure = Val("error")
         if observation.reason == .Val(reason) {
@@ -616,7 +616,7 @@ queue_publish_optional_transition: fn(observation: QueueTransition?) Never! {
 
 queue_publish_status: fn(status: JobQueueStatus) -[DB, Time]> Never! {
     entity: "{status.authority}:{status.queue}"
-    fields: "{{\"event\":\"status\",\"state\":\"status\",\"job_id\":{queue_json_text(entity)},\"name\":{queue_json_text(status.queue)},\"queue\":{queue_json_text(status.queue)},\"attempts\":0,\"duration_ms\":null,\"worker\":null,\"request_id\":null,\"failure\":null,\"reason\":null,\"sequence\":0,\"authority\":{queue_json_text(status.authority)},\"queued\":{status.queued},\"running\":{status.running},\"retrying\":{status.retrying},\"completed\":{status.completed},\"failed\":{status.failed},\"dead_lettered\":{status.dead_lettered},\"cancelled\":{status.cancelled},\"depth\":{status.depth},\"wait_ms\":{status.wait_ms},\"throughput\":{status.throughput},\"capacity\":{status.capacity},\"paused\":{status.paused},\"freshness_ms\":{status.freshness_ms},\"labels\":{{}}}}"
+    fields: "{{\"event\":\"status\",\"state\":\"status\",\"job_id\":{queue_json_text(entity)},\"name\":{queue_json_text(status.queue)},\"queue\":{queue_json_text(status.queue)},\"attempts\":0,\"duration_ms\":null,\"worker\":null,\"request_id\":null,\"failure\":null,\"reason\":null,\"sequence\":0,\"authority\":{queue_json_text(status.authority)},\"queued\":{status.queued},\"running\":{status.running},\"retrying\":{status.retrying},\"completed\":{status.completed},\"failed\":{status.failed},\"dead_lettered\":{status.dead_lettered},\"cancelled\":{status.canceled},\"depth\":{status.depth},\"wait_ms\":{status.wait_ms},\"throughput\":{status.throughput},\"capacity\":{status.capacity},\"paused\":{status.paused},\"freshness_ms\":{status.freshness_ms},\"labels\":{{}}}}"
     now: queue_now()
     timestamp: if now < 0 -> 0 else -> now
     #Unsafe("publish source-projected queue status through the existing validated Devtools event/sink boundary") {
@@ -655,10 +655,10 @@ queue_publish_status: fn(status: JobQueueStatus) -[DB, Time]> Never! {
 // Pure state policy belongs in Jet. The provider owns atomic transitions, not
 // an independently mutable copy of a queue's records.
 is_terminal: fn(state: JobQueueState) -> Bool Never! {
-    state == JobQueueState.Completed || state == JobQueueState.Failed || state == JobQueueState.DeadLettered || state == JobQueueState.Cancelled
+    state == JobQueueState.Completed || state == JobQueueState.Failed || state == JobQueueState.DeadLettered || state == JobQueueState.Canceled
 }
 
-is_cancelled: fn(state: JobQueueState) -> Bool Never! { state == JobQueueState.Cancelled }
+is_canceled: fn(state: JobQueueState) -> Bool Never! { state == JobQueueState.Canceled }
 
 // The durable queue keeps its SQLite bindings and row projections in this
 // module. No queue value is serialized through a second provider carrier.
@@ -736,7 +736,7 @@ queue_state_text: fn(state: JobQueueState) -> String Never! {
         .Completed -> "completed"
         .Failed -> "failed"
         .DeadLettered -> "dead_lettered"
-        .Cancelled -> "cancelled"
+        .Canceled -> "cancelled"
     }
 }
 
@@ -748,7 +748,7 @@ queue_state_parse: fn(value: String) -> JobQueueState ServiceError! {
         "completed" -> Ok(JobQueueState.Completed)
         "failed" -> Ok(JobQueueState.Failed)
         "dead_lettered" -> Ok(JobQueueState.DeadLettered)
-        "cancelled" -> Ok(JobQueueState.Cancelled)
+        "cancelled" -> Ok(JobQueueState.Canceled)
         else -> Err(queue_unavailable("queue state `{value}` is unknown"))
     }
 }
@@ -1266,7 +1266,7 @@ queue_transition: fn(record: StoredJob, state: JobQueueState, attempts: Int, now
         .Running -> "start"
         .Retrying -> "retry"
         .Completed -> "complete"
-        .Failed | .DeadLettered | .Cancelled -> "fail"
+        .Failed | .DeadLettered | .Canceled -> "fail"
     }
     QueueTransition{
         event: event,
@@ -1627,7 +1627,7 @@ queue_fail_on_driver: fn(driver: &db.DBDriver, authority: String, name: String, 
 
 queue_cancel_on_driver: fn(driver: &db.DBDriver, authority: String, name: String, id: String, reason: String, lease_token: String?) -[DB, Time]> {receipt: JobQueueReceipt, observation: QueueTransition?} ServiceError! {
     record := queue_find(driver, authority, name, id) ?? return Err(err)
-    if record.state == .Cancelled || record.state == .Completed || record.state == .DeadLettered {
+    if record.state == .Canceled || record.state == .Completed || record.state == .DeadLettered {
         return Ok({receipt: queue_receipt(record, false), observation: None})
     }
     if record.state == .Running && record.lease_token != lease_token {
@@ -1638,7 +1638,7 @@ queue_cancel_on_driver: fn(driver: &db.DBDriver, authority: String, name: String
     queue_update_event(
         driver,
         record,
-        .Cancelled,
+        .Canceled,
         record.attempts,
         now,
         Val(reason),
@@ -1655,8 +1655,8 @@ queue_cancel_on_driver: fn(driver: &db.DBDriver, authority: String, name: String
             {column: "error_detail", value: .Null},
         },
     ) ?? return Err(err)
-    observation: queue_transition(record, .Cancelled, record.attempts, now, Val(reason), duration, record.lease_owner)
-    record.state = .Cancelled
+    observation: queue_transition(record, .Canceled, record.attempts, now, Val(reason), duration, record.lease_owner)
+    record.state = .Canceled
     record.finished_at_ms = Val(now)
     record.lease_owner = None
     record.lease_token = None
@@ -1675,7 +1675,7 @@ queue_dead_letter_on_driver: fn(driver: &db.DBDriver, authority: String, name: S
     if record.state == .DeadLettered {
         return Ok({receipt: queue_receipt(record, false), observation: None})
     }
-    if record.state == .Completed || record.state == .Cancelled {
+    if record.state == .Completed || record.state == .Canceled {
         return Err(ServiceError.Policy("completed or canceled queue work cannot be dead-lettered"))
     }
     if record.state == .Running && record.lease_token != lease_token {
@@ -1787,7 +1787,7 @@ queue_status_on_driver: fn(driver: &db.DBDriver, authority: String, name: String
     completed: queue_count(queue_row_int(row, "completed") ?? return Err(err), "completed") ?? return Err(err)
     failed: queue_count(queue_row_int(row, "failed") ?? return Err(err), "failed") ?? return Err(err)
     dead_lettered: queue_count(queue_row_int(row, "dead_lettered") ?? return Err(err), "dead-lettered") ?? return Err(err)
-    cancelled: queue_count(queue_row_int(row, "cancelled") ?? return Err(err), "cancelled") ?? return Err(err)
+    canceled: queue_count(queue_row_int(row, "cancelled") ?? return Err(err), "cancelled") ?? return Err(err)
     now: queue_now()
     oldest_accepted: if queue_row_optional_int(row, "oldest_accepted") == {
         .Val(value) -> Val(value)
@@ -1834,7 +1834,7 @@ queue_status_on_driver: fn(driver: &db.DBDriver, authority: String, name: String
             completed: completed,
             failed: failed,
             dead_lettered: dead_lettered,
-            cancelled: cancelled,
+            canceled: canceled,
             depth: queued + retrying,
             wait_ms: wait_ms,
             throughput: throughput,

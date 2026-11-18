@@ -193,18 +193,6 @@ host_error_with_context: fn(context: I64, kind: I64) -> I64 {
     value
 }
 
-// Seed bridge, deleted by the sweep that renames the remaining British case
-// names: the seed that builds this runtime's compiler still names
-// `IOError`'s fifth case `Cancelled`, so its record routes reach the
-// `Canceled` exports under the British atom too.
-#Export(c) jet_rt_record_get_io_error_cancelled: fn(error: I64) -> I64 {
-    jet_rt_record_get_io_error_canceled(error)
-}
-
-#Export(c) jet_rt_record_new_io_error_cancelled: fn(context: I64) -> I64 {
-    jet_rt_record_new_io_error_canceled(context)
-}
-
 #Export(c) jet_rt_record_get_io_error_resource_limit: fn(value: I64) -> I64 {
     // `value` borrows an initialized ResourceLimit error.
     if (rt_text_word(value) != HOST_IO_KIND_RESOURCE_LIMIT) {

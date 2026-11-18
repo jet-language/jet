@@ -1,0 +1,147 @@
+// Toolchain a0.0.45: Jet's names are spelled the American way, so every name
+// with a British word in it takes the American word: `TaskFailure.Cancelled`
+// is `TaskFailure.Canceled`, `is_cancelled` is `is_canceled`,
+// `HOST_IO_KIND_CANCELLED` is `HOST_IO_KIND_CANCELED`, `litre` is `liter`.
+// A name is a run of letters, digits and underscores, and its words are split
+// at an underscore, a digit, a lower-case letter followed by a capital, and
+// the last capital of a run of them followed by a lower-case letter
+// (`LSPCancelledCostly` is `LSP`, `Cancelled`, `Costly`). A word in
+// AMERICAN_IDENT1_WORDS is replaced in the case it is written in: all
+// capitals, a capital first letter, or lower case; a word that only contains
+// one (`labelledby`) stays. A name in code, a comment, a string, a Markdown
+// file or an expected output is rewritten alike, so a string that is a wire or
+// storage token is put back by hand. A Jet source that parsed cleanly keeps
+// its text unless the rewrite parses cleanly too.
+
+// One British word of a Jet name and the American word that replaces it.
+AmericanIdentWord: struct {
+    british: String,
+    american: String,
+}
+
+// The British words of Jet's names, in lower case.
+AMERICAN_IDENT1_WORDS: [AmericanIdentWord]{
+    {british: "cancelled", american: "canceled"},
+    {british: "uncancelled", american: "uncanceled"},
+    {british: "cancelling", american: "canceling"},
+    {british: "labelled", american: "labeled"},
+    {british: "unlabelled", american: "unlabeled"},
+    {british: "marshalled", american: "marshaled"},
+    {british: "coloured", american: "colored"},
+    {british: "neighbouring", american: "neighboring"},
+    {british: "metre", american: "meter"},
+    {british: "metres", american: "meters"},
+    {british: "kilometres", american: "kilometers"},
+    {british: "litre", american: "liter"},
+    {british: "millilitre", american: "milliliter"},
+}
+
+// Rewrites the British words of the names in one file of any kind.
+american_ident1_file: fn(path: String, text: String, source: Bool) -[]> MigrationOutcome {
+    words := [String:String]{}
+    loop row in AMERICAN_IDENT1_WORDS -> words[row.british] = row.american
+    bytes: text.bytes()
+    out := [String]{}
+    rewritten := 0
+    cursor := 0
+    at := 0
+    loop at < bytes.len() {
+        if !american_ident1_name_byte(bytes[at]) {
+            at += 1
+            next
+        }
+        start: at
+        loop at < bytes.len() && american_ident1_name_byte(bytes[at]) -> at += 1
+        name: String.from_bytes(bytes[start..<at]) ?? ""
+        renamed: american_ident1_name(name, words)
+        if renamed == name -> next
+        out.push(String.from_bytes(bytes[cursor..<start]) ?? "")
+        out.push(renamed)
+        cursor = at
+        rewritten += 1
+    }
+    if rewritten == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    out.push(String.from_bytes(bytes[cursor..<bytes.len()]) ?? "")
+    result: out.join("")
+    if (source || path.ends_with(".jet") || path.ends_with(".template")) && lambda_shape1_errors(text) == 0 {
+        after_errors: lambda_shape1_errors(result)
+        if after_errors > 0 {
+            return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: the rewrite does not parse ({after_errors} errors), file left alone"}}
+        }
+    }
+    MigrationOutcome{text: result, rewritten: rewritten, skipped: [String]{}}
+}
+
+// `name` with each of its words that `words` lists in the American spelling.
+american_ident1_name: fn(name: String, words: [String:String]) -[]> String {
+    bytes: name.bytes()
+    out := [String]{}
+    cursor := 0
+    at := 0
+    loop at < bytes.len() {
+        if !american_ident1_letter(bytes[at]) {
+            at += 1
+            next
+        }
+        start: at
+        at += 1
+        loop at < bytes.len() && american_ident1_letter(bytes[at]) && !american_ident1_word_starts(bytes, at) {
+            at += 1
+        }
+        word: String.from_bytes(bytes[start..<at]) ?? ""
+        american: words.get(word.to_lower()) ?? next
+        out.push(String.from_bytes(bytes[cursor..<start]) ?? "")
+        out.push(american_ident1_cased(word, american))
+        cursor = at
+    }
+    out.push(String.from_bytes(bytes[cursor..<bytes.len()]) ?? "")
+    out.join("")
+}
+
+// Whether a new word starts at the letter at `at`: a capital after a
+// lower-case letter, or the last capital of a run before a lower-case letter.
+american_ident1_word_starts: fn(bytes: [U8], at: Int) -[]> Bool {
+    if !american_ident1_upper(bytes[at]) -> return false
+    if american_ident1_lower(bytes[at - 1]) -> return true
+    american_ident1_upper(bytes[at - 1]) && at + 1 < bytes.len() && american_ident1_lower(bytes[at + 1])
+}
+
+// `american` in the case `word` is written in.
+american_ident1_cased: fn(word: String, american: String) -[]> String {
+    if word.len() > 1 && word == word.to_upper() -> return american.to_upper()
+    bytes := american.bytes()
+    if american_ident1_upper(word.bytes()[0]) -> bytes[0] = U8{Int{bytes[0]} - 32}
+    String.from_bytes(bytes) ?? ""
+}
+
+american_ident1_name_byte: fn(byte: U8) -[]> Bool {
+    american_ident1_letter(byte) || (byte >= 48 && byte <= 57) || byte == 95
+}
+
+american_ident1_letter: fn(byte: U8) -[]> Bool {
+    american_ident1_upper(byte) || american_ident1_lower(byte)
+}
+
+american_ident1_upper: fn(byte: U8) -[]> Bool { byte >= 65 && byte <= 90 }
+
+american_ident1_lower: fn(byte: U8) -[]> Bool { byte >= 97 && byte <= 122 }
+
+#Test("each British word of a name takes the American word in its case") {
+    words := [String:String]{}
+    loop row in AMERICAN_IDENT1_WORDS -> words[row.british] = row.american
+    assert_eq(american_ident1_name("Cancelled", words), "Canceled")
+    assert_eq(american_ident1_name("is_cancelled", words), "is_canceled")
+    assert_eq(american_ident1_name("HOST_IO_KIND_CANCELLED", words), "HOST_IO_KIND_CANCELED")
+    assert_eq(american_ident1_name("LSPCancelledCostly", words), "LSPCanceledCostly")
+    assert_eq(american_ident1_name("cancelled96", words), "canceled96")
+    assert_eq(american_ident1_name("allow_unlabelled", words), "allow_unlabeled")
+    assert_eq(american_ident1_name("labelledby", words), "labelledby")
+    assert_eq(american_ident1_name("METRETES", words), "METRETES")
+    assert_eq(american_ident1_name("METRE", words), "METER")
+}
+
+#Test("names in code, comments and strings are rewritten, other words stay") {
+    outcome: american_ident1_file("a.txt", "x.is_cancelled() // a `Cancelled` task, aria-labelledby\n\"cancelled\"", false)
+    assert_eq(outcome.text, "x.is_canceled() // a `Canceled` task, aria-labelledby\n\"canceled\"")
+    assert_eq(outcome.rewritten, 3)
+}

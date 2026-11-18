@@ -3280,7 +3280,7 @@ function liveLossOwner(declaredOwners, metric, tower) {
   }
   const card = towerState.cards.get(number);
   if (!card) return { status: "stale", metric, category, card: number, reason: "declared owner card is absent" };
-  if (["done", "cancelled", "frozen"].includes(card.phase)) {
+  if (["done", "canceled", "frozen"].includes(card.phase)) {
     return { status: "stale", metric, category, card: number, title: card.title, phase: card.phase, reason: "declared owner card is terminal" };
   }
   return { status: "live", metric, category, card: number, title: card.title, phase: card.phase, assignee: card.assignee ?? null };
