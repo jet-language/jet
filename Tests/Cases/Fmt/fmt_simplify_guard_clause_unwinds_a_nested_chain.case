@@ -1,0 +1,27 @@
+# `jet fmt --simplify` writes a callable body that ends in a two-way if/else,
+# one of whose branches only leaves the function, as that branch's guard
+# clause followed by the other branch's work; a nested chain unwinds one
+# guard per pass to a fixed point. The program prints the same before and
+# after, simplify reports nothing, and a second pass keeps the output.
+fixture: FmtSimplifyGuardClause.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run one/guard.jet
+exit: 0
+stdout: = "0\n-1\n40\n100\nzero\ntwice 8\nhello\nada\n"
+step: jet run one/kept.jet
+exit: 0
+stdout: = "3\n2\n"
+step: jet fmt --simplify --check one/kept.jet
+exit: 0 # every shape the rule leaves alone is left alone
+step: jet fmt --simplify one/guard.jet
+exit: 0
+stdout: = ""
+stderr: = ""
+file: one/guard.jet = "// A nested chain whose other branches only leave unwinds into guards.\nscore: fn(text: String, limit: Int) -> Int {\n    if text.is_empty() -> return 0\n    value: text.len() * 10\n    if value == 30 -> return -1\n    if value > limit -> return limit\n    return value\n}\n\n// A branch that only leaves first becomes the guard as written.\ndescribe: fn(n: Int) -> String {\n    if n == 0 -> return \"zero\"\n    doubled: n * 2\n    return \"twice {doubled}\"\n}\n\ngreet: fn(name: String) {\n    if !name.contains(\"a\") {\n        return\n    }\n    print(\"hello\")\n    print(name)\n}\n\nrun: fn() {\n    print(score(\"\", 100))\n    print(score(\"abc\", 100))\n    print(score(\"abcd\", 100))\n    print(score(\"abcdefghijkl\", 100))\n    print(describe(0))\n    print(describe(4))\n    greet(\"\")\n    greet(\"ada\")\n}\n"
+step: jet fmt --simplify --check one/guard.jet
+exit: 0 # the second pass keeps the first pass's output
+step: jet run one/guard.jet
+exit: 0
+stdout: = "0\n-1\n40\n100\nzero\ntwice 8\nhello\nada\n"

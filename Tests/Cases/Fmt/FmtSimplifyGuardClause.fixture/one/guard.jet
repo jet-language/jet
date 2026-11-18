@@ -1,0 +1,44 @@
+// A nested chain whose other branches only leave unwinds into guards.
+score: fn(text: String, limit: Int) -> Int {
+    if !text.is_empty() {
+        value: text.len() * 10
+        if value != 30 {
+            if value > limit -> return limit
+            return value
+        } else {
+            return -1
+        }
+    } else {
+        return 0
+    }
+}
+
+// A branch that only leaves first becomes the guard as written.
+describe: fn(n: Int) -> String {
+    if n == 0 {
+        return "zero"
+    } else {
+        doubled: n * 2
+        return "twice {doubled}"
+    }
+}
+
+greet: fn(name: String) {
+    if name.contains("a") {
+        print("hello")
+        print(name)
+    } else {
+        return
+    }
+}
+
+run: fn() {
+    print(score("", 100))
+    print(score("abc", 100))
+    print(score("abcd", 100))
+    print(score("abcdefghijkl", 100))
+    print(describe(0))
+    print(describe(4))
+    greet("")
+    greet("ada")
+}
