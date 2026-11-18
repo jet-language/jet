@@ -4,6 +4,10 @@
 # a local and computes from locals there. The logpoint after the loop logs
 # its message with `total` filled in and does not stop. A condition that is
 # not a Jet expression leaves its breakpoint unplaced.
+# The fixture must stay in jet fmt form: the loop body holds two statements,
+# so line 4 is the body and line 7 the `total` after the loop. The loop has
+# no `break`: it leaves by its test alone, so `total` after it is still the
+# loop's `total` under the IR verifier's SSA round trip too.
 fixture: DapCLIConditionsLogpointsAndEvaluate.fixture
 env: NO_COLOR=1
 session dap content-length: jet debug --dap {work}/prog.jet
@@ -13,7 +17,7 @@ json: stdout doc $.body.supportsConditionalBreakpoints = true
 json: stdout doc $.body.supportsLogPoints = true
 send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/prog.jet\",\"stopOnEntry\":false,\"args\":[]}}"
 recv dap until $.event = "initialized" timeout 30s every 100ms
-send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":4,\"condition\":\"i == 3\"},{\"line\":6,\"logMessage\":\"total is {total}\"},{\"line\":2,\"condition\":\"i ==\"}]}}"
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":4,\"condition\":\"i == 3\"},{\"line\":7,\"logMessage\":\"total is {total}\"},{\"line\":2,\"condition\":\"i ==\"}]}}"
 recv dap until $.request_seq = 3 timeout 30s every 100ms
 json: stdout doc $.body.breakpoints[0].verified = true
 json: stdout doc $.body.breakpoints[1].verified = true

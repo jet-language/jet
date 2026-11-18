@@ -1,14 +1,17 @@
 # On the native O0 image a loop `next` statement has a line row of
 # its own. A breakpoint on the `next` line binds there instead of sliding to
 # the following statement, stops when the edge is taken, and `n` from it goes
-# to the next iteration.
+# through the loop's head to the next iteration.
+# The fixture must stay in jet fmt form: the `if` body holds two statements,
+# so `next` keeps a line of its own.
 fixture: NextLineTakesABreakpoint.fixture
 env: NO_COLOR=1
 step: jet debug prog.jet
 stdin: next_line_takes_a_breakpoint.stdin
 exit: 0
-stdout: ~ "Breakpoint set  prog.jet:5" # the breakpoint binds on the next line itself
-stdout: ~ "Breakpoint hit  prog.jet:5  in run()\n5 |             next        <- here" # it stops on the next line
-stdout: ~ "(Jet) p i\ni = 1\n(Jet) n\n4 |         if i == 1 {        <- here\nLocals:  hits = 0   i = 2" # only the iteration that takes the edge stops; n goes to the next iteration
-stdout: ~ "(Jet) p i\ni = 2\n(Jet) c\n2\nProgram finished\n" # the edge is taken once; the program's own result is unchanged
-stdout: !~ "prog.jet:5  in run()" # the breakpoint never slid to the following statement
+stdout: ~ "Breakpoint set  prog.jet:6" # the breakpoint binds on the next line itself
+stdout: ~ "Breakpoint hit  prog.jet:6  in run()\n6 |             next        <- here" # it stops on the next line
+stdout: ~ "(Jet) p i\ni = 1\n(Jet) n\n3 |     loop i in 0..<3 {        <- here" # the edge goes to the loop's head
+stdout: ~ "(Jet) n\n4 |         if i == 1 {        <- here\nLocals:  hits = 10   i = 2" # then to the next iteration, skipping the rest of the body
+stdout: ~ "(Jet) p i\ni = 2\n(Jet) c\n12\nProgram finished\n" # the edge is taken once; the program's own result is unchanged
+stdout: !~ "prog.jet:8  in run()" # the breakpoint never slid to the following statement
