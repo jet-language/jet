@@ -1,0 +1,21 @@
+# A string view local read only as the receiver of a builtin scalar
+# read (`trimmed.len()`, `trimmed.is_empty()`) is passed as the view it is and
+# never materialized (JetSema StringViews.jet sema_string_view_read_method), so
+# no hidden copy fact exists for it and the loop has no copy to lint. The run
+# reads the views in place and counts their bytes.
+fixture: Fixtures/Cost
+step: jet explain --cost {work}/tests/cli/cost_view_receiver.jet
+env: NO_COLOR=1
+exit: 0
+stdout: !~ "view materialization" # the view is never made owned
+stdout: !~ "implicit copy" # nor copied any other way
+step: jet lint --cost {work}/tests/cli/cost_view_receiver.jet
+env: NO_COLOR=1
+exit: 1
+stderr: count "Warning [jet.HiddenCostInLoop]:" = 1 # only the `total +=` Int spill
+stderr: !~ "view into an owned slot" # no copy to lint inside the loop
+step: jet run {work}/tests/cli/cost_view_receiver.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "3" # "a" and "bb" counted through their views; the blank line is empty
+stdout: lines = 1 # the one count

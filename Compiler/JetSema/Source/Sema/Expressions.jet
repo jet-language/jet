@@ -4661,12 +4661,13 @@ sema_expr_check_method_call: fn(receiver: Expr, method: String, method_span: Spa
     if outcome_read.handled -> return outcome_read.value
     scopes.ownership_call_depth += 1
     // Chaining `.trim()`/`.after()`/`.before()` onto a string view
-    // reads it as the `&str` those methods take, so the view read is allowed.
-    // (Rust `infer_method_call`): any other method but the
+    // reads it as the `&str` those methods take, and a builtin scalar read
+    // (`len`, `is_empty`, `index_of`, …) reads it in place, so the view read
+    // is allowed. (Rust `infer_method_call`): any other method but the
     // `&str` kernels (`starts_with`, `ends_with`, `contains`) reads the view
     // through a `String` receiver, so it takes the default owning copy.
     previous_string_view_read := context.allow_string_view_read
-    exempt_view_receiver: sema_string_view_exempt_receiver(receiver, method, scopes)
+    exempt_view_receiver: sema_string_view_exempt_receiver(receiver, method, args.len(), scopes)
     if exempt_view_receiver -> context.allow_string_view_read = true
     receiver_checked := TExpr?{None}
     if !exempt_view_receiver && method != "starts_with" && method != "ends_with" && method != "contains" && sema_string_view_owning_read(receiver, Type.String, scopes) && receiver == .Ident(view_name, view_span, _) {

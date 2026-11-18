@@ -201,3 +201,34 @@ cost_projection_lines_source: fn() -> String {
     }
     assert_eq(lints, [String]{"This copy of `String` view into an owned slot inside a loop"})
 }
+
+// A string view read only as the receiver of a scalar read: `trimmed.len()`
+// reads the view in place, while pushing it stores it into an owned slot.
+cost_projection_view_receiver_source: fn() -> String {
+    [String]{
+        "widths: fn(lines: [String]) -> [String] {{",
+        "    out := [String]{{}}",
+        "    loop line in lines {{",
+        "        trimmed: line.trim()",
+        "        if trimmed.len() > 0 && !trimmed.is_empty() -> out.push(trimmed)",
+        "    }}",
+        "    out",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+#Test("a view read as a scalar method's receiver is passed as the view; storing it copies") {
+    request := cost_projection_request(cost_projection_view_receiver_source())
+    request.capture_cost_report = true
+    compiled := jet_driver_compile(request)
+    assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
+    report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
+    copies := [String]{}
+    loop site in report.sites {
+        if site.kind == .ViewMaterialization || site.kind == .ImplicitCopy {
+            copies.push("{site.kind:Debug} `{site.view}` {site.path}:{site.line} depth {site.loop_depth}")
+        }
+    }
+    assert_eq(copies, [String]{"ViewMaterialization `String` main.jet:5 depth 1"})
+}
