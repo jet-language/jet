@@ -214,6 +214,14 @@ trace_walk: fn(text: I64, with_function: Bool) -> Bool {
     }
     trace_unmap(stub, I64{4096})
     if (frame == I64{0}) { return false }
+    trace_image(text, frame, I64{0}, with_function)
+}
+
+// Read the image's location table as trace_frames does: the chain from
+// `frame`, or with no frame (0) the one function whose code holds runtime
+// address `address`. The image is the loader's mapping under `jet run`
+// (HOST_AT_IMAGE), else /proc/self/exe mapped read-only for the call.
+trace_image: fn(text: I64, frame: I64, address: I64, with_function: Bool) -> Bool {
     loaded: host_getauxval(HOST_AT_IMAGE)
     image := loaded
     length := I64{0}
@@ -240,9 +248,19 @@ trace_walk: fn(text: I64, with_function: Bool) -> Bool {
         trace_unmap(path, I64{4096})
     }
     if (image == I64{0}) { return false }
-    found: trace_frames(text, image, alloc_check_bias(image), frame, with_function)
+    found: trace_frames(text, image, alloc_check_bias(image), frame, address, with_function)
     if (length > I64{0}) { trace_unmap(image, length) }
     found
+}
+
+// The line of the Jet function whose code holds runtime address `address`,
+// in trace_text's form (`function\tfile\tline\n`), as a new text: empty when
+// the image's table holds no such function. 0 when no text could be made.
+trace_address_text: fn(address: I64) -> I64 {
+    text: rt_text_builder_with_capacity(I64{0})
+    if (text == I64{0}) { return I64{0} }
+    _ := trace_image(text, I64{0}, address, true)
+    text
 }
 
 // Unmap a mapping the trace made: its stub page, its path page or its view
@@ -330,8 +348,9 @@ trace_decimal: fn(at: I64, length: I64) -> I64 {
 
 // Each Jet frame of the chain from `start`, read from the .debug_jetline
 // section of `image` (its load bias `bias`), as trace_walk takes them:
-// onto `text`, or to the first frame outside Core when `text` is 0.
-priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, with_function: Bool) -> Bool {
+// onto `text`, or to the first frame outside Core when `text` is 0. With no
+// `start` (0), only the function whose code holds runtime address `target`.
+priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, target: I64, with_function: Bool) -> Bool {
     table := I64{0}
     table_end := I64{0}
     #Unsafe("image is a read-only mapping of this executable's ELF64 file; every offset read comes from its own header and section table") {
@@ -357,6 +376,9 @@ priv trace_frames: fn(text: I64, image: I64, bias: I64, start: I64, with_functio
         }
     }
     if (table == I64{0}) { return false }
+    if (start == I64{0}) {
+        return trace_frame(text, table, table_end, wrapping(target - bias), with_function)
+    }
     frame := start
     steps := I64{0}
     loop frame != (I64{0}) && frame & (I64{7}) == (I64{0}) && steps < (I64{4096}) {

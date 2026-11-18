@@ -212,6 +212,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     }
     loop line in jet_cli_perf_counter_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_memory_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_game_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_receipt_lines(trace) -> out = "{out}{line}\n"
     if frames == "all" {
         out = "{out}generated-frames: none retained in .jettrace (hidden unless captured under --frames=all)\n"
@@ -839,7 +840,58 @@ jet_cli_perf_member_is_null: fn(value: CanonicalJSON, key: String) -> Bool Never
 
 // Whether the trace holds any typed evidence a summary reads.
 jet_cli_perf_has_evidence: fn(trace: CanonicalJSON) -> Bool Never! {
-    jet_cli_perf_first_sample(trace) != None || jet_cli_perf_profile_summary(trace) != None || jet_cli_perf_allocation_summary(trace) != None || jet_cli_perf_browser_summary(trace) != None || jet_cli_perf_task_summary(trace) != None || jet_cli_perf_lock_summary(trace) != None || jet_cli_perf_io_summary(trace) != None || jet_cli_perf_native_summary(trace) != None || jet_cli_perf_span_summary(trace) != None || jet_cli_perf_log_span_summary(trace) != None || jet_cli_perf_join_summary(trace) != None
+    jet_cli_perf_first_sample(trace) != None || jet_cli_perf_profile_summary(trace) != None || jet_cli_perf_allocation_summary(trace) != None || jet_cli_perf_browser_summary(trace) != None || jet_cli_perf_task_summary(trace) != None || jet_cli_perf_lock_summary(trace) != None || jet_cli_perf_io_summary(trace) != None || jet_cli_perf_native_summary(trace) != None || jet_cli_perf_span_summary(trace) != None || jet_cli_perf_log_span_summary(trace) != None || jet_cli_perf_join_summary(trace) != None || jet_cli_perf_game_lines(trace).len() > 0
+}
+
+// A core.game run's frames and draw events: `game frames=… draw_events=…
+// scene=… cpu=…ns slowest_frame=… · <function>` (the slowest frame's
+// responsible function), then each callback function's draw events, the
+// most time first, at most 8: `game draw <name> <file>:<line> count=…
+// ns=…`.
+jet_cli_perf_game_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    frames: jet_cli_perf_rows(trace, "game_frames") ?? return [String]{}
+    if frames.len() == 0 -> return [String]{}
+    cpu := 0
+    slowest := 0
+    responsible := "none"
+    scene := ""
+    loop frame in frames {
+        ns: jet_cli_perf_member_number(frame, "cpu_ns") ?? next
+        cpu += ns
+        if scene == "" -> scene = jet_cli_perf_member_text(frame, "scene") ?? ""
+        if ns < slowest -> next
+        slowest = ns
+        responsible = jet_cli_perf_game_function_label(frame, "responsible_function") ?? "none"
+    }
+    draws: jet_cli_perf_rows(trace, "game_draw_events") ?? return [String]{}
+    counts := [String:Int]{}
+    totals := [String:Int]{}
+    loop draw in draws {
+        label: jet_cli_perf_game_function_label(draw, "function") ?? next
+        ns: jet_cli_perf_member_number(draw, "duration_ns") ?? 0
+        counts[label] = (counts.get(label) ?? 0) + 1
+        totals[label] = (totals.get(label) ?? 0) + ns
+    }
+    labels := counts.keys().to_list()
+    labels.sort_by(fn(left: String, right: String) { if totals[left] == totals[right] -> left <=> right else -> totals[right] <=> totals[left] })
+    lines := [String]{"game frames={frames.len()} draw_events={draws.len()} scene={scene} cpu={cpu}ns slowest_frame={slowest}ns · {responsible}"}
+    loop index in 0..<(if labels.len() > 8 -> 8 else -> labels.len()) {
+        lines.push("game draw {labels[index]} count={counts[labels[index]]} ns={totals[labels[index]]}")
+    }
+    lines
+}
+
+// `<name> <file>:<line>` of the function member `key` of a game row.
+jet_cli_perf_game_function_label: fn(row: CanonicalJSON, key: String) -> String? Never! {
+    fields: jettrace_object_view(row, "jettrace row") ?? return None
+    at: jet_cli_perf_key(fields, key) ?? return None
+    function: fields[at].value
+    name: jet_cli_perf_member_text(function, "name") ?? return None
+    source: jettrace_object_view(function, "jettrace function") ?? return None
+    span: jet_cli_perf_key(source, "source") ?? return None
+    file: jet_cli_perf_member_text(source[span].value, "file") ?? return None
+    line: jet_cli_perf_member_integer(source[span].value, "start_line") ?? return None
+    Val("{name} {file}:{line}")
 }
 
 // A bar of `count` marks, 1 to 40 wide.

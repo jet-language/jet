@@ -1,0 +1,85 @@
+# A core.game run relays each frame and each frame callback through its live
+# snapshots as typed game records, at most 512 of them kept. `jet perf run`
+# merges every snapshot's records into the trace's game frames and draw
+# events, each callback a draw event of the function at the line that
+# registered it, every row carrying its frame's identity; the `game` receipt
+# says what the relay lost. `jet perf attach` reads one snapshot of a running
+# game, whose window starts past retired records. Both hold on O0, O1 and O2.
+# Each attached game starts the way a user makes a program observable
+# (Docs/Spec/observability.md): `jet run --observe` at the tier's level,
+# whose process is the game's, so `jet perf attach` takes its pid.
+requires: os-name:linux
+fixture: GameFrameEvents.fixture
+env: NO_COLOR=1
+step o0: jet perf run -O0 main.jet --out {work}/o0.jettrace
+exit: 0
+stdout: = "frames=40\n"
+step o0view: jet perf view {work}/o0.jettrace
+exit: 0
+stdout: ~ "game frames=40 draw_events=80 scene=arena cpu=" # every frame, each with its two callbacks
+stdout: ~ "main.jet:13 count=40 ns=" # the physics callback, by the line that registered it
+stdout: ~ "main.jet:14 count=40 ns=" # the render callback, by the line that registered it
+stdout: ~ "receipt game {\"callbacks_without_frame\":0,\"callbacks_without_function\":0,\"draw_events\":80,\"first_sequence\":1,\"frames\":40,\"frames_missing_callbacks\":0,\"last_sequence\":120,\"records_retired\":0,\"rows_truncated\":false}" # a whole run under the relay's bound loses nothing
+step o1: jet perf run -O1 main.jet --out {work}/o1.jettrace
+exit: 0
+stdout: = "frames=40\n"
+step o1view: jet perf view {work}/o1.jettrace
+exit: 0
+stdout: ~ "game frames=40 draw_events=80 scene=arena cpu=" # every frame, each with its two callbacks
+stdout: ~ "main.jet:13 count=40 ns=" # the physics callback, by the line that registered it
+stdout: ~ "main.jet:14 count=40 ns=" # the render callback, by the line that registered it
+stdout: ~ "receipt game {\"callbacks_without_frame\":0,\"callbacks_without_function\":0,\"draw_events\":80,\"first_sequence\":1,\"frames\":40,\"frames_missing_callbacks\":0,\"last_sequence\":120,\"records_retired\":0,\"rows_truncated\":false}" # a whole run under the relay's bound loses nothing
+step o2: jet perf run -O2 main.jet --out {work}/o2.jettrace
+exit: 0
+stdout: = "frames=40\n"
+step o2view: jet perf view {work}/o2.jettrace
+exit: 0
+stdout: ~ "game frames=40 draw_events=80 scene=arena cpu=" # every frame, each with its two callbacks
+stdout: ~ "main.jet:13 count=40 ns=" # the physics callback, by the line that registered it
+stdout: ~ "main.jet:14 count=40 ns=" # the render callback, by the line that registered it
+stdout: ~ "receipt game {\"callbacks_without_frame\":0,\"callbacks_without_function\":0,\"draw_events\":80,\"first_sequence\":1,\"frames\":40,\"frames_missing_callbacks\":0,\"last_sequence\":120,\"records_retired\":0,\"rows_truncated\":false}" # a whole run under the relay's bound loses nothing
+session live0 raw: jet run -O0 --observe live.jet
+recv live0 until = "ready\n" within 60s
+stdout: = "ready\n"
+step o0attach: jet perf attach {pid:live0} --source live.jet --out {work}/a0.jettrace
+exit: 0
+step o0attachview: jet perf view {work}/a0.jettrace
+exit: 0
+stdout: ~ "game frames=" # the snapshot's frames
+stdout: !~ "game frames=0 " # an attach mid-run still reads frames
+stdout: ~ "live.jet:16 count=" # the physics callback, by the line that registered it
+stdout: ~ "live.jet:17 count=" # the render callback, by the line that registered it
+stdout: !~ "\"records_retired\":0," # the window starts past the records the relay retired
+signal live0: KILL
+close live0
+exit: any # the case kills the endless game; its status is the signal's
+session live1 raw: jet run -O1 --observe live.jet
+recv live1 until = "ready\n" within 60s
+stdout: = "ready\n"
+step o1attach: jet perf attach {pid:live1} --source live.jet --out {work}/a1.jettrace
+exit: 0
+step o1attachview: jet perf view {work}/a1.jettrace
+exit: 0
+stdout: ~ "game frames=" # the snapshot's frames
+stdout: !~ "game frames=0 " # an attach mid-run still reads frames
+stdout: ~ "live.jet:16 count=" # the physics callback, by the line that registered it
+stdout: ~ "live.jet:17 count=" # the render callback, by the line that registered it
+stdout: !~ "\"records_retired\":0," # the window starts past the records the relay retired
+signal live1: KILL
+close live1
+exit: any # the case kills the endless game; its status is the signal's
+session live2 raw: jet run -O2 --observe live.jet
+recv live2 until = "ready\n" within 60s
+stdout: = "ready\n"
+step o2attach: jet perf attach {pid:live2} --source live.jet --out {work}/a2.jettrace
+exit: 0
+step o2attachview: jet perf view {work}/a2.jettrace
+exit: 0
+stdout: ~ "game frames=" # the snapshot's frames
+stdout: !~ "game frames=0 " # an attach mid-run still reads frames
+stdout: ~ "live.jet:16 count=" # the physics callback, by the line that registered it
+stdout: ~ "live.jet:17 count=" # the render callback, by the line that registered it
+stdout: !~ "\"records_retired\":0," # the window starts past the records the relay retired
+signal live2: KILL
+close live2
+exit: any # the case kills the endless game; its status is the signal's

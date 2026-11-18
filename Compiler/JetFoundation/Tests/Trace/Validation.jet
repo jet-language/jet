@@ -241,4 +241,15 @@ jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {
     skeleton.game_frames[0].scene = "scene"
     skeleton.game_draw_events[0].function.source.file = ""
     assert(jettrace_test_error(skeleton).contains("source.file is empty"))
+    skeleton.game_draw_events[0].function.source.file = "scene.jet"
+    // A draw names its frame and carries that frame's identity.
+    skeleton.game_draw_events[0].frame_id = U64{8}
+    assert(jettrace_test_error(skeleton).contains("names no captured frame"))
+    skeleton.game_draw_events[0].frame_id = U64{7}
+    skeleton.game_draw_events[0].revision = "other"
+    assert(jettrace_test_error(skeleton).contains("does not carry the identity of frame 7"))
+    skeleton.game_draw_events[0].revision = "rev"
+    repeated := project_game_devtools_bodies(bodies) ?? panic(err.message)
+    loop frame in repeated.frames.move() -> skeleton.game_frames.push(frame)
+    assert(jettrace_test_error(skeleton).contains("repeats a frame"))
 }

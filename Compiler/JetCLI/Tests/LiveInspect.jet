@@ -3,7 +3,7 @@
 // witnesses are separate real-filesystem fixtures.
 use {
     jet_cli.[jet_cli_live_event_render, jet_cli_live_json_report, jet_cli_live_text]
-    jet_foundation.[JetLiveChannel, JetLiveEvent, JetLiveRuntime, JetLiveSnapshot, JetLiveTask, JetLiveValue, jet_live_bind, jet_live_decode]
+    jet_foundation.[JetLiveChannel, JetLiveEvent, JetLiveGameFunction, JetLiveGameRecord, JetLiveRuntime, JetLiveSnapshot, JetLiveTask, JetLiveValue, jet_live_bind, jet_live_decode]
 }
 
 // The runtime's record layout (JetRuntime ObserveLive.jet): little-endian
@@ -119,6 +119,22 @@ live_inspect_bytes: fn(snapshot: JetLiveSnapshot) -> [U8] Never! {
             live_inspect_put(out, Val(event.terminal.copy()))
         }
     }
+    if snapshot.game_records.len() > 0 {
+        live_inspect_word(out, 5)
+        live_inspect_word(out, snapshot.game_records.len())
+        loop record in snapshot.game_records {
+            live_inspect_word(out, record.sequence)
+            live_inspect_word(out, if record.kind == "frame" -> 0 else if record.kind == "callback" -> 1 else -> 2)
+            live_inspect_word(out, record.frame_index)
+            live_inspect_word(out, record.start_ns)
+            live_inspect_word(out, record.ns)
+            live_inspect_word(out, record.code)
+            live_inspect_word(out, record.ordinal)
+            if record.kind == "frame" -> live_inspect_text(out, record.scene) else if record.function == .Val(function) {
+                live_inspect_text(out, "{function.name}\t{function.file}\t{function.line}\n")
+            } else { live_inspect_word(out, -1) }
+        }
+    }
     live_inspect_word(out, 0)
     out
 }
@@ -155,6 +171,7 @@ live_inspect_fixture: fn() -> JetLiveSnapshot Never! {
         resources: resources,
         runtime: JetLiveRuntime{elapsed_ns: 7, cpu_ns: None, exit: false},
         event_records: [JetLiveEvent]{live_inspect_event(1)},
+        game_records: [JetLiveGameRecord]{},
         events: None,
         boot_ns: U64{20000000000},
         start_ticks: U64{3},
@@ -343,4 +360,36 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
         closed.event_records[0].terminal = terminal.copy()
         assert(jet_cli_live_text(live_inspect_decoded(closed)).contains("terminal={terminal}"))
     }
+    // A game run's relay: frames carry their scene, callbacks their code and
+    // the function the image names for it.
+    game := live_inspect_fixture()
+    game.game_records = [JetLiveGameRecord]{live_inspect_game(3, "callback", 4096), live_inspect_game(4, "frame", 0)}
+    relayed: live_inspect_decoded(game).game_records
+    assert(relayed.len() == 2 && relayed[0].kind == "callback" && relayed[0].code == 4096 && relayed[0].scene == "" && relayed[1].kind == "frame" && relayed[1].scene == "arena" && relayed[1].ordinal == 1 && relayed[1].function == None)
+    named: relayed[0].function ?? panic("the callback's function was dropped")
+    assert(named.name == "draw" && named.file == "app.jet" && named.line == 7)
+    game.game_records[0].function = None
+    assert(live_inspect_decoded(game).game_records[0].function == None)
+    // A line cut short by the runtime's text bound (no closing newline, the
+    // last byte before the end tag here) names no function.
+    game.game_records = [JetLiveGameRecord]{live_inspect_game(3, "callback", 4096)}
+    cut := live_inspect_bytes(game)
+    cut[cut.len() - 9] = U8{32}
+    assert((jet_live_decode(cut) ?? panic(err.message)).game_records[0].function == None)
+    game.game_records[0].function = Val(JetLiveGameFunction{name: "draw", file: "app.jet", line: -1})
+    live_inspect_rejected(live_inspect_bytes(game), "function line is malformed")
+    game.game_records = [JetLiveGameRecord]{live_inspect_game(4, "frame", 0), live_inspect_game(4, "frame", 0)}
+    live_inspect_rejected(live_inspect_bytes(game), "out of sequence")
+    game.game_records = [JetLiveGameRecord]{live_inspect_game(1, "callback", 0)}
+    live_inspect_rejected(live_inspect_bytes(game), "needs a code address")
+    game.game_records = [JetLiveGameRecord]{live_inspect_game(1, "frame", 8)}
+    live_inspect_rejected(live_inspect_bytes(game), "needs a scene")
+    game.game_records = [JetLiveGameRecord]{live_inspect_game(1, "draw", 8)}
+    live_inspect_rejected(live_inspect_bytes(game), "unknown kind")
+    game.game_records = loop sequence in 1..<514 -> live_inspect_game(sequence, "frame", 0)
+    live_inspect_rejected(live_inspect_bytes(game), "too many game records")
+}
+
+live_inspect_game: fn(sequence: Int, kind: String, code: Int) -> JetLiveGameRecord Never! {
+    JetLiveGameRecord{sequence: sequence, kind: kind, frame_index: 1, start_ns: 100, ns: 20, code: code, ordinal: if kind == "frame" -> 1 else -> 0, scene: if kind == "frame" -> "arena" else -> "", function: if kind == "callback" -> Val(JetLiveGameFunction{name: "draw", file: "app.jet", line: 7}) else -> None}
 }

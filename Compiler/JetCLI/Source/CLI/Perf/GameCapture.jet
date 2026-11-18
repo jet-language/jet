@@ -1,0 +1,145 @@
+// The game events of `jet perf run` and `jet perf attach`: the records a
+// core.game run relays through the live snapshots it publishes (JetRuntime
+// ObserveLive.jet observe_game_record), as the typed GameFrameSample and
+// GameDrawEvent bodies the trace keeps (GameProjection.jet). A frame is kept
+// with the callbacks recorded for it, each a draw event of the function the
+// program's location table names for its code. A callback whose frame record
+// no observation holds, or whose code names no function, is counted, never
+// kept or given an invented identity. The `game` receipt section says what
+// the relay lost: records retired before an observation read them (the gaps
+// in the sequences), frames that ran more callbacks than were read, the
+// callbacks kept nowhere, and the rows past the trace's limits.
+use jet_foundation.[
+    CanonicalJSON,
+    CanonicalJSONField,
+    JetDevtoolsEventBody,
+    JetDevtoolsFunctionIdentity,
+    JetLiveGameRecord,
+    TRACE_GAME_DRAW_EVENT_ROW_LIMIT,
+    TRACE_GAME_FRAME_ROW_LIMIT,
+    TraceReceiptSection,
+    canonical_json_sha256,
+    jet_devtools_function_identity_new,
+    jet_devtools_source_span_new,
+    project_game_devtools_bodies,
+]
+
+// The game rows of `observations` onto `capture`, its callbacks attributed
+// to the checked source `path` where the table names that file. Every
+// observation must belong to one session, build and revision, and a record
+// two observations hold must be the same record. Times are from the first
+// record's start.
+jet_cli_perf_games_capture: fn(capture: &JetCLIPerfCapture, observations: [JetCLIPerfObservation], path: String) JetCLIReadError! {
+    records := [Int:JetLiveGameRecord]{}
+    sequences := [Int]{}
+    loop observed in observations {
+        live: observed.live
+        first: observations[0].live
+        if live.session_id != first.session_id || live.build_id != first.build_id || live.revision != first.revision {
+            return Err(jet_cli_read_error("game records cross a session/build/revision boundary"))
+        }
+        loop record in live.games {
+            if records.get(record.sequence) == .Val(seen) {
+                if seen.kind != record.kind || seen.frame_index != record.frame_index || seen.start_ns != record.start_ns || seen.ns != record.ns || seen.code != record.code || seen.ordinal != record.ordinal || seen.scene != record.scene {
+                    return Err(jet_cli_read_error("game record {record.sequence} changed between observations"))
+                }
+                next
+            }
+            records[record.sequence] = record
+            sequences.push(record.sequence)
+        }
+    }
+    if sequences.len() == 0 {
+        return
+    }
+    sequences.sort_by(fn(left: Int, right: Int) { left <=> right })
+    origin := records[sequences[0]].start_ns
+    loop sequence in sequences {
+        if records[sequence].start_ns < origin -> origin = records[sequence].start_ns
+    }
+    owned := ""
+    loop source in capture.source_identity {
+        if source.path == path -> owned = "sha256:{source.sha256}"
+    }
+    identity: observations[0].live
+    bodies := [JetDevtoolsEventBody]{}
+    pending := [Int]{}
+    retired := 0
+    previous := 0
+    partial := 0
+    orphaned := 0
+    unnamed := 0
+    frames := 0
+    draws := 0
+    truncated := false
+    loop sequence in sequences {
+        retired += sequence - previous - 1
+        previous = sequence
+        record: records[sequence]
+        if record.kind == "callback" {
+            pending.push(sequence)
+            next
+        }
+        attached := [Int]{}
+        loop waiting in pending {
+            if records[waiting].frame_index == record.frame_index -> attached.push(waiting) else {
+                orphaned += 1
+            }
+        }
+        pending = [Int]{}
+        if attached.len() != record.ordinal -> partial += 1
+        if frames >= TRACE_GAME_FRAME_ROW_LIMIT {
+            truncated = true
+            next
+        }
+        frames += 1
+        slowest := 0
+        loop waiting in attached {
+            callback: records[waiting]
+            if callback.function == None {
+                unnamed += 1
+                next
+            }
+            function: jet_cli_perf_game_function(callback, path, owned) ?? next
+            if slowest == 0 || callback.ns > records[slowest].ns -> slowest = waiting
+            if draws >= TRACE_GAME_DRAW_EVENT_ROW_LIMIT {
+                truncated = true
+                next
+            }
+            draws += 1
+            bodies.push(.GameDrawEvent{sequence: U64{waiting}, frame_id: U64{sequence}, scene: "{record.scene}", frame_index: U64{record.frame_index}, build: "{identity.build_id}", revision: "{identity.revision}", trace_id: "{identity.session_id}", event_index: U64{callback.ordinal}, event_id: U64{waiting}, function: function, phase: "frame_callback", domain: "cpu", start_ns: jet_cli_perf_since(callback.start_ns, origin), duration_ns: U64{callback.ns}, object_id: None, resource_id: None})
+        }
+        responsible: if slowest == 0 -> JetDevtoolsFunctionIdentity?{None} else -> jet_cli_perf_game_function(records[slowest], path, owned)
+        bodies.push(.GameFrameSample{sequence: U64{sequence}, frame_id: U64{sequence}, scene: "{record.scene}", frame_index: U64{record.frame_index}, build: "{identity.build_id}", revision: "{identity.revision}", trace_id: "{identity.session_id}", start_ns: jet_cli_perf_since(record.start_ns, origin), cpu_ns: U64{record.ns}, gpu_ns: None, responsible_function: responsible})
+    }
+    projected := project_game_devtools_bodies(bodies) ?? return Err(jet_cli_read_error(err.message))
+    capture.game_frames = projected.frames.move()
+    capture.game_draw_events = projected.draws.move()
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "callbacks_without_frame", value: CanonicalJSON.Integer("{orphaned + pending.len()}")},
+            {key: "callbacks_without_function", value: CanonicalJSON.Integer("{unnamed}")},
+            {key: "draw_events", value: CanonicalJSON.Integer("{draws}")},
+            {key: "first_sequence", value: CanonicalJSON.Integer("{sequences[0]}")},
+            {key: "frames", value: CanonicalJSON.Integer("{frames}")},
+            {key: "frames_missing_callbacks", value: CanonicalJSON.Integer("{partial}")},
+            {key: "last_sequence", value: CanonicalJSON.Integer("{previous}")},
+            {key: "records_retired", value: CanonicalJSON.Integer("{retired}")},
+            {key: "rows_truncated", value: CanonicalJSON.Bool(truncated)},
+        },
+    )
+    digest: canonical_json_sha256(value)
+    capture.receipts.push(TraceReceiptSection{name: "game", type_name: "JetPerfGameRelay", value: value, digest: digest})
+}
+
+// A callback's function as the table names it: the checked source `path`,
+// whose identity is `owned`, when its path ends with the table's file, else
+// that file. The table gives the line of the code's first row, not columns.
+jet_cli_perf_game_function: fn(callback: JetLiveGameRecord, path: String, owned: String) -> JetDevtoolsFunctionIdentity? Never! {
+    named: callback.function ?? return None
+    own: owned != "" && (path == named.file || path.ends_with("/{named.file}"))
+    file: if own -> "{path}" else -> "{named.file}"
+    source_id: if own -> "{owned}" else -> "{named.file}"
+    line: checked(U32{named.line}) ?? U32{0}
+    Val(jet_devtools_function_identity_new("{file}:{named.line}:{named.name}", "{named.name}", jet_devtools_source_span_new(source_id, file, line, U32{0}, line, U32{0})))
+}

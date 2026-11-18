@@ -204,7 +204,32 @@ prints `joins count=1 · task 1 waited 400212345ns for task 2 spawned at
 main.jet:4`. Its timeline shows each wait as `[start..end] join task 1 awaits
 task 2 spawned at main.jet:4`, beside the task spans.
 
-A `jet perf run` or `jet perf test` trace records one receipt section, `perf`
+A `core.game` run under `jet run --observe` relays its frames through its live
+snapshots: each frame callback records the frame's index, its start and wall
+time on the monotonic clock and its code's function, as the program's location
+table names it (`name`, file and the line its code starts at), and each frame
+then records its scene, its index, its CPU time and how many callbacks it ran.
+The runtime keeps the latest 512 records, each with a sequence number.
+`jet perf run` merges every observation's records and `jet perf attach` reads
+the one it takes; a record two observations hold must be the same record. Each
+frame becomes a `game_frames` row and each of its callbacks a
+`game_draw_events` row (`phase` `frame_callback`, `domain` `cpu`), keyed by the
+frame's sequence and carrying its scene, index, build, revision and trace id;
+the frame's `responsible_function` is its slowest callback, and a callback in
+the checked source has that source's identity. A callback whose frame no
+observation holds, or whose code no function names, becomes no row. The trace
+then records the `game` receipt section (type `JetPerfGameRelay`): the first
+and last sequence read, the records the relay retired before any observation
+read them (`records_retired`), the frames and draw events kept, the frames that
+ran more callbacks than were read (`frames_missing_callbacks`), the callbacks
+kept nowhere (`callbacks_without_frame`, `callbacks_without_function`) and
+whether rows past the trace's 4096-row limits were dropped (`rows_truncated`).
+`jet perf view` prints `game frames=40 draw_events=80 scene=arena cpu=812345ns
+slowest_frame=40123ns · <function> main.jet:13`, then each callback function's
+draw events, the most time first (`game draw <function> main.jet:13 count=40
+ns=82000000`). Tests/Cases/Perf/game_frame_events.case is the worked example.
+
+A `jet perf run` or `jet perf test` trace records the receipt section `perf`
 (type `JetPerfReceipt`). Its `build` names the build the program compiled
 under: `profile`, the profile the run's words select (null for none), and
 `options`, every build option's value as `jet run` resolves the words over the
@@ -218,7 +243,7 @@ sampled, else its `lenses` (`["cpu"]`, `["memory"]` or `["cpu","memory"]`),
 `interval_us` 1000, which are null without it. `jet perf view` prints it
 as `receipt perf <canonical JSON>`, and `jet perf compare` lists each field
 that differs between two traces' receipts (`perf.build.options.optimize: "O0"
--> "O2"`). `jet perf attach` records none.
+-> "O2"`). `jet perf attach` records no `perf` section.
 
 ## Canonical devtools protocol
 
