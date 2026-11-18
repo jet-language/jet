@@ -1,0 +1,16 @@
+# run.jet is ScriptBench w06 (Tools/Perf/Scriptbench/W06JSON/run.jet),
+# unchanged: decode w06.json into typed records, total the salaries of the
+# active ones and print one summary line. Each tier runs it as it runs any
+# entry, then runs the page `jet build --target web` writes for it under
+# node, and both print the expected bytes. Its w06.json is small, and has
+# escapes, an empty name and a salary past 2^53.
+requires: tool:node
+step: built
+stdout: = W06SameOutput.out
+step: jet build --target web run.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node .jet/build/app.js
+exit: 0
+stdout: = W06SameOutput.out
+stderr: empty

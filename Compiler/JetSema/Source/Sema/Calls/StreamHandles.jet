@@ -15,6 +15,7 @@ use jet_foundation.[
     TMethodRef,
     Type,
     core_source_owns_type,
+    core_item_spelling,
     AST_EMPTY_CALL_ARG_FLAGS,
     expr_span,
 ]
@@ -145,7 +146,7 @@ sema_stream_handle_spec: fn(owner: String, method: String, receiver_type: Type) 
         if method == "is_interval" {
             return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelIsInterval, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         }
-        if method == "is_cancelled" {
+        if core_item_spelling("Receiver", method) == "is_cancelled" {
             return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelIsCancelled, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         }
         if method == "is_ready" {

@@ -1,0 +1,28 @@
+// Seed bridge, deleted by the sweep that renames the remaining British
+// names: a handle method this compiler knows by its British name checks
+// alike under its American spelling, which the swept Core and tests write.
+bridge_errors: fn(source: String) -> String {
+    errors := [String]{}
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+        if diagnostic.code.starts_with("E") -> errors.push("{diagnostic.code}: {diagnostic.what}")
+    }
+    errors.join("; ")
+}
+
+#Test("a renamed handle method checks under its American spelling") {
+    both: `receiver_canceled: fn(rx: Receiver<Int>) -> Bool Never! { rx.is_canceled() }
+
+receiver_cancelled: fn(rx: Receiver<Int>) -> Bool Never! { rx.is_cancelled() }
+
+stream_canceled: fn(stream: RealtimeStream) -> Bool Never! { stream.is_canceled() }
+
+stream_cancelled: fn(stream: RealtimeStream) -> Bool Never! { stream.is_cancelled() }
+`
+    receiver_unknown: `receiver_unknown: fn(rx: Receiver<Int>) -> Bool Never! { rx.is_cancel() }
+`
+    stream_unknown: `stream_unknown: fn(stream: RealtimeStream) -> Bool Never! { stream.is_cancel() }
+`
+    assert_eq(bridge_errors(both), "")
+    assert(bridge_errors(receiver_unknown) != "")
+    assert(bridge_errors(stream_unknown) != "")
+}

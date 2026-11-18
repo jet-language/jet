@@ -283,12 +283,24 @@ net_render_ordinal: fn(ordinal: I64) -> I64 {
     net_error_get(value, NET_ERROR_TIMEOUT)
 }
 
-#Export(c) jet_rt_record_new_jet_net_error_cancelled: fn(payload: I64) -> I64 {
+#Export(c) jet_rt_record_new_jet_net_error_canceled: fn(payload: I64) -> I64 {
     net_error_new(NET_ERROR_CANCELLED, payload)
 }
 
-#Export(c) jet_rt_record_get_jet_net_error_cancelled: fn(value: I64) -> I64 {
+#Export(c) jet_rt_record_get_jet_net_error_canceled: fn(value: I64) -> I64 {
     net_error_get(value, NET_ERROR_CANCELLED)
+}
+
+// Seed bridge, deleted by the sweep that renames the remaining British case
+// names: this tree's Core still names `NetError`'s case `Cancelled`, and a
+// record route is named from the written case, so the British atom reaches
+// the `Canceled` exports too.
+#Export(c) jet_rt_record_new_jet_net_error_cancelled: fn(payload: I64) -> I64 {
+    jet_rt_record_new_jet_net_error_canceled(payload)
+}
+
+#Export(c) jet_rt_record_get_jet_net_error_cancelled: fn(value: I64) -> I64 {
+    jet_rt_record_get_jet_net_error_canceled(value)
 }
 
 #Export(c) jet_rt_record_new_jet_net_error_unsupported: fn(payload: I64) -> I64 {

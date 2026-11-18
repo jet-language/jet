@@ -24,7 +24,12 @@ five files beside the entry in `.jet/build/`, whatever the entry is named:
 environment and exits with its status. A page or a harness imports
 `jet_main` from `app.js`: it resolves when the program exits 0 and rejects
 with `JetHostExitError` (its `status`) otherwise, `JetHostWasmError` on a
-trap, or `JetHostAbiError` when the files are not one build's.
+trap, or `JetHostAbiError` when the files are not one build's. A stack
+overflow, which the JavaScript engine refuses with an exception of its own,
+is no trap: the host gives the E3012 stop `jet run` prints, naming the
+innermost Jet function at its declaration line with that line's source (read
+from `app.wasm.map`, so none when the map is missing), and the program exits
+70.
 `instantiateWasm` and `takeWasmError` from `jet_dom_runtime.js` drive the
 modules directly; the `jet_export_run` that `instantiateWasm` returns runs the
 program once and answers a promise of its exit status.

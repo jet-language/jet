@@ -497,13 +497,15 @@ WEB_LOCATION_SECTION: "jet.lines"
 // The program module's location table, what an image's .debug_jetline is to
 // the native runtime (JetBackend Image/Dwarf.jet dwarf_jet_line): the host
 // reads it for the calling chain's Jet frames (Host.jet, JetRuntime Fault.jet
-// jet_rt_host_frames). After the section's name: the count of the source
-// files and each file, then the count of the functions it holds and for each
-// its function index, its name, its file's index and its line rows: their
-// count, then per row the code's module offset and its source line, each the
-// difference from the row before (the first from 0). `lines` are the
-// module's line rows (WebModule.lines). A function with no source file or
-// declaration line is left out, as the native table leaves it.
+// jet_rt_host_frames) and for the function a stack overflow stops in
+// (JetRuntime Trap.jet jet_rt_stack_overflow_stop). After the section's name:
+// the count of the source files and each file, then the count of the
+// functions it holds and for each its function index, its name, its file's
+// index, its declaration line and its line rows: their count, then per row
+// the code's module offset and its source line, each the difference from the
+// row before (the first from 0). `lines` are the module's line rows
+// (WebModule.lines). A function with no source file or declaration line is
+// left out, as the native table leaves it.
 web_location_table: fn(m: IRModule, lines: [Int], defined_base: Int) -> [U8] Never! {
     files := [Int]{}
     body := [U8]{}
@@ -516,6 +518,7 @@ web_location_table: fn(m: IRModule, lines: [Int], defined_base: Int) -> [U8] Nev
         wasm_put_unsigned(body, defined_base + row)
         wat_put_name(body, f.name)
         wasm_put_unsigned(body, web_file_index(m, files, row))
+        wasm_put_unsigned(body, f.line)
         wasm_put_unsigned(body, (cursor - first) /% 3)
         offset := 0
         line := 0

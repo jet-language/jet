@@ -164,8 +164,8 @@ JetCLIPlan: enum {
 // `--set name=value` writers the compile folds (BuildFactChain.jet);
 // `profile` is the `--profile` it compiles under ("" for the default);
 // `style` (`--style`) adds the opt-in style checks (StyleCheck.jet);
-// `target` is the machine without an OS `--target` names, the program is
-// checked for ("" for the host; jet_cli_no_os_machine).
+// `target` is the declared machine `--target` names, the program is checked
+// for ("" for the host; jet_cli_checked_machine).
 // `jet check` of a workspace root (no `-p`): the entry and bytes of each
 // member no other member depends on (Host.jet `jet_cli_check_workspace`),
 // each compiled under the `--set` writers and the `--profile`, and with
@@ -1341,10 +1341,10 @@ jet_cli_check_prelude: fn(args: [String], color: Bool, quiet: Bool, threads: Int
 // `jet run` with the same writers and profile would, so an undeclared or
 // conflicting writer, or a profile no member declares, is refused here too
 // (jet_cli_build_options). `--style` adds the opt-in style checks. A
-// `--target` naming a machine without an OS checks one file for that machine,
-// as `jet build --target` does, and `--target web` (or `wasm.browser`)
-// checks it for the browser's machine, which `jet build --target web`
-// builds for; any other value leaves the host's.
+// `--target` naming a declared machine other than the browser's checks one
+// file for that machine, as `jet build --target` does, and `--target web`
+// (or `wasm.browser`) checks it for the browser's machine, which `jet build
+// --target web` builds for; any other value leaves the host's.
 jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet: Bool, threads: Int?, json: Bool) -[FS, Env]> JetCLIPlan Never! {
     settings := [BuildSettingOverride]{}
     if jet_cli_setting_flags(jet_argv, color) == {
@@ -1354,10 +1354,7 @@ jet_cli_check_settled: fn(jet_argv: [String], args: [String], color: Bool, quiet
     style: jet_argv.contains("--style")
     machine := ""
     if jet_cli_target_flag(jet_argv) == .Named(name) {
-        if {
-            name == "web" || name == "wasm.browser" -> machine = "wasm.browser"
-            jet_cli_no_os_machine(name) -> machine = name
-        }
+        machine = if name == "web" || name == "wasm.browser" -> "wasm.browser" else -> jet_cli_checked_machine(name) ?? ""
     }
     planned: jet_cli_check(jet_argv, args, "check", color, quiet, threads, json)
     if planned == {
@@ -1470,17 +1467,18 @@ jet_cli_profile_name: fn(jet_argv: [String]) -> String Never! {
     profile
 }
 
-// Is `name` a declared machine without an OS (`board.sensor_v1`, `wasm.no-os`;
-// JetDriver jet_driver_target_machine_by_name)? `jet build` and `jet check`
-// check a program for such a machine.
-jet_cli_no_os_machine: fn(name: String) -> Bool Never! {
-    machine: jet_driver_target_machine_by_name(name, JET_VERSION) ?? return false
-    machine.no_os
+// The declared machine `--target` names (JetDriver
+// jet_driver_target_machine_by_name), by its canonical name, when it is not
+// the browser's: `jet build` and `jet check` check a program for it.
+jet_cli_checked_machine: fn(name: String) -> String? Never! {
+    machine: jet_driver_target_machine_by_name(name, JET_VERSION) ?? return None
+    if machine.name == "wasm.browser" -> return None
+    Val(machine.name)
 }
 
-// A build for a machine without an OS, once the program checks clean for it:
-// no backend writes its image yet, so the build ends in the form's E2104.
-// None for a host build.
+// A build for a declared machine, once the program checks clean for it: no
+// backend writes its image yet, so the build ends in the form's E2104. None
+// for a host build.
 jet_cli_build_machine_refusal: fn(options: BuildOptions, color: Bool) -> JetDriverVerbOutput? Never! {
     if options.target_machine == "" -> return None
     Val(jet_cli_not_ported_output("build --target={options.target_machine}", color))
@@ -1570,14 +1568,16 @@ jet_cli_build_options: fn(jet_argv: [String], command: String, file: String, sou
     if os_web {
         written.insert(0, BuildOptionChoice{name: "optimize", value: build_options_value(build_options_stock("dev"), "optimize"), layer: BuildOptionLayer.Stock, written: "", site: "", pinned: false})
     }
-    // `jet build --target=<machine>` of a machine without an OS checks the
-    // program for that machine (BuildOptions.target_machine); the browser's
-    // machine, `wasm.browser`, is the web build's.
+    // `jet build --target=<machine>` of a declared machine checks the program
+    // for that machine (BuildOptions.target_machine); the browser's machine,
+    // `wasm.browser`, is the web build's.
     machine := ""
     if jet_cli_target_flag(jet_argv) == {
         .Named(target) -> {
             if target == "web" || target == "wasm.browser" -> web = true
-            if command == "build" && jet_cli_no_os_machine(target) -> machine = target
+            if command == "build" && !web && jet_cli_checked_machine(target) == .Val(found) {
+                machine = found
+            }
         }
         .Absent -> {
             if command == "build" && !flags.any(fn(flag) { flag.name == "os" }) && jet_cli_declares_web_target(source) && !jet_cli_declares_web_app(source) {
@@ -1725,7 +1725,7 @@ jet_cli_with_build_options: fn(plan: &&JetCLIPlan, jet_argv: [String], quiet: Bo
                 .Refused(refusal) -> return refusal
                 .Selected(options, notes) -> {
                     // A package build runs its `build: fn` on the host, which
-                    // does not check for a machine without an OS yet.
+                    // does not check for a declared machine yet.
                     if options.target_machine != "" {
                         return jet_cli_not_ported("build --target={options.target_machine}", color)
                     }
@@ -1905,9 +1905,9 @@ jet_cli_build_entry: fn(jet_argv: [String], args: [String], passthrough: [String
         .Absent -> {}
         .Missing -> return jet_cli_fail("E2104", "`--target` needs a value", jet_cli_why("E2104"), "write `--target=<triple>` or `--target <triple>` before the source file", color, JET_DRIVER_EXIT_USAGE)
         .Named(name) -> {
-            // A machine without an OS is checked for that machine first; its
-            // image is refused after the check (jet_cli_build_machine_refusal).
-            if !jet_cli_form_ported("build --target={name}") && !jet_cli_no_os_machine(name) {
+            // A declared machine is checked for first; its image is refused
+            // after the check (jet_cli_build_machine_refusal).
+            if !jet_cli_form_ported("build --target={name}") && jet_cli_checked_machine(name) == None {
                 return jet_cli_not_ported("build --target={name}", color)
             }
         }

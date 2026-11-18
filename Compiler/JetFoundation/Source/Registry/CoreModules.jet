@@ -444,6 +444,32 @@ core_enum_payload_spelling: fn(name: String, variant: String) -> String Never! {
     assert_eq(core_enum_payload_spelling("TaskFailure", "Cancelled"), "Cancelled")
 }
 
+// Seed bridge, deleted by the sweep that renames the remaining British
+// names: this compiler's rows spell these compiler-known Core items and
+// handle methods British, while the swept Core and tests the next compiler
+// checks write them American, so a written American name under `owner` (a
+// Core module or a handle type) names the British row. Any other written
+// name is its own spelling.
+core_item_spelling: fn(owner: String, name: String) -> String Never! {
+    if {
+        owner == "core.rt" && name == "__is_canceled" -> "__is_cancelled"
+        owner == "core.tasks" && name == "__task_canceled" -> "__task_cancelled"
+        (owner == "Receiver" || owner == "RealtimeStream") && name == "is_canceled" -> "is_cancelled"
+        else -> name
+    }
+}
+
+#Test("the American spelling of a renamed compiler-known item names its British row") {
+    assert_eq(core_item_spelling("core.rt", "__is_canceled"), "__is_cancelled")
+    assert_eq(core_item_spelling("core.tasks", "__task_canceled"), "__task_cancelled")
+    assert_eq(core_item_spelling("Receiver", "is_canceled"), "is_cancelled")
+    assert_eq(core_item_spelling("RealtimeStream", "is_canceled"), "is_cancelled")
+    assert_eq(core_item_spelling("core.jobs", "is_canceled"), "is_canceled")
+    assert_eq(core_item_spelling("core.rt", "__is_cancelled"), "__is_cancelled")
+    assert_eq(core_call("core.rt", core_item_spelling("core.rt", "__is_canceled")) != None, true)
+    assert_eq(core_call("core.tasks", core_item_spelling("core.tasks", "__task_canceled")) != None, true)
+}
+
 // The cases of the enum `name` that the Core module `module_name` exports:
 // the module's catalog row authenticates the export, and the build keeps
 // every enum leaf's case list identical across the modules that export it.

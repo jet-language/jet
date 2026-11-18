@@ -620,7 +620,11 @@ exactly the flags the command takes. A value written after a flag that takes
 none is E2102 too, never ignored: a switch takes no `=value`
 (`jet fmt --check=true`), and a true/false flag takes only `=true` or `=false`.
 
-- `--target` selects a triple, `board.<name>`, or named database target;
+- `--target` selects a triple, `board.<name>`, or named database target. A
+  declared machine (`jet inspect target` lists them; `wasm32-wasip2` names
+  `wasm.wasi`) has `build` and `check` check the program for that machine,
+  and `build` then refuses the image of a machine no backend writes yet;
+  `web` is the browser's machine, which `build` builds for.
   `--profile` selects `release`, `debug`, `hardened`, or a named bundle
   (`ci` is not built yet). `hardened` builds as `release` does and, like
   `policy: { harden: true }`, keeps the memory sentry: a raw access through
