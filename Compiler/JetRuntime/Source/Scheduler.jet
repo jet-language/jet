@@ -27,10 +27,11 @@ SCHEDULER_SCOPE_TASK_CLEANUP_ORIGIN: I64{16}
 SCHEDULER_SCOPE_MASK_KIND: I64{1792}
 
 // Nonzero while any task's stop poll may have something to deliver that no
-// call of its own published: a stop published to another task's control, an
-// interrupt, a cancel, a strong pause, a deadline or a turn request. A
-// program's loops read it (as the runtime object's data symbol
-// jet_rt_checks_armed, JetIR X64Select.jet ir_x64_stop_point; on the web, at
+// call of its own published: a stop published to another task's control or
+// by a memory hook (scheduler_hook_checks_arm), an interrupt, a cancel, a
+// strong pause, a deadline or a turn request. A program's loops read it (as
+// the runtime object's data symbol jet_rt_checks_armed, JetIR
+// X64Select.jet ir_x64_stop_point; on the web, at
 // the address the runtime partition's receipt names, JetWeb Select.jet
 // web_stop_point) before a stop poll that checks no call, and enter the
 // poll's routine only while it is set; that routine tests the task control
@@ -741,6 +742,18 @@ scheduler_delivered_status: fn() -> I64 {
 // check takes them, so such a route publishes no stop of its own and no
 // poll follows its call (JetIR BuildLibrary.jet ir_stop_exports).
 scheduler_stop_pending: fn() -> I64 { scheduler_delivered_status() }
+
+// After a memory hook ran program code (JetIR BuildLibrary.jet
+// IR_STOP_DEFERRED), given the running task's stop status from before it
+// (jet_scheduler_native_status): no poll follows the call that ran the
+// hook, so a stop that code published waits for the task's next stop
+// check, and a loop's check enters its routine only while the polls are
+// armed. A stop the hook published arms them for good, as a stop published
+// to another task does; one already pending before the hook ran is not its.
+scheduler_hook_checks_arm: fn(before: I64) {
+    status: scheduler_control_status(scheduler_control_current())
+    if (status != I64{0} && status != before) { scheduler_checks_arm() }
+}
 
 // The turn poll's routine (JetIR IR.jet IR_STOP_TURN_KEY): at a loop's
 // turn or a recursive body's entry a passed deadline is delivered too.

@@ -121,16 +121,20 @@ coll_slot_new: fn(meta: I64) -> I64 {
 }
 
 coll_slot_clone: fn(source: I64, target: I64, meta: I64) {
+    before: jet_scheduler_native_status()
     coll_call2_unit(trap_word(wrapping(meta + I64{8})), source, target)
+    scheduler_hook_checks_arm(before)
 }
 
 coll_slot_drop: fn(slot: I64, meta: I64) {
     code: trap_word(wrapping(meta + I64{16}))
     if (code != I64{0}) {
-        saved: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
+        before: jet_scheduler_native_status()
+        saved: jet_rt_session_cleanup_enter(before)
         jet_scheduler_shield_enter()
         coll_call1_unit(code, slot)
         jet_scheduler_shield_leave()
+        scheduler_hook_checks_arm(before)
         jet_rt_session_cleanup_leave(saved)
     }
 }

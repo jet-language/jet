@@ -3243,17 +3243,23 @@ ir_op_can_stop: fn(m: IRModule, f: IRFunction, at: Int) -> Bool Never! {
     }
 }
 
-// `stopped := poll(); if stopped { stop edge }`, with poll `key`.
+// `stopped := poll(); if stopped { stop edge }`, with poll `key`. The edge
+// runs the scope's deferred statements, which move the builder's line to
+// theirs; the code after the stop point is still the statement's that
+// raised it, so its line comes back (a bounds stop later in the statement
+// names that statement's line and column).
 ir_stop_point: fn(m: &IRModule, b: &IRBuilder, key: String) Never! {
+    line: b.line
     bool_row: ir_type_row(m, Type.Bool) ?? 0
     stopped: ir_temp(m, b, bool_row)
     poll: ir_stop_poll(m, key)
     start: ir_args(b.f, [Int]{})
-    ir_emit(b.f, IROp.Call, stopped, poll, start, 0, b.line)
-    ir_open_if(b.f, stopped, b.line)
+    ir_emit(b.f, IROp.Call, stopped, poll, start, 0, line)
+    ir_open_if(b.f, stopped, line)
     ir_stop_catches(m, b)
     ir_stop_return(m, b)
-    ir_end(b.f, b.line)
+    b.line = line
+    ir_end(b.f, line)
 }
 
 // In an `.expect_fail` region, a stop edge first offers the stop to each

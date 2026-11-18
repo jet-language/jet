@@ -227,7 +227,9 @@ context_values_release: fn(node: I64) {
             return
         }
         next: sync_load(wrapping(at + CONTEXT_NODE_NEXT))
+        before: jet_scheduler_native_status()
         coll_call1_unit(sync_load(wrapping(at + CONTEXT_NODE_RELEASE)), at)
+        scheduler_hook_checks_arm(before)
         at = next
     }
 }

@@ -27,7 +27,9 @@ err_payload_retain: fn(node: I64) {
 
 err_payload_release: fn(node: I64) {
     if (node != I64{0} && jet_rt_native_closure_unref(node)) {
+        before: jet_scheduler_native_status()
         coll_call1_unit(rt_text_word(wrapping(node + I64{16})), node)
+        scheduler_hook_checks_arm(before)
     }
 }
 

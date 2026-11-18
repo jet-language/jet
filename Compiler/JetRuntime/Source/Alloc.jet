@@ -1899,7 +1899,11 @@ alloc_user_drop: fn(carrier: I64) {
         held: sync_load(wrapping(at + I64{48}))
         if (handler != I64{0} && jet_rt_native_closure_unref(handler)) {
             helper: sync_load(wrapping(handler + I64{16}))
-            if (helper != I64{0}) { coll_call1_unit(helper, handler) }
+            if (helper != I64{0}) {
+                before: jet_scheduler_native_status()
+                coll_call1_unit(helper, handler)
+                scheduler_hook_checks_arm(before)
+            }
         }
         if (held != I64{0}) { jet_rt_handle_drop_jet_arena(held) }
         alloc_free_validated(at, ALLOC_USER_CARRIER_BYTES, I64{8})
@@ -2128,11 +2132,13 @@ alloc_user_call: fn(carrier: I64, op: I64, x: I64, y: I64) -> I64 {
     first: jet_int_owned_from_i64(op)
     second: jet_int_owned_from_i64(x)
     third: jet_int_owned_from_i64(y)
+    before: jet_scheduler_native_status()
     answer: coll_call4(sync_load(wrapping(handler + I64{8})), handler, first, second, third)
     jet_rt_int_drop(first)
     jet_rt_int_drop(second)
     jet_rt_int_drop(third)
     if (slot != I64{0}) { sync_store(slot, saved) }
+    scheduler_hook_checks_arm(before)
     if (scheduler_stop_pending() != I64{0}) { return I64{0} }
     word: jet_int_owned_to_i64(answer)
     jet_rt_int_drop(answer)
@@ -2823,7 +2829,11 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
     }
     alloc_check_frames(wrapping(pointer - I64{120}), I64{10})
     observer: alloc_check_take_observer
-    if (observer != I64{0}) { _ := coll_call3(observer, pointer, size, align) }
+    if (observer != I64{0}) {
+        before: jet_scheduler_native_status()
+        _ := coll_call3(observer, pointer, size, align)
+        scheduler_hook_checks_arm(before)
+    }
     pointer
 }
 
@@ -2856,7 +2866,11 @@ priv alloc_check_frames: fn(out: I64, count: I64) {
         }
     }
     observer: alloc_check_give_observer
-    if (observer != I64{0}) { _ := coll_call3(observer, pointer, size, align) }
+    if (observer != I64{0}) {
+        before: jet_scheduler_native_status()
+        _ := coll_call3(observer, pointer, size, align)
+        scheduler_hook_checks_arm(before)
+    }
     alloc_check_frames(wrapping(pointer - I64{200}), I64{10})
     alloc_check_fill(pointer, size)
     alloc_lock(lock)

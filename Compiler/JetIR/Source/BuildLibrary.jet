@@ -573,11 +573,12 @@ IR_STOP_FATAL: [String]{"alloc_out_of_memory", "alloc_check_fail", "rt_seq_capac
 // allocator's handler and its release and the checked heap's allocation
 // observers (JetRuntime Alloc.jet), a value's clone and drop glue
 // (Collections.jet), a context value's release (Context.jet) and an error
-// payload's release (Err.jet). A stop that hook publishes stays pending,
-// and the program takes it at its next stop check (an allocation it
-// interrupts takes its buffer from the program heap), so allocation,
-// freeing, cloning and dropping take no poll after them. The stops receipt
-// never goes through these functions.
+// payload's release (Err.jet). A stop that hook publishes stays pending and
+// arms the loops' polls (Scheduler.jet scheduler_hook_checks_arm), and the
+// program takes it at its next stop check (an allocation it interrupts
+// takes its buffer from the program heap), so allocation, freeing, cloning
+// and dropping take no poll after them. The stops receipt never goes
+// through these functions.
 IR_STOP_DEFERRED: [String]{"alloc_user_call", "alloc_user_drop", "jet_rt_alloc_check_take", "jet_rt_alloc_check_give", "coll_slot_clone", "coll_slot_drop", "context_values_release", "err_payload_release"}
 
 // The start of the name of each `#FFI(asm)` leaf that calls the code
