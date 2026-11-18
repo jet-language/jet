@@ -4,18 +4,19 @@
 // the process's profiling timer (setitimer ITIMER_PROF), which sends SIGPROF
 // for each PERF_SAMPLES_INTERVAL_US of CPU time the process uses, to the
 // thread that was running. Each SIGPROF appends one record: the program
-// counter it interrupted, then the call site of each caller up the frame
-// pointer chain, innermost first, each less the image's load bias. Each is
-// a link-time address in the image `jet run` writes beside the file, where
-// the image's location table names its function and line, as Linux perf
-// names the same image's samples. A record is one write of little-endian
-// words; its first word holds the record's word count in bits 48..58 above
-// the program counter's low 48, and its kind in bits 59..62: 0 for a
-// CPU-time sample, a counter's index plus one for that counter's sample,
-// PERF_SAMPLES_SPAWN for a task's spawn and PERF_SAMPLES_JOIN for a join's
-// wait. The handler allocates nothing and never waits. Beside the samples,
-// `<samples>.spans` keeps a row for each core.log span the program closes
-// (RouteALog.jet log_span_row_write).
+// counter it interrupted, then the call site of each caller, innermost
+// first, each less the image's load bias: by the image's call frame
+// information through frames without a frame pointer, then up the frame
+// pointer chain. Each is a link-time address in the image `jet run` writes
+// beside the file, where the image's location table names its function and
+// line, as Linux perf names the same image's samples. A record is one write
+// of little-endian words; its first word holds the record's word count in
+// bits 48..58 above the program counter's low 48, and its kind in bits
+// 59..62: 0 for a CPU-time sample, a counter's index plus one for that
+// counter's sample, PERF_SAMPLES_SPAWN for a task's spawn and
+// PERF_SAMPLES_JOIN for a join's wait. The handler allocates nothing and
+// never waits. Beside the samples, `<samples>.spans` keeps a row for each
+// core.log span the program closes (RouteALog.jet log_span_row_write).
 //
 // `jet perf run --method=memory` sets JET_PERF_COUNTERS too: the start
 // opens four counters of the thread that starts the observation, the
@@ -71,7 +72,8 @@ perf_samples_fd := I64{-1}
 perf_samples_bias := I64{0}
 
 // The image's code at link time, [low, high): a frame whose address is in
-// it is Jet code, which keeps its frame pointer, so its chain can be walked.
+// it is Jet code or a C library function of the image, which the call frame
+// information or the frame pointer chain walks.
 perf_samples_code_low := I64{0}
 
 perf_samples_code_high := I64{0}
@@ -113,6 +115,7 @@ perf_samples_start: fn() {
     bias: alloc_check_bias(image)
     low: perf_samples_code_edge(image, false)
     high: perf_samples_code_edge(image, true)
+    perf_cfi_start(image)
     buffer: alloc_map_try(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) * I64{8}))
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
         perf_samples_bias = bias
@@ -459,18 +462,518 @@ perf_samples_in_code: fn(address: I64) -> Bool {
     address >= perf_samples_code_low && address < perf_samples_code_high
 }
 
+// Code without a frame pointer chain (an O2 leaf like the stop poll, the
+// frame-free prefix before a function's `push rbp`, a C library function)
+// unwinds by the image's call frame information (.eh_frame), which the
+// backend writes for every Jet function and the C objects bring with
+// theirs. The start reads each FDE into a table of [begin, end) link-time
+// ranges and the FDE's address in the image mapping, sorted by begin; the
+// handler finds the sample's FDE, runs its CIE's and its own rules up to the
+// address, and steps out through rsp-based frames until a frame keeps rbp,
+// where the frame pointer walk takes over. 0 when the image has none.
+perf_cfi_table := I64{0}
+
+perf_cfi_count := I64{0}
+
+// One page the handler interprets an FDE's rules in, while it holds the
+// record buffer (perf_samples_buffer's first word), so one thread at a time.
+perf_cfi_scratch := I64{0}
+
+// The scratch page's words: the read cursor, the CIE's code and data
+// alignment, return address column and pointer encoding, whether it has
+// augmentation data ('z'), then the rule row (CFA register and offset, rbp's
+// and the return address's rule and offset), the CIE's initial rbp and
+// return address rules (DW_CFA_restore), and the remember stack's depth and
+// rows.
+PERF_CFI_CURSOR: I64{0}
+
+PERF_CFI_CODE_ALIGN: I64{8}
+
+PERF_CFI_DATA_ALIGN: I64{16}
+
+PERF_CFI_RA_COLUMN: I64{24}
+
+PERF_CFI_ENCODING: I64{32}
+
+PERF_CFI_AUGMENTED: I64{40}
+
+PERF_CFI_ROW: I64{48}
+
+PERF_CFI_CFA_REG: I64{48}
+
+PERF_CFI_CFA_OFFSET: I64{56}
+
+PERF_CFI_RBP_RULE: I64{64}
+
+PERF_CFI_RBP_OFFSET: I64{72}
+
+PERF_CFI_RA_RULE: I64{80}
+
+PERF_CFI_RA_OFFSET: I64{88}
+
+PERF_CFI_INITIAL: I64{96}
+
+PERF_CFI_DEPTH: I64{128}
+
+PERF_CFI_STACK: I64{136}
+
+// A rule row's bytes, and the most rows DW_CFA_remember_state keeps.
+PERF_CFI_ROW_BYTES: I64{48}
+
+PERF_CFI_STACK_ROWS: I64{4}
+
+// A register's rule: unchanged from the caller (same value), saved at CFA +
+// offset, or one the unwinder cannot follow.
+PERF_CFI_SAME: I64{0}
+
+PERF_CFI_SAVED: I64{1}
+
+PERF_CFI_UNKNOWN: I64{2}
+
+// The DWARF x86-64 numbers of rbp and rsp.
+PERF_CFI_RBP: I64{6}
+
+PERF_CFI_RSP: I64{7}
+
+// A pointer the unwinder cannot decode.
+PERF_CFI_BAD: I64{-1}
+
+perf_cfi_u16: fn(at: I64) -> I64 {
+    rt_text_byte(at) | (rt_text_byte(wrapping(at + I64{1})) << I64{8})
+}
+
+perf_cfi_u32: fn(at: I64) -> I64 {
+    perf_cfi_u16(at) | (perf_cfi_u16(wrapping(at + I64{2})) << I64{16})
+}
+
+perf_cfi_u64: fn(at: I64) -> I64 {
+    perf_cfi_u32(at) | (perf_cfi_u32(wrapping(at + I64{4})) << I64{32})
+}
+
+// The byte at the scratch page's cursor, which moves past it.
+perf_cfi_byte: fn(scratch: I64) -> I64 {
+    at: rt_text_word(scratch)
+    rt_text_store(scratch, wrapping(at + I64{1}))
+    rt_text_byte(at)
+}
+
+// The unsigned (`signed` false) or signed LEB128 number at the cursor.
+perf_cfi_leb: fn(scratch: I64, signed: Bool) -> I64 {
+    value := I64{0}
+    shift := I64{0}
+    byte := I64{0}
+    more := true
+    loop more {
+        byte = perf_cfi_byte(scratch)
+        if (shift < I64{64}) { value = value | ((byte & I64{127}) << shift) }
+        shift = wrapping(shift + I64{7})
+        more = byte & I64{128} != I64{0}
+    }
+    if (signed && shift < I64{64} && byte & I64{64} != I64{0}) {
+        value = value | wrapping(I64{0} - (I64{1} << shift))
+    }
+    value
+}
+
+// The bytes a pointer in `encoding` takes: its low four bits; 0 for a
+// format the unwinder does not read.
+perf_cfi_pointer_size: fn(encoding: I64) -> I64 {
+    format: encoding & I64{15}
+    if {
+        (format == I64{0} || format == I64{4} || format == I64{12}) -> I64{8}
+        (format == I64{3} || format == I64{11}) -> I64{4}
+        (format == I64{2} || format == I64{10}) -> I64{2}
+        else -> I64{0}
+    }
+}
+
+// The pointer in `encoding` at the cursor, which moves past it: absolute,
+// or relative to its own field, whose link-time address is `address` plus
+// its distance from `bytes`, the section's first byte in the mapping.
+// PERF_CFI_BAD for an encoding the unwinder does not read.
+perf_cfi_pointer: fn(scratch: I64, encoding: I64, bytes: I64, address: I64) -> I64 {
+    at: rt_text_word(scratch)
+    size: perf_cfi_pointer_size(encoding)
+    if (size == I64{0}) { return PERF_CFI_BAD }
+    format: encoding & I64{15}
+    value := if {
+        (size == I64{8}) -> perf_cfi_u64(at)
+        (size == I64{4}) -> perf_cfi_u32(at)
+        else -> perf_cfi_u16(at)
+    }
+    if (format == I64{11} && value >= I64{2147483648}) { value = wrapping(value - I64{4294967296}) }
+    if (format == I64{10} && value >= I64{32768}) { value = wrapping(value - I64{65536}) }
+    rt_text_store(scratch, wrapping(at + size))
+    application: encoding & I64{112}
+    if (application == I64{16}) {
+        return wrapping(value + wrapping(address + wrapping(at - bytes)))
+    }
+    if (application != I64{0}) { return PERF_CFI_BAD }
+    value
+}
+
+// Give register `register` the rule `rule` at CFA + `offset`; only rbp and
+// the return address are followed.
+perf_cfi_set: fn(scratch: I64, register: I64, rule: I64, offset: I64) {
+    at: if {
+        (register == PERF_CFI_RBP) -> PERF_CFI_RBP_RULE
+        (register == rt_text_word(wrapping(scratch + PERF_CFI_RA_COLUMN))) -> PERF_CFI_RA_RULE
+        else -> I64{-1}
+    }
+    if (at < I64{0}) {
+        return
+    }
+    rt_text_store(wrapping(scratch + at), rule)
+    rt_text_store(wrapping(scratch + wrapping(at + I64{8})), offset)
+}
+
+// DW_CFA_restore: register `register` takes its rule after the CIE's
+// initial instructions back.
+perf_cfi_restore: fn(scratch: I64, register: I64) {
+    initial: wrapping(scratch + PERF_CFI_INITIAL)
+    if {
+        (register == PERF_CFI_RBP) -> {
+            perf_cfi_set(scratch, register, rt_text_word(initial), rt_text_word(wrapping(initial + I64{8})))
+        }
+        else -> {
+            perf_cfi_set(scratch, register, rt_text_word(wrapping(initial + I64{16})), rt_text_word(wrapping(initial + I64{24})))
+        }
+    }
+}
+
+// Copy one rule row of PERF_CFI_ROW_BYTES from `source` to `target`.
+perf_cfi_copy_row: fn(target: I64, source: I64) {
+    at := I64{0}
+    loop at < PERF_CFI_ROW_BYTES {
+        rt_text_store(wrapping(target + at), rt_text_word(wrapping(source + at)))
+        at = wrapping(at + I64{8})
+    }
+}
+
+// Run the call frame instructions from the cursor to `end`, the first row
+// at link-time address `location`, until the row that holds `target`.
+// False on an instruction the unwinder does not follow.
+perf_cfi_run: fn(scratch: I64, end: I64, location: I64, target: I64) -> Bool {
+    code_align: rt_text_word(wrapping(scratch + PERF_CFI_CODE_ALIGN))
+    data_align: rt_text_word(wrapping(scratch + PERF_CFI_DATA_ALIGN))
+    at := location
+    loop rt_text_word(scratch) < end {
+        op: perf_cfi_byte(scratch)
+        high: op & I64{192}
+        low: op & I64{63}
+        advance := I64{-1}
+        if {
+            (high == I64{64}) -> advance = low
+            (high == I64{128}) -> perf_cfi_set(scratch, low, PERF_CFI_SAVED, wrapping(perf_cfi_leb(scratch, false) * data_align))
+            (high == I64{192}) -> perf_cfi_restore(scratch, low)
+            (op == I64{0}) -> {}
+            (op == I64{2}) -> advance = perf_cfi_byte(scratch)
+            (op == I64{3}) -> {
+                advance = perf_cfi_u16(rt_text_word(scratch))
+                rt_text_store(scratch, wrapping(rt_text_word(scratch) + I64{2}))
+            }
+            (op == I64{4}) -> {
+                advance = perf_cfi_u32(rt_text_word(scratch))
+                rt_text_store(scratch, wrapping(rt_text_word(scratch) + I64{4}))
+            }
+            (op == I64{5} || op == I64{17} || op == I64{47}) -> {
+                // offset_extended, offset_extended_sf, GNU_negative_offset_extended.
+                register: perf_cfi_leb(scratch, false)
+                factored: perf_cfi_leb(scratch, op == I64{17})
+                offset: wrapping(factored * data_align)
+                perf_cfi_set(scratch, register, PERF_CFI_SAVED, if (op == I64{47}) -> wrapping(I64{0} - offset) else -> offset)
+            }
+            (op == I64{6}) -> perf_cfi_restore(scratch, perf_cfi_leb(scratch, false))
+            (op == I64{7} || op == I64{9} || op == I64{20} || op == I64{21}) -> {
+                // undefined, register, val_offset, val_offset_sf: a rule the
+                // unwinder does not follow for rbp or the return address.
+                register: perf_cfi_leb(scratch, false)
+                if (op != I64{7}) { _ := perf_cfi_leb(scratch, op == I64{21}) }
+                perf_cfi_set(scratch, register, PERF_CFI_UNKNOWN, I64{0})
+            }
+            (op == I64{8}) -> perf_cfi_set(scratch, perf_cfi_leb(scratch, false), PERF_CFI_SAME, I64{0})
+            (op == I64{10}) -> {
+                depth: rt_text_word(wrapping(scratch + PERF_CFI_DEPTH))
+                if (depth >= PERF_CFI_STACK_ROWS) { return false }
+                perf_cfi_copy_row(wrapping(scratch + wrapping(PERF_CFI_STACK + wrapping(depth * PERF_CFI_ROW_BYTES))), wrapping(scratch + PERF_CFI_ROW))
+                rt_text_store(wrapping(scratch + PERF_CFI_DEPTH), wrapping(depth + I64{1}))
+            }
+            (op == I64{11}) -> {
+                depth: rt_text_word(wrapping(scratch + PERF_CFI_DEPTH))
+                if (depth <= I64{0}) { return false }
+                perf_cfi_copy_row(wrapping(scratch + PERF_CFI_ROW), wrapping(scratch + wrapping(PERF_CFI_STACK + wrapping(wrapping(depth - I64{1}) * PERF_CFI_ROW_BYTES))))
+                rt_text_store(wrapping(scratch + PERF_CFI_DEPTH), wrapping(depth - I64{1}))
+            }
+            (op == I64{12} || op == I64{18}) -> {
+                rt_text_store(wrapping(scratch + PERF_CFI_CFA_REG), perf_cfi_leb(scratch, false))
+                offset: if (op == I64{18}) -> wrapping(perf_cfi_leb(scratch, true) * data_align) else -> perf_cfi_leb(scratch, false)
+                rt_text_store(wrapping(scratch + PERF_CFI_CFA_OFFSET), offset)
+            }
+            (op == I64{13}) -> rt_text_store(wrapping(scratch + PERF_CFI_CFA_REG), perf_cfi_leb(scratch, false))
+            (op == I64{14}) -> rt_text_store(wrapping(scratch + PERF_CFI_CFA_OFFSET), perf_cfi_leb(scratch, false))
+            (op == I64{19}) -> rt_text_store(wrapping(scratch + PERF_CFI_CFA_OFFSET), wrapping(perf_cfi_leb(scratch, true) * data_align))
+            (op == I64{15} || op == I64{16} || op == I64{22}) -> {
+                // def_cfa_expression, expression, val_expression: the block
+                // is skipped and what it computes is not followed.
+                register := I64{-1}
+                if (op != I64{15}) { register = perf_cfi_leb(scratch, false) }
+                length: perf_cfi_leb(scratch, false)
+                rt_text_store(scratch, wrapping(rt_text_word(scratch) + length))
+                if {
+                    (op == I64{15}) -> rt_text_store(wrapping(scratch + PERF_CFI_CFA_REG), I64{-1})
+                    else -> perf_cfi_set(scratch, register, PERF_CFI_UNKNOWN, I64{0})
+                }
+            }
+            // GNU_args_size.
+            (op == I64{46}) -> { _ := perf_cfi_leb(scratch, false) }
+            // set_loc and any other instruction.
+            else -> return false
+        }
+        if (advance >= I64{0}) {
+            at = wrapping(at + wrapping(advance * code_align))
+            if (at > target) { return true }
+        }
+    }
+    true
+}
+
+// Read the CIE at `cie` (its length word) into the scratch page and run its
+// initial instructions; the cursor is left past them. False for a CIE the
+// unwinder does not read.
+perf_cfi_cie: fn(scratch: I64, cie: I64) -> Bool {
+    length: perf_cfi_u32(cie)
+    if (length == I64{0} || length == I64{4294967295} || perf_cfi_u32(wrapping(cie + I64{4})) != I64{0}) {
+        return false
+    }
+    end: wrapping(cie + wrapping(length + I64{4}))
+    version: rt_text_byte(wrapping(cie + I64{8}))
+    augmentation: wrapping(cie + I64{9})
+    at := augmentation
+    loop rt_text_byte(at) != (I64{0}) -> at = wrapping(at + I64{1})
+    rt_text_store(scratch, wrapping(at + I64{1}))
+    augmented: rt_text_byte(augmentation) == I64{122}
+    if (rt_text_byte(augmentation) != I64{0} && !augmented) { return false }
+    rt_text_store(wrapping(scratch + PERF_CFI_CODE_ALIGN), perf_cfi_leb(scratch, false))
+    rt_text_store(wrapping(scratch + PERF_CFI_DATA_ALIGN), perf_cfi_leb(scratch, true))
+    column: if (version == I64{1}) -> perf_cfi_byte(scratch) else -> perf_cfi_leb(scratch, false)
+    rt_text_store(wrapping(scratch + PERF_CFI_RA_COLUMN), column)
+    encoding := I64{0}
+    if (augmented) {
+        size: perf_cfi_leb(scratch, false)
+        data: rt_text_word(scratch)
+        field := data
+        letter := wrapping(augmentation + I64{1})
+        loop rt_text_byte(letter) != (I64{0}) {
+            kind: rt_text_byte(letter)
+            // 'R' the FDE pointer encoding, 'P' a personality pointer, 'L'
+            // the LSDA encoding; 'S' and 'B' carry no data.
+            if {
+                (kind == I64{82}) -> {
+                    encoding = rt_text_byte(field)
+                    field = wrapping(field + I64{1})
+                }
+                (kind == I64{80}) -> {
+                    skip: perf_cfi_pointer_size(rt_text_byte(field))
+                    if (skip == I64{0}) { return false }
+                    field = wrapping(field + wrapping(skip + I64{1}))
+                }
+                (kind == I64{76}) -> field = wrapping(field + I64{1})
+                (kind != I64{83} && kind != I64{66}) -> return false
+                else -> {}
+            }
+            letter = wrapping(letter + I64{1})
+        }
+        rt_text_store(scratch, wrapping(data + size))
+    }
+    rt_text_store(wrapping(scratch + PERF_CFI_ENCODING), encoding)
+    rt_text_store(wrapping(scratch + PERF_CFI_AUGMENTED), if (augmented) -> I64{1} else -> I64{0})
+    // Until the instructions say otherwise: no CFA, rbp unchanged, the
+    // return address unknown.
+    rt_text_store(wrapping(scratch + PERF_CFI_CFA_REG), I64{-1})
+    rt_text_store(wrapping(scratch + PERF_CFI_CFA_OFFSET), I64{0})
+    rt_text_store(wrapping(scratch + PERF_CFI_RBP_RULE), PERF_CFI_SAME)
+    rt_text_store(wrapping(scratch + PERF_CFI_RBP_OFFSET), I64{0})
+    rt_text_store(wrapping(scratch + PERF_CFI_RA_RULE), PERF_CFI_UNKNOWN)
+    rt_text_store(wrapping(scratch + PERF_CFI_RA_OFFSET), I64{0})
+    rt_text_store(wrapping(scratch + PERF_CFI_DEPTH), I64{0})
+    if (!perf_cfi_run(scratch, end, I64{0}, I64{-1})) { return false }
+    initial: wrapping(scratch + PERF_CFI_INITIAL)
+    rt_text_store(initial, rt_text_word(wrapping(scratch + PERF_CFI_RBP_RULE)))
+    rt_text_store(wrapping(initial + I64{8}), rt_text_word(wrapping(scratch + PERF_CFI_RBP_OFFSET)))
+    rt_text_store(wrapping(initial + I64{16}), rt_text_word(wrapping(scratch + PERF_CFI_RA_RULE)))
+    rt_text_store(wrapping(initial + I64{24}), rt_text_word(wrapping(scratch + PERF_CFI_RA_OFFSET)))
+    true
+}
+
+// The rule row at link-time address `address` of the FDE at `fde`, whose
+// range starts at `begin`, in the scratch page. False when its CIE or
+// instructions are ones the unwinder does not read.
+perf_cfi_rule: fn(scratch: I64, fde: I64, begin: I64, address: I64) -> Bool {
+    pointer: wrapping(fde + I64{4})
+    if (!perf_cfi_cie(scratch, wrapping(pointer - perf_cfi_u32(pointer)))) { return false }
+    end: wrapping(fde + wrapping(perf_cfi_u32(fde) + I64{4}))
+    // The range's begin and length are the table's; past them, the FDE's
+    // augmentation data when its CIE has a 'z'.
+    size: perf_cfi_pointer_size(rt_text_word(wrapping(scratch + PERF_CFI_ENCODING)))
+    if (size == I64{0}) { return false }
+    rt_text_store(scratch, wrapping(fde + wrapping(I64{8} + wrapping(size * I64{2}))))
+    if (rt_text_word(wrapping(scratch + PERF_CFI_AUGMENTED)) != I64{0}) {
+        skip: perf_cfi_leb(scratch, false)
+        rt_text_store(scratch, wrapping(rt_text_word(scratch) + skip))
+    }
+    perf_cfi_run(scratch, end, begin, address)
+}
+
+// The table entry (begin, end, FDE) whose range holds link-time address
+// `address`, or 0.
+perf_cfi_find: fn(address: I64) -> I64 {
+    table: perf_cfi_table
+    low := I64{0}
+    high := perf_cfi_count
+    // The last entry that begins at or below the address.
+    loop low < high {
+        middle: wrapping(low + ((high - low) >> I64{1}))
+        if {
+            (rt_text_word(wrapping(table + wrapping(middle * I64{24}))) <= address) -> {
+                low = wrapping(middle + I64{1})
+            }
+            else -> high = middle
+        }
+    }
+    if (low == I64{0}) { return I64{0} }
+    entry: wrapping(table + wrapping(wrapping(low - I64{1}) * I64{24}))
+    if (address < rt_text_word(wrapping(entry + I64{8}))) -> entry else -> I64{0}
+}
+
+// The FDEs of the .eh_frame section at `bytes` in the mapping, `size` bytes
+// from link-time address `address`: counted when `table` is 0, else written
+// to it from entry `first` on. The entries written or counted.
+perf_cfi_section: fn(scratch: I64, bytes: I64, size: I64, address: I64, table: I64, first: I64) -> I64 {
+    written := first
+    at := bytes
+    stop: wrapping(bytes + size)
+    loop wrapping(at + I64{8}) <= stop {
+        length: perf_cfi_u32(at)
+        if (length == I64{0} || length == I64{4294967295}) { break }
+        pointer: wrapping(at + I64{4})
+        if (perf_cfi_u32(pointer) != I64{0}) {
+            if {
+                (table == I64{0}) -> written = wrapping(written + I64{1})
+                (perf_cfi_cie(scratch, wrapping(pointer - perf_cfi_u32(pointer)))) -> {
+                    encoding: rt_text_word(wrapping(scratch + PERF_CFI_ENCODING))
+                    rt_text_store(scratch, wrapping(at + I64{8}))
+                    begin: perf_cfi_pointer(scratch, encoding, bytes, address)
+                    extent: perf_cfi_pointer(scratch, encoding & I64{15}, bytes, address)
+                    if (begin != PERF_CFI_BAD && extent != PERF_CFI_BAD && extent > I64{0}) {
+                        entry: wrapping(table + wrapping(written * I64{24}))
+                        rt_text_store(entry, begin)
+                        rt_text_store(wrapping(entry + I64{8}), wrapping(begin + extent))
+                        rt_text_store(wrapping(entry + I64{16}), at)
+                        written = wrapping(written + I64{1})
+                    }
+                }
+                else -> {}
+            }
+        }
+        at = wrapping(pointer + length)
+    }
+    written
+}
+
+// The FDEs of every section named `.eh_frame` of the ELF64 file `image`:
+// counted when `table` is 0, else written to it.
+perf_cfi_sections: fn(image: I64, scratch: I64, table: I64) -> I64 {
+    sections: wrapping(image + rt_text_word(wrapping(image + I64{40})))
+    entry: rt_text_word(wrapping(image + I64{58})) & I64{65535}
+    count: rt_text_word(wrapping(image + I64{60})) & I64{65535}
+    strings: wrapping(image + rt_text_word(wrapping(wrapping(sections + wrapping((rt_text_word(wrapping(image + I64{62})) & I64{65535}) * entry)) + I64{24})))
+    found := I64{0}
+    index := I64{0}
+    loop index < count {
+        section: wrapping(sections + wrapping(index * entry))
+        name: wrapping(strings + perf_cfi_u32(section))
+        // ".eh_fram", then "e" and the name's end.
+        if (perf_cfi_u64(name) == I64{7881706606887986478} && rt_text_byte(wrapping(name + I64{8})) == I64{101} && rt_text_byte(wrapping(name + I64{9})) == I64{0}) {
+            bytes: wrapping(image + rt_text_word(wrapping(section + I64{24})))
+            found = perf_cfi_section(scratch, bytes, rt_text_word(wrapping(section + I64{32})), rt_text_word(wrapping(section + I64{16})), table, found)
+        }
+        index = wrapping(index + I64{1})
+    }
+    found
+}
+
+// The FDE table of the ELF64 file `image` (alloc_check_image), sorted by
+// begin.
+perf_cfi_start: fn(image: I64) {
+    if (image == I64{0}) {
+        return
+    }
+    scratch: alloc_map_try(I64{4096})
+    if (scratch == I64{0}) {
+        return
+    }
+    found: perf_cfi_sections(image, scratch, I64{0})
+    if (found == I64{0}) {
+        return
+    }
+    table: alloc_map_try(wrapping(found * I64{24}))
+    if (table == I64{0}) {
+        return
+    }
+    total: perf_cfi_sections(image, scratch, table)
+    perf_cfi_sort(table, total)
+    #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
+        perf_cfi_table = table
+        perf_cfi_count = total
+        perf_cfi_scratch = scratch
+    }
+}
+
+// Sort the `count` three-word entries of `table` by their first word, in
+// place: a shell sort, as the runtime's sort would allocate.
+perf_cfi_sort: fn(table: I64, count: I64) {
+    gap := count >> I64{1}
+    loop gap > (I64{0}) {
+        index := gap
+        loop index < count {
+            moving: wrapping(table + wrapping(index * I64{24}))
+            begin: rt_text_word(moving)
+            end: rt_text_word(wrapping(moving + I64{8}))
+            fde: rt_text_word(wrapping(moving + I64{16}))
+            slot := index
+            loop slot >= gap && rt_text_word(wrapping(table + wrapping(wrapping(slot - gap) * I64{24}))) > begin {
+                to: wrapping(table + wrapping(slot * I64{24}))
+                from: wrapping(table + wrapping(wrapping(slot - gap) * I64{24}))
+                rt_text_store(to, rt_text_word(from))
+                rt_text_store(wrapping(to + I64{8}), rt_text_word(wrapping(from + I64{8})))
+                rt_text_store(wrapping(to + I64{16}), rt_text_word(wrapping(from + I64{16})))
+                slot = wrapping(slot - gap)
+            }
+            to: wrapping(table + wrapping(slot * I64{24}))
+            rt_text_store(to, begin)
+            rt_text_store(wrapping(to + I64{8}), end)
+            rt_text_store(wrapping(to + I64{16}), fde)
+            index = wrapping(index + I64{1})
+        }
+        gap = gap >> I64{1}
+    }
+}
+
 // The SIGPROF handler (SA_SIGINFO), and PERF_COUNTERS_SIGNAL's: the
 // interrupted rip, rbp and rsp are ucontext_t's mcontext gregs[16], [10]
-// and [15], at 168, 120 and 160. In Jet code rbp is always a frame of the
-// chain (the caller's, before the prologue sets it), so the walk starts
-// there when rip is in the image's code. It follows each [saved rbp][return
-// address] pair while the call site is Jet code too, whose caller keeps its
-// own frame pointer, as the fault report's walk does (Fault.jet
-// trace_frames). One thread fills the record buffer at a time; another
-// thread's sample meanwhile, or one outside Jet code, is its program
-// counter alone. A write the kernel refuses loses that one sample; O_APPEND
-// puts each record after the last. A counter's record has its kind, and
-// the counter is armed again once it is written.
+// and [15], at 168, 120 and 160. When rip is in the image's code, the call
+// frame information (perf_cfi_rule) first steps out through each frame
+// whose CFA is rsp-based, a function without a frame pointer or one before
+// its prologue sets it, reading the return address and, where it was
+// saved, rbp from below its CFA. At the first frame that keeps rbp, rbp is
+// a frame of the chain, and the walk follows each [saved rbp][return
+// address] pair while the call site is in the image's code, as the fault
+// report's walk does (Fault.jet trace_frames). A frame neither can follow
+// ends the stack there. One thread fills the record buffer at a time;
+// another thread's sample meanwhile, or one outside the image's code, is
+// its program counter alone. A write the kernel refuses loses that one
+// sample; O_APPEND puts each record after the last. A counter's record has
+// its kind, and the counter is armed again once it is written.
 #Export(c) jet_rt_perf_samples_signal: fn(signal: I64, info: I64, context: I64) -> I64 {
     fd: perf_samples_fd
     if (fd < I64{0} || context == I64{0}) { return I64{0} }
@@ -493,11 +996,48 @@ perf_samples_in_code: fn(address: I64) -> Bool {
     count := I64{1}
     stack: rt_text_word(wrapping(context + I64{160}))
     frame := rt_text_word(wrapping(context + I64{120}))
-    if (frame < stack || wrapping(frame - stack) >= I64{16777216}) { frame = I64{0} }
+    scratch: perf_cfi_scratch
+    sp := stack
+    address := pc
+    loop scratch != (I64{0}) && count < PERF_SAMPLES_DEPTH {
+        entry: perf_cfi_find(address)
+        if (entry == I64{0} || !perf_cfi_rule(scratch, rt_text_word(wrapping(entry + I64{16})), rt_text_word(entry), address)) {
+            break
+        }
+        register: rt_text_word(wrapping(scratch + PERF_CFI_CFA_REG))
+        // A frame that keeps rbp: the walk below takes it from here.
+        if (register == PERF_CFI_RBP) { break }
+        cfa: wrapping(sp + rt_text_word(wrapping(scratch + PERF_CFI_CFA_OFFSET)))
+        if (register != PERF_CFI_RSP || rt_text_word(wrapping(scratch + PERF_CFI_RA_RULE)) != PERF_CFI_SAVED || cfa <= sp || cfa & I64{7} != I64{0} || wrapping(cfa - stack) >= I64{16777216}) {
+            frame = I64{0}
+            break
+        }
+        // cfa is above the interrupted rsp on the thread's stack, so the
+        // return address and the saved rbp below it are words of that stack.
+        rule: rt_text_word(wrapping(scratch + PERF_CFI_RBP_RULE))
+        if {
+            (rule == PERF_CFI_SAVED) -> {
+                frame = rt_text_word(wrapping(cfa + rt_text_word(wrapping(scratch + PERF_CFI_RBP_OFFSET))))
+            }
+            (rule == PERF_CFI_UNKNOWN) -> frame = I64{0}
+            else -> {}
+        }
+        site: wrapping(wrapping(rt_text_word(wrapping(cfa + rt_text_word(wrapping(scratch + PERF_CFI_RA_OFFSET)))) - I64{1}) - bias)
+        if (!perf_samples_in_code(site)) {
+            frame = I64{0}
+            break
+        }
+        rt_text_store(wrapping(buffer + wrapping(wrapping(count + I64{1}) * I64{8})), site)
+        count = wrapping(count + I64{1})
+        sp = cfa
+        address = site
+    }
+    if (frame < sp || wrapping(frame - stack) >= I64{16777216}) { frame = I64{0} }
     loop count < PERF_SAMPLES_DEPTH {
         if (frame == I64{0} || frame & I64{7} != I64{0}) { break }
         // frame is a [saved rbp][return address] pair of the interrupted
-        // thread's chain: rbp of Jet code, or the saved rbp of a Jet caller.
+        // thread's chain: rbp of a frame that keeps it, or the saved rbp of
+        // its caller.
         site: wrapping(wrapping(rt_text_word(wrapping(frame + I64{8})) - I64{1}) - bias)
         if (!perf_samples_in_code(site)) { break }
         rt_text_store(wrapping(buffer + wrapping(wrapping(count + I64{1}) * I64{8})), site)

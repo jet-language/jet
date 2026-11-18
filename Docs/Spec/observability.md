@@ -98,7 +98,11 @@ profile is `no_samples` with no window.
 `jet perf run` samples the program's CPU time: the runtime arms the process's
 profiling timer (`setitimer` `ITIMER_PROF`, one sample per millisecond of
 CPU) and records the program counter each `SIGPROF` interrupted with the call
-site of each Jet caller up the frame-pointer chain, and `jet run` writes the
+site of each caller. A frame without a frame pointer (code before a
+function's prologue sets one, a frameless runtime routine, a C library
+function) is stepped out of by the image's own call frame information
+(`.eh_frame`), read by the runtime's unwinder, up to the first frame that
+keeps one; the frame-pointer chain gives the rest. `jet run` writes the
 program's image beside the samples. The session names each sample's Jet
 function and source line from that image's `.debug_jetline` location table, as
 Linux perf names the same image's samples from its line tables, so `-O2` code
