@@ -2157,8 +2157,9 @@ mutable binding insert or replace without creating missing containers.
 The map slot `m[k, or: start]` (D-MAP-SLOT1=A) looks `k` up once. As a value
 it reads the stored value, or `start` for a missing key, and adds no entry. As
 a place it adds `start` under a missing key first: `counts[w, or: 0] += 1`,
-`&groups[w, or: [String]{}].push(w)` and `slot: &m[k, or: start]` each insert
-at most once. `start` runs only for a missing key, and a plain
+`groups[w, or: [String]{}].push(w)` (`&groups[…].push(w)` under
+`#Policy(writes: .Explicit)`) and `slot: &m[k, or: start]` each insert at
+most once. `start` runs only for a missing key, and a plain
 `m[k, or: start] = v` sets `k` without running it. It is the one upsert
 spelling.
 

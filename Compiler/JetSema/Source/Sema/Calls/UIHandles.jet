@@ -250,39 +250,56 @@ sema_ui_handle_button: fn(args: [CallArg], span: Span, expected: Type?, environm
 // `ui.text_input(state, ime)` is the Core source function `text_input`; the
 // `on_drop:` form registers its drop handler as a retained closure (a drop
 // slot Int) and builds the node with the Core function that fills the
-// jet_builtins role TextInputDrop.
+// jet_builtins role TextInputDrop. The `on_change:` form registers its
+// change handler as a button's click handler is kept (a click slot Int:
+// the click registry keeps any callback closure), and a drop handler
+// beside it when `on_drop:` is given too (else drop slot 0), and builds the
+// node with the Core function that fills TextInputChange.
 sema_ui_handle_text_input: fn(args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
-    params := [SemaCallParam]{
+    params: [SemaCallParam]{
         sema_ui_handle_callback_param("state", "state", Type.String, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
         sema_ui_handle_callback_param("ime", "ime", Type.Named{name: "UIIMEMode"}, span, AccessConvention.Read, ParamZone.PositionalOnly, None),
         sema_ui_handle_callback_param("on_drop", "on_drop", Type.Option{inner: sema_ui_handle_callback_type([Type]{Type.Named{name: "UIDropItem"}})}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span, id: AST_NODE_GENERATED})),
+        sema_ui_handle_callback_param("on_change", "on_change", Type.Option{inner: sema_ui_handle_callback_type([Type]{Type.String})}, span, AccessConvention.Move, ParamZone.LabelOnly, Val(Expr.Absent{span: span, id: AST_NODE_GENERATED})),
     }
     bound: sema_ui_handle_bind_callback_args("text_input", args, span, "on_drop", params, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    if bound.len() != 3 {
+    if bound.len() != 4 {
         _ := sema_ui_handle_infer_args(bound, environment, program, scopes, state, tail_store, context, diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     state_value: sema_ui_handle_typed_arg(bound[0], Type.String, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     ime_value: sema_ui_handle_typed_arg(bound[1], Type.Named{name: "UIIMEMode"}, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    result_type := Type.Named{name: "UINode"}
+    result_type: Type.Named{name: "UINode"}
     on_drop_absent: sema_expression_absent_none(bound[2].expr)
-    if on_drop_absent {
+    on_change_absent: sema_expression_absent_none(bound[3].expr)
+    if on_drop_absent && on_change_absent {
         value: sema_call_core_source("core.ui", "text_input", [TExpr]{state_value, ime_value}, result_type, false, span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, diagnostics)}
     }
-    callback: sema_ui_handle_stored_callback("text_input on_drop", bound[2], [Type]{Type.Named{name: "UIDropItem"}}, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    drop_slot: sema_tree_node(Type.Int, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIDropSlot{executable: callback}}, span)
+    drop_slot := sema_tree_node(Type.Int, TExprKind.IntLit{value: 0, width: None}, span)
+    if !on_drop_absent {
+        callback: sema_ui_handle_stored_callback("text_input on_drop", bound[2], [Type]{Type.Named{name: "UIDropItem"}}, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        drop_slot = sema_tree_node(Type.Int, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIDropSlot{executable: callback}}, span)
+    }
+    role := SEMA_CORE_ROLE_TEXT_INPUT_DROP
+    slots := [TExpr]{state_value, ime_value}
+    if on_change_absent -> slots.push(drop_slot) else {
+        callback: sema_ui_handle_stored_callback("text_input on_change", bound[3], [Type]{Type.String}, span, environment, program, scopes, state, tail_store, context, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+        slots.push(sema_tree_node(Type.Int, TExprKind.CoreClosureCall{kind: TCoreClosureKind.UIClickSlot{executable: callback}}, span))
+        slots.push(drop_slot)
+        role = SEMA_CORE_ROLE_TEXT_INPUT_CHANGE
+    }
     graph: program.registration_graph ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    builder: sema_core_role_function(graph, SEMA_CORE_ROLE_TEXT_INPUT_DROP) ?? {
-        diagnostics.push(sema_missing_core_role(SEMA_CORE_ROLE_TEXT_INPUT_DROP, span))
+    builder: sema_core_role_function(graph, role) ?? {
+        diagnostics.push(sema_missing_core_role(role, span))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    value: sema_call_core_source("core.ui", builder.name, [TExpr]{state_value, ime_value, drop_slot}, result_type, true, span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    value: sema_call_core_source("core.ui", builder.name, slots, result_type, true, span, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     checked: sema_expr_expected(value, expected, environment, program, diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_ui_handle_call_fact(environment, program, scopes, context, "core.ui.text_input", span, result_type, "Browser", diagnostics) {
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    return SemaDirectSpecialCheck{handled: true, value: Val(checked)}
+    SemaDirectSpecialCheck{handled: true, value: Val(checked)}
 }
 
 // `ui.reactive_render(() -> { … })`: the measure/layout/paint loop keeps its

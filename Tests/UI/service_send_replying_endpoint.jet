@@ -1,0 +1,11 @@
+// A worker whose handler answers is reached by `call`: `send` has no place
+// for its answer.
+use service: core.service
+
+price: fn(quantity: Int) -> Int { quantity * 3 }
+
+run: fn() {
+    tree := service.tree("shop")
+    pricing: tree.worker("pricing", price, capacity: 8) ?? return
+    tree.send(pricing, 2) ?? return
+}

@@ -601,11 +601,11 @@ core_decl_call_effect: fn(module_name: String, member: String) -> String? Never!
         }
         "core.plugin" -> Val("Exec")
         // A web page's scene is the browser's, so core.ui's leaves use
-        // `Browser`, but for the two the window host shares with the page:
-        // a native window routes a click or a drop to its slot's handler
-        // through them, as the page does.
+        // `Browser`, but for the three the window host shares with the page:
+        // a native window routes a click, a drop or typing to its slot's
+        // handler through them, as the page does.
         "core.ui" -> if member == {
-            "__click" | "__drop" -> None
+            "__change" | "__click" | "__drop" -> None
             else -> Val("Browser")
         }
         "core.browser.host" | "core.browser.storage.local" | "core.browser.storage.session" -> Val("Browser")

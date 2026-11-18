@@ -1,0 +1,14 @@
+// `tree.send` takes only the message type of the worker's handler.
+use service: core.service
+
+Email: struct {
+    to: String,
+}
+
+send_email: fn(email: Email) { print("to {email.to}") }
+
+run: fn() {
+    tree := service.tree("mail")
+    email: tree.worker("email", send_email, capacity: 64) ?? return
+    tree.send(email, "someone") ?? return
+}
