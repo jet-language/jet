@@ -2464,6 +2464,50 @@ sema_inline_strip_members: fn(body: [Item]) -> [Item] Never! {
     kept
 }
 
+// Whether a module body, or a module nested in it, declares one name twice.
+sema_inline_repeats_name: fn(body: [Item]) -[]> Bool {
+    seen := [String:Bool]{}
+    loop item in body {
+        name: sema_registration_root_name(item)
+        if name != "" {
+            if seen.get(name) != None -> return true
+            seen[name] = true
+        }
+        if item == .CodeModule(child) && child.body == .Val(child_body) && sema_inline_repeats_name(child_body) {
+            return true
+        }
+    }
+    false
+}
+
+// An inline module body is one namespace, as a file's top level is
+// (sema_registration_add_root), whatever kind each declaration is: a second
+// declaration of a name is E0105 and leaves the body, so it lowers no member
+// and is reported once.
+sema_inline_refuse_repeated_names: fn(body: &[Item], diagnostics: &[Diagnostic]) -[]> {
+    seen := [String:Bool]{}
+    index := 0
+    loop index < body.len() {
+        name: sema_registration_root_name(body[index])
+        if name != "" && seen.get(name) != None {
+            why: if body[index] == .Func(_) -> "every function needs a unique name so calls aren't ambiguous" else -> "module declarations share one namespace"
+            diagnostics.push(sema_defined_twice(name, why, sema_registration_root_span(body[index])))
+            loop later in index..<body.len() - 1 -> body[later] = body[later + 1]
+            _: body.pop()
+            next
+        }
+        if name != "" -> seen[name] = true
+        if body[index] == .CodeModule(child) && child.body == .Val(child_body) && sema_inline_repeats_name(child_body) {
+            members := child_body
+            sema_inline_refuse_repeated_names(members, diagnostics)
+            updated := child
+            updated.body = Val(members)
+            body[index] = Item.CodeModule{value: updated}
+        }
+        index += 1
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The pass.
 
@@ -2498,6 +2542,19 @@ sema_inline_rewrite_item: fn(rewrite: &SemaInlineRewrite, item: Item) -> Item Ne
 sema_inline_modules_lower: fn(program: &Program, diagnostics: &[Diagnostic]) -> SemaInlinePreparedBindings {
     if !sema_inline_modules_any_body(program.items) {
         return SemaInlinePreparedBindings{imports: [String:SemaInlineFunctionBinding]{}, modules: [SemaInlineModuleSurface]{}}
+    }
+
+    // 0. A module body declares each name once, at every depth.
+    loop index in 0..<program.items.len() {
+        refused := Item?{None}
+        if program.items[index] == .CodeModule(definition) && definition.body == .Val(body) && sema_inline_repeats_name(body) {
+            members := body
+            sema_inline_refuse_repeated_names(members, diagnostics)
+            updated := definition
+            updated.body = Val(members)
+            refused = Val(Item.CodeModule{value: updated})
+        }
+        program.items[index] = refused.move() ?? next
     }
 
     // 1. Member types, in item order, then the enclosing file's qualified
@@ -2833,4 +2890,24 @@ sema_inline_test_run_call: fn(source: String) -[]> {callee: String, codes: [Stri
     if nested == .Present(_, _, inner, _) && inner == .Val(.Struct(_, _, _, head)) {
         assert((head?.name ?? "") == "M3GeoPoint")
     } else { panic("the struct pattern lost its head") }
+}
+
+#Test("an inline module body that declares a name twice is one E0105, whatever kinds share it") {
+    source: "m: module {{\n    t: module {{\n        f: fn() {{}}\n    }}\n\n    t: fn() {{}}\n}}\n\nrun: fn() {{\n    m.t.f()\n}}\n"
+    lowered: sema_inline_test_run_call(source)
+    assert(lowered.codes.len() == 1 && lowered.codes[0] == "E0105", lowered.codes.join(", "))
+    // The first declaration keeps the name.
+    assert(lowered.callee == sema_inline_member_name("m.t", "f"), lowered.callee)
+    parsed := parse_source(source.bytes())
+    diagnostics := [Diagnostic]{}
+    _: sema_inline_modules_lower(parsed.program, diagnostics)
+    assert(diagnostics[0].what == "`t` is defined twice", diagnostics[0].what)
+    assert(diagnostics[0].span == Val(Span{start: source.find("t: fn"), end: source.find("t: fn") + 1}))
+}
+
+#Test("a module nested in an inline module shares its parent body's names") {
+    source: "outer: module {{\n    inner: module {{\n        Shape: struct {{ side: Int }}\n\n        Shape: module {{\n            f: fn() {{}}\n        }}\n\n        g: fn() {{}}\n\n        g: fn() {{}}\n    }}\n}}\n\nrun: fn() {{\n    outer.inner.g()\n}}\n"
+    lowered: sema_inline_test_run_call(source)
+    assert(lowered.codes.len() == 2 && lowered.codes[0] == "E0105" && lowered.codes[1] == "E0105", lowered.codes.join(", "))
+    assert(lowered.callee == sema_inline_member_name("outer.inner", "g"), lowered.callee)
 }

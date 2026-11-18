@@ -1,0 +1,45 @@
+// An inline module body is one namespace at every depth, as a file's top
+// level is: a name declared twice there is one E0105 at its second
+// declaration, whatever kinds the two declarations are.
+inline_duplicate_reports: fn(source: String) -> String {
+    rows := [String]{}
+    loop diagnostic in core_failure_record_diagnostics(source, "user/fixture") {
+        start: if diagnostic.span == .Val(at) -> at.start else -> -1
+        rows.push("{diagnostic.code} {start}: {diagnostic.what}")
+    }
+    rows.join("; ")
+}
+
+#Test("an inline module refuses a nested module and a function that share a name") {
+    source: `tools: module {
+    text: module {
+        shout: fn(s: String) -> String { s.to_upper() }
+    }
+
+    text: fn() -> String { "plain" }
+}
+
+run: fn() { print(tools.text.shout("hi")) }
+`
+    assert_eq(inline_duplicate_reports(source), "E0105 {source.find("text: fn")}: `text` is defined twice")
+}
+
+#Test("a module nested in an inline module refuses a module beside a struct of its name") {
+    source: `geo: module {
+    plane: module {
+        Shape: struct { side: Int }
+
+        Shape: module {
+            area: fn(side: Int) -> Int { side * side }
+        }
+    }
+}
+
+run: fn() { print(geo.plane.Shape{side: 2}.side) }
+`
+    at: source.find("Shape: module")
+    reports: inline_duplicate_reports(source)
+    // This fixture graph holds no Core module, so the inline module's read
+    // of core.meta adds an E0003 after these two.
+    assert(reports.starts_with("E0357 {at}: Module `Shape` must be snake_case; E0105 {at}: `Shape` is defined twice; "), reports)
+}
