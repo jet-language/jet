@@ -1,0 +1,46 @@
+// A page app whose screen at `/` shows how many tasks the board holds and
+// an Add button that adds one. The page (page.mjs) is at `/`, so launch
+// draws that screen; a click on Add changes the data the screen shows, and
+// the page draws it again.
+use {
+    app
+    ui: core.ui
+    core.ui.[UINode]
+}
+
+#Error
+BoardError: enum {
+    Offline,
+}
+
+Board: struct {
+    tasks: Int,
+}
+
+BOARD: Shared{Board{tasks: 0}}
+
+task_count: fn() -[DB.Read]> Int BoardError! {
+    held: BOARD.guard_read()
+    Ok(held.value.tasks)
+}
+
+add_task: fn() {
+    held := BOARD.guard_edit()
+    held.value.tasks += 1
+    app.invalidate(task_count)
+}
+
+BoardView: struct {}
+
+board: fn(_view: BoardView) -> UINode Never! {
+    count: if app.state(app.live(task_count)) == {
+        .Loaded(count) -> "{count}"
+        .Failed(_) | .Idle | .Loading -> "none yet"
+    }
+    ui.box([ui.text("Tasks: {count}"), ui.button("Add", fn() { add_task() })])
+}
+
+run: fn() {
+    graph: app.new("Crewboard").screen("/", board)
+    print(if graph.launch() -> "launched" else -> "not launched")
+}

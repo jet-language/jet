@@ -1,0 +1,16 @@
+# An App screen renders in a page. Launch in a page opens the page's
+# address, `/`, and draws its screen into `#jet-app` as a Linux window
+# draws it: the screen's text and its Add button. A click on Add changes
+# the data the screen shows, and once the click's handler ends the page
+# draws the screen again.
+requires: tool:node
+fixture: AnAppScreenRendersInAPage.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+step: jet build --target web main.jet
+exit: 0
+copy: page.mjs .jet/build/page.mjs
+step: node page.mjs
+cwd: .jet/build
+exit: 0
+stdout: = "launched\nafter launch: SPAN \"Tasks: 0\" | BUTTON \"Add\"\nafter a click on Add: SPAN \"Tasks: 1\" | BUTTON \"Add\"\n"

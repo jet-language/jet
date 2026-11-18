@@ -1,0 +1,30 @@
+// Notes on a page: a text input whose change handler (`on_change:`) keeps
+// the note and prints each text it gets, and a line that shows the note.
+use {
+    ui: core.ui
+    reactive: core.reactive
+}
+
+run: fn() {
+    note: reactive.signal("")
+    backend: ui.null_backend()
+    ui.reactive_render(
+        fn() {
+            shown: note.get()
+            tree: ui.box(
+                [
+                    ui.text("note: {shown}"),
+                    ui.text_input(
+                        shown,
+                        UIIMEMode.Native,
+                        on_change: fn(typed: String) {
+                            print("changed: {typed}")
+                            note.set(typed.copy())
+                        },
+                    ),
+                ],
+            )
+            ui.mount(backend, tree, ui.constraint(0.0, 0.0, 200.0, 200.0))
+        },
+    )
+}

@@ -656,8 +656,9 @@ function postRequest(request) {
 // page's lifecycle through the hook whose click slot `request` names,
 // its first moment the document's visibility, 17 the oldest moment
 // of the page's lifecycle the app hasn't taken (Host followLifecycle),
-// and 18 a remote call's POST (postRequest), null for none. An answer
-// may be a promise.
+// 18 a remote call's POST (postRequest), and 19 the app drawing its
+// screens through the hook whose click slot `request` names (Host show),
+// the page's address, null for none. An answer may be a promise.
 function deviceRequest(doc, kept, watches, drops, lifecycle, kind, request) {
   if (kind === 0) return askPermission(request);
   if (kind === 1) return findPlace().then(providerRecord);
@@ -701,6 +702,11 @@ function deviceRequest(doc, kept, watches, drops, lifecycle, kind, request) {
   }
   if (kind === 17) return lifecycle.moments.shift() ?? null;
   if (kind === 18) return postRequest(request);
+  if (kind === 19) {
+    lifecycle.draw = Number(request);
+    const place = globalThis.location;
+    return place?.pathname ? place.pathname + (place.search ?? "") : "/";
+  }
   return null;
 }
 
@@ -717,12 +723,13 @@ function defaultUiProvider(doc) {
   // file, a picked or kept folder's handle), by number; each lives as long
   // as the page. The files of each drop on a body that takes them, until
   // the app takes them. The sensors its streams follow, by number, until
-  // each stops. The click slot of the hook of the app following the page's
-  // lifecycle (0 before one launched) and the moments it hasn't taken.
+  // each stops. The click slots of the hooks of the app that launched (each
+  // 0 before one launched): the one following the page's lifecycle, with
+  // the moments it hasn't taken, and the one drawing its screens (Host show).
   const kept = [];
   const drops = [];
   const watches = { count: 0, held: new Map() };
-  const lifecycle = { hook: 0, moments: [] };
+  const lifecycle = { hook: 0, moments: [], draw: 0 };
   const enqueue = (queue, fields) => {
     const records = queues[queue];
     if (records.length < UI_QUEUE) records.push(providerRecord(fields));
@@ -792,6 +799,9 @@ function defaultUiProvider(doc) {
       lifecycle.moments.push(moment);
       return lifecycle.hook;
     },
+    // The click slot of the hook of the app drawing its screens, 0 with no
+    // app that launched with screens.
+    drawHook: () => lifecycle.draw,
     keyClaim: (claim) => {
       claims.add(claim);
       return true;
@@ -1184,7 +1194,8 @@ class Host {
       this.flushLines();
       this.outcome = status;
       if (status !== 0) this.end();
-      this.paintScene();
+      if (status === 0) await this.show();
+      else this.paintScene();
     }).then(() => this.outcome);
   }
 
@@ -1311,6 +1322,8 @@ class Host {
   // TextInput, a span for a Text and a div for any other leaf, each placed
   // at its frame. An element with a click slot runs its handler on click; one
   // with a drop slot accepts drops and runs its handler on each dropped item;
+  // an input with a change slot runs its handler on its value at each input,
+  // and keeps the focus and selection across the repaint that may follow;
   // one with a files slot accepts a drop of files, which the provider keeps
   // (filesDropped) for the handler it then clicks to take (deviceRequest);
   // one with context menu entries opens them (openMenu) on contextmenu in
@@ -1366,7 +1379,7 @@ class Host {
     this.picked = null;
     this.dragging = 0;
     while (offset < bytes.length) {
-      const [kind, slot, dropSlot, filesSlot, entries, pickSlot, pickKind, takeSlot, takeKind, x, y, width, height, color, length] = fields(15);
+      const [kind, slot, dropSlot, changeSlot, filesSlot, entries, pickSlot, pickKind, takeSlot, takeKind, x, y, width, height, color, length] = fields(16);
       const text = label(length);
       const pick = Number(pickSlot);
       const take = Number(takeSlot);
@@ -1389,6 +1402,8 @@ class Host {
       else element.textContent = text;
       const id = Number(slot);
       if (id !== 0) element.addEventListener("click", () => this.click(id));
+      const changeId = Number(changeSlot);
+      if (changeId !== 0) element.addEventListener("input", () => this.change(changeId, element));
       const dropId = Number(dropSlot);
       const filesId = Number(filesSlot);
       if (take !== 0) held(zones, take, takeKind, zoneName, element);
@@ -1548,16 +1563,26 @@ class Host {
   }
 
   // A click on a scene element, once the program's run returned 0: runs the
-  // element's handler as the next entry (turn), drains stdout, then shows
-  // the scene it painted. A promise of the handler's end.
+  // element's handler as the next entry (turn), then shows what it changed
+  // (show). A promise of the handler's end.
   click(id) {
     return this.turn(async () => {
       if (this.outcome !== 0) return;
       await this.waitableCall(this.rt.jet_ui_click, BigInt(id));
-      this.rt.jet_rt_stdout_flush();
-      this.flushLines();
-      this.paintScene();
+      await this.show();
     });
+  }
+
+  // The end of an entry that ran the program's handlers: the app that
+  // launched with screens draws them again when what they show changed
+  // (app.launch's draw hook, which the provider names), stdout drains, and
+  // the page shows the scene painted.
+  async show() {
+    const draw = globalThis.jetUiProvider?.drawHook?.() ?? 0;
+    if (draw !== 0) await this.waitableCall(this.rt.jet_ui_click, BigInt(draw));
+    this.rt.jet_rt_stdout_flush();
+    this.flushLines();
+    this.paintScene();
   }
 
   // The page's lifecycle, told to the app that launched (app.launch's hook,
@@ -1587,7 +1612,7 @@ class Host {
   // `text/uri-list` line that is neither empty nor a `#` comment one URI item
   // (kind 1). The items are read while the drop is dispatched; then, once
   // the program's run returned 0, each runs the element's handler in order
-  // as the next entry (turn), stdout drains and the scene it painted shows.
+  // as the next entry (turn), and the page shows what they changed (show).
   // A promise of the last handler's end.
   drop(id, data) {
     if (!data) return Promise.resolve();
@@ -1606,9 +1631,33 @@ class Host {
         this.u8().set(bytes, at);
         await this.waitableCall(this.rt.jet_ui_web_drop, BigInt(id), BigInt(kind));
       }
-      this.rt.jet_rt_stdout_flush();
-      this.flushLines();
-      this.paintScene();
+      await this.show();
+    });
+  }
+
+  // An input in `element`, a scene element with change slot `id`: once the
+  // program's run returned 0, the element's handler runs on its value as the
+  // next entry (turn), and the page shows what it changed (show). That
+  // repaint replaces the elements, so the element in the input's place
+  // takes the focus and selection it had. A promise of the handler's end.
+  change(id, element) {
+    const value = element.value;
+    return this.turn(async () => {
+      if (this.outcome !== 0) return;
+      const bytes = encoder.encode(value);
+      const at = Number(this.rt.jet_ui_web_text_buffer(BigInt(bytes.length)));
+      this.u8().set(bytes, at);
+      await this.waitableCall(this.rt.jet_ui_web_change, BigInt(id));
+      const doc = globalThis.document;
+      const root = doc.getElementById("jet-app");
+      const focused = root && doc.activeElement === element ? Array.from(root.children).indexOf(element) : -1;
+      const [start, end] = [element.selectionStart, element.selectionEnd];
+      await this.show();
+      const again = focused >= 0 ? root.children[focused] : null;
+      if (again && again !== element && again.tagName === "INPUT") {
+        again.focus();
+        again.setSelectionRange?.(start, end);
+      }
     });
   }
 

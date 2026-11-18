@@ -5810,7 +5810,7 @@ tasks never read or change the process registry. The module source is
 | `graph.app_links(domain: String) -> App` | graph | Make the web links of `domain` the app's own: `https://{domain}/tasks/7` opens what `/tasks/7` opens; give back the graph. See below. |
 | `graph.open_link(link: String) -[Net, FS.Read]> Bool` | opened | Open the screen state `link` addresses through the graph's route set, or the not-found state; true when a screen opened. See below. |
 | `graph.lost_link() -> String?` | link | The link the not-found state shows; `None` while a screen is open. |
-| `graph.launch() -[Browser, Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. In a page, start the app's run and follow the page's lifecycle, and be true. See below. |
+| `graph.launch() -[Browser, Env, Exec.Args, Exec.Exit, FS.Read, FS.Write, Net, Time]> Bool` | runs | Start the app on a Linux desktop as its one running copy: hand the link the launch was given to a copy that runs, and be false, or install its desktop entry and open the link. In a page, start the app's run, follow the page's lifecycle, draw the screen at the page's address into the page, and be true. See below. |
 | `graph.activations() -> [String]` | tokens | The activation token of each later launch that handed the running app its link, in order. |
 | `graph.background(every: Duration, run: fn() Notice!, at_login: Bool = false) -> App` | graph | Run `run` every `every` while the app runs on a Linux desktop, and make the app a login item when `at_login`; give back the graph. See below. |
 | `graph.tray(icon: String, menu: fn() -> [MenuItem] Notice!) -> App` | graph | Put the app's icon in the Linux desktop's tray from `launch` on, with the menu `menu` makes, kept current; give back the graph. See below. |
@@ -6492,9 +6492,13 @@ there is no phase (`None`).
 
 In a page (a web build), `graph.launch()` starts the app's run and
 follows the page's lifecycle into it: there is no other copy, desktop
-entry or window, and the launch is true. The run starts `Unknown` and
-hears at once whether the document shows. The document is `Visible`
-while the browser shows it and `Hidden` while it doesn't
+entry or window, and the launch is true. A graph with screens opens the
+page's address, unless a screen is open already, and draws its screen
+into the page as a window's frame draws it; after each of the page's
+handlers it opens the screen again and draws it when another screen
+opened or a live binding the screen read changed. The run starts
+`Unknown` and hears at once whether the document shows. The document is
+`Visible` while the browser shows it and `Hidden` while it doesn't
 (`visibilitychange`). The page is `Suspending` from the Page Lifecycle
 API's `freeze`, or a `pagehide` that keeps the page in the back-forward
 cache, until its `resume` or the `pageshow` that gives it back, which is
@@ -6546,12 +6550,13 @@ running its handler; Tab moves the focus through the buttons and text
 inputs in order; a key pressed with exactly a button's `shortcut:`
 modifiers clicks it (a command shortcut takes Control or Super); Enter or
 space with no modifier clicks the focused button; typed text and Backspace
-edit the focused text input; and a drop on a text input with `on_drop:`
-gives its handler each text and URI item. The window draws again when
-another screen opens, typing changes the tree, or it takes another size,
-and shows an empty box for the not-found state. Closing the window ends
-the process with status 0. A desktop with no display, or a display that
-fails, adds a notice. A side below one pixel panics.
+edit the focused text input, and one built with `on_change:` runs its
+handler on its new text after each edit; and a drop on a text input with
+`on_drop:` gives its handler each text and URI item. The window draws
+again when another screen opens, typing changes the tree, or it takes
+another size, and shows an empty box for the not-found state. Closing the
+window ends the process with status 0. A desktop with no display, or a
+display that fails, adds a notice. A side below one pixel panics.
 
 `app.ask(permission)` asks the person for a device permission and gives
 their answer. `Permission` is `.Camera`, `.Location` or `.Notifications`;
