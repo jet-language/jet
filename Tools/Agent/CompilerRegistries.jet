@@ -2369,6 +2369,10 @@ run_entry: fn(result: &[String:Dyn], entry: Dyn, manifest: Dyn, repo: String, je
                 }
             }
         }
+        // A package registry reads its inputs by repository-relative path, so
+        // it runs from the repository root; its scratch (TMPDIR) stays under
+        // the entry's own directory.
+        if kind == "package" -> cwd = repo.copy()
         child: registry_spec(command, cwd, repo, extra, timeout_ms).run() ?? return Err(problem("the registry cannot start: {err}"))
         stdout = child.output.copy()
         stderr = child.errors.copy()
