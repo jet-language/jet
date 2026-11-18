@@ -197,10 +197,13 @@ sema_scope_members_registry_add_applied_catalog: fn(registry: &SemaScopeMembersM
 }
 
 // `catalog` must be built from the complete embedded Prelude/Markers.jet
-// source. The graph must be complete because the visible marker declarations
-// are read across it. Occurrence facts never authorize marker sites.
+// source. The visible marker declarations are read across the graph, so it
+// must be complete, or under JET_KEEP_GOING have registered in full the
+// module's package and every module it imports
+// (sema_scope_members_marker_rows_settled). Occurrence facts never authorize
+// marker sites.
 sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, module_identity: ModuleID, program: Program, catalog: TAppliedRuleCatalog) -> SemaScopeMembersMarkerRegistry? {
-    if !graph.complete -> return None
+    if !sema_scope_members_marker_rows_settled(graph, module_identity) -> return None
     registry := SemaScopeMembersMarkerRegistry{
         applied_rules: catalog.rows,
         argument_menus: catalog.argument_menus,
@@ -236,6 +239,21 @@ sema_scope_members_build_marker_registry: fn(graph: SemaRegistrationGraph, modul
         }
     }
     Val(registry)
+}
+
+// Whether the marker rows module `module_identity` reads are final: the graph
+// is complete, or JET_KEEP_GOING settled its package
+// (sema_registration_package_settled) and each module its imports name
+// (sema_marker_module_visible_declarations reads their declarations).
+sema_scope_members_marker_rows_settled: fn(graph: SemaRegistrationGraph, module_identity: ModuleID) -> Bool Never! {
+    if graph.complete -> return true
+    if !sema_registration_package_settled(graph, module_identity) -> return false
+    loop edge in graph.edges {
+        if edge.source_module_identity != module_identity -> next
+        target: sema_registration_module_index(graph, edge.target_module_identity) ?? next
+        if !sema_registration_module_settled(graph, target) -> return false
+    }
+    true
 }
 
 sema_scope_members_has_name: fn(values: [String], name: String) -> Bool Never! {
