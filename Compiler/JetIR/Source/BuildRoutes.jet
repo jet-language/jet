@@ -2239,9 +2239,9 @@ ir_fn_widens: fn(m: IRModule, have: Int, row: Int) -> Bool Never! {
 // the closure passes on through the same conversion, does (Sema
 // sema_type_nested_fn_failure_gap). Sema lets an infallible function value
 // fill a fallible function type (a `fn(Int) -> Int` parameter with the
-// inferred failure contract), and a named function whose inferred contract
-// is empty fill an infallible one (`[fn(String) -> String]{quote}`), but the
-// closures return differently: a fallible one returns its Result box.
+// inferred failure contract), and a fallible one fill an infallible one
+// (`[fn(String) -> String]{quote}`), but the closures return differently: a
+// fallible one returns its Result box.
 ir_fn_type_widens: fn(from_ty: Type, to_ty: Type) -> Bool Never! {
     if ir_untag(from_ty) == .Fn(from_params, from_ret, _, _, _, _) {
         if ir_untag(to_ty) == .Fn(to_params, to_ret, _, _, _, _) {
@@ -2259,9 +2259,10 @@ ir_fn_type_widens: fn(from_ty: Type, to_ty: Type) -> Bool Never! {
 
 // The function value in `slot` as `row`, its fallible or infallible form: a
 // closure that owns it and calls it with its own arguments. Widening returns
-// Ok of what the value returns; narrowing unwraps the value's Result, whose
-// Err Sema has ruled out (`?` with the Never conversion). The call adapts
-// each argument to the value's parameter (ir_indirect_call), so a function
+// Ok of what the value returns; narrowing unwraps the value's Result, and a
+// failure there, which the slot has no way to hand back, stops as `panic`
+// does (IRLambdaJob `narrows`, ir_try_failure). The call adapts each
+// argument to the value's parameter (ir_indirect_call), so a function
 // argument converts the same way; when only those differ, the closure
 // returns what the value returns. Built as its own function like a source
 // lambda (ir_lambda).
@@ -2292,6 +2293,7 @@ ir_fn_widen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, 
     }
     call: ir_node(b, from_result, NodeKind.IndirectCall{callee: inner, type_args: [Type]{}, args: args, signature: from_ty}, span)
     carrier := TFailureCarrier.Infallible
+    narrows := false
     body := call.copy()
     if ir_untag(to_result) == .Result(ok, err) {
         carrier = TFailureCarrier.Result{success: ok, error: err}
@@ -2299,7 +2301,8 @@ ir_fn_widen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, 
             body = ir_node(b, to_result, NodeKind.Ok{value: call}, span)
         }
     } else if ir_untag(from_result) == .Result(ok, err) {
-        body = ir_node(b, ok, NodeKind.Try{value: call, conversion: TTryConvert.Never, failure: TFailureCarrier.Result{success: ok, error: err}}, span)
+        narrows = true
+        body = ir_node(b, ok, NodeKind.Try{value: call, conversion: TTryConvert.NoConversion, failure: TFailureCarrier.Result{success: ok, error: err}}, span)
     }
     lambda: BodyLambda{
         executable: BodyLambdaBody.Expr{value: body},
@@ -2328,7 +2331,7 @@ ir_fn_widen: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, slot: Int, row: Int, 
     ir_store_at(m, p, b, boxed, 24, slot)
     id: m.functions.len()
     m.functions.push(ir_hashed_function("{b.f.name}.fn_widen@{span.start}", ir_closure_key(b, "fn_widen"), "{b.f.symbol}__fn_widen_", b.f.source_file, b.line))
-    m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, instance: b.instance, row: b.row, made: b.made, next_node: b.next_node})
+    m.lambdas.push(IRLambdaJob{lambda: lambda, captures: captures, source_file: b.f.source_file, line: b.line, instance: b.instance, row: b.row, made: b.made, next_node: b.next_node, narrows: narrows})
     m.queue.push(IRQueued{row: -1, id: id, args: [Type]{}, lambda: m.lambdas.len() - 1})
     pointer_row: ir_pointer_row(m)
     code: ir_temp(m, b, pointer_row)

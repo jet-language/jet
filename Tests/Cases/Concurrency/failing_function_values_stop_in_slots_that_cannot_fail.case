@@ -1,0 +1,29 @@
+# A function value that can fail fills a function slot that cannot (a
+# no-result `fn([Q])` parameter, a stored field) through a narrowing adapter.
+# A failure there has nowhere to go, so it stops as `panic` does: a task's
+# join reports it, and outside a task the program stops with the error. The
+# adapter treated the failure as impossible and died with SIGILL in
+# `fn_widen` on every tier.
+fixture: FailingFunctionValuesInInfallibleSlots.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "ok [1]\ntrue\nfalse\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "ok [1]\ntrue\nfalse\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "ok [1]\ntrue\nfalse\n"
+step: jet run -O0 direct.jet
+exit: 70
+stdout: = "ok [1]\nok [1]\ntrue\n"
+stderr: ~ "too many" # the failing call stops the program with its error
+step: jet run -O1 direct.jet
+exit: 70
+stdout: = "ok [1]\nok [1]\ntrue\n"
+stderr: ~ "too many" # the same stop on O1
+step: jet run -O2 direct.jet
+exit: 70
+stdout: = "ok [1]\nok [1]\ntrue\n"
+stderr: ~ "too many" # the same stop on O2

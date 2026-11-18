@@ -15,6 +15,9 @@ use {
     service_encoding: core.encoding
     service_crypto: core.crypto
     service_files: core.files
+    service_actor: core.actor
+    service_tasks: core.tasks
+    service_time: core.time
     core.prelude.[TaskFailure]
 }
 
@@ -4913,6 +4916,11 @@ pending_rollback_error: fn(error: ServiceError, authority_error: ServiceError?, 
 // Workers are declared before start. The tree mailbox and the endpoint
 // registry share one bounded channel per worker.
 worker: fn(tree: &ServiceTree, name: String, handler: fn(), handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
+    declare_worker(tree, name, handler_name, capacity)
+}
+
+// Checks a worker declaration and registers its route, not yet published.
+priv declare_worker: fn(tree: &ServiceTree, name: String, handler_name: String, capacity: Int) -> ServiceEndpoint ServiceError! {
     if tree.started -> return Err(ServiceError.Policy("cannot add workers after start"))
     if capacity <= 0 || capacity > 1000000 {
         return Err(ServiceError.Policy("mailbox capacity must be positive and bounded"))
@@ -4937,6 +4945,285 @@ worker: fn(tree: &ServiceTree, name: String, handler: fn(), handler_name: String
     authority_register(endpoint, false, Val(channel))
     tree.workers.push(TreeWorker{name: name, handler_name: handler_name, endpoint: endpoint, capacity: capacity, channel: channel, restarts: [Int]{}, running: false})
     Ok(endpoint)
+}
+
+// --- Typed workers ---------------------------------------------------------
+// A worker is its handler: a core.actor actor whose one detached task owns
+// the worker's state and runs the handler once per message, in send order.
+// The tree gates every send (started, running, draining, generation), and a
+// semaphore counts the free places of the mailbox, so a send past
+// `capacity` waiting messages is Full. A handler that fails or panics fails
+// only its message; the worker begins again from its `state:` value, at most
+// the tree's restart budget of times, and then stops.
+
+/// The address of a worker whose handler takes `Q` and answers `R`; the
+/// endpoint of a worker that does not answer has `R` = Unit.
+Endpoint: struct<Q, R> {
+    priv id: ServiceEndpoint,
+    priv inbox: service_actor.Actor<Job<Q, R>>,
+    priv room: service_tasks.Semaphore,
+}
+
+// One queued message, with the asker's reply place when it came by `call`.
+// A batched worker's timer also queues the flush of a waiting batch.
+priv Job: enum<Q, R> {
+    Message(message: Q, reply: service_actor.Reply<R>?),
+    Flush(round: Int),
+}
+
+// A batched worker's messages waiting for their batch; `round` counts the
+// batches handed over, so a late timer flushes nothing.
+priv BatchState: struct<Q> {
+    pending: [Q],
+    round: Int,
+}
+
+/// Declares a worker whose handler takes each message: `fn(q: Q)` or, for
+/// a worker that answers `call`, `fn(q: Q) -> R`.
+typed_worker: fn<Q, R>(tree: &ServiceTree, name: String, handler: &&fn(Q) -> R Err!, handler_name: String, capacity: Int) -> Endpoint<Q, R> ServiceError! {
+    typed_declare(tree, name, handler_name, capacity, false, fn(state: &Bool, message: Q) -> R Err! { handler(message) })
+}
+
+/// Declares a worker whose task keeps `state` for its handler `fn(s: &S,
+/// q: Q) -> R`; a restart begins again from `state`.
+stateful_worker: fn<S, Q, R>(tree: &ServiceTree, name: String, handler: &&fn(&S, Q) -> R Err!, handler_name: String, state: &&S, capacity: Int) -> Endpoint<Q, R> ServiceError! {
+    typed_declare(tree, name, handler_name, capacity, state, handler)
+}
+
+/// Declares a worker whose handler takes a list of up to `batch` messages:
+/// once a message arrives, the worker waits at most `wait` for the rest of
+/// its batch. A failed batch is handed over again on each restart.
+batched_worker: fn<Q>(tree: &ServiceTree, name: String, handler: &&fn([Q]) Err!, handler_name: String, batch: Int, wait: service_time.Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError! {
+    if batch < 1 || batch > capacity {
+        return Err(ServiceError.Policy("batch must be positive and no larger than the mailbox capacity"))
+    }
+    id: declare_worker(tree, name, handler_name, capacity)
+    room: service_tasks.Semaphore.new(capacity)
+    // The timer reaches the worker through its own mailbox, which exists
+    // only once the actor does.
+    timer_inbox: Shared<service_actor.Actor<Job<Q, ()>>?>{None}
+    attempts: tree.budget_max + 1
+    step: fn(state: BatchState<Q>, job: Job<Q, ()>) -> BatchState<Q> Err! {
+        current := state
+        if job == {
+            .Message(message, _) -> {
+                room.release()
+                current.pending.push(message.copy())
+                if current.pending.len() >= batch -> hand_over(current, handler, attempts) else if current.pending.len() == 1 {
+                    arm_flush(timer_inbox, wait, current.round)
+                }
+            }
+            .Flush(round) -> {
+                if round == current.round && current.pending.len() > 0 {
+                    hand_over(current, handler, attempts)
+                }
+            }
+        }
+        current
+    }
+    inbox: service_actor.spawn(BatchState<Q>{pending: [Q]{}, round: 0}, step) ?? return Err(worker_task_failed(name))
+    slot := timer_inbox.guard_edit()
+    slot.value = Val(inbox)
+    Ok(Endpoint<Q, ()>{id: id, inbox: inbox, room: room})
+}
+
+priv worker_task_failed: fn(name: String) -> ServiceError Never! {
+    ServiceError.Unavailable("worker `{name}` could not start its task")
+}
+
+// Registers the worker and starts its task over `state`. Each message
+// leaves the mailbox before the handler runs, so a failing handler frees
+// its place too; the answer goes to the asker of a `call`.
+priv typed_declare: fn<S, Q, R>(tree: &ServiceTree, name: String, handler_name: String, capacity: Int, state: &&S, handler: &&fn(&S, Q) -> R Err!) -> Endpoint<Q, R> ServiceError! {
+    id: declare_worker(tree, name, handler_name, capacity)
+    room: service_tasks.Semaphore.new(capacity)
+    step: fn(held: S, job: Job<Q, R>) -> S Err! {
+        current := held
+        if job == {
+            .Message(message, reply) -> {
+                room.release()
+                answer: handler(current, message)
+                if reply == .Val(asker) -> asker.answer(answer)
+            }
+            .Flush(_) -> {}
+        }
+        current
+    }
+    inbox: service_actor.supervise(fn() -> S { state }, step, .Restart{limit: tree.budget_max}) ?? return Err(worker_task_failed(name))
+    Ok(Endpoint<Q, R>{id: id, inbox: inbox, room: room})
+}
+
+// Hands the waiting batch to the handler, again after each failure up to
+// `attempts` runs, then starts the next batch.
+priv hand_over: fn<Q>(state: &BatchState<Q>, handler: fn([Q]) Err!, attempts: Int) {
+    loop _ in 1..attempts {
+        handled := false
+        task.group group {
+            attempt: task handler(state.pending)
+            if attempt.join() == {
+                .Ok(_) -> { handled = true }
+                .Err(_) -> {}
+            }
+        }
+        if handled -> break
+    }
+    state.pending.clear()
+    state.round += 1
+}
+
+// After `wait`, flushes batch `round` if it is still waiting.
+priv arm_flush: fn<Q>(inbox: Shared<service_actor.Actor<Job<Q, ()>>?>, wait: service_time.Duration, round: Int) {
+    timer: task {
+        service_time.sleep(wait)
+        slot: inbox.guard_read()
+        if slot.value == .Val(worker) -> worker.send(Job<Q, ()>.Flush{round: round}) ?? return
+    }
+    timer.detach()
+}
+
+// The checks every typed send passes: a started tree, a current endpoint of
+// this tree, and a running worker that is not draining.
+priv typed_gate: fn(tree: ServiceTree, endpoint: ServiceEndpoint) -> TreeWorker ServiceError! {
+    if !tree.started -> return Err(ServiceError.NotStarted("service tree is not started"))
+    validate_tree_endpoint(tree, endpoint)
+    index: worker_slot(tree, endpoint) ?? return Err(ServiceError.Unknown("endpoint {endpoint.tree}/{endpoint.worker} is not in this tree"))
+    worker: tree.workers[index]
+    if !worker.running || worker_contains(tree.draining, endpoint.worker) {
+        return Err(ServiceError.NotStarted("worker `{worker.name}` is not running"))
+    }
+    Ok(worker)
+}
+
+// Passes the gate and takes a mailbox place; a full mailbox is Full.
+priv typed_queue: fn<Q, R>(tree: ServiceTree, endpoint: Endpoint<Q, R>) -> TreeWorker ServiceError! {
+    worker: typed_gate(tree, endpoint.id)
+    if !endpoint.room.try_acquire() -> return Err(full_tree_mailbox(worker.name, worker.capacity))
+    Ok(worker)
+}
+
+/// Queues `message` for the worker behind `endpoint`, which runs its
+/// handler on it after every message sent before.
+typed_send: fn<Q, R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q) ServiceError! {
+    worker: typed_queue(tree, endpoint)
+    endpoint.inbox.send(Job<Q, R>.Message{message: message, reply: None}) ?? {
+        endpoint.room.release()
+        return Err(ServiceError.Unavailable("worker `{worker.name}` stopped after its restart budget"))
+    }
+}
+
+/// Sends `message` and waits for the handler's answer. A handler that
+/// fails while handling it leaves the outcome unknown: Ambiguous.
+call: fn<Q, R>(tree: &ServiceTree, endpoint: Endpoint<Q, R>, message: &&Q) -> R ServiceError! {
+    worker: typed_queue(tree, endpoint)
+    answer: endpoint.inbox.ask<R, Never>(fn(reply: service_actor.Reply<R>) -> Job<Q, R> Never! { Job<Q, R>.Message{message: message, reply: Val(reply)} })
+    handled: answer ?? return Err(ServiceError.Ambiguous("worker `{worker.name}` failed while handling the call"))
+    Ok(handled)
+}
+
+#Test("a typed worker runs its handler once per message in send order and answers a call") {
+    seen: Shared<[Int]>{[Int]{}}
+    services := tree("typed")
+    record: typed_worker(
+        services,
+        "record",
+        fn(n: Int) -> Int Err! {
+            log := seen.guard_edit()
+            log.value.push(n)
+            n * 10
+        },
+        "record",
+        8,
+    ) ?? panic("typed worker must declare")
+    start(services) ?? panic("typed tree must start")
+    typed_send(services, record, 1) ?? panic("send 1")
+    typed_send(services, record, 2) ?? panic("send 2")
+    assert_eq(call(services, record, 3) ?? panic("call"), 30)
+    log: seen.guard_read()
+    assert_eq(log.value, [Int]{1, 2, 3})
+}
+
+#Test("a stateful worker keeps its state and a failed call is Ambiguous, then begins again from state") {
+    services := tree("stateful")
+    total: stateful_worker(
+        services,
+        "total",
+        fn(sum: &Int, n: Int) -> Int Err! {
+            if n < 0 -> return Err("negative amount {n}")
+            sum += n
+            sum
+        },
+        "add",
+        100,
+        8,
+    ) ?? panic("stateful worker must declare")
+    assert(typed_send(services, total, 1) == .Err(ServiceError.NotStarted("service tree is not started")))
+    start(services) ?? panic("stateful tree must start")
+    typed_send(services, total, 2) ?? panic("send 2")
+    assert_eq(call(services, total, 5) ?? panic("call 5"), 107)
+    assert(call(services, total, -1) == .Err(ServiceError.Ambiguous("worker `total` failed while handling the call")))
+    assert_eq(call(services, total, 1) ?? panic("call 1"), 101)
+}
+
+#Test("a typed send past the mailbox capacity is Full") {
+    entered: service_tasks.Semaphore.new(0)
+    gate: service_tasks.Semaphore.new(0)
+    services := tree("bounded")
+    slow: typed_worker(
+        services,
+        "slow",
+        fn(n: Int) -> Int Err! {
+            entered.release()
+            _: gate.acquire()
+            n
+        },
+        "slow",
+        1,
+    ) ?? panic("slow worker must declare")
+    start(services) ?? panic("bounded tree must start")
+    typed_send(services, slow, 1) ?? panic("send 1")
+    _: entered.acquire()
+    typed_send(services, slow, 2) ?? panic("send 2")
+    assert(typed_send(services, slow, 3) == .Err(ServiceError.Full("mailbox for `slow` is full (capacity 1)")))
+    // Message 2 leaves the mailbox before its handler runs; once it has
+    // entered, the call has a place.
+    gate.release()
+    gate.release()
+    gate.release()
+    _: entered.acquire()
+    assert_eq(call(services, slow, 4) ?? panic("call 4"), 4)
+}
+
+#Test("a batched worker hands over full batches at once, the rest after its wait, and a failed batch again") {
+    sizes: Shared<[Int]>{[Int]{}}
+    failed: Shared<Bool>{false}
+    done: service_tasks.Semaphore.new(0)
+    services := tree("batched")
+    bulk: batched_worker(
+        services,
+        "bulk",
+        fn(items: [Int]) Err! {
+            flag := failed.guard_edit()
+            if !flag.value {
+                flag.value = true
+                return Err("first batch fails once")
+            }
+            log := sizes.guard_edit()
+            log.value.push(items.len())
+            done.release()
+        },
+        "bulk",
+        2,
+        20ms,
+        8,
+    ) ?? panic("batched worker must declare")
+    start(services) ?? panic("batched tree must start")
+    typed_send(services, bulk, 1) ?? panic("send 1")
+    typed_send(services, bulk, 2) ?? panic("send 2")
+    typed_send(services, bulk, 3) ?? panic("send 3")
+    _: done.acquire()
+    _: done.acquire()
+    log: sizes.guard_read()
+    assert_eq(log.value, [Int]{2, 1})
 }
 
 worker_contains: fn(names: [String], name: String) -> Bool Never! {

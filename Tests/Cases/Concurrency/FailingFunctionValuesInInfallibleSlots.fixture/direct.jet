@@ -1,0 +1,34 @@
+// A failing function value called outside a task through a slot that cannot
+// fail: a stored field, then a parameter. The first failure stops the program
+// with its error.
+Holder: struct {
+    cb: fn([Int]),
+}
+
+check: fn(items: [Int]) Err! {
+    if items.len() > 1 -> return Err("too many")
+    print("ok {items}")
+}
+
+hand_over: fn(items: [Int], handler: fn([Int])) -> Bool {
+    handler(items)
+    true
+}
+
+run: fn() {
+    holder: Holder{cb: check}
+    holder.cb([1])
+    print(
+        hand_over([1], fn(items: [Int]) Err! {
+            if items.len() > 1 -> return Err("too many")
+            print("ok {items}")
+        }) ?? false,
+    )
+    print(
+        hand_over([1, 2], fn(items: [Int]) Err! {
+            if items.len() > 1 -> return Err("too many")
+            print("ok {items}")
+        }) ?? false,
+    )
+    print("not reached")
+}

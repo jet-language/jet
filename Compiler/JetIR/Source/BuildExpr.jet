@@ -6985,12 +6985,13 @@ ir_try_failure: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, subject: Int, is_r
     // implicit `Err!` rail: a failure that reaches it fails the build with
     // the error's text, as a panic does. A failure that leaves a task body
     // stops the task as a panic does, which its join reports as
-    // TaskFailure.Panicked.
+    // TaskFailure.Panicked; one that leaves a narrowing function-value
+    // adapter (ir_fn_widen), whose slot cannot fail, stops the same way.
     if b.failure == .Infallible && b.f.name == "__comptime_item" {
         ir_failure_stop(m, p, b, subject, is_result, "the compile-time value is absent", span)
         return
     }
-    if b.failure == .Infallible && b.task_body {
+    if b.failure == .Infallible && b.failure_stops {
         ir_failure_stop(m, p, b, subject, is_result, "the task's value is absent", span)
         return
     }
@@ -8568,7 +8569,7 @@ ir_cell_binding: fn(m: &IRModule, b: &IRBuilder, name: String) -> Int Never! {
 ir_build_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob) Never! {
     lambda: job.lambda
     b.line = job.line
-    b.task_body = job.task_body
+    b.failure_stops = job.task_body || job.narrows
     span: lambda.source_span
     env: ir_new_slot(b, ir_pointer_row(m), IRSlotKind.Param, ir_intern_name(m, "closure"))
     conventions: lambda.host_param_conventions ?? [AccessConvention]{}
