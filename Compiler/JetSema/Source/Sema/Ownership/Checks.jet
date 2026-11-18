@@ -762,7 +762,7 @@ sema_ownership_type_is_copy: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `Type::is_scalar`: the by-value numeric and boolean leaves (and raw
+// Rust `Type.is_scalar`: the by-value numeric and boolean leaves (and raw
 // pointers). Unlike Copy it excludes `Char`, carriers, tuples and units; the
 // borrowed-parameter binding and return audits key on exactly this set.
 sema_ownership_type_is_scalar: fn(ty: Type) -> Bool Never! {
@@ -1281,7 +1281,7 @@ sema_ownership_note_place_reference: fn(state: &SemaOwnershipState, expr: Expr, 
 sema_ownership_finalize_references: fn(state: &SemaOwnershipState, diagnostics: &[Diagnostic]) {
     loop fact in state.declarations {
         if fact.references == 0 && state.used_ids.get(fact.id.id) == None && !fact.ambient && !sema_ownership_intentional_name(fact.name) && !sema_ownership_flow_narrowing(state, fact) {
-            // Rust `CheckerReferences::emit_unused_binding_lints`: the
+            // Rust `CheckerReferences.emit_unused_binding_lints`: the
             // registry row wording, with the `_name` rename as the edit.
             what := "Local binding `{fact.name}` is never read."
             why := "A binding that no later expression reads adds dead code and may hide a computed result that should have been used."
@@ -5584,7 +5584,7 @@ sema_ownership_collect_evaluated_expr_accesses: fn(state: &SemaOwnershipState, e
     }
 }
 
-// Rust `Pattern::for_each_value_expr`: the values a pattern compares against
+// Rust `Pattern.for_each_value_expr`: the values a pattern compares against
 // or looks up with, in source order.
 sema_ownership_pattern_value_exprs: fn(pattern: Pattern) -> [Expr] Never! {
     values := [Expr]{}
@@ -6422,7 +6422,7 @@ sema_ownership_check_ident_reference: fn(state: &SemaOwnershipState, name: Strin
 // ────────────────────────────────────────────────────────────────────────────
 // Branch and scope state
 
-// Branch facts are joined per key, like Rust `FlowFacts::merge_paths` rows:
+// Branch facts are joined per key, like Rust `FlowFacts.merge_paths` rows:
 // `slots` maps a key to its bucket in `rows`, and each bucket lists the
 // merged rows of that key in merge order.
 sema_ownership_bucket_add: fn(slots: &NameRows, rows: &[[Int]], key: String, row: Int) Never! {
@@ -6718,7 +6718,7 @@ sema_ownership_join_reference: fn(index: SemaOwnershipState, limit: Int, anchors
     joined.push(reference.copy())
 }
 
-// The join of two paths of `fork` (Rust `FlowFacts::merge_paths`): what the
+// The join of two paths of `fork` (Rust `FlowFacts.merge_paths`): what the
 // whole-state join of the fork's state and the two path states adds to the
 // fork's state. `index` holds the fork's rows before the fork's counts;
 // `found` is the share-site list of the join target.
@@ -6897,7 +6897,7 @@ sema_ownership_join_paths: fn(state: &SemaOwnershipState, before: SemaOwnershipS
     sema_ownership_keep_mutations(state, else_state)
 }
 
-// This rule branch merge (Rust `UninitState::merge_paths`): a binding left
+// This rule branch merge (Rust `UninitState.merge_paths`): a binding left
 // unwritten by either path stays unwritten, and a fixed-list slot counts as
 // written only where every path wrote it.
 sema_ownership_uninit_join: fn(left: [SemaOwnershipUninitFact], right: [SemaOwnershipUninitFact]) -> [SemaOwnershipUninitFact] Never! {
@@ -7023,7 +7023,7 @@ sema_ownership_moved_reported: fn(diagnostics: [Diagnostic], site: Span) -> Bool
     false
 }
 
-// The join after a loop (Rust `FlowFacts::after_loop_value`). `fork` is the
+// The join after a loop (Rust `FlowFacts.after_loop_value`). `fork` is the
 // mark the loop opened before its body (sema_ownership_mark); the body ran in
 // place, so `state` is the state after it. The join base is the fork state,
 // or with `outer` that state after leaving one more scope (a counted loop's

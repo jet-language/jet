@@ -1,7 +1,7 @@
 // The semantic index builder: one walk over the checked modules sema settled,
 // recording definitions, use-site references, call edges, members, arithmetic
 // policy facts, structural boundaries, and spelled bypasses, then the finalized
-// index rows (`SymbolDB::finalize_index`). Reference targets come from sema's
+// index rows (`SymbolDB.finalize_index`). Reference targets come from sema's
 // name references (the Rust name ledger's `reference` rows) and effect rows
 // from the checked functions (the Rust `SemIndexEffectFacts` summaries), so
 // this walk never runs a second checker. LSP hover and inlay text have no Jet
@@ -293,7 +293,7 @@ semindex_callable_policies: fn(tables: ASTTables, markers: [Marker]) -> [Callabl
     policies
 }
 
-// `CallablePolicy::display`.
+// `CallablePolicy.display`.
 semindex_policy_display: fn(policy: CallablePolicy) -> String Never! {
     "{policy.name}({policy.arguments.join(", ")})"
 }
@@ -741,7 +741,7 @@ semindex_lvalue_start: fn(tables: ASTTables, target: LValue) -> Int Never! {
     }
 }
 
-// `Stmt::span` and the statement shape.
+// `Stmt.span` and the statement shape.
 semindex_stmt_head: fn(tables: ASTTables, stmt: StmtNode) -> NamedSpan {
     if ast_stmt(tables, stmt) == {
         .Expr(expr) -> NamedSpan{name: "Expr", span: ast_expr_span(tables, expr)}
@@ -2107,7 +2107,7 @@ semindex_anchor_kind: fn(db: SemDB, target: SemAnchor) -> String Never! {
     target.kind
 }
 
-// `SymbolDB::align_reference_targets`.
+// `SymbolDB.align_reference_targets`.
 semindex_align_reference_targets: fn(db: &SemDB) {
     loop index in 0..<db.refs.len() {
         target: db.refs[index].target ?? next
@@ -2396,7 +2396,7 @@ semindex_exported: fn(item: Item) -> String? Never! {
     name
 }
 
-// `SymbolDB::finalize_index` instance rows. An instance expanded inside a
+// `SymbolDB.finalize_index` instance rows. An instance expanded inside a
 // module body (a template's nested module) is a row too.
 semindex_instances: fn(modules: [JetDriverDocModule]) -> [SemInstance] {
     output := [SemInstance]{}
@@ -2447,7 +2447,7 @@ semindex_output_kind: fn(kind: OutputKind) -> String Never! {
     }
 }
 
-// `SymbolDB::finalize_index` output rows.
+// `SymbolDB.finalize_index` output rows.
 semindex_outputs: fn(modules: [JetDriverDocModule]) -> [SemOutput] {
     output := [SemOutput]{}
     loop doc_module in modules {
@@ -2642,7 +2642,7 @@ semindex_convert_defs: fn(db: SemDB, modules: [JetDriverDocModule]) -> [SemDefin
     output
 }
 
-// `build_symbol_db` + `SymbolDB::finalize_index`: the semantic index of the
+// `build_symbol_db` + `SymbolDB.finalize_index`: the semantic index of the
 // checked user modules. `effect_projection` is the application authority of the
 // same program.
 semindex_build: fn(modules: [JetDriverDocModule], effect_projection: SemEffectProjection) -> SemIndex {

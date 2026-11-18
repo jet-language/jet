@@ -326,7 +326,7 @@ sema_stmt_check_yield: fn(value: Expr, span: Span, return_type: Type?, environme
     }
     diagnostic_start: diagnostics.len()
     checked: sema_check_expression(value, Val(elem_type), environment, program, scopes, state, tail_store, context, diagnostics) ?? {
-        // Rust `Stmt::Yield`: the element type is the yielded value's target,
+        // Rust `Stmt.Yield`: the element type is the yielded value's target,
         // and a value of another type is E0807 about the stream.
         mismatch_index: sema_value_mismatch_index(diagnostics, diagnostic_start, expr_span(value)) ?? return None
         probe_diagnostics := [Diagnostic]{}
@@ -1156,7 +1156,7 @@ sema_stmt_char_end: fn(raw: [U8], at: Int) -> Int {
     raw.len()
 }
 
-// Rust u8::is_ascii_whitespace: space, tab, newline, form feed, return.
+// Rust u8.is_ascii_whitespace: space, tab, newline, form feed, return.
 sema_stmt_ascii_space: fn(byte: U8) -> Bool {
     byte == U8{32} || byte == U8{9} || byte == U8{10} || byte == U8{12} || byte == U8{13}
 }
@@ -4167,7 +4167,7 @@ sema_stmt_record_binding_views: fn(binding: Binding, init_ty: Type, scopes: Sema
     }
     call_facts := sema_stmt_call_return_views_for_expr(binding.init, context)
     // A copy of a value holding views carries the same views into the
-    // binding (Rust `Expr::Copy` keeps its operand's view sources).
+    // binding (Rust `Expr.Copy` keeps its operand's view sources).
     copied: sema_stmt_copy_operand(binding.init)
     if sema_stmt_has_struct_view_source(binding.init) || copied != None {
         // A struct that stores a view is a new carrier of its places: it
@@ -7021,7 +7021,7 @@ sema_stmt_comptime_site_refused: fn(program: SemaProgramTables, context: SemaChe
     diagnostics.len() > before
 }
 
-// Rust `Stmt::Assign` with a compound op checks the update value against the
+// Rust `Stmt.Assign` with a compound op checks the update value against the
 // place type: `text += "…"` appends to a String place (the binary `+`
 // itself is not text joining, which stays E0109); every other compound op
 // keeps its binary operator typing, and `n /%= 0` its zero-divisor lint.
@@ -7103,7 +7103,7 @@ sema_stmt_check_local_assignment: fn(name: String, name_span: Span, op: BinOp?, 
     number_target: sema_expr_number_target_open(index, scopes, context)
     plain_self_typed: op == None && (sema_stmt_numeric_slot_self_typed(expr, required, environment, program, scopes) || (number_target && sema_expr_number_target_value_typed(expr, environment, program, scopes)))
     if op == None && !plain_self_typed -> expected = Val(required)
-    // The Rust `Stmt::Assign` feeds the place type into the RHS for compound
+    // The Rust `Stmt.Assign` feeds the place type into the RHS for compound
     // updates too, so `price *= 2.0` with `price: Float` reads the literal as
     // Float rather than exact Decimal.
     if op != None && sema_expr_decimal_literal_operand(expr, true) && sema_expr_expects_machine_float(Val(required)) {
@@ -7210,7 +7210,7 @@ sema_stmt_module_storage_binding: fn(environment: SemaScopeEnvironment, program:
     None
 }
 
-// Rust `Stmt::Assign` on a module-level mutable binding: the value checks
+// Rust `Stmt.Assign` on a module-level mutable binding: the value checks
 // against the declared place type, and the write lands in the binding's
 // persistent storage cell (the Rust reference lowering's `persistent_local`).
 sema_stmt_check_module_storage_assignment: fn(symbol: Symbol, name: String, name_span: Span, op: BinOp?, op_span: Span, expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TStmt? {
@@ -7281,7 +7281,7 @@ sema_stmt_compound_widens: fn(value: TExpr, target: Type) -> Bool {
     widening != None
 }
 
-// Rust `Stmt::Assign` and call arguments infer the value with the slot type
+// Rust `Stmt.Assign` and call arguments infer the value with the slot type
 // only as a hint, then widen a narrower numeric value into the slot
 // (`n = bytes[i]` with `n: Int`, `f(id.value)` of `U64` into `Int`). A name,
 // field, or index read, and a typed literal with a written numeric head
@@ -8338,7 +8338,7 @@ sema_stmt_check_shared_place_assignment: fn(handle: Expr, target: LValue, op: Bi
 sema_stmt_check_assignment_place: fn(target: LValue, compound: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if target == {
         .Field(base, member, span) -> {
-            // Rust `check_stmt` (LValue::Field): a plain assignment writes the
+            // Rust `check_stmt` (LValue.Field): a plain assignment writes the
             // field, so its base answers only for a move of the whole name
             // (`env.graph = None` after `env.graph.move()`).
             previous_root_read: context.suppress_partial_move_root_read
@@ -9752,7 +9752,7 @@ sema_stmt_type_is_fallible: fn(ty: Type) -> Bool Never! {
     }
 }
 
-// Rust `Expr::Try` over a call or method call: the checked form of a
+// Rust `Expr.Try` over a call or method call: the checked form of a
 // fallible call whose failure propagates, explicitly (`?`) or implicitly.
 sema_stmt_is_propagated_call: fn(init: TExpr) -> Bool Never! {
     value := init
@@ -11630,7 +11630,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                 else -> { output.push(TStmt.Defer{body: nested.value, span: span}) }
             }
         }
-        // Rust `Stmt::Live`: a lexical block; a no-OS target has no terminal.
+        // Rust `Stmt.Live`: a lexical block; a no-OS target has no terminal.
         .Live(body, span) -> {
             if sema_scope_environment_no_os(environment, program) {
                 complete = false
@@ -11642,7 +11642,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
                 else -> output.push(TStmt.Live{body: nested.value, span: span})
             }
         }
-        // Rust `Stmt::AssumeDet`: the audited `#Nondeterministic("reason")`
+        // Rust `Stmt.AssumeDet`: the audited `#Nondeterministic("reason")`
         // body is a lexical block (the gate ledger records the audit).
         .AssumeDet(_, _, body, span) -> {
             nested: sema_stmt_check_block(body, return_type, environment, program, scopes, state, tail_store, context, diagnostics, "nondeterministic@{span.start}", loop_depth)
@@ -11786,7 +11786,7 @@ sema_stmt_check_scoped_statement: fn(statement: Stmt, return_type: Type?, enviro
             }
         }
         .AuthorityScope(caps, _, binding, body, span) -> {
-            // (Rust `Stmt::AuthorityScope`): the body is a lexical
+            // (Rust `Stmt.AuthorityScope`): the body is a lexical
             // block; a named head binds the scoped `Authority` handle. The
             // cap subset check (E0712) runs over the lowered region in the
             // effect pass.

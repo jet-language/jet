@@ -630,7 +630,7 @@ jet_cli_offset_lines: fn(bytes: [U8], starts: [Int]) -> [Int] Never! {
 }
 
 // A source that lexes and parses with no error, read as Rust
-// `Parser::parse_with_source(..).ok()` reads it.
+// `Parser.parse_with_source(..).ok()` reads it.
 jet_cli_parsed_program: fn(source: String) -> Program? Never! {
     parsed: jet_driver_parse_user_source(source)
     loop diagnostic in parsed.diagnostics {
@@ -747,7 +747,7 @@ jet_cli_output_entry_file: fn(root: String, output: JetCLIOutputFact) -[FS]> Jet
 }
 
 // `resolve_run_entry_checked` for the facts `manifest` (`None` =
-// `PackageFacts::default()`, whose origin is empty): the canonical `run.jet`
+// `PackageFacts.default()`, whose origin is empty): the canonical `run.jet`
 // (root, then `src/`) after the retired-entry migration, the refusal of a
 // leftover `main.jet`, else the selected runnable output.
 jet_cli_resolve_run_entry: fn(root: String, manifest: JetCLIManifest?, notices: &[String]) -[FS]> JetCLIStockEntry Never! {
@@ -768,7 +768,7 @@ jet_cli_resolve_run_entry: fn(root: String, manifest: JetCLIManifest?, notices: 
         compatible.len() == 1 -> selected = compatible[0]
         facts.default_run == .Val(chosen) -> selected = chosen
         else -> {
-            // ComposeError::Conflict, behind the facts origin.
+            // ComposeError.Conflict, behind the facts origin.
             return JetCLIStockEntry.Failed{message: "{origin}: conflicting `outputs.run` from `{origin}` ({compatible.join(", ")}) and `{origin}` (no unambiguous compatible output was selected)"}
         }
     }
@@ -1028,7 +1028,7 @@ jet_cli_workspace_present: fn(source: JetCLIWorkspaceSource) -> Bool Never! {
     true
 }
 
-// `Path::parent` for an upward authority walk: None above `/`.
+// `Path.parent` for an upward authority walk: None above `/`.
 jet_cli_walk_up: fn(dir: String) -> String? Never! {
     if dir == "/" -> return None
     jet_cli_parent(dir)

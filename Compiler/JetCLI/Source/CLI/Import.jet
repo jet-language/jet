@@ -14,7 +14,7 @@ use {
 
 JET_CLI_IMPORT_TODO_CODE: "JT0101"
 
-// Rust `Todo::diagnostic`: the registry row with its holes filled.
+// Rust `Todo.diagnostic`: the registry row with its holes filled.
 jet_cli_import_todo_diagnostic: fn(todo: JetCLIImportTodo) -> Diagnostic Never! {
     row: diagnostic_registry_row(JET_CLI_IMPORT_TODO_CODE) ?? panic("JT0101 is not registered")
     what: row.what.replace("{{construct}}", todo.what).replace("{{source}}", todo.source)
@@ -23,7 +23,7 @@ jet_cli_import_todo_diagnostic: fn(todo: JetCLIImportTodo) -> Diagnostic Never! 
     diagnostic_from_registry(JET_CLI_IMPORT_TODO_CODE, None, what, why, fix)
 }
 
-// One `ReportEnvelope::new("tool", "error", code, what, why, fix)` child.
+// One `ReportEnvelope.new("tool", "error", code, what, why, fix)` child.
 jet_cli_import_tool_report: fn(code: String, what: String, why: String, fix: String) -> String Never! {
     jet_cli_report_json(Diagnostic{moment: DiagnosticMoment.Tool, severity: 1, code: code, what: what, why: why, fix: fix}, None, "", "", 0)
 }
@@ -166,7 +166,7 @@ jet_cli_import_persist_evidence: fn(report: EvidenceReport, target_inputs_sha256
     jet_cli_evidence_persist(cache, report, bytes, artifact_id, target_inputs_sha256, true) ?? return Err(err)
 }
 
-// `fs::read_to_string(path).ok()`.
+// `fs.read_to_string(path).ok()`.
 jet_cli_import_existing: fn(path: String) -[FS.Read]> String? Never! {
     text: import_out_files.read(path) ?? return None
     Val(text)

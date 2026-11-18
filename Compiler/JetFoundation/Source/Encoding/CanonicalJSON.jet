@@ -22,7 +22,7 @@ CanonicalJSONError: struct {
     message: String,
 }
 
-// Rust `CanonicalJson::object`: a repeated key is refused.
+// Rust `CanonicalJson.object`: a repeated key is refused.
 canonical_json_object: fn(fields: [CanonicalJSONField]) -> CanonicalJSON CanonicalJSONError! {
     seen := [String:Bool]{}
     loop field in fields {
@@ -37,7 +37,7 @@ canonical_json_object: fn(fields: [CanonicalJSONField]) -> CanonicalJSON Canonic
     Ok(CanonicalJSON.Object(sorted))
 }
 
-// Rust `CanonicalJson::bytes`: the encoding plus one LF.
+// Rust `CanonicalJson.bytes`: the encoding plus one LF.
 canonical_json_bytes: fn(value: CanonicalJSON) -> [U8] Never! {
     out := [U8]{}
     canonical_json_encode(value, out)
@@ -45,7 +45,7 @@ canonical_json_bytes: fn(value: CanonicalJSON) -> [U8] Never! {
     out
 }
 
-// Rust `CanonicalJson::sha256`.
+// Rust `CanonicalJson.sha256`.
 canonical_json_sha256: fn(value: CanonicalJSON) -> String Never! {
     bytes: canonical_json_bytes(value)
     sha256_hex_bytes(sha256_bytes(bytes[0..<bytes.len()]))

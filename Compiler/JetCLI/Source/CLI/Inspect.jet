@@ -61,7 +61,7 @@ use {
     jetpack_artifact_store.[ArtifactStore]
 }
 
-// `InspectPlane::ALL`, in order, then `target` (the target machine dossier)
+// `InspectPlane.ALL`, in order, then `target` (the target machine dossier)
 // and `events` (the compiler event schema).
 JET_CLI_INSPECT_PLANES: [String]{"types", "rights", "claims", "shapes", "decisions", "structure", "build", "gates", "memory", "choices", "target", "events"}
 
@@ -425,7 +425,7 @@ JetCLIInspectJob: struct {
     threads: Int?,
     // The stderr notices entry resolution wrote, which go out first.
     notice: String,
-    // A bare or directory scope (a project check, `CheckScope::Project`) rather
+    // A bare or directory scope (a project check, `CheckScope.Project`) rather
     // than an explicitly named file.
     project: Bool,
     // The `jet inspect impact` transitive walk limit (`--depth=N`).
@@ -602,7 +602,7 @@ jet_cli_inspect_count: fn(text: String) -> Int? Never! {
     Val(value)
 }
 
-// `CoverageBaseline::parse`: `plane edit reason total` rows, blank lines and
+// `CoverageBaseline.parse`: `plane edit reason total` rows, blank lines and
 // `#` comments skipped, in plane order.
 jet_cli_coverage_baseline: fn(text: String) -> JetCLICoverageBaseline Never! {
     rows := [JetCLICoverageBaselineRow]{}
@@ -658,7 +658,7 @@ jet_cli_inspect_saturating_sub: fn(a: Int, b: Int) -> Int Never! {
     a - b
 }
 
-// `CoverageBaseline::validate`: the first ratchet failure.
+// `CoverageBaseline.validate`: the first ratchet failure.
 jet_cli_coverage_validate: fn(baseline: [JetCLICoverageBaselineRow], facts: [JetCLICoverageFact]) -> String? Never! {
     loop previous in baseline {
         found := JetCLICoverageFact?{None}
@@ -820,7 +820,7 @@ jet_cli_inspect_reads_bytes: fn(file: String) -[FS]> Bool Never! {
 }
 
 // `run_compiler_api`: an unknown operation and an unreadable input are
-// versioned error documents (Rust `io::Error` wording); lex and parse project
+// versioned error documents (Rust `io.Error` wording); lex and parse project
 // the Jet lexer and parser over the inline-package-masked source, source-map
 // reads the `// jet:` markers of generated Rust, and check projects the checked
 // file (InspectCompiler.jet, `checked_value`).
@@ -1036,7 +1036,7 @@ jet_cli_compiler_diagnostics: fn(diagnostics: [Diagnostic]) -> JetCLIStatusValue
     jet_cli_status_array(values)
 }
 
-// `SourcePositionIndex::line_col` for every byte offset: lines and columns
+// `SourcePositionIndex.line_col` for every byte offset: lines and columns
 // count Unicode scalars from 1; an offset inside a scalar counts that scalar.
 JetCLIPositions: struct {
     lines: [Int],
@@ -1416,7 +1416,7 @@ jet_cli_inspect_synthetic_operator: fn(impls: &[JetCLIOperatorImpl], left: Strin
     impls.push(JetCLIOperatorImpl{left: left, trait_name: trait_name, rhs: rhs, result: result, explicit_rhs: true})
 }
 
-// One module's operator rows: `TraitRegistry::auto_derives_for_items` then
+// One module's operator rows: `TraitRegistry.auto_derives_for_items` then
 // `register_synthetic_operators`. Nominal names register first; impls register
 // in item order (an owner's type parameters count once its declaration has been
 // read), then the trait blocks of structs and enums.
@@ -1579,7 +1579,7 @@ jet_cli_replay_fail: fn(job: JetCLIInspectJob, code: String, what: String, why: 
 }
 
 // `validate_replay_path`: a forward-slash path of non-empty, safe components
-// ending in `.jetproof-replay` (Rust `Path::components` drops an interior `.`).
+// ending in `.jetproof-replay` (Rust `Path.components` drops an interior `.`).
 jet_cli_replay_path_problem: fn(path: String) -> String? Never! {
     if path == "" -> return Val("replay artifact path is empty")
     loop byte in path.bytes() {
@@ -1618,7 +1618,7 @@ jet_cli_replay_name_problem: fn(name: String) -> String? Never! {
     Val("replay NAME must be non-empty and contain only ASCII letters, digits, `-`, or `_`")
 }
 
-// Rust `Path::starts_with(".jet")`: the first component is `.jet`.
+// Rust `Path.starts_with(".jet")`: the first component is `.jet`.
 jet_cli_replay_in_project_cache: fn(path: String) -> Bool Never! {
     path == ".jet" || path.starts_with(".jet/")
 }

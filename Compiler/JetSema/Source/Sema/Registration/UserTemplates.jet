@@ -1012,14 +1012,14 @@ SemaUserTextBlock: struct {
     site: Span,
 }
 
-// Rust `LValue::span`.
+// Rust `LValue.span`.
 sema_user_text_lvalue_span: fn(target: LValue) -> Span Never! {
     if target == {
         .Local(_, span) | .Index(_, _, span, _) | .Field(_, _, span) -> span
     }
 }
 
-// Rust `Stmt::span`.
+// Rust `Stmt.span`.
 sema_user_text_stmt_span: fn(statement: Stmt) -> Span Never! {
     if statement == {
         .Expr(value) -> expr_span(value)
@@ -1062,7 +1062,7 @@ sema_user_text_block_source: fn(source: String, body: [Stmt], block_spans: [Span
     String.from_bytes(bytes[span.start..<span.end]) ?? ""
 }
 
-// Rust `ScopeMembers::statement_bodies`.
+// Rust `ScopeMembers.statement_bodies`.
 sema_user_text_statement_bodies: fn(statement: Stmt) -> [[Stmt]] Never! {
     if statement == {
         .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {

@@ -9,7 +9,7 @@ use {
     jet_driver.[JetDriverRunReceiptError]
 }
 
-// Rust's `String` refusals from the status readers (StatusValue::parse and
+// Rust's `String` refusals from the status readers (StatusValue.parse and
 // the ledgers and manifests read through it).
 #Error
 JetCLIReadError: struct {
@@ -33,7 +33,7 @@ jet_cli_status_tree_parse: fn(text: String) -> Dyn JetCLIReadError! {
     }
 }
 
-// Rust StatusValue::from_dyn over every Dyn variant: a Number lexeme is an
+// Rust StatusValue.from_dyn over every Dyn variant: a Number lexeme is an
 // integer when it parses as one, an integer spelling past Int stays exact,
 // and a fraction or exponent is an f64 rendered in its Display form
 // (`1.2300e+4` is `12300`); Bytes are their base64 text and a DateTime its
@@ -91,7 +91,7 @@ jet_cli_status_from_tree: fn(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
     Ok(value)
 }
 
-// StatusValue::parse always goes through the canonical Core JSON reader.
+// StatusValue.parse always goes through the canonical Core JSON reader.
 jet_cli_status_value_parse: fn(text: String) -> JetCLIStatusValue JetCLIReadError! {
     jet_cli_status_from_tree(jet_cli_status_tree_parse(text))
 }

@@ -89,7 +89,7 @@ live_transport_rejected: fn(pid: Int, path: String, message: String) {
     live_transport_rejected(pid, path, "not publishing a live runtime snapshot")
     cli_files.write_bytes(path, live_transport_fixture(pid + 1, latest, now, None)) ?? panic("wrong pid fixture")
     live_transport_rejected(pid, path, "does not belong to process")
-    // PID error precedes event-validation error, exactly as LiveInspect::read.
+    // PID error precedes event-validation error, exactly as LiveInspect.read.
     cli_files.write_bytes(path, live_transport_fixture(pid + 1, latest, now, Val(0))) ?? panic("wrong pid plus invalid event fixture")
     live_transport_rejected(pid, path, "does not belong to process")
     cli_files.write_bytes(path, live_transport_fixture(pid, latest, now, Val(0))) ?? panic("invalid event sequence fixture")

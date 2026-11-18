@@ -69,7 +69,7 @@ JetFmtFnEntry: struct {
     zone: String,
 }
 
-// Rust `let Expr::If { … } = expr else { … }` as an optional record.
+// Rust `let Expr.If { … } = expr else { … }` as an optional record.
 JetFmtIf: struct {
     cond: Expr,
     then_body: [Stmt],
@@ -327,7 +327,7 @@ jfmt_guard_arm_test: fn(cond: Expr) -> Expr Never! {
     test
 }
 
-// Recover `(subject, table_op)` from a nested value-dispatch `Expr::If` chain.
+// Recover `(subject, table_op)` from a nested value-dispatch `Expr.If` chain.
 jfmt_dispatch_value_head: fn(f: JetFmt, expr: Expr) -> JetFmtDispatchHead? Never! {
     head: jfmt_if_parts(expr) ?? return None
     cond: jfmt_guard_arm_test(head.cond)
@@ -2046,7 +2046,7 @@ jfmt_fmt_for_header: fn(f: &JetFmt, var: String, var2: NamedSpan?, kind: ForKind
     }
 }
 
-// Rust `AST::is_subjectless_guard`: a `Stmt::Switch` with a compiler-private
+// Rust `AST.is_subjectless_guard`: a `Stmt.Switch` with a compiler-private
 // `true` subject at the `if` span.
 jfmt_is_subjectless_guard: fn(subject: Expr, span: Span) -> Bool Never! {
     if subject == .Bool(value, subject_span, _) {

@@ -643,7 +643,7 @@ SemaRegistrationModuleInput: struct {
     // The dotted `name: module` path that declared the file ("" at the
     // package root): the start of SourceLocation's `module`.
     declared_module: String{""},
-    // The module's source text (Rust `Module::source`). A declared text block
+    // The module's source text (Rust `Module.source`). A declared text block
     // hands the text inside its braces to its rule.
     source: String{""},
     // The unit mentions of `source` (sema_units_source_mentions) when the
@@ -741,7 +741,7 @@ SemaRegistrationModule: struct {
     persist_roots: [SymbolID]{[SymbolID]{}},
     imports: [SemaRegistrationImport],
     exports: [SemaRegistrationExport],
-    // Local import name -> its binding (Rust `Checker::imports`). Import
+    // Local import name -> its binding (Rust `Checker.imports`). Import
     // names are unique per module, so each name has one row; the row packs
     // the import and binding positions (sema_registration_import_binding_at).
     import_binding_rows: NameRows,
@@ -1008,7 +1008,7 @@ SemaRegistrationGraph: struct {
     // (sema_registration_module_settled). Empty when not set, or when an
     // error names no source file.
     settled_modules: [Bool]{[Bool]{}},
-    // Test mode (Rust `CompileMode::Test`/`TestOverride`), set by the driver:
+    // Test mode (Rust `CompileMode.Test`/`TestOverride`), set by the driver:
     // named `#Test` bodies are checked and lowered as synthetic functions.
     test_mode: Bool{false},
     // Test mode: each law test the compiler could not make (TraitLaws.jet),
@@ -2280,7 +2280,7 @@ sema_registration_original_error_module: fn(module_table: &ModuleTable) -> SemaR
     }
 }
 
-// Rust `Prelude::retain_error_prelude_module`: a graph whose inputs already
+// Rust `Prelude.retain_error_prelude_module`: a graph whose inputs already
 // retain the original error module (the driver loads it as a source module)
 // keeps that one owner after checking its source context; otherwise the
 // original module is appended once. An input holding the original path or
@@ -3950,7 +3950,7 @@ sema_registration_cli_callable_params: fn(function: Func, command: String, share
     }
 }
 
-// Rust `Expr::without_parens` matched against a literal Int, Float, Bool or String.
+// Rust `Expr.without_parens` matched against a literal Int, Float, Bool or String.
 sema_registration_cli_literal_default: fn(expr: Expr) -> Bool Never! {
     current: sema_registration_cli_without_parens(expr)
     if current == {
@@ -3979,7 +3979,7 @@ sema_registration_cli_binding_target: fn(items: [Item], target: Expr) -> Func? {
     None
 }
 
-// Rust `Expr::without_parens`.
+// Rust `Expr.without_parens`.
 sema_registration_cli_without_parens: fn(expr: Expr) -> Expr Never! {
     current := expr
     loop {
@@ -4492,7 +4492,7 @@ sema_registration_serde_union_members: fn(items: [Item], union_ty: Type, members
     }
 }
 
-// Rust `label`: the member's `Type::show` with surrounding backticks trimmed.
+// Rust `label`: the member's `Type.show` with surrounding backticks trimmed.
 sema_registration_serde_label: fn(ty: Type) -> String Never! {
     label := sema_type_show(ty)
     loop label.starts_with("`") -> label = label.slice(1, label.len())
@@ -4528,7 +4528,7 @@ sema_registration_serde_sorted_shapes: fn(shapes: [SerdeWireShape]) -> [SerdeWir
     sorted
 }
 
-// Rust `SerdeWireShape::name`.
+// Rust `SerdeWireShape.name`.
 sema_registration_serde_shape_name: fn(shape: SerdeWireShape) -> String Never! {
     if shape == {
         .Null -> "Null"
@@ -5671,7 +5671,7 @@ sema_registration_prepare_graph: fn(inputs: &&[SemaRegistrationModuleInput], edg
     // check_guest_symbol_collisions: the C guest boundary is checked once every
     // declaration is registered, before any body is checked.
     sema_guest_check_surfaces(graph)
-    // Rust CheckInner BudgetSpecs::validate_bundle: every performance role
+    // Rust CheckInner BudgetSpecs.validate_bundle: every performance role
     // elaborates into its canonical typed budgets once every declaration is
     // registered.
     budget_findings: sema_budget_validate_graph(graph)
@@ -5804,7 +5804,7 @@ sema_registration_index_namespaces: fn(graph: &SemaRegistrationGraph) Never! {
     }
 }
 
-// (Rust `NameLedger::namespace_owner`): the registered symbol
+// (Rust `NameLedger.namespace_owner`): the registered symbol
 // row of `name` in the other member of `module_index`'s package that
 // declares it, or none (no namespace, the module's own name, or a
 // declaration that did not register).

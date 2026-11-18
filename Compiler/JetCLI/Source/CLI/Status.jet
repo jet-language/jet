@@ -1,5 +1,5 @@
 // The one machine status object every `--json` command writes (`StatusValue`,
-// `StatusFields`, `StatusEnvelope::json`, `render_status`,
+// `StatusFields`, `StatusEnvelope.json`, `render_status`,
 // `report_json_string`). Producers build typed values; only this file turns
 // them into JSON bytes.
 
@@ -101,7 +101,7 @@ jet_cli_json_string: fn(value: String) -> String Never! {
     "{output}\""
 }
 
-// `StatusValue::json`.
+// `StatusValue.json`.
 jet_cli_status_json: fn(value: JetCLIStatusValue) -> String Never! {
     if value == {
         .Null -> "null"
@@ -119,19 +119,19 @@ jet_cli_status_json: fn(value: JetCLIStatusValue) -> String Never! {
     }
 }
 
-// `StatusFields::json`: `"name":value` pairs joined by commas.
+// `StatusFields.json`: `"name":value` pairs joined by commas.
 jet_cli_status_fields_json: fn(fields: [JetCLIStatusField]) -> String Never! {
     rendered: loop field in fields -> "{jet_cli_json_string(field.name)}:{jet_cli_status_json(field.value)}"
     rendered.join(",")
 }
 
-// `render_status` / `StatusEnvelope::json` with no report children:
+// `render_status` / `StatusEnvelope.json` with no report children:
 // `{"schema":"jet.status/v1","action":…,"ok":…,"reports":[],…fields}`.
 jet_cli_status_render: fn(action: String, ok: Bool, fields: [JetCLIStatusField]) -> String Never! {
     jet_cli_status_render_with_reports(action, ok, [String]{}, fields)
 }
 
-// `StatusEnvelope::json` with already rendered report children.
+// `StatusEnvelope.json` with already rendered report children.
 jet_cli_status_render_with_reports: fn(action: String, ok: Bool, reports: [String], fields: [JetCLIStatusField]) -> String Never! {
     flag: if ok -> "true" else -> "false"
     out := "{{\"schema\":{jet_cli_json_string(JET_CLI_STATUS_SCHEMA)},\"action\":{jet_cli_json_string(action)},\"ok\":{flag},\"reports\":[{reports.join(",")}]"

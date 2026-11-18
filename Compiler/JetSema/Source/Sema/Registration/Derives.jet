@@ -194,7 +194,7 @@ sema_derive_value_type_name: fn(value: CtValue) -> String Never! {
 }
 
 // ---------------------------------------------------------------------------
-// Static condition evaluation (Rust `MirBridge::static_ct_value`).
+// Static condition evaluation (Rust `MirBridge.static_ct_value`).
 
 sema_derive_static_value: fn(expansion: SemaDeriveExpansion, expression: Expr) -> CtValue? Never! {
     if expression == {
@@ -1910,7 +1910,7 @@ sema_derive_unsupported: fn(span: Span, what: String) -> Diagnostic Never! {
     sema_error("E0956", span, "`{what}` isn't supported by the current evaluator yet", "the canonical evaluator doesn't cover this construct yet", "report this unsupported construct as a compiler bug")
 }
 
-// Rust `Interp::exec_block` over a template statement: the statement runs
+// Rust `Interp.exec_block` over a template statement: the statement runs
 // against the template scope for its checks (`if`, `reject`) and generates
 // nothing. A binding inside a nested block lives until the block ends.
 sema_derive_exec_stmts: fn(expansion: &SemaDeriveExpansion, stmts: [Stmt]) Never! {
@@ -2083,7 +2083,7 @@ sema_derive_report_text: fn(definition: ImplDef, name: String, value: CtValue) -
     None
 }
 
-// Rust `Comptime::expand_derive_body`: `name` and the template's `target` are
+// Rust `Comptime.expand_derive_body`: `name` and the template's `target` are
 // bound to the target's reflected handle.
 sema_derive_expand_provider_body: fn(body: [DeriveBodyItem], type_info: CtValue, diagnostics: &[Diagnostic]) -> [Item]? {
     sema_derive_expand_rule_body(body, "target", type_info, None, [SemaDeriveReport]{}, None, "", diagnostics)
@@ -2102,7 +2102,7 @@ sema_derive_expand_rule_body: fn(body: [DeriveBodyItem], type_param: String, typ
     sema_derive_expand_scoped(body, scope, reports, site, definition_module, diagnostics)
 }
 
-// Rust `Comptime::expand_template_body`: expand one typed item template in
+// Rust `Comptime.expand_template_body`: expand one typed item template in
 // the caller's compile-time scope. A failed expansion reports its one
 // diagnostic and generates nothing.
 sema_derive_expand_template_body: fn(body: [DeriveBodyItem], scope: [NamedCtValue], diagnostics: &[Diagnostic]) -> [Item]? {
@@ -2471,7 +2471,7 @@ sema_derive_has_trait_impl: fn(index: SemaDeriveItemIndex, type_name: String, tr
 }
 
 // ---------------------------------------------------------------------------
-// Structural auto-derive selection (Rust `TraitRegistry::compute_auto_derive`
+// Structural auto-derive selection (Rust `TraitRegistry.compute_auto_derive`
 // for Equatable and Comparable over one module's items). Every requesting
 // declaration is first assumed to derive; one whose own fields fail, and
 // every declaration that relied on it, transitively, loses the derive.

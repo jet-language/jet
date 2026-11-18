@@ -41,7 +41,7 @@ JetCLICodemodRun: struct {
     failure: String?,
 }
 
-// A JSON object being consumed field by field (Rust `BTreeMap::remove`).
+// A JSON object being consumed field by field (Rust `BTreeMap.remove`).
 JetCLICodemodObject: struct {
     fields: [JetCLIStatusField],
     taken: [Bool],
@@ -64,7 +64,7 @@ JetCLICodemodAtom: enum {
     Capture(name: String, variadic: Bool),
 }
 
-// Rust `Rule::Rename` (kind `symbol_rename`) or `Rule::Ast` (`ast_rewrite`).
+// Rust `Rule.Rename` (kind `symbol_rename`) or `Rule.Ast` (`ast_rewrite`).
 JetCLICodemodRule: struct {
     id: String,
     kind: String,
@@ -325,7 +325,7 @@ jet_cli_codemod_take_object: fn(object: &JetCLICodemodObject, key: String) -> Je
 
 // ---- paths ----
 
-// Rust `Path::components` of a relative path: `.` drops except in front.
+// Rust `Path.components` of a relative path: `.` drops except in front.
 jet_cli_codemod_components: fn(raw: String) -> [String] Never! {
     parts := [String]{}
     loop (index, part) in raw.split("/").to_list() {
@@ -1494,7 +1494,7 @@ jet_cli_codemod_target: fn(fact: SemDefinitionFact, to: String) -> JetCLISemOpTa
     JetCLISemOpTarget{stable_id: fact.stable_id.copy(), before: fact.human_identity.copy(), after: jet_cli_codemod_renamed_identity(fact, to), kind: fact.kind.copy(), module_path: fact.module_path.copy()}
 }
 
-// Rust apply_rule `Rule::Rename`.
+// Rust apply_rule `Rule.Rename`.
 jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodUnit], plan: &JetCLICodemodPlan, run: &JetCLICodemodRun) -> Int JetCLIReadError! {
     anchors := [SemAnchor]{}
     targets := [JetCLISemOpTarget]{}
@@ -1556,7 +1556,7 @@ jet_cli_codemod_apply_rename: fn(rule: JetCLICodemodRule, units: [JetCLICodemodU
     Ok(count)
 }
 
-// Rust apply_rule `Rule::Ast`.
+// Rust apply_rule `Rule.Ast`.
 jet_cli_codemod_apply_ast: fn(rule: JetCLICodemodRule, units: [JetCLICodemodUnit], plan: &JetCLICodemodPlan, run: &JetCLICodemodRun) -> Int JetCLIReadError! {
     edits := JetCLICodemodEdits{paths: [String]{}, edits: [[TextEdit]]{}}
     loop unit in units {
@@ -1666,7 +1666,7 @@ jet_cli_codemod_plan_batch: fn(batch: JetCLICodemodBatch, run: &JetCLICodemodRun
     Ok(plan)
 }
 
-// Rust `str::lines`: `\n` separated, a final `\r` dropped, no empty tail.
+// Rust `str.lines`: `\n` separated, a final `\r` dropped, no empty tail.
 jet_cli_codemod_lines: fn(bytes: [U8]) -> [String] Never! {
     text: String.from_bytes(bytes) ?? ""
     lines := [String]{}

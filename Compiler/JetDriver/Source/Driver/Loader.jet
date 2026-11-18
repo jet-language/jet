@@ -184,7 +184,7 @@ use {
 // The one language edition (greenfield: one meaning, no edition-gated behavior).
 JET_DRIVER_EDITION: "2026"
 
-// S51 (Rust `Syntax::FIRST_PARTY_RESERVED`): first-party short names reserved
+// S51 (Rust `Syntax.FIRST_PARTY_RESERVED`): first-party short names reserved
 // before packages land.
 JET_DRIVER_FIRST_PARTY_RESERVED: #run { [String]{
     "core",
@@ -3396,7 +3396,7 @@ jet_driver_path_leaf: fn(path: String) -> String Never! {
 // (`namespace_private`, which sema doesn't refuse as E0105 against a
 // sibling's same name); semantic registration keeps ONE name -> declaring
 // member table per package and consults it after a module's own
-// declarations and imports (Rust `NameLedger::namespace_owner`). No member
+// declarations and imports (Rust `NameLedger.namespace_owner`). No member
 // receives import rows or edges for its siblings.
 jet_driver_bind_package_namespaces: fn(
     modules: &[JetDriverLoadedModule],
@@ -3506,7 +3506,7 @@ jet_driver_bind_package_namespaces: fn(
 }
 
 // Root component of every embedded Core module path (`<corelib>/Core/Perf/Perf.jet`),
-// the Rust `Diagnostics::CORE_SOURCE_ROOT`. Core is library source, not the
+// the Rust `Diagnostics.CORE_SOURCE_ROOT`. Core is library source, not the
 // user's program; no authorized disk file ever carries this prefix.
 JET_DRIVER_CORE_SOURCE_ROOT: "<corelib>"
 
@@ -3631,7 +3631,7 @@ jet_driver_language_root: fn(block: TraitImplBlock) -> String? {
 }
 
 // The one leading `package: { … }` carrier of a source
-// (Rust `Package::extract_inline_package`). Offsets index the original text;
+// (Rust `Package.extract_inline_package`). Offsets index the original text;
 // `error` is the E1360/E1361/E1362 structure failure.
 JetDriverInlinePackage: struct {
     found: Bool,
@@ -4016,7 +4016,7 @@ jet_driver_inline_scan_part: fn(inputs: Shared<JetDriverInlineShared>, part: Sha
 }
 
 // Blank `start..<end` with spaces, keeping line endings, so every span stays
-// an offset into the original text (Rust `InlinePackageBlock::mask_source`).
+// an offset into the original text (Rust `InlinePackageBlock.mask_source`).
 jet_driver_blank_source_range: fn(source: String, start: Int, end: Int) -> String {
     bytes := source.bytes()
     jet_driver_blank_bytes(bytes, start, end)
@@ -4034,7 +4034,7 @@ jet_driver_blank_bytes: fn(bytes: &[U8], start: Int, end: Int) Never! {
 }
 
 // The source an ordinary parse reads: the inline carrier masked away (Rust
-// `Package::mask_inline_package_source`).
+// `Package.mask_inline_package_source`).
 jet_driver_mask_inline_package: fn(source: String, carrier: JetDriverInlinePackage) -> String {
     // copy: the masked source is a new owned String. Without an inline carrier it equals `source`,
     // the caller's file text (a read parameter), which stays with the caller.
@@ -4043,7 +4043,7 @@ jet_driver_mask_inline_package: fn(source: String, carrier: JetDriverInlinePacka
 }
 
 // Only the carrier's body, at its original offsets, for the manifest field
-// parser (Rust `InlinePackageBlock::body`). Every byte outside the body is
+// parser (Rust `InlinePackageBlock.body`). Every byte outside the body is
 // blanked, so text after the carrier never reaches the field lexer.
 jet_driver_inline_package_body: fn(source: String, carrier: JetDriverInlinePackage) -> String {
     bytes := source.bytes()

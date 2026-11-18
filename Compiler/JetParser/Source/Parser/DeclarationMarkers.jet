@@ -333,7 +333,7 @@ parser_layout_alignment_span: fn(markers: [Marker]) -> Span? {
     Val(expr_span(call.args[call.args.len() - 1].expr))
 }
 
-// Rust `BoundRuleArguments::parameter_for_source`: the parameter each written
+// Rust `BoundRuleArguments.parameter_for_source`: the parameter each written
 // argument binds, positional ones first and labeled ones by name. A bare
 // identifier naming one of `flags` (`#Meta(category: "Movement", tunable)`)
 // binds that parameter wherever it is written. None when the arguments do not
@@ -448,7 +448,7 @@ parser_marker_shape_fatal: fn(state: &JetParserState, marker: Marker) {
     parser_add_fatal_code(state, "E0930", Span{start: marker.name_span.start, end: marker.span.end}, "`#{marker.name}` arguments do not match `{expected}`", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered signature `{expected}`")
 }
 
-// Rust `MetaAttr::maturity`: the closed maturity scale a `maturity:` value names.
+// Rust `MetaAttr.maturity`: the closed maturity scale a `maturity:` value names.
 parser_maturity_tag: fn(value: Expr) -> MaturityTag? Never! {
     if value == .EnumLit(type_name, variant, _, args, _, _, _) && type_name == "" && args.len() == 0 {
         if variant == "Experimental" -> return Val(MaturityTag.Experimental)

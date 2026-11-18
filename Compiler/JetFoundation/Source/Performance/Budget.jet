@@ -9,7 +9,7 @@ PerfBudgetError: struct {
 
 perf_error: fn(message: String) -> PerfBudgetError Never! { PerfBudgetError{message: message} }
 
-// Rust BigInt::parse.
+// Rust BigInt.parse.
 perf_integer_parse: fn(text: String) -> Int PerfBudgetError! {
     if !canonical_json_valid_integer(text) {
         return Err(perf_error("non-canonical integer `{text}`"))
@@ -17,7 +17,7 @@ perf_integer_parse: fn(text: String) -> Int PerfBudgetError! {
     Ok(Int.parse(text) ?? return Err(perf_error("invalid integer")))
 }
 
-// Rust BigInt::parse_source.
+// Rust BigInt.parse_source.
 perf_integer_parse_source: fn(text: String) -> Int PerfBudgetError! {
     bytes: text.bytes()
     negative: bytes.len() > 0 && Int{bytes[0]} == 45
@@ -61,7 +61,7 @@ perf_integer_parse_source: fn(text: String) -> Int PerfBudgetError! {
     Ok(if { negative -> -value, else -> value })
 }
 
-// Rust BigInt::div_rem_abs.
+// Rust BigInt.div_rem_abs.
 perf_integer_div_rem_abs: fn(left: Int, right: Int) -> {quotient: Int, remainder: Int} PerfBudgetError! {
     if right == 0 -> return Err(perf_error("integer division by zero"))
     a: if { left < 0 -> -left, else -> left }
@@ -69,14 +69,14 @@ perf_integer_div_rem_abs: fn(left: Int, right: Int) -> {quotient: Int, remainder
     Ok({quotient: a /% b, remainder: a % b})
 }
 
-// Rust BigInt::exact_div.
+// Rust BigInt.exact_div.
 perf_integer_exact_div: fn(left: Int, right: Int) -> Int PerfBudgetError! {
     division: perf_integer_div_rem_abs(left, right)
     if division.remainder != 0 -> return Err(perf_error("integer division is not exact"))
     Ok(if { (left < 0) != (right < 0) -> -division.quotient, else -> division.quotient })
 }
 
-// Rust BigInt::gcd.
+// Rust BigInt.gcd.
 perf_integer_gcd: fn(left: Int, right: Int) -> Int Never! {
     a := if { left < 0 -> -left, else -> left }
     b := if { right < 0 -> -right, else -> right }
@@ -93,7 +93,7 @@ PerfRational: struct {
     den: Int,
 }
 
-// Rust Rational::new/from_bigints.
+// Rust Rational.new/from_bigints.
 perf_rational_new: fn(num: Int, den: Int) -> PerfRational PerfBudgetError! {
     if den == 0 -> return Err(perf_error("rational denominator is zero"))
     if num == 0 -> return Ok(perf_rational_zero())
@@ -102,26 +102,26 @@ perf_rational_new: fn(num: Int, den: Int) -> PerfRational PerfBudgetError! {
     Ok(PerfRational{num: num /% divisor * sign, den: den /% divisor * sign})
 }
 
-// Rust Rational::parse.
+// Rust Rational.parse.
 perf_rational_parse: fn(num: String, den: String) -> PerfRational PerfBudgetError! {
     numerator: perf_integer_parse(num)
     denominator: perf_integer_parse(den)
     perf_rational_new(numerator, denominator)
 }
 
-// Rust Rational::parse_source.
+// Rust Rational.parse_source.
 perf_rational_parse_source: fn(num: String, den: String) -> PerfRational PerfBudgetError! {
     numerator: perf_integer_parse_source(num)
     denominator: perf_integer_parse_source(den)
     perf_rational_new(numerator, denominator)
 }
 
-// Rust Rational::zero/integer.
+// Rust Rational.zero/integer.
 perf_rational_zero: fn() -> PerfRational Never! { PerfRational{num: 0, den: 1} }
 
 perf_rational_integer: fn(value: Int) -> PerfRational Never! { PerfRational{num: value, den: 1} }
 
-// Rust Rational::add/sub/mul.
+// Rust Rational.add/sub/mul.
 perf_rational_add: fn(left: PerfRational, right: PerfRational) -> PerfRational PerfBudgetError! {
     perf_rational_new(left.num * right.den + right.num * left.den, left.den * right.den)
 }
@@ -134,13 +134,13 @@ perf_rational_mul: fn(left: PerfRational, right: PerfRational) -> PerfRational P
     perf_rational_new(left.num * right.num, left.den * right.den)
 }
 
-// Rust Rational::div.
+// Rust Rational.div.
 perf_rational_div: fn(left: PerfRational, right: PerfRational) -> PerfRational PerfBudgetError! {
     if right.num == 0 -> return Err(perf_error("rational division by zero"))
     perf_rational_new(left.num * right.den, left.den * right.num)
 }
 
-// Rust Rational::neg/abs/max_zero.
+// Rust Rational.neg/abs/max_zero.
 perf_rational_neg: fn(value: PerfRational) -> PerfRational Never! {
     PerfRational{num: -value.num, den: value.den}
 }
@@ -153,7 +153,7 @@ perf_rational_max_zero: fn(value: PerfRational) -> PerfRational Never! {
     if { value.num < 0 -> perf_rational_zero(), else -> value.copy() }
 }
 
-// Rust Rational::cmp/Display.
+// Rust Rational.cmp/Display.
 perf_rational_cmp: fn(left: PerfRational, right: PerfRational) -> Ordering Never! {
     left.num * right.den <=> right.num * left.den
 }
@@ -162,7 +162,7 @@ perf_rational_text: fn(value: PerfRational) -> String Never! {
     if { value.den == 1 -> "{value.num}", else -> "{value.num}/{value.den}" }
 }
 
-// Rust Rational::to_json.
+// Rust Rational.to_json.
 perf_rational_to_json: fn(value: PerfRational) -> CanonicalJSON Never! {
     CanonicalJSON.Object(
         [CanonicalJSONField]{
@@ -332,7 +332,7 @@ PerfSHAStream: struct {
     words: [Int],
 }
 
-// Rust ShaStream::new.
+// Rust ShaStream.new.
 perf_sha_stream_new: fn(evidence_id: String, context_key: String, baseline_ids: [String], replicate: Int) -> PerfSHAStream Never! {
     prefix := PERF_BOOTSTRAP_DOMAIN.bytes()
     prefix.push(U8{0})
@@ -349,7 +349,7 @@ perf_push_u64: fn(bytes: &[U8], value: Int) Never! {
     loop index in 0..<8 -> bytes.push(U8{(value >> ((7 - index) * 8)) & 255})
 }
 
-// Rust ShaStream::word.
+// Rust ShaStream.word.
 perf_sha_stream_word: fn(stream: &PerfSHAStream) -> Int Never! {
     if stream.words.len() == 0 {
         input := stream.prefix.copy()
@@ -365,7 +365,7 @@ perf_sha_stream_word: fn(stream: &PerfSHAStream) -> Int Never! {
     stream.words.pop() ?? panic("digest contains four words")
 }
 
-// Rust ShaStream::index.
+// Rust ShaStream.index.
 perf_sha_stream_index: fn(stream: &PerfSHAStream, population: Int) -> Int PerfBudgetError! {
     if population == 0 -> return Err(perf_error("cannot sample an empty population"))
     threshold: 18446744073709551616 /% population * population

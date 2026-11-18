@@ -1817,7 +1817,7 @@ sema_expression_or_fallback_route: fn(fallback: OrFallback, span: Span, subject_
         .Value(other) -> {
             fallback_expected: if payload == (Type.Named{name: "Never"}) -> None else -> Val(payload)
             // The success payload is the fallback's hint: its own E0108
-            // against it is the `??` mismatch (Rust `OrFallback::Value`).
+            // against it is the `??` mismatch (Rust `OrFallback.Value`).
             fallback_start: diagnostics.len()
             checked: sema_check_expression(other, fallback_expected, environment, program, scopes, fallback_state, tail_store, context, diagnostics) ?? {
                 if fallback_expected != None && sema_value_mismatch_index(diagnostics, fallback_start, expr_span(other)) == .Val(mismatch_index) {

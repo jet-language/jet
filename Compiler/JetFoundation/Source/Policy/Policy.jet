@@ -1,10 +1,10 @@
 // Compiler-owned scoped policy registry and resolution ladder. PolicyKey,
-// PolicyValue, PolicyScope (Rust `Authority::Scope`) and PolicyDeclaration live
+// PolicyValue, PolicyScope (Rust `Authority.Scope`) and PolicyDeclaration live
 // in AST/Statements.jet. The build-fact contribution law (SourceScope,
 // ContributionLayer, Fact*) is owned by
 // Jetpack/PackageModel/Source/Merge/FactLaw.jet, not repeated here.
 
-// Rust `PolicyKey::name`.
+// Rust `PolicyKey.name`.
 policy_key_name: fn(key: PolicyKey) -> String Never! {
     if key == {
         .Unsafe -> "unsafe"
@@ -34,7 +34,7 @@ policy_key_name: fn(key: PolicyKey) -> String Never! {
     }
 }
 
-// Rust `PolicyKey::parse`.
+// Rust `PolicyKey.parse`.
 policy_key_parse: fn(name: String) -> PolicyKey? Never! {
     if name == {
         "unsafe" -> Val(PolicyKey.Unsafe)
@@ -63,7 +63,7 @@ policy_key_parse: fn(name: String) -> PolicyKey? Never! {
     }
 }
 
-// Rust `PolicyKey::is_audited_gate`.
+// Rust `PolicyKey.is_audited_gate`.
 policy_key_is_audited_gate: fn(key: PolicyKey) -> Bool Never! {
     if key == {
         .ScopedGC | .ExplicitUnits | .Copies | .Sentries | .Arithmetic | .Writes | .Failures | .Runtime -> false
@@ -71,7 +71,7 @@ policy_key_is_audited_gate: fn(key: PolicyKey) -> Bool Never! {
     }
 }
 
-// Rust `PolicyValue::display`.
+// Rust `PolicyValue.display`.
 policy_value_display: fn(value: PolicyValue) -> String Never! {
     if value == {
         .Enabled -> "true"
@@ -151,7 +151,7 @@ runtime_marker_mode: fn(marker: Marker) -> PolicyValue? Never! {
     None
 }
 
-// Rust `Authority::Scope::name`.
+// Rust `Authority.Scope.name`.
 policy_scope_name: fn(scope: PolicyScope) -> String Never! {
     if scope == {
         .Organization -> "organization"
@@ -162,7 +162,7 @@ policy_scope_name: fn(scope: PolicyScope) -> String Never! {
     }
 }
 
-// Rust `Authority::Scope::rank`: the lexical ladder, outer to inner.
+// Rust `Authority.Scope.rank`: the lexical ladder, outer to inner.
 policy_scope_rank: fn(scope: PolicyScope) -> Int Never! {
     if scope == {
         .Organization -> 0
@@ -417,7 +417,7 @@ policy_widens: fn(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Boo
     true
 }
 
-// The `PolicyCombine::Merge` arm of Rust `resolve_policy`; None is a conflict.
+// The `PolicyCombine.Merge` arm of Rust `resolve_policy`; None is a conflict.
 policy_merge: fn(outer: PolicyValue, inner: PolicyValue) -> PolicyValue? Never! {
     if outer == .Limit(a) && inner == .Limit(b) {
         return Val(PolicyValue.Limit{value: if a < b -> a else -> b})

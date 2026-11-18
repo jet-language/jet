@@ -194,7 +194,7 @@ semindex_symbol_is_result: fn(ty: Type?) -> Bool Never! {
 }
 
 // The one typed compiler fact with a public read type
-// (`CompilerFact::from_member` over Syntax `fact_read_members`) is `$origin`.
+// (`CompilerFact.from_member` over Syntax `fact_read_members`) is `$origin`.
 semindex_language_symbols: fn() -> [SemSymbol] Never! {
     symbols := [SemSymbol]{}
     no_examples: [String]{}
@@ -223,7 +223,7 @@ semindex_language_symbols: fn() -> [SemSymbol] Never! {
     symbols
 }
 
-// `SemanticSymbolIndex::new` (`push` keeps the last row of one identity).
+// `SemanticSymbolIndex.new` (`push` keeps the last row of one identity).
 semindex_symbol_index: fn(symbols: [SemSymbol]) -> [SemSymbol] Never! {
     unique := [SemSymbol]{}
     positions := [String:Int]{}
@@ -235,12 +235,12 @@ semindex_symbol_index: fn(symbols: [SemSymbol]) -> [SemSymbol] Never! {
             unique.push(symbol.copy())
         }
     }
-    // `SemanticSymbolIndex::sort`: qualified name, module, identity.
+    // `SemanticSymbolIndex.sort`: qualified name, module, identity.
     unique.sort_by(fn(left: SemSymbol, right: SemSymbol) { (left.qualified_name <=> right.qualified_name).then(left.module_path <=> right.module_path).then(left.identity <=> right.identity) })
     unique
 }
 
-// Rust `Type::is_numeric`: an integer or float type, through a tag.
+// Rust `Type.is_numeric`: an integer or float type, through a tag.
 semindex_symbol_is_numeric: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Int | .Float | .Float32 -> return true
@@ -407,7 +407,7 @@ semindex_symbol_collect_conversions: fn(index: SemIndex, items: [Item], module_p
             }
             .UnitFamily(family) -> {
                 // Canonical Time is the one fixed-carrier family that mints no
-                // distinct (`UnitFamilyDef::distinct_defs`).
+                // distinct (`UnitFamilyDef.distinct_defs`).
                 canonical_time: family.family == "Time" && (family.resolved_owner ?? "") == "core.units"
                 if !canonical_time {
                     loop named in sema_registration_unit_family_type_names(family) {
@@ -546,7 +546,7 @@ semindex_symbol_scopes: fn(index: SemIndex) -> SemSymbolScopes Never! {
     scopes
 }
 
-// `LexicalScopeIndex::scope`.
+// `LexicalScopeIndex.scope`.
 semindex_symbol_scope: fn(scopes: SemSymbolScopes, module_path: String, def_span: Span, is_param: Bool) -> SemSymbolScope? Never! {
     key: semindex_symbol_scope_key(module_path, def_span.start, def_span.end)
     initial: scopes.enclosing.get(key) ?? return None

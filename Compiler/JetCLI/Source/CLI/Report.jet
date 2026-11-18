@@ -1,7 +1,7 @@
 // The one `jet.report/v3` machine projection of a diagnostic
 // (`to_report_with_clears`, `report_clear_counts`, `render_all_json`, and
-// `ReportPath`, `ReportEnvelope::json`; the `build_error` member is
-// `JetErrorReport::to_json`). Every `--json` surface that carries diagnostics
+// `ReportPath`, `ReportEnvelope.json`; the `build_error` member is
+// `JetErrorReport.to_json`). Every `--json` surface that carries diagnostics
 // serializes them here; the status envelope around them is Status.jet.
 use {
     cli_files: core.files
@@ -29,14 +29,14 @@ use {
 
 JET_CLI_REPORT_SCHEMA: "jet.report/v3"
 
-// `std::env::current_dir`: the base that makes a relative report path
+// `std.env.current_dir`: the base that makes a relative report path
 // absolute. `None` when the process has no readable working directory.
 jet_cli_report_cwd: fn() -[FS, Env]> String? Never! {
     directory: cli_files.cwd() ?? return None
     Val(directory)
 }
 
-// `ReportPath::from_process`: an empty or synthetic (`<…>`) label stays as
+// `ReportPath.from_process`: an empty or synthetic (`<…>`) label stays as
 // written; a disk path becomes absolute against `cwd` and lexically normalized
 // (`.` dropped, `..` pops a component, never above the root). No filesystem
 // lookup is involved, so the path need not exist.
@@ -201,7 +201,7 @@ jet_cli_report_hex_digit: fn(value: Int) -> String Never! {
 }
 
 // `json_escape` / `jet_error_json_quote`, quoted: unlike `jet_cli_json_string`,
-// every `char::is_control` scalar (C0, DEL, and the C1 block U+0080..U+009F)
+// every `char.is_control` scalar (C0, DEL, and the C1 block U+0080..U+009F)
 // other than `\n`, `\r`, `\t` becomes `\u00xx`, and backspace and form feed
 // take that form too. The C1 scalars are the UTF-8 pairs `C2 80`.`C2 9F`; every
 // other byte run is copied verbatim.
@@ -255,7 +255,7 @@ jet_cli_report_span: fn(start: Int, end: Int) -> String Never! {
     "{{\"start\":{start},\"end\":{end}}}"
 }
 
-// `JetErrorReport::to_json`: the `jet.err/v1` object a build error carries. A
+// `JetErrorReport.to_json`: the `jet.err/v1` object a build error carries. A
 // Jet error frame records no column and the report no separate origin frame
 // (the host codec's projection), so `column` is 0 and `origin` is absent.
 jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
@@ -293,7 +293,7 @@ jet_cli_build_error_json: fn(report: DiagnosticBuildError) -> String Never! {
         fields.push("\"conversion_history\":[{conversions.join(",")}]")
     }
     if report.details == .Val(details) {
-        // JetErrorDetails::to_json: field values are already JSON text.
+        // JetErrorDetails.to_json: field values are already JSON text.
         members: loop field in details.fields -> "{jet_cli_json_control_quote(field.name)}:{field.value}"
         source_span: if details.source_span == {
             .Val(span) -> jet_cli_report_span(span.start, span.end)
@@ -353,7 +353,7 @@ jet_cli_report_same_origin: fn(left: DiagnosticOrigin?, right: DiagnosticOrigin?
     first.revision == second.revision && first.path == second.path && first.display == second.display && first.source == second.source
 }
 
-// `DiagnosticCause::matches`: a cause names a report by its code, span, and
+// `DiagnosticCause.matches`: a cause names a report by its code, span, and
 // originating snapshot.
 jet_cli_report_cause_names: fn(cause: DiagnosticCause, diagnostic: Diagnostic) -> Bool Never! {
     cause.code == diagnostic.code && cause.span == diagnostic.span && jet_cli_report_same_origin(cause.origin, diagnostic.origin)
@@ -386,7 +386,7 @@ jet_cli_report_clear_counts: fn(diagnostics: [Diagnostic]) -> [Int] Never! {
     counts
 }
 
-// `to_report_with_clears` + `ReportEnvelope::json`: one report object. `file`
+// `to_report_with_clears` + `ReportEnvelope.json`: one report object. `file`
 // is the batch's report path (`jet_cli_report_file`) and `source` its bytes; a
 // diagnostic's own origin replaces both, and origin paths are named under
 // `base` the same way.

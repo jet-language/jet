@@ -647,7 +647,7 @@ jet_cli_authority_path: fn(root: String, relative: String) -> String Never! {
     "{root}/{relative}"
 }
 
-// `identity_key` over `FileIdentity::from_metadata`. Directory identity is
+// `identity_key` over `FileIdentity.from_metadata`. Directory identity is
 // pinned to the opened object, not its mutable listing.
 jet_cli_identity_key: fn(kind: String, stat: cli_files.Stat) -> String Never! {
     if kind == "directory" {
@@ -1888,7 +1888,7 @@ JetCLIBuildInputs: struct {
     }
 }
 
-// CheckReads::read_nofollow_at_root's raw transport. Keep every directory
+// CheckReads.read_nofollow_at_root's raw transport. Keep every directory
 // pinned and recheck its parent entry; no canonicalize-then-read window can
 // follow a replaced intermediate component outside the authorized build root.
 jet_cli_build_read_rooted: fn(root: String, relative: String, limit: Int) -[FS.Read]> [U8] JetCLIReadError! {
@@ -2024,7 +2024,7 @@ jet_cli_build_rooted_open_error: fn(error: IOError) -> JetCLIReadError Never! {
     jet_cli_read_error(if message.ends_with("(os error 40)") || message.ends_with("(os error 62)") -> "file authority path contains a symlink" else -> message)
 }
 
-// Where absolute `path` resolves with every link followed (fs::canonicalize
+// Where absolute `path` resolves with every link followed (fs.canonicalize
 // over lstat/readlink): a missing component is `exists: false`; a link chain
 // longer than the system's 40 is ELOOP.
 jet_cli_build_resolve: fn(path: String) -[FS.Read]> JetDriverBuildPath JetCLIReadError! {
