@@ -1,0 +1,28 @@
+// Two walks that read every element of one array of Ints eight times each,
+// and so read the same number of elements. The array is `rows` rows of 520
+// Ints, its row count from the command line so nothing folds at compile
+// time. The sequential walk (line 21) reads the elements in order, eight to
+// a 64-byte cache line, and the hardware prefetcher brings each line in
+// before the walk reaches it. The strided walk (line 25) reads them column
+// by column, one element every 4160 bytes, a page and a line apart, which no
+// prefetcher follows, so nearly every read misses L1D. Each walk is one
+// line, so a counter sample that lands a few instructions past the read
+// still counts at its walk. Under `jet perf run --method=memory` the strided
+// walk's line counts several times the L1D misses of the sequential walk's.
+use core.process
+
+run: fn() {
+    args: process.args()
+    rows: if args.len() > 0 -> Int.parse(args[args.len() - 1]) ?? 4096 else -> 4096
+    count: rows * 520
+    data: loop index in 0..<count -> index
+    sequential := 0
+    loop _ in 0..<8 {
+        loop index in 0..<count -> sequential += data[index]
+    }
+    strided := 0
+    loop _ in 0..<8 {
+        loop index in 0..<count -> strided += data[(index % rows) * 520 + index /% rows]
+    }
+    print("sequential={sequential} strided={strided} same={sequential == strided}")
+}

@@ -1,0 +1,16 @@
+# Both walks read every element of the array eight times, so their L1D read
+# misses compare per element as they stand. The sequential walk (line 21)
+# misses about once per 64-byte line at most, and the strided walk (line 25)
+# at nearly every read, so its line counts more than twice the sequential
+# line's misses.
+requires: os-name:linux
+requires: arch:x86_64
+step: built
+stdout: = StridedVsSequentialL1D.out
+step: jet perf run --method=memory StridedVsSequentialL1D.jet --out {work}/walk.jettrace
+env: NO_COLOR=1
+exit: 0
+stdout: = StridedVsSequentialL1D.out
+json: file walk.jettrace doc $.content.profile.counters[?name="l1d_misses"][?status="captured"] #= 1
+capture: sequential file walk.jettrace doc $.content.profile.rows[?source.start_line=21].l1d_miss_count
+json: file walk.jettrace doc $.content.profile.rows[?source.start_line=25].l1d_miss_count > 2*{cap:sequential} # a miss at nearly every strided read, at most one per line in order
