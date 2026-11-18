@@ -1,0 +1,22 @@
+// `Event.reflect().layout.size` is this target's byte count for an enum
+// without `#Layout`, a value compile-time code may branch on. Its guarantee
+// is `none`: a later compiler or another target may place the type
+// otherwise. An enum value with payloads is one pointer to a box, so on a
+// 64-bit target the one-word arm is the one built.
+Event: enum {
+    Click(x: I32, y: I32),
+    Key(code: I32),
+    Resize(width: Int, height: Int),
+}
+
+EVENT_SIZE: #run { Event.reflect().layout.size ?? -1 }
+
+EVENT_GUARANTEE: #run Event.reflect().layout.guarantee
+
+run: fn() {
+    #if EVENT_SIZE == 8 {
+        print("Event is one word: {EVENT_SIZE} bytes, guarantee {EVENT_GUARANTEE}")
+    } else {
+        print("Event takes {EVENT_SIZE} bytes, guarantee {EVENT_GUARANTEE}")
+    }
+}

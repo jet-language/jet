@@ -1,0 +1,21 @@
+# A default-layout enum's `reflect().layout.size` (the `Event.$layout.size`
+# fact) is this target's byte count, with guarantee `none`, and `#if` branches
+# on it at compile time: an enum value with payloads is one pointer on
+# x86_64 Linux, so the one-word arm is the one built on every tier. `jet
+# inspect shapes` reports the same 8 bytes from the same record.
+fixture: LayoutSizeSelectsAComptimeBranch.fixture
+env: NO_COLOR=1
+env: JET_COMPILER_IDENTITY=jet@case#layout
+step o0: jet run -O0 main.jet
+exit: 0
+stdout: = "Event is one word: 8 bytes, guarantee none\n"
+step o1: jet run -O1 main.jet
+exit: 0
+stdout: = "Event is one word: 8 bytes, guarantee none\n"
+step o2: jet run -O2 main.jet
+exit: 0
+stdout: = "Event is one word: 8 bytes, guarantee none\n"
+step shapes: jet inspect shapes --json main.jet
+exit: 0
+json: stdout doc $ valid # the report parses
+stdout: ~ '"type":"Event","target":"x86_64-unknown-linux-gnu","compiler":"jet@case#layout","promised":false,"kind":"default","size":8,"alignment":8,"stride":8,"boxed":true,' # the size the branch read

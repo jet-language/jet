@@ -176,7 +176,10 @@ sema_expression_path_segments: fn(expression: Expr) -> [String]? {
         .Ident(name, _, _) -> Val([String]{name})
         // `Phantom<Space>.Marker`: the generic owner names its declaration.
         .TypeValue(ty, _, _) -> if ty == .Apply(name, _) -> Val([String]{name}) else -> None
+        // A `$` member reads a compiler fact (`Event.$layout.size`): the
+        // chain names a fact, not a variant or module path.
         .Field(inner, member, _, _) -> {
+            if member.starts_with("$") -> return None
             segments := sema_expression_path_segments(inner) ?? return None
             segments.push(member.copy())
             Val(segments)
