@@ -5557,6 +5557,13 @@ sema. (S44)
 The formatter also accepts `--lang`, `--simplify`, `--changed`,
 `--explicit-copies`, and `--explicit-failures`. `--simplify` opts into the
 ratified simplest spellings; the default output does not depend on it.
+Among them, `--simplify` writes a value block's old arm-table shapes in the
+current form: a fallback-free table whose arms each only `return` a value,
+followed by a default `return`, becomes one table with that default as its
+explicit `else` arm, and an arm of a value block's last-line table that ends
+in `return value` ends in the value. The block's own last-line `return` and
+every early return stay as written, and comments stay where they were. These
+are the shapes `jet check` reports as L0513 and L0530.
 `--changed` selects changed project files. `--explicit-copies` keeps copy
 operations explicit where that mode requires them; `--explicit-failures`
 writes the `?` that `#Policy(failures: .Explicit)` asks at each call that can

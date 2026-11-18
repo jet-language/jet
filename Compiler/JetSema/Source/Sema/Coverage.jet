@@ -3,24 +3,27 @@
 // value dispatch chain that ends in `NoElse`, and multi-head functions. It
 // reads the checked conditions, so contextual `.Case` heads are already
 // resolved against the subject type.
-use jet_foundation.[
-    Diagnostic,
-    ElseArmSpan,
-    Expr,
-    Span,
-    Stmt,
-    TextEdit,
-    TBinaryOp,
-    Type,
-    core_enum_cases,
-    core_enum_payload_variants,
-    diagnostic_with_edit,
-    diagnostic_with_structured_edit,
-    expr_span,
-    measure_literal_value,
-    type_name,
-    type_unqualified_nominals,
-]
+use {
+    jet_foundation.[
+        Diagnostic,
+        ElseArmSpan,
+        Expr,
+        Span,
+        Stmt,
+        TextEdit,
+        TBinaryOp,
+        Type,
+        core_enum_cases,
+        core_enum_payload_variants,
+        diagnostic_with_edit,
+        diagnostic_with_structured_edit,
+        expr_span,
+        measure_literal_value,
+        type_name,
+        type_unqualified_nominals,
+    ]
+    jet_parser.[parser_table_close]
+}
 
 SemaCoverageTable: struct {
     subject: TExpr,
@@ -572,7 +575,7 @@ sema_coverage_missing_arms_edit: fn(patterns: [String], span: Span, environment:
     graph: program.registration_graph ?? return None
     caller: sema_scope_caller_index(environment, graph) ?? return None
     raw: graph.modules[caller].source.bytes()
-    close: sema_stmt_table_close(raw, span.start) ?? return None
+    close: parser_table_close(raw, span.start) ?? return None
     line_start := close
     loop line_start > 0 && raw[line_start - 1] != (U8{10}) -> line_start -= 1
     loop at in line_start..<close {

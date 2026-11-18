@@ -1335,7 +1335,11 @@ sorted) and exits 1; `--diff` adds unified diffs and implies `--check`, so it
 never writes a file either; `--dry-run` is both; every word after `--` is a
 path, even one that starts with `-` (a missing one is a read failure); `-`
 formats stdin to stdout under the `--stdin-path=` label; `--simplify` enables
-the ratified rewrites. The retired-spelling status lines go to stderr unless
+the ratified rewrites, among them the arm-table rewrite: a fallback-free
+table of `return` arms and the default `return` after it become one table
+with an explicit `else` arm, and the arms of a value block's last-line table
+end in their values (the L0513 and L0530 shapes), while a block's own
+last-line `return` stays. The retired-spelling status lines go to stderr unless
 `--quiet`. `package.jet` goes through the typed Package formatter (the Jetpack
 Package model, referenced into the Compiler unit from `Jetpack/PackageModel`):
 an unreadable manifest stops the run with its E1215 manifest diagnostic.

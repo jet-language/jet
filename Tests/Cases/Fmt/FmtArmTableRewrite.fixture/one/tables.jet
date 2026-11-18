@@ -1,0 +1,38 @@
+// The table and its default return become one table with an `else` arm.
+describe: fn(code: Int) -> String {
+    if code == {
+        1 -> { return "one:{code}" }  // first
+        2 -> return "two"
+    }
+    // the fallback
+    return "other"
+}
+
+// A last-line table's arms end in their values.
+sign: fn(n: Int) -> String {
+    label: "n"
+    if {
+        n < 0 -> {
+            print("{label} negative")
+            return "-"
+        }
+        n > 0 -> return "+"
+        else -> return "0"
+    }
+}
+
+// An early return and a block's own last-line return stay.
+first: fn(values: [Int]) -> Int {
+    if values.len() == 0 -> return -1
+    return values[0]
+}
+
+run: fn() {
+    print(describe(1))
+    print(describe(7))
+    print(sign(-3))
+    print(sign(0))
+    print(sign(5))
+    print(first([Int]{}))
+    print(first([7, 8]))
+}

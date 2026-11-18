@@ -1877,6 +1877,77 @@ jfmt_note_compound_rewrite: fn(f: &JetFmt, op_start: Int, right_start: Int, grou
     f.compound_rewrites.push(TextEdit{span: Span{start: op_start, end: right_start}, new_text: text})
 }
 
+// ---- old value-tail shapes ----
+
+// The source edits that write the old tail shapes of every value-returning
+// callable body in `items` (parser_value_tails, the shapes `jet check`
+// reports as L0513 and L0530, here in the tables spelled as tables, braced
+// arms included) in the current form: a table of returns followed by a
+// default return gains that default as its explicit `else` arm, and an arm
+// of a last-line table that ends in `return value` ends in the value. A
+// block's own last-line `return` stays as written, as do the branches of a
+// classic `if cond { … } else { … }`, which cannot end in a value. `items`
+// is the program as parsed, before `--simplify` rewrites it.
+jfmt_value_tail_rewrites: fn(f: JetFmt, items: [Item], edits: &[TextEdit]) -[]> {
+    loop item in items {
+        if item == {
+            .Func(function) -> { jfmt_value_tail_func_rewrites(f, function, edits) }
+            .Struct(definition) -> {
+                loop function in definition.methods {
+                    jfmt_value_tail_func_rewrites(f, function, edits)
+                }
+                loop conformance in definition.trait_impls {
+                    loop function in conformance.methods {
+                        jfmt_value_tail_func_rewrites(f, function, edits)
+                    }
+                }
+            }
+            .Enum(definition) -> {
+                loop function in definition.methods {
+                    jfmt_value_tail_func_rewrites(f, function, edits)
+                }
+                loop conformance in definition.trait_impls {
+                    loop function in conformance.methods {
+                        jfmt_value_tail_func_rewrites(f, function, edits)
+                    }
+                }
+            }
+            .Impl(definition) -> {
+                loop function in definition.methods {
+                    jfmt_value_tail_func_rewrites(f, function, edits)
+                }
+            }
+            .CodeModule(decl) -> {
+                if decl.body == .Val(body) -> jfmt_value_tail_rewrites(f, body, edits)
+            }
+            .GenericModule(decl) -> jfmt_value_tail_rewrites(f, decl.body, edits)
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+jfmt_value_tail_func_rewrites: fn(f: JetFmt, function: Func, edits: &[TextEdit]) -[]> {
+    if !parser_return_type_has_value(function.return_type) {
+        return
+    }
+    tails := [ParserValueTail]{}
+    parser_value_tails(function.body, ParserTailReach.SpelledTables, f.src_bytes, tails)
+    // The default return an `else` arm takes in is part of that arm's edit.
+    taken := -1
+    loop tail in tails {
+        if tail == {
+            .ElseArm(table, returns, fallback, default) -> {
+                edit: parser_else_arm_edit(f.src_bytes, table, returns, fallback, default) ?? next
+                taken = fallback
+                edits.push(edit)
+            }
+            .FinalReturn(keyword, value, arm) -> {
+                if arm && keyword != taken -> edits.push(parser_final_return_edit(keyword, value))
+            }
+        }
+    }
+}
+
 // ---- inlined temporaries (`--simplify`) ----
 
 // Where the line after a temporary first reads a name: the identifier, and
@@ -1918,8 +1989,9 @@ jfmt_note_inline_temporaries: fn(f: &JetFmt, body: [Stmt]) -[]> Never! {
 // The two edits that drop the binding `statement` and write its value at
 // its one use in `following`, or None when the binding is not a needless
 // temporary: it has a type, a pattern, a marker, a comment or a mutable
-// sigil, shares a line with another statement, or its name is read again
-// anywhere before `block_end`.
+// sigil, shares a line with another statement, its value spans lines (a
+// routed value loop keeps its name), or its name is read again anywhere
+// before `block_end`.
 jfmt_inline_temporary_edits: fn(f: JetFmt, statement: Stmt, following: Stmt, block_end: Int) -[]> [TextEdit]? Never! {
     if statement == .Val(binding) {
         return jfmt_inline_binding_edits(f, statement, binding, following, block_end)
@@ -1964,7 +2036,7 @@ jfmt_inline_binding_edits: fn(f: JetFmt, statement: Stmt, binding: Binding, foll
         return None
     }
     value: jfmt_src_text(f, sigil.end, end).trim()
-    if value == "" || (slot.primary && !primary_value) || (slot.header && value.contains("{{")) {
+    if value == "" || value.contains("\n") || (slot.primary && !primary_value) || (slot.header && value.contains("{{")) {
         return None
     }
     Val([TextEdit]{TextEdit{span: Span{start: line_start, end: next_line_start}, new_text: ""}, TextEdit{span: slot.span, new_text: value}})
@@ -2482,7 +2554,7 @@ jfmt_trailing_marker_followed: fn(f: JetFmt, prog: Program, ordered_file_rules: 
 
 // Lex, parse, then format. Parse errors propagate; sema is not required.
 jet_format_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult {
-    jfmt_format_source_in(src, simplify_requested, false)
+    jfmt_format_source_in(src, simplify_requested, false, true)
 }
 
 // jet_format_source for a Core library or compiler prelude source. Those
@@ -2490,10 +2562,14 @@ jet_format_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult 
 // reads embedded Core (parse_generated_layout); a user file never formats
 // this way.
 jet_format_library_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult {
-    jfmt_format_source_in(src, simplify_requested, true)
+    jfmt_format_source_in(src, simplify_requested, true, true)
 }
 
-jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool) -> JetFormatResult {
+// `settle` lets a `--simplify` format read its printed text once more: the
+// printer's own rewrites (an `else if` chain written as an arm table) can
+// leave a shape the source rewrites write in the current form. The settling
+// pass does not settle again, so an unstable print cannot recurse forever.
+jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool, settle: Bool) -> JetFormatResult {
     source: src.bytes()
     lexed: if library -> lex_generated(source) else -> lex(source)
     if lexed.diagnostics.len() > 0 {
@@ -2516,15 +2592,32 @@ jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool) 
         }
     }
     prog := parsed.program
+    // The formatter's own items serve declaration lookups only, which
+    // `--simplify` leaves alone, so they can be the program as parsed.
+    f := jfmt_new(prog, src, lexed.tokens, simplify)
+    // Under `--simplify` each old value-tail shape is written in the current
+    // form and the rewritten source is formatted again; a rewrite that would
+    // not parse is left out.
+    if simplify && jfmt_structure_clean(parsed.diagnostics) {
+        tail_rewrites := [TextEdit]{}
+        jfmt_value_tail_rewrites(f, prog.items, tail_rewrites)
+        if tail_rewrites.len() > 0 && jfmt_apply_source_edits(src, tail_rewrites) == .Val(rewritten) {
+            again: jfmt_format_source_in(rewritten, true, library, true)
+            if again.ok -> return again
+        }
+    }
     // Dropping a redundant `Val(x)` rewrites the program itself.
     if simplify -> prog.items = jfmt_strip_redundant_optional_returns(prog.items)
-    f := jfmt_new(prog, src, lexed.tokens, simplify)
     text: jfmt_format_program_with(f, prog)
     // Each inlined temporary removes a binding, so formatting the rewritten
     // source again reaches the form a second pass keeps; a rewrite that
     // would not parse is left out.
     if simplify && f.inline_rewrites.len() > 0 && jfmt_apply_source_edits(src, f.inline_rewrites) == .Val(rewritten) {
-        again: jfmt_format_source_in(rewritten, true, library)
+        again: jfmt_format_source_in(rewritten, true, library, true)
+        if again.ok -> return again
+    }
+    if simplify && settle && text != src {
+        again: jfmt_format_source_in(text, true, library, false)
         if again.ok -> return again
     }
     // Without simplify, a format changes layout only: the text must parse to

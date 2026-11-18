@@ -66,6 +66,7 @@ use {
     ]
     jet_parser.[
         parse_source,
+        parser_table_close,
     ]
 }
 
@@ -475,7 +476,7 @@ sema_gone_failure_braced_end: fn(raw: [U8], head_end: Int) -> Int? {
     if at + 1 >= raw.len() || raw[at] != (U8{45}) || raw[at + 1] != (U8{62}) -> return None
     at = sema_gone_failure_blank_end(raw, at + 2)
     if at >= raw.len() || raw[at] != (U8{123}) -> return None
-    close: sema_stmt_table_close(raw, at) ?? return None
+    close: parser_table_close(raw, at) ?? return None
     Val(close + 1)
 }
 
