@@ -25,6 +25,7 @@ use jet_foundation.[
     UnOp,
     expr_span,
     module_text,
+    type_name,
 ]
 
 SemaServiceCoreMethodContract: struct {
@@ -235,23 +236,9 @@ sema_services_check_core_method: fn(api: String, contract: SemaServiceCoreMethod
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     // A tree query with no Core row (`event_count`) is the ordinary source call
-    // `core.service.<member>(receiver, args…)`, as Rust lowers it
-    // (`service_method_route` + `core_source_owns_call`).
+    // `core.service.<member>(receiver, args…)`.
     if core_call("core.service", contract.member) == None {
-        identity: sema_call_core_module_identity(environment, program, "core.service") ?? {
-            diagnostics.push(sema_error("E0003", span, "service source module is not loaded", "`{api}` requires Core/Service/Service.jet", "load the registered Core source module"))
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-        target: sema_call_core_source_target(environment, program, identity, contract.member, [Type]{}, span, true, diagnostics) ?? {
-            diagnostics.push(sema_error("E0003", span, "service source receiver target is missing", "`{api}` requires its canonical source function", "load the registered Core source function"))
-            return SemaMethodSpecialCheck{handled: true, value: None}
-        }
-        source_args := [CallArg]{CallArg{convention: contract.receiver_access, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
-        loop argument in updated_args -> source_args.push(argument)
-        scopes.ownership_call_depth += 1
-        value := sema_call_core_check_source_owned(target, api, [Type]{}, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
-        scopes.ownership_call_depth -= 1
-        return SemaMethodSpecialCheck{handled: true, value: value}
+        return sema_services_source_call(api, contract.member, [Type]{}, receiver, contract.receiver_access, updated_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
     }
     values := [TExpr]{}
     valid := true
@@ -283,6 +270,27 @@ sema_services_check_core_method: fn(api: String, contract: SemaServiceCoreMethod
     fallback_accesses := [AccessConvention]{contract.receiver_access}
     loop access in accesses -> fallback_accesses.push(access)
     sema_services_core_call(record, core_arguments, fallback_accesses, true, true, contract.result_type, expected, span, environment, program, scopes, context, diagnostics)
+}
+
+// The source call `core.service.<member>(receiver, args…)` at `type_args`, as
+// Rust lowers it (`service_method_route` + `core_source_owns_call`); `api`
+// names the call in its diagnostics.
+sema_services_source_call: fn(api: String, member: String, type_args: [Type], receiver: Expr, receiver_access: AccessConvention, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    identity: sema_call_core_module_identity(environment, program, "core.service") ?? {
+        diagnostics.push(sema_error("E0003", span, "service source module is not loaded", "`{api}` requires Core/Service/Service.jet", "load the registered Core source module"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    target: sema_call_core_source_target(environment, program, identity, member, type_args, span, true, diagnostics) ?? {
+        diagnostics.push(sema_error("E0003", span, "service source receiver target is missing", "`{api}` requires its canonical source function", "load the registered Core source function"))
+        return SemaMethodSpecialCheck{handled: true, value: None}
+    }
+    source_args := [CallArg]{CallArg{convention: receiver_access, expr: receiver, span: span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false}}
+    written := args
+    loop argument in written -> source_args.push(argument)
+    scopes.ownership_call_depth += 1
+    value := sema_call_core_check_source_owned(target, api, type_args, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+    scopes.ownership_call_depth -= 1
+    SemaMethodSpecialCheck{handled: true, value: value}
 }
 
 sema_services_contract: fn(member: String, parameters: [Type], result_type: Type, receiver_access: AccessConvention) -> SemaServiceCoreMethodContract Never! {
@@ -473,10 +481,172 @@ sema_services_receiver_is: fn(ty: Type, owner: String) -> Bool Never! {
     }
 }
 
+// The builder shape every worker declaration keeps: a visible literal name,
+// a positive literal capacity and a top-level function handler. Returns the
+// handler's name, or None once a diagnostic reports the shape.
+sema_services_worker_shape: fn(name: Expr, handler: Expr, capacity: Expr, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) -> String? {
+    valid := true
+    literal: sema_services_literal_string(name)
+    if literal == None || !sema_services_valid_name(literal ?? "") {
+        diagnostics.push(sema_error("E0112", expr_span(name), "service worker name is outside the checked builder shape", "worker names must be non-empty visible literals of at most 256 bytes", "use a literal visible worker name"))
+        valid = false
+    }
+    if sema_services_literal_int(capacity) == .Val(number) && number <= 0 {
+        diagnostics.push(sema_error("E0112", expr_span(capacity), "service worker capacity is outside the checked builder shape", "a service worker needs a positive mailbox capacity", "use a positive integer capacity"))
+        valid = false
+    }
+    handler_name := ""
+    if {
+        handler == .Ident(identifier, _, _) -> {
+            handler_name = identifier
+            // Rust `self.lookup(handler)`: only a body binding is a local; the
+            // root frame holds the module's items and imports.
+            if sema_scope_resolve_index(scopes, identifier) == .Val(index) && scopes.frames[scopes.bindings[index].frame].parent >= 0 {
+                diagnostics.push(sema_error("E0112", expr_span(handler), "service worker handler lifetime is outside the checked builder shape", "service topology values must stay visible to sema before runtime construction", "pass a top-level function, not a local or captured function value"))
+                valid = false
+            }
+        }
+        else -> {
+            diagnostics.push(sema_error("E0112", expr_span(handler), "service worker handler is outside the checked builder shape", "service handlers must be top-level functions and cannot capture local values", "pass a top-level function name"))
+            valid = false
+        }
+    }
+    if !valid -> return None
+    Val(handler_name)
+}
+
+sema_services_labeled: fn(args: [CallArg], label: String) -> Bool Never! {
+    loop argument in args {
+        if argument.label == .Val(written) && written.name == label -> return true
+    }
+    false
+}
+
+sema_services_is_unit: fn(ty: Type) -> Bool Never! {
+    if ty == .Tuple(fields) -> return fields.len() == 0
+    ty == Type.Named{name: "Unit"}
+}
+
+// Whether a handler returning `ret` answers nothing: no result, or Unit under
+// any failure contract.
+sema_services_answers_nothing: fn(ret: Type?) -> Bool Never! {
+    value: ret ?? return true
+    if value == .Result(ok, _) -> return sema_services_is_unit(ok)
+    sema_services_is_unit(value)
+}
+
+// `tree.worker(name, handler, …)` whose handler takes its message: the
+// source call of Core's typed declaration, which answers Endpoint<Q, R>.
+// The labels pick it: `state:` keeps the value the handler's `&S` first
+// parameter edits (stateful_worker); `batch:` with `wait:` hands a `[Q]`
+// handler up to `batch` waiting messages (batched_worker); otherwise the
+// handler runs once per message (typed_worker). The name, capacity and
+// handler keep the builder shape of every worker (sema_services_worker_shape).
+sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_ret: Type?, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    api: "ServiceTree.worker"
+    failed: SemaMethodSpecialCheck{handled: true, value: None}
+    batched: sema_services_labeled(args, "batch") || sema_services_labeled(args, "wait")
+    stateful: !batched && sema_services_labeled(args, "state")
+    labels: if {
+        batched -> [String]{"", "", "batch", "wait", "capacity"}
+        stateful -> [String]{"", "", "state", "capacity"}
+        else -> [String]{"", "", "capacity"}
+    }
+    updated_args := args
+    if updated_args.len() != labels.len() {
+        sema_services_report_arity(api, updated_args.len(), labels.len(), span, diagnostics)
+        sema_services_check_untyped_args(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
+        return failed
+    }
+    if !sema_services_bind_labels(api, updated_args, labels, span, diagnostics) {
+        sema_services_check_untyped_args(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
+        return failed
+    }
+    handler_span: expr_span(updated_args[1].expr)
+    shape_errors: diagnostics.len()
+    if {
+        batched && (handler_params.len() != 1 || !(handler_params[0] == .List(_))) -> {
+            diagnostics.push(sema_error("E0112", handler_span, "a batched worker's handler takes `[T]`", "`batch:` and `wait:` hand the handler a list of up to `batch` waiting messages", "take the batch as `fn(batch: [T])`, or remove `batch:` and `wait:`"))
+        }
+        batched && !sema_services_answers_nothing(handler_ret) -> {
+            diagnostics.push(sema_error("E0112", handler_span, "a batched worker's handler answers nothing", "a batch has no one caller to answer, so a batched worker is reached by `send`, not `call`", "remove `batch:` and `wait:`, or the handler's result"))
+        }
+        stateful && handler_params.len() != 2 -> {
+            diagnostics.push(sema_error("E0112", handler_span, "a stateful worker's handler takes the state first", "the worker keeps the `state:` value and lends it to each run of the handler as `&S`", "take the state first, as in `fn(s: &S, q: Q)`, or remove `state:`"))
+        }
+        !batched && !stateful && handler_params.len() == 2 -> {
+            diagnostics.push(sema_error("E0112", handler_span, "a handler that takes state needs `state:`", "a two-parameter handler takes the worker's state first, and `state:` gives its first value", "add `state:` with the worker's first state, or take only the message"))
+        }
+        handler_params.len() > 2 -> {
+            diagnostics.push(sema_error("E0112", handler_span, "a worker handler takes one message", "each run of the handler takes one message, after the worker's state when it keeps one", "take the message as one parameter"))
+        }
+    }
+    if batched && sema_services_literal_int(updated_args[2].expr) == .Val(size) && size <= 0 {
+        diagnostics.push(sema_error("E0112", expr_span(updated_args[2].expr), "service worker batch is outside the checked builder shape", "a batch hands the handler at least one message", "use a positive batch size"))
+    }
+    shaped: sema_services_worker_shape(updated_args[0].expr, updated_args[1].expr, updated_args[labels.len() - 1].expr, scopes, diagnostics)
+    if shaped == None || diagnostics.len() > shape_errors {
+        sema_services_check_untyped_args(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
+        return failed
+    }
+    handler_name: shaped ?? ""
+    registered := false
+    if program.registration_graph == .Val(graph) {
+        resolved: sema_registration_lookup_name(graph, environment.module_identity, handler_name)
+        if resolved == .Val(function) && sema_resolved_kind(graph, function) == SymbolKind.Function {
+            registered = true
+        }
+    }
+    if !registered {
+        diagnostics.push(sema_error("E0112", handler_span, "service worker handler has no checked top-level function identity", "service handlers must resolve to registered top-level function bodies", "pass a registered top-level function"))
+        return failed
+    }
+    member: if {
+        batched -> "batched_worker"
+        stateful -> "stateful_worker"
+        else -> "typed_worker"
+    }
+    // The handler's name follows the handler, as Core's declaration takes it.
+    source_args := [CallArg]{}
+    loop (index, argument) in updated_args {
+        source_args.push(argument)
+        if index == 1 {
+            source_args.push(CallArg{convention: AccessConvention.Read, expr: Expr.Str{parts: [StrPart]{StrPart.Lit{text: handler_name}}, span: handler_span, id: AST_NODE_GENERATED}, span: handler_span, flags: AST_EMPTY_CALL_ARG_FLAGS, label: None, spread: false})
+        }
+    }
+    sema_services_source_call(api, member, [Type]{}, receiver, AccessConvention.Write, source_args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics)
+}
+
+// `tree.send(endpoint, message)` and `tree.call(endpoint, message)` on a
+// typed Endpoint<Q, R>: the source calls typed_send and call at the
+// endpoint's Q and R, so a message of another type is a mismatch with the
+// endpoint (E0112). A worker that answers is reached by `call`, since `send`
+// has no place for its answer. None leaves the call to the String endpoint.
+sema_services_typed_delivery: fn(method: String, receiver: Expr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
+    if args.len() != 2 -> return None
+    endpoint: sema_expr_probe_type(args[0].expr, false, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
+    if endpoint == .Apply(name, endpoint_args) && endpoint_args.len() == 2 && core_identity_is(name, "core.service", "Endpoint") {
+        if method == "send" && !sema_services_is_unit(endpoint_args[1]) {
+            diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "service send reaches a worker that answers", "this worker answers each message with {type_name(endpoint_args[1])}, and `send` has no place for the answer", "use `tree.call(endpoint, message)`, which returns the answer"))
+            sema_services_check_untyped_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
+            return Val(SemaMethodSpecialCheck{handled: true, value: None})
+        }
+        member: if method == "send" -> "typed_send" else -> "call"
+        return Val(sema_services_source_call("ServiceTree.{method}", member, endpoint_args, receiver, AccessConvention.Write, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics))
+    }
+    None
+}
+
 sema_check_service_tree_method: fn(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     if !sema_services_receiver_is(receiver_value.ty, "ServiceTree") -> return None
     updated_args := args
     if method == "worker" {
+        // A handler that takes its message declares a typed worker.
+        if updated_args.len() > 1 && sema_expr_probe_type(updated_args[1].expr, false, environment, program, scopes, state, tail_store, context, diagnostics) == .Val(probed) {
+            if probed == .Fn(handler_params, handler_ret, _, _, _, _) && handler_params.len() > 0 {
+                return Val(sema_services_typed_worker(receiver, handler_params, handler_ret, updated_args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics))
+            }
+        }
         if updated_args.len() != 3 {
             sema_services_report_arity("ServiceTree.worker", updated_args.len(), 3, span, diagnostics)
             sema_services_check_untyped_args(updated_args, environment, program, scopes, state, tail_store, context, diagnostics)
@@ -495,37 +665,11 @@ sema_check_service_tree_method: fn(method: String, receiver: Expr, receiver_valu
         if handler_value == .Val(item) -> values.push(item) else -> valid = false
         capacity_value := sema_check_expression(updated_args[2].expr, Val(Type.Int), environment, program, scopes, state, tail_store, context, diagnostics)
         if capacity_value == .Val(item) -> values.push(item) else -> valid = false
-        name := sema_services_literal_string(updated_args[0].expr)
-        if name == None || !sema_services_valid_name(name ?? "") {
-            diagnostics.push(sema_error("E0112", expr_span(updated_args[0].expr), "service worker name is outside the checked builder shape", "worker names must be non-empty visible literals of at most 256 bytes", "use a literal visible worker name"))
-            valid = false
+        shaped: sema_services_worker_shape(updated_args[0].expr, updated_args[1].expr, updated_args[2].expr, scopes, diagnostics)
+        if !valid || shaped == None {
+            return Val(SemaMethodSpecialCheck{handled: true, value: None})
         }
-        capacity := sema_services_literal_int(updated_args[2].expr)
-        if capacity == .Val(number) && number <= 0 {
-            diagnostics.push(sema_error("E0112", expr_span(updated_args[2].expr), "service worker capacity is outside the checked builder shape", "a service worker needs a positive mailbox capacity", "use a positive integer capacity"))
-            valid = false
-        }
-        handler_name := ""
-        if updated_args[1].expr == {
-            .Ident(identifier, _, _) -> {
-                handler_name = identifier
-                // Rust `self.lookup(handler)`: only a body binding is a local;
-                // the root frame holds the module's items and imports.
-                local := false
-                if sema_scope_resolve_index(scopes, identifier) == .Val(index) {
-                    local = scopes.frames[scopes.bindings[index].frame].parent >= 0
-                }
-                if local {
-                    diagnostics.push(sema_error("E0112", expr_span(updated_args[1].expr), "service worker handler lifetime is outside the checked builder shape", "service topology values must stay visible to sema before runtime construction", "pass a top-level function, not a local or captured function value"))
-                    valid = false
-                }
-            }
-            .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .Unary(_, _, _, _) | .Binary(_, _, _, _, _) | .CompareChain(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Paren(_, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) -> {
-                diagnostics.push(sema_error("E0112", expr_span(updated_args[1].expr), "service worker handler is outside the checked builder shape", "service handlers must be top-level functions and cannot capture local values", "pass a top-level function name"))
-                valid = false
-            }
-        }
-        if !valid -> return Val(SemaMethodSpecialCheck{handled: true, value: None})
+        handler_name: shaped ?? ""
         handler := values[1]
         handler_symbol: sema_services_const_symbol(handler, context)
         registered_function := false
@@ -553,6 +697,10 @@ sema_check_service_tree_method: fn(method: String, receiver: Expr, receiver_valu
         }
         fallbacks := [AccessConvention]{AccessConvention.Write, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read, AccessConvention.Read}
         return Val(sema_services_core_call(record, core_args, fallbacks, true, false, sema_services_result_type(Type.Named{name: "ServiceEndpoint"}), expected, span, environment, program, scopes, context, diagnostics))
+    }
+    if method == "send" || method == "call" {
+        typed: sema_services_typed_delivery(method, receiver, updated_args, expected, span, environment, program, scopes, state, tail_store, context, diagnostics)
+        if typed == .Val(checked) -> return Val(checked)
     }
     if method == "group" {
         contract := sema_services_contract("group", [Type]{Type.String, Type.List{element: Type.String}}, sema_services_result_type(Type.Named{name: "Unit"}), AccessConvention.Write)

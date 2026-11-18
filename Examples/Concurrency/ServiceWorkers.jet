@@ -1,0 +1,79 @@
+// Typed service workers: a worker is its function. Each runs once per
+// message, in send order, on the worker's own task.
+package: {
+    name: "service_workers"
+    authority: { allow: [IO, Time, Time.Wait] }
+}
+
+use {
+    service: core.service
+    time: core.time
+}
+
+Email: struct {
+    to: String,
+}
+
+Quote: struct {
+    items: Int,
+}
+
+Cart: struct {
+    items: [String],
+}
+
+send_email: fn(email: Email) { print("email to {email.to}") }
+
+// A handler that answers gives an endpoint `call` reaches.
+price: fn(quote: Quote) -> Int {
+    if quote.items < 0 -> return Err("a quote of {quote.items} items")
+    quote.items * 5
+}
+
+// A `&S` first parameter keeps the worker's state between messages.
+add_item: fn(cart: &Cart, item: String) -> Int {
+    cart.items.push(item)
+    cart.items.len()
+}
+
+// `batch:` hands the handler up to that many waiting messages.
+send_bulk: fn(batch: [Int]) { print("bulk {batch}") }
+
+run: fn() {
+    tree := service.tree("shop")
+    email: tree.worker("email", send_email, capacity: 64) ?? return
+    pricing: tree.worker("pricing", price, capacity: 8) ?? return
+    cart: tree.worker("cart", add_item, state: Cart{items: [String]{}}, capacity: 8) ?? return
+    bulk: tree.worker("bulk", send_bulk, batch: 2, wait: 20ms, capacity: 16) ?? return
+    tree.start() ?? return
+
+    tree.send(email, Email{to: "ada"}) ?? return
+    tree.send(email, Email{to: "grace"}) ?? return
+    // A call waits for every message sent before it.
+    tree.call(email, Email{to: "edsger"}) ?? return
+
+    three: tree.call(pricing, Quote{items: 3}) ?? 0
+    print("price {three}")
+    // A handler that fails while handling a call leaves its outcome unknown.
+    if tree.call(pricing, Quote{items: -1}) == {
+        .Ok(total) -> { print("price {total}") }
+        .Err(.Ambiguous(why)) -> { print("ambiguous: {why}") }
+        .Err(_) -> print("refused")
+    }
+    four: tree.call(pricing, Quote{items: 4}) ?? 0
+    print("price {four}")
+
+    first: tree.call(cart, "apple") ?? 0
+    second: tree.call(cart, "pear") ?? 0
+    print("cart holds {first}, then {second}")
+
+    // Two full batches go to the handler at once; the last message waits
+    // for `wait:`.
+    tree.send(bulk, 1) ?? return
+    tree.send(bulk, 2) ?? return
+    tree.send(bulk, 3) ?? return
+    time.sleep(200ms)
+    tree.send(bulk, 4) ?? return
+    tree.send(bulk, 5) ?? return
+    time.sleep(200ms)
+}

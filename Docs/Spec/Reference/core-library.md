@@ -8135,13 +8135,38 @@ Combined rollback failures preserve the original diagnostic and recovery text.
 Generation rollout, start and stop are Jet policy; each registry change takes
 the registry guard, the one linearization point for drain, partition, handoff
 and endpoint send.
-No service worker runs its handler in-process. `core.jobs.queue()` binds to
-the package endpoint instead, whose authority `core.jobs` describes below.
+A worker whose handler takes no message runs no handler in-process.
+`core.jobs.queue()` binds to the package endpoint instead, whose authority
+`core.jobs` describes below. A worker whose handler takes its message is
+typed: its handler runs in-process on the worker's own actor, once per
+message in send order, and its endpoint is `Endpoint<Q, R>` for a handler
+taking `Q` and answering `R` (`R` is `()` for one that answers nothing).
+`tree.send` takes only `Q` (E0112 otherwise) and reaches only a worker that
+answers nothing; `tree.call` waits for the answer. A handler that fails while
+handling a call leaves its outcome unknown: `ServiceError.Ambiguous`. A send
+past `capacity` waiting messages is `ServiceError.Full`. A failing handler
+fails only its message; the worker begins again from its `state:` value
+within the tree's restart budget. With `batch:` and `wait:`, a `[Q]`
+handler takes up to `batch` waiting messages, waiting at most `wait` for a
+batch to fill; a failed batch is handed over again on each restart.
+
+```jet
+email: tree.worker("email", send_email, capacity: 64) ?? return
+cart: tree.worker("cart", cart_step, state: Cart{items: []}, capacity: 64) ?? return
+bulk: tree.worker("bulk", send_bulk, batch: 50, wait: flush, capacity: 500) ?? return
+tree.send(email, Email{to: "ada@example.com"}) ?? return
+total: tree.call(pricing, Quote{items: 3}) ?? 0
+```
 
 | Signature | Result | Description |
 |---|---|---|
 | `tree(name: String) -> ServiceTree` | tree | Create a named service topology. |
-| `tree.worker(name: String, handler, capacity: Int) -> ServiceEndpoint ServiceError!` | endpoint | Register a checked top-level handler with a bounded mailbox. |
+| `tree.worker(name: String, handler, capacity: Int) -> ServiceEndpoint ServiceError!` | endpoint | Register a checked top-level handler that takes no message, with a bounded mailbox. |
+| `tree.worker(name: String, handler: fn(Q) -> R, capacity: Int) -> Endpoint<Q, R> ServiceError!` | endpoint | Register a typed worker that runs its top-level handler once per message. |
+| `tree.worker(name: String, handler: fn(&S, Q) -> R, state: S, capacity: Int) -> Endpoint<Q, R> ServiceError!` | endpoint | Register a typed worker that lends its handler the state it keeps, starting from `state`. |
+| `tree.worker(name: String, handler: fn([Q]), batch: Int, wait: Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError!` | endpoint | Register a typed worker that hands its handler up to `batch` waiting messages. |
+| `tree.send(endpoint: Endpoint<Q, ()>, message: Q) ServiceError!` | — | Queue a message for a typed worker that answers nothing. |
+| `tree.call(endpoint: Endpoint<Q, R>, message: Q) -> R ServiceError!` | answer | Send a message and wait for the handler's answer. |
 | `tree.start()` / `tree.stop()` | — | Start or stop the service tree. |
 | `tree.show() -> Dyn` | tree | Inspect topology and delivery state. |
 | `tree.set_restart(strategy: ServiceRestart)` | — | Select one-for-one, all-for-one, or rest-for-one restart. |
