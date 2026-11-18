@@ -162,7 +162,7 @@ jet_cli_perf_chrome: fn(trace: CanonicalJSON) -> CanonicalJSON Never! {
             },
         ),
     )
-    lanes: [String]{"wall samples", "cpu samples", "browser", "lock contention", "native CPU", "allocations"}
+    lanes: [String]{"wall samples", "cpu samples", "browser", "lock contention", "native CPU", "allocations", "I/O outside tasks"}
     loop (index, lane) in lanes -> jet_cli_perf_chrome_lane(events, index + 1, lane)
     if jet_cli_perf_rows(trace, "samples") == .Ok(items) {
         loop item in items {
@@ -200,9 +200,12 @@ jet_cli_perf_chrome: fn(trace: CanonicalJSON) -> CanonicalJSON Never! {
                 }
                 start: jet_cli_perf_member_number(item, "start_ns") ?? next
                 end: jet_cli_perf_member_number(item, "end_ns") ?? next
-                task: jet_cli_perf_member_number(item, "task_id") ?? next
+                // Task ids count from 1; a transfer outside every task has
+                // its own lane, a span outside every task none.
+                task: jet_cli_perf_member_number(item, "task_id") ?? 0
+                if task == 0 && key == "spans" -> next
                 duration: if end > start -> end - start else -> 0
-                jet_cli_perf_chrome_event(events, item, start, duration, 1000 + task)
+                jet_cli_perf_chrome_event(events, item, start, duration, if task == 0 -> 7 else -> 1000 + task)
             }
         }
     }

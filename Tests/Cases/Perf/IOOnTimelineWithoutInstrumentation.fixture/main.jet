@@ -1,0 +1,20 @@
+package: { name: "run", authority: { allow: [FS, IO, Mem.Alloc, Net, Time.Wait] } }
+
+use {
+    files: core.files
+    net: core.net
+}
+
+// A file written and read back, then 4 bytes over loopback TCP, with no
+// instrumentation in the program.
+run: fn() {
+    files.write("notes.txt", "hello, jet\n") ?? panic("write")
+    text: files.read("notes.txt") ?? panic("read")
+    listener: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address: net.listener_local_socket_addr(listener) ?? panic("listener address")
+    client := net.tcp_connect_addr(address) ?? panic("connect")
+    server := net.tcp_accept(listener) ?? panic("accept")
+    net.tcp_write_all_bytes(client, "ping".bytes()) ?? panic("send")
+    got: net.tcp_read_bytes(server, 4) ?? panic("receive")
+    print("{text.len()} {got.len()}")
+}

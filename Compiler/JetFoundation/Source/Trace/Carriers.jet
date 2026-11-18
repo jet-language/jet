@@ -221,22 +221,27 @@ TraceLock: struct {
     symbol: JetSymbolRef,
 }
 
+// An I/O row: one file or network transfer the program made through the
+// runtime's I/O leaves under `jet perf run`, from `start_ns` to `end_ns` on
+// the clock of every span. `kind` is `file` or `network`, `operation`
+// `read` or `write`; `bytes` is what it moved, or 0 with the OS `error`
+// (errno) that refused it. `target` is a file's path as the program named
+// it (`fd N` for a descriptor the runtime holds no path for), a peer's
+// `host:port` or a Unix socket's path. `task_id` is the task that made it,
+// null outside every observed task; `stack` the frames of `symbol.path` on
+// its stack, innermost first, and `symbol.name` its `operation` and
+// `target`: `read notes.txt`.
 TraceIO: struct {
-    start_ns: U64,
+    bytes: U64,
     end_ns: U64,
+    error: U64?,
     kind: String,
-    task_id: U64,
-    wait: String,
+    operation: String,
+    stack: [TraceStackFrame],
+    start_ns: U64,
     symbol: JetSymbolRef,
-}
-
-trace_io_kind_for_wait: fn(wait: String) -> String? Never! {
-    if wait.contains("tcp") -> return Val("tcp")
-    if wait.contains("network") || wait.starts_with("udp ") || wait.starts_with("unix ") {
-        return Val("network")
-    }
-    if wait.starts_with("io ") -> return Val("io")
-    None
+    target: String,
+    task_id: U64?,
 }
 
 TraceNative: struct {
@@ -275,15 +280,15 @@ TraceSpan: struct {
     status: String,
     symbol: JetSymbolRef,
     task_id: U64?,
-    wait_stack: [TraceWaitFrame],
+    wait_stack: [TraceStackFrame],
     waker: String,
     waker_line: U64?,
     waker_task_id: U64?,
 }
 
-// One frame of a wait's stack: the function `name` at `line` of its row's
-// `symbol.path`.
-TraceWaitFrame: struct {
+// One frame of a wait's or a transfer's stack: the function `name` at
+// `line` of its row's `symbol.path`.
+TraceStackFrame: struct {
     line: U64,
     name: String,
 }
@@ -459,7 +464,12 @@ trace_lock_to_json: fn(value: TraceLock) -> CanonicalJSON JetTraceError! {
 }
 
 trace_io_to_json: fn(value: TraceIO) -> CanonicalJSON JetTraceError! {
-    jettrace_object([CanonicalJSONField]{jettrace_field("end_ns", jettrace_uint(value.end_ns)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("start_ns", jettrace_uint(value.start_ns)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("task_id", jettrace_uint(value.task_id)), jettrace_field("wait", .String(value.wait.copy()))})
+    jettrace_object([CanonicalJSONField]{jettrace_field("bytes", jettrace_uint(value.bytes)), jettrace_field("end_ns", jettrace_uint(value.end_ns)), jettrace_field("error", jettrace_optional_uint(value.error)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("operation", .String(value.operation.copy())), jettrace_field("stack", trace_stack_to_json(value.stack)), jettrace_field("start_ns", jettrace_uint(value.start_ns)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("target", .String(value.target.copy())), jettrace_field("task_id", jettrace_optional_uint(value.task_id))})
+}
+
+// A row's stack: each frame's line and function, innermost first.
+trace_stack_to_json: fn(frames: [TraceStackFrame]) -> CanonicalJSON JetTraceError! {
+    .Array(loop frame in frames -> jettrace_object([CanonicalJSONField]{jettrace_field("line", jettrace_uint(frame.line)), jettrace_field("name", .String(frame.name.copy()))}))
 }
 
 trace_native_to_json: fn(value: TraceNative) -> CanonicalJSON JetTraceError! {
@@ -467,11 +477,7 @@ trace_native_to_json: fn(value: TraceNative) -> CanonicalJSON JetTraceError! {
 }
 
 trace_span_to_json: fn(value: TraceSpan) -> CanonicalJSON JetTraceError! {
-    stack := [CanonicalJSON]{}
-    loop frame in value.wait_stack {
-        stack.push(jettrace_object([CanonicalJSONField]{jettrace_field("line", jettrace_uint(frame.line)), jettrace_field("name", .String(frame.name.copy()))}))
-    }
-    jettrace_object([CanonicalJSONField]{jettrace_field("awaited_task_id", jettrace_optional_uint(value.awaited_task_id)), jettrace_field("channel_id", jettrace_optional_uint(value.channel_id)), jettrace_field("clock", .String(value.clock.copy())), jettrace_field("end_ns", jettrace_optional_uint(value.end_ns)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("parent_task_id", jettrace_optional_uint(value.parent_task_id)), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("spawn_line", jettrace_optional_uint(value.spawn_line)), jettrace_field("start_ns", jettrace_optional_uint(value.start_ns)), jettrace_field("status", .String(value.status.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("task_id", jettrace_optional_uint(value.task_id)), jettrace_field("wait_stack", .Array(stack.move())), jettrace_field("waker", .String(value.waker.copy())), jettrace_field("waker_line", jettrace_optional_uint(value.waker_line)), jettrace_field("waker_task_id", jettrace_optional_uint(value.waker_task_id))})
+    jettrace_object([CanonicalJSONField]{jettrace_field("awaited_task_id", jettrace_optional_uint(value.awaited_task_id)), jettrace_field("channel_id", jettrace_optional_uint(value.channel_id)), jettrace_field("clock", .String(value.clock.copy())), jettrace_field("end_ns", jettrace_optional_uint(value.end_ns)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("parent_task_id", jettrace_optional_uint(value.parent_task_id)), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("spawn_line", jettrace_optional_uint(value.spawn_line)), jettrace_field("start_ns", jettrace_optional_uint(value.start_ns)), jettrace_field("status", .String(value.status.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("task_id", jettrace_optional_uint(value.task_id)), jettrace_field("wait_stack", trace_stack_to_json(value.wait_stack)), jettrace_field("waker", .String(value.waker.copy())), jettrace_field("waker_line", jettrace_optional_uint(value.waker_line)), jettrace_field("waker_task_id", jettrace_optional_uint(value.waker_task_id))})
 }
 
 trace_browser_to_json: fn(value: TraceBrowser) -> CanonicalJSON JetTraceError! {

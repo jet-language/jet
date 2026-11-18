@@ -247,13 +247,17 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     capture.receipts.push(stamped)
     capture.policy.allowlist = parsed.allowlist.move()
     // The core.log spans the program closed, which its runtime keeps beside
-    // the samples, and the tasks' waits and wakes it recorded among them,
-    // each on the clock of `started`.
+    // the samples, and the tasks' waits and wakes and the file and network
+    // transfers it recorded among them, each on the clock of `started`.
     if samples == .Val(file) && parsed.source == .Val(source) {
         jet_cli_perf_log_spans_read(capture, "{file}.spans", source, started.start_ns)
     }
     if parsed.source == .Val(source) {
-        if sampled.move() == .Val(found) -> jet_cli_perf_waits_read(capture, found, source, started.start_ns)
+        if sampled.move() == .Val(found) {
+            // The I/O rows take the transfers and the task_wait rows the waits.
+            jet_cli_perf_io_read(capture, found.transfers.move(), source, started.start_ns)
+            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, source, started.start_ns)
+        }
     }
     full := [String]{action}
     loop arg in args {

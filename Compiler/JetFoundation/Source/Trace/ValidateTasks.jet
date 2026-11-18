@@ -83,6 +83,9 @@ jettrace_validate_locks: fn(value: CanonicalJSON) JetTraceError! {
     return
 }
 
+// Each I/O row is one transfer the runtime recorded (Carriers.jet TraceIO):
+// a file or network read or write of a target, that moved its bytes or
+// failed with an errno and moved none, made by a known task or by none.
 jettrace_validate_io: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact], limit: Int) JetTraceError! {
     items: jettrace_array(value, "content.io")
     if items.len() > limit {
@@ -90,36 +93,54 @@ jettrace_validate_io: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact], li
     }
     loop index in 0..<items.len() {
         label: "content.io[{index}]"
-        fields: jettrace_object_keys(items[index], label, [String]{"end_ns", "kind", "start_ns", "symbol", "task_id", "wait"})
+        fields: jettrace_object_keys(items[index], label, [String]{"bytes", "end_ns", "error", "kind", "operation", "stack", "start_ns", "symbol", "target", "task_id"})
         kind: jettrace_text(fields[jettrace_get(fields, "kind")].value, "{label}.kind")
-        if kind != "tcp" && kind != "network" && kind != "io" {
-            return Err(jettrace_error("{label}.kind must be tcp, network, or io"))
+        if kind != "file" && kind != "network" {
+            return Err(jettrace_error("{label}.kind must be file or network"))
         }
-        id: jettrace_unsigned(fields[jettrace_get(fields, "task_id")].value, "{label}.task_id")
-        if !tasks.has_key(id) {
-            return Err(jettrace_error("{label}.task_id refers to missing task {id}"))
+        operation: jettrace_text(fields[jettrace_get(fields, "operation")].value, "{label}.operation")
+        if operation != "read" && operation != "write" {
+            return Err(jettrace_error("{label}.operation must be read or write"))
         }
-        task_fact: tasks[id]
+        if jettrace_text(fields[jettrace_get(fields, "target")].value, "{label}.target").len() == 0 {
+            return Err(jettrace_error("{label}.target is empty (a transfer names what it moved bytes to or from)"))
+        }
         start: jettrace_unsigned(fields[jettrace_get(fields, "start_ns")].value, "{label}.start_ns")
         end: jettrace_unsigned(fields[jettrace_get(fields, "end_ns")].value, "{label}.end_ns")
         if end < start -> return Err(jettrace_error("{label}.end_ns precedes start_ns"))
-        wait: jettrace_text(fields[jettrace_get(fields, "wait")].value, "{label}.wait")
-        if wait.len() == 0 -> return Err(jettrace_error("{label}.wait is empty (vacuous I/O row)"))
-        expected: trace_io_kind_for_wait(wait) ?? return Err(jettrace_error("{label}.wait is not an observe I/O wait (idle scrape is not an I/O fact)"))
-        if kind != expected {
-            return Err(jettrace_error("{label}.kind does not match wait classifier"))
+        bytes: jettrace_unsigned(fields[jettrace_get(fields, "bytes")].value, "{label}.bytes")
+        error: fields[jettrace_get(fields, "error")].value
+        if error != CanonicalJSON.Null {
+            if jettrace_unsigned(error, "{label}.error") == (U64{0}) {
+                return Err(jettrace_error("{label}.error must be an errno, from 1"))
+            }
+            if bytes != (U64{0}) {
+                return Err(jettrace_error("{label} failed transfer must move no bytes"))
+            }
         }
-        if {
-            task_fact.state == "done" && task_fact.wait.len() == 0 -> {}
-            task_fact.state == "blocked" && task_fact.wait == wait -> {}
-            task_fact.state == "done" -> return Err(jettrace_error("{label} completed task must have an empty wait"))
-            task_fact.state == "blocked" -> return Err(jettrace_error("{label}.wait does not match its blocked task"))
-            else -> return Err(jettrace_error("{label} task must be blocked or done"))
+        task: fields[jettrace_get(fields, "task_id")].value
+        if task != CanonicalJSON.Null {
+            id: jettrace_unsigned(task, "{label}.task_id")
+            if !tasks.has_key(id) {
+                return Err(jettrace_error("{label}.task_id refers to missing task {id}"))
+            }
         }
-        symbol: fields[jettrace_get(fields, "symbol")].value
-        jettrace_validate_symbol(symbol, "{label}.symbol")
-        if symbol != task_fact.symbol {
-            return Err(jettrace_error("{label}.symbol does not match its task"))
+        jettrace_validate_stack(jettrace_array(fields[jettrace_get(fields, "stack")].value, "{label}.stack"), "{label}.stack")
+        jettrace_validate_symbol(fields[jettrace_get(fields, "symbol")].value, "{label}.symbol")
+    }
+    return
+}
+
+// A row's stack (Carriers.jet TraceStackFrame): each frame a line, from 1,
+// and the function at it.
+jettrace_validate_stack: fn(stack: View<CanonicalJSON>, label: String) JetTraceError! {
+    loop at in 0..<stack.len() {
+        frame: jettrace_object_keys(stack[at], "{label}[{at}]", [String]{"line", "name"})
+        if jettrace_unsigned(frame[jettrace_get(frame, "line")].value, "{label}[{at}].line") == (U64{0}) {
+            return Err(jettrace_error("{label}[{at}].line must be a line, from 1"))
+        }
+        if jettrace_text(frame[jettrace_get(frame, "name")].value, "{label}[{at}].name").len() == 0 {
+            return Err(jettrace_error("{label}[{at}].name must name a function"))
         }
     }
     return
@@ -237,15 +258,7 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
             if channel != CanonicalJSON.Null {
                 _ := jettrace_unsigned(channel, "{label}.channel_id")
             }
-            loop at in 0..<stack.len() {
-                frame: jettrace_object_keys(stack[at], "{label}.wait_stack[{at}]", [String]{"line", "name"})
-                if jettrace_unsigned(frame[jettrace_get(frame, "line")].value, "{label}.wait_stack[{at}].line") == (U64{0}) {
-                    return Err(jettrace_error("{label}.wait_stack[{at}].line must be a line, from 1"))
-                }
-                if jettrace_text(frame[jettrace_get(frame, "name")].value, "{label}.wait_stack[{at}].name").len() == 0 {
-                    return Err(jettrace_error("{label}.wait_stack[{at}].name must name a function"))
-                }
-            }
+            jettrace_validate_stack(stack, "{label}.wait_stack")
             if {
                 waker == "task" -> {
                     if waker_task != CanonicalJSON.Null {

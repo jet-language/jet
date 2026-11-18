@@ -712,14 +712,23 @@ jet_cli_perf_lock_summary: fn(trace: CanonicalJSON) -> String? Never! {
     Val("locks count={items.len()} waiters={waiters} · {symbol ?? "?"}")
 }
 
+// The file and network transfers (`io` rows): how many, the bytes read and
+// written, how many the OS refused, and the first's symbol.
 jet_cli_perf_io_summary: fn(trace: CanonicalJSON) -> String? Never! {
     items: jet_cli_perf_rows(trace, "io") ?? return None
     if items.len() == 0 -> return None
-    symbol := String?{None}
+    read := 0
+    written := 0
+    failed := 0
     loop item in items {
-        if symbol == None -> symbol = jet_cli_perf_member_symbol(item)
+        bytes: jet_cli_perf_member_number(item, "bytes") ?? 0
+        if {
+            (jet_cli_perf_member_text(item, "operation") ?? "") == "write" -> written += bytes
+            else -> read += bytes
+        }
+        if jet_cli_perf_member_integer(item, "error") != None -> failed += 1
     }
-    Val("io count={items.len()} · {symbol ?? "?"}")
+    Val("io count={items.len()} read_bytes={read} write_bytes={written} errors={failed} · {jet_cli_perf_member_symbol(items[0]) ?? "?"}")
 }
 
 jet_cli_perf_native_summary: fn(trace: CanonicalJSON) -> String? Never! {
@@ -830,7 +839,7 @@ jet_cli_perf_wait_summary: fn(trace: CanonicalJSON) -> String? Never! {
 jet_cli_perf_wait_text: fn(item: CanonicalJSON) -> String Never! {
     path: jet_cli_perf_member_symbol_text(item, "path") ?? "?"
     text := "task {jet_cli_perf_member_integer(item, "task_id") ?? "?"} in {jet_cli_perf_member_symbol_text(item, "name") ?? "wait"}"
-    stack: jet_cli_perf_wait_stack(item)
+    stack: jet_cli_perf_row_stack(item, "wait_stack")
     if stack.len() > 0 -> text = "{text} at {path}:{stack[0].line}"
     if jet_cli_perf_member_integer(item, "awaited_task_id") == .Val(awaited) {
         text = "{text} for task {awaited}"
@@ -851,25 +860,45 @@ jet_cli_perf_wait_text: fn(item: CanonicalJSON) -> String Never! {
     text
 }
 
-// A frame of a wait row's stack (`wait_stack`): its function and line.
-JetCLIPerfWaitFrame: struct {
+// An I/O row `item` in words: its task, what it moved to or from what, and
+// its line: `task 1 wrote 5 bytes to file notes.txt at main.jet:6`, `task 2
+// read 4 bytes from peer 127.0.0.1:4000 at main.jet:14`; a refused one
+// `task 1 read from file gone.txt at main.jet:9 failed: errno 2`.
+jet_cli_perf_io_text: fn(item: CanonicalJSON) -> String Never! {
+    path: jet_cli_perf_member_symbol_text(item, "path") ?? "?"
+    who: if jet_cli_perf_member_integer(item, "task_id") == .Val(task) -> "task {task} " else -> ""
+    writing: (jet_cli_perf_member_text(item, "operation") ?? "") == "write"
+    place: if (jet_cli_perf_member_text(item, "kind") ?? "") == "network" -> "peer" else -> "file"
+    target: "{place} {jet_cli_perf_member_text(item, "target") ?? "?"}"
+    stack: jet_cli_perf_row_stack(item, "stack")
+    at: if stack.len() > 0 -> " at {path}:{stack[0].line}" else -> ""
+    if jet_cli_perf_member_integer(item, "error") == .Val(error) {
+        return if writing -> "{who}wrote to {target}{at} failed: errno {error}" else -> "{who}read from {target}{at} failed: errno {error}"
+    }
+    bytes: jet_cli_perf_member_integer(item, "bytes") ?? "?"
+    if writing -> "{who}wrote {bytes} bytes to {target}{at}" else -> "{who}read {bytes} bytes from {target}{at}"
+}
+
+// A frame of a row's stack (`wait_stack`, an I/O row's `stack`): its
+// function and line.
+JetCLIPerfStackFrame: struct {
     name: String,
     line: String,
 }
 
-// The frames of a wait row `item`'s stack, innermost first.
-jet_cli_perf_wait_stack: fn(item: CanonicalJSON) -> [JetCLIPerfWaitFrame] Never! {
-    fields: jettrace_object_view(item, "jettrace row") ?? return [JetCLIPerfWaitFrame]{}
-    at: jet_cli_perf_key(fields, "wait_stack") ?? return [JetCLIPerfWaitFrame]{}
-    frames: jettrace_array(fields[at].value, "wait_stack") ?? return [JetCLIPerfWaitFrame]{}
-    loop frame in frames -> JetCLIPerfWaitFrame{name: jet_cli_perf_member_text(frame, "name") ?? "?", line: jet_cli_perf_member_integer(frame, "line") ?? "?"}
+// The frames of row `item`'s stack `key`, innermost first.
+jet_cli_perf_row_stack: fn(item: CanonicalJSON, key: String) -> [JetCLIPerfStackFrame] Never! {
+    fields: jettrace_object_view(item, "jettrace row") ?? return [JetCLIPerfStackFrame]{}
+    at: jet_cli_perf_key(fields, key) ?? return [JetCLIPerfStackFrame]{}
+    frames: jettrace_array(fields[at].value, key) ?? return [JetCLIPerfStackFrame]{}
+    loop frame in frames -> JetCLIPerfStackFrame{name: jet_cli_perf_member_text(frame, "name") ?? "?", line: jet_cli_perf_member_integer(frame, "line") ?? "?"}
 }
 
 // A wait row `item`'s stack in words, outermost frame first: `run
 // main.jet:5 > nap main.jet:10`; empty for none.
 jet_cli_perf_wait_stack_text: fn(item: CanonicalJSON) -> String Never! {
     path: jet_cli_perf_member_symbol_text(item, "path") ?? "?"
-    frames: jet_cli_perf_wait_stack(item)
+    frames: jet_cli_perf_row_stack(item, "wait_stack")
     parts: loop index in 0..<frames.len() -> "{frames[frames.len() - 1 - index].name} {path}:{frames[frames.len() - 1 - index].line}"
     parts.join(" > ")
 }
@@ -1242,6 +1271,15 @@ jet_cli_perf_timeline: fn(trace: CanonicalJSON) -> [String] Never! {
             if spans >= 8 -> next
             spans += 1
             rows.push("[{start}..{end}] {jet_cli_perf_member_symbol(item) ?? "span"}")
+        }
+    }
+    if jet_cli_perf_rows(trace, "io") == .Ok(items) {
+        // Up to 8 file and network transfers, on the same clock.
+        limit: if items.len() > 8 -> 8 else -> items.len()
+        loop index in 0..<limit {
+            start: jet_cli_perf_member_integer(items[index], "start_ns") ?? next
+            end: jet_cli_perf_member_integer(items[index], "end_ns") ?? next
+            rows.push("[{start}..{end}] {jet_cli_perf_io_text(items[index])}")
         }
     }
     rows

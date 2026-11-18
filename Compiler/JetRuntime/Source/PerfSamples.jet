@@ -19,11 +19,11 @@
 // 59..62: 0 for a CPU-time sample, a counter's index plus one for that
 // counter's sample, PERF_SAMPLES_SPAWN for a task's spawn,
 // PERF_SAMPLES_WAIT for a task's wait, PERF_SAMPLES_WAKE for the wake of a
-// waiter and PERF_SAMPLES_CLOCK for the CPU time the process used while
-// sampled, written at exit (perf_samples_exit). The handler allocates
-// nothing and never waits. Beside the samples, `<samples>.spans` keeps a
-// row for each core.log span the program closes (RouteALog.jet
-// log_span_row_write).
+// waiter, PERF_SAMPLES_IO for a file or network transfer and
+// PERF_SAMPLES_CLOCK for the CPU time the process used while sampled,
+// written at exit (perf_samples_exit). The handler allocates nothing and
+// never waits. Beside the samples, `<samples>.spans` keeps a row for each
+// core.log span the program closes (RouteALog.jet log_span_row_write).
 //
 // Under the `memory` lens, which JET_PERF_LENSES names as it names `cpu`,
 // the start opens four counters of the thread that starts the observation,
@@ -70,6 +70,27 @@ PERF_SAMPLES_WAKE: I64{12}
 // The kind of the record of the CPU time the process used since sampling
 // started (perf_samples_exit): its second word, in nanoseconds.
 PERF_SAMPLES_CLOCK: I64{13}
+
+// The kind of a file or network transfer's record (perf_samples_io).
+PERF_SAMPLES_IO: I64{11}
+
+// What a transfer moved its bytes to or from (perf_samples_io): a file by
+// the path the program opened it by, a descriptor by its number when the
+// runtime holds no path for it, or a socket by its peer's address, the
+// kernel's sockaddr bytes.
+PERF_SAMPLES_TARGET_PATH: I64{1}
+
+PERF_SAMPLES_TARGET_FD: I64{2}
+
+PERF_SAMPLES_TARGET_SOCKET: I64{3}
+
+// A transfer's direction.
+PERF_SAMPLES_IO_READ: I64{0}
+
+PERF_SAMPLES_IO_WRITE: I64{1}
+
+// The most bytes of its target a transfer's record keeps.
+PERF_SAMPLES_IO_TARGET: I64{1024}
 
 // The record buffers besides perf_samples_buffer, for the handlers of
 // threads sampled at the same moment: each a busy word, PERF_SAMPLES_DEPTH
@@ -560,6 +581,94 @@ perf_samples_lock_release: fn() -> I64 {
     count: perf_samples_lock_count()
     if (perf_samples_fd < I64{0} || count == I64{0} || sync_load(count) == I64{0}) { return I64{0} }
     time_host_monotonic_i64()
+}
+
+// Under `jet perf run`, the monotonic clock now, as the start of the file
+// or network transfer an I/O leaf is about to make, for its
+// perf_samples_io; else 0, and the leaf records nothing.
+perf_samples_io_start: fn() -> I64 {
+    if (perf_samples_fd < I64{0}) -> I64{0} else -> time_host_monotonic_i64()
+}
+
+// The record of one file or network transfer from `start`
+// (perf_samples_io_start; none when 0) to now on the monotonic clock: the
+// current task's id in place of a sample's program counter, 0 outside
+// every task, then `operation` (PERF_SAMPLES_IO_READ or
+// PERF_SAMPLES_IO_WRITE) with the target's `class` (PERF_SAMPLES_TARGET_*)
+// above its low 8 bits, the start, the end, `result` (the bytes moved, or
+// the negated errno the kernel refused it with), the target's byte length,
+// the target in whole words (`length` bytes at `target`, at most
+// PERF_SAMPLES_IO_TARGET of them; for PERF_SAMPLES_TARGET_FD, `target` is
+// the descriptor's number, one word), then the transferring stack
+// (perf_samples_stack). A try the kernel turned away as not ready (EAGAIN)
+// or interrupted (EINTR) moved nothing and records nothing: the task's
+// wait for readiness is its own record.
+perf_samples_io: fn(start: I64, operation: I64, result: I64, class: I64, target: I64, length: I64) {
+    fd: perf_samples_fd
+    if (start == I64{0} || fd < I64{0} || result == I64{-11} || result == I64{-4}) {
+        return
+    }
+    end: time_host_monotonic_i64()
+    kept: if {
+        (class == PERF_SAMPLES_TARGET_FD) -> I64{8}
+        (length < I64{0}) -> I64{0}
+        (length > PERF_SAMPLES_IO_TARGET) -> PERF_SAMPLES_IO_TARGET
+        else -> length
+    }
+    text_words: wrapping(kept + I64{7}) >> I64{3}
+    head: wrapping(I64{6} + text_words)
+    size: wrapping(wrapping(head + PERF_SAMPLES_STACK_DEPTH) * I64{8})
+    record: jet_rt_alloc(size, I64{8})
+    rt_text_store(wrapping(record + I64{8}), operation | (class << I64{8}))
+    rt_text_store(wrapping(record + I64{16}), start)
+    rt_text_store(wrapping(record + I64{24}), end)
+    rt_text_store(wrapping(record + I64{32}), result)
+    rt_text_store(wrapping(record + I64{40}), kept)
+    if (text_words != I64{0}) {
+        text: wrapping(record + I64{48})
+        thread_zero(text, wrapping(text_words * I64{8}))
+        if {
+            (class == PERF_SAMPLES_TARGET_FD) -> rt_text_store(text, target)
+            else -> rt_text_bytes_copy(text, target, kept)
+        }
+    }
+    words: wrapping(head + perf_samples_stack(wrapping(record + wrapping(head * I64{8}))))
+    id: if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task()
+    rt_text_store(record, (id & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_IO << PERF_SAMPLES_KIND_BITS))
+    _ := host_write_all(fd, record, wrapping(words * I64{8}))
+    jet_rt_free(record, size, I64{8})
+}
+
+// The record of a transfer on the FD72 `state` (HostFiles.jet), from
+// `start`: its target the path the program opened it by, else its
+// descriptor's number.
+perf_samples_io_file: fn(start: I64, operation: I64, result: I64, state: I64) {
+    if (start == I64{0}) {
+        return
+    }
+    path: fd_word(state, I64{24})
+    if (path == I64{0}) {
+        perf_samples_io(start, operation, result, PERF_SAMPLES_TARGET_FD, fd_word(state, I64{8}), I64{8})
+        return
+    }
+    perf_samples_io(start, operation, result, PERF_SAMPLES_TARGET_PATH, rt_text_data(path), rt_text_len(path))
+}
+
+// The record of a transfer on the connected socket `state` (HostSockets.jet),
+// from `start`: its target the peer's address as getpeername gives it,
+// none when the kernel names no peer.
+perf_samples_io_peer: fn(start: I64, operation: I64, result: I64, state: I64) {
+    if (start == I64{0} || result == I64{-11} || result == I64{-4}) {
+        return
+    }
+    // A sockaddr of at most 110 bytes (a Unix socket's), then its length.
+    scratch: jet_rt_alloc(I64{128}, I64{8})
+    size: wrapping(scratch + I64{112})
+    net_store_uint(size, I64{4}, I64{110})
+    named: host_call(I64{52}, fd_word(state, I64{8}), scratch, size) == I64{0}
+    length: if named -> net_load_uint(size, I64{4}) else -> I64{0}
+    perf_samples_io(start, operation, result, PERF_SAMPLES_TARGET_SOCKET, scratch, if (length > I64{110}) -> I64{110} else -> length)
+    jet_rt_free(scratch, I64{128}, I64{8})
 }
 
 // The lenses JET_PERF_LENSES names: `cpu` when it starts with `cpu`,

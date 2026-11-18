@@ -36,7 +36,8 @@ output and audits unique provider ownership.
 `jet perf export <trace.jettrace> --chrome` writes Chrome Trace Event JSON.
 Open it in Perfetto UI or `chrome://tracing`. Captured wall/CPU, allocation,
 browser, task-span, I/O, lock, and native rows become complete (`X`) events;
-process, domain, and task lanes use metadata (`M`) events. Unavailable states,
+process, domain, and task lanes use metadata (`M`) events, and a transfer
+outside every task has its own `I/O outside tasks` lane. Unavailable states,
 async flows, counters, screenshots, and source-map events remain outside this
 projection.
 
@@ -229,6 +230,37 @@ main.jet:10 > time sleep`. A stack holds the checked source's frames only,
 as the CPU-time profile's lines do; a wait whose stack holds none counts
 under its name alone. Tests/Cases/Perf/off_cpu_time_by_stack.case is the
 worked example.
+
+`jet perf run` puts the program's file and network I/O on the timeline too,
+with no instrumentation in the program. Each file and socket transfer passes
+through the runtime's I/O leaves after the effect chokepoint admitted its
+path or host, and while sampling the leaf that makes the kernel's read or
+write records it: the task, read or write, its start and end on the
+monotonic clock, the bytes it moved or the errno that refused it, its target
+and the Jet call sites of its stack. A file's target is the path the
+program opened it by (`fd 3` for a descriptor the runtime holds no path
+for); a socket's is its peer's address, as the kernel's `getpeername` gives
+it (`127.0.0.1:4000`, `[::1]:4000`, a Unix socket's path, `@name` for an
+abstract one). A try the kernel turned away as not ready or interrupted
+moved nothing and records nothing; the task's wait for readiness is its own
+`task_wait` row. Each transfer becomes a row of the trace's `io`: `kind`
+`file` or `network`, `operation` `read` or `write`, `bytes`, `error` (null,
+or the errno, with 0 bytes), `target`, `task_id` (null outside every
+observed task), its `stack` the functions and lines of the checked source,
+innermost first, and its symbol's name `read notes.txt`. At most 4096 rows
+are kept (`io_rows_truncated`). `jet perf view` prints `io count=4
+read_bytes=15 write_bytes=15 errors=0 · main.jet#write notes.txt`, and its
+timeline shows up to 8 transfers as `[start..end] task 1 wrote 11 bytes to
+file notes.txt at main.jet:11` or `task 1 read 4 bytes from peer
+127.0.0.1:4000 at main.jet:18`. The leaves recorded are a whole file's read
+or write (`core.files.read`, `write`, `append`), a file or pipe stream's
+reads and writes, and a stream or datagram socket's sends and receives (TCP,
+Unix sockets, UDP, DNS). A buffered file writer's writes are recorded when
+its buffer reaches the kernel, with the flushing stack; a read its buffer
+serves records nothing. SQLite's page reads and writes, file copies and
+directory walks, raw descriptors and the terminal are not recorded. An
+attach records no transfers. Tests/Cases/Perf/io_on_timeline_without_instrumentation.case
+is the worked example.
 
 A `core.game` run under `jet run --observe` relays its frames through its live
 snapshots: each frame callback records the frame's index, its start and wall

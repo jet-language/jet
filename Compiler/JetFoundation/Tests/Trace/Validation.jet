@@ -3,17 +3,14 @@ use jet_foundation.[
     CanonicalJSON,
     CanonicalJSONField,
     JetDevtoolsEventBody,
-    JetSymbolRef,
     SourceIdentity,
     TraceCounter,
     TraceCounterName,
-    TraceIO,
     TraceProfileRow,
     TraceProfileSource,
     TraceReceiptSection,
     TraceSample,
     TraceSkeleton,
-    TraceTask,
     canonical_json_bytes,
     canonical_json_object,
     canonical_json_sha256,
@@ -80,9 +77,6 @@ use jet_foundation.[
     assert(jettrace_test_error(skeleton).contains("duplicates task 1"))
     skeleton.tasks[1].id = U64{0}
     assert(jettrace_test_error(skeleton).contains("id must be greater than zero"))
-    skeleton.tasks = [TraceTask]{jettrace_test_task(U64{1}, U64{0}, "blocked", "tcp accept")}
-    skeleton.io.push(TraceIO{start_ns: U64{1}, end_ns: U64{2}, kind: "tcp", task_id: U64{1}, wait: "tcp accept", symbol: JetSymbolRef{path: "app.jet", name: "wrong"}})
-    assert(jettrace_test_error(skeleton).contains("symbol does not match its task"))
 }
 
 jettrace_test_profile_skeleton: fn() -> TraceSkeleton Never! {

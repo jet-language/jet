@@ -1,6 +1,6 @@
 // One Jet provider for perf consumers. The command layer provisions/awaits the
 // producer and supplies observation ticks; no synthetic samples or durations.
-use jet_foundation.[TraceSkeleton, TraceToolchain, TraceHardware, CapturePolicy, TraceSample, TraceAllocation, TraceBrowser, TraceGameFrame, TraceGameDrawEvent, TraceTask, TraceLock, TraceIO, TraceNative, TraceSpan, TraceReceiptSection, SourceIdentity, TraceSourceMap, TraceProfile, JetSymbolRef, TRACE_IO_ROW_LIMIT, capture_policy_default_exclusions, trace_profile_unsupported, trace_io_kind_for_wait, trace_source_map_jet_with_source, build_skeleton_bytes, verify_jettrace]
+use jet_foundation.[TraceSkeleton, TraceToolchain, TraceHardware, CapturePolicy, TraceSample, TraceAllocation, TraceBrowser, TraceGameFrame, TraceGameDrawEvent, TraceTask, TraceLock, TraceIO, TraceNative, TraceSpan, TraceStackFrame, TraceReceiptSection, SourceIdentity, TraceSourceMap, TraceProfile, JetSymbolRef, capture_policy_default_exclusions, trace_profile_unsupported, trace_source_map_jet_with_source, build_skeleton_bytes, verify_jettrace]
 
 JetCLIPerfObservation: struct {
     at_ns: U64,
@@ -94,49 +94,11 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
         capture.tasks[index].parent = stable_parent
         capture.task_ids[observed_id] = stable_id
         if observations.len() > 1 {
-            capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: Val(first_seen[observed_id]), end_ns: Val(last_seen[observed_id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", spawn_line: None, status: "captured", symbol: symbol, task_id: Val(stable_id), wait_stack: [TraceWaitFrame]{}, waker: "", waker_line: None, waker_task_id: None})
+            capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: Val(first_seen[observed_id]), end_ns: Val(last_seen[observed_id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", spawn_line: None, status: "captured", symbol: symbol, task_id: Val(stable_id), wait_stack: [TraceStackFrame]{}, waker: "", waker_line: None, waker_task_id: None})
         }
     }
     if capture.spans.len() == 0 {
-        capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", spawn_line: None, status: "unavailable", symbol: symbol, task_id: None, wait_stack: [TraceWaitFrame]{}, waker: "", waker_line: None, waker_task_id: None})
-    }
-    // `IOTimeline`: a real I/O wait is a span from the first observation that
-    // shows its task blocked on it to the first that no longer does; one still
-    // open at the last observation ends there. No duration is invented
-    // between polls.
-    open := [TraceIO]{}
-    loop observed in observations {
-        still := [TraceIO]{}
-        loop span in open {
-            blocked := false
-            loop observed_task in observed.live.tasks {
-                if observed_task.state == "blocked" && observed_task.wait == span.wait && task_indexes.has_key(observed_task.id) && (U64{task_indexes[observed_task.id] + 1}) == span.task_id {
-                    blocked = true
-                }
-            }
-            end: if blocked -> span.end_ns else -> observed.at_ns
-            moved: TraceIO{start_ns: span.start_ns, end_ns: end, kind: span.kind, task_id: span.task_id, wait: span.wait, symbol: symbol}
-            if blocked -> still.push(moved) else -> capture.io.push(moved)
-        }
-        open = still
-        loop observed_task in observed.live.tasks {
-            if !task_indexes.has_key(observed_task.id) || observed_task.state != "blocked" -> next
-            kind: trace_io_kind_for_wait(observed_task.wait) ?? next
-            task_id: U64{task_indexes[observed_task.id] + 1}
-            known := false
-            loop span in open {
-                if span.task_id == task_id && span.wait == observed_task.wait -> known = true
-            }
-            if known -> next
-            if (U64{open.len() + capture.io.len()}) >= TRACE_IO_ROW_LIMIT {
-                capture.policy.io_rows_truncated = true
-                next
-            }
-            open.push(TraceIO{start_ns: observed.at_ns, end_ns: observed.at_ns, kind: kind, task_id: task_id, wait: observed_task.wait, symbol: symbol})
-        }
-    }
-    loop span in open {
-        capture.io.push(TraceIO{start_ns: span.start_ns, end_ns: latest.at_ns, kind: span.kind, task_id: span.task_id, wait: span.wait, symbol: symbol})
+        capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", spawn_line: None, status: "unavailable", symbol: symbol, task_id: None, wait_stack: [TraceStackFrame]{}, waker: "", waker_line: None, waker_task_id: None})
     }
     // A run's exit publication ends every task it observed.
     if latest.live.runtime.exit {
