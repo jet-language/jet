@@ -1,0 +1,14 @@
+# At -O2 `mix` is inlined into `run`, so its loop has no function of its
+# own. A CPU-time sample in that loop counts at the inlined line under
+# `mix`'s name, from the DWARF's inlined runs, and inclusive at the line of
+# `run` that called it. Before this, the loop's line counted under `run`'s
+# symbol and the call's line held no sample.
+requires: os-name:linux
+fixture: InlinedSamplesNameTheInlinedLine.fixture
+env: NO_COLOR=1
+step: jet perf run -O2 prog.jet --out {work}/prog.jettrace -- 300000000
+exit: 0
+stdout: = "mix=899999997\n"
+json: file prog.jettrace doc $.content.profile.rows[?source.start_line=7][?symbol.name="mix"][?sample_count>=100] #= 1 # the loop's line counts under the inlined function
+json: file prog.jettrace doc $.content.profile.rows[?source.start_line=15][?inclusive_count>=100] #= 1 # and the call it was inlined for holds those samples
+json: file prog.jettrace doc $.content.profile.rows[?source.start_line=7][?symbol.name!="mix"] #= 0 # no row names the loop's line under the caller

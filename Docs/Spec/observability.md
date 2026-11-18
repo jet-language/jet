@@ -109,9 +109,14 @@ first frame that keeps one; the frame-pointer chain gives the rest. At exit
 the runtime records the CPU time it sampled, and `jet run` writes the
 program's image beside the samples. The session names each sample's Jet
 function and source line from that image's `.debug_jetline` location table, as
-Linux perf names the same image's samples from its line tables, so `-O2` code
-inlined into a caller counts at that caller, at the line the table gives the
-code. The rows are `cpu` rows, one per function and line of the checked
+Linux perf names the same image's samples from its line tables, and code
+the optimizer inlined from the image's DWARF inlined subroutines: a sample in
+`-O2` code inlined into a caller counts at the inlined function's line under
+that function's name, and inclusive at each call it was inlined for, as the
+debugger's inlined frames show it; a line of an inlined function from another
+file counts outside the checked source. A caller's frame is looked up at its
+call, the byte before its return address. The rows are `cpu` rows, one per
+function and line of the checked
 source, hottest first. A row's `sample_count` is its exclusive time, the
 samples whose program counter is on it; its `inclusive_count` is its inclusive
 time, the samples that hold it anywhere on the stack, each once however often

@@ -110,6 +110,9 @@ NativeVariable: struct {
 // of its abstract subprogram's DIE (a NativeImage.abstracts key), the line of
 // the call it stands for, and the run it is inlined into (an index in the
 // same list, -1 for the function itself). `die` is its own DIE's offset.
+// `file` is the declaration file of the function inlined, `call_file` the
+// file of the call, each an index in its unit's file table, -1 when the
+// DWARF gives none.
 NativeInlined: struct {
     die: Int,
     origin: Int,
@@ -117,22 +120,35 @@ NativeInlined: struct {
     high: Int,
     call_line: Int,
     parent: Int,
+    file: Int,
+    call_file: Int,
 }
 
-// One subprogram: its code [low, high), name, variables and inlined runs in
-// DIE order (an inlined run follows the run it is nested in).
+// One subprogram: its code [low, high), name, declaration file (an index
+// in its unit's file table, -1 when the DWARF gives none), variables and
+// inlined runs in DIE order (an inlined run follows the run it is nested
+// in).
 NativeFunction: struct {
     low: Int,
     high: Int,
     name: String,
+    file: Int,
     variables: [NativeVariable],
     inlined: [NativeInlined],
+}
+
+// The abstract subprogram of a function inlined somewhere: its name and
+// declaration file (an index in its unit's file table, -1 when the DWARF
+// gives none).
+NativeAbstract: struct {
+    name: String,
+    file: Int,
 }
 
 // The facts of one image. `types` is keyed by the type DIE's offset in
 // `.debug_info`; `members`, `enumerators` and `variants` hold each struct's,
 // union's and enumeration's in DIE order, as its group names them;
-// `abstracts` names each abstract subprogram of inlined code by its offset.
+// `abstracts` holds each abstract subprogram of inlined code by its offset.
 NativeImage: struct {
     lines: X64Jetline,
     functions: [NativeFunction],
@@ -141,7 +157,7 @@ NativeImage: struct {
     enumerators: [[NativeEnumerator]],
     variants: [NativeVariants],
     loclists: [U8],
-    abstracts: [Int:String],
+    abstracts: [Int:NativeAbstract],
 }
 
 // One range of a variable's location list: [start, end), and the DWARF
@@ -157,7 +173,7 @@ NativeRange: struct {
 // The facts of the ELF image `elf`; None without a `.debug_jetline`.
 native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
     table: native_elf_section(elf, ".debug_jetline") ?? return None
-    image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(elf, ".debug_loclists") ?? [U8]{}, abstracts: [Int:String]{}}
+    image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(elf, ".debug_loclists") ?? [U8]{}, abstracts: [Int:NativeAbstract]{}}
     info: native_elf_section(elf, ".debug_info") ?? return Val(image)
     abbrev: native_elf_section(elf, ".debug_abbrev") ?? return Val(image)
     at := 0
@@ -211,7 +227,8 @@ native_encoding: fn(code: Int) -> X64DebugEncoding Never! {
 // The attribute values of one DIE the reader uses; a missing number is -1.
 // `discriminant` is the DIE a variant part's discriminant member is,
 // `selects` the discriminant value a variant is selected by, `origin` the
-// abstract subprogram an inlined run is of and `call_line` its call's line.
+// abstract subprogram an inlined run is of and `call_line` and `call_file`
+// its call's line and file; `file` is a declaration's file.
 NativeDie: struct {
     tag: Int,
     offset: Int,
@@ -230,6 +247,8 @@ NativeDie: struct {
     selects: Int?,
     origin: Int,
     call_line: Int,
+    file: Int,
+    call_file: Int,
 }
 
 // The DIEs of the unit at [start, end) of `info`, into `image`.
@@ -256,7 +275,7 @@ native_image_unit: fn(image: &NativeImage, info: [U8], abbrev: [U8], start: Int,
             next
         }
         entry: table.entries.get(code) ?? return
-        die := NativeDie{tag: table.tags[entry], offset: offset, children: table.children[entry], name: "", ty: -1, low: -1, length: -1, location: -1, size: -1, member_offset: -1, encoding: -1, value: 0, line: 0, discriminant: -1, selects: None, origin: -1, call_line: 0}
+        die := NativeDie{tag: table.tags[entry], offset: offset, children: table.children[entry], name: "", ty: -1, low: -1, length: -1, location: -1, size: -1, member_offset: -1, encoding: -1, value: 0, line: 0, discriminant: -1, selects: None, origin: -1, call_line: 0, file: -1, call_file: -1}
         loop k in table.starts[entry]..<table.starts[entry + 1] {
             form: table.forms[k]
             value_at: at
@@ -306,6 +325,8 @@ native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8],
         0x16 -> die.selects = Val(value)
         0x31 -> die.origin = value
         0x59 -> die.call_line = value
+        0x3a -> die.file = value
+        0x58 -> die.call_file = value
         else -> {}
     }
 }
@@ -398,13 +419,15 @@ native_image_die: fn(image: &NativeImage, die: NativeDie, open: [NativeDie], bas
         }
         code == NATIVE_TAG_SUBPROGRAM -> {
             if die.low < 0 {
-                if die.name != "" -> image.abstracts[die.offset] = die.name
+                if die.name != "" {
+                    image.abstracts[die.offset] = NativeAbstract{name: die.name, file: die.file}
+                }
                 return
             }
             if die.length < 0 {
                 return
             }
-            image.functions.push(NativeFunction{low: die.low, high: die.low + die.length, name: die.name, variables: [NativeVariable]{}, inlined: [NativeInlined]{}})
+            image.functions.push(NativeFunction{low: die.low, high: die.low + die.length, name: die.name, file: die.file, variables: [NativeVariable]{}, inlined: [NativeInlined]{}})
         }
         code == NATIVE_TAG_INLINED -> {
             if image.functions.len() == 0 || !native_open_in_function(open) || die.low < 0 || die.length < 0 {
@@ -412,7 +435,8 @@ native_image_die: fn(image: &NativeImage, die: NativeDie, open: [NativeDie], bas
             }
             last: image.functions.len() - 1
             parent: native_open_site(image.functions[last], open)
-            image.functions[last].inlined.push(NativeInlined{die: die.offset, origin: die.origin, low: die.low, high: die.low + die.length, call_line: die.call_line, parent: parent})
+            file: if image.abstracts.get(die.origin) == .Val(origin) -> origin.file else -> -1
+            image.functions[last].inlined.push(NativeInlined{die: die.offset, origin: die.origin, low: die.low, high: die.low + die.length, call_line: die.call_line, parent: parent, file: file, call_file: die.call_file})
         }
         code == NATIVE_TAG_PARAMETER || code == NATIVE_TAG_VARIABLE -> {
             if image.functions.len() == 0 || !native_open_in_function(open) {

@@ -1,0 +1,16 @@
+use process: core.process
+
+// At -O2 `mix` is inlined into `run`, so its loop has no function of its own.
+mix: fn(n: Int) -> Int {
+    total := 0
+    loop i in 0..<n {
+        total += i % 7
+        if total < 0 -> break
+    }
+    total
+}
+
+run: fn() {
+    n: Int.parse(process.args().get(0) ?? "1000") ?? 1000
+    print("mix={mix(n)}")
+}

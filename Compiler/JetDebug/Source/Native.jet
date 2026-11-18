@@ -845,7 +845,9 @@ NativeSession: struct {
     // Lift line_over's traps `owned`, unless the program has ended and taken
     // them with it.
     lift_owned: fn(&self, owned: [Int]) Never! {
-        if !self.alive() -> return
+        if !self.alive() {
+            return
+        }
         loop at in owned -> self.lift(at)
     }
 
@@ -1194,7 +1196,8 @@ native_frames_at: fn(image: NativeImage, lookup: Int) -[]> [NativeFrame] {
     line := frame.line
     loop site in native_inline_chain(function, lookup) {
         run: function.inlined[site]
-        shown.push(NativeFrame{function: image.abstracts.get(run.origin) ?? "?", file: frame.file, line: line, inlined: true})
+        name: if image.abstracts.get(run.origin) == .Val(origin) -> origin.name else -> "?"
+        shown.push(NativeFrame{function: name, file: frame.file, line: line, inlined: true})
         line = run.call_line
     }
     shown.push(NativeFrame{function: frame.function, file: frame.file, line: line, inlined: false})

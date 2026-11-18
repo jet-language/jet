@@ -3,6 +3,7 @@
 use {
     jet_backend.[X64ImageFunction, X64Jetline, X64JetlineFunction]
     jet_cli.[
+        JetCLIPerfInlines,
         JetCLIPerfObservation,
         jet_cli_perf_browser_decode,
         jet_cli_perf_capture_bytes,
@@ -14,6 +15,7 @@ use {
         jet_cli_perf_source_position,
         jet_cli_perf_source_profile,
     ]
+    jet_debug.[NativeAbstract, NativeFunction, NativeInlined, NativeVariable]
     jet_foundation.[
         JetLiveChannel,
         JetLiveEvent,
@@ -198,7 +200,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             1000,
         },
     )
-    sampled: jet_cli_perf_samples_count(table, functions, [Bool]{true}, [U64]{}, words)
+    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, words)
     assert_eq(sampled.total, U64{3})
     assert_eq(sampled.outside, U64{1})
     assert_eq(sampled.helpers, U64{1})
@@ -218,4 +220,62 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(profile.overhead_status, "measured")
     assert_eq(profile.overhead_ns, Val(U64{9000}))
     assert_eq(profile.overhead_reason, "the sampler took 9 microseconds, 0.22% of the 4000 microseconds of CPU time sampled: 6 in its handlers and 3 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started")
+}
+
+#Test("perf samples in inlined code count at the inlined line and inclusive at the call") {
+    // run's code at 0x1000: its rows give line 6 at 0x1000 (sum_squares's
+    // body, inlined), 14 at 0x1040, 3 at 0x1080 (max's body, inlined from
+    // file 2) and 15 at 0x1090.
+    rows: [U8]{0, 5, 64, 8, 64, 117, 16, 12}
+    table: X64Jetline{table: rows, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "run", file: "prog.jet", dir: "", decl: 10, rows: 0, rows_end: 8}}}
+    runs: [NativeInlined]{
+        NativeInlined{die: 10, origin: 1, low: 4096, high: 4160, call_line: 14, parent: -1, file: 1, call_file: 1},
+        NativeInlined{die: 20, origin: 2, low: 4224, high: 4240, call_line: 15, parent: -1, file: 2, call_file: 1},
+    }
+    inlines: JetCLIPerfInlines{functions: [Int:NativeFunction]{4096: NativeFunction{low: 4096, high: 4352, name: "run", file: 1, variables: [NativeVariable]{}, inlined: runs}}, abstracts: [Int:NativeAbstract]{1: NativeAbstract{name: "sum_squares", file: 1}, 2: NativeAbstract{name: "max", file: 2}}}
+    one: 1 << 48
+    two: 2 << 48
+    words: jet_cli_perf_test_words(
+        [Int]{
+            // In sum_squares's inlined body.
+            4112 | one,
+            // In max's, from another file.
+            4228 | one,
+            // At run's line 14, called from the call that returns to
+            // 0x1010, inside sum_squares's run.
+            4176 | two,
+            4112,
+        },
+    )
+    sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, inlines, [Bool]{true}, [U64]{}, words)
+    assert_eq(sampled.total, U64{3})
+    text := ""
+    loop _ in 0..<16 -> text = "{text}line\n"
+    profile: jet_cli_perf_samples_profile(jet_cli_perf_source("prog.jet", text), sampled) ?? panic("run's lines hold samples")
+    found := 0
+    loop row in profile.rows {
+        line: row.source.start_line
+        if line == (U64{6}) {
+            assert_eq(row.symbol.name, "sum_squares")
+            assert_eq(row.sample_count, U64{1})
+            assert_eq(row.inclusive_count, Val(U64{2}))
+            found += 1
+        }
+        if line == (U64{14}) {
+            assert_eq(row.symbol.name, "run")
+            assert_eq(row.sample_count, U64{1})
+            assert_eq(row.inclusive_count, Val(U64{2}))
+            found += 1
+        }
+        if line == (U64{15}) {
+            assert_eq(row.symbol.name, "run")
+            assert_eq(row.sample_count, U64{0})
+            assert_eq(row.inclusive_count, Val(U64{1}))
+            found += 1
+        }
+        // max's line 3 is in its own file, not prog.jet.
+        assert(line != (U64{3}))
+    }
+    assert_eq(found, 3)
+    assert(profile.reason.contains("; 1 of 3 samples are outside prog.jet"))
 }
