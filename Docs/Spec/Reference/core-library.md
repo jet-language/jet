@@ -8163,6 +8163,15 @@ fails only its message; the worker begins again from its `state:` value
 within the tree's restart budget. With `batch:` and `wait:`, a `[Q]`
 handler takes up to `batch` waiting messages, waiting at most `wait` for a
 batch to fill; a failed batch is handed over again on each restart.
+Under `delivery_durable()`, `tree.send_durable(endpoint, message, key: k)`
+keeps a message whose type is `Encode` and `Decode` (E0112 otherwise) as
+JSON in the authority until the worker's handler succeeds on it. Each
+receipt reaches the worker once while the worker takes messages: when it is
+sent, when the tree starts, and when `runtime.retry(delivery)` accepts it
+again; a handler that succeeds makes it `Delivered`, and one that fails
+leaves it for `retry`. A key already used answers its first receipt, a full
+mailbox is `ServiceError.Full` before the authority keeps anything, and a
+kept message that no longer decodes is dead-lettered.
 
 ```jet
 email: tree.worker("email", send_email, capacity: 64) ?? return
@@ -8181,6 +8190,7 @@ total: tree.call(pricing, Quote{items: 3}) ?? 0
 | `tree.worker(name: String, handler: fn([Q]), batch: Int, wait: Duration, capacity: Int) -> Endpoint<Q, ()> ServiceError!` | endpoint | Register a typed worker that hands its handler up to `batch` waiting messages. |
 | `tree.send(endpoint: Endpoint<Q, ()>, message: Q) ServiceError!` | — | Queue a message for a typed worker that answers nothing. |
 | `tree.call(endpoint: Endpoint<Q, R>, message: Q) -> R ServiceError!` | answer | Send a message and wait for the handler's answer. |
+| `tree.send_durable(endpoint: Endpoint<Q, R>, message: Q, key: String) -> Delivery ServiceError!` | receipt | Durably queue an `Encode` and `Decode` message for a typed worker under an idempotency key. |
 | `tree.start()` / `tree.stop()` | — | Start or stop the service tree. |
 | `tree.show() -> Dyn` | tree | Inspect topology and delivery state. |
 | `tree.set_restart(strategy: ServiceRestart)` | — | Select one-for-one, all-for-one, or rest-for-one restart. |
