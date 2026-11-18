@@ -2564,7 +2564,7 @@ ir_fixed_power: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, left: Int, right: 
     kind_word: ir_int_constant(m, b, int_row, if row.signed -> width else -> width + 4)
     narrowed := [Int]{power, kind_word}
     loop arg in ir_location(m, b, site) -> narrowed.push(arg)
-    result: ir_runtime(m, b, ir_route_export("jet_std::jet_int_checked_fixed"), narrowed, target)
+    result: ir_runtime(m, b, ir_route_export("jet_std.jet_int_checked_fixed"), narrowed, target)
     ir_release(m, b, power)
     result
 }
@@ -2937,7 +2937,7 @@ ir_order_handle: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, left: I
         zero: ir_word_const(m, b, 0)
         return ir_order_step(m, b, order, zero, sign, decided)
     }
-    symbol: if handle.runtime == "JetDecimal" -> "jet_decimal_compare" else -> "{handle.runtime}::compare_value"
+    symbol: if handle.runtime == "JetDecimal" -> "jet_decimal_compare" else -> "{handle.runtime}.compare_value"
     route: ir_runtime_route(symbol) ?? return ir_fail(b, span, "comparison of {ir_type_name(ty)}")
     word_row: ir_word_row(m)
     order: ir_runtime(m, b, route.export, [Int]{left, right}, word_row)
@@ -4728,7 +4728,7 @@ ir_numeric_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
             args := [Int]{value, kind_word}
             site: if line > 0 -> line else -> b.line
             loop arg in ir_location(m, b, site) -> args.push(arg)
-            result: ir_runtime(m, b, ir_route_export("jet_std::jet_int_checked_fixed"), args, target)
+            result: ir_runtime(m, b, ir_route_export("jet_std.jet_int_checked_fixed"), args, target)
             ir_release(m, b, value)
             return result
         }
@@ -5153,7 +5153,7 @@ ir_checked_widen: fn(m: &IRModule, b: &IRBuilder, value: Int, target: Int, line:
         path: ir_intern_text(m, b.f.source_file)
         ir_emit(b.f, IROp.ConstText, file, path, -1, -1, b.line)
         site: ir_word_const(m, b, line)
-        wide: ir_runtime(m, b, ir_route_export("jet_std::jet_int_checked_widen"), [Int]{value, flag, file, site}, float_row)
+        wide: ir_runtime(m, b, ir_route_export("jet_std.jet_int_checked_widen"), [Int]{value, flag, file, site}, float_row)
         if !single -> return wide
         narrow: ir_temp(m, b, target)
         ir_emit(b.f, IROp.Convert, narrow, wide, -1, -1, b.line)

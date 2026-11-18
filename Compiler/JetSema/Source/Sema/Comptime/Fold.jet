@@ -89,7 +89,7 @@ sema_comptime_fold_node_row: fn(tree: BodyTree, id: Int) -> Int Never! {
 // (JetIR ir_shared_holder_read).
 sema_comptime_shared_payload: fn(tree: BodyTree, expression: Int) -> Int? Never! {
     if tree.nodes[sema_comptime_fold_node_row(tree, expression)].kind == .StaticCall(owner, _, method, _, args) {
-        if owner == .Prelude(rooted, path, _) && rooted && path == "jet_std::JetShared" && method.name == "new" && args.len() == 1 {
+        if owner == .Prelude(rooted, path, _) && rooted && path == "jet_std.JetShared" && method.name == "new" && args.len() == 1 {
             return Val(args[0].value)
         }
     }

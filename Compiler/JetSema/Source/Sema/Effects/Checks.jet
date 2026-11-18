@@ -3966,7 +3966,7 @@ sema_effect_walk_expr_enter: fn(nodes: &[SemaEffectNode], node_index: Int, tree:
         // `Shared{x}` (Rust `Shared.new`): new shared storage that every
         // handle copy retains.
         .StaticCall(owner, _, method, _, _) -> {
-            if owner == .Prelude(_, path, _) && path == "jet_std::JetShared" && method.name == "new" {
+            if owner == .Prelude(_, path, _) && path == "jet_std.JetShared" && method.name == "new" {
                 sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` allocates shared storage", "alloc", None)
                 sema_effect_push_memory_event(nodes, node_index, node.span, "`Shared{{…}}` introduces reference-counted ownership", "rc", None)
             }

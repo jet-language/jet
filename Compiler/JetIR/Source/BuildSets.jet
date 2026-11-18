@@ -513,8 +513,8 @@ ir_set_end: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, shape: IRMap
     result
 }
 
-// `Set.new()` / `Rank.new()` (the Prelude std::collections::HashSet::new /
-// BTreeSet::new route): an empty header.
+// `Set.new()` / `Rank.new()` (the Prelude std.collections.HashSet.new /
+// BTreeSet.new route): an empty header.
 ir_set_new: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if inputs.len() != 0 -> return ir_fail_slot(b, span, "Set.new with {inputs.len()} arguments")
     set_row: ir_value_type(m, p, result) ?? return ir_type_fail(b, span, result)
@@ -590,7 +590,7 @@ ir_set_symbol: fn(symbol: String) -> String Never! {
         "jet_sorted_set_is_subset" -> "jet_set_is_subset"
         "jet_sorted_set_is_superset" -> "jet_set_is_superset"
         "jet_sorted_set_is_disjoint" -> "jet_set_is_disjoint"
-        "std::collections::BTreeSet::contains" -> "jet_set_has"
+        "std.collections.BTreeSet.contains" -> "jet_set_has"
         else -> symbol
     }
 }
@@ -755,7 +755,7 @@ ir_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, route: S
     }
     // `clear()`: each key drops and the Set is left empty; its buffer stays
     // for later inserts, as the Map's `clear` does.
-    if symbol == "std::collections::HashSet::clear" || symbol == "std::collections::BTreeSet::clear" {
+    if symbol == "std.collections.HashSet.clear" || symbol == "std.collections.BTreeSet.clear" {
         if operands.len() != 1 {
             return Val(ir_fail_slot(b, span, "Set clear with {operands.len() - 1} arguments"))
         }
@@ -965,7 +965,7 @@ ir_bit_set_from: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, set_row
     ir_bit_set_make(m, b, set_row, word)
 }
 
-// `set.bits()` (the Prelude std::collections::HashSet::bits route): the
+// `set.bits()` (the Prelude std.collections.HashSet.bits route): the
 // word as a U64, each present case of a `#Specified` enum as its own value.
 ir_bit_set_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
     if inputs.len() != 1 || inputs[0] < 0 {
@@ -998,7 +998,7 @@ ir_bit_set_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], re
     out
 }
 
-// `Set<E>.from_bits(n)` (the Prelude std::collections::HashSet::from_bits
+// `Set<E>.from_bits(n)` (the Prelude std.collections.HashSet.from_bits
 // route): the Set whose bits `n` gives, each case of a `#Specified` enum by
 // its own value; None when `n` has a bit no case stands for.
 ir_bit_set_from_bits: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, inputs: [Int], result: Type, span: Span) -> Int Never! {
@@ -1143,7 +1143,7 @@ ir_bit_set_builtin: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, rout
             }
         }
     }
-    if symbol == "std::collections::HashSet::clear" {
+    if symbol == "std.collections.HashSet.clear" {
         if operands.len() != 1 {
             return Val(ir_fail_slot(b, span, "Set clear with {operands.len() - 1} arguments"))
         }

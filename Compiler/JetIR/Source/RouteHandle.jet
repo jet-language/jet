@@ -196,25 +196,25 @@ ir_general_handle_route: fn(operation: BodyHandleOp, receiver: Type) -> IRHandle
         .ReflectValueFields -> return Val(ir_handle_h("jet_jit_reflect_fields", [Bool]{true}))
         .ReflectFieldName -> return Val(ir_handle_h("jet_jit_reflect_field_name", [Bool]{true}))
         .ReflectFieldValue -> return Val(ir_handle_h("jet_jit_reflect_field_value", [Bool]{true}))
-        .TaskDetach -> return Val(ir_handle_h("jet_std::JetTask::detach", [Bool]{false}))
-        .TaskPause -> return Val(ir_handle_h("jet_std::JetTask::pause", [Bool]{true}))
-        .TaskResume -> return Val(ir_handle_h("jet_std::JetTask::resume", [Bool]{true}))
-        .TaskCancel -> return Val(ir_handle_h("jet_std::JetTask::cancel", [Bool]{true}))
-        .ChannelReceive -> return Val(ir_handle_h("jet_std::JetReceiver::receive", [Bool]{true}))
-        .ChannelTryReceive -> return Val(ir_handle_h("jet_std::JetReceiver::try_receive", [Bool]{true}))
-        .ChannelIsTimer -> return Val(ir_handle_h("jet_std::JetReceiver::is_timer", [Bool]{true}))
-        .ChannelIsInterval -> return Val(ir_handle_h("jet_std::JetReceiver::is_interval", [Bool]{true}))
-        .ChannelIsCanceled -> return Val(ir_handle_h("jet_std::JetReceiver::is_canceled", [Bool]{true}))
-        .ChannelIsReady -> return Val(ir_handle_h("jet_std::JetReceiver::is_ready", [Bool]{true}))
-        .ChannelDelayMs -> return Val(ir_handle_h("jet_std::JetReceiver::delay_ms", [Bool]{true}))
-        .SenderSend -> return Val(ir_handle_h("jet_std::JetSender::send", [Bool]{true, false}))
+        .TaskDetach -> return Val(ir_handle_h("jet_std.JetTask.detach", [Bool]{false}))
+        .TaskPause -> return Val(ir_handle_h("jet_std.JetTask.pause", [Bool]{true}))
+        .TaskResume -> return Val(ir_handle_h("jet_std.JetTask.resume", [Bool]{true}))
+        .TaskCancel -> return Val(ir_handle_h("jet_std.JetTask.cancel", [Bool]{true}))
+        .ChannelReceive -> return Val(ir_handle_h("jet_std.JetReceiver.receive", [Bool]{true}))
+        .ChannelTryReceive -> return Val(ir_handle_h("jet_std.JetReceiver.try_receive", [Bool]{true}))
+        .ChannelIsTimer -> return Val(ir_handle_h("jet_std.JetReceiver.is_timer", [Bool]{true}))
+        .ChannelIsInterval -> return Val(ir_handle_h("jet_std.JetReceiver.is_interval", [Bool]{true}))
+        .ChannelIsCanceled -> return Val(ir_handle_h("jet_std.JetReceiver.is_canceled", [Bool]{true}))
+        .ChannelIsReady -> return Val(ir_handle_h("jet_std.JetReceiver.is_ready", [Bool]{true}))
+        .ChannelDelayMs -> return Val(ir_handle_h("jet_std.JetReceiver.delay_ms", [Bool]{true}))
+        .SenderSend -> return Val(ir_handle_h("jet_std.JetSender.send", [Bool]{true, false}))
         .ChannelClose -> {
             sender_receiver := if ir_handle_type_without_tags(receiver) == {
                 .Named(name) | .Apply(name, _) -> name == "Sender"
                 .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
             }
-            if sender_receiver -> return Val(ir_handle_h("jet_std::JetSender::close", [Bool]{true}))
-            return Val(ir_handle_h("jet_std::JetReceiver::close", [Bool]{true}))
+            if sender_receiver -> return Val(ir_handle_h("jet_std.JetSender.close", [Bool]{true}))
+            return Val(ir_handle_h("jet_std.JetReceiver.close", [Bool]{true}))
         }
         .DynField | .DynAt | .DynInt | .DynText | .DynBool | .DynFloat | .DynToText | .DynEqualUnordered | .DynDecode(_, _) | .SerdeEncode(_) | .JSONField | .JSONAt | .JSONInt | .JSONText | .JSONBool | .JSONFloat | .JSONToText | .JSONEqualUnordered | .HTTPClientMethod(_, _) | .ArgsSpecHelp | .ReaderTakePattern(_, _) | .CursorTakePattern(_, _) | .ReactiveGet | .ReactiveSet | .ReactiveEffectMethod | .Hardware(_) | .ProcessLines -> return None
         .MappedFileLines | .LinesIter | .DurationNsValue | .AllocAlloc | .AllocTryAlloc | .AllocReset | .PreciseMethod(_, _) | .ArgsSpecFlag | .ArgsSpecFlagShort | .ArgsSpecOption | .ArgsSpecOptionShort | .ArgsSpecOptionDefault | .ArgsSpecOptionEnv | .ArgsSpecOptionInt | .ArgsSpecOptionFloat | .ArgsSpecOptionChoice | .ArgsSpecRepeat | .ArgsSpecRequiredOption | .ArgsSpecPositional | .ArgsSpecDescription | .ArgsSpecSubcommand | .ArgsSpecVersion | .ArgsSpecCompletion | .ArgsSpecParse | .ArgsSpecParseOrExit | .ParsedArgsFlag | .ParsedArgsOption | .ParsedArgsOptionInt | .ParsedArgsOptionFloat | .ParsedArgsOptions | .ParsedArgsSubcommand | .ParsedArgsPositional | .TaskJoin | .EventMethod(_) | .LayoutMethod(_) | .DynIndexKey(_, _) | .DynIndexAt(_, _) | .DynGetKey | .DynGetAt | .DynHas | .DynKeys | .DynLen(_, _) | .DynRemove | .DynBinary(_, _, _) | .DynCompare(_, _, _) | .DynSetPath(_, _, _) | .PluginInvoke(_, _) -> return None
