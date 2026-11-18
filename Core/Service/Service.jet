@@ -1231,8 +1231,9 @@ authority_update: fn(endpoint: ServiceEndpoint, started: Bool, channel: Shared<S
 }
 
 // Process feed registry: the wake of each typed worker whose message
-// decodes. Releasing it has the worker's feeder hand over the endpoint's
-// pending durable receipts.
+// decodes, under the endpoint it was declared with. Releasing it has the
+// worker's feeder hand over the worker's pending durable receipts, at
+// whichever generation the worker runs now.
 priv EndpointFeed: struct {
     endpoint: ServiceEndpoint,
     wake: service_tasks.Semaphore,
@@ -1254,22 +1255,28 @@ feed_register: fn(endpoint: ServiceEndpoint, wake: service_tasks.Semaphore) Neve
 }
 
 // Wakes the feeder of the typed worker behind `endpoint`, when it has one.
+// A handoff or a rollback moves a worker to another generation, so the
+// feeder is found by its worker, not by the generation it was declared at.
 feed_wake: fn(endpoint: ServiceEndpoint) Never! {
     registry := feed_registry().guard_read()
     loop feed in registry.value.feeds {
-        if feed.endpoint == endpoint {
+        if feed.endpoint.authority == endpoint.authority && feed.endpoint.tree == endpoint.tree && feed.endpoint.worker == endpoint.worker {
             feed.wake.release()
-            return
         }
     }
 }
 
-// Whether `endpoint`'s worker takes messages: started and not partitioned.
-feed_open: fn(endpoint: ServiceEndpoint) -> Bool Never! {
+// The endpoint at which the worker declared as `endpoint` takes messages
+// now: its started row that is not partitioned, at any generation. None
+// while the worker takes none.
+feed_current: fn(endpoint: ServiceEndpoint) -> ServiceEndpoint? Never! {
     registry := service_registry().guard_read()
-    index: registry_index(registry.value.endpoints, endpoint.authority, endpoint.worker, endpoint.generation)
-    if index < 0 -> return false
-    registry.value.endpoints[index].started && !registry.value.endpoints[index].partitioned
+    loop state in registry.value.endpoints {
+        if state.authority == endpoint.authority && state.tree == endpoint.tree && state.worker == endpoint.worker && state.started && !state.partitioned {
+            return Val(ServiceEndpoint{tree: state.tree, worker: state.worker, generation: state.generation, authority: state.authority})
+        }
+    }
+    None
 }
 
 authority_update_partitioned: fn(endpoint: ServiceEndpoint, partitioned: Bool) ServiceError! {
@@ -5178,9 +5185,9 @@ priv room_take: fn(room: service_tasks.Semaphore, starved: Shared<Bool>) -> Bool
 }
 
 // Starts the feeder of a typed worker whose message decodes: on each wake
-// it hands the worker the endpoint's pending durable receipts while the
-// worker takes messages and its mailbox has places. A worker without a
-// decoder has no feeder.
+// it hands the worker its pending durable receipts, at the generation it
+// runs now, while the worker takes messages and its mailbox has places. A
+// worker without a decoder has no feeder.
 priv feed_start: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, wake: service_tasks.Semaphore, decoder: &&(fn(String) -> Q ServiceError!)?) Never! {
     decode: decoder ?? return
     feed_register(id, wake)
@@ -5199,8 +5206,9 @@ priv feed_wait: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, 
 
 priv feed: fn<Q, R>(id: ServiceEndpoint, inbox: service_actor.Actor<Job<Q, R>>, room: service_tasks.Semaphore, starved: Shared<Bool>, decode: fn(String) -> Q ServiceError!) ServiceError! {
     loop {
-        if !feed_open(id) || !room_take(room, starved) -> return Ok()
-        if feed_one(id, inbox, decode) == {
+        current: feed_current(id) ?? return Ok()
+        if !room_take(room, starved) -> return Ok()
+        if feed_one(current, inbox, decode) == {
             .Ok(handed) -> {
                 if !handed {
                     room.release()
@@ -5479,6 +5487,99 @@ typed_send_durable: fn<Q: [Encode, Decode], R>(tree: &ServiceTree, endpoint: End
     log: seen.guard_read()
     assert_eq(log.value, [Int]{1, 2})
     stop(services) ?? panic("stop")
+}
+
+#Test("a durable typed worker keeps taking durable sends after a handoff moves it to the next generation") {
+    dir: service_files.mkdtemp("typed-durable-handoff") ?? panic("temp dir")
+    path: "{dir}/state.log"
+    seen: Shared<[Int]>{[Int]{}}
+    done: service_tasks.Semaphore.new(0)
+    services := tree("typed-durable-handoff")
+    set_delivery(services, delivery_durable()) ?? panic("durable delivery")
+    store: state_store(path) ?? panic("state store")
+    set_state_event_log(services, store, "events", 1, "reversible") ?? panic("state adapter")
+    record: durable_worker(
+        services,
+        "record",
+        fn(n: Int) -> Int Err! {
+            log := seen.guard_edit()
+            log.value.push(n)
+            done.release()
+            n
+        },
+        "record",
+        8,
+    ) ?? panic("durable worker must declare")
+    start(services) ?? panic("durable tree must start")
+    first: typed_send_durable(services, record, 1, "one") ?? panic("send 1")
+    // A handled receipt that is not yet Delivered would pin the worker at
+    // its generation through the handoff.
+    assert((delivery_settle(first) ?? panic("status 1")) == DeliveryState.Delivered)
+    assert_eq(handoff_generation(services) ?? panic("handoff"), 2)
+    assert_eq(services.workers[0].endpoint.generation, 2)
+    // The worker runs at generation 2 now; its endpoint there keeps the
+    // same mailbox.
+    moved: Endpoint<Int, Int>{id: services.workers[0].endpoint.copy(), inbox: record.inbox, room: record.room}
+    second: typed_send_durable(services, moved, 2, "two") ?? panic("send 2")
+    assert((delivery_settle(second) ?? panic("status 2")) == DeliveryState.Delivered)
+    log: seen.guard_read()
+    assert_eq(log.value, [Int]{1, 2})
+    stop(services) ?? panic("stop")
+}
+
+#Test("a retained durable typed receipt retried after a handoff reaches the worker at its next generation") {
+    dir: service_files.mkdtemp("typed-durable-handoff-retry") ?? panic("temp dir")
+    path: "{dir}/state.log"
+    seen: Shared<[Int]>{[Int]{}}
+    failed: Shared<Bool>{false}
+    services := tree("typed-durable-handoff-retry")
+    set_delivery(services, delivery_durable()) ?? panic("durable delivery")
+    store: state_store(path) ?? panic("state store")
+    set_state_event_log(services, store, "events", 1, "reversible") ?? panic("state adapter")
+    record: durable_worker(
+        services,
+        "record",
+        fn(n: Int) -> Int Err! {
+            flag := failed.guard_edit()
+            if n == 2 && !flag.value {
+                flag.value = true
+                return Err("the first try fails")
+            }
+            log := seen.guard_edit()
+            log.value.push(n)
+            n
+        },
+        "record",
+        8,
+    ) ?? panic("durable worker must declare")
+    start(services) ?? panic("durable tree must start")
+    first: typed_send_durable(services, record, 1, "one") ?? panic("send 1")
+    second: typed_send_durable(services, record, 2, "two") ?? panic("send 2")
+    third: typed_send_durable(services, record, 3, "three") ?? panic("send 3")
+    // The worker runs in send order, so 2 has failed once 3 is Delivered.
+    assert((delivery_settle(first) ?? panic("status 1")) == DeliveryState.Delivered)
+    assert((delivery_settle(third) ?? panic("status 3")) == DeliveryState.Delivered)
+    // A retained receipt does not pin the worker, so the handoff moves it.
+    runtime: ServiceRuntime{store: delivery_store(path), retention_ms: 86400000}
+    _: runtime_retain(runtime, second) ?? panic("retain 2")
+    assert_eq(handoff_generation(services) ?? panic("handoff"), 2)
+    assert_eq(services.workers[0].endpoint.generation, 2)
+    _: runtime_retry(runtime, second) ?? panic("retry 2")
+    assert((delivery_settle(second) ?? panic("status 2")) == DeliveryState.Delivered)
+    log: seen.guard_read()
+    assert_eq(log.value, [Int]{1, 3, 2})
+    stop(services) ?? panic("stop")
+}
+
+// Waits up to five seconds for `delivery` to be Delivered; its state then.
+priv delivery_settle: fn(delivery: Delivery) -> DeliveryState ServiceError! {
+    loop _ in 0..<500 {
+        if delivery_status(delivery) == DeliveryState.Delivered {
+            return Ok(DeliveryState.Delivered)
+        }
+        service_sleep_ms(10)
+    }
+    delivery_status(delivery)
 }
 
 worker_contains: fn(names: [String], name: String) -> Bool Never! {

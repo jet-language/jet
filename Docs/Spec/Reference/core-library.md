@@ -8169,10 +8169,11 @@ keeps a message whose type is `Encode` and `Decode` (E0112 otherwise) as
 JSON in the authority until the worker's handler succeeds on it. Each
 receipt reaches the worker once while the worker takes messages: when it is
 sent, when the tree starts, and when `runtime.retry(delivery)` accepts it
-again; a handler that succeeds makes it `Delivered`, and one that fails
-leaves it for `retry`. A key already used answers its first receipt, a full
-mailbox is `ServiceError.Full` before the authority keeps anything, and a
-kept message that no longer decodes is dead-lettered.
+again, at whichever generation a handoff has moved the worker to; a handler
+that succeeds makes it `Delivered`, and one that fails leaves it for `retry`.
+A key already used answers its first receipt, a full mailbox is
+`ServiceError.Full` before the authority keeps anything, and a kept message
+that no longer decodes is dead-lettered.
 
 ```jet
 email: tree.worker("email", send_email, capacity: 64) ?? return

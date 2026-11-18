@@ -1,0 +1,55 @@
+// A durable typed worker crosses a handoff. The receipt whose handler failed
+// is retained, so the handoff moves the worker to its next generation;
+// retried there, the receipt reaches the worker and is Delivered.
+use {
+    service: core.service
+    testing: core.testing
+    time: core.time
+}
+
+// The first run of message 2 fails. A failing handler restarts the worker
+// from its `state:` value, so the flag is a shared cell the restart keeps.
+tally: fn(failed: &Shared<Bool>, n: Int) -> Int {
+    flag := failed.guard_edit()
+    if n == 2 && !flag.value {
+        flag.value = true
+        return Err("the first run of 2 fails")
+    }
+    n
+}
+
+// The receipt's state once it is Delivered, or after five seconds.
+settle: fn(delivery: Delivery) -> DeliveryState {
+    waited := 0
+    loop {
+        state: delivery.copy().status() ?? panic("status")
+        if state == .Delivered || waited == 500 -> return state
+        time.sleep(10ms)
+        waited += 1
+    }
+}
+
+run: fn() {
+    temp := testing.temp_dir("durable-handoff")
+    state_path: Path.from(temp).join("state.log").to_string()
+    retention: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime("{state_path}.delivery", retention: retention)
+    tree := service.tree("durable-handoff")
+    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    state: service.state_store(state_path) ?? panic("state")
+    tree.set_state_event_log(state, "events", 1, "reversible") ?? panic("state adapter")
+    worker: tree.worker("tally", tally, state: Shared<Bool>{false}, capacity: 8) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    first: tree.send_durable(worker, 1, key: "one") ?? panic("send 1")
+    second: tree.send_durable(worker, 2, key: "two") ?? panic("send 2")
+    third: tree.send_durable(worker, 3, key: "three") ?? panic("send 3")
+    // The worker runs in send order, so 2 has failed once 3 is Delivered.
+    print("first: {settle(first).show()}")
+    print("third: {settle(third).show()}")
+    _: runtime.retain(second) ?? panic("retain")
+    print("handoff: {tree.handoff_generation() ?? panic("handoff")}")
+    retried: second.retry() ?? panic("retry")
+    print("second: {settle(retried).show()}")
+    tree.stop() ?? panic("stop")
+}

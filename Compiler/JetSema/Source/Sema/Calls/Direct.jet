@@ -1598,6 +1598,21 @@ sema_call_inference_needs_context: fn(expr: Expr) -> Bool Never! {
     }
 }
 
+// The value type of a function named as an argument (`apply(add_item, …)`),
+// for inference to learn from. Its probe alone fails on a function with a
+// `&` or `&&` parameter, since only a function type that marks the same
+// parameters takes it (E0227); the argument is checked against its settled
+// parameter type once inference is done, which reports a mark that differs.
+sema_call_function_name_value: fn(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Type? Never! {
+    if expr == .Ident(name, _, _) {
+        index: sema_scope_resolve_index(scopes, name) ?? return None
+        if scopes.bindings[index].symbol.kind != SymbolKind.Function -> return None
+        ty: sema_scope_binding_type(environment, scopes, index) ?? return None
+        return Val(sema_function_value_type(program, ty, scopes.bindings[index].symbol.module_identity, None))
+    }
+    None
+}
+
 sema_call_collect_inference_facts: fn(params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallInferenceFacts Never! {
     parameter_types := [Type]{}
     argument_types := [Type]{}
@@ -1616,6 +1631,9 @@ sema_call_collect_inference_facts: fn(params: [SemaCallParam], binding: SemaCall
                     if value == .Val(checked) {
                         parameter_types.push(required)
                         argument_types.push(checked.ty)
+                    } else if sema_call_function_name_value(args[index].expr, environment, program, scopes) == .Val(named) {
+                        parameter_types.push(required)
+                        argument_types.push(named)
                     } else if !sema_has_error_since(probe_diagnostics, 0) {
                         if waiting == None -> waiting = Val(index)
                     } else if failed == None { failed = Val(index) }

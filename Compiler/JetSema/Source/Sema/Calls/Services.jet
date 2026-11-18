@@ -605,6 +605,11 @@ sema_services_typed_worker: fn(receiver: Expr, handler_params: [Type], handler_r
     }
     handled: if stateful -> handler_params[1] else -> handler_params[0]
     durable: if batched && handled == .List(element) -> sema_services_type_meets(element, "Decode", environment, program) else -> sema_services_type_meets(handled, "Decode", environment, program)
+    // No program spells these names, so each is a Core source route
+    // (CoreReach JET_DRIVER_SOURCE_ROUTES) that the load keeps:
+    // ("core.service", "durable_batched_worker"), ("core.service", "batched_worker"),
+    // ("core.service", "durable_stateful_worker"), ("core.service", "stateful_worker"),
+    // ("core.service", "durable_worker"), ("core.service", "typed_worker").
     member: if {
         batched && durable -> "durable_batched_worker"
         batched -> "batched_worker"
@@ -651,6 +656,9 @@ sema_services_typed_delivery: fn(method: String, receiver: Expr, args: [CallArg]
             sema_services_check_untyped_args(args, environment, program, scopes, state, tail_store, context, diagnostics)
             return Val(rejected)
         }
+        // A program spells only `send` and `send_durable`, so each source is
+        // a Core source route: ("core.service", "typed_send"),
+        // ("core.service", "typed_send_durable").
         if !durable {
             member: if method == "send" -> "typed_send" else -> "call"
             return Val(sema_services_source_call("ServiceTree.{method}", member, endpoint_args, receiver, AccessConvention.Write, args, span, expected, environment, program, scopes, state, tail_store, context, diagnostics))

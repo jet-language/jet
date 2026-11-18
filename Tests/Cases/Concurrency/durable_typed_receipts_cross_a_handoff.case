@@ -1,0 +1,15 @@
+# A durable typed worker's receipt crosses a handoff: retried after the
+# handoff moved the worker to its next generation, it reaches the worker and
+# is Delivered. The feeder was keyed by the generation the worker was
+# declared at, so the retried receipt stayed Accepted.
+fixture: DurableTypedReceiptsCrossAHandoff.fixture
+env: NO_COLOR=1
+step: jet run -O0 main.jet
+exit: 0
+stdout: = "first: Delivered\nthird: Delivered\nhandoff: 2\nsecond: Delivered\n"
+step: jet run -O1 main.jet
+exit: 0
+stdout: = "first: Delivered\nthird: Delivered\nhandoff: 2\nsecond: Delivered\n"
+step: jet run -O2 main.jet
+exit: 0
+stdout: = "first: Delivered\nthird: Delivered\nhandoff: 2\nsecond: Delivered\n"
