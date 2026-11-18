@@ -1,7 +1,7 @@
-# Maturity metadata
+# API maturity tags
 
 `#Meta(maturity: …)` tells readers how stable a public API is without changing
-compiler behavior. This page is for API authors and documentation tooling. The
+compiler behavior. This guide is for API authors and documentation tooling. The
 closed values are registered in
 [`PackageFiles.jet`](../../../Compiler/JetFoundation/Data/Syntax/PackageFiles.jet),
 and the source-backed example is

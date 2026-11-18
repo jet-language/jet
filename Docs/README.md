@@ -13,6 +13,9 @@ strategic guidance document.
 |---|---|
 | [First-hour guide](Spec/Guides/first-hour.md) | Install Jet and learn the `new` → `run` → `check` → `test` → `fix` → `explain` loop |
 | [Diagnostic recovery](Spec/Guides/diagnostic-recovery.md) | Reading and fixing compiler errors |
+| [Designing Jet programs](Spec/Guides/design.md) | A method for hard problems, SOLID in Jet, and the escape-hatch ladder |
+| [Embedded systems](Spec/Guides/embedded.md) | Target machines, no-OS boards, firmware builds, and embedding a Jet library |
+| [API maturity tags](Spec/Guides/maturity-tags.md) | Marking how stable a public API is with `#Meta(maturity: …)` |
 | [Examples](../Examples/README.md) | Small golden-tested programs for each feature |
 | [Language spec](Spec/spec.md) | The language contract, topic by topic |
 | [Core library reference](Spec/Reference/core-library.md) | The `core.*` modules |
@@ -29,7 +32,7 @@ strategic guidance document.
 | [Diagnostics](Spec/diagnostics.md) | What every diagnostic must contain |
 | [Standard library API laws](Spec/stdlib-api-laws.md) and [native contract](Spec/core-library-native-contract.md) | Rules every Core API follows |
 | [Release policy](Spec/release-policy.md) | Pre-1.0 compatibility and release rules |
-| [Reference](Spec/Reference/) | Focused references: CLI, Canvas, Jetpack, FFI hosts, embedded, web, and more |
+| [Reference](Spec/Reference/) | Focused references: CLI, Canvas, Jetpack, FFI hosts, web, and more |
 | [Environment variables](Spec/Reference/environment.md) | The canonical reference for `JET_*` environment variables |
 | [Packaging](Spec/Packaging/) | Toolchain channels, the package index, and the trust root |
 

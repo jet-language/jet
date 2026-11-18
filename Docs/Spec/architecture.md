@@ -2328,14 +2328,17 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   runtime rather than being dispatched into a crypto-only FFI bridge.
 
   The comptime Core registry uses the following namespace classification. The
-  table covers the namespaces of
-  [`CoreCallRows.jet`](../../Compiler/JetFoundation/Source/Registry/CoreCallRows.jet),
-  which the compiler build computes from Core.rows.
+  table has a row for every module that
+  [`Core.rows`](../../Compiler/Prelude/Core.rows) declares, and the guard
+  `Tests/Guards/architecture_rows.jet` holds it to that list.
   `Kernel` means that comptime marshals `CtValue` into the exact Prelude part.
   `Intrinsic` means that the evaluator implements a language value operation,
   not a second Core policy. `Host` means that the call crosses an effect or
-  authority boundary. Every listed semantic rule has one Prelude/Core home;
-  engines only marshal values to it.
+  authority boundary. `Jet` means that the module is plain Jet source with no
+  compiler or host support. `Mixed` means that the module's rules are Jet
+  source and the effects it names stay host-bound. `Namespace` means that the
+  module groups other names and has no source of its own. Every listed
+  semantic rule has one Prelude/Core home; engines only marshal values to it.
 
   | Namespace | Class | Semantic home |
   |---|---|---|
@@ -2405,6 +2408,85 @@ may accept; guests never mutate compiler facts or expose rustc (I2/I3).
   | `core.net.url.data: mime.sub` | Kernel | URL MIME field validation stays with the shared kernel. |
   | `core.net.url.data: mime.top` | Kernel | URL MIME field validation stays with the shared kernel. |
   | `core.net.url` | Kernel | `Core/Net/URL.jet` owns URL parse/render/percent rules; comptime marshals values. |
+  | `app` | Host | `Core/App/App.jet` owns the app's live bindings, endpoints, blobs and notices; device, push and dialog work crosses the host. |
+  | `jet_builtins` | Intrinsic | `Core/Builtins/Builtins.jet` declares the kernel operations, storage types and markers the compiler itself provides to Core; programs never name it. |
+  | `core` | Namespace | The root of the Core module tree; it declares nothing. |
+  | `core.browser` | Host | `Core/Browser/Browser.jet` runs the WebDriver BiDi session in Jet over `core.net.ws`; launching a browser, files and the network stay host-bound. |
+  | `core.browser.host` | Host | `Core/Browser/Host.jet` asks the page's `core.ui.host` provider for DOM event routes and element values. |
+  | `core.browser.storage` | Jet | `Core/Browser/Storage.jet` owns the storage namespaces and the provider request each store makes. |
+  | `core.browser.storage.local` | Host | `Core/Browser/Storage/Local.jet`: the page's localStorage through the `core.ui.host` provider, else a process store. |
+  | `core.browser.storage.session` | Host | `Core/Browser/Storage/Session.jet`: the page's sessionStorage through the `core.ui.host` provider, else a process store. |
+  | `core.build` | Jet | `Core/Build/Build.jet` describes build steps as plain values; `jet build` runs them in its sandbox. |
+  | `core.collections` | Jet | `Core/Collections/Collections.jet` owns counters, heaps and bisection over arrays. |
+  | `core.collections.set` | Jet | `Core/Collections/Set.jet` owns ordered unique string sets. |
+  | `core.color` | Jet | `Core/Color/Color.jet` owns the one Core color value and its hex, HSL and other spellings. |
+  | `core.compiler` | Intrinsic | `Core/Compiler/Compiler.jet` names the extension points library code runs under inside the compiler; their Meta effects are in `Core/Compiler/Meta.jet`. |
+  | `core.compiler.lang` | Intrinsic | `Core/Compiler/Lang.jet` holds the closed menus of marker arguments that the compiler consults. |
+  | `core.context` | Namespace | The task context the compiler provides; no source declares it. |
+  | `core.crypto.random` | Host | `Core/Crypto/Random.jet` is the fail-closed CSPRNG; every request crosses the OS entropy provider. |
+  | `core.crypto.uuid` | Mixed | `Core/Crypto/UUID.jet` owns UUID formatting, parsing and name-based construction; v4 and v7 entropy crosses `core.crypto.random`. |
+  | `core.crypto.vault` | Host | `Core/Crypto/Vault.jet` validates names and reasons; the vault provider owns repository state and key material. |
+  | `core.data.arrow` | Host | `Core/Data/Arrow.jet` carries a foreign Arrow batch's owner; the provider validates and releases it. |
+  | `core.data.loader` | Jet | `Core/Data/Loader.jet` owns the `DataLoader<T>` lifecycle; payload bytes come from its provider. |
+  | `core.data.plot` | Jet | `Core/Data/Plot.jet` owns text and SVG charts. |
+  | `core.data.sketch` | Jet | `Core/Data/Sketch.jet` owns sketch-state framing and the seeded FNV hash. |
+  | `core.data.stream` | Jet | `Core/Data/Stream.jet` owns the one-shot `DataStream<T>` cursor. |
+  | `core.db` | Host | `Core/DB/DB.jet` owns SQL values and typed row selection; the private SQLite driver holds the connection. |
+  | `core.db.query` | Mixed | `Core/DB/Query.jet` owns typed queries over rows; reading a CSV file is file-bound. |
+  | `core.db.sql` | Jet | `Core/DB/SQL.jet` is the one SQL grammar and row-selection kernel, with no connection authority. |
+  | `core.debug` | Intrinsic | `Core/Debug/Debug.jet` declares the stop record the runtime passes to `context.on_stop` and the records `context.trace` reads. |
+  | `core.devtools` | Host | `Core/Devtools/Devtools.jet` owns the inspector identity and field envelope; the raw leaf publishes through the global sink. |
+  | `core.encoding.binary` | Jet | `Core/Encoding/Binary.jet` owns integer packing and the named float packers. |
+  | `core.encoding.eetf` | Jet | `Core/Encoding/Eetf.jet` owns the Erlang external term format codec. |
+  | `core.encoding.ini` | Jet | `Core/Encoding/Ini.jet` owns the INI codec. |
+  | `core.encoding.validate` | Jet | `Core/Encoding/Validate.jet` owns the use-site rule builder, sharing the `validate` block's vocabulary. |
+  | `core.files.data` | Host | `Core/Files/Data.jet` reads a file loader's payload and the CSV and JSON record cursors. |
+  | `core.files.path` | Mixed | `Core/Files/Path.jet` owns path construction and string math; existence queries are file-bound. |
+  | `core.files.sealed` | Host | `Core/Files/Sealed.jet` seals and opens whole files with `core.crypto`'s chunk engine, publishing through a private temporary. |
+  | `core.game` | Intrinsic | `Core/Game/Game.jet`: scene, replay and backend are compiler-owned handles; the runtime owns frame scheduling and presentation. |
+  | `core.git` | Host | `Core/Git/Git.jet` runs git command blocks in a work tree. |
+  | `core.http` | Mixed | `Core/HTTP/HTTP.jet` owns HTTP/1.1 message semantics; the transport leaf is host-bound. |
+  | `core.http.client` | Host | `Core/HTTP/Client.jet` owns client configuration and session policy around the transport leaves. |
+  | `core.http.server` | Host | `Core/HTTP/Server.jet` serves HTTP/1.1 over `core.net` TCP or `core.net.tls`. |
+  | `core.jobs` | Host | `Core/Jobs/Jobs.jet` owns the durable queue's storage, lease and receipt transactions over the SQLite bridge. |
+  | `core.log` | Host | `Core/Log/Log.jet` owns the structured logger, its levels, fields and spans; sinks write. |
+  | `core.math.combinatorics` | Jet | `Core/Math/Combinatorics.jet` owns permutations, combinations, products and the counts `core.math` lacks. |
+  | `core.math.stats` | Mixed | `Core/Math/Stats.jet` owns descriptive statistics; random sampling takes the `Rand` effect. |
+  | `core.mem` | Intrinsic | `Core/Mem/Mem.jet`: allocator and pointer values are compiler-owned, and each raw memory primitive is a compiler intrinsic. |
+  | `core.mem.scope` | Namespace | Scoped allocation names the compiler provides; no source declares them. |
+  | `core.meta` | Intrinsic | `Core/Meta/Meta.jet` declares the module and package metadata the compiler fills. |
+  | `core.mod` | Host | `Core/Mod/Mod.jet` owns loader sequencing and typed refusals; mapping a compiled unit stays native. |
+  | `core.net.ip` | Jet | `Core/Net/IP.jet` owns IPv4 and IPv6 addresses and CIDR networks. |
+  | `core.net.ws` | Host | `Core/Net/Ws.jet` validates the URL and handshake; the provider owns socket I/O and the frame codec. |
+  | `core.plugin` | Intrinsic | `Core/Plugin/Plugin.jet` is the WASM Component boundary; the compiler attaches the component interface and `load` is the native route. |
+  | `core.prelude` | Intrinsic | `Core/Prelude/Prelude.jet`: `keep` is the compiler's use-site barrier; the other helpers are plain Jet. |
+  | `core.reactive` | Mixed | `Core/Reactive/Reactive.jet` owns the value transitions; the runtime provider retains the `computed`, `derived` and `effect` closures. |
+  | `core.rt` | Host | `Core/Rt/Rt.jet` runs realtime callback streams and reads their provider receipt. |
+  | `core.target` | Jet | `Core/Target/Target.jet` declares the machines a build can target and derives each machine's denial row. |
+  | `core.tasks` | Mixed | `Core/Tasks/Tasks.jet` owns task state transitions; timers and the scheduler's identity are host cells. |
+  | `core.text.html` | Jet | `Core/Text/HTML.jet` owns XML-safe escaping and bounded entity decoding. |
+  | `core.text.parse` | Jet | `Core/Text/Parse.jet` owns scanning, splitting and number parsing. |
+  | `core.text.wrap` | Jet | `Core/Text/Wrap.jet` owns paragraph filling and indentation in display columns. |
+  | `core.time.calendar` | Jet | `Core/Time/Calendar.jet` owns month and week calendars. |
+  | `core.time.expiring` | Jet | `Core/Time/Expiring.jet` owns deadline comparison; the caller owns the clock. |
+  | `core.tui` | Mixed | `Core/TUI/TUI.jet` owns models and layout; terminal facts cross provider seams. |
+  | `core.ui.font` | Jet | `Core/UI/Font.jet` reads TrueType faces and lays out glyphs. |
+  | `core.ui.host` | Host | `Core/UI/Host.jet` owns the host capability rules; the provider gives primitives only. |
+  | `core.ui.host.accessibility` | Host | `Core/UI/Host/Accessibility.jet` sets node metadata once the provider reports accessibility. |
+  | `core.ui.host.clipboard` | Host | `Core/UI/Host/Clipboard.jet` owns typed UTF-8 clipboard text over the provider's primitives. |
+  | `core.ui.host.drag_drop` | Host | `Core/UI/Host/DragDrop.jet` decodes the provider's file and text drop events. |
+  | `core.ui.host.ime` | Host | `Core/UI/Host/IME.jet` decodes the provider's input-method events. |
+  | `core.ui.host.shortcuts` | Host | `Core/UI/Host/Shortcuts.jet` owns the shortcut registry and its matching; the provider takes key claims. |
+  | `core.ui.xkb` | Jet | `Core/UI/Xkb.jet` compiles XKB keymaps and tracks keyboard state. |
+  | `core.watcher` | Host | `Core/Watcher/Watcher.jet` watches files, processes and ports. |
+  | `core.web` | Host | `Core/Web/Web.jet` builds server-rendered apps on `core.http`. |
+  | `core.web.devserver` | Jet | `Core/Web/DevServer.jet` describes the hot-reload wrapper around an app. |
+  | `core.web.forms` | Jet | `Core/Web/Forms.jet` owns typed HTML forms and their validation. |
+  | `core.web.query` | Jet | `Core/Web/Query.jet` owns a client's cached query state and mutation transitions. |
+  | `core.web.router` | Jet | `Core/Web/Router.jet` owns typed routes, navigation and cache state. |
+  | `core.web.store` | Jet | `Core/Web/Store.jet` owns typed state history, transactions and patches. |
+  | `core.web.table` | Jet | `Core/Web/Table.jet` owns typed rows, sorting, filtering and paging. |
+  | `core.web.virtual` | Jet | `Core/Web/Virtual.jet` owns windowed list geometry. |
 
 - **R13 — An abort is never an outcome.** A host seam that runs inside an
   execution engine converts a runtime panic into the tier's **existing** status
