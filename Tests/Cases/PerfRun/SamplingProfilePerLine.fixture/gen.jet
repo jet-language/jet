@@ -1,0 +1,79 @@
+// Writes data/words.txt: about 4 MB of the prose ScriptBench writes for w04
+// (Tools/Perf/Scriptbench/Gen.jet `words`, which writes 25 MB), the same
+// bytes on every run, for the copy of w04's run.jet beside it.
+package: {
+    name: "gen"
+    authority: { allow: [IO, Mem.Alloc, FS] }
+}
+
+use fs: core.files
+
+// A 31-bit linear congruential generator, as Gen.jet's.
+RNG: struct {
+    state: Int,
+
+    step: fn(&self) -> Int {
+        self.state = (self.state * 1103515245 + 12345) %% 2147483648
+        self.state /% 65536
+    }
+
+    // The next value in 0..<n.
+    below: fn(&self, n: Int) -> Int {
+        if n <= 32768 -> return self.step() %% n
+        high: self.step()
+        (high * 32768 + self.step()) %% n
+    }
+}
+
+capital: fn(word: String) -> String {
+    "{word.slice(0, 1).to_upper()}{word.slice(1, word.count_bytes())}"
+}
+
+run: fn() {
+    rng := RNG{state: 3}
+    syl: ["ka", "lo", "mi", "ne", "ru", "sa", "ti", "vo", "ze", "qua", "ber", "don", "fel", "gri", "hap", "jun"]
+    vocab := [String]{}
+    seen := Set.from([String]{})
+    loop vocab.len() < 5000 {
+        k: 1 + rng.below(4)
+        w := ""
+        loop _ in 0..<k -> w = "{w}{syl[rng.below(16)]}"
+        if !seen.has(w) {
+            seen.add(w.copy())
+            vocab.push(w)
+        }
+    }
+    // Zipf weights 1/(i+1), scaled to integers.
+    cum := [Int]{}
+    total := 0
+    loop i in 0..<5000 {
+        total += 1000000 /% (i + 1)
+        cum.push(total)
+    }
+    punct: [" ", " ", " ", " ", " ", ", ", "; ", " - "]
+    parts := [String]{}
+    bytes := 0
+    loop bytes < 4000000 {
+        n: 6 + rng.below(10)
+        line := ""
+        loop j in 0..<n {
+            x: rng.below(total)
+            lo := 0
+            hi := 4999
+            loop lo < hi {
+                m: (lo + hi) /% 2
+                if cum[m] <= x -> lo = m + 1 else -> hi = m
+            }
+            w := vocab[lo].copy()
+            if j == 0 || rng.below(100) < 5 -> w = capital(w)
+            if rng.below(100) < 1 -> w = w.to_upper()
+            tail: if j == n - 1 -> (if rng.below(2) == 0 -> "." else -> "!") else -> punct[rng.below(8)]
+            line = "{line}{w}{tail}"
+        }
+        text: "{line}\n"
+        bytes += text.count_bytes()
+        parts.push(text)
+    }
+    fs.create_dir_all("data") ?? panic("mkdir data failed")
+    fs.write("data/words.txt", parts.join("")) ?? panic("write data/words.txt failed")
+}

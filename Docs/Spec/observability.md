@@ -108,18 +108,24 @@ source, hottest first. A row's `sample_count` is its exclusive time, the
 samples whose program counter is on it; its `inclusive_count` is its inclusive
 time, the samples that hold it anywhere on the stack, each once however often
 (a recursive call's line counts once per sample), so a line the stack only
-passes through has a row with no exclusive samples. `coverage` is `complete`
-when every sample landed in that source and `partial` when some ran in the
-runtime or another file, which the `reason` counts and, for samples outside
-every Jet function, names by the image's `.symtab` function, hottest first, as
-`perf report` names them (the compiler's stop poll `jet_ir_stop_turn` is the
-usual one). `jet perf view` sums them per function with its share of the
-samples, then its hottest lines with their exclusive and inclusive samples
-(`line 7 samples=12 inclusive=40`). A run whose samples never reach the checked
-source (a short program, `jet perf test`, `jet perf attach`) keeps the
-observation rows, which attribute to the parsed `run: fn` declaration (`fn`
-through its closing brace) and do not separate the functions that `run` calls;
-their `inclusive_count` is null.
+passes through has a row with no exclusive samples. A row's
+`allocation_count` is the allocations whose stack holds its line innermost
+of the checked source's lines, from the allocation records the runtime
+writes with the samples, so an allocation in the runtime or a core module
+counts at the line of the source that called into it; a run whose runtime
+recorded no allocation site leaves it null. `coverage`
+is `complete` when every sample landed in that source and `partial` when some
+ran in the runtime or another file, which the `reason` counts and, for samples
+outside every Jet function, names by the image's `.symtab` function, hottest
+first, as `perf report` names them (the compiler's stop poll `jet_ir_stop_turn`
+is the usual one). `jet perf view` sums them per function with its share of the
+samples, then its hottest lines with their exclusive and inclusive samples and
+allocations (`line 7 samples=12 inclusive=40 allocations=300`). A run whose
+samples never reach the checked source (a short program, `jet perf test`, `jet
+perf attach`) keeps the observation rows, which attribute to the parsed `run:
+fn` declaration (`fn` through its closing brace) and do not separate the
+functions that `run` calls; their `inclusive_count` and `allocation_count` are
+null.
 
 ## Canonical devtools protocol
 

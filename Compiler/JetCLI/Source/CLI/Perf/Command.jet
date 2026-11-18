@@ -747,37 +747,38 @@ jet_cli_perf_flame: fn(trace: CanonicalJSON) -> [String] Never! {
 }
 
 // One profile row as the flame graph reads it: its function's `path#name`,
-// its clock and samples, and, for a row that is one source line, the line
-// and its inclusive samples when it has them.
+// its clock and samples, and, for a row that is one source line, the line,
+// its inclusive samples and its allocations when it has them.
 JetCLIPerfProfileRow: struct {
     symbol: String,
     clock: String,
     weight: Int,
     line: Int?,
     inclusive: Int?,
+    allocations: Int?,
 }
 
 jet_cli_perf_profile_row: fn(item: CanonicalJSON) -> JetCLIPerfProfileRow? Never! {
     symbol: jet_cli_perf_member_symbol(item) ?? return None
     clock: jet_cli_perf_member_text(item, "clock") ?? return None
     weight: jet_cli_perf_member_number(item, "sample_weight") ?? return None
-    Val(JetCLIPerfProfileRow{symbol: symbol, clock: clock, weight: weight, line: jet_cli_perf_row_line(item), inclusive: jet_cli_perf_member_number(item, "inclusive_count")})
+    Val(JetCLIPerfProfileRow{symbol: symbol, clock: clock, weight: weight, line: jet_cli_perf_row_line(item), inclusive: jet_cli_perf_member_number(item, "inclusive_count"), allocations: jet_cli_perf_member_number(item, "allocation_count")})
 }
 
 // One function's profile rows on one clock: their samples, and those of
-// each row that is one source line, with its inclusive samples when the
-// row has them.
+// each row that is one source line, with its inclusive samples and its
+// allocations when the row has them.
 JetCLIPerfFlameFunction: struct {
     symbol: String,
     clock: String,
     weight: Int,
-    lines: [{line: Int, weight: Int, inclusive: Int?}],
+    lines: [{line: Int, weight: Int, inclusive: Int?, allocations: Int?}],
 }
 
 // The profile rows by function and clock, hottest first: each function's
 // samples and its share of its clock's, then its hottest lines, each with
-// its inclusive samples when the row has them. At most 8 functions and 3
-// lines each.
+// its inclusive samples and its allocations when the row has them. At most
+// 8 functions and 3 lines each.
 jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow]) -> [String] Never! {
     functions := [JetCLIPerfFlameFunction]{}
     loop row in rows.move() {
@@ -790,11 +791,11 @@ jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow]) -> [String] Never
         }
         if found < 0 {
             found = functions.len()
-            functions.push(JetCLIPerfFlameFunction{symbol: row.symbol, clock: row.clock, weight: 0, lines: [{line: Int, weight: Int, inclusive: Int?}]{}})
+            functions.push(JetCLIPerfFlameFunction{symbol: row.symbol, clock: row.clock, weight: 0, lines: [{line: Int, weight: Int, inclusive: Int?, allocations: Int?}]{}})
         }
         functions[found].weight += row.weight
         if row.line == .Val(line) {
-            functions[found].lines.push({line: line, weight: row.weight, inclusive: row.inclusive})
+            functions[found].lines.push({line: line, weight: row.weight, inclusive: row.inclusive, allocations: row.allocations})
         }
     }
     functions.sort_by(fn(left: JetCLIPerfFlameFunction, right: JetCLIPerfFlameFunction) { right.weight <=> left.weight })
@@ -808,12 +809,13 @@ jet_cli_perf_flame_profile: fn(rows: &&[JetCLIPerfProfileRow]) -> [String] Never
         weight: functions[index].weight
         share: if total > 0 -> weight * 100 /% total else -> 0
         out.push("{functions[index].symbol} profile:{functions[index].clock} samples={weight} share={share}%")
-        functions[index].lines.sort_by(fn(left: {line: Int, weight: Int, inclusive: Int?}, right: {line: Int, weight: Int, inclusive: Int?}) { (right.weight <=> left.weight).then((right.inclusive ?? 0) <=> (left.inclusive ?? 0)).then(left.line <=> right.line) })
+        functions[index].lines.sort_by(fn(left: {line: Int, weight: Int, inclusive: Int?, allocations: Int?}, right: {line: Int, weight: Int, inclusive: Int?, allocations: Int?}) { (right.weight <=> left.weight).then((right.inclusive ?? 0) <=> (left.inclusive ?? 0)).then(left.line <=> right.line) })
         shown: if functions[index].lines.len() > 3 -> 3 else -> functions[index].lines.len()
         loop at in 0..<shown {
             row: functions[index].lines[at]
             inclusive: if row.inclusive == .Val(count) -> " inclusive={count}" else -> ""
-            out.push("  line {row.line} samples={row.weight}{inclusive}")
+            allocations: if row.allocations == .Val(count) -> " allocations={count}" else -> ""
+            out.push("  line {row.line} samples={row.weight}{inclusive}{allocations}")
         }
     }
     out
@@ -933,7 +935,7 @@ jet_cli_perf_line_before: fn(totals: JetCLIPerfLineTotals, left: Int, left_sampl
 
 // Per-line totals as the flame graph's `cpu` rows.
 jet_cli_perf_total_rows: fn(totals: JetCLIPerfLineTotals) -> [JetCLIPerfProfileRow] Never! {
-    loop row in totals.rows -> JetCLIPerfProfileRow{symbol: "{totals.names[row.path]}#{totals.names[row.function]}", clock: "cpu", weight: row.samples, line: Val(row.line), inclusive: None}
+    loop row in totals.rows -> JetCLIPerfProfileRow{symbol: "{totals.names[row.path]}#{totals.names[row.function]}", clock: "cpu", weight: row.samples, line: Val(row.line), inclusive: None, allocations: None}
 }
 
 // `ascii_timeline`.
