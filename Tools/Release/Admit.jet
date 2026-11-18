@@ -1128,6 +1128,7 @@ pack_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
         // when admit ends.
         kept: files.join(ctx.work, "pack-rebuilt")
         remove_tree(kept)
+        files.create_dir_all(kept) ?? ()
         _: copy_tree(pack, files.join(kept, "jet-runtime"))
         copy_file(files.join(built, "jet-bare"), files.join(kept, "jet-bare"), true) ?? ()
         shown: compared.differ[0..<if compared.differ.len() > 8 -> 8 else -> compared.differ.len()].join(", ")
