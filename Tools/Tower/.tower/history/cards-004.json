@@ -117274,6 +117274,924 @@
       "completedAt": "2026-11-15T03:42:39.444Z",
       "questions": [],
       "retiredAt": "2026-11-18T03:45:50.551Z"
+    },
+    {
+      "id": "c0qus24o",
+      "num": 3550,
+      "title": "CoreLib data: complete Jet ownership (browser storage moves with the web package, #6445)",
+      "body": "Complete data loaders, transforms, HTTP, router/forms, reactive, sync, services/jobs, storage, and browser semantics. Remove high-level native policy and prove all applicable tiers.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "**Goal**\nFinish the data/web slice of Core Jet ownership (parent #3547 is done). Every data, web, reactive, sync, service and jobs declaration has a real Jet body or a typed provider leaf, all policy, validation and error meaning lives in Jet, and each package passes AOT, `jet run` and interpreter proof.\n\n**Current state**\n- Building (log 2026-09-24): disjoint worktree lanes for data, HTTP client, web router and sync. Known failures: core/data/database and `is_base64` emit AOT Rust E0308/E0063 (JetErr into typed `DataError` slots). The Core/http/client.jet syntax cascade (E0003 at byte 12789) blocked the http_i9 framing test.\n- HTTP/CSRF policy still in Rust: crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:141-174 (`JetWebServerFnCsrfPolicy`, `JetWebServerFnSpec`) and HTTPServer.rs. Core/http/server.jet:53 `json<T: Encode>` delegates to the provider. The HTTP client/server framing now belongs to #3665 and #3666, so it is out of this card's scope.\n- Jobs: Core/jobs/jobs.jet:59-69 `JobQueue` is an in-memory record list (`queue()` builds `records: []`), which shadows the D-DX-QUEUE1=A SQLite provider. Examples/features/concurrency/job_queue.jet has no golden.\n- Packages: Core/data (data, loader, stream, arrow, plot, sketch), Core/web (router, forms, query, table, virtual, store, storage, browser, devserver), Core/reactive, Core/service, Core/jobs.\n\n**Changes**\n1. Lane data: fix the typed error-carrier emission so `DataError` slots receive `DataError`, not `JetErr`. The fix goes in Compiler/JetCodegen at the result-carrier lowering, mirrored in the Rust emitter only as far as the shipped binary needs. Then fix the Core/data/data.jet `public_parameter` split and Core/web/query.jet `esc_json` UTF-8 defects named in the log.\n2. Lane web: move CSRF/retry/idempotency policy from WebServerFn.rs into Core/web (a Jet decision function). WebServerFn.rs keeps only transport leaves.\n3. Lane jobs: make `jobs.queue()` open the single SQLite-default durable provider identity with receiver `enqueue`/`claim`/`ack`/`retry`/`delay`/dead-letter. Delete the in-memory `records` shadow, migrate callers and add the job_queue golden.\n4. Per package: diff each source declaration against the CoreCallRows and CoreModuleExportNames rows and the actual callers. Delete any route that re-encodes a Jet body. Main alone edits the shared Core.jet and registry rows at integration.\n5. Web and browser tier cells stay explicitly pending until exercised.\n\n**Proof**\n- `jet test Compiler --profile golden concurrency/job_queue`: passes.\n- `Tools/agent/jet-env cargo test --test corelib_http_data -- core_data_`: passes, including database and base64 on AOT.\n- `Tools/agent/jet-env cargo test --test ui_backend -- web_` and `jet test Compiler --profile golden web/`: pass.\n- A three-tier `jet run` diff for Examples/features/web/query_lifecycle.jet and store_history.jet against their goldens: empty.\n\n**Batch**\nbatch-core-ui (web/reactive family): most remaining work is Core/web, reactive and jobs. The data carrier fix lands in the same build.\n\n**Dependencies**\nNone blocking. #3665 and #3666 own HTTP framing and TLS.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Closed 2026-11-15: the last open criterion (c13, SQLite completeness) moved to #6894, split into three criteria. The web parts moved with #6445 earlier."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c8 progress: dev a0222b38e4 adds the guidance, so core-library.md core.encoding.json names the backtick raw form and the escaped quoted form. Examples/Data/Analysis/DataLoader.jet uses backtick raw JSON (lines 98 and 136), and golden Data/Analysis/DataLoader passes 3/3 with no E0904/E0112/E0905. Still open: the focused before/after test for the TypeRelations nominal Apply-head identity and codec-bounds fix. No test under Compiler/JetSema/Tests or tests/cases covers it, so c8 stays open; it is queued for G3Core-2."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Sweep (G12Docs-5, dev e764ade14b, seed-b14). c6: golden Tooling/DataQuantilePartitions (now tests/run/Tooling/DataQuantilePartitions.jet) passes on O0, O1 and O2. Rank selection landed in fe108d1ea5, and describe reuses its pass in ca3c169d18. Still open: the required-cell run and the small sorted-input loss, which were not measured. c8: golden Data/Analysis/DataLoader passes on O0, O1 and O2, and jet check of the example reports no errors (it uses raw backtick JSON). Still open: the guidance naming the raw and escaped forms, which was not found."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "HANDOFF (CoreOwnership lane wound down at the owner's roster cut to 3). Landed, unverified until Main's next batch: a8446d5347 c9; 8cc53255fc c12 part (CORE_CALL_AMBIENT_ROUTES removed); fe108d1ea5+ca3c169d18 c6; 9d641c51f7+28ce346b82 RuntimeStopExports regen; d22c6d2926 c7. Believed met, need verification: c4/c5 (SQLite jobs.queue, job_queue golden+case). Open: c1-c3 untouched; c8 data_loader raw JSON (E0904/E0112/E0905); c10/c11 fold into c12. c12 (web storage on localStorage/sessionStorage per spec.md:3565, headless/native in-memory) is written but NOT landed, in old syntax at JET_SCRATCH_ROOT/lanes/CoreOwnership/a1 (base a5d77ac873; diff each file against a5d77ac873, not 551afcca78). Files: Core.jet 5 core.web.storage __store_{present,get,set,remove,clear} rows, CorePlatformSignatures, CoreSurfaceInventory, StructureRegistry, IR_HOST_PROVIDER, RuntimeRoutes, new JetRuntime/Source/WebStorageProvider.jet (+sources.list), JetWeb Host.jet, Core/Web/Storage{,/Local,/Session}.jet. Port: apply to HEAD, jet fix a standalone copy, regenerate CoreSourceRows, check-core-surface-ledger --write-core-call-registry and --write, gen-runtime-stop-exports --write, all from a clean export, never the worktree. Staged unrun case + doc paragraph: JET_SCRATCH_ROOT/lanes/Main/handoff-3550-c12. Also drop dead storageGet/fallbackStorage in Prelude/Web/DomRuntime.js. Open owner question: a write the browser refuses (quota) is dropped silently; spec is silent and there is no error channel."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 3 criteria from archived #3519: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: re-phased (no building work logged since before 2026-10-20)."
+        },
+        {
+          "at": "2026-10-05",
+          "by": "Pip",
+          "text": "Distill 2026-10-05 (re-targeted by the fresh review from done #2427, D-DX-WEBARCH1=D): a no-choice acceptance for streamed routes. All loaders of a streamed route start when the request starts, so the shell-to-section delay is the slowest loader at or above that section, not the sum: two loaders sleeping 200 ms and 300 ms finish in about 300 ms. Sources: progressive JSON reaction JAmGgadALQQ, U8L_KOQmDj4 13:08-13:45. Design input for the deferred option E stays in the mining report; no vote now."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #3012, #3018, #3417, #3749; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-core-ui."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (toolwebmem1b, Opus 5.5): E_BUILD. Still building. The CoreLib data/web slice of the Jet-ownership epic (#3547) is blocked in practice by typed AOT error-carrier and native-shape failures (database, base64). The HTTP portion now overlaps #3665 and #3666. Evidence: Card log 2026-09-24: core/data/database fails generated AOT Rust (E0308/E0063, JetErr into typed DataError slots); is_base64 fails the same way. HTTP and CSRF policy still sit in Rust CoreLib (crates/jet-codegen/src/Prelude/CoreLib/Top/WebServerFn.rs:141-167, HTTPServer.rs); Core/http/server.jet:77-83 delegates to the provider."
+        },
+        {
+          "at": "2026-09-27",
+          "by": "Pip",
+          "text": "Cleanup 2026-09-27 (owner-directed): all side worktrees and non-master branches were removed from the repo. Committed history is preserved in ~/.cache/jet-luna/branch-archive/unmerged-2026-09-27.bundle (all 38 branch heads; list in branches-2026-09-27.txt); each worktree's uncommitted diff and untracked files are in ~/.cache/jet-luna/branch-archive/worktrees-2026-09-27/. Restore a branch with: git fetch <bundle> <branch>:<branch>."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 fresh exact `JET_CORE_CONFORMANCE_FILTER=core/data/database cargo test -q -p jet --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --exact --nocapture` FAILS generated AOT Rust with 12 errors (E0308/E0063), artifact://3013: typed DataError/Infallible slots receive JetErr; native DataLoader<String> is non-Clone, generated structs pass JetInt for i64 and Result<Vec<u8>,JetAbsent> for Option<Vec<u8>>, and omit private marker/raw_locator fields. JIT/interpreter parity is not reached after AOT compile rejection. This is a typed-carrier/native shape root issue; do not paper over native invariants or convert every JetErr into DataError. All #3550 tier criteria stay open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 typed AOT error-carrier blocker is broader than database: fresh compiler builds core/encoding/base64/is_base64.jet in JIT and forced interpreter (both `false`) but generated AOT Rust fails E0308 at is_base64.rs:134058 (`JetErr` inserted into `Result<_,Base64Error>`). Source inspection by DatabaseAotRepair found only explicit String→Base64Error `rewrap`/`new` and local HexError/Base32Error remapping; no JetErr→Base64Error conversion. No catch-all conversion was invented, and no AOT or #3550 tier criterion is claimed. Existing database/HTTP native shape and typed error blockers remain open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 corrected earlier Core/data String !Never helper regression: restored private trim/upper plain String signatures and removed unsuccessful panic coalesce. Regenerated Core views --write/--check and fresh jet bin PASS artifact://2835. Narrow `scripts/agent/jet-env target/debug/jet check tests/conformance/corpus/core/data/database.jet` completes exit0 with warnings only (468 lint warnings), read-back in Main hub bg_2 snapshot; this is static source type-check, NOT AOT/runtime/tier proof, criterion remains open. Agent://DataLoaderNativeScout traces five native AOT DataLoader fields and warns raw_locator must preserve original unredacted input (public locator may be hashed/redacted); Context/MIRRust released by Net owner to DatabaseAotRepair for an owner-safe native bridge. No generic coercion, compiler smoke exact still pending."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 after fresh Core views and jet build PASS artifact://2803, exact filtered `JET_CORE_CONFORMANCE_FILTER=core/data/database cargo test -q -p jet --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --exact --nocapture` FAILS before tiers sema E0311 in Core/data/data.jet source byte 29779..29782: private `trim(parts[0])` now yields `String !Never` checked carrier, `key.len()` is not a method on carrier (artifact://2823). This is a regression in recent source signature correction, replacing previous AOT 18-error witness, not progress/criterion proof. Data source owner assigned one bounded fix preserving private total semantics without adding error policy or public API. DataLoader native AOT and SHA interpreter parity independently open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 isolated core/crypto/sha256 conformance after canonical `.as_bytes()` fixture migration reached executable tiers but FAILED I9: default JIT stdout `true\\ntrue\\n`, forced interpreter stdout `false\\nfalse\\n` (both exit0), artifact://2768; AOT not reached because strict gate stops at disagreement. SHA-256 correctness and Digest256 native carrier parity therefore NOT proven. Static Crypto helper Result carrier correction builds, but interpreter disagrees on hex and raw digest bytes; park crypto and continue independent TCP. Read-only root scout agent://TypedErrorCarrierMap traces 10 DataError generated mismatches to source `make_loader !DataError` propagating unannotated `valid_public_text` default !Err without a checked conversion; HTTP/URL similarly propagate default-Err helpers into HTTPError/URLError. MIRRust faithfully emits raw Err; no backend blanket conversion is valid. Source/domain typed conversion work and native DataLoader remain open; no criterion met."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 source-only DataFormat/Digest256 native AOT correction and fresh compiler build PASS artifact://2745. Exact isolated core/crypto/sha256 three-tier conformance attempt `JET_CORE_CONFORMANCE_FILTER=core/crypto/sha256 scripts/agent/jet-env cargo test -p jet --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --exact --nocapture` FAILED pre-runtime E0102 fixture uses obsolete `Digest256.bytes()` while canonical Core/crypto/crypto.jet declares `as_bytes()`, artifact://2765. Migrated only stale Digest256/Digest512 conformance fixtures sha256, blake3, sha512 from `.bytes()` to `.as_bytes()` preserving expected bytes; bounded exact sha256 retry pending. No all-tier crypto/database claim yet; database typed DataError/DataLoader blockers still open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "CORRECTION 2026-09-24 to immediately preceding count: artifact://2730 contains exactly 10 typed DataError-vs-JetErr errors, 5 DataLoader carrier errors (one non-Clone, buffered_bytes Int, two Option<Result> fields, missing private native fields), and 3 Digest256.hex ? String errors = 18. The earlier 11 DataError number was an arithmetic transcription mistake; no other finding or open criterion changed."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 fresh jet binary cargo build PASS artifact://2728 after DataFormat native map and Digest256 projection. Exact filtered core/data/database strict AOT/default run/interpreter criterion `JET_CORE_CONFORMANCE_FILTER=core/data/database scripts/agent/jet-env cargo test -p jet --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --exact --nocapture` FAILED before tier execution: generated Rust errors reduced from 50 to 18, artifact://2730. Remaining 11 DataError-vs-JetErr, five DataLoader shape/ownership, plus three newly exposed Digest256.hex String followed by erroneous ?; same worker correcting only crypto call carrier, typed DataError/DataLoader remain open. I2 rustc rejection cannot be accepted as a user error or all-tier proof; #3550 criteria stay open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 read-only HTTP AOT map agent://HttpAotMap of artifact://2574: 86 generated-Rust errors separate into Header native tuple carrier projection (six E0560/four E0609; Core/http Header {name,value} vs JetHTTPHeaders.entries) and typed error-carrier mismatches (29 URLError and 47 JetHTTPError expected but JetErr produced). No new policy conversion or semantic Rust shim authorized; HTTP criterion stays open. Native DataFormat and Digest256 source projection patch builds in fresh jet binary; exact filtered DB all-tier proof pending."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Timestamp correction (2026-09-24 09:15 EDT): previous AOT database census log used an approximate future wall-clock time (~09:25) in error. The test artifacts and the 50-error diagnosis/evidence are unchanged; this correction records actual wall-clock timing without altering any criterion."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 ~09:25 EDT read-only bounded AOT database root census (agent://DatabaseAotMap) for exact failure artifact://2594: 50 rustc errors = missing source DataFormat native projection 29 (TIR/tir_to_mir_types.rs marks compiler-owned; MIRRust.rs skips declaration; Context.rs omits mapping despite native jet_std::DataFormat), Digest256 source record vs native JetDigest256 tuple 6 (inherent impl/method/field/named constructor), DataLoader native field/carrier mismatch 5, DataError JetErr vs typed DataError mismatch 10. Four separate AOT projection slices; no all-tier pass; #3550 criteria remain open. Independent typed StoreErr selected-entry exact AOT/default-JIT/interpreter proof PASS artifact://2659, but this is not data/web API closure. No blind coercions or repeated database test this batch."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 08:42 EDT exact filtered `JET_CORE_CONFORMANCE_FILTER=core/data/database cargo test -p jet --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --exact --nocapture` FAIL artifact://2598. Previous default JIT invalid SHA-256 digest handle panic no longer appears after source Digest256.hex() cutover; fixture runs in dev, then AOT rustc rejects generated Rust with 50 errors, including missing source DataFormat type (E0425 around generated :164834) and JetDigest256 tuple native vs source `.bytes` record constructor (E0560 around :167533). Test stops before all-tier parity; no criterion met. This is separate AOT projection slice; stop same-issue retesting this batch, continue independent selected-entry and file-handle work."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 FRESH REBUILT EXACT JOB QUEUE WITNESS FAIL: `scripts/agent/jet-env jet run examples/features/concurrency/job_queue.jet` exits1, E0102 at lines 13-26 (`<corelib>/Core/jobs::Core/jobs/jobs.jet::JobQueue` has no receiver enqueue/delay/receipt/inspect/events/claim/heartbeat), followed by dependent errors (full command artifact://2746). Read-only route agent://JobQueueRouteScout proves CoreModuleExports source-owns core.jobs.queue, TIR source ModuleCall wins, returns plain in-memory JobQueue while D-DX-QUEUE1=A requires fallible SQLite-default native/provider JobQueue; existing ServiceAuthority.rs and JIT DB.rs implement provider path but factory is shadowed. This is observed source/caller defect, not a new API decision; #3550 criterion2/3 OPEN. Remove parallel source constructor/API with complete caller, generated projection and example/golden cutover; shared compiler/Core registry files currently externally dirty, do not overwrite before integration ownership coordinated."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 08:35 EDT grouped fresh build PASS and exact HTTP status/framing witness still FAIL AOT artifact://2592 (default Cranelift and forced interpreter reach expected eight-line behavior; generated Rust rejects 86 type errors, down from prior 103). New Body/Headers/BodyTooLarge projections removed some errors; remaining first failures: generated Header lacks source name/value fields (E0560/E0609 at aot.rs:172557,175931), and many typed Result Err sites contain JetErr where HTTPError/URLError declared (E0308 at :179968 onward). I2 requires compiler-internal failure, not user diagnostic. Original generated aot.rs scratch was removed by test harness. No further same-issue rebuild/retest in this batch; typed carrier first-producer map and source Header representation need separate bounded follow-up. #3550 criteria remain OPEN. Independent DB proof runs next."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "CORRECTION 2026-09-24 to earlier jobs speculation: D-DX-QUEUE1=A is ratified: jobs.queue() defaults to bundled SQLite durability and one typed Prelude-owned enqueue/lease/ack/retry/dead-letter/wait/status contract, provider override explicit. Core/jobs/jobs.jet:12-17 in-memory/persistence-later prose conflicts with that approved contract, while job_queue.jet shows richer durable calls. This is a defect or stale source/fixture to trace, NOT a fresh product/API decision and must not trigger a new ballot for durability. If current public route does not satisfy D-DX-QUEUE1, #3550 owns full source/provider/example/golden cutover; no runtime claim until #3556 restores fresh build."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 #3559 data/web peer audit source/fixture discrepancy: Core/jobs/jobs.jet:5,12-17 labels Durable job queues yet implements in-memory state-machine and postpones persistence; examples/features/concurrency/job_queue.jet:1-52 exercises provider-backed DB path, claim/heartbeat/delay/dead-letter/pause/resume workflow with no matching examples/features/expected/*job_queue* golden. This is static inconsistency, not proof the provider is absent. Trace checked source/member routing and executable example/golden before changing API or claiming production durability; if new persistence/lease semantics are needed, owner gate. Python/Rust/Zig/Go standard libraries supply in-process queues, not durable job queues."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 filtered database exact three-tier witness artifact://2497 after one canonical typed EncodingLimits.max_total_bytes carrier cutover: previous default JIT `?Int value is not a result` fault no longer appears. New default JIT failure is `panic: invalid SHA-256 digest handle` (Core/data/data.jet:0, exit70) vs forced interpreter success stdout `value-807d0fbc…` exit0. Read-only SHA carrier trace assigned; no database tier parity claim, AOT remains unverified by this witness."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 focused HTTP framing artifact://2492: JIT and forced interpreter both matched eight expected status/framing/header output lines without deopt; default Cranelift HTTPError packed type owner detection fix advanced. AOT then failed to compile generated Rust with 103 type errors (JetHTTPError expected vs JetErr, BodyTooLarge.limit i64 vs JetInt, E0560/E0609); per I2 these are internal compiler defects, NOT user diagnostics. AOT root under read-only provenance trace; HTTP all-tier criterion remains OPEN. DB filtered three-tier proof now in flight after typed EncodingLimits Option carrier cutover."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 read-only JIT carrier trace agent://JitEnumAndOptionTrace: HTTPError InvalidHeader host packs ordinal 2 as scalar, but functions_compile.rs:128-133 recognizes only exact key core.http::HTTPError; checked imported owner key may be path-qualified, so enum matcher reads scalar as heap struct and falls into other (exact owner key still inferred, targeted fix pending). DB DataLimits.safe => EncodingLimits.max_total_bytes None produced as raw packed 0 in enc_stream/mod.rs:676-678; generic typed Option clone requires rt.results handle, and both enc_stream read_limits and Data loader_limits decode packed form. Two-file canonical typed handle cutover assigned; no generic clone shim. Exact criteria stay OPEN until focused three-tier proof."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 06:55 EDT: Latest filtered core/data/database exact regressed before interpreter: default Cranelift `RUNTIME_HOST_FAULT: JIT copy ?Int value is not a result` artifact://2434 after new shared string_split and concurrent integration; prior exact AOT/default Cranelift PASS artifact://2417, so no current JIT parity claim. HTTP exact still JIT InvalidHeader enum mismatch artifact://2428; short-circuit exact all-tier PASS artifact://2376. New split interpreter tier remains unproven. Root tracing read-only and worker lane-check receipts queued; card stays open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 06:57 EDT: After fresh jet build PASS (artifact://2425), HTTP framing focused exact still fails resident Cranelift: invalid header name/value map to `rejected:other`, while six framing lines match; qualified HTTPError packed detector alone insufficient (artifact://2428). Root tracing under HTTP worker; no I9 parity claim. DB filtered still open at interpreter string_split, adapter source-stable but not re-run. Core tables generated-view check PASS. Short-circuit six guard exact all tiers PASS artifact://2376."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 06:50 EDT: Fresh rebuild and exact Core.data rolling_mean_prefix_windows_when_window_exceeds_input still FAILS AOT, 0/1 artifact://2140. Native carrier projections and DataError optional Int write conversion now eliminate 20/28 original generated Rust errors; 8 E0308 remain (JetErr emitted where DataError is required). Default JIT and interpreter passed on earlier run artifact://2063, but current three-tier criterion remains red. I2/I9 require compiler typed-error lowering root fix; no card closure."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 06:41 EDT: Filtered core/data/database exact still AOT+default Cranelift PASS; interpreter advanced past `u8.trap.sub` and `core.builtin.string_starts_with` after shared/checked adapters but next gap is checked `core.builtin.string_split()` E0956 (artifact://2417). Worker tracing shared split kernel; no three-tier DB parity claim. HTTP host InvalidHeader canonical enum-ID fix source-stable, exact test pending after fresh build; history needs shared Prelude bounds bridge."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 06:35 EDT: Focused data_one_kernel rolling_mean_prefix_windows_when_window_exceeds_input after Core.data AOT changes still FAILS AOT, 14 rustc E0308 errors vs 28 prior: 7 native projection + 7 typed-failure-route errors resolved, 6 optional Int-to-i64 struct ABI + 8 JetErr-vs-DataError remain. Generator --write/--check and fresh cargo build PASS; exact test 0/1 artifact://2125. Main corrected DataError native-name gate afterward; unverified pending fresh proof. Do not close card or claim I9 parity."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 06:14 EDT: Applied narrow Core.data AOT ABI cutover under active proof: mapped DataTracked/DataWatch/DataWatchStatus to existing native carriers, added DataError optional Int write-boundary conversion, marked infallible error constructors !Never in data/loader/stream. Running generator check, fresh compiler build, and exact rolling_mean_prefix_windows_when_window_exceeds_input test. This is not runtime proof until command completes; broad data/web card criteria remain open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 06:09 EDT: Focused HTTP framing test now compiles and runs in resident JIT after fixing fixture IO effect; first six request/response framing outputs match, but invalid header name/value both returned typed `rejected:other` instead of expected `rejected:InvalidHeader` (artifact://2388). Worker tracing canonical HTTPError tag/host setter, no tier parity claim. DB latest forced interpreter gap `core.builtin.string_starts_with()` has source-stable adapter but not yet retested (artifact://2382). Short-circuit guard exact all-tier PASS artifact://2376."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 06:02 EDT: Filtered exact `core/data/database` now AOT + default Cranelift PASS; forced interpreter advanced past previously missing u8.trap.sub after shared fixed-arithmetic adapter, next missing checked builtin `core.builtin.string_starts_with()` E0956 (artifact://2382). HTTP framing exact temporarily blocked by test-fixture `run` effect omitting IO, artifact://2379; test-only declaration corrected and not yet rerun. Boolean short-circuit exact I9 PASS artifact://2376. No overall DB/HTTP parity claim."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 06:03 EDT: Focused `cargo test -p jet --test http_i9 source_boolean_short_circuit_guards_are_lazy_on_all_supported_tiers -- --exact --nocapture` PASS 1/1 (artifact://2376): six guards with empty/slash/other values match AOT, forced interpreter and verified resident Cranelift no-deopt/no-fallback. HTTP framing exact three-tier proof now in progress; no HTTP parity claim yet."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 05:58 EDT: HTTP interpreter now adapts checked body/header builders via the shared Prelude header validation, preserving sticky InvalidHeader and native request target path; numeric interpreter uses the shared fixed-width arithmetic kernel for checked Overflow trap routes. History native strategy codegen now skips canonical core.encoding.DataTree and bridges absent strategy to typed None. Fresh `cargo build -p jet --bin jet --quiet` passed (artifact://2374); static Core conformance PASS 2469 functions/2476 programs/11 carve-outs/0 uncovered. Focused short-circuit, HTTP, database, histories three-tier runtime proof in progress; no claim of parity pending exact results."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 05:35 EDT: Filtered core/data/database exact artifact://2359 now executes AOT and default Cranelift JIT successfully after canonical imported generic source specialization, but forced interpreter compile fails E0956 unsupported `core.numeric.u8.trap.sub()` in reached Core/data source. No AOT rustc mismatch remains for this fixture. Worker mapping missing interpreter numeric route; HTTP worker owns MIREval concurrently, so edits will serialize. HTTP JIT proof passed all output; interpreter blocked on http.request_body setter artifact://2355. Criteria open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 05:31 EDT: Exact HTTP framing after fresh jet build, single Prelude request-target projection, and short-circuit fix: default Cranelift JIT matched all 12 HTTP/Bool lines with no deopt, but forced interpreter stopped at compile E0956 unsupported `core.handle.http.request_body()` setter route (artifact://2355). Source calls request.header/body, so interpreter needs same checked Prelude meaning, not a new policy. AOT not reached. Database generic namespace unit PASS 1/1; filtered exact rerun after current compiler snapshot stable."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 05:22 EDT: Core.data rolling_mean prefix cell now passes default Cranelift JIT and forced interpreter after root fixes to MIR Copy-valued CoreCall ownership (TIR/mir.rs) and shared Prelude core.math.fabs interpreter route (plain_calls.rs). AOT remains FAIL/I2: generated Rust has 28 E0392/E0282/E0599/E0277/E0308 in source DataTracked/DataQuery and DataError vs JetErr; exact focused cargo test rolling_mean_prefix_windows_when_window_exceeds_input failed artifact://2063. Fixed separate foreign bridge sandbox omission for new Core/text/string.jet by digesting/staging a read-only file closure (FFI.rs), so proof reached AOT rustc. Do not close card or claim full tier parity."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 05:20 EDT: Database generic template lookup now uses checked Core namespace (`core.data`) rather than Rust loader alias (`core_core_data`); focused `cargo test -p jet-codegen --lib checked_database_template_uses_core_source_namespace_key --quiet` PASS 1/1 after fixing one compile-time borrow mismatch. HTTP path projection now one pure embedded Prelude helper called by AOT/JIT provider and interpreter ambient, not duplicated host defaults. Fresh jet binary rebuild underway; exact database/HTTP tier proofs pending."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 05:12 EDT: Filtered core/data/database exact now advances from missing imported generic target to compiler invariant `checked Core source generic target <corelib>/Core/data::Core/data/data.jet::database has no loaded template` during source specialization, before tier execution artifact://2295. Worker resolving module alias/template lookup using checked bundle source; no generic host fallback. Query/facts focused tier proof passed artifact://2288; HTTP JIT path mismatch artifact://2280, independent source/provider constructor seam under investigation. All broad card criteria still open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 05:18 EDT: Filtered `JET_CORE_CONFORMANCE_FILTER=core/web/query/facts cargo test -p jet --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --exact --nocapture` PASSED 1/1 (37.79s) across AOT, default Cranelift and forced interpreter artifact://2288 after checked imported callable ABI and native enum trait fixes. This is an exact filtered slice proof, not specialized-wide closure. HTTP framing still valid request path-empty mismatch artifact://2280; filtered core/data/database exact next."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 05:15 EDT: Fresh HTTP framing exact 3-tier proof after canonical short-circuit TIR->MIR fix advanced: default Cranelift JIT ran with exit0/stderr empty and no deopt, rejected malformed framing/204 correctly, validated 304/200 and all six &&/|| guard witnesses, but valid POST request dispatch path was empty instead of `/safe` (artifact://2280); first prior E3010 on Core/net/url.jet eliminated. AOT/interpreter not reached. Worker investigating checked parse_request/path seam; query filtered exact running."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 05:07 EDT: Integrated canonical TIR->MIR branch+phi short-circuit for both &&/|| (fixes Core/net/url.jet eager raw[i] E3010), checked imported Core generic specialization from loaded checked template, and checked effective Fn-return signature at imported Core callback callsite. Focused `cargo test -p jet-codegen --lib checked_source_ --quiet` PASS 4/4; fresh `cargo build -p jet --bin jet --quiet` PASS artifact://2278. Exact HTTP framing 3-tier running with explicit JIT-executed/no-deopt assertion; filtered query/database proofs follow. No criterion met yet."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 04:41 EDT: exact HTTP framing rerun with test assertion stderr/exit witness reaches Cranelift then fails exit70 Stop[E3010] Core/net/url.jet:544 `if i == raw.len() || raw[i] == U8{47}` on empty byte list, before any print (artifact://2255); worker tracing short-circuit OR across TIR/MIR/JIT, no source workaround. Prior checked private target ICE eliminated. Interpreter/AOT not yet reached. Query/facts still sole AOT callback ABI mismatch (artifact://2254), database generic Core specialization in progress. Criteria open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 04:38 EDT: filtered core/web/query/facts exact criterion rerun (cargo test -p jet --test dev_corpus_gate core_conformance_corpus_uses_strict_three_tier_gate -- --exact --nocapture with JET_CORE_CONFORMANCE_FILTER=core/web/query/facts) confirms native enum JetShow/JetDebug patch removed all eight E0599s; sole AOT E0308 remains: checked Core/web/query.jet::live loader fn() -> String caller has JetHistoryFn0<String>, emitted imported callee expects JetHistoryFn0<Result<String,JetErr>> (artifact://2254). Compiler worker tracing callable ABI without fixture/API workaround. HTTP exact rerun with stderr/exit diagnostic assertion underway; criteria open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 04:34 EDT: exact source_http_message_framing_is_status_aware_on_all_supported_tiers (cargo test -p jet --test http_i9 ... --exact --nocapture) advanced beyond missing checked private trim_ascii target and compiled successfully, but first Cranelift JIT mode returned empty stdout vs six expected framing lines (artifact://2243; failure at tests/http_i9.rs:1150); interpreter/AOT not reached. Worker refining assertion to expose stderr/exit and investigating. Filtered web query/facts exact rerun underway after native query enum JetShow/Debug patch; filtered database still blocked on canonical imported Core generic specialization. Criteria remain open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Database blocker root now traced: `api.database<String>(...)` is a sema-checked generic Core source MethodCall with resolved return, but imported-body projection in Codegen/TIR/mod.rs skips every generic function (type_params nonempty); existing specialization only sees entry-local templates. Fix needs checked imported generic specialization, not a name alias or source fixture workaround. Filtered query fixture `live(..., () -> \"jet\")` matches Core/web/query.jet public loader fn() -> String; ninth AOT mismatch is callback lowering, not bad fixture. Focused local private Core function closure unit passed 1/1; fresh bin and exact HTTP retry pending."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "2026-09-24 04:04 EDT: Exact rolling_mean_prefix_windows_when_window_exceeds_input progressed past both earlier Core.math provider and missing checked target failures after shared compiler fixes, but default jet run now fails I2 MIR legality: MirFunctionId(5506907506660982443) moves MirValueId(13997917672116848703) more than once at 34430..34432 (artifact://1995). Data criterion remains open; investigating MIR ownership root."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Fresh compiler bin passed after checked Core source target closure patch; focused codegen checked reference units passed 2/2. Exact HTTP framing tier advanced past imported request target, now I2 ICE on same-module Core/net/url.jet::parse → private trim_ascii missing checked target (artifact://2197); typed local closure repair in progress. Filtered database conformance still I2 ICE missing checked Core/data/data.jet::database target for generic `api.database<String>` call (artifact://2200); AST form under investigation. Filtered Core/web/query/facts exact advanced from 50 to 9 AOT errors after preserving source-owned WebQuery records (artifact://2203): native enum JetShow/JetDebug missing (8), live callback fallible/nonfallible mismatch (1). No data/HTTP/query three-tier criterion met."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Static Core conformance denominator previously passed (2469 funcs, 2476 programs, 11 carve-outs, 0 uncovered), not tier proof. Fresh exact HTTP framing tier cargo test -p jet --test http_i9 source_http_message_framing_is_status_aware_on_all_supported_tiers -- --exact --nocapture FAILED I2 ICE: compiler now resolves canonical checked target <corelib>/Core/http::Core/http/client.jet::request, but TIR function closure omits that callee (artifact://2135). Filtered core/data/database conformance fails analogous missing imported checked function target (artifact://2118), after fixture unwrap repair. HttpCheckedTargetLuna9 now repairing sema function-reference closure. Filtered core/web/query/facts AOT fails ~50 generated Rust type mismatches from overbroad native WebQuery source-record projection (artifact://2139); canonical owner projection correction released but runtime retry pending. No HTTP/data/query tier criterion met."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Canonical route fix exercised: scripts/agent/jet-env cargo test -q -p jet-foundation --lib transparent_math_primitives_keep_the_fixed_provider_route passed 1/1; fresh cargo build -q --bin jet passed. Exact rolling_mean_prefix_windows_when_window_exceeds_input retried and still FAILED before execution, now `run: missing checked function target core.data::rolling_mean` exit101 instead of prior Core.math.is_finite target. Source-owned function reachability/target matching remains open, DataTargetScout is locating root; no data tier claim. Generator Core views were stale after concurrent Core.jet changes and are being refreshed before independent TLS proof."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Focused data parity test scripts/agent/jet-env cargo test -q -p jet --test data_one_kernel rolling_mean_prefix_windows_when_window_exceeds_input -- --exact FAILED before execution: generated TIR called __jet_core_math::__jet_is_finite from Core.data::nonfinite despite sema choosing infallible provider leaf; missing checked function target, exit 101. Main changed canonical CoreModuleExports::core_source_owns to exclude transparent core.math primitive aliases for both sema and codegen; fresh foundation unit/build/exact tier retest is running. No data criterion is met by this failure."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Core.web.router path/query plus-decoding and invalid UTF-8 now pass exact all-tier proof: scripts/agent/jet-env cargo test -q -p jet --test web_app_graph router_path_and_search_plus_decoding_are_distinct -- --exact (1 passed, AOT/default jet run/forced interpreter). Fixed compiler duplicate synthetic enum fallback, recorded generated operator Comparable method dependency in sema, and explicitly handled plain helper carriers in typed router paths; generated Core tables checked and fresh jet binary built. The larger data/web criterion remains open; crypto, data, and other web surfaces still need exact proofs."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Correction to the immediately preceding note: artifact://1830 was not a verified captured output link. The exact router command and reported 17 rustc errors are real, but there is no evidence artifact at that address. I will attach a real capture only after a fresh run."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "The router plus-decoding case passes default run, but its new compiled/default/interpreter parity test is not green. AOT first failed on a missing return value, then on missing source-owned enum declarations; I fixed both compiler ownership gaps and reran the exact test. The latest AOT still rejects generated Rust with 17 errors: local router enum literals use a different type name than their canonical declarations, and some error values become the generic JetErr. Evidence: scripts/agent/jet-env cargo test -q -p jet --test web_app_graph router_path_and_search_plus_decoding_are_distinct -- --exact, latest failure artifact://1830 (test output). No router three-tier result or card acceptance is claimed."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Core conformance static denominator PASS again: 2469 public funcs, 2476 programs, 11 carveouts, zero uncovered. Filtered exact core/data/database tier proof FAILED at fixture E0302 `.source` on still-wrapped loader (artifact://2013); corpus owner corrected fixture to unwrap before source assertion, rerun pending. Filtered core/web/query/facts tier proof reaches AOT but rustc rejects generated missing imported WebQueryNetworkMode, WebQueryError and WebMutationStatus declarations (artifact://2056, I2). Scout tracing imported Core nominal AOT emission. Static denominator is not tier execution proof."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "HTTP framing source now passes prior E0068 syntax point; exact all-tier proof fails earlier in compiler checked MIR: Method.Custom(String) pattern has payload but Core exported enum metadata labels Custom as unit, ICE unit MIR variant Custom has no payload 0 (artifact://2005). HttpMethodPayloadLuna8 is repairing canonical Core enum payload model and MIR projection; no HTTP behavior/tier claim yet."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "The sync tie-break fixture now passes in compiled, default run, and forced interpreter modes: scripts/agent/jet-env cargo test -q -p jet --test sync_crdt map_merge_equal_timestamp_conflicts_are_deterministic -- --exact (1 passed). Its bare core.data dependency had been starting an unrelated Arrow bridge; direct data calls still select that provider. Native sync RowPolicy and the Jet sync policy list also no longer share a Rust type, and a None fallback keeps the checked option payload type. This proves only this sync scenario, not the whole data/web card. Router decoding and broader CoreLib tests remain open."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Fresh HTTP framing exact test after migrating unit-fallible signatures and correcting query_decode brace reaches sema but FAILS before runtime: Core/http/http.jet has E0068 at byte30536, E0308 untyped None at bytes14458/14474, E0121 moved piece bytes24972..25138; fixture typed HTTPError.InvalidFraming equality is E0312 because checker reports non-Equatable operation field, while prior imported variant pattern was E0305 nominal struct-vs-enum. Focused artifact://1972. HttpFramingLuna6 owns source repairs; preserve typed variant witness and I9 proof, no criterion met."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Correction to earlier HTTP syntax-gate note: the owner already ratified D-SIG-AFTER1=A (`docs/spec/syntax-decisions.md:7432-7455`), explicitly saying fallible Unit uses arrowless `fn ... !HTTPError {}` while checker infers body effects. This is an approved cutover, not a new syntax ballot. HttpFramingLuna6 now owns the four stale unit-fallible HTTP signatures in Core/http/http.jet and Core/http/server.jet, preserving named error, body, and effect checking; no claim of runtime proof until fresh generated-source build and exact three-tier HTTP test pass."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "HTTP source framing test blocked before runtime by a ratified-syntax contradiction, not evidence of HTTP meaning: exact cargo test -p jet --test http_i9 source_http_message_framing_is_status_aware_on_all_supported_tiers -- --exact --nocapture after Core table generation and fresh jet build parsed the test fixture, then emitted E0003 for unit-fallible HTTP serve signature with effects first (or E0068 with existing !HTTPError -[Net,Time.Wait]> at Core/http/http.jet:456 and server.jet:24). crates/jet-parser/src/Parser/Items/functions_params.rs:505-551 diagnoses Type::Result(Unit,E) whenever an effect prefix exists; D-SIG-AFTER1=A also retires failure-before-effect spelling. No currently parser-accepted spelling retains the explicit Net/Time.Wait ceiling and !HTTPError without an owner syntax decision. HttpFramingLuna6 source request/response framing logic and typed test remain integrated but have NO applicable-tier proof; worker scoped lane-check -p jet CHECK OK only. Do not remove effect ceilings or serve API to game proof. Source/client.jet transitive syntax+type defects were fixed; this owner-gated signature issue remains."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Read-only sync/jobs contract audit: Core/sync/sync.jet still source-owns obsolete LWW `text_edit(text,value)` while approved D-SYNC1/fixed_sigs requires positioned five-argument sequence-CRDT provider; source ownership shadows existing `jet_sync_text_edit` route. A source-only arity tweak is unsafe because carrier/merge semantics differ. Smallest coherent follow-up is SyncText family (`text_new`,`text_set`,`text_edit`,`text_merge`,`text_show`,`text_metadata`) plus main-owned Core.jet cutover and exact forced-interpreter/default JIT/AOT core/sync/text_edit witness, not yet dispatched during current compiler repairs. Core/jobs/jobs.jet source in-memory string queue shadows durable typed JobQueue provider; retiring its extra free-function exports is owner-sensitive public API choice, so affected jobs slice held pending explicit owner gate while independent work proceeds. No provider-only witness misrepresented as source parity."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Fresh exact `cargo test -p jet --test http_i9 source_http_message_framing_is_status_aware_on_all_supported_tiers -- --exact --nocapture` FAILED before framing assertions: JIT compiled embedded Core/http/client.jet and hit E0003 first at byte 12789 (`This line computes a value but does nothing`), then nested fn cascade and EOF missing brace at byte 17827. `wc -c Core/http/client.jet` is exactly 17827, distinct from 39865-byte Core/http/http.jet and ~1KB test fixture. HttpFramingLuna6 revived to fix only transitive client source syntax plus owned HTTP paths, preserve six tests; Main reruns exact AOT/default/interpreter proof. No criterion met."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Read-only Core data/web audit found two independent masked Jet-source defects: data public_parameter indexes split[1] for no-delimiter flag although PreludeDataFlow canonical policy hashes it; web query esc_json drops UTF-8 multibyte characters by decoding each byte. Dispatched disjoint DataParameterLuna6 and QueryUnicodeLuna6 for source repairs and focused witnesses; host-routed conformance alone does not prove Jet source, so preserve explicit proof gap until source exercise. Larger sync ratified contract and jobs typed queue cutovers require separate coordinated ownership of shared Core.jet, currently TestingHistoryLuna6 owns that table."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Owner deadline 0700: disjoint in-repo worktree lanes active for Core compute, data, HTTP client, web router and sync. Compute all-tier test after raw Equatable AOT fix still fails generated E0308 from implicit JetErr helper through explicit ComputeError; dedicated compute source worker repairing carrier boundaries, Main reruns focused AOT/default/interpreter proof after integration. No unrun criteria marked met."
+        },
+        {
+          "at": "2026-09-24",
+          "by": "Main",
+          "text": "Owner overnight direction: parallelize independent Wave A delivery without OOM. Dispatched Luna HttpFramingLuna6 for Core/http/http.jet + hostile-case test; read-only DataWebGapScout maps data/web/reactive/sync/service/jobs next focused gaps. Main owns shared projections/generator writes and exact integrated-tier proof; no broad green claim from worker lane-check."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every public core.data declaration has a Jet body or a typed runtime leaf, with no native policy shim, and jet Tools/agent/CoreSurfaceLedger.jet --check passes (was c1, c2).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev f3ef655a4c (state check, G3Core-2 run on the gate-p45 jet). `jet -A Tools/agent/CoreSurfaceLedger.jet --check` rc 0 (\"source-derived, verified against 11 recorded competitor surfaces, and unique\"). git grep for bodiless fn declarations in Core/Data finds only 3 fn-typed struct fields (Data.jet:348, 414, 433); every core.data declaration has a Jet body. The only non-source-owned core.data dispatcher row is `__host_path_is_file`, a typed runtime leaf (`#Import(c) priv host_path_is_file: fn(path: [U8]) -[FS]> Bool EncodingCause!` in Compiler/JetRuntime/Source/Public/Data.jet, with its RuntimeInterface row): a stat call with no policy, kept so a non-UTF-8 path is not lossy. Main rules it a typed runtime leaf, not a native policy shim.",
+          "at": "2026-11-14T05:39:16.637Z"
+        },
+        {
+          "n": 3,
+          "text": "core.data APIs have failure and effect cases under tests/cases/corelib that pass on O0, O1, O2 and web.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dc1dbbe179 (batch 46a, dev 6cf5809415..81b426cf46): case corelib/core_data_failures_and_effects_match_on_every_tier_and_web 1/0 on the gate-p54 jet. Its steps are `jet run` (O0), `jet build` plus the built binary (O1), `jet run --release` (O2) and `jet build --target web` plus `node app.js`, all printing one .out. It covers 12 typed DataErrors (Empty, NonFinite, Overflow, InvalidArgument, Decode, Bridge) and the FS effects (a missing file gives IO; a written file decodes).",
+          "at": "2026-11-14T05:59:16.144Z"
+        },
+        {
+          "n": 4,
+          "text": "D-DX-QUEUE1=A jobs.queue() uses one SQLite-default durable provider identity, and the maintained job_queue example with receiver enqueue/claim/ack/retry/delay/dead-letter compiles and passes golden plus focused AOT/default-run/forced-interpreter lifecycle/restart proof; source-owned in-memory JobQueue no longer shadows the provider.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "vb3 at dev 490142763c (chain FIXED_POINT s2==s3, jet 28a779f1d474bca1); results $JET_SCRATCH_ROOT/lanes/Main/vb3/kit: golden Examples/features/concurrency/job_queue.jet PASS at o0, o1 and o2; cases services_runtime/job_queue_reaches_the_same_queue_on_every_run and job_queue_refuses_a_shared_authority_file PASS; ui job_queue_checked_identity and job_queue_effects_narrow PASS",
+          "at": "2026-11-06T16:35:50.159Z"
+        },
+        {
+          "n": 5,
+          "text": "The maintained job queue proves D-DX-QUEUE1=A on every tier: `JET_GOLDEN_FILTER=concurrency/job_queue Tools/agent/jet-env cargo test --test golden examples_compile_and_run` passes with a new golden, and `for m in --release '' --interpret; do Tools/agent/jet-env jet run $m Examples/features/concurrency/job_queue.jet | diff - Examples/features/expected/concurrency/job_queue.out; done` is empty.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "vb3 at dev 490142763c (chain FIXED_POINT s2==s3, jet 28a779f1d474bca1); results $JET_SCRATCH_ROOT/lanes/Main/vb3/kit: the native-era form of the cited proof: golden concurrency/job_queue PASS at o0 (jet run), o1 (jet build) and o2 (--release) with its golden",
+          "at": "2026-11-06T16:35:51.093Z"
+        },
+        {
+          "n": 6,
+          "text": "[#3012] Quantile, median and describe keep exact values, errors and mutation behavior (NaN, inf, signed zero, invalid q) while using rank selection. describe reuses computed sums. Required cells pass, and the small sorted-input loss is resolved. tooling/data_quantile_partitions golden.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Timed verdict (Lander qtimed, 2026-11-14 07:25, gate-p62 jet on dev 26afb1a0e6): quantile partition cells (5f78993a99), selection vs sort baseline: PASS 30 of 30 cells, worst ratio 0.478 (reverse n=1001 q=0.1234567). The small sorted-input loss is resolved: sorted n=1001 is 0.051 (q=0.5) and 0.051 (q=0.1234567), n=10001 0.035, n=100001 0.029. Golden tests/run/Tooling/DataQuantilePartitions passes on O0, O1 and O2 (sweep at e764ade14b, recorded above); rank selection fe108d1ea5, describe reuse ca3c169d18.",
+          "at": "2026-11-14T12:41:26.421Z"
+        },
+        {
+          "n": 7,
+          "text": "[#3018] A private, worst-case-linear rank-selection prototype (no public export) proves the boundaries, partition laws, callback error order, the borrowed-key/comparator rules and the comparison bound. `rank_select_prototype` test passes on every level.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G12Docs-5 closer sweep, dev e764ade14b, seed-b14: jet test Core/Data/Data.jet --filter rank_select_prototype gives 1 passed, 0 failed at O0, at --optimize=basic and at --release. The prototype is private (priv rank_order module, Data.jet:2783), with no public export.",
+          "at": "2026-11-13T10:10:44.376Z"
+        },
+        {
+          "n": 8,
+          "text": "[#3417] data_loader.jet uses raw backtick JSON and checks with no E0904/E0112/E0905 through Compiler/ (TypeRelations nominal Apply-head identity and codec bounds fix, with a focused before/after test). Guidance names the existing raw and escaped forms.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 47120e21fe (G3Core2-apply-identity-r2), landed by Lander5 via directq on 2026-11-13. seed-b14 on 7611eb49b1 plus the patch: apply_heads_unify_by_declaration_identity 1/0; the generics filter 18 PASS, 0 FAIL, 1 KNOWN-FAILING (#5454); DiagnosticRows --check rc 0.",
+          "at": "2026-11-13T12:36:20.760Z"
+        },
+        {
+          "n": 9,
+          "text": "[#3749] Fix the defects found proving #3260: the core.reactive `fn effect` versus KW_EFFECT_DECL collision (reactive.out and reactive_scope.out pass) and grouped/missing-map comparison. #3260 is then re-proved.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "vb3 at dev 490142763c (chain FIXED_POINT s2==s3, jet 28a779f1d474bca1); results $JET_SCRATCH_ROOT/lanes/Main/vb3/kit: golden Examples/features/ui/reactive.jet and reactive_scope.jet PASS at o0, o1 and o2 (reactive.out and reactive_scope.out)",
+          "at": "2026-11-06T16:35:52.046Z"
+        },
+        {
+          "n": 13,
+          "text": "The Jet SQLite is the complete library: the public sqllogictest corpus passes, WAL mode and crash-recovery round trips with C SQLite pass, and every SQL feature of SQLite 3.45 that Core/Db does not use yet is ported (moved from #6695 c2 and c3 by owner order 2026-11-09).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6894 c1: the SQL engine leaves Core for the sql package (D-DB-AUTH-HOME1=A); SQLite completeness has its own card, split into corpus, interop and feature census",
+          "at": "2026-11-15T03:48:11.347Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ready-for-agent",
+        "cluster-core-web-ownership",
+        "batch-core-ui",
+        "wayfinder:task"
+      ],
+      "parentId": "c0u1wtj7",
+      "needsAcceptance": false,
+      "created": "2026-09-22T00:15:04.333Z",
+      "updated": "2026-11-15T03:48:20.175Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 13,
+      "completedAt": "2026-11-15T03:48:20.175Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T04:06:57.480Z"
+    },
+    {
+      "id": "c0h4r83r",
+      "num": 5982,
+      "title": "Map: Docs and CI: runnable docs, install, examples hygiene, spec truth",
+      "body": "Destination: Every runnable doc block runs in CI; the spec describes only what works.\nNotes: Batch DOC of the 2026-10-28 board consolidation (TowerDedup). One worker (sonic), one build, one proof run: the docs-block CI check (#5953) and the unused-grant lint over Examples/ (#5961). Order: #4904 #5953 #3173 #4728 #4800 #5782 #5892 #3195 #5950 #5961 #5962.\nDecisions so far: D-P0-CAP1 (open) on #5962\nFog: no criteria yet on #5892 #5782 #4800 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e10",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Map card distributed 2026-11-15 and closed: runnable and true docs to #6899, guides to #6900, E35xx snapshot coverage to #6752."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 45 criteria from archived #54, #100, #104, #138, #149, #150, #151, #155, #244, #459, #672, #1358, #1587, #1656, #1881, #2228, #2328, #2900, #2926, #2930, #2980, #2984, #3859: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5961 \"Examples grant only the permissions they use; the unused-grant lint runs over Examples/ in CI\" (CardTrim 2026-10-28: single-root bug step of map #5982 (Map: Docs and CI: runnable docs, install, examples); 2 criteria, 0 ratified decisions). Body: Examples are copied by users, so their permission lists become everyone's defaults. Today some examples grant far more than they use; the FFI example grants 14 roots for one base64 call. This card trims every example to what it uses and keeps it that way in CI. Evidence (audit 2026-10-28, SEC-03). Script permissions follow #5949."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5953 \"CI checks every runnable ```jet block in README and user docs; fix the 12 failing blocks\" (CardTrim 2026-10-28: single-root bug step of map #5982 (Map: Docs and CI: runnable docs, install, examples); 3 criteria, 0 ratified decisions). Body: Docs teach by example, so a broken example teaches the wrong thing. Today 12 of the 29 runnable Jet blocks in the README and user docs fail `jet check`, starting with the README. This card fixes them and adds a CI check so docs cannot drift again. Evidence (audit 2026-10-28, DOC-02, doc_blocks.sh): 17/29 pass. README prefix `!NameError` sample -> E0003; core-library.md 7 failures (E0107 `process`, E0302, E0202, E0740, E0224, E0357, E0433); metaprogramming.md 3 (`@WIDTH`/`@CONFIG` prefix constants, E0357, see #3662); foreign-octave.md 1 (E1002). Related: #3173."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5892 \"Spec describes arenas, raw pointers, sentries, #Context and #Policy(gc) as working; the native backend builds none of them\" (CardTrim 2026-10-28: single-root task step of map #5982 (Map: Docs and CI: runnable docs, install, examples); 1 criteria, 0 ratified decisions). Body: From the memory review (Docs/audits/2026-10-23-memory-model-review.md, G1-G4): spec.md:1817-1946 and the sentry/GC/#Context sections read as working, but IR has no lowering (BuildExpr.jet:464-477, 1426-1428), Core/Mem/Mem.jet:23-31 holds empty structs, Sentry.jet is never called from generated code, and GC facts are sema-only. AGENTS.md: fix stale prose by cutting or correcting it. Acceptance: the spec states what builds today (or the features are built), pending the owner decisions on the companion card."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5782 \"Goose and Lobster mining: close recall audit 3 (65 misses) and re-mine uncited deep spans\" (CardTrim 2026-10-28: single-root task step of map #5982 (Map: Docs and CI: runnable docs, install, examples); 0 criteria, 0 ratified decisions). Body: Run dir $JET_STATE_ROOT/scratch/mine/goose-2026-10-23 (skill mine-for-jet-v2). State 2026-10-23: 244 segments, ledger 3738, claims 349; gate-10 PASS. Recall audits: 1 FAIL, 2 FAIL 78.1% (33 misses, all fixed), 3 FAIL ~77% (seed audit3-20261023-w8d2, R/recall-audit.json: 65 misses + 4 short reasons; 9 misses + 4 reasons fixed in remine/gaps/audit3-misses.txt). Pattern: ledger covers the first few hundred lines of large files and thins after (typecheck_types.h L299-603, codegen_builtin.h L404-887, codegen_frames.h L584-858, vmdata.cpp L124-303, codegen_lval.h L285-623), plus test/expected outputs and bench dirs. Remaining: (1) the other 56 audit-3 misses (extraction work, assigned to Opus by "
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4800 \"Docs/spec/architecture.md lacks classification rows for 60 Core namespaces\" (CardTrim 2026-10-28: single-root task step of map #5982 (Map: Docs and CI: runnable docs, install, examples); 0 criteria, 0 ratified decisions). Body: The architecture.md guard, as ported to the Jet test kit, derives Core namespaces from the Jet-side Compiler/JetCli/Source/Cli/CoreSources.jet (110 namespaces) instead of the Rust comptime dispatch files (61), and finds 60 Core namespaces with no classification row in Docs/spec/architecture.md, e.g. core.build, core.compiler, core.db, core.http, core.log. Exact diff (+78/-29): $JET_STATE_ROOT/scratch/TestSlice6/core-law-diff.json. The guard is KNOWN-FAILING in the kit until the rows are added (docs owner)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4728 \"Design guide: a method for hard problems, SOLID translated for Jet, and the escape-hatch ladder\" (CardTrim 2026-10-28: single-root task step of map #5982 (Map: Docs and CI: runnable docs, install, examples); 3 criteria, 0 ratified decisions). Body: Owner notes: 'Only hard problems require guidance: how does Jet set users up to tackle hard problems with a consistent approach?', 'What is SOLID, what can we learn and what are its weaknesses?', 'Overly safe / encapsulated / prescriptive can be harmful', and 'strong primitives-level APIs, then pareto wrappers' (OwnerNotes1 digest section 3). The mechanisms exist (D-ONCE-LAYER1 two-door Core, D-CORE-DOCTRINE1, D-OUTPUT-RETURNS1, D-GATE-LAW1, D-RAWPTR2, D-WRAP-SCOPE1, D-CPU-DISPATCH1, D-ARCH-ADVICE1, D-INSPECT-DECISIONS1, D-COSTLAW1) but no document states the method or the ladder once. Scope: one guide, Docs/spec/guides/design.md, plain prose, three parts. (1) A method for hard problems usin"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "(was #4728) Design guide: a method for hard problems, SOLID translated for Jet, and the escape-hatch ladder: Docs/spec/guides/design.md exists with the three parts and links every cited decision",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6900 c1: docs map replaced by focused cards",
+          "at": "2026-11-15T03:53:19.326Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 2,
+          "text": "(was #4800) Docs/spec/architecture.md lacks classification rows for 60 Core namespaces",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6900 c2: docs map replaced by focused cards",
+          "at": "2026-11-15T03:53:20.619Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 4,
+          "text": "(was #5892) Spec describes arenas, raw pointers, sentries, #Context and #Policy(gc) as working; the native backend builds none of them: the spec states what builds today (or the features are",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6899 c4: docs map replaced by focused cards",
+          "at": "2026-11-15T03:53:22.026Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 5,
+          "text": "(was #5953) CI checks every runnable ```jet block in README and user docs; fix the 12 failing blocks: A CI guard runs `jet check` on every ```jet block containing `fn",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6899 c1: docs map replaced by focused cards",
+          "at": "2026-11-15T03:53:23.308Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 6,
+          "text": "(was #5961) Examples grant only the permissions they use; the unused-grant lint runs over Examples/ in CI: The unused-grant lint runs over every Examples/ program in CI and reports 0",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6899 c3: docs map replaced by focused cards; a tidy error under D-NO-WARNINGS1=A",
+          "at": "2026-11-15T03:53:24.365Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 7,
+          "text": "Every public Core function has at least one runnable example on its doc page, run in CI, and the page shows the function's effect row and failure type; the count of public functions without an example is 0.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6899 c2: docs map replaced by focused cards",
+          "at": "2026-11-15T03:53:25.372Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 15,
+          "text": "(was #155) Add docs for embedded systems & for API/fn maturity tags [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6900 c3: docs map replaced by focused cards",
+          "at": "2026-11-15T03:53:26.322Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 28,
+          "text": "(was #672 c3) E3501-E3505, E3512, and E3530 are each checked for diagnostics.md registration, reachable Jet-owned what/why/fix output, and pinned test coverage; every missing cell has one scoped gap card [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6752 c7: diagnostic snapshot coverage is #6752",
+          "at": "2026-11-15T03:53:27.683Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 41,
+          "text": "(was #2328 c2) Unsupported public claims are removed or narrowed. Evidence links resolve to committed gauntlet, conformance, golden, or suite artifacts [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6899 c5: docs map replaced by focused cards",
+          "at": "2026-11-15T03:53:28.634Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 42,
+          "text": "(was #2900 c1) The complete non-skipping first-hour scenario and its CI/suite registration are implemented in source [precut audit: failing on 9c7ddf1359: C:first_hour/first_hour_cli_journey KNOWN-FAILING #4944 `jet add` is not built yet (E2104): exit 2; expected 0 (known-failing #4944: `jet add` is not built yet (E2104))]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6899 c6: docs map replaced by focused cards",
+          "at": "2026-11-15T03:53:29.578Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 50,
+          "text": "(was #2984 c1) Generated documentation catalogs and producers are removed while executable registry/proof checks retain their input coverage [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6899 c7: docs map replaced by focused cards",
+          "at": "2026-11-15T03:53:30.609Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 53,
+          "text": "jet test on a Core file runs that file's doctests. Found by G1Lead4 on 2026-11-11: Host.jet jet_cli_compile_core_test passes an empty doctest list, so Core doctests are only seen by the census and never run unless a #Test mirrors them. Fix: the Core test path collects and runs the file's jet doctests on the same terms as user packages. Proof: jet test Core/Regex/Regex.jet reports its doctests as run (the count rises by the number of doctests), and a deliberately broken doctest in a scratch copy fails the run.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e7ec019814, seed-b14 (Main ran both): jet test Core/Regex/Regex.jet prints 8 \"doctest 1 of <item> in Core/Regex/Regex.jet: pass\" lines and \"12 passed, 0 failed\" (rc 0). With line 1939 changed in the worktree from prev_boundary(text, 6) // => 3 to // => 4 (then reverted), it prints \"doctest 1 of prev_boundary ...: FAIL\", \"11 passed, 1 failed\" and jet.DoctestMismatch at Regex.jet:1939 (rc 1). Found by G5DevX-1.",
+          "at": "2026-11-13T07:29:36.506Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:map",
+        "consolidation-2026-10-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T11:19:05.440Z",
+      "updated": "2026-11-15T03:53:36.157Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 53,
+      "completedAt": "2026-11-15T03:53:36.157Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T04:06:57.480Z"
+    },
+    {
+      "id": "c0kob6cb",
+      "num": 6005,
+      "title": "Map: Formatter: parser coverage, behaviour gaps, stream predicates, jet new output",
+      "body": "Destination: tests/fmt cases pass on the Jet formatter; jet new output passes jet fmt --check.\nNotes: Batch G15 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && TESTKIT_ARGS=\"--cases $JET_SCRATCH_ROOT/lanes/Audit/consol/cases/G15.golden.txt --tier o0,o1\" JET=$JET Tools/agent/jet-env jet test Tools/testkit \"suite golden\". Order: #5812 #5813 #5814 #5956.\nDecisions so far: D-FMTCOLLAPSE2 (open) on #5956\nFog: no criteria yet on #5812 #5813 #5814 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Map card distributed 2026-11-15 and closed: formatter work to #6898 (which owns the 12 known-failing fmt rows that name #6005), simplify cases to #6850, c25 met (Core.rows rename)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 14 criteria from archived #448, #1514, #1515, #2357, #3503: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5814 \"Formatter cases: 9 fail only their stream predicates\" (CardTrim 2026-10-28: golden/test-gap step of map #6005). Body: Rust-test port SA5, tests/fmt.rs (kit on dev HEAD cc02218111; first errors $JET_RUN_ROOT/RustTestsA/SA5/firsterr-dev.tsv): fmt_layout_block_round_trips_byte_for_byte, fmt_arithmetic_policy_scope_is_canonical_and_idempotent, fmt_simplify_keeps_a_struct_literal_return_braced, fmt_simplify_keeps_a_routed_value_loop_binding, fmt_migrates_each_retired_print_spelling_to_one_canonical_job, fmt_still_canonicalizes_valid_codable_union, fmt_canonicalizes_skipped_decode_union, fmt_simplify_one_line_return_is_ast_equal_and_stable, fmt_map_type_spacing_is_canonical_and_value_spacing_stays. Formatter output differs from the ported expectation; triage each against tests/fmt.rs history before fixing."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5813 \"Formatter behaviour gaps: braced callables, else-if simplify, comment fail-closed, layout compiler-fact check\" (CardTrim 2026-10-28: golden/test-gap step of map #6005). Body: Rust-test port SA5, tests/fmt.rs (kit on dev HEAD cc02218111; first errors $JET_RUN_ROOT/RustTestsA/SA5/firsterr-dev.tsv): 4 cases: fmt_marks_only_value_returning_braced_callables_with_an_arrow (E0081 fn fail has no body); fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table (output differs); package_formatter_fails_closed_on_comments (no output, exit differs); layout_compiler_fact_rejects_unknown_and_user_owned_at_members (accepted with exit 0, rejection expected)."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5812 \"Parser rejects syntax the formatter cases use (E0003: block after a name, value at '>', '{' after a dot-name payload)\" (CardTrim 2026-10-28: golden/test-gap step of map #6005). Body: Rust-test port SA5, tests/fmt.rs (kit on dev HEAD cc02218111; first errors $JET_RUN_ROOT/RustTestsA/SA5/firsterr-dev.tsv): 6 cases: fmt_origin_compiler_fact_stability, fmt_meta_attribute_stability, fmt_preserves_track_binding_marker, fmt_preserves_local_and_shared_reactive_pins ('Expected { to begin the block, found name'); fmt_preserves_computed_fields ('Expected a value, found >'); fmt_preserves_named_payload_variant_dot_brace ('Something unexpected appeared, found {'). Check each spelling against the syntax registry; a retired spelling means the case changes, a ratified one means the parser does."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "(was #5812) Parser rejects syntax the formatter cases use (E0003: block after a name, value at '>', '{' after a dot-name payload)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c1: formatter map replaced by a focused card",
+          "at": "2026-11-15T03:52:59.157Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 2,
+          "text": "(was #5813) Formatter behaviour gaps: braced callables, else-if simplify, comment fail-closed, layout compiler-fact check",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c2: formatter map replaced by a focused card",
+          "at": "2026-11-15T03:53:00.312Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 3,
+          "text": "(was #5814) Formatter cases: 9 fail only their stream predicates",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c3: formatter map replaced by a focused card",
+          "at": "2026-11-15T03:53:01.365Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 8,
+          "text": "(was #1514 c4) tests/cases/fmt has one AST-equality and second-pass stability case for every enabled simplify rewrite, and tests/cases/fmt_project/simplify_mode_is_stable_across_a_project exists; `jet test Compiler --profile cases fmt/` and `jet test Compiler --profile cases fmt_project/` pass [precut audit: failing on 9c7ddf1359: C:fmt/fmt_simplify_one_line_return_is_ast_equal_and_stable KNOWN-FAILING #6005 expected output stream predicate not matched on HEAD (no replayable first error): literal stream differs (known-failing #6005: expected output stream predicate not matched on…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6850 c5: simplify rewrites live on #6850",
+          "at": "2026-11-15T03:53:02.410Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 9,
+          "text": "(was #1514 c5) After the selected migration, rg over examples tests docs/reference for every retired before-form returns only explicit negative fixtures and decision history; a second jet fmt --simplify --check over the same corpus exits 0 and changes no bytes [precut audit: failing on 9c7ddf1359: C:fmt/fmt_simplify_one_line_return_is_ast_equal_and_stable KNOWN-FAILING #6005 expected output stream predicate not matched on HEAD (no replayable first error): literal stream differs (known-failing #6005: expected output stream predicate not matched on…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6850 c1: the one-time simplify migration of the corpus is #6850 c1",
+          "at": "2026-11-15T03:53:03.994Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 10,
+          "text": "(was #1515 c5) jet fmt emits [K:V] for map types in type position — a tests/cases/fmt stability case extended and passing [precut audit: failing on 9c7ddf1359: C:fmt/fmt_map_type_spacing_is_canonical_and_value_spacing_stays KNOWN-FAILING #6005 expected output stream predicate not matched on HEAD (no replayable first error): stream predicate ~ failed (known-failing #6005: expected output stream predicate not matched…]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c4: formatter map replaced by a focused card",
+          "at": "2026-11-15T03:53:05.550Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 11,
+          "text": "(was #2357 c1) `fmt` produces the canonical arrow-loop form and is idempotent [precut audit: failing on 9c7ddf1359: UL:arrow_loop_value_drop FAIL lint fixture must compile and emit a lint]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c5: formatter map replaced by a focused card",
+          "at": "2026-11-15T03:53:06.756Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 14,
+          "text": "(was #3503 c5) Parser accepts String? and MyErr! in every applicable type/signature slot, requires -> or -[Effects]> before declared result facts (including error-only declarations), and rejects the old prefix/arrowless forms without fallback [precut audit: failing on 9c7ddf1359: C:fmt/fmt_marks_only_value_returning_braced_callables_with_an_arrow KNOWN-FAILING #6005 Error [E0081]: `fn fail` has no body: exit 2; expected 0 (known-failing #6005: Error [E0081]: `fn fail` has no body)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6898 c1: the failing proof is a fixture in a retired `fn` spelling; current suffix-type and arrow parsing is FMTSAFE c6",
+          "at": "2026-11-15T03:53:07.987Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 15,
+          "text": "(was #3503 c6) jet fmt and relevant code fixes emit suffix types, arrow-before-result signatures, one blank line between functions, and safe ordered-arm-table rewrites; formatting is idempotent and old spellings receive registered actionable diagnostics and UI snapshots [precut audit: failing on 9c7ddf1359: C:fmt/fmt_marks_only_value_returning_braced_callables_with_an_arrow KNOWN-FAILING #6005 Error [E0081]: `fn fail` has no body: exit 2; expected 0 (known-failing #6005: Error [E0081]: `fn fail` has no body)]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c6: formatter map replaced by a focused card; greenfield: no teaching diagnostic for old spellings",
+          "at": "2026-11-15T03:53:09.277Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 18,
+          "text": "fmt_is_lossless_on_supported_source_corpus (Compiler/JetCli/Tests/FmtLossless.jet) passes: jet fmt keeps every token of every Examples and tests/ui source; on 95e5e3e027 it drops or changes tokens in 131 files, cannot parse 11 example programs and writes 4 outputs that do not lex",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c7: formatter map replaced by a focused card",
+          "at": "2026-11-15T03:53:10.490Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 19,
+          "text": "jet fmt never changes meaning or order: on Compiler/JetCli/Tests/ReceiptStorePorts.jet (RustPorts-S7) it reordered the fields of a named tuple type and added a comma after a wrapped 'loop … in' head (formatted copy kept under $JET_SCRATCH_ROOT/held/). A case pins each, and jet fmt --check passes on the Compiler/JetCli/Tests folder (46 of 52 files flagged on 2026-11-04).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c8: formatter map replaced by a focused card",
+          "at": "2026-11-15T03:53:11.955Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 20,
+          "text": "jet fmt writes only when asked to. --diff (with or without --check), --check and --dry-run never write: they report and exit 1 on a change, leaving the bytes unchanged. On seed-t21, `jet fmt --diff FILE` rewrote the file and exited 0 (G6Decl's repro, 2026-11-11). An unknown flag form such as --check=true is refused with the CLI's unknown-flag error instead of being ignored, and after `--` the word --check is a path, so a missing file is an error. CLI #Tests cover each form.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Meet batch g6f on dev 2368741c9b with seed-b13 (jet@a0.0.45#6c8af19f74a2): every line for this criterion PASS, 0 FAIL, each at 24G. Summary at $JET_SCRATCH_ROOT/lanes/Lander/loop/out/meet-g6f/summary.txt.",
+          "at": "2026-11-12T10:54:14.357Z"
+        },
+        {
+          "n": 22,
+          "text": "jet fmt --diff prints a minimal unified diff (longest-common-subsequence lines): jet_format_unified_diff (JetParser) never prints moved or unchanged text as deleted and re-added. On seed-t22, Core/Text/Fmt.jet's pure restyle (blank lines between items, wrapped one-line fns) printed as '-5,10 +5,0' and then one '-16,509 +6,523' replace hunk, which reads like a deletion of the header and number: fn (found by G6Meta, 2026-11-11). Proof: a #Test where inserting one blank line yields a one-line hunk.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c9: formatter map replaced by a focused card",
+          "at": "2026-11-15T03:53:13.252Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 23,
+          "text": "Every tracked .jet file under Compiler/, Core/, Jetpack/, Examples/, Tools/ and tests/ (negative fixtures excluded) passes jet fmt --check with the formatter of the train compiler, and a guard keeps it so. On seed-t22 almost every file fails on canonical blank lines between items and wrapped over-wide one-line fns (G6Meta, 2026-11-11). The one-time reformat lands as its own mechanical commit after c18 and c19 prove the formatter keeps every token, and lanes rebase onto it.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c12: formatter map replaced by a focused card",
+          "at": "2026-11-15T03:53:14.511Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 24,
+          "text": "jet fmt keeps a file's meaning and layout intent before any repo-wide reformat (#6005 c23 waits on this). Found by ScriptAPI on a0.0.44, 2026-11-11: (1) jet fmt deletes a #!/usr/bin/env jet first line (Tools/agent/Land.jet's output starts at its line 2); (2) it drops the blank line after a // --- x --- banner, which turns the banner into the next fn's doc comment; (3) a call whose argument is a triple-quoted text block is laid out with its args and ) at the call's own indent (the value is unchanged). Fix: keep the shebang byte for byte, keep a blank line that separates a standalone comment from a declaration, and indent text-block call arguments one level. Proof: fmt UI/golden cases for all three, and jet fmt --check over Tools/agent shows no shebang or banner hunks.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c10: formatter map replaced by a focused card",
+          "at": "2026-11-15T03:53:15.850Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 25,
+          "text": "Every .jet file in the repository is Jet that jet fmt formats. Compiler/Prelude/Core.jet and CoreSurfaceInventory.jet are row-table inputs that only the generators read (CoreSourceRows.jet and CoreSurfaceLedger.jet), so they are renamed to a non-Jet extension (.rows) in one cutover covering every reader, LaneCheck and the docs. LaneCheck's generator-input skip and the FmtCorpus exception are removed. jet fmt carries no path special case. git grep for the old names finds no hits, and the generators' --check still owns the files' canonical form.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "dev 3c0aa0be87 added Compiler/Prelude/Core.rows and CoreSurfaceInventory.rows. On dev 6f82527b17: `git ls-files Compiler/Prelude` lists Core.rows and CoreSurfaceInventory.rows and no Core.jet; `git grep -n -E 'Prelude/Core\\.jet|CoreSurfaceInventory\\.jet'` hits only a dated Docs/proposals file; Tools/agent/FmtCorpus.jet lists no path exception for them and LaneCheck.jet says a .rows table is never Jet, its generator check is its whole check.",
+          "at": "2026-11-15T03:53:17.089Z"
+        },
+        {
+          "n": 26,
+          "text": "The package-manifest formatter (pkg_format_source) formats manifests that contain comments instead of refusing them. On seed-b8, 41 of 2,607 package.jet files are refused for comments. Each comment stays with the record or field it precedes or follows. A round trip over every tracked package.jet refuses only invalid manifests, keeps every comment byte for byte, and is idempotent on a second run. Typed Config .jet sources go through the ordinary Jet formatter, so every Jet source has exactly one formatter.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The guard that was missing landed directly as dev 8022a0609f (G6Meta-77, tests/guards/package_manifests). Lander5 2026-11-12 on def68fb097 plus the patch (the tree of 8022a0609f) with seed-b11 jet@a0.0.45#3667b9a1 (built at 19333b2bb3), in a 10G jetwork scope. jet test tests/guards/package_manifests/package_manifests.jet gave rc 0, 2 passed, 0 failed, 0 skipped. The two tests: 'a commented manifest formats with its comments, and an invalid one is refused', and 'every tracked package.jet round-trips through the Package formatter' (every tracked manifest is formatted, refusal only where PackageFacts.parse cannot read, every comment kept byte for byte in order beside its field, and a second format is a no-op). jet check of the guard has no problems. The comment-preserving pkg_format_source and the one-formatter rule for typed Config sources landed earlier, in b10 (deferred-pass rows). Out: $JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G6Meta-77/{1,2}.out.",
+          "at": "2026-11-12T08:18:29.701Z"
+        },
+        {
+          "n": 27,
+          "text": "jet fmt never changes template text. In Examples/Metaprogramming/Reflection/ReflectedInspector/Engine/engine.jet it collapses the braced #loop (lines 93-95) onto one line and drops the blank lines at 119 and 132 inside the marker expand template. Proof: jet fmt --check is clean on that file with its template lines unchanged, and a fmt case pins a template whose blank lines and braced #loop survive formatting.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6898 c11: formatter map replaced by a focused card",
+          "at": "2026-11-15T03:53:18.114Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:map",
+        "consolidation-2026-10-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T11:42:16.618Z",
+      "updated": "2026-11-15T03:53:34.463Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 27,
+      "completedAt": "2026-11-15T03:53:34.463Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T04:06:57.480Z"
     }
   ]
 }

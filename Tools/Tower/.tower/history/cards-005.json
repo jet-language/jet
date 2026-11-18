@@ -1,0 +1,386 @@
+{
+  "cards": [
+    {
+      "id": "c018gdah",
+      "num": 6006,
+      "title": "Map: Lints",
+      "body": "Destination: Each lint has a UI snapshot for the fire and the no-fire case.\nNotes: Batch D05 of the 2026-10-28 board consolidation (TowerDedup). One worker (opus), one build, one proof run: cd <worktree> && JET=$JET Tools/agent/jet-env jet test Tools/testkit \"suite ui\" (add each card's repro as a tests/ui fixture first; both halves: rejected program and accepted fix). Order: #4603 #3029 #4629 #5463 #5927 #4624 #4669 #4671 #4686.\nDecisions so far: D-LOOP-PAIRS1 (open) on #4603; D-MEMBER-LIVE1 (ratified=A) on #4624; D-RANGE-BACKWARD1 (ratified=A) on #4629; D-DEEP-CHECK1 (ratified=A) on #3029\nFog: no criteria yet on #4603 #4669 #4671 #4686 #5927 #5463 (proposals in consolidate-plan.json no_criteria).\nOut of scope: cards outside this list; other batches of the consolidation plan.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Map card distributed 2026-11-15 and closed: likely-bug lints to #6895, name-wins to #6896, cost surfaces to #6897, c5 merged into #6652 c2, c20 to #6850, c32 to #2393; c14 obsolete by D-DUPLINT1=C."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 28 criteria from archived #50, #2033, #2180, #2325, #2373, #2374, #2885, #2991, #3020, #3174, #3920, #3921, #3922, #3923: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at 94dacfc354 in GoldC-35 (patch row: criterion/count 2): L0104 rows were stale fixtures: unmarked fns are public by default (spec.md:2163-2166); helpers moved into a priv module, check_warning passes on p3 s1 13ed5f13; no_change stays KF on jet build printing no lints"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at 94dacfc354 in GoldC-34 (patch row: criterion/count 2): no L0104 on any input while L0103 fires; root narrowed to the liveness candidate or reach step (Sema/Liveness.jet:204-208, 233-242)"
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at 94dacfc354 in CoverPort-20: Log only: 9 rows with no lint emitted, filed as known-failing \"check not ported: <code>\": 7 ui lint rows, plus ui_lint/unreachable_else_open_int and unreachable_else_partial (L0303; their .warn was never blessed)."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6019 \"Lints: N+1 queries, two-binding loops over pairs, parameters that shadow globals\" into this card (lints map and its lint cards); its 7 open item(s) are carried as \"(was #6019)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5927 \"Lint: sort()/min/max/<=> on a named tuple whose written field order differs from its label order\" (CardTrim 2026-10-28: single-root task step of map #6006 (Map: Lints); 0 criteria, 0 ratified decisions). Body: Named tuples order by label (alphabetical) order, not written order; this is specified and intended. The compiler's own ir_first_rows sorted (at, key, row) expecting key-first, which was an O(N^2) and last-wins bug, fixed in #5911 2a. Proposal: a warning when sort/sort_desc/min/max/<=>/Map-key ordering applies to a named tuple whose written order differs from its label order, saying which order it uses and to use sort_by. This is a new diagnostic and needs owner approval (product behavior). Found by RustOut-4 2026-10-24; one other site, BuildMerge.jet:239, is correct."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #5463 \"Lint cost sites: rebuild TCostReport from JetIR\" (CardTrim 2026-10-28: single-root bug step of map #6006 (Map: Lints); 1 criteria, 0 ratified decisions). Body: JetCodegen Codegen/CostReport.jet filled JetDriverCompileResult.cost_report while MIR was lowered (capture_cost_report). S4b-a stopped every compile mode after checking and S4b-b deleted JetCodegen. No pass fills the report now: jet_driver_cost_query (JetDriver CostQueries.jet) returns an empty TCostReport, and `jet lint` cost diagnostics (JetCli Lint.jet jet_cli_cost_diagnostics) carry only the sema L2510 rows. Port: record the cost sites (allocation, copy, dynamic dispatch) while JetIR is built and fill TCostReport there. Acceptance: the cost-lint tests and goldens that the MIR path covered pass on JetIR."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4686 \"Lints: a field-less struct of static functions should be a module; a constructor must return its owner type\" (CardTrim 2026-10-28: single-root bug step of map #6006 (Map: Lints); 0 criteria, 0 ratified decisions). Body: b02_static_only.jet checks clean with no warning; b01_surprising_ctor.jet: struct Payment { fn new(kind: String) -> Stripe } and Payment.new(\"card\").id prints 1 with only an unused-parameter warning. Add a lint suggesting module X { ... }, and reject or lint a static new/over/from_* whose success type is not the owner (allow T? and T E!), enforcing D-API-CTOR1."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4671 \"Lint: a Float binding seeded with infinity but only assigned Int values\" (CardTrim 2026-10-28: single-root bug step of map #6006 (Map: Lints); 0 criteria, 0 ratified decisions). Body: Proven: best := -math.infinity() then best = d over [5, 3] prints 5.0 with no diagnostic (APICompPython u17); the faithful Python port silently changes the result type. Suggest xs.max() ?? fallback. Corrects claim v3-P2:PYB-37."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4669 \"Unconditional-recursion lint over call-graph cycles\" (CardTrim 2026-10-28: single-root bug step of map #6006 (Map: Lints); 0 criteria, 0 ratified decisions). Body: Proven gap: ping(n) -> pong(n+1), pong(n) -> ping(n+1) passes check with no problems (q19_mutual_recursion). Add a warning when every path through a function reaches a call back into its own call-graph cycle with no exit, as rustc's unconditional_recursion does, using the semindex call graph. Never blocks."
+        },
+        {
+          "at": "2026-10-28",
+          "by": "CardTrim",
+          "text": "Folded #4629 \"Constant ranges that can never run: one advisory lint and one written stride law (S19/S22)\" (CardTrim 2026-10-28: single-root task step of map #6006 (Map: Lints); 4 criteria, 1 ratified decisions). Body: Split from the NC-DIAG draft by the fresh review (2026-10-05) and extended with the v3-P2 delta. NEW small card completing existing law. S22 (inclusive `a..b`) and D-RANGE-EXCL1=C (half-open empty when a >= b) are ratified; S19 states a dynamic nonpositive stride raises E0123. The law never states what a constant inclusive range with start above end, or a constant stride whose sign contradicts the bounds, does; observed behavior is zero iterations. This card documents that behavior (no semantic change) and adds an advisory lint under D-LINTPOLICY1=A, visible per D-LINT-VISIBILITY2=A. Joins the lint family owned by #2141/#3919. No existing card (searched 'reversed range|empty range|descending"
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A source loop over a constant range that can never run (`10..1`, `1..10, -1`) is a tidy error with a registered code and UI snapshot: jet check and jet build list it and exit non-zero, and jet run runs without printing it. The stride law is written in the spec (S19/S22).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6895 c1: lint batch replaced by focused cards",
+          "at": "2026-11-15T03:50:58.879Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 2,
+          "text": "(was #4669) Unconditional-recursion lint over call-graph cycles",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6895 c2: lint batch replaced by focused cards",
+          "at": "2026-11-15T03:50:59.845Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 3,
+          "text": "(was #4671) Lint: a Float binding seeded with infinity but only assigned Int values",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6895 c3: lint batch replaced by focused cards",
+          "at": "2026-11-15T03:51:00.776Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 4,
+          "text": "(was #4686) Lints: a field-less struct of static functions should be a module; a constructor must return its owner type",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6895 c4: lint batch replaced by focused cards",
+          "at": "2026-11-15T03:51:01.713Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 5,
+          "text": "(was #5463) Lint cost sites: rebuild TCostReport from JetIR: the cost-lint tests and goldens that the MIR path covered pass on JetIR.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6652 c2: rebuilding the cost report on JetIR is the cost producer port on #6652",
+          "at": "2026-11-15T03:51:02.650Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 6,
+          "text": "(was #5927) Lint: sort()/min/max/<=> on a named tuple whose written field order differs from its label order",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6895 c5: D-TUPLE-ORDER1=A settles named-tuple order as label order; its owed work is the spec sentence, docs and an example",
+          "at": "2026-11-15T03:51:03.575Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 7,
+          "text": "`jet check` on a fixture that runs a Query-class SQL statement inside a loop over rows reports one registered error at the query line naming the batched form (an IN list or a join), with what/why/fix text and a UI snapshot; a query outside any loop reports nothing (negative fixture); jet run is never stopped by it.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6895 c6: lint batch replaced by focused cards",
+          "at": "2026-11-15T03:51:04.513Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 10,
+          "text": "(was #6019) (was #4603) Lint: two-binding loop over a sequence of 2-tuples (`loop (a, b) in pairs` binds index+tuple, not the pair)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6895 c7: lint batch replaced by focused cards; no decision yet, gate row added",
+          "at": "2026-11-15T03:51:05.443Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 11,
+          "text": "Every case where one name silently wins is a registered tidy error (what/why/fix text, a rename fix in jet fix) with a UI snapshot per case.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6896 c1: name-wins errors have their own card",
+          "at": "2026-11-15T03:51:06.395Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 12,
+          "text": "Core, Examples and the compiler pass `jet check` with no name-wins error (each hit renamed).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6896 c3: name-wins errors have their own card",
+          "at": "2026-11-15T03:51:07.363Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 13,
+          "text": "L0510 prelude_alias_shadow has a real emitter as a tidy error: its tests/ui_lint fixtures (re-registered from .warn) pass on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6896 c2: name-wins errors have their own card",
+          "at": "2026-11-15T03:51:08.401Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 14,
+          "text": "(was #50) Copy-paste drift / structural-duplication lint [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "D-DUPLINT1=C (ratified 2026-06-27): the copy-paste-drift lint is deferred indefinitely",
+          "at": "2026-11-15T03:51:09.482Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 15,
+          "text": "(was #2033 c1) jet lint reports a cognitive-complexity score per function with an optional max budget that fails the run when exceeded; output has a machine-readable form for the agent loop [precut audit: failing on 9c7ddf1359: U:lint_cognitive_complexity FAIL snapshot mismatch: tests/ui/lint_cognitive_complexity.stderr]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/ui/lint_cognitive_complexity.jet PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:47:39.097Z"
+        },
+        {
+          "n": 16,
+          "text": "(was #2180 c1) Every value-expected function, method, lambda, fallback, nested block, and value arm yields its final expression under D-TAIL-RETURN1=A [precut audit: failing on 9c7ddf1359: C:control_and_data/value_block_tails_report_unit_and_lint_old_arm_table_shape FAIL JSON count comparison failed]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the gate-p18 jet built from dev f5a6961852 (G5DevX-2 sweep log, $JET_SCRATCH_ROOT/lanes/G5DevX2/evidence/sweep/sweep1.log and sweep2.log): control_and_data/value_block_tails_report_unit_and_lint_old_arm_table_shape, the case the precut audit cited as failing for this criterion, now PASS.",
+          "at": "2026-11-14T00:37:26.497Z"
+        },
+        {
+          "n": 17,
+          "text": "(was #2180 c2) Explicit `return` remains an early exit; a semicolon, assignment, declaration, or other statement tail yields unit instead of an accidental value [precut audit: failing on 9c7ddf1359: C:control_and_data/value_block_tails_report_unit_and_lint_old_arm_table_shape FAIL JSON count comparison failed]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the gate-p18 jet built from dev f5a6961852 (G5DevX-2 sweep log, $JET_SCRATCH_ROOT/lanes/G5DevX2/evidence/sweep/sweep1.log and sweep2.log): control_and_data/value_block_tails_report_unit_and_lint_old_arm_table_shape, the case the precut audit cited as failing for this criterion, now PASS.",
+          "at": "2026-11-14T00:37:27.691Z"
+        },
+        {
+          "n": 18,
+          "text": "(was #2180 c3) Sema checks one expected block type across all reachable tails and reports mixed types, missing values, and accidental unit with exact spans [precut audit: failing on 9c7ddf1359: C:control_and_data/value_block_tails_report_unit_and_lint_old_arm_table_shape FAIL JSON count comparison failed]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the gate-p18 jet built from dev f5a6961852 (G5DevX-2 sweep log, $JET_SCRATCH_ROOT/lanes/G5DevX2/evidence/sweep/sweep1.log and sweep2.log): control_and_data/value_block_tails_report_unit_and_lint_old_arm_table_shape, the case the precut audit cited as failing for this criterion, now PASS.",
+          "at": "2026-11-14T00:37:29.045Z"
+        },
+        {
+          "n": 19,
+          "text": "The old function-only tail rewrite is gone and one sema block-value mechanism serves every value block (`jet test Compiler --profile cases --filter value_block_tails` passes).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 26afb1a0e6 (GoalsB-1 sweep, gate-p62 jet, 2026-11-14): jet test Compiler --profile cases --filter value_block_tails -> PASS 1/FAIL 0 (control_and_data/value_block_tails_report_unit_and_lint_old_arm_table_shape).",
+          "at": "2026-11-14T13:00:04.873Z"
+        },
+        {
+          "n": 20,
+          "text": "jet fmt rewrites the old arm-table shapes (adds an explicit `else` arm, removes redundant returns and fallback tails), keeping comments, bindings, order, effects and spans; a fmt case pins it and nothing is reported.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6850 c4: fmt rewrites of style shapes belong on the jet fmt --simplify card (#6850)",
+          "at": "2026-11-15T03:51:10.627Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 21,
+          "text": "(was #2180 c7) `status_label` and `outcome_label` become exhaustive value tables with no repeated `return` and no trailing fallback statement [precut audit: failing on 9c7ddf1359: C:control_and_data/value_block_tails_report_unit_and_lint_old_arm_table_shape FAIL JSON count comparison failed]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On the gate-p18 jet built from dev f5a6961852 (G5DevX-2 sweep log, $JET_SCRATCH_ROOT/lanes/G5DevX2/evidence/sweep/sweep1.log and sweep2.log): control_and_data/value_block_tails_report_unit_and_lint_old_arm_table_shape, the case the precut audit cited as failing for this criterion, now PASS.",
+          "at": "2026-11-14T00:37:30.105Z"
+        },
+        {
+          "n": 23,
+          "text": "Every current hidden-cost site has one sema or JetIR fact row: implicit copy, collection clone-on-write, packed-Int fallback and per-call outcome construction (`jet test Compiler --profile cases --filter cost_cli_surfaces` passes).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6897 c1: D-COSTLAW1 cost surfaces have their own card",
+          "at": "2026-11-15T03:51:11.785Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 24,
+          "text": "Hidden copy, clone or representation fallback in a loop is a registered error listed by jet check and jet build (never stopping jet run or jet dev), with what/why/fix text and a UI snapshot; optimizer-proven removal reports nothing.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6897 c2: D-COSTLAW1 cost surfaces have their own card",
+          "at": "2026-11-15T03:51:12.987Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 25,
+          "text": "Unit-returning arrow-loop bodies are not reported, while a genuinely discarded value is a registered error (L0508 re-registered) that jet check lists (UI snapshot pair).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6895 c8: lint batch replaced by focused cards",
+          "at": "2026-11-15T03:51:13.952Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 26,
+          "text": "(was #2374 c1) Compiler-discovered fn build is a liveness root and BuildError is excluded from the user Display migration lint; neighboring real lints remain [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6895 c9: lint batch replaced by focused cards",
+          "at": "2026-11-15T03:51:14.971Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 27,
+          "text": "(was #2885 c2) L0520 never emits a span outside user-written source; a UI snapshot shows a real user interpolation case [precut audit: failing on 9c7ddf1359: U:ioerror_display_migration KNOWN-FAILING #4717 the Jet checker has no L0520 display_migration lint yet: snapshot mismatch: tests/ui/ioerror_display_migration.stderr (known-failing #4717: the Jet checker has no L0520 display_migration lint yet)]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/ui/ioerror_display_migration.jet PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:47:40.566Z"
+        },
+        {
+          "n": 28,
+          "text": "(was #2991 c2) The refactored fixture remains below the same budget [precut audit: failing on 9c7ddf1359: U:lint_cognitive_complexity FAIL snapshot mismatch: tests/ui/lint_cognitive_complexity.stderr]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/ui/lint_cognitive_complexity.jet PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:47:41.600Z"
+        },
+        {
+          "n": 29,
+          "text": "(was #2991 c3) The registered diagnostic snapshot and focused fixture proof agree; parser failure cannot satisfy the lint criterion [precut audit: failing on 9c7ddf1359: U:lint_cognitive_complexity FAIL snapshot mismatch: tests/ui/lint_cognitive_complexity.stderr]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "aaa6331fc0 release candidate kit (chain s2 98d89707fb97975a): tests/ui/lint_cognitive_complexity.jet PASS. This row is the proof the precut audit named for this criterion.",
+          "at": "2026-11-07T03:47:42.522Z"
+        },
+        {
+          "n": 30,
+          "text": "(was #3020 c3) Default O0, O1 and O2 produce exactly the existing printable.out result [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6895 c10: the printable example and its printing contracts are one criterion",
+          "at": "2026-11-15T03:51:15.994Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 31,
+          "text": "(was #3020 c4) Bare Display interpolation, explicit Debug selection, manual overrides, negative derive controls and redaction retain their existing distinct contracts; no global policy change is smuggled into the example fix [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6895 c10: the printing contracts are part of the printable example criterion",
+          "at": "2026-11-15T03:51:17.019Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 32,
+          "text": "(was #3174 c1) Predeclare paired tasks for early guard versus positive branch, named selection versus manual loop, one deep interface versus shallow helper splitting, and necessary WHY/invariant comments versus redundant HOW narration [precut audit: no dev test, golden, case or snapshot proves this today]",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #2393 c10: readability task pairs belong to the fresh-agent rerun (#2393), which owns matched real tasks",
+          "at": "2026-11-15T03:51:18.041Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "wayfinder:map",
+        "consolidation-2026-10-28"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-28T11:42:17.619Z",
+      "updated": "2026-11-15T03:51:25.044Z",
+      "updatedBy": "TowerKeeper-1",
+      "criteriaLastN": 41,
+      "completedAt": "2026-11-15T03:51:25.044Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T04:06:57.480Z"
+    }
+  ]
+}
