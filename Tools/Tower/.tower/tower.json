@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112284,
+    "rev": 112286,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -86410,6 +86410,11 @@
         {
           "at": "2026-11-18",
           "by": "Main",
+          "text": "Owner ratified D-DBG-DEADLOCK1, D-DBG-VERBS1, D-OBSERVE-FLIGHT1, D-PERF-CAUSAL1, D-PERF-HEAP1, D-PERF-TOPDOWN1, D-PERF-ZONES1, D-TIMETRAVEL3 (2026-11-18). Lens moves off NameWins to this card: c56(a), then c49, c48, c51, c47, c52, c43, c57, c55. D-DBG-UI1 r2 (Canvas native or in a browser) awaits the vote; D-PERF-COMPARE1 is drafted and in recheck."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
           "text": "c56 (b): ballot D-PERF-COMPARE1 filed (how several captures per side reach `jet perf compare`; recommendation A, a folder of traces per side). c56 (a), cost facts in `jet perf view`, needs no new surface and proceeds."
         },
         {
@@ -87062,7 +87067,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-18T21:36:45.972Z",
+      "updated": "2026-11-18T21:37:23.625Z",
       "updatedBy": "Main",
       "criteriaLastN": 58
     },
@@ -175894,27 +175899,27 @@
       "explainer": "Beginner path: run each build a few times, then compare. Under A, run `jet perf run prog.jet --out base/1.jettrace` four times, changing the number. Do the same into `head/`, then run `jet perf compare base/ head/`. Under B, make the same runs, then name each with `--base` or `--head`. Under C, run `jet perf run prog.jet --repeat=4 --out base.jettrace` once per side. Then run `jet perf compare base.jettrace head.jettrace`.\n\nExpert path: every option uses the same verdict test. The captures must share a toolchain and hardware fingerprint, or pass `--override-identity`. `--json` gives each function's and line's per-capture samples, means, delta and verdict. The two-trace form `jet perf compare base.jettrace head.jettrace` keeps working under every option. It prints the per-line deltas with `verdict: none (one capture each; capture each side at least 4 times)`.",
       "story": "Mia speeds up a parser's tokenizer and wants to know if `next_token` really got faster. Under A, she runs `jet perf run parse.jet --out before/$i.jettrace` in a loop of five on main. She runs the same loop into `after/` on her branch. Then `jet perf compare before/ after/` prints `parse.jet:88 next_token 412 -> 301 samples (-27%) faster (p=0.008)`.\n\nUnder B, she types ten paths, or a shell glob, after the repeated flags. Under C, she runs `jet perf run parse.jet --repeat=5` on each branch and compares the two files.",
       "inWild": "# Go benchstat: each side is one file holding repeated runs (go test -count=10).\n$ benchstat old.txt new.txt\n        │   old.txt   │              new.txt               │\n        │   sec/op    │   sec/op     vs base               │\nParse-8   412.0µ ± 2%   301.0µ ± 1%  -26.94% (p=0.000 n=10)",
-      "detail": "Code read on dev be8e6a353e. `jet_cli_perf_compare` (Compiler/JetCLI/Source/CLI/Perf/Command.jet:284) takes exactly two paths. It prints whole-run `wall`, `cpu` and `alloc` deltas, the receipt deltas and a #241 budget line, and always exits 0. The audit's F14 (Docs/Audits/2026-11-14-debugging-profiling-review.md) is that gap. A trace's per-line CPU samples are its `cpu` profile rows, the per-line table of `jet perf view`.\n\nThe verdict is the same under every option. Per function and per line, it is a two-sided Mann-Whitney U test over the per-capture sample counts, at p < 0.05, as benchstat does. It assumes nothing about the noise's shape, and one outlier capture moves it little. It can reach p < 0.05 only from 4 captures a side: 4 against 4 gives a smallest p of 0.029.\n\nSo with fewer than 4 a side, compare shows the deltas and refuses the verdict, naming the count. A line that a capture never sampled counts 0 samples in that capture.",
+      "detail": "Code read on dev be8e6a353e. `jet_cli_perf_compare` (Compiler/JetCLI/Source/CLI/Perf/Command.jet:284) takes exactly two paths. It prints whole-run `wall`, `cpu` and `alloc` deltas, the receipt deltas and a #241 budget line, and always exits 0. The audit's F14 (Docs/Audits/2026-11-14-debugging-profiling-review.md) is that gap. A trace's per-line CPU samples are its `cpu` profile rows, the per-line table of `jet perf view`.\n\nThe verdict is the same under every option. Per function and per line, it is a two-sided Mann-Whitney U test over the per-capture sample counts, at p < 0.05, as benchstat does. It assumes nothing about the noise's shape, and one outlier capture moves it little. It can reach p < 0.05 only from 4 captures a side: 4 against 4 gives a smallest p of 0.029.\n\nSo with fewer than 4 a side, compare shows the deltas and refuses the verdict, naming the count. A file on one side and a folder of 4 on the other is 1 against 4, so it gets no verdict either. The 0.029 figure assumes no ties. Tied counts are ranked as halves and judged against the no-tie distribution, which only makes p larger. A line that a capture never sampled counts 0 samples in that capture.\n\nMany lines means many tests. At p < 0.05, about 1 in 20 unchanged lines would be flagged by chance. So compare judges only rows holding at least 1% of a side's samples. Colder rows show their deltas with `too few samples to judge`. Within each table it then applies Benjamini-Hochberg at a 5% false discovery rate.\n\nA row is called faster or slower only if it passes that. A program with one hot loop still gets its verdict at 4 a side. A program with 20 warm lines needs more captures, and the refusal says so.",
       "options": [
         {
           "key": "A",
           "name": "A side may be a folder of traces",
           "detail": "Each of compare's two arguments is a `.jettrace` or a folder; a folder stands for every `.jettrace` directly in it. `jet perf compare base/ head/`. Two single traces work as today.",
-          "technical": "No new flag. `jet perf run --out base/3.jettrace` already makes the folder's files. A folder with no trace is refused, naming it.",
+          "technical": "No new flag. `jet perf run --out base/3.jettrace` already makes the folder's files. A folder with no trace is refused, naming it. A file on one side and a folder on the other is one capture against the folder's: compare shows the deltas and refuses the verdict, as with one capture each.",
           "code": "for i in 1 2 3 4; do jet perf run parse.jet --out before/$i.jettrace; done\n# switch branches\nfor i in 1 2 3 4; do jet perf run parse.jet --out after/$i.jettrace; done\njet perf compare before/ after/"
         },
         {
           "key": "B",
           "name": "Repeat a flag per capture",
           "detail": "`--base <trace>` and `--head <trace>` each name one capture and repeat. The two-path form stays as shorthand for one of each.",
-          "technical": "Two new repeatable flags on compare.",
+          "technical": "Two new repeatable flags on compare. Every capture is named on the line, so no stray file joins a side.",
           "code": "jet perf compare --base before/1.jettrace --base before/2.jettrace --base before/3.jettrace --base before/4.jettrace \\\n  --head after/1.jettrace --head after/2.jettrace --head after/3.jettrace --head after/4.jettrace"
         },
         {
           "key": "C",
           "name": "One trace holds repeated runs",
           "detail": "`jet perf run --repeat=N` runs the program N times and writes one trace holding N captures; compare takes two such traces.",
-          "technical": "A new run flag and a trace schema change: the profile carries one row set per run.",
+          "technical": "A new run flag and a trace schema change: the profile carries one row set per run. Each side is one self-contained file, easy to share, with no stray capture to join it.",
           "code": "jet perf run parse.jet --repeat=4 --out before.jettrace\n# switch branches\njet perf run parse.jet --repeat=4 --out after.jettrace\njet perf compare before.jettrace after.jettrace"
         }
       ],
@@ -175942,10 +175947,10 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "A adds no flag and no schema: the files `jet perf run --out` already writes are the captures, a folder is the natural group, and the two-trace form is unchanged. Captures of the two sides can be interleaved in time (one before, one after, repeat), which cancels slow machine drift; C can't interleave, since each side's runs come back to back.",
+        "why": "A adds no flag and no schema: the files `jet perf run --out` already writes are the captures, a folder is the natural group, and the two-trace form is unchanged. Like B, it lets the two sides' captures be interleaved in time, which cancels slow machine drift. C can't interleave, since each side's runs come back to back.",
         "gains": [
           "No new flag or trace field.",
-          "Base and head runs can be interleaved, so drift cancels.",
+          "Base and head runs can be interleaved, as under B, so drift cancels.",
           "Adding a capture is one more file in the folder."
         ],
         "losses": [
@@ -175961,14 +175966,14 @@
         "whyNot": [
           {
             "key": "B",
-            "reason": "The same captures as A, but every path typed after a flag; a glob works only by accident of shell quoting."
+            "reason": "Every capture is named on the line, so no stray file can join a side. But ten captures means ten flags, and a glob after a repeated flag works only by accident of shell quoting. A gets the same interleaving with a short command, and lists each side's traces so a stray one shows."
           },
           {
             "key": "C",
-            "reason": "A new flag and a trace schema change, and each side's runs come back to back, so drift between the two sides is not cancelled."
+            "reason": "One self-contained file per side is easy to share and can't pick up a stray capture. But it needs a new flag and a trace schema change, and each side's runs come back to back, so drift between the sides is not cancelled."
           }
         ],
-        "tradeoff": "A shell loop to make the captures, for no new flag, no schema change, and interleavable runs."
+        "tradeoff": "A shell loop and a folder that could hold a stray trace, for no new flag, no schema change and a short command."
       },
       "hybrid": null,
       "ballotMode": "short",
@@ -175989,7 +175994,8 @@
               "Runs can be interleaved."
             ],
             "losses": [
-              "The user loops `jet perf run`."
+              "The user loops `jet perf run`.",
+              "A stray trace in the folder joins its side."
             ],
             "proposed": {
               "code": "jet perf compare before/ after/"
@@ -176000,7 +176006,8 @@
             "name": "Repeated flags",
             "gist": "`--base a --base b --head c --head d`",
             "gains": [
-              "Every capture named on the line."
+              "Runs can be interleaved.",
+              "Every capture named on the line; no stray file joins."
             ],
             "losses": [
               "Long command lines.",
@@ -176015,7 +176022,9 @@
             "name": "`--repeat` in one trace",
             "gist": "`jet perf run --repeat=4` writes one trace per side",
             "gains": [
-              "No loop to write."
+              "No loop to write.",
+              "One self-contained file per side, easy to share.",
+              "No stray capture can join."
             ],
             "losses": [
               "Schema change and a new flag.",
@@ -176028,25 +176037,29 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "The files users already make are the captures; nothing new to learn.",
+          "why": "The files users already make are the captures; nothing new to learn, and runs interleave as under B.",
           "gains": [
             "No new flag.",
-            "Interleaved runs cancel drift."
+            "A short command, even for many captures."
           ],
           "losses": [
             {
               "loss": "A shell loop.",
               "mitigation": "The refusal prints it."
+            },
+            {
+              "loss": "A stray trace can join a side.",
+              "mitigation": "Compare lists each side's traces and refuses mixed toolchains or sources."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Same captures, longer commands."
+              "reason": "Explicit captures, but a flag per capture."
             },
             {
               "key": "C",
-              "reason": "Schema change; no interleaving."
+              "reason": "Shareable, but a schema change and no interleaving."
             }
           ],
           "tradeoff": "A loop for no new surface."
@@ -178783,6 +178796,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T21:37:23.625Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-18T21:36:57.279Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-PERF-COMPARE1",
+      "note": ""
+    },
     {
       "at": "2026-11-18T21:36:46.869Z",
       "by": "Main",
