@@ -1,9 +1,7 @@
 use {
     disp_files: core.files
     disp_process: core.process
-    disp_sys: core.sys
     disp_parse: core.text.parse
-    disp_encoding: core.encoding
     disp_json: core.encoding.json
 }
 
@@ -14,8 +12,10 @@ use {
 // Tower card, a ratified decision, or a concrete no-action reason. The
 // program prints every report and row without one; the case compares that
 // list with its golden, so a new report without dispositions changes it.
-// The live cards and decisions come from Tools/Tower/Board.jet, run by the
-// jet under test (JET, which the case sets).
+// The cards and decisions come from the fixture's board.json, in the Tower
+// board's own shape: every card and decision the tables name that the live
+// board holds (open, closed or retired), with each decision's status. A
+// dev checkout's Tools/Tower/.tower is not the live board, so it is not read.
 disp_slice: fn(text: String, start: Int, end: Int) -> String {
     if start == end -> return ""
     String.from_bytes(text.bytes()[start..(end - 1)]) ?? panic("audit report byte slice must end on UTF-8 boundaries")
@@ -88,23 +88,6 @@ disp_dashes: fn(cell: String) -> Bool {
     true
 }
 
-// The board under test is the tree's own Tools/Tower/.tower: TOWER_DATA pins
-// the board reader to it, and the parses choose their own input budget
-// because the board is past `json.parse`'s 16 MiB safe bound.
-disp_board_limits: fn() -> disp_encoding.EncodingLimits {
-    disp_encoding.EncodingLimits{buffer_bytes: 65536, max_depth: 256, max_item_bytes: 1073741824, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
-}
-
-disp_tower_json: fn(root: String, words: [String]) -> Dyn {
-    board: disp_files.join(root, "Tools/Tower/.tower")
-    jet: disp_sys.get("JET") ?? panic("JET names the jet that runs Tools/Tower/Board.jet")
-    command := [String]{jet, "Tools/Tower/Board.jet"}
-    loop word in words -> command.push(word.copy())
-    live: disp_process.cmd(command).cwd(root).env("TOWER_DATA", disp_files.join(board, "tower.json")).stdout(.Capture).stderr(.Capture).run() ?? panic("run Tower projection")
-    assert(live.success, "Tower projection failed: {live.errors}")
-    disp_json.parse_with_limits(live.output, disp_board_limits()) ?? panic("parse live Tower JSON: {err.reason}")
-}
-
 disp_card_num: fn(card: Dyn) -> Int {
     value: card.field("num") ?? panic("Tower card num is required")
     if value == {
@@ -139,43 +122,12 @@ DispBoard: struct {
     decisions: [String:String],
 }
 
-// Live cards and decisions first, then the retired ones in history.json and
-// its card shards.
-disp_tower: fn(root: String) -> DispBoard {
+disp_board: fn(path: String) -> DispBoard {
     cards := [Int:Bool]{}
     decisions := [String:String]{}
-    live_cards: disp_tower_json(root, [String]{"card", "list", "--json"})
-    if live_cards == .Array(entries) {
-        loop card in entries -> cards[disp_card_num(card)] = true
-    }
-    live_decisions: disp_tower_json(root, [String]{"decision", "list", "--json"})
-    if live_decisions == .Array(entries) {
-        loop decision in entries {
-            if decision.field("id") == .Ok(id) {
-                status := ""
-                if decision.field("status") == .Ok(value) -> status = value.text() ?? ""
-                decisions[id.text() ?? ""] = status
-            }
-        }
-    }
-    board: disp_files.join(root, "Tools/Tower/.tower")
-    if disp_files.read(disp_files.join(board, "history.json")) == .Ok(raw) {
-        history: disp_json.parse_with_limits(raw, disp_board_limits()) ?? panic("parse Tower history: {err.reason}")
-        disp_ingest(history, cards, decisions)
-        if history.field("cards") == .Ok(field) {
-            if field.field("shards") == .Ok(shards) {
-                if shards == .Array(listed) {
-                    loop shard in listed {
-                        name := ""
-                        if shard.field("file") == .Ok(file) -> name = file.text() ?? ""
-                        part_raw: disp_files.read(disp_files.join(disp_files.join(board, "history"), name)) ?? panic("read Tower history shard {name}")
-                        part: disp_json.parse_with_limits(part_raw, disp_board_limits()) ?? panic("parse Tower history shard {name}: {err.reason}")
-                        disp_ingest(part, cards, decisions)
-                    }
-                }
-            }
-        }
-    }
+    raw: disp_files.read(path) ?? panic("read board {path}")
+    board: disp_json.parse(raw) ?? panic("parse board {path}: {err.reason}")
+    disp_ingest(board, cards, decisions)
     DispBoard{cards: cards, decisions: decisions}
 }
 
@@ -268,11 +220,10 @@ disp_report: fn(relative: String, text: String, board: DispBoard, problems: &[St
     rows
 }
 
-// Arguments: the checkout whose Docs/Audits is read in place, then the copy
-// whose Tools/Tower the Tower CLI reads.
+// Arguments: the checkout whose Docs/Audits is read in place, then the board.
 run: fn() {
     root: disp_process.args()[0]
-    board: disp_tower(disp_process.args()[1])
+    board: disp_board(disp_process.args()[1])
     audits: disp_files.join(root, "Docs/Audits")
     names := disp_files.listdir(audits) ?? panic("list Docs/Audits")
     names.sort()

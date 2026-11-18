@@ -414,7 +414,9 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             loop k in 0..<record {
                 word: at + k * 8
                 if counter >= sampled.periods.len() || word + 8 > words.len() -> break
-                held: jet_cli_perf_samples_own(sampled, jet_cli_perf_samples_chain(sampled, places, resolved, owned, link_debug_addr(words, word), k > 0))
+                // The first word keeps the record's length and kind above its program counter.
+                address: if k == 0 -> pc else -> link_debug_addr(words, word)
+                held: jet_cli_perf_samples_own(sampled, jet_cli_perf_samples_chain(sampled, places, resolved, owned, address, k > 0))
                 if held < 0 -> next
                 sampled.lines[held].events[counter] = sampled.lines[held].events[counter] + sampled.periods[counter]
                 break

@@ -53,7 +53,7 @@ test_debug_request: fn(src: String, graph_json: String, transcript: String, snap
     assert(named == DebugTier.Native)
     if DebugTier.parse(Val("jet-dev-replay")) == {
         .Err(failure) -> { assert(failure.body.contains("\"kind\":\"unsupported\""), failure.body) }
-        .Val(_) -> panic("the replay tier was accepted")
+        .Ok(_) -> panic("the replay tier was accepted")
     }
 }
 
