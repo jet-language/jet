@@ -337,6 +337,11 @@ SemaGraphModuleResult: struct {
     // module whose body checked, in declaration order; the checked synthetic
     // function is in `functions` and its key in `injected_function_keys`.
     tests: [TTestFact]{[TTestFact]{}},
+    // Outside test mode (`jet check`, a build's root tests): the fields this
+    // module's checked `#Test` bodies read and the cases they build. The
+    // bodies are dropped, so liveness reads a test's member uses from here
+    // (sema_liveness_member_uses).
+    test_member_uses: SemaLivenessMemberUses{SemaLivenessMemberUses.empty()},
     // Under a per-function trace: each Core body a demand wave checked into
     // this module, as its position in `functions`, and the task CPU time
     // (ns) its check took at the same position of `core_check_ns`
@@ -3899,6 +3904,7 @@ sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, progr
                     module_result.diagnostics.push(diagnostic)
                 }
                 if !graph.test_mode {
+                    if checked_test.function == .Val(function) -> sema_liveness_member_body_uses(function, module_result.test_member_uses)
                     return
                 }
                 loop fact in checked_test.call_facts -> module_result.call_facts.push(fact)
@@ -11873,6 +11879,7 @@ sema_stage_declaration_modules: fn(modules: &&[SemaGraphModuleResult]) -> [SemaG
         kept[index].diagnostics = [Diagnostic]{}
         kept[index].failure_facts = [SemaFunctionFailureFacts]{}
         kept[index].tests = [TTestFact]{}
+        kept[index].test_member_uses = SemaLivenessMemberUses.empty()
     }
     kept
 }

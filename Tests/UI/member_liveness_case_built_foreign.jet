@@ -1,0 +1,21 @@
+// @all_diags
+// A foreign return builds a case: an enum foreign code hands back has every
+// case built.
+use device: c.device
+
+#Layout(c, tag: U8)
+Status: enum {
+    Ready,
+    Busy,
+}
+
+#Import c.device: module {
+    device_status: fn() -> Status = "device_status"
+}
+
+run: fn() {
+    if device.device_status() == {
+        .Ready -> { print("ready") }
+        .Busy -> print("busy")
+    }
+}

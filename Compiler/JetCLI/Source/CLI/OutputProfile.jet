@@ -28,12 +28,14 @@ JetCLIOutputChannel: enum {
     Hidden,
 }
 
+// Only the shared-output tests build these kinds: no CLI writer routes
+// through jet_cli_output_channel yet.
 JetCLIOutputKind: enum {
-    Renderable,
-    Status,
-    Log,
-    Progress,
-    Machine,
+    _Renderable,
+    _Status,
+    _Log,
+    _Progress,
+    _Machine,
 }
 
 #Error
@@ -43,11 +45,13 @@ JetCLIOutputProfileError: enum {
     InvalidWidth(value: U64),
 }
 
+// `_ansi_enabled` and `_progress_enabled` are read only by the shared-output
+// tests until a CLI writer takes its capabilities from this profile.
 JetCLIOutputProfile: struct {
     width: U64,
-    ansi_enabled: Bool,
+    _ansi_enabled: Bool,
     unicode_enabled: Bool,
-    progress_enabled: Bool,
+    _progress_enabled: Bool,
     human_enabled: Bool,
     machine_enabled: Bool,
 }
@@ -103,9 +107,9 @@ jet_cli_output_profile: fn(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetC
     Ok(
         JetCLIOutputProfile{
             width: width,
-            ansi_enabled: human && ansi,
+            _ansi_enabled: human && ansi,
             unicode_enabled: human && facts.tty && facts.unicode && !dumb,
-            progress_enabled: human && facts.tty && !dumb,
+            _progress_enabled: human && facts.tty && !dumb,
             human_enabled: human,
             machine_enabled: facts.json,
         },
@@ -114,12 +118,13 @@ jet_cli_output_profile: fn(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetC
 
 jet_cli_output_channel: fn(profile: JetCLIOutputProfile, kind: JetCLIOutputKind) -> JetCLIOutputChannel Never! {
     if profile.machine_enabled {
-        if kind == .Machine -> return .MachineStdout
+        if kind == ._Machine -> return .MachineStdout
         return .Hidden
     }
-    if kind == {
-        .Renderable -> .HumanStdout
-        .Status | .Log | .Progress -> .HumanStderr
-        .Machine -> .Hidden
+    // Guards, not case arms: the seed parser reads no `._Name ->` arm head.
+    if {
+        kind == ._Renderable -> .HumanStdout
+        kind == ._Machine -> .Hidden
+        else -> .HumanStderr
     }
 }

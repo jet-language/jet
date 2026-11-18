@@ -167,7 +167,7 @@ JetCLIRootedDirectory: struct {
                 if err == .NotFound(_) -> next
                 return Err(jet_cli_read_error("could not inspect `{entry.path}`: {jet_cli_io_error_text(err)}"))
             }
-            rows.push(JetCLIRootedEntry{name: entry.name, is_file: info.is_file && !info.is_symlink, is_dir: info.is_dir && !info.is_symlink, is_symlink: info.is_symlink, size: info.size})
+            rows.push(JetCLIRootedEntry{name: entry.name, is_file: info.is_file && !info.is_symlink, is_dir: info.is_dir && !info.is_symlink, size: info.size})
         }
         rows.sort_by(fn(left: JetCLIRootedEntry, right: JetCLIRootedEntry) { left.name <=> right.name })
         Ok(rows)
@@ -415,7 +415,6 @@ JetCLIRootedEntry: struct {
     name: String,
     is_file: Bool,
     is_dir: Bool,
-    is_symlink: Bool,
     size: Int,
 }
 

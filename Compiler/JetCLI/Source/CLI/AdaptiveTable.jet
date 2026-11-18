@@ -28,7 +28,6 @@ JetCLITableCellKind: enum {
 JetCLITableAlignment: enum {
     Left,
     Right,
-    Center,
 }
 
 JetCLITableColumn: struct {
@@ -47,10 +46,11 @@ JetCLIAdaptiveTable: struct {
     truncated: Bool,
 }
 
+// Only the shared-output tests read the projection's columns and flag.
 JetCLIStructuredTable: struct {
-    columns: [JetCLITableColumn],
+    _columns: [JetCLITableColumn],
     rows: [JetCLITableRow],
-    truncated: Bool,
+    _truncated: Bool,
 }
 
 // This contains no table copy or escaping borrowed carrier. Its caller keeps
@@ -145,9 +145,9 @@ jet_cli_table: fn(input_columns: &&[JetCLITableColumn], input_rows: &&[JetCLITab
 
 jet_cli_table_structured: fn(table: JetCLIAdaptiveTable) -> JetCLIStructuredTable Never! {
     // copy: `table.columns` stays with the caller (`table` is a read parameter: no move out of it,
-    // E0201) and the field `columns` owns its own. `table.rows` stays with the caller (`table` is a
+    // E0201) and the field `_columns` owns its own. `table.rows` stays with the caller (`table` is a
     // read parameter: no move out of it, E0201) and the field `rows` owns its own.
-    JetCLIStructuredTable{columns: table.columns.copy(), rows: table.rows.copy(), truncated: table.truncated}
+    JetCLIStructuredTable{_columns: table.columns.copy(), rows: table.rows.copy(), _truncated: table.truncated}
 }
 
 JET_CLI_TABLE_TRUE_BYTES: [U8]{116, 114, 117, 101}
