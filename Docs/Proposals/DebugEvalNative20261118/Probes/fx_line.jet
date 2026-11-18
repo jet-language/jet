@@ -1,0 +1,24 @@
+// Probe N3: does an `#FX: (!Time.Wait, !Unsafe)` line in a `-[]>` body deny
+// the wait and the raw write, as the module form does (row_compose.jet)?
+use mem: core.mem
+
+peek_receive: fn(rx: Receiver<Int>) -[]> Int {
+    #FX: (!Time.Wait, !Unsafe)
+    rx.receive() ?? 0
+}
+
+peek_raw: fn(total: Int) -[]> Int {
+    #FX: (!Time.Wait, !Unsafe)
+    cell := total
+    #Unsafe("probe: a raw write under the empty row") {
+        p: mem.Ptr<Int>.from_addr(mem.address_of(cell))
+        mem.volatile_write(p, 42)
+    }
+    cell
+}
+
+run: fn() {
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 8)
+    tx.send(1)
+    print(peek_receive(rx) + peek_raw(1))
+}

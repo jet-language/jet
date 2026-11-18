@@ -1,0 +1,20 @@
+// Probe P1 (revision 4): two calls of one take method in one statement.
+// Each takes its argument, so `run` holds different move states at a stop in
+// the first call and at a stop in the second, from one (line, column).
+Builder: struct {
+    items: [Int],
+
+    add: fn(self, xs: &&[Int]) -> Builder {
+        items := xs
+        items.push(self.items.len())
+        Builder{items: items}
+    }
+}
+
+run: fn() {
+    xs := [Int]{1, 2}
+    ys := [Int]{3, 4, 5}
+    start: Builder{items: [Int]{}}
+    out: start.add(xs).add(ys)
+    print(out.items.len())
+}

@@ -1,0 +1,34 @@
+// Probe N3: does `!Unsafe` over `-[]>` still admit the expressions a debugger
+// evaluates? Core's own code uses `#Unsafe` inside safe APIs; if a denial
+// reached through them, ordinary expressions would be refused.
+#FX(!Unsafe) probe: module {
+    peek_list: fn(xs: [Int]) -[]> Int {
+        ys := xs.copy()  // copy: the probe grows its own list
+        ys.push(4)
+        ys.len()
+    }
+
+    peek_map: fn(xs: [Int]) -[]> Int { xs.map(fn(x) { x * 2 }).sum() }
+
+    peek_text: fn(xs: [Int]) -[]> String { "{xs.len()} items, first {xs[0]}" }
+
+    peek_contains: fn(xs: [Int]) -[]> Bool { xs.contains(2) }
+
+    peek_sorted: fn(xs: [Int]) -[]> Int {
+        ys := xs.copy()  // copy: the probe sorts its own list
+        ys.sort()
+        ys[0]
+    }
+
+    peek_dict: fn(names: [String:Int]) -[]> Int { names.get("a") ?? 0 }
+
+    peek_split: fn(text: String) -[]> Int { text.split(",").len() }
+}
+
+run: fn() {
+    xs := [Int]{3, 1, 2}
+    names: [String:Int]{"a": 1}
+    print(probe.peek_list(xs) + probe.peek_map(xs) + probe.peek_sorted(xs) + probe.peek_dict(names) + probe.peek_split("a,b"))
+    print(probe.peek_text(xs))
+    print(probe.peek_contains(xs))
+}

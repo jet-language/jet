@@ -1,0 +1,12 @@
+// Probe N1: an exact move, then a read. sema's walk holds `xs` as moved
+// from line 9 and refuses the read with that origin.
+Box: struct {
+    items: [Int],
+}
+
+run: fn() {
+    xs := [Int]{1, 2, 3}
+    box := Box{items: xs.move()}
+    box.items.push(4)
+    print(xs.len())
+}

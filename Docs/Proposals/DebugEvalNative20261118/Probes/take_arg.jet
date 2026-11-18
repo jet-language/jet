@@ -1,0 +1,14 @@
+// Probe N2: an argument to a take parameter moves at the call, as its last
+// use (implicit_take); a stop inside `consume` has `run` mid-call.
+consume: fn(xs: &&[Int]) -> Int {
+    items := xs
+    items.push(9)
+    items.len()
+}
+
+run: fn() {
+    xs := [Int]{1, 2}
+    xs.push(3)
+    n: consume(xs)
+    print(n)
+}

@@ -1,0 +1,23 @@
+// Probe N3/G5: under the composed ceiling (`-[]>` in a `#FX(!Time.Wait,
+// !Unsafe)` module), is a `Shared` read still admitted, and under `!Unsafe`
+// alone?
+Stats: struct {
+    hits: Int,
+}
+
+#FX(!Time.Wait, !Unsafe) both: module {
+    peek_shared: fn(cell: Shared<Stats>) -[]> Int { cell.hits }
+}
+
+#FX(!Unsafe) unsafe_only: module {
+    peek_shared: fn(cell: Shared<Stats>) -[]> Int { cell.hits }
+
+    peek_receive: fn(rx: Receiver<Int>) -[]> Int { rx.receive() ?? 0 }
+}
+
+run: fn() {
+    cell: Shared{Stats{hits: 1}}
+    { sender: tx, receiver: rx }: channel<Int>(capacity: 8)
+    tx.send(1)
+    print(both.peek_shared(cell) + unsafe_only.peek_shared(cell) + unsafe_only.peek_receive(rx))
+}

@@ -1,0 +1,19 @@
+// Probe P8 (revision 4): two instances of one generic module, each with its
+// own `HITS`, declared at one source site; and a top-level `Shared` global.
+counter: module<T>(start: Int) {
+    HITS: start
+
+    bump: fn() -> Int { HITS + 1 }
+}
+
+small: counter<Int>(8)
+
+large: counter<Int>(64)
+
+tally := Shared{[Int]{1, 2}}
+
+run: fn() {
+    print(small.bump())
+    print(large.bump())
+    print(tally.guard_read().value.len())
+}
