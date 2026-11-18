@@ -2,7 +2,8 @@
 // Usage: jet run Compiler/Migrations/Migrate.jet -- <plan> [--write] [--against DIR] [--list FILE] [--source-list FILE] PATH...
 // Each PATH, and each line of a `--list` file, names a file the plan reads by
 // its kind: a `.jet` or `.template` source, a `.md` file, or any other text,
-// such as an expected output. Each line of a `--source-list` file names a file
+// such as an expected output, or a database a plan converts in place, such as
+// an SQLite job queue. Each line of a `--source-list` file names a file
 // read as a Jet source whatever its name, such as a formatter's expected
 // output. Without `--write` the files are only read. The run prints
 // `EDIT <path> <count>` for each file the plan changes, `SKIP <site>: <reason>`
@@ -63,6 +64,29 @@ migration_same_meaning: fn(plan: String, path: String, before: String, after: St
     }
 }
 
+// Whether the plan reads `path` as a database, which it converts in place,
+// rather than as text.
+migration_database: fn(plan: String, path: String) -> Bool {
+    plan == "american-tokens1" && american_tokens1_database_file(path)
+}
+
+// A plan's conversion of the database at `path`, made when `write` is set.
+migration_database_rewrite: fn(plan: String, path: String, write: Bool) -> MigrationOutcome {
+    if plan == {
+        "american-tokens1" -> american_tokens1_database(path, write)
+        else -> panic("the {plan} plan converts no database")
+    }
+}
+
+// Why the database `after`, the plan's conversion of `before`, does not
+// mean what `before` means, or None when it does.
+migration_database_same_meaning: fn(plan: String, before: String, after: String) -> String? {
+    if plan == {
+        "american-tokens1" -> american_tokens1_database_same_meaning(before, after)
+        else -> panic("the {plan} plan converts no database")
+    }
+}
+
 migration_listing: fn(path: String, into: &[String]) {
     listing: files.read(path) ?? panic("cannot read {path}: {err}")
     loop line in listing.split("\n") {
@@ -111,6 +135,14 @@ run: fn() {
     if against > 0 {
         same := 0
         loop path in paths {
+            if migration_database(plan, path) {
+                if migration_database_same_meaning(plan, "{args[against]}/{path}", path) == .Val(why) {
+                    print("CHANGED {path}: {why}")
+                    next
+                }
+                same += 1
+                next
+            }
             after: files.read(path) ?? panic("cannot read {path}: {err}")
             before: files.read("{args[against]}/{path}") ?? panic("cannot read {args[against]}/{path}: {err}")
             if migration_same_meaning(plan, path, before, after, sources.contains(path)) == .Val(why) {
@@ -126,17 +158,26 @@ run: fn() {
     total := 0
     changed := 0
     loop path in paths {
-        text: files.read(path) ?? {
-            print("UNREADABLE {path}")
-            next
+        database: migration_database(plan, path)
+        outcome := MigrationOutcome{text: "", rewritten: 0, skipped: [String]{}}
+        if {
+            database -> outcome = migration_database_rewrite(plan, path, write)
+            else -> {
+                text: files.read(path) ?? {
+                    print("UNREADABLE {path}")
+                    next
+                }
+                outcome = migration_rewrite(plan, path, text, sources.contains(path))
+            }
         }
-        outcome: migration_rewrite(plan, path, text, sources.contains(path))
         loop line in outcome.skipped -> print("SKIP {line}")
         if outcome.rewritten == 0 -> next
         total += outcome.rewritten
         changed += 1
         print("EDIT {path} {outcome.rewritten}")
-        if write -> files.write(path, outcome.text) ?? panic("cannot write {path}: {err}")
+        if write && !database {
+            files.write(path, outcome.text) ?? panic("cannot write {path}: {err}")
+        }
     }
     print("TOTAL {total} sites in {changed} files")
 }

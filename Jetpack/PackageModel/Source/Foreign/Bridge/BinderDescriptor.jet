@@ -39,7 +39,12 @@ use {
 
 FOREIGN_DESCRIPTOR_SCHEMA: "jet-ffi-descriptor-v1"
 
+// A contract's version names the vocabulary its stamp is written in. The
+// direct C and C++ contracts are at version 1; the adapter contracts are at
+// version 2, which spells their marshaled models `AdapterMarshaled`.
 FOREIGN_ABI_CONTRACT_VERSION: 1
+
+FOREIGN_ADAPTER_CONTRACT_VERSION: 2
 
 // A foreign language is the binder that owns its `<lang>` mount root (the
 // root of `<lang>.<lib>`): the language is named by that root, and its row
@@ -315,7 +320,7 @@ ForeignCallbackModel: enum {
     debug_name: fn(self) -> String Never! {
         if self == {
             .ReentrantThreadSafe -> "ReentrantThreadSafe"
-            .AdapterMarshaled -> "AdapterMarshalled"
+            .AdapterMarshaled -> "AdapterMarshaled"
             .NoCallback -> "None"
             .CABI -> "CAbi"
             .HostRegistration -> "HostRegistration"
@@ -330,7 +335,7 @@ ForeignAsyncModel: enum {
     debug_name: fn(self) -> String Never! {
         if self == {
             .JetTask -> "JetTask"
-            .AdapterMarshaled -> "AdapterMarshalled"
+            .AdapterMarshaled -> "AdapterMarshaled"
         }
     }
 }
@@ -342,7 +347,7 @@ ForeignTaskBoundary: enum {
     debug_name: fn(self) -> String Never! {
         if self == {
             .RejectCapturedState -> "RejectCapturedState"
-            .AdapterMarshaled -> "AdapterMarshalled"
+            .AdapterMarshaled -> "AdapterMarshaled"
         }
     }
 }
@@ -460,6 +465,7 @@ ForeignABIContract: struct {
     // `ForeignAbiContract::MESSAGE` (the adapter contract).
     message: fn() -> ForeignABIContract Never! {
         contract := ForeignABIContract.c()
+        contract.version = FOREIGN_ADAPTER_CONTRACT_VERSION
         contract.calling_convention = ForeignCallingConvention.HostMessage
         contract.layout = ForeignLayoutModel.AdapterTyped
         contract.ownership = ForeignOwnershipModel.AdapterOwned

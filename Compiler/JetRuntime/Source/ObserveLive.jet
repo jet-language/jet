@@ -8,22 +8,23 @@
 // The published snapshot is raw facts, not a rendered view;
 // jet_foundation's codec (Devtools/LiveSnapshot.jet) validates them for readers.
 // Little-endian words, then sections:
-//   magic "JETLIVE1", sequence, pid, captured unix ms (0 when the clock
+//   magic "JETLIVE2", sequence, pid, captured unix ms (0 when the clock
 //   fails), elapsed ns since the run started, boot-clock ns when the writer
 //   started, CPU ticks (times(2)) when the run started, AT_CLKTCK, exit,
 //   arenas, arena allocations, arena bytes, workers, queued; the five
 //   identity texts.
 //   Sections, each a tag word and a record count: 1 tasks (id, parent,
-//   spawn site, state, deadline present, deadline, canceled; label and
-//   wait texts), 2 channels (id, depth, bounded, capacity, send and receive
-//   waiters, closed), 3 values (five texts), 4 events (the fifteen fields,
-//   five of them texts). Tag 0 ends the snapshot.
+//   spawn site, state, deadline present, deadline, canceled, open spans,
+//   arena allocations; label and wait texts), 2 channels (id, depth,
+//   bounded, capacity, send and receive waiters, closed), 3 values (five
+//   texts), 4 events (the fifteen fields, five of them texts). Tag 0 ends
+//   the snapshot.
 //   A text is its byte length (-1 when absent) and the bytes of at most its
 //   first 160 scalars.
 // Tasks are written by every writer (the run's root task is one). The
 // channel, value and event sections are written through code words their
 // producers install, so a program pays for a section only with its feature.
-OBSERVE_RAW_MAGIC: I64{3550338754064696650}
+OBSERVE_RAW_MAGIC: I64{3622396348102624586}
 
 observe_values_code := I64{0}
 
@@ -189,6 +190,8 @@ observe_raw_tasks: fn(builder: I64) {
             }
             at += I64{8}
         }
+        observe_raw_word(builder, sync_load(wrapping(node + OBSERVE_TASK_SPANS)))
+        observe_raw_word(builder, sync_load(wrapping(node + OBSERVE_TASK_ALLOCATIONS)))
         observe_raw_text(builder, sync_load(wrapping(node + I64{32})))
         observe_raw_text(builder, sync_load(wrapping(node + I64{48})))
         node = sync_load(node)

@@ -1,0 +1,17 @@
+# An interop check of Jet's DWARF: LLDB reads the O0 image a build ships.
+# `total` leaves its loop by the loop's test or by the `break`, so after the
+# loop its value is the join of both; the kit leaves the IR verifier's SSA
+# round trip (JET_OPT_VERIFY), which would move that value into a fresh
+# unnamed slot, off for debugger cases. Stopped on the line after the loop,
+# LLDB reads `total` with the value the `break` left. The fixture is the
+# Debug suite's and must stay in jet fmt form.
+requires: tool:lldb
+fixture: ../Debug/LocalJoinedAtABreakExitStaysVisible.fixture
+env: NO_COLOR=1
+step: jet build -O0 prog.jet
+exit: 0
+step: lldb --no-lldbinit --no-use-colors -b -o "breakpoint set -f prog.jet -l 8" -o run -o "frame variable total" -o "process kill" {work}/.jet/build/prog
+exit: any # only the stop and the local are the subject
+stdout+stderr: ~ "at prog.jet:8" # the stop is on the line after the loop
+stdout+stderr: ~ "total = 6" # the joined local is there, with the value the `break` left
+stdout+stderr: !~ "total = <" # with a value, not "optimized out" or "not available"

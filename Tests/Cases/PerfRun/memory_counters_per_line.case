@@ -1,0 +1,37 @@
+# `jet perf run --method=memory` samples four counters of the program's
+# main thread beside its CPU time: L1D read misses, LLC read misses, dTLB
+# read misses and page faults. Each counter sample counts at the innermost
+# line of walk.jet on the stack it interrupted, weighted by the counter's
+# sampling period, so every line of walk.jet has its count of each counter
+# taken. The fill (line 14) faults the array's pages in. The walk a page
+# and a line apart (line 30) misses L1D at nearly every one of its 16
+# million reads. Its dTLB misses depend on the host's page size, as
+# transparent huge pages map the array with few TLB entries, so the case
+# asserts only that they are counted. The random hops through a 128 MiB
+# table (line 44) miss the LLC at most of their 4 million reads: the
+# kernel's generic LLC read-miss event on Intel, the core's demand fills
+# from beyond its L3 (event 0x43, unit mask 0xFC) on AMD Zen 3 and later.
+# A counter the CPU does not have is reported unavailable with the
+# kernel's errno (no_counters_reports_unavailable).
+requires: os-name:linux
+requires: arch:x86_64
+fixture: MemoryCountersPerLine.fixture
+env: NO_COLOR=1
+step: jet perf run --method=memory walk.jet --out {work}/walk.jettrace
+exit: 0
+stdout: = "lines=35184363700224 pages=35184363700224 hops=35183996698624\n"
+json: file walk.jettrace doc $.content.profile.method = "memory"
+json: file walk.jettrace doc $.content.profile.counters #= 4
+json: file walk.jettrace doc $.content.profile.counters[?name="l1d_misses"][?status="captured"] #= 1
+json: file walk.jettrace doc $.content.profile.counters[?name="dtlb_misses"][?status="captured"] #= 1
+json: file walk.jettrace doc $.content.profile.counters[?name="page_faults"][?status="captured"] #= 1
+json: file walk.jettrace doc $.content.profile.counters[?name="llc_misses"][?status="captured"] #= 1
+json: file walk.jettrace doc $.content.profile.rows[?source.start_line=14][?page_fault_count>=16] #= 1 # the fill faults the array in, 2 MiB pages or 4 KiB
+json: file walk.jettrace doc $.content.profile.rows[?source.start_line=30][?l1d_miss_count>=100000] #= 1 # an L1D miss at nearly every read
+json: file walk.jettrace doc $.content.profile.rows[?source.start_line=30][?dtlb_miss_count>=0] #= 1 # its dTLB misses, counted
+json: file walk.jettrace doc $.content.profile.rows[?source.start_line=20][?l1d_miss_count>=0] #= 1 # the cache-line walk's L1D misses, counted
+json: file walk.jettrace doc $.content.profile.rows[?source.start_line=44][?llc_miss_count>=100000] #= 1 # an LLC miss at most random hops
+step: jet perf view {work}/walk.jettrace
+exit: 0
+stdout: ~ "counter l1d_misses captured period="
+stdout: ~ " l1d_misses="

@@ -7,7 +7,11 @@
 // conflicts with the export, E1341), so these name the direct calls.
 storage_arena_open: fn() { jet_rt_mem_arena_open() }
 
-storage_arena_alloc: fn(bytes: I64) { jet_rt_mem_arena_alloc(bytes) }
+// Each allocation also counts for the task that made it (Observe.jet).
+storage_arena_alloc: fn(bytes: I64) {
+    jet_rt_mem_arena_alloc(bytes)
+    observe_task_count(OBSERVE_TASK_ALLOCATIONS, I64{1})
+}
 
 storage_arena_reset: fn(count: I64, bytes: I64) { jet_rt_mem_arena_reset(count, bytes) }
 

@@ -1,10 +1,11 @@
 # Linux perf is the comparator for `jet perf run`'s own sampler: on the same
 # -O2 fib, sampling the same CPU clock, both put fib first, at the same
 # hottest source line, and both name the compiler's stop poll beside it by
-# its symbol. `jet perf` reads no perf data; perf only checks it.
+# its symbol. `jet perf` reads no perf data; perf only checks it, as an
+# interop check of Jet's symbol map. The fixture is the capture suite's.
 requires: os-name:linux
 requires: tool:perf
-fixture: Fixtures/Fib
+fixture: ../JetPerfTracePartsCaptureRun/Fixtures/Fib
 step: jet build -O2 fib.jet
 exit: 0
 step: perf record -q -e cpu-clock -o {work}/fib.perf -- {work}/.jet/build/fib 35

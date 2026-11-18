@@ -1,0 +1,37 @@
+// web.requests is the decision point each request a web app serves passes
+// before its routes, and web.under(prefix, handler) scopes one handler to
+// the paths under a prefix. The handler under "/admin" answers 401 for
+// /admin and /admin/users before their routes run. It leaves /about and
+// /administrator to their routes, since a prefix holds whole path segments.
+use {
+    client: core.http.client
+    event: core.event
+    net: core.net
+    server: core.http.server
+    web: core.web
+}
+
+signed_out: fn(asked: HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse> {
+    HookDecision.Fail(server.response(401, "sign in for {asked.path}"))
+}
+
+page: fn(asked: HTTPRequest) -[Net, FS.Read]> HTTPResponse HTTPError! {
+    Ok(server.response(200, "page {asked.path}"))
+}
+
+run: fn() -[Net, FS.Read, Time]> (HTTPError | NetError | TaskFailure)! {
+    scope: event.scope()
+    _: web.requests.on(scope, web.under("/admin", signed_out))
+    served: web.app().get("/about", page).get("/admin", page).get("/admin/users", page).get("/administrator", page)
+    listener: net.tcp_listen("127.0.0.1:0")
+    addr: listener.local_addr()
+    paths: [String]{"/about", "/admin", "/admin/users", "/administrator"}
+    serving: task {
+        loop _ in 0..<4 { served.serve_once(listener) }
+    }
+    loop path in paths {
+        got: client.get("http://{addr}{path}")
+        print("{path}: {got.status} {got.text()}")
+    }
+    serving.join()
+}

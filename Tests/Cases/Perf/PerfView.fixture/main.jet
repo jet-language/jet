@@ -1,0 +1,26 @@
+// Spends its CPU time in `spin_hot_loop`, long enough for the sampler to
+// land there many times, inside the core.log span `spin`. The rounds can
+// come from the command line, so the loop can't fold at compile time.
+use {
+    log: core.log
+    core.process
+}
+
+spin_hot_loop: fn(rounds: Int) -> Int Never! {
+    total := 0
+    loop index in 0..<rounds -> total = (total * 31 + index) % 1000003
+    total
+}
+
+spin: fn(rounds: Int) -[Log]> Int {
+    span: log.span("spin")
+    total: spin_hot_loop(rounds)
+    log.close(span)
+    total
+}
+
+run: fn() {
+    args: process.args()
+    rounds: if args.len() > 0 -> Int.parse(args[args.len() - 1]) ?? 200000000 else -> 200000000
+    print("spun={spin(rounds)}")
+}

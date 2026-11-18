@@ -32,6 +32,7 @@ Run a lesson from the repository root, for example `jet run Examples/Text/<Lesso
 - [StringParse](StringParse.jet) — String parsing and line splitting for *small in-memory* text only.
 - [Strings](Strings.jet)
 - [StringTryPush](StringTryPush.jet) — `s.try_push(text)` appends to a String place and reports a refused allocation as an `AllocError` value, which `??` handles at the call.
+- [StructuralPrinting](StructuralPrinting.jet) — A struct with no hand-written display shows its fields under `{value:Debug}` with no report, beside a hand-written `Display` or `Debug`, a `#!Debug` type and a `#Redact` field.
 - [TextCursor](TextCursor.jet) — `text.Cursor` — `take_pattern` reuses the interpolation-literal-as-pattern matcher (typed holes, non-greedy, anchored by literal text) in CONSUME mode: it…
 - [TextTabsTitle](TextTabsTitle.jet)
 - [TypedLiteralRaw](TypedLiteralRaw.jet) — Typed literal bodies own backslashes.

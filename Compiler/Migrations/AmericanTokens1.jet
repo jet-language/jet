@@ -17,11 +17,76 @@
 //   `status` is a word of the record's vocabulary, so it follows the
 //   record's version; JetCLI TestCompare.jet reads it and refuses any other
 //   word, the old spelling included.
+// - A jettrace (`jet.trace`, `version` 1 to 2): a task row's `cancelled`
+//   key is `canceled`. Written by jettrace_artifact (JetFoundation
+//   Trace/JetTrace.jet, its rows by Trace/Carriers.jet) and read by
+//   verify_jettrace (Trace/ValidateTasks.jet checks the rows) and by `jet
+//   perf` (JetCLI Perf/Export.jet names the key). Its `trace_id` is the hash
+//   of its content, so a converted trace with task rows has a new one.
+// - A generated binding's descriptor stamp (`// jet-ffi-descriptor=`, its
+//   first line): an adapter contract's marshaled models are spelled
+//   `AdapterMarshaled` and the contract is version 2. Written by
+//   BinderDescriptor.stamp (Jetpack PackageModel
+//   Foreign/Bridge/BinderDescriptor.jet; JetDriver RustForeign.jet keeps
+//   the Rust binder's) into every binding a binder generates, and read by
+//   the provider's stale-stamp check (Jetpack Provider
+//   Foreign/ForeignRealization.jet), the C import assembly and the COM
+//   binder, which take only the stamp the binder writes now. A converted
+//   stamp must be that stamp. The cache identities that hash a stamp (a
+//   binding's `.hash` and `.provenance`) are not converted: `jet inspect
+//   bind` regenerates them.
+// - A service state store (`JET-SERVICE-STATE/1` to `/2`, its first line):
+//   in a workflow log (`{store}.workflows`) a canceled sleep record is
+//   `workflow-wait-sleep-canceled:` and an activity's canceled outcome is
+//   `Canceled`. Written by state_encode and state_append (Core
+//   Service/Service.jet) and read by state_decode, which refuses version 1
+//   by name, and workflow_apply. Other stores only take the new first line.
+// - A service authority log (lines `S|`, `K|` and `E|` of length-prefixed
+//   hex fields): a delivery event's canceled state is `Canceled`, signed as
+//   `jet-service-delivery-event-v2`. Written by authority_append_event and
+//   read by authority_entries (Core Service/Service.jet), which validates
+//   every event's signature. The converter checks each version 1 event's
+//   signature before it re-signs it, with the key the log's acceptance
+//   record names, so a log that does not validate is reported, not signed.
+//   A delivery receipt (`jet-service-delivery-receipt-v2`) is answered to its
+//   caller and never stored, and the file dialog's canceled answer
+//   (`canceled`, Core UI/Host.jet) is a provider's live reply: neither has a
+//   file to convert.
+// - A job queue database (SQLite, format version 1 to 2): a canceled job's
+//   and event's `state` is `canceled`, and the database records version 2
+//   in its `jet_job_queue_format` table. Written and read by the queue (Core
+//   Jobs/Jobs.jet), which refuses version 1 by its number when it opens. The
+//   converter changes the file in place, in one `db.migrate` transaction.
+//   The queue's status and event notices (`canceled` count, `failure`) are
+//   published live and never stored, so they have nothing to convert.
 //
-// Only a top-level member the format names is rewritten: an observation, a
+// Only the members the format names are rewritten: an observation, a
 // reason or any other text keeps its words, and a file in no known format
 // is left alone and reported.
-use jet_foundation.[ComparisonStatus, TEST_COMPARISON_SCHEMA_VERSION, canonical_json_parse, comparison_parse_status, comparison_record_from_json, comparison_status_as_str]
+use {
+    jet_foundation.[
+        CanonicalJSON,
+        CanonicalJSONField,
+        ComparisonStatus,
+        TEST_COMPARISON_SCHEMA_VERSION,
+        TRACE_SCHEMA,
+        TRACE_VERSION,
+        canonical_json_bytes,
+        canonical_json_object,
+        canonical_json_parse,
+        canonical_json_sha256,
+        comparison_parse_status,
+        comparison_record_from_json,
+        comparison_status_as_str,
+        verify_jettrace,
+    ]
+    jet_pkg_model.[FOREIGN_ADAPTER_CONTRACT_VERSION, pkg_binder_descriptor, pkg_foreign_binders]
+    tokens_crypto: core.crypto
+    tokens_db: core.db
+    core.db.[DBError, DBScope, DBValue, SQL]
+    tokens_encoding: core.encoding
+    tokens_files: core.files
+}
 
 // One word of an old comparison status vocabulary and the status it named.
 AmericanTokensStatus: struct {
@@ -42,6 +107,68 @@ AMERICAN_TOKENS1_COMPARISON_STATUS_V1: [AmericanTokensStatus]{
     {token: "contaminated", status: ComparisonStatus.Contaminated},
 }
 
+// Version 1's key of a jettrace task row's canceled flag.
+AMERICAN_TOKENS1_TRACE_CANCELED_V1: "cancelled"
+
+// Version 2's key of it.
+AMERICAN_TOKENS1_TRACE_CANCELED: "canceled"
+
+// Version 1's spelling of an adapter contract's marshaled models.
+AMERICAN_TOKENS1_MARSHALED_V1: "AdapterMarshalled"
+
+// Version 2's spelling of them.
+AMERICAN_TOKENS1_MARSHALED: "AdapterMarshaled"
+
+// The start of a generated binding's first line, its descriptor stamp.
+AMERICAN_TOKENS1_DESCRIPTOR_LINE: "// jet-ffi-descriptor="
+
+// The first line of a version 1 service state store.
+AMERICAN_TOKENS1_SERVICE_STATE_V1: "JET-SERVICE-STATE/1"
+
+// The first line of a version 2 one.
+AMERICAN_TOKENS1_SERVICE_STATE: "JET-SERVICE-STATE/2"
+
+// Version 1's start of a workflow log's canceled sleep record.
+AMERICAN_TOKENS1_SLEEP_CANCELED_V1: "workflow-wait-sleep-cancelled:"
+
+// Version 2's start of it.
+AMERICAN_TOKENS1_SLEEP_CANCELED: "workflow-wait-sleep-canceled:"
+
+// Version 1's canceled task outcome and delivery state.
+AMERICAN_TOKENS1_OUTCOME_CANCELED_V1: "Cancelled"
+
+// Version 2's.
+AMERICAN_TOKENS1_OUTCOME_CANCELED: "Canceled"
+
+// The label a version 1 delivery event is signed under.
+AMERICAN_TOKENS1_DELIVERY_EVENT_V1: "jet-service-delivery-event-v1"
+
+// The label a version 2 one is.
+AMERICAN_TOKENS1_DELIVERY_EVENT: "jet-service-delivery-event-v2"
+
+// The label of a delivery generation's signing key, in both versions.
+AMERICAN_TOKENS1_DELIVERY_GENERATION: "jet-service-delivery-generation-v1"
+
+// A service state store: its five header lines and its records.
+AmericanTokensStore: struct {
+    header: [String],
+    records: [String],
+}
+
+// One length-prefixed field and the text after it.
+AmericanTokensField: struct {
+    value: String,
+    rest: String,
+}
+
+// One line of a service authority log, without its line break: its
+// operation and its decoded fields.
+AmericanTokensRecord: struct {
+    line: String,
+    op: String,
+    fields: [String],
+}
+
 // One member of a JSON document's top-level object: its key and the byte
 // range of its value's text.
 AmericanTokensMember: struct {
@@ -59,8 +186,17 @@ AmericanTokensEdit: struct {
 
 // Converts one file to the current version of its format.
 american_tokens1_file: fn(path: String, text: String) -[]> MigrationOutcome {
+    if text.starts_with(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
+        return american_tokens1_binding(path, text)
+    }
+    if text.starts_with(AMERICAN_TOKENS1_SERVICE_STATE_V1) || text.starts_with(AMERICAN_TOKENS1_SERVICE_STATE) {
+        return american_tokens1_store(path, text)
+    }
+    log: american_tokens1_log_parse(text) ?? [AmericanTokensRecord]{}
+    if log.len() > 0 -> return american_tokens1_log(path, text, log)
     bytes: text.bytes()
     members: american_tokens1_members(bytes) ?? return american_tokens1_unknown(path, text)
+    if american_tokens1_is_trace(bytes, members) -> return american_tokens1_trace(path, text)
     edits := [AmericanTokensEdit]{}
     if american_tokens1_is_record(members) {
         if american_tokens1_value(bytes, members, "schema_version") != Val("1") {
@@ -92,12 +228,24 @@ american_tokens1_file: fn(path: String, text: String) -[]> MigrationOutcome {
 // Why `after`, the plan's rewrite of `before`, does not mean what `before`
 // meant, or None when it does. Every member but the rewritten ones keeps
 // its text, the old status word names the status the current reader reads
-// from the new one, and a record is one the current reader accepts.
+// from the new one, and a record, a trace, a store or a log is one the
+// current reader accepts.
 american_tokens1_same_meaning: fn(path: String, before: String, after: String) -[]> String? {
     if before == after -> return None
+    if before.starts_with(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
+        return american_tokens1_binding_same_meaning(before, after)
+    }
+    if before.starts_with(AMERICAN_TOKENS1_SERVICE_STATE_V1) {
+        return american_tokens1_store_same_meaning(path, before, after)
+    }
+    old_log: american_tokens1_log_parse(before) ?? [AmericanTokensRecord]{}
+    if old_log.len() > 0 -> return american_tokens1_log_same_meaning(old_log, after)
     old_bytes: before.bytes()
     new_bytes: after.bytes()
     old: american_tokens1_members(old_bytes) ?? return Val("{path} was in no format this plan converts")
+    if american_tokens1_is_trace(old_bytes, old) {
+        return american_tokens1_trace_same_meaning(old_bytes, new_bytes)
+    }
     new: american_tokens1_members(new_bytes) ?? return Val("the rewrite is not a JSON object")
     if old.len() != new.len() -> return Val("the rewrite has {new.len()} members, not {old.len()}")
     loop (index, member) in old {
@@ -130,6 +278,464 @@ american_tokens1_same_meaning: fn(path: String, before: String, after: String) -
 
 american_tokens1_unknown: fn(path: String, text: String) -[]> MigrationOutcome {
     MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: in no format this plan converts"}}
+}
+
+// A jettrace: its top-level `schema` names the trace format.
+american_tokens1_is_trace: fn(bytes: [U8], members: [AmericanTokensMember]) -[]> Bool {
+    american_tokens1_value(bytes, members, "schema") == Val("\"{TRACE_SCHEMA}\"")
+}
+
+// Converts a version 1 jettrace: each task row's canceled key takes its new
+// name, `version` is the current one and `trace_id` the new content's hash.
+american_tokens1_trace: fn(path: String, text: String) -[]> MigrationOutcome {
+    wrapper: canonical_json_parse(text.bytes()) ?? {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: a jettrace that is not canonical JSON ({err.message})"}}
+    }
+    fields: american_tokens1_object(wrapper) ?? return american_tokens1_unknown(path, text)
+    if american_tokens1_field(fields, "version") != Val(CanonicalJSON.Integer("1")) {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    content: american_tokens1_field(fields, "content") ?? return american_tokens1_unknown(path, text)
+    renamed := 0
+    moved: american_tokens1_trace_tasks(content, AMERICAN_TOKENS1_TRACE_CANCELED_V1, AMERICAN_TOKENS1_TRACE_CANCELED, renamed)
+    id: canonical_json_sha256(moved)
+    out := [CanonicalJSONField]{}
+    loop field in fields {
+        value: if field.key == {
+            "content" -> moved
+            "trace_id" -> CanonicalJSON.String(id)
+            "version" -> CanonicalJSON.Integer("{TRACE_VERSION}")
+            else -> field.value
+        }
+        out.push(CanonicalJSONField{key: field.key, value: value})
+    }
+    converted: String.from_bytes(canonical_json_bytes(CanonicalJSON.Object(out))) ?? return american_tokens1_unknown(path, text)
+    MigrationOutcome{text: converted, rewritten: renamed + 1, skipped: [String]{}}
+}
+
+// Whether a converted trace means what its version 1 source meant: the
+// source's `trace_id` is its content's hash, the current reader accepts the
+// rewrite, and the rewrite's content with the old task key restored is the
+// source's content.
+american_tokens1_trace_same_meaning: fn(old_bytes: [U8], new_bytes: [U8]) -[]> String? {
+    old: canonical_json_parse(old_bytes) ?? return Val("the old trace is not canonical JSON: {err.message}")
+    old_fields: american_tokens1_object(old) ?? return Val("the old trace is not a JSON object")
+    if american_tokens1_field(old_fields, "version") != Val(CanonicalJSON.Integer("1")) {
+        return Val("the old trace is not version 1")
+    }
+    old_content: american_tokens1_field(old_fields, "content") ?? return Val("the old trace has no content")
+    if american_tokens1_field(old_fields, "trace_id") != Val(CanonicalJSON.String(canonical_json_sha256(old_content))) {
+        return Val("the old trace's trace_id is not its content's hash")
+    }
+    new: verify_jettrace(new_bytes) ?? return Val("the current reader refuses the rewrite: {err.message}")
+    new_fields: american_tokens1_object(new) ?? return Val("the rewrite is not a JSON object")
+    new_content: american_tokens1_field(new_fields, "content") ?? return Val("the rewrite has no content")
+    restored := 0
+    if american_tokens1_trace_tasks(new_content, AMERICAN_TOKENS1_TRACE_CANCELED, AMERICAN_TOKENS1_TRACE_CANCELED_V1, restored) != old_content {
+        return Val("the trace content changed beyond its task rows' canceled key")
+    }
+    None
+}
+
+// `content` with the `from` key of each row of its `tasks` named `to`,
+// counting the renamed keys in `renamed`.
+american_tokens1_trace_tasks: fn(content: CanonicalJSON, from: String, to: String, renamed: &Int) -[]> CanonicalJSON {
+    fields: american_tokens1_object(content) ?? return content
+    out := [CanonicalJSONField]{}
+    loop field in fields {
+        rows: american_tokens1_array(field.value) ?? [CanonicalJSON]{}
+        if field.key != "tasks" || rows.len() == 0 {
+            out.push(field)
+            next
+        }
+        moved := [CanonicalJSON]{}
+        loop row in rows -> moved.push(american_tokens1_rename(row, from, to, renamed))
+        out.push(CanonicalJSONField{key: field.key, value: CanonicalJSON.Array(moved)})
+    }
+    CanonicalJSON.Object(out)
+}
+
+// `row` with its `from` key named `to`, its keys in canonical order.
+american_tokens1_rename: fn(row: CanonicalJSON, from: String, to: String, renamed: &Int) -[]> CanonicalJSON {
+    fields: american_tokens1_object(row) ?? return row
+    out := [CanonicalJSONField]{}
+    loop field in fields {
+        if field.key != from {
+            out.push(field)
+            next
+        }
+        renamed += 1
+        out.push(CanonicalJSONField{key: to, value: field.value})
+    }
+    canonical_json_object(out) ?? row
+}
+
+american_tokens1_object: fn(value: CanonicalJSON) -[]> [CanonicalJSONField]? {
+    if value == {
+        .Object(fields) -> Val(fields)
+        .Null | .Bool(_) | .Integer(_) | .String(_) | .Array(_) -> None
+    }
+}
+
+american_tokens1_array: fn(value: CanonicalJSON) -[]> [CanonicalJSON]? {
+    if value == {
+        .Array(items) -> Val(items)
+        .Null | .Bool(_) | .Integer(_) | .String(_) | .Object(_) -> None
+    }
+}
+
+american_tokens1_field: fn(fields: [CanonicalJSONField], key: String) -[]> CanonicalJSON? {
+    loop field in fields {
+        if field.key == key -> return Val(field.value)
+    }
+    None
+}
+
+// Converts a binding whose descriptor stamp carries a version 1 adapter
+// contract: its marshaled models take the new spelling and the contract is
+// version 2. The reader takes only the stamp the binder writes now, so a
+// converted stamp that is not that one is reported and left alone.
+american_tokens1_binding: fn(path: String, text: String) -[]> MigrationOutcome {
+    line: american_tokens1_first_line(text)
+    renamed := 0
+    stamp: american_tokens1_stamp(line.removeprefix(AMERICAN_TOKENS1_DESCRIPTOR_LINE), AMERICAN_TOKENS1_MARSHALED_V1, AMERICAN_TOKENS1_MARSHALED, "1", "{FOREIGN_ADAPTER_CONTRACT_VERSION}", renamed)
+    if renamed == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    if !american_tokens1_current_stamp(stamp) {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: a descriptor stamp no current binder writes, even converted; `jet inspect bind` regenerates the binding"}}
+    }
+    MigrationOutcome{text: "{AMERICAN_TOKENS1_DESCRIPTOR_LINE}{stamp}{text.removeprefix(line)}", rewritten: renamed + 1, skipped: [String]{}}
+}
+
+// Whether a converted binding means what its version 1 source meant: only
+// its descriptor stamp changed, the stamp is the one its binder writes now,
+// and with the old spelling and contract version restored it is the
+// source's stamp.
+american_tokens1_binding_same_meaning: fn(before: String, after: String) -[]> String? {
+    old_line: american_tokens1_first_line(before)
+    new_line: american_tokens1_first_line(after)
+    if before.removeprefix(old_line) != after.removeprefix(new_line) {
+        return Val("the binding changed beyond its descriptor stamp")
+    }
+    if !new_line.starts_with(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
+        return Val("the rewrite has no descriptor stamp")
+    }
+    stamp: new_line.removeprefix(AMERICAN_TOKENS1_DESCRIPTOR_LINE)
+    if !american_tokens1_current_stamp(stamp) {
+        return Val("the current reader refuses the rewrite's descriptor stamp: no binder writes it")
+    }
+    restored := 0
+    if american_tokens1_stamp(stamp, AMERICAN_TOKENS1_MARSHALED, AMERICAN_TOKENS1_MARSHALED_V1, "{FOREIGN_ADAPTER_CONTRACT_VERSION}", "1", restored) != old_line.removeprefix(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
+        return Val("the descriptor stamp changed beyond its marshaled models and contract version")
+    }
+    None
+}
+
+// `stamp` with each marshaled model (a field whose value is `from`) spelled
+// `to`, counting them in `renamed`, and, when one was, its contract version
+// `from_version` set to `to_version`.
+american_tokens1_stamp: fn(stamp: String, from: String, to: String, from_version: String, to_version: String, renamed: &Int) -[]> String {
+    fields := stamp.split(";").to_list()
+    old_version: "version={from_version}"
+    version := -1
+    loop index in 0..<fields.len() {
+        if index > 0 && fields[index] == old_version && fields[index - 1].starts_with("contract=") {
+            version = index
+            next
+        }
+        parts: fields[index].split_once("=") ?? next
+        if parts.after == from {
+            fields[index] = "{parts.before}={to}"
+            renamed += 1
+        }
+    }
+    if renamed > 0 && version >= 0 -> fields[version] = "version={to_version}"
+    fields.join(";")
+}
+
+// Whether a binder writes `stamp` now.
+american_tokens1_current_stamp: fn(stamp: String) -[]> Bool {
+    loop binder in pkg_foreign_binders() {
+        if binder.stamp() == stamp -> return true
+    }
+    false
+}
+
+// `text` up to its first line break.
+american_tokens1_first_line: fn(text: String) -[]> String {
+    parts: text.split_once("\n") ?? return text
+    parts.before
+}
+
+// Converts a version 1 service state store: its first line is version 2's
+// and, in a workflow log, each canceled sleep record and canceled activity
+// outcome takes the new spelling.
+american_tokens1_store: fn(path: String, text: String) -[]> MigrationOutcome {
+    store: american_tokens1_store_parse(text) ?? {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: a service state store whose records do not parse; not converted"}}
+    }
+    if store.header[0] == AMERICAN_TOKENS1_SERVICE_STATE {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    renamed := 0
+    moved: american_tokens1_store_text(store, path.ends_with(".workflows"), AMERICAN_TOKENS1_SERVICE_STATE, AMERICAN_TOKENS1_SLEEP_CANCELED_V1, AMERICAN_TOKENS1_SLEEP_CANCELED, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED, renamed) ?? {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: a workflow record that does not parse; not converted"}}
+    }
+    MigrationOutcome{text: moved, rewritten: renamed + 1, skipped: [String]{}}
+}
+
+// Whether a converted store means what its version 1 source meant: the
+// rewrite is a version 2 store holding no version 1 token, and with the old
+// first line and spellings restored it is the source.
+american_tokens1_store_same_meaning: fn(path: String, before: String, after: String) -[]> String? {
+    old: american_tokens1_store_parse(before) ?? return Val("the old store's records do not parse")
+    if old.header[0] != AMERICAN_TOKENS1_SERVICE_STATE_V1 {
+        return Val("the old store is not version 1")
+    }
+    new: american_tokens1_store_parse(after) ?? return Val("the rewrite is not a service state store")
+    if new.header[0] != AMERICAN_TOKENS1_SERVICE_STATE {
+        return Val("the rewrite is not a version 2 store")
+    }
+    workflows: path.ends_with(".workflows")
+    left := 0
+    _: american_tokens1_store_text(new, workflows, AMERICAN_TOKENS1_SERVICE_STATE, AMERICAN_TOKENS1_SLEEP_CANCELED_V1, AMERICAN_TOKENS1_SLEEP_CANCELED, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED, left) ?? return Val("a record of the rewrite does not parse")
+    if left > 0 -> return Val("the rewrite still holds {left} version 1 tokens")
+    restored := 0
+    back: american_tokens1_store_text(new, workflows, AMERICAN_TOKENS1_SERVICE_STATE_V1, AMERICAN_TOKENS1_SLEEP_CANCELED, AMERICAN_TOKENS1_SLEEP_CANCELED_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1, restored) ?? return Val("a record of the rewrite does not parse")
+    if back != before -> return Val("the store changed beyond its first line and canceled tokens")
+    None
+}
+
+// The header lines and records of a service state store, or None when a
+// header line or a record's frame is cut short.
+american_tokens1_store_parse: fn(text: String) -[]> AmericanTokensStore? {
+    bytes: text.bytes()
+    header := [String]{}
+    at := 0
+    loop header.len() < 5 {
+        end := at
+        loop end < bytes.len() && bytes[end] != 10 -> end += 1
+        if end == bytes.len() -> return None
+        header.push(String.from_bytes(bytes[at..<end]) ?? return None)
+        at = end + 1
+    }
+    records := [String]{}
+    loop at < bytes.len() {
+        colon := at
+        loop colon < bytes.len() && bytes[colon] != 58 -> colon += 1
+        if colon == bytes.len() -> return None
+        length: american_tokens1_count(String.from_bytes(bytes[at..<colon]) ?? return None) ?? return None
+        end: colon + 1 + length
+        if end > bytes.len() -> return None
+        records.push(String.from_bytes(bytes[colon + 1..<end]) ?? return None)
+        at = end
+    }
+    Val(AmericanTokensStore{header: header, records: records})
+}
+
+// `store`'s text with `magic` its first line and, in a workflow log, each
+// record's `sleep_from` sleep and `wire_from` outcome spelled `sleep_to`
+// and `wire_to`, counting them in `renamed`; None when a record does not
+// parse.
+american_tokens1_store_text: fn(store: AmericanTokensStore, workflows: Bool, magic: String, sleep_from: String, sleep_to: String, wire_from: String, wire_to: String, renamed: &Int) -[]> String? {
+    parts := [String]{"{magic}\n"}
+    loop index in 1..<store.header.len() -> parts.push("{store.header[index]}\n")
+    version: store.header[3].removeprefix("version:")
+    prefix: "v{version}:"
+    loop record in store.records {
+        if !record.starts_with(prefix) -> return None
+        field: american_tokens1_take(record.removeprefix(prefix)) ?? return None
+        if field.rest.len() > 0 -> return None
+        payload: american_tokens1_workflow(field.value, workflows, sleep_from, sleep_to, wire_from, wire_to, renamed) ?? return None
+        parts.push(american_tokens1_frame("{prefix}{american_tokens1_frame(payload)}"))
+    }
+    Val(parts.join(""))
+}
+
+// A record's payload, in a workflow log with its `sleep_from` sleep or its
+// activity's `wire_from` outcome spelled `sleep_to` or `wire_to`, counting
+// them in `renamed`; None when an activity record's fields do not parse.
+american_tokens1_workflow: fn(payload: String, workflows: Bool, sleep_from: String, sleep_to: String, wire_from: String, wire_to: String, renamed: &Int) -[]> String? {
+    if !workflows -> return Val(payload)
+    if payload.starts_with(sleep_from) {
+        renamed += 1
+        return Val("{sleep_to}{payload.removeprefix(sleep_from)}")
+    }
+    retry: "workflow-activity-retry:"
+    done: "workflow-activity-done:"
+    head := ""
+    rest := ""
+    if payload.starts_with(retry) {
+        run: payload.removeprefix(retry).split_once(":") ?? return None
+        attempt: run.after.split_once(":") ?? return None
+        head = "{retry}{run.before}:{attempt.before}:"
+        rest = attempt.after
+    } else if payload.starts_with(done) {
+        run: payload.removeprefix(done).split_once(":") ?? return None
+        head = "{done}{run.before}:"
+        rest = run.after
+    } else { return Val(payload) }
+    key: american_tokens1_take(rest) ?? return None
+    wire: american_tokens1_take(key.rest) ?? return None
+    if wire.value != wire_from -> return Val(payload)
+    renamed += 1
+    Val("{head}{american_tokens1_frame(key.value)}{american_tokens1_frame(wire_to)}{wire.rest}")
+}
+
+// The field `{length}:{value}` that starts `text`, the length in bytes,
+// and the text after it.
+american_tokens1_take: fn(text: String) -[]> AmericanTokensField? {
+    parts: text.split_once(":") ?? return None
+    length: american_tokens1_count(parts.before) ?? return None
+    raw: parts.after.bytes()
+    if length > raw.len() -> return None
+    value: String.from_bytes(raw[0..<length]) ?? return None
+    rest: String.from_bytes(raw[length..<raw.len()]) ?? return None
+    Val(AmericanTokensField{value: value, rest: rest})
+}
+
+// `text` framed as `{length}:{text}`, the length in bytes.
+american_tokens1_frame: fn(text: String) -[]> String { "{text.bytes().len()}:{text}" }
+
+// A count written in decimal digits.
+american_tokens1_count: fn(text: String) -[]> Int? {
+    digits: text.bytes()
+    if digits.len() == 0 || digits.len() > 18 -> return None
+    count := 0
+    loop digit in digits {
+        if digit < 48 || digit > 57 -> return None
+        count = count * 10 + Int{digit} - 48
+    }
+    Val(count)
+}
+
+// Converts a version 1 authority log: each delivery event's canceled state
+// takes the new spelling and the event is signed under version 2's label,
+// once its version 1 signature validates. An event already signed under
+// version 2's label is kept, and one that validates under neither leaves
+// the log alone.
+american_tokens1_log: fn(path: String, text: String, records: [AmericanTokensRecord]) -[]> MigrationOutcome {
+    out := [String]{}
+    renamed := 0
+    loop (index, record) in records {
+        if record.op != "E" {
+            out.push("{record.line}\n")
+            next
+        }
+        line: american_tokens1_event(records, record, AMERICAN_TOKENS1_DELIVERY_EVENT_V1, AMERICAN_TOKENS1_DELIVERY_EVENT, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED) ?? {
+            return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: line {index + 1}, a delivery event, is signed under neither version's label; not converted"}}
+        }
+        if line != record.line -> renamed += 1
+        out.push("{line}\n")
+    }
+    if renamed == 0 -> return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    MigrationOutcome{text: out.join(""), rewritten: renamed, skipped: [String]{}}
+}
+
+// Whether a converted authority log means what its version 1 source meant:
+// every line but a delivery event's is unchanged, and each event, signed
+// under version 2's label, is its source once its state's old spelling and
+// version 1's signature are restored.
+american_tokens1_log_same_meaning: fn(old: [AmericanTokensRecord], after: String) -[]> String? {
+    new: american_tokens1_log_parse(after) ?? return Val("the rewrite is not a service authority log")
+    if new.len() != old.len() -> return Val("the rewrite has {new.len()} lines, not {old.len()}")
+    loop (index, record) in old {
+        if record.op != "E" {
+            if new[index].line != record.line -> return Val("line {index + 1} changed")
+            next
+        }
+        restored: american_tokens1_event(new, new[index], AMERICAN_TOKENS1_DELIVERY_EVENT, AMERICAN_TOKENS1_DELIVERY_EVENT_V1, AMERICAN_TOKENS1_OUTCOME_CANCELED, AMERICAN_TOKENS1_OUTCOME_CANCELED_V1) ?? {
+            return Val("line {index + 1}, a delivery event, is not signed under version 2's label")
+        }
+        if restored != record.line {
+            return Val("line {index + 1}, a delivery event, changed beyond its state's spelling and its signature")
+        }
+    }
+    None
+}
+
+// The lines of a service authority log, or None when `text` is not one:
+// each line is an `S`, `K` or `E` operation and its `|{length}:{hex}`
+// fields, the first is an acceptance, and the last is complete.
+american_tokens1_log_parse: fn(text: String) -[]> [AmericanTokensRecord]? {
+    if !text.starts_with("S|") || !text.ends_with("\n") -> return None
+    records := [AmericanTokensRecord]{}
+    loop line in text.removesuffix("\n").split("\n") {
+        parts: line.split("|").to_list()
+        op: "{parts[0]}"
+        if op != "S" && op != "K" && op != "E" -> return None
+        fields := [String]{}
+        loop at in 1..<parts.len() {
+            field: parts[at].split_once(":") ?? return None
+            length: american_tokens1_count(field.before) ?? return None
+            bytes: tokens_encoding.hex_to_bytes(field.after) ?? return None
+            if bytes.len() != length -> return None
+            fields.push(String.from_bytes(bytes) ?? return None)
+        }
+        records.push(AmericanTokensRecord{line: "{line}", op: op, fields: fields})
+    }
+    Val(records)
+}
+
+// A delivery event's line with a `from_state` state spelled `to_state` and
+// signed under `to_label`, when its signature validates under
+// `from_label`; the line itself when it validates under `to_label`; None
+// otherwise.
+american_tokens1_event: fn(records: [AmericanTokensRecord], event: AmericanTokensRecord, from_label: String, to_label: String, from_state: String, to_state: String) -[]> String? {
+    if event.fields.len() != 6 -> return None
+    key: american_tokens1_delivery_key(records, event.fields[0]) ?? return None
+    signature: tokens_encoding.hex_to_bytes(event.fields[5]) ?? return None
+    if signature == american_tokens1_event_signature(key, to_label, event.fields) {
+        return Val("{event.line}")
+    }
+    if signature != american_tokens1_event_signature(key, from_label, event.fields) -> return None
+    state: if event.fields[2] == from_state -> "{to_state}" else -> "{event.fields[2]}"
+    fields := [String]{"{event.fields[0]}", "{event.fields[1]}", state, "{event.fields[3]}", "{event.fields[4]}"}
+    fields.push(tokens_encoding.bytes_to_hex(american_tokens1_event_signature(key, to_label, fields)))
+    Val(american_tokens1_record("E", fields))
+}
+
+// An authority log line, without its line break: `op`, then each field as
+// `|{length}:{hex}`.
+american_tokens1_record: fn(op: String, fields: [String]) -[]> String {
+    parts := [String]{"{op}"}
+    loop field in fields {
+        bytes: field.bytes()
+        parts.push("|{bytes.len()}:{tokens_encoding.bytes_to_hex(bytes)}")
+    }
+    parts.join("")
+}
+
+// The signing key of delivery `id`'s generation, named by its acceptance
+// record: the authority token's 32 key bytes signing the generation.
+american_tokens1_delivery_key: fn(records: [AmericanTokensRecord], id: String) -[]> [U8]? {
+    loop record in records {
+        if record.op == "S" && record.fields.len() == 10 && record.fields[0] == id {
+            authority: record.fields[2]
+            if !authority.starts_with("sa-") -> return None
+            key: tokens_encoding.hex_to_bytes(authority.removeprefix("sa-")) ?? return None
+            if key.len() != 32 -> return None
+            return Val(tokens_crypto.hmac_sha256(key, american_tokens1_signed([String]{AMERICAN_TOKENS1_DELIVERY_GENERATION, "{record.fields[5]}"})))
+        }
+    }
+    None
+}
+
+// The signature of a delivery event's first five fields under `label`.
+american_tokens1_event_signature: fn(key: [U8], label: String, fields: [String]) -[]> [U8] {
+    tokens_crypto.hmac_sha256(key, american_tokens1_signed([String]{"{label}", "{fields[0]}", "{fields[1]}", "{fields[2]}", "{fields[3]}", "{fields[4]}"}))
+}
+
+// The signed bytes of `fields`: each one's length in bytes as a big-endian
+// 64-bit count, then its bytes.
+american_tokens1_signed: fn(fields: [String]) -[]> [U8] {
+    signed := [U8]{}
+    loop field in fields {
+        bytes: field.bytes()
+        length: bytes.len()
+        loop shift in 0..<8 -> signed.push(U8{(length >> ((7 - shift) * 8)) & 255})
+        loop byte in bytes -> signed.push(byte)
+    }
+    signed
 }
 
 // A comparison record: the members its canonical payload always has.
@@ -253,6 +859,161 @@ american_tokens1_blank: fn(byte: U8) -[]> Bool {
     byte == 32 || byte == 10 || byte == 13 || byte == 9
 }
 
+// The first bytes of an SQLite file, which this plan reads as a job queue
+// database.
+AMERICAN_TOKENS1_SQLITE: "SQLite format 3"
+
+// Version 1's canceled job state.
+AMERICAN_TOKENS1_JOB_CANCELED_V1: "cancelled"
+
+// Version 2's.
+AMERICAN_TOKENS1_JOB_CANCELED: "canceled"
+
+// The job queue format version this plan converts to, and the table that
+// records it (Core Jobs/Jobs.jet's QUEUE_FORMAT and QUEUE_CREATE_FORMAT).
+AMERICAN_TOKENS1_QUEUE_FORMAT: 2
+
+AMERICAN_TOKENS1_QUEUE_FORMAT_TABLE: "CREATE TABLE jet_job_queue_format (version INTEGER NOT NULL)"
+
+// Whether `path` is an SQLite file.
+american_tokens1_database_file: fn(path: String) -[FS]> Bool {
+    head: tokens_files.read_at(path, 0, 15) ?? return false
+    text: String.from_bytes(head) ?? return false
+    text == AMERICAN_TOKENS1_SQLITE
+}
+
+// Converts a version 1 job queue database in place when `write` is set: in
+// one migration, each canceled job's and event's state takes the new
+// spelling and the database records format version 2. A database with no
+// job queue, or one whose queue tables do not read, is reported and left
+// alone.
+american_tokens1_database: fn(path: String, write: Bool) -[DB, Time.Wait]> MigrationOutcome {
+    store: tokens_db.open(path)
+    outcome: american_tokens1_database_scope(path, store.all_rows(), write)
+    _: store.close()
+    outcome
+}
+
+american_tokens1_database_scope: fn(path: String, scope: DBScope, write: Bool) -[DB, Time.Wait]> MigrationOutcome {
+    version: american_tokens1_queue_version(scope) ?? {
+        return american_tokens1_database_skip("{path}: an SQLite database whose job queue does not read ({err}); not converted")
+    }
+    if version == 0 {
+        return american_tokens1_database_skip("{path}: an SQLite database with no job queue; not converted")
+    }
+    if version == AMERICAN_TOKENS1_QUEUE_FORMAT {
+        return MigrationOutcome{text: "", rewritten: 0, skipped: [String]{}}
+    }
+    if version != 1 {
+        return american_tokens1_database_skip("{path}: a job queue database of format version {version}; not converted")
+    }
+    jobs: american_tokens1_queue_count(scope, SQL{"SELECT COUNT(*) AS count FROM jet_job_queue_jobs WHERE state = {AMERICAN_TOKENS1_JOB_CANCELED_V1}"}) ?? {
+        return american_tokens1_database_skip("{path}: a job queue whose jobs do not read ({err}); not converted")
+    }
+    events: american_tokens1_queue_count(scope, SQL{"SELECT COUNT(*) AS count FROM jet_job_queue_events WHERE state = {AMERICAN_TOKENS1_JOB_CANCELED_V1}"}) ?? {
+        return american_tokens1_database_skip("{path}: a job queue whose events do not read ({err}); not converted")
+    }
+    if write {
+        steps: [SQL]{
+            SQL.raw(AMERICAN_TOKENS1_QUEUE_FORMAT_TABLE),
+            SQL{"INSERT INTO jet_job_queue_format (version) VALUES ({AMERICAN_TOKENS1_QUEUE_FORMAT})"},
+            SQL{"UPDATE jet_job_queue_jobs SET state = {AMERICAN_TOKENS1_JOB_CANCELED} WHERE state = {AMERICAN_TOKENS1_JOB_CANCELED_V1}"},
+            SQL{"UPDATE jet_job_queue_events SET state = {AMERICAN_TOKENS1_JOB_CANCELED} WHERE state = {AMERICAN_TOKENS1_JOB_CANCELED_V1}"},
+        }
+        _: tokens_db.migrate(scope, "american-tokens1", steps) ?? {
+            return american_tokens1_database_skip("{path}: the job queue's migration failed ({err}); not converted")
+        }
+    }
+    MigrationOutcome{text: "", rewritten: jobs + events + 1, skipped: [String]{}}
+}
+
+american_tokens1_database_skip: fn(why: String) -[]> MigrationOutcome {
+    MigrationOutcome{text: "", rewritten: 0, skipped: [String]{why}}
+}
+
+// The format version of the job queue `scope` holds, read as Core's queue
+// reads it: its format table's, 1 for queue tables without one, or 0 when
+// it holds no queue.
+american_tokens1_queue_version: fn(scope: DBScope) -[DB]> Int DBError! {
+    tables: scope.query(SQL.raw("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('jet_job_queue_format', 'jet_job_queue_jobs')")) ?? return Err(err)
+    names := [String]{}
+    loop row in tables {
+        if row.get("name") == .Val(.Text(name)) -> names.push("{name}")
+    }
+    if !names.contains("jet_job_queue_format") {
+        if names.contains("jet_job_queue_jobs") -> return Ok(1)
+        return Ok(0)
+    }
+    rows: scope.query(SQL.raw("SELECT version FROM jet_job_queue_format")) ?? return Err(err)
+    if rows.len() != 1 {
+        return Err(DBError.Failed("the format table holds {rows.len()} rows, not one"))
+    }
+    if rows[0].get("version") == .Val(.Int(version)) -> return Ok(version)
+    Err(DBError.Failed("the format table's version is not a number"))
+}
+
+// The `count` column of the one row `sql` reads.
+american_tokens1_queue_count: fn(scope: DBScope, sql: SQL) -[DB]> Int DBError! {
+    rows: scope.query(sql) ?? return Err(err)
+    if rows.len() == 1 {
+        if rows[0].get("count") == .Val(.Int(count)) -> return Ok(count)
+    }
+    Err(DBError.Failed("a count read no number"))
+}
+
+// Why the converted job queue database `after` does not mean what the
+// version 1 database `before` meant, or None when it does: it is a version
+// 2 queue, and its metadata, jobs and events are the source's, row for row
+// and column for column, but for a canceled state's spelling.
+american_tokens1_database_same_meaning: fn(before: String, after: String) -[DB]> String? {
+    old_store: tokens_db.open(before)
+    new_store: tokens_db.open(after)
+    why: american_tokens1_database_compare(old_store.all_rows(), new_store.all_rows())
+    _: old_store.close()
+    _: new_store.close()
+    why
+}
+
+american_tokens1_database_compare: fn(old: DBScope, new: DBScope) -[DB]> String? {
+    old_version: american_tokens1_queue_version(old) ?? return Val("the old job queue does not read: {err}")
+    if old_version != 1 -> return Val("the old database is not a version 1 job queue")
+    new_version: american_tokens1_queue_version(new) ?? return Val("the rewrite's job queue does not read: {err}")
+    if new_version != AMERICAN_TOKENS1_QUEUE_FORMAT {
+        return Val("the rewrite is not a version 2 job queue")
+    }
+    if american_tokens1_table_compare(old, new, "jet_job_queue_meta") == .Val(why) {
+        return Val(why)
+    }
+    if american_tokens1_table_compare(old, new, "jet_job_queue_jobs") == .Val(why) {
+        return Val(why)
+    }
+    american_tokens1_table_compare(old, new, "jet_job_queue_events")
+}
+
+// Why `table`'s rows in `new` are not `old`'s, with version 1's canceled
+// state read as version 2's, or None when they are.
+american_tokens1_table_compare: fn(old: DBScope, new: DBScope, table: String) -[DB]> String? {
+    old_rows: old.query(SQL.raw("SELECT * FROM {table} ORDER BY rowid")) ?? return Val("the old `{table}` does not read: {err}")
+    new_rows: new.query(SQL.raw("SELECT * FROM {table} ORDER BY rowid")) ?? return Val("the rewrite's `{table}` does not read: {err}")
+    if old_rows.len() != new_rows.len() {
+        return Val("`{table}` has {new_rows.len()} rows, not {old_rows.len()}")
+    }
+    loop (index, row) in old_rows {
+        found: new_rows[index]
+        if found.len() != row.len() {
+            return Val("`{table}` row {index} has {found.len()} columns, not {row.len()}")
+        }
+        loop (column, value) in row {
+            now: found.get(column) ?? return Val("`{table}` row {index} has no `{column}`")
+            expected: if column == "state" && "{value}" == AMERICAN_TOKENS1_JOB_CANCELED_V1 -> DBValue.Text(AMERICAN_TOKENS1_JOB_CANCELED) else -> value
+            if now != expected {
+                return Val("`{table}` row {index}'s `{column}` is `{now}`, not `{expected}`")
+            }
+        }
+    }
+    None
+}
+
 #Test("a version 1 comparison record becomes version 2 and keeps its reason's words") {
     old: "{{\"reason\":\"recorded runner outcome is cancelled\",\"samples\":[],\"schema_version\":1,\"status\":\"cancelled\",\"universal_proof\":false}}\n"
     outcome: american_tokens1_file("record.json", old)
@@ -274,4 +1035,71 @@ american_tokens1_blank: fn(byte: U8) -[]> Bool {
     outcome: american_tokens1_file("notes.txt", "cancelled\n")
     assert_eq(outcome.rewritten, 0)
     assert_eq(outcome.skipped, [String]{"notes.txt: in no format this plan converts"})
+}
+
+#Test("a binding's version 1 adapter stamp becomes the one its binder writes now") {
+    current: (pkg_binder_descriptor("js") ?? panic("the js binder")).stamp()
+    restored := 0
+    old_stamp: american_tokens1_stamp(current, AMERICAN_TOKENS1_MARSHALED, AMERICAN_TOKENS1_MARSHALED_V1, "{FOREIGN_ADAPTER_CONTRACT_VERSION}", "1", restored)
+    assert_eq(restored, 3)
+    assert(old_stamp.contains(";version=1;calling=HostMessage;") && old_stamp.contains(";tasks=AdapterMarshalled;"))
+    old: "// jet-ffi-descriptor={old_stamp}\nscatter: fn() -> Int {{ return 7 }}\n"
+    outcome: american_tokens1_file("plotly.jet", old)
+    assert_eq(outcome.text, "// jet-ffi-descriptor={current}\nscatter: fn() -> Int {{ return 7 }}\n")
+    assert_eq(outcome.rewritten, 4)
+    assert_eq(american_tokens1_same_meaning("plotly.jet", old, outcome.text), None)
+    assert_eq(american_tokens1_same_meaning("plotly.jet", old, "{outcome.text}x"), Val("the binding changed beyond its descriptor stamp"))
+}
+
+#Test("a C binding's stamp has nothing to convert and a stale adapter stamp is reported") {
+    c_binding: "// jet-ffi-descriptor={(pkg_binder_descriptor("c") ?? panic("the c binder")).stamp()}\n"
+    assert_eq(american_tokens1_file("c.jet", c_binding).rewritten, 0)
+    stale: "// jet-ffi-descriptor=jet-ffi-descriptor-v1;language=JS;contract=jet-ffi-descriptor-v1;version=1;callbacks=AdapterMarshalled\n"
+    outcome: american_tokens1_file("old.jet", stale)
+    assert_eq(outcome.text, stale)
+    assert_eq(outcome.skipped, [String]{"old.jet: a descriptor stamp no current binder writes, even converted; `jet inspect bind` regenerates the binding"})
+}
+
+#Test("a version 1 workflow log takes version 2's first line and canceled tokens") {
+    header: "adapter:event-log\nschema:15:workflow-events\nversion:1\nmigration:10:reversible\n"
+    start: american_tokens1_test_record("workflow-start:1:1:8:checkout")
+    old: "JET-SERVICE-STATE/1\n{header}{start}{american_tokens1_test_record("workflow-wait-sleep-cancelled:1")}{american_tokens1_test_record("workflow-activity-retry:1:2:6:charge9:Cancelled")}{american_tokens1_test_record("workflow-activity-done:1:6:charge9:Cancelled")}"
+    new: "JET-SERVICE-STATE/2\n{header}{start}{american_tokens1_test_record("workflow-wait-sleep-canceled:1")}{american_tokens1_test_record("workflow-activity-retry:1:2:6:charge8:Canceled")}{american_tokens1_test_record("workflow-activity-done:1:6:charge8:Canceled")}"
+    outcome: american_tokens1_file("state.workflows", old)
+    assert_eq(outcome.text, new)
+    assert_eq(outcome.rewritten, 4)
+    assert_eq(american_tokens1_file("state.workflows", new).rewritten, 0)
+    assert_eq(american_tokens1_same_meaning("state.workflows", old, new), None)
+    refund: new.replace("charge", "refund")
+    assert_eq(american_tokens1_same_meaning("state.workflows", old, refund), Val("the store changed beyond its first line and canceled tokens"))
+    other: american_tokens1_file("state", old)
+    assert_eq(other.text, "JET-SERVICE-STATE/2\n{old.removeprefix("JET-SERVICE-STATE/1\n")}")
+    assert_eq(other.rewritten, 1)
+    assert_eq(american_tokens1_file("cut.workflows", "JET-SERVICE-STATE/1\n{header}9:v1:2").skipped, [String]{"cut.workflows: a service state store whose records do not parse; not converted"})
+}
+
+#Test("a version 1 authority log's delivery events are re-signed under version 2's label") {
+    authority: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
+    accept: american_tokens1_record("S", [String]{"d1", "k1", authority, "tree", "worker", "7", "payload", "0", "1700000000999", "00"})
+    key: american_tokens1_delivery_key([AmericanTokensRecord]{AmericanTokensRecord{line: "", op: "S", fields: [String]{"d1", "k1", authority, "tree", "worker", "7", "payload", "0", "1700000000999", "00"}}}, "d1") ?? panic("the generation key")
+    delivered: american_tokens1_record("E", [String]{"d1", "4", "Delivered", "3", "1700000000123", "b26b530c1223a26a44476d6d44df66905c6cf02eaf51f440790b5ee153140aa6"})
+    canceled := [String]{"d1", "5", "Cancelled", "3", "1700000000200"}
+    canceled.push(tokens_encoding.bytes_to_hex(american_tokens1_event_signature(key, AMERICAN_TOKENS1_DELIVERY_EVENT_V1, canceled)))
+    old: "{accept}\n{delivered}\n{american_tokens1_record("E", canceled)}\n"
+    outcome: american_tokens1_file("authority.log", old)
+    assert_eq(outcome.rewritten, 2)
+    records: american_tokens1_log_parse(outcome.text) ?? panic("the converted log")
+    assert_eq(records[0].line, accept)
+    assert_eq(records[1].fields[5], "cc9a4e99bc0965d18e25288b0eafcce74a83e0c4736aa823e2db4ab6ad6152d7")
+    assert_eq(records[2].fields[2], "Canceled")
+    assert_eq(american_tokens1_file("authority.log", outcome.text).rewritten, 0)
+    assert_eq(american_tokens1_same_meaning("authority.log", old, outcome.text), None)
+    unsigned: american_tokens1_record("E", [String]{"d1", "4", "Delivered", "3", "1700000000123", "0000000000000000000000000000000000000000000000000000000000000000"})
+    forged: "{accept}\n{unsigned}\n"
+    assert_eq(american_tokens1_file("authority.log", forged).skipped, [String]{"authority.log: line 2, a delivery event, is signed under neither version's label; not converted"})
+}
+
+// A version 1 state store record framing `payload`.
+american_tokens1_test_record: fn(payload: String) -[]> String {
+    american_tokens1_frame("v1:{american_tokens1_frame(payload)}")
 }

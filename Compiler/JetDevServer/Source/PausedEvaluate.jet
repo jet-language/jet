@@ -8,7 +8,9 @@ use {
 
 PAUSED_EVALUATE_PROTOCOL: "jet.devtools.v1"
 
-PAUSED_EVALUATE_SCHEMA_VERSION: 1
+// Version 2 spells the canceled session state, rejection reason and request
+// flag `canceled`.
+PAUSED_EVALUATE_SCHEMA_VERSION: 2
 
 INSPECT_AUTHORITY: "devtools.inspect"
 
@@ -51,7 +53,7 @@ SessionState: enum {
             .Paused -> "paused"
             .Finished -> "finished"
             .Stale -> "stale"
-            .Canceled -> "cancelled"
+            .Canceled -> "canceled"
         }
     }
 }
@@ -657,7 +659,7 @@ InspectRequest: struct {
             .Val(id) -> "\"{foundation_json_escape(id)}\""
             else -> "null"
         }
-        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"kind\":\"paused.inspect\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"value_id\":{value_id},\"budget\":{self.budget.json()},\"authority\":{requirements_json(self.authority)},\"cancelled\":{self.cancellation.requested}}}"
+        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"kind\":\"paused.inspect\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"value_id\":{value_id},\"budget\":{self.budget.json()},\"authority\":{requirements_json(self.authority)},\"canceled\":{self.cancellation.requested}}}"
     }
 }
 
@@ -690,7 +692,7 @@ EvaluateRequest: struct {
     json: fn(self) -> String Never! {
         effects := [String]{}
         loop effect_ref in self.effects -> effects.push("\"{foundation_json_escape(effect_ref)}\"")
-        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"kind\":\"paused.evaluate\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"expression\":\"{foundation_json_escape(self.expression)}\",\"mode\":\"{self.mode.as_str()}\",\"effects\":{array_json(effects)},\"authority\":{requirements_json(self.authority)},\"budget\":{self.budget.json()},\"cancelled\":{self.cancellation.requested}}}"
+        "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"kind\":\"paused.evaluate\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"expression\":\"{foundation_json_escape(self.expression)}\",\"mode\":\"{self.mode.as_str()}\",\"effects\":{array_json(effects)},\"authority\":{requirements_json(self.authority)},\"budget\":{self.budget.json()},\"canceled\":{self.cancellation.requested}}}"
     }
 }
 
@@ -806,7 +808,7 @@ RejectReason: enum {
             .ValueNotPublished -> "value_not_published"
             .InsufficientAuthority -> "insufficient_authority"
             .BudgetExceeded -> "budget_exceeded"
-            .Canceled -> "cancelled"
+            .Canceled -> "canceled"
             .EvaluatorFailed -> "evaluator_failed"
             .MutationNotAllowed -> "mutation_not_allowed"
             .ObservationMissing -> "observation_missing"
@@ -843,7 +845,7 @@ AuditReceipt: struct {
     }
 }
 
-// The receipt id hashes the canonical `paused-audit-v1|...` material and keeps
+// The receipt id hashes the canonical `paused-audit-v2|...` material and keeps
 // the first 24 SHA-256 hex characters.
 audit_receipt: fn(operation: String, request_id: String, identity: SessionIdentity, scope_id: String, authority: [AuthorityRequirement], outcome: AuditOutcome, reason: RejectReason?, usage: EvaluationUsage, truncated: Bool{false}, published_values: Int, redacted_values: Int, observation_id: String?) -> AuditReceipt Never! {
     canonical_authority: authority_requirements_canonical(authority)
@@ -854,7 +856,7 @@ audit_receipt: fn(operation: String, request_id: String, identity: SessionIdenti
         else -> ""
     }
     observation_text: observation_id ?? ""
-    canonical: "paused-audit-v1|{operation}|{request_id}|{identity.session_id}|{identity.source_id}|{identity.source_revision}|{identity.pause_id}|{identity.frame_id}|{scope_id}|{outcome.as_str()}|{reason_text}|{keys.join(",")}|{usage.depth}|{usage.nodes}|{usage.bytes}|{usage.steps}|{truncated}|{published_values}|{redacted_values}|{observation_text}"
+    canonical: "paused-audit-v2|{operation}|{request_id}|{identity.session_id}|{identity.source_id}|{identity.source_revision}|{identity.pause_id}|{identity.frame_id}|{scope_id}|{outcome.as_str()}|{reason_text}|{keys.join(",")}|{usage.depth}|{usage.nodes}|{usage.bytes}|{usage.steps}|{truncated}|{published_values}|{redacted_values}|{observation_text}"
     digest: sha256_hex(canonical)
     AuditReceipt{
         receipt_id: "paused-audit-{digest.slice(0, 24)}",
@@ -1411,7 +1413,7 @@ validate_header: fn(fields: [String:Dyn], kind: String) PausedEvaluateError! {
 }
 
 request_cancellation: fn(fields: [String:Dyn]) -> Cancellation PausedEvaluateError! {
-    if optional_bool(fields, "cancelled") -> return cancellation_requested("request canceled")
+    if optional_bool(fields, "canceled") -> return cancellation_requested("request canceled")
     Ok(cancellation_none())
 }
 

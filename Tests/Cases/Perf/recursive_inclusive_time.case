@@ -17,5 +17,5 @@ step: jet perf view {work}/fib.jettrace
 exit: 0
 stdout: ~ "  line 7 samples=" # fib's recursive line
 stdout: ~ "  line 13 samples=" # run's line that calls fib, though few samples or none land on it
-capture: outer = text stdout.split("  line 13 samples=", 1).split("inclusive=", 1).split("\n", 0).trim
-json: stdout.split("  line 7 samples=", 1).split("inclusive=", 1).split("\n", 0).trim doc $ <= {cap:outer}+0 # recursion counts once per sample
+capture: outer = text stdout.split("  line 13 samples=", 1).split("inclusive=", 1).split(" ", 0).trim
+json: stdout.split("  line 7 samples=", 1).split("inclusive=", 1).split(" ", 0).trim doc $ <= {cap:outer}+0 # recursion counts once per sample

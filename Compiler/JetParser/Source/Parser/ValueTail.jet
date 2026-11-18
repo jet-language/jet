@@ -1,0 +1,327 @@
+// The old shapes at the end of a value block, read the same way by
+// `jet check`, which reports them (L0513, L0530), and by
+// `jet fmt --simplify`, which rewrites them: a value table whose arms each
+// only return, then a default `return value`, is the table with an
+// explicit `else` arm; a last-line `return value` is the bare value.
+use jet_foundation.[
+    AST_NODE_GENERATED,
+    Expr,
+    Span,
+    Stmt,
+    TextEdit,
+    expr_node_id,
+    expr_source_span,
+    expr_source_start,
+]
+
+// One arm's `return value`: where `return` starts and where its value ends.
+ParserArmReturn: struct {
+    keyword: Int,
+    value_end: Int,
+}
+
+ParserValueTail: enum {
+    // A value table (`table`) with no `else`, whose arms each only return a
+    // value (`returns`, in source order), then the default `return` at
+    // `fallback` of the value at `default`.
+    ElseArm(table: Span, returns: [ParserArmReturn], fallback: Int, default: Span),
+    // A last-line `return` at `keyword` of the value starting at `value`;
+    // `arm` when it ends an arm of a last-line table, not the block itself.
+    FinalReturn(keyword: Int, value: Int, arm: Bool),
+}
+
+// Which last-line tables the reading enters. `jet check` reports in every
+// table the parser keeps as a table. `jet fmt --simplify` rewrites only the
+// tables spelled as tables in `raw`: a classic `if cond { … } else { … }`
+// reads as a subjectless table but its branches cannot end in a value, and
+// a table whose arms are braced (`cond -> { return value }`) reads as a
+// chain of `if` expressions.
+ParserTailReach: enum {
+    Tables,
+    SpelledTables,
+}
+
+// Every old shape at the end of the value block `statements` and, as a
+// last-line table hands its arms the value and a last-line `#Unsafe` region
+// its body, at the end of each of those. `raw` is the block's source, read
+// only for `SpelledTables`.
+parser_value_tails: fn(statements: [Stmt], reach: ParserTailReach, raw: [U8], tails: &[ParserValueTail]) -[]> {
+    parser_value_tails_at(statements, 0, reach, raw, tails)
+}
+
+// `parser_value_tails` for a block `arms` tables deep.
+parser_value_tails_at: fn(statements: [Stmt], arms: Int, reach: ParserTailReach, raw: [U8], tails: &[ParserValueTail]) -[]> {
+    count: statements.len()
+    if count == 0 {
+        return
+    }
+    if count >= 2 && parser_else_arm_tail(statements[count - 2], statements[count - 1]) == .Val(tail) {
+        tails.push(tail)
+    }
+    spelled: reach == ParserTailReach.SpelledTables
+    if statements[count - 1] == {
+        .Return(value, span) -> {
+            // A generated value (a synthesized body's own `return`) has no
+            // source to rewrite.
+            if value == .Val(returned) && expr_node_id(returned) != AST_NODE_GENERATED {
+                tails.push(ParserValueTail.FinalReturn{keyword: span.start, value: expr_source_start(returned), arm: arms > 0})
+            }
+        }
+        .Switch(subject, table_arms, else_body, span) -> {
+            if spelled && parser_is_subjectless_guard(subject, span) && !parser_spelled_table(raw, span.start) {
+                return
+            }
+            loop arm in table_arms -> parser_value_tails_at(arm.body, arms + 1, reach, raw, tails)
+            if else_body == .Val(rest) -> parser_value_tails_at(rest, arms + 1, reach, raw, tails)
+        }
+        .Unsafe(_, _, body, _) -> { parser_value_tails_at(body, arms, reach, raw, tails) }
+        .Expr(value) -> {
+            if spelled && parser_spelled_table(raw, expr_source_span(value).start) && parser_if_chain_closed(value) {
+                parser_if_chain_tails(value, arms, reach, raw, tails)
+            }
+        }
+        .Val(_) | .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> {}
+    }
+}
+
+// Whether the `if` at `start` of `raw` opens a subjectless table: `if`,
+// then space, then `{`.
+parser_spelled_table: fn(raw: [U8], start: Int) -[]> Bool Never! {
+    if start < 0 || start + 2 > raw.len() || raw[start] != (U8{105}) || raw[start + 1] != (U8{102}) {
+        return false
+    }
+    at := start + 2
+    loop at < raw.len() && parser_tail_space(raw[at]) -> at += 1
+    at < raw.len() && raw[at] == (U8{123})
+}
+
+// Whether `value` is an `if` chain that ends in an `else`, so every branch
+// carries the block's value. A branch that only runs statements holds a
+// zero-width value; an `else if` is an `else` of no statements whose value
+// is the next `if`.
+parser_if_chain_closed: fn(value: Expr) -[]> Bool Never! {
+    if value == .If(_, _, _, else_body, else_value, _, _) {
+        if else_body.len() > 0 -> return true
+        else_span: expr_source_span(else_value)
+        if else_span.start == else_span.end -> return false
+        if else_value == .If(_, _, _, _, _, _, _) -> return parser_if_chain_closed(else_value)
+        return true
+    }
+    false
+}
+
+// `parser_value_tails_at` for each branch of the closed `if` chain `value`,
+// whose branches are arms of a table `arms` deep.
+parser_if_chain_tails: fn(value: Expr, arms: Int, reach: ParserTailReach, raw: [U8], tails: &[ParserValueTail]) -[]> {
+    if value == .If(_, then_body, then_value, else_body, else_value, _, _) {
+        parser_if_branch_tails(then_body, then_value, arms, reach, raw, tails)
+        parser_if_branch_tails(else_body, else_value, arms, reach, raw, tails)
+    }
+}
+
+// One branch of a closed `if` chain: a branch of statements ends one arm;
+// an `else if` continues the chain.
+parser_if_branch_tails: fn(body: [Stmt], value: Expr, arms: Int, reach: ParserTailReach, raw: [U8], tails: &[ParserValueTail]) -[]> {
+    span: expr_source_span(value)
+    if {
+        span.start == span.end -> parser_value_tails_at(body, arms + 1, reach, raw, tails)
+        body.len() == 0 -> parser_if_chain_tails(value, arms, reach, raw, tails)
+    }
+}
+
+// A value-dispatch table (not a subjectless guard or readiness table) with
+// no `else`, whose arms each only return a value, then a default
+// `return value`.
+parser_else_arm_tail: fn(table: Stmt, fallback: Stmt) -[]> ParserValueTail? Never! {
+    if fallback == .Return(fallback_value, fallback_span) {
+        default: fallback_value ?? return None
+        if table == .Switch(subject, arms, else_body, span) {
+            if else_body != None || arms.len() == 0 || parser_is_subjectless_guard(subject, span) {
+                return None
+            }
+            returns := [ParserArmReturn]{}
+            loop arm in arms {
+                if parser_readiness_arm(arm.cond) || arm.body.len() != 1 -> return None
+                if arm.body[0] == .Return(arm_value, return_span) {
+                    returned: arm_value ?? return None
+                    returns.push(ParserArmReturn{keyword: return_span.start, value_end: expr_source_span(returned).end})
+                    next
+                }
+                return None
+            }
+            return Val(ParserValueTail.ElseArm{table: span, returns: returns, fallback: fallback_span.start, default: expr_source_span(default)})
+        }
+    }
+    None
+}
+
+// A readiness arm reads one `(name: source)` or `(after: duration)` field.
+parser_readiness_arm: fn(cond: Expr) -[]> Bool Never! {
+    if cond == .TupleLit(fields, _, _, _) -> return fields.len() == 1
+    false
+}
+
+// The edit that leaves the value of a final return as the block tail: the
+// `return` at `keyword` and the blank run after it go.
+parser_final_return_edit: fn(keyword: Int, value: Int) -[]> TextEdit Never! {
+    TextEdit{span: Span{start: keyword, end: value}, new_text: ""}
+}
+
+// The one edit, from the table's `if` to the end of its default return,
+// that gives an `ElseArm` table its `else`: each arm loses its `return`
+// keyword (and an authored `;`), the table gains `else -> { default }`
+// before its closing brace, and the default return goes; every comment and
+// space stays where it was written. None when `raw` does not hold the parts
+// in order.
+parser_else_arm_edit: fn(raw: [U8], table: Span, returns: [ParserArmReturn], fallback: Int, default: Span) -[]> TextEdit? Never! {
+    // The cuts run in source order; inserts[i] replaces cuts[i].
+    cuts := [Span]{}
+    inserts := [String]{}
+    loop arm in returns {
+        cuts.push(parser_return_keyword(raw, arm.keyword) ?? return None)
+        inserts.push("")
+        if parser_authored_semicolon(raw, arm.value_end) == .Val(semicolon) {
+            cuts.push(Span{start: semicolon, end: semicolon + 1})
+            inserts.push("")
+        }
+    }
+    close: parser_table_close(raw, table.start) ?? return None
+    default_text: parser_tail_text(raw, default) ?? return None
+    prefix: if close > table.start && !parser_tail_space(raw[close - 1]) -> " " else -> ""
+    cuts.push(Span{start: close, end: close})
+    inserts.push("{prefix}else -> {{ {default_text} }}")
+    cuts.push(parser_return_keyword(raw, fallback) ?? return None)
+    inserts.push("")
+    end := default.end
+    cuts.push(Span{start: default.start, end: default.end})
+    inserts.push("")
+    // The fallback's `;` goes too, so no stray terminator follows the table.
+    if parser_authored_semicolon(raw, end) == .Val(semicolon) {
+        end = semicolon + 1
+        cuts.push(Span{start: semicolon, end: end})
+        inserts.push("")
+    }
+    text := ""
+    at := table.start
+    loop index in 0..<cuts.len() {
+        cut: cuts[index]
+        if cut.start < at || cut.end > end || cut.start > cut.end -> return None
+        if cut.start > at {
+            kept: parser_tail_text(raw, Span{start: at, end: cut.start}) ?? return None
+            text = "{text}{kept}"
+        }
+        text = "{text}{inserts[index]}"
+        at = cut.end
+    }
+    if end > at {
+        kept: parser_tail_text(raw, Span{start: at, end: end}) ?? return None
+        text = "{text}{kept}"
+    }
+    Val(TextEdit{span: Span{start: table.start, end: end}, new_text: text})
+}
+
+// The span of the `return` keyword at `start`, None when the source does not
+// spell it there.
+parser_return_keyword: fn(raw: [U8], start: Int) -[]> Span? Never! {
+    keyword: Span{start: start, end: start + "return".len()}
+    if parser_tail_text(raw, keyword) != (Val("return")) -> return None
+    Val(keyword)
+}
+
+// The offset of the `}` that closes the first brace opened at or after
+// `start`, past comments, strings and character literals.
+parser_table_close: fn(raw: [U8], start: Int) -[]> Int? Never! {
+    depth := 0
+    at := start
+    loop at < raw.len() {
+        byte: raw[at]
+        next_byte: if at + 1 < raw.len() -> raw[at + 1] else -> (U8{0})
+        if {
+            byte == (U8{47}) && next_byte == (U8{47}) -> at = parser_line_comment_end(raw, at + 2)
+            byte == (U8{47}) && next_byte == (U8{42}) -> at = parser_block_comment_end(raw, at + 2)
+            byte == (U8{34}) -> at = parser_string_end(raw, at)
+            byte == (U8{39}) -> at = parser_char_end(raw, at + 1)
+            byte == (U8{123}) -> {
+                depth += 1
+                at += 1
+            }
+            byte == (U8{125}) && depth == 1 -> return Val(at)
+            else -> {
+                if byte == (U8{125}) && depth > 1 -> depth -= 1
+                at += 1
+            }
+        }
+    }
+    None
+}
+
+// The offset of a `;` that follows `from` past spaces and comments, None
+// when anything else comes first.
+parser_authored_semicolon: fn(raw: [U8], from: Int) -[]> Int? Never! {
+    at := if from < raw.len() -> from else -> raw.len()
+    loop at < raw.len() {
+        byte: raw[at]
+        next_byte: if at + 1 < raw.len() -> raw[at + 1] else -> (U8{0})
+        if {
+            parser_tail_space(byte) -> at += 1
+            byte == (U8{47}) && next_byte == (U8{47}) -> at = parser_line_comment_end(raw, at + 2)
+            byte == (U8{47}) && next_byte == (U8{42}) -> at = parser_block_comment_end(raw, at + 2)
+            byte == (U8{59}) -> return Val(at)
+            else -> return None
+        }
+    }
+    None
+}
+
+// The offset of the newline that ends a `//` comment whose text starts at `at`.
+parser_line_comment_end: fn(raw: [U8], at: Int) -[]> Int Never! {
+    end := at
+    loop end < raw.len() && raw[end] != (U8{10}) -> end += 1
+    end
+}
+
+// The offset just past the `*/` that ends a `/*` comment whose text starts at `at`.
+parser_block_comment_end: fn(raw: [U8], at: Int) -[]> Int Never! {
+    end := at
+    loop end + 1 < raw.len() && !(raw[end] == (U8{42}) && raw[end + 1] == (U8{47})) -> end += 1
+    if end + 2 < raw.len() -> end + 2 else -> raw.len()
+}
+
+// The offset just past the string literal whose opening quote is at `at`: a
+// `"""` block ends at the next `"""`; a plain string skips its escapes.
+parser_string_end: fn(raw: [U8], at: Int) -[]> Int Never! {
+    triple: at + 2 < raw.len() && raw[at + 1] == (U8{34}) && raw[at + 2] == (U8{34})
+    end := if triple -> at + 3 else -> at + 1
+    loop end < raw.len() {
+        if triple && end + 2 < raw.len() && raw[end] == (U8{34}) && raw[end + 1] == (U8{34}) && raw[end + 2] == (U8{34}) {
+            return end + 3
+        }
+        if !triple && raw[end] == (U8{34}) -> return end + 1
+        end += if !triple && raw[end] == (U8{92}) -> 2 else -> 1
+    }
+    raw.len()
+}
+
+// The offset just past the `'` that closes a character literal whose text
+// starts at `at`.
+parser_char_end: fn(raw: [U8], at: Int) -[]> Int Never! {
+    end := at
+    loop end < raw.len() {
+        if raw[end] == (U8{39}) -> return end + 1
+        end += if raw[end] == (U8{92}) -> 2 else -> 1
+    }
+    raw.len()
+}
+
+// The text of `span` in `raw`, None when the span is empty, out of range or
+// not UTF-8.
+parser_tail_text: fn(raw: [U8], span: Span) -[]> String? Never! {
+    if span.start < 0 || span.end > raw.len() || span.start >= span.end -> return None
+    text: String.from_bytes(raw[span.start..<span.end]) ?? return None
+    Val(text)
+}
+
+// ASCII whitespace: space, tab, newline, form feed, return.
+parser_tail_space: fn(byte: U8) -[]> Bool Never! {
+    byte == U8{32} || byte == U8{9} || byte == U8{10} || byte == U8{12} || byte == U8{13}
+}

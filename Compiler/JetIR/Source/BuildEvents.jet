@@ -6,7 +6,7 @@
 // the provider retains, invoked through the typed lazy.callback helper with
 // the payload's slot lent for the call (its result written to the
 // provider's slot), and released once by the release helper.
-use jet_foundation.[Span, BodyHandleOp, TConstantDef, Type, type_carrier_identity]
+use jet_foundation.[Span, BodyEnumArg, BodyEnumPayload, BodyHandleOp, TConstantDef, Type, type_carrier_identity]
 
 // The compiler-known `Event<T>`.
 ir_event_type: fn(ty: Type) -> Bool Never! {
@@ -455,6 +455,9 @@ ir_quiet_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args:
     ir_release(m, b, payload)
     if ir_unit_type(ty) -> return -1
     if fallback < 0 -> return -1
+    // An integer literal's constant is the run's own value: it moves out
+    // instead of cloning, as a binding's does.
+    if ir_body_node(p, b, args[1]).kind == .IntLit(_, _) -> b.fresh[fallback] = true
     owned: if b.fresh[fallback] -> fallback else -> ir_copy_value(m, p, b, fallback, span)
     if ir_failed(b) -> return -1
     b.fresh[owned] = true
@@ -473,10 +476,15 @@ ir_event_variant: fn(m: &IRModule, p: IRProgram, row: Int, args: [Type], variant
 
 // DecisionHook.run(payload): the provider folds the decisions and builds the
 // HookOutcome box from the layout words passed here (the runtime's
-// DECISION_* / OUTCOME_* offsets in EventHooks.jet).
+// DECISION_* / OUTCOME_* offsets in EventHooks.jet). A run of a point no
+// handler can reach (IRProgram.quiet_points) is `HookOutcome.Continue` over
+// its own payload: no call, no hook and no cell.
 ir_decision_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, receiver: Int, args: [Int], span: Span) -> Int Never! {
     if args.len() != 1 {
         return ir_fail_slot(b, span, "DecisionHook.run with {args.len()} arguments")
+    }
+    if ir_quiet_point_read(p, b, receiver) {
+        return ir_enum_value(m, p, b, ty, "HookOutcome", "Continue", BodyEnumPayload.Positional{args: [BodyEnumArg]{BodyEnumArg{value: args[0]}}}, span)
     }
     outcome_row: ir_value_type(m, p, ty) ?? return ir_type_fail(b, span, ty)
     type_args: ir_type_args(ir_untag(ty))

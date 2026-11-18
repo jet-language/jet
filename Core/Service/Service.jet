@@ -73,7 +73,7 @@ delivery_state_show: fn(state: DeliveryState) -> String Never! {
         .Delivering -> "Delivering"
         .Delivered -> "Delivered"
         .DeadLettered -> "DeadLettered"
-        .Canceled -> "Cancelled"
+        .Canceled -> "Canceled"
     }
 }
 
@@ -132,14 +132,14 @@ task_outcome_show: fn(outcome: TaskOutcome) -> String Never! {
     if outcome == {
         .Finished -> "Finished"
         .Failed(.Panicked(reason)) -> "Panicked({reason})"
-        .Failed(.Canceled) -> "Cancelled"
+        .Failed(.Canceled) -> "Canceled"
         .Failed(.DeadlineBlown) -> "DeadlineBlown"
     }
 }
 
 #Test("task outcome display and debug distinguish raw and quoted panic reasons") {
     assert(task_outcome_show(TaskOutcome.Finished) == "Finished")
-    assert(task_outcome_show(TaskOutcome.Failed(.Canceled)) == "Cancelled")
+    assert(task_outcome_show(TaskOutcome.Failed(.Canceled)) == "Canceled")
     assert(task_outcome_show(TaskOutcome.Failed(.DeadlineBlown)) == "DeadlineBlown")
     assert(task_outcome_show(TaskOutcome.Failed(.Panicked("a\"b"))) == "Panicked(a\"b)")
     outcome: TaskOutcome.Failed(.Panicked("a\"b"))
@@ -1908,12 +1908,17 @@ state_record: fn(prefix: String, payload: String) -> String Never! {
     "{prefix}{workflow_frame(payload)}"
 }
 
+// The first line of a service state store. Version 2 spells a workflow's
+// canceled sleep and canceled outcome `canceled` and `Canceled`; version 1
+// used the British spelling, which the american-tokens1 migration converts.
+SERVICE_STATE_MAGIC: "JET-SERVICE-STATE/2"
+
 state_encode: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, records: [String]) -> [U8] ServiceError! {
     if records.len() > 100000 || (adapter == TreeStateAdapter.Snapshot && records.len() > 1) {
         return Err(ServiceError.Policy("service state record limit exceeded"))
     }
     prefix: "v{authority.version}:"
-    header: "JET-SERVICE-STATE/1\nadapter:{state_adapter_name(adapter)}\nschema:{workflow_frame(authority.schema)}\nversion:{authority.version}\nmigration:{workflow_frame(authority.migration)}\n"
+    header: "{SERVICE_STATE_MAGIC}\nadapter:{state_adapter_name(adapter)}\nschema:{workflow_frame(authority.schema)}\nversion:{authority.version}\nmigration:{workflow_frame(authority.migration)}\n"
     parts := [String]{header}
     size := header.bytes().len()
     loop record in records {
@@ -1973,9 +1978,11 @@ state_decode: fn(authority: TreeStateAuthority, adapter: TreeStateAdapter, bytes
         return Err(state_error("service state store exceeds its byte limit"))
     }
     cursor := StateCursor{bytes: bytes, offset: 0}
-    if state_read_line(cursor, "state magic") != "JET-SERVICE-STATE/1" {
-        return Err(state_error("service state magic is invalid"))
+    magic: state_read_line(cursor, "state magic")
+    if magic == "JET-SERVICE-STATE/1" {
+        return Err(state_error("service state store is version 1, an older format this runtime no longer reads; the american-tokens1 migration converts it"))
     }
+    if magic != SERVICE_STATE_MAGIC -> return Err(state_error("service state magic is invalid"))
     if state_read_line(cursor, "state adapter") != "adapter:{state_adapter_name(adapter)}" {
         return Err(state_error("service state adapter does not match the declared adapter"))
     }
@@ -2729,7 +2736,7 @@ workflow_token_valid: fn(text: String) -> Bool Never! {
 
 workflow_outcome_from_wire: fn(value: String) -> TaskOutcome ServiceError! {
     if value == "Finished" -> return Ok(TaskOutcome.Finished)
-    if value == "Cancelled" -> return Ok(TaskOutcome.Failed(.Canceled))
+    if value == "Canceled" -> return Ok(TaskOutcome.Failed(.Canceled))
     if value == "DeadlineBlown" -> return Ok(TaskOutcome.Failed(.DeadlineBlown))
     if !value.starts_with("Panicked:") -> return Err(state_error("unknown task outcome"))
     outcome: TaskOutcome.Failed(.Panicked(workflow_field(value.removeprefix("Panicked:"), "panic reason")))
@@ -2832,14 +2839,14 @@ workflow_apply: fn(workflows: &[TreeWorkflowState], payload: String) ServiceErro
         }
         workflows[index].history.push("sleep:{nanos}")
         workflows[index].status = TaskStatus.Running
-    } else if payload.starts_with("workflow-wait-sleep-cancelled:") {
-        run_id: workflow_parse_int(payload.removeprefix("workflow-wait-sleep-cancelled:"), "canceled sleep run id")
+    } else if payload.starts_with("workflow-wait-sleep-canceled:") {
+        run_id: workflow_parse_int(payload.removeprefix("workflow-wait-sleep-canceled:"), "canceled sleep run id")
         if run_id < 1 -> return Err(state_error("workflow canceled sleep run id is invalid"))
         index: workflow_index_of(workflows, run_id, "canceled sleep")
         if workflows[index].outcome != None || !workflow_last_is_sleep(workflows[index].history) {
             return Err(state_error("workflow canceled sleep is out of order"))
         }
-        workflows[index].history.push("sleep-cancelled")
+        workflows[index].history.push("sleep-canceled")
         workflows[index].status = TaskStatus.CancelRequested
         workflows[index].outcome = Val(TaskOutcome.Failed(.Canceled))
     } else if payload.starts_with("workflow-wait-sleep-deadline:") {
@@ -3099,7 +3106,7 @@ workflow_sleep: fn(workflow: ServiceWorkflow, duration: Duration) ServiceError! 
         state := workflow.state.guard_edit()
         cursor: state.value.replay_cursor
         if cursor < state.value.history.len() {
-            if state.value.history[cursor] == "sleep-cancelled" {
+            if state.value.history[cursor] == "sleep-canceled" {
                 state.value.replay_cursor = cursor + 1
                 state.value.status = TaskStatus.CancelRequested
                 state.value.outcome = Val(TaskOutcome.Failed(.Canceled))
@@ -3119,7 +3126,7 @@ workflow_sleep: fn(workflow: ServiceWorkflow, duration: Duration) ServiceError! 
     // deadline-blown sleep is recorded before the workflow fails.
     if core.service.__host_sleep_wait_ns(nanos) == {
         1 -> {
-            workflow_append_handle(workflow, "workflow-wait-sleep-cancelled:{workflow.run_id}")
+            workflow_append_handle(workflow, "workflow-wait-sleep-canceled:{workflow.run_id}")
             Err(ServiceError.Policy("workflow sleep was canceled"))
         }
         2 -> {
@@ -4680,7 +4687,7 @@ authority_commit: fn(runtime: ServiceRuntime, id: String) ServiceError! {
 
 delivery_receipt_signature: fn(entry: DeliveryEntry, duplicate: Bool) -> String ServiceError! {
     key: delivery_generation_key(entry.authority, entry.generation)
-    fields: [String]{"jet-service-delivery-receipt-v1", entry.id, entry.key, "{duplicate}", entry.tree, entry.worker, entry.message, delivery_state_show(entry.state), "{entry.attempts}", "{entry.expires}", "{entry.retained_until ?? -1}", "{entry.generation}"}
+    fields: [String]{"jet-service-delivery-receipt-v2", entry.id, entry.key, "{duplicate}", entry.tree, entry.worker, entry.message, delivery_state_show(entry.state), "{entry.attempts}", "{entry.expires}", "{entry.retained_until ?? -1}", "{entry.generation}"}
     Ok(service_encoding.bytes_to_hex(service_crypto.hmac_sha256(key, delivery_signature_payload(fields))))
 }
 
@@ -4691,7 +4698,7 @@ delivery_event_signature: fn(authority: String, generation: Int, id: String, seq
             return Err(error)
         }
     }
-    fields: [String]{"jet-service-delivery-event-v1", id, "{sequence}", delivery_state_show(state), "{attempts}", "{timestamp}"}
+    fields: [String]{"jet-service-delivery-event-v2", id, "{sequence}", delivery_state_show(state), "{attempts}", "{timestamp}"}
     Ok(service_crypto.hmac_sha256(key, delivery_signature_payload(fields)))
 }
 
@@ -4723,7 +4730,7 @@ delivery_parse_state: fn(text: String) -> DeliveryState? Never! {
     if text == "Delivering" -> return Val(DeliveryState.Delivering)
     if text == "Delivered" -> return Val(DeliveryState.Delivered)
     if text == "DeadLettered" -> return Val(DeliveryState.DeadLettered)
-    if text == "Cancelled" -> return Val(DeliveryState.Canceled)
+    if text == "Canceled" -> return Val(DeliveryState.Canceled)
     None
 }
 
@@ -4734,18 +4741,19 @@ delivery_parse_state: fn(text: String) -> DeliveryState? Never! {
     assert(delivery_parse_state("delivered") == None)
 }
 
-// Independent node:crypto oracle, captured in
-// JsonStreams8/service-signature-oracle.json. Native framing:
-// each length is u64 BE UTF8 bytes.
+// Independent node:crypto oracle: the generation key as captured in
+// JsonStreams8/service-signature-oracle.json, and the version 2 receipt and
+// event signatures computed the same way (HMAC-SHA256 over the framing).
+// Native framing: each length is u64 BE UTF8 bytes.
 #Test("delivery receipt and event signatures match observed fixed-key framing vectors") {
     authority: "sa-000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"
     generation_key: delivery_generation_key(authority, 7) ?? panic("fixed key")
     assert(service_encoding.bytes_to_hex(generation_key) == "0efa1cbc75008d741cc1cdfb5a9b4512112201437413147ff3a5bdaabc65699e")
     entry: DeliveryEntry{id: "d1", key: "k1", tree: "tree", worker: "worker", authority: authority, generation: 7, message: "λ", created: 0, expires: 1700000000999, retained_until: Val(1700000010000), attempts: 3, state: DeliveryState.Delivered, event_sequence: 4, delivered_to_worker: true, delivered: true, dead: false}
     receipt: delivery_receipt_signature(entry, true) ?? panic("receipt vector")
-    assert(receipt == "df0bd21f6f2307c792cfb3b56258a633200241a964aca0c5f669853f11883601")
+    assert(receipt == "1cef25fefb7a29e25b3e369c50436ed21900de68531e6897bb51976e5e1328a8")
     event: delivery_event_signature(authority, 7, "d1", 4, DeliveryState.Delivered, 3, 1700000000123) ?? panic("event vector")
-    assert(service_encoding.bytes_to_hex(event) == "b26b530c1223a26a44476d6d44df66905c6cf02eaf51f440790b5ee153140aa6")
+    assert(service_encoding.bytes_to_hex(event) == "cc9a4e99bc0965d18e25288b0eafcce74a83e0c4736aa823e2db4ab6ad6152d7")
 }
 
 // The validated worker slot for `endpoint`.

@@ -1,0 +1,25 @@
+// A loop under run that calls `pick` at each turn. Each of pick's returns
+// but the last is in its frame-free prefix, which runs before the prologue
+// sets up a frame, so a sample there has no frame pointer of pick's. Built
+// with no inlining, each is a call of its own: a sample in `pick` holds
+// spin's loop line and run's line that calls spin.
+use core.process
+
+pick: fn(x: Int, i: Int) -> Int {
+    if x < i -> return i
+    if x > i -> return x
+    0
+}
+
+spin: fn(n: Int) -> Int {
+    total := 0
+    loop i in 0..<n -> total = (total * 31 + pick(total, i)) % 1000003
+    total
+}
+
+run: fn() {
+    args: process.args()
+    n: if args.len() > 0 -> Int.parse(args[args.len() - 1]) ?? 1000 else -> 1000
+    total: spin(n)
+    print("spin={total}")
+}

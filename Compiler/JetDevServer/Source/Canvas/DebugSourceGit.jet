@@ -52,20 +52,20 @@ canvas_debug_error: fn(kind: String, message: String) -> CanvasDebugError Never!
 
 // Canvas debugs on the native tier only.
 DebugTier: enum {
-    NativeLLDB,
+    Native,
 
     parse: fn(value: String?) -> DebugTier CanvasDebugError! {
         if value == {
             .Val(name) -> if {
-                name == "native-lldb" -> Ok(DebugTier.NativeLLDB)
-                name == "jet-dev-replay" -> Err(canvas_debug_error("unsupported", "the jet-dev-replay Canvas debug tier is unavailable; use native-lldb"))
-                else -> Err(canvas_debug_error("bad_request", "Canvas debug tier must be native-lldb"))
+                name == "native" -> Ok(DebugTier.Native)
+                name == "jet-dev-replay" -> Err(canvas_debug_error("unsupported", "the jet-dev-replay Canvas debug tier is unavailable; use native"))
+                else -> Err(canvas_debug_error("bad_request", "Canvas debug tier must be native"))
             }
-            .None -> Ok(DebugTier.NativeLLDB)
+            .None -> Ok(DebugTier.Native)
         }
     }
 
-    wire_name: fn(self) -> String Never! { "native-lldb" }
+    wire_name: fn(self) -> String Never! { "native" }
 }
 
 SessionStatus: enum {
@@ -483,7 +483,7 @@ native_debug_run: fn(session: &DebugSession, commands: [String], run_to_end: Boo
     transcript := ""
     if session.native_live == None {
         live := NativeSession.start(native.binary, canvas_files.join(native.dir, "output.txt")) ?? return Err(debug_unavailable(err))
-        opened: if live.open(native.jet_file, native.jet_lines) == {
+        opened: if live.open(native.jet_file, native.jet_lines, [String]{}) == {
             .Ok(step) -> step
             .Err(failure) -> {
                 return Err(debug_unavailable(failure))

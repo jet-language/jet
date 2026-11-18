@@ -159,14 +159,43 @@ kit_exec_toolchain_root: fn(root: String) -> String? {
 // launcher reads the home the kit replaced). A `jet` under test that is itself
 // a Jet script (a CLI double) runs under the caller's JET, so PATH leads with
 // that one's directory instead. The inherited PATH when neither names a `jet`.
-kit_exec_path: fn(jet: String) -> String? {
+// A case that proves jet alone (KitEnv.jet_alone) has no outside debugger or
+// profiler on it.
+kit_exec_path: fn(env: KitEnv, scratch: String) -> String? {
     inherited: sys.get("PATH")
-    under_test: if jet.ends_with(".jet") -> sys.get("JET") ?? "" else -> jet
-    directory: kit_exec_jet_directory(under_test) ?? return inherited
-    if inherited == {
-        .Val(path) -> Val("{directory}:{path}")
-        .None -> Val(directory)
+    under_test: if env.jet.ends_with(".jet") -> sys.get("JET") ?? "" else -> env.jet
+    path: if kit_exec_jet_directory(under_test) == {
+        .Val(directory) -> if inherited == .Val(rest) -> "{directory}:{rest}" else -> directory
+        .None -> inherited ?? return None
     }
+    if !env.jet_alone -> return Val(path)
+    Val(kit_exec_path_without(path, KIT_OUTSIDE_TOOLS, scratch))
+}
+
+// `path` without the tools `hidden`: each directory that holds one of them is
+// replaced by a mirror under `scratch` that links every other entry of it.
+kit_exec_path_without: fn(path: String, hidden: [String], scratch: String) -> String {
+    kept := [String]{}
+    loop (index, directory) in path.split(":").to_list() {
+        holds := false
+        loop name in hidden {
+            if files.exists(files.join(directory, name)) -> holds = true
+        }
+        if !holds {
+            kept.push(directory)
+            next
+        }
+        mirror: files.join(scratch, "path/{index}")
+        if !files.is_dir(mirror) {
+            files.create_dir_all(mirror) ?? panic("testkit PATH mirror {mirror}: {err}")
+            loop entry in files.list_dir_or(directory, [files.DirEntry]{}) {
+                if hidden.contains(entry.name) -> next
+                files.symlink(entry.path, files.join(mirror, entry.name)) ?? panic("testkit PATH mirror link {entry.path}: {err}")
+            }
+        }
+        kept.push(mirror)
+    }
+    kept.join(":")
 }
 
 // The directory of `jet` when it resolves to a file named `jet`.
@@ -194,7 +223,7 @@ kit_exec_base_value: fn(name: String, env: KitEnv, scratch: String) -> String? {
         name == ENV_JET_REPL_HISTORY -> Val("off")
         // Cases run outside the checkout: the compiler under test reads the kit's toolchain tree.
         name == ENV_JET_TOOLCHAIN_ROOT -> kit_exec_toolchain_root(env.root)
-        name == "PATH" -> kit_exec_path(env.jet)
+        name == "PATH" -> kit_exec_path(env, scratch)
         // Children that run `jet` themselves (jetpack, scripts) run the `jet`
         // under test, never the caller's JET.
         name == "JET" -> if env.jet != "" -> Val(env.jet) else -> None
@@ -917,7 +946,15 @@ kit_exec_requires: fn(requirement: String, env: KitEnv, work: String, scratch: S
         matched: kit_steps_capability_any(body, probes, env, work, scratch)
         if !matched -> return Val(kit_expect_verdict("FAIL", requirement))
     } else if requirement.starts_with("tool:") {
-        if kit_steps_tool(requirement.slice(5, requirement.len())) == None {
+        alternatives: requirement.slice(5, requirement.len())
+        if env.jet_alone {
+            loop name in alternatives.split("|") {
+                if KIT_OUTSIDE_TOOLS.contains(name) {
+                    return Val(kit_expect_verdict("REFUSED", "{requirement}: a Debug or Perf case proves jet alone; a check with `{name}` is an interop case in Tests/Cases/ToolInterop"))
+                }
+            }
+        }
+        if kit_steps_tool(alternatives) == None {
             return Val(kit_expect_verdict("SKIP-HOST", requirement))
         }
     } else { return Val(kit_expect_verdict("REFUSED", "unknown host requirement: {requirement}")) }

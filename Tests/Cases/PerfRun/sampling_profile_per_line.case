@@ -1,0 +1,20 @@
+# `jet perf run` on ScriptBench's w04 wordfreq (run.jet, a verbatim copy of
+# Tools/Perf/Scriptbench/W04Wordfreq/run.jet, over the 4 MB of its prose
+# gen.jet writes) gives each line of run.jet its own CPU time
+# (sample_count) and its inclusive time (inclusive_count), each counted at
+# the innermost line of run.jet on its stack. Nearly all the time goes to
+# the regex and string code line 24 calls, so the line holds it inclusively.
+requires: os-name:linux
+fixture: SamplingProfilePerLine.fixture
+env: NO_COLOR=1
+step: jet run gen.jet
+exit: 0
+step: jet perf run run.jet --out {work}/w04.jettrace
+exit: 0
+stdout: = "total 458545\ndistinct 5000\n50402 negrizehap\n25285 gri\n16984 zejungriti\n12776 quasa\n10111 ru\n8428 don\n7108 ne\n6353 fel\n5520 fellosa\n5061 jun\n"
+json: file w04.jettrace doc $.content.profile.status = "captured"
+json: file w04.jettrace doc $.content.profile.rows[?source.start_line=24][?sample_count>=0] #= 1 # own time, per line: few samples land on run.jet's own code
+json: file w04.jettrace doc $.content.profile.rows[?source.start_line=24][?inclusive_count>=50] #= 1 # inclusive time, per line
+step: jet perf view {work}/w04.jettrace
+exit: 0
+stdout: ~ " inclusive=" # the view shows it beside each line's time

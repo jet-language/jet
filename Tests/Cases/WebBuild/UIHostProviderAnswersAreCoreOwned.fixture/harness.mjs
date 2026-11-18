@@ -23,7 +23,7 @@ globalThis.jetUiProvider = {
   },
   eventPop: (queue) => queues[queue].shift() ?? null,
   dialogRequest: (kind, request) => dialogs.push({ kind, request }) - 1,
-  dialogResult: (token) => record(dialogs[token].kind === 0 ? ["selected", "notes/today.txt"] : ["cancelled"]),
+  dialogResult: (token) => record(dialogs[token].kind === 0 ? ["selected", "notes/today.txt"] : ["canceled"]),
   keyClaim: () => true,
 };
 const { jet_main } = await import("./app.js");

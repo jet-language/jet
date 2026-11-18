@@ -42,19 +42,70 @@ TraceProfileSource: struct {
 
 // One profile row: the samples of one source range on one clock.
 // `inclusive_count`, when the sampler walks the stack, counts the samples
-// that hold the range anywhere on it, once each however often.
+// that hold the range anywhere on it, once each however often;
+// `allocation_count`, when the sampler records allocations, the allocations
+// whose stack holds the range innermost of the profiled source's ranges.
+// Under the memory method each counter's count is the events of its
+// samples whose stack holds the range innermost of the profiled source's
+// ranges, each sample weighing the counter's period; None when the profile
+// did not capture that counter, or the row is not one the samples name.
 TraceProfileRow: struct {
     clock: String,
+    allocation_count: U64?,
+    dtlb_miss_count: U64?,
     execution_count: U64?,
     inclusive_count: U64?,
+    l1d_miss_count: U64?,
+    llc_miss_count: U64?,
+    page_fault_count: U64?,
     sample_count: U64,
     sample_weight: U64,
     source: TraceProfileSource,
     symbol: JetSymbolRef,
 }
 
+// The counters the memory method samples, in the order the runtime opens
+// them (PerfSamples.jet perf_counter_config) and a profile lists them.
+TraceCounterName: enum {
+    L1dMisses,
+    LlcMisses,
+    DtlbMisses,
+    PageFaults,
+}
+
+TRACE_COUNTERS: [TraceCounterName]{.L1dMisses, .LlcMisses, .DtlbMisses, .PageFaults}
+
+trace_counter_name: fn(name: TraceCounterName) -> String Never! {
+    if name == {
+        .L1dMisses -> return "l1d_misses"
+        .LlcMisses -> return "llc_misses"
+        .DtlbMisses -> return "dtlb_misses"
+        .PageFaults -> return "page_faults"
+    }
+}
+
+// The key of the counter `name`'s count in a profile row.
+trace_counter_key: fn(name: TraceCounterName) -> String Never! {
+    if name == {
+        .L1dMisses -> return "l1d_miss_count"
+        .LlcMisses -> return "llc_miss_count"
+        .DtlbMisses -> return "dtlb_miss_count"
+        .PageFaults -> return "page_fault_count"
+    }
+}
+
+// One counter of a memory-method profile: captured with a sample every
+// `period` events, or unavailable because the kernel refused it with
+// `errno`. An unavailable counter has no count in any row.
+TraceCounter: struct {
+    name: TraceCounterName,
+    period: U64?,
+    errno: U64?,
+}
+
 TraceProfile: struct {
     method: String,
+    counters: [TraceCounter],
     status: String,
     coverage: String,
     rows: [TraceProfileRow],
@@ -73,6 +124,7 @@ TraceProfile: struct {
 trace_profile_unsupported: fn(reason: String) -> TraceProfile Never! {
     TraceProfile{
         method: "sampling",
+        counters: [TraceCounter]{},
         status: "unsupported",
         coverage: "unsupported",
         rows: [TraceProfileRow]{},
@@ -198,12 +250,19 @@ TraceNative: struct {
     task_id: U64?,
 }
 
+// A span row: a task's observed span (`task_observed`), a closed core.log
+// span (`log_span`) or a join's wait (`task_join`), whose `task_id` is the
+// joining task and `awaited_task_id` the task it waits for, which the line
+// `spawn_line` of `symbol.path` spawned (null when the spawning stack held
+// no line of it). Only a join has either.
 TraceSpan: struct {
+    awaited_task_id: U64?,
     clock: String,
     end_ns: U64?,
     kind: String,
     parent_task_id: U64?,
     reason: String,
+    spawn_line: U64?,
     start_ns: U64?,
     status: String,
     symbol: JetSymbolRef,
@@ -328,13 +387,20 @@ trace_profile_source_to_json: fn(value: TraceProfileSource) -> CanonicalJSON Jet
 }
 
 trace_profile_row_to_json: fn(value: TraceProfileRow) -> CanonicalJSON JetTraceError! {
-    jettrace_object([CanonicalJSONField]{jettrace_field("clock", .String(value.clock.copy())), jettrace_field("execution_count", jettrace_optional_uint(value.execution_count)), jettrace_field("inclusive_count", jettrace_optional_uint(value.inclusive_count)), jettrace_field("sample_count", jettrace_uint(value.sample_count)), jettrace_field("sample_weight", jettrace_uint(value.sample_weight)), jettrace_field("source", trace_profile_source_to_json(value.source)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol))})
+    jettrace_object([CanonicalJSONField]{jettrace_field("allocation_count", jettrace_optional_uint(value.allocation_count)), jettrace_field("clock", .String(value.clock.copy())), jettrace_field("dtlb_miss_count", jettrace_optional_uint(value.dtlb_miss_count)), jettrace_field("execution_count", jettrace_optional_uint(value.execution_count)), jettrace_field("inclusive_count", jettrace_optional_uint(value.inclusive_count)), jettrace_field("l1d_miss_count", jettrace_optional_uint(value.l1d_miss_count)), jettrace_field("llc_miss_count", jettrace_optional_uint(value.llc_miss_count)), jettrace_field("page_fault_count", jettrace_optional_uint(value.page_fault_count)), jettrace_field("sample_count", jettrace_uint(value.sample_count)), jettrace_field("sample_weight", jettrace_uint(value.sample_weight)), jettrace_field("source", trace_profile_source_to_json(value.source)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol))})
+}
+
+trace_counter_to_json: fn(value: TraceCounter) -> CanonicalJSON JetTraceError! {
+    status: if value.period == None -> "unavailable" else -> "captured"
+    jettrace_object([CanonicalJSONField]{jettrace_field("errno", jettrace_optional_uint(value.errno)), jettrace_field("name", .String(trace_counter_name(value.name))), jettrace_field("period", jettrace_optional_uint(value.period)), jettrace_field("status", .String(status))})
 }
 
 trace_profile_to_json: fn(value: TraceProfile) -> CanonicalJSON JetTraceError! {
+    counters := [CanonicalJSON]{}
+    loop counter in value.counters -> counters.push(trace_counter_to_json(counter))
     rows := [CanonicalJSON]{}
     loop row in value.rows -> rows.push(trace_profile_row_to_json(row))
-    jettrace_object([CanonicalJSONField]{jettrace_field("coverage", .String(value.coverage.copy())), jettrace_field("method", .String(value.method.copy())), jettrace_field("overhead_ns", jettrace_optional_uint(value.overhead_ns)), jettrace_field("overhead_reason", .String(value.overhead_reason.copy())), jettrace_field("overhead_status", .String(value.overhead_status.copy())), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("row_limit", jettrace_uint(value.row_limit)), jettrace_field("rows", .Array(rows.move())), jettrace_field("rows_truncated", .Bool(value.rows_truncated)), jettrace_field("status", .String(value.status.copy())), jettrace_field("window_cpu_ns", jettrace_optional_uint(value.window_cpu_ns)), jettrace_field("window_reason", .String(value.window_reason.copy())), jettrace_field("window_status", .String(value.window_status.copy())), jettrace_field("window_wall_ns", jettrace_optional_uint(value.window_wall_ns))})
+    jettrace_object([CanonicalJSONField]{jettrace_field("counters", .Array(counters.move())), jettrace_field("coverage", .String(value.coverage.copy())), jettrace_field("method", .String(value.method.copy())), jettrace_field("overhead_ns", jettrace_optional_uint(value.overhead_ns)), jettrace_field("overhead_reason", .String(value.overhead_reason.copy())), jettrace_field("overhead_status", .String(value.overhead_status.copy())), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("row_limit", jettrace_uint(value.row_limit)), jettrace_field("rows", .Array(rows.move())), jettrace_field("rows_truncated", .Bool(value.rows_truncated)), jettrace_field("status", .String(value.status.copy())), jettrace_field("window_cpu_ns", jettrace_optional_uint(value.window_cpu_ns)), jettrace_field("window_reason", .String(value.window_reason.copy())), jettrace_field("window_status", .String(value.window_status.copy())), jettrace_field("window_wall_ns", jettrace_optional_uint(value.window_wall_ns))})
 }
 
 trace_sample_to_json: fn(value: TraceSample) -> CanonicalJSON JetTraceError! {
@@ -366,7 +432,7 @@ trace_allocation_to_json: fn(value: TraceAllocation) -> CanonicalJSON JetTraceEr
 }
 
 trace_task_to_json: fn(value: TraceTask) -> CanonicalJSON JetTraceError! {
-    jettrace_object([CanonicalJSONField]{jettrace_field("cancelled", .Bool(value.canceled)), jettrace_field("id", jettrace_uint(value.id)), jettrace_field("parent", jettrace_uint(value.parent)), jettrace_field("state", .String(value.state.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("wait", .String(value.wait.copy()))})
+    jettrace_object([CanonicalJSONField]{jettrace_field("canceled", .Bool(value.canceled)), jettrace_field("id", jettrace_uint(value.id)), jettrace_field("parent", jettrace_uint(value.parent)), jettrace_field("state", .String(value.state.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("wait", .String(value.wait.copy()))})
 }
 
 trace_lock_to_json: fn(value: TraceLock) -> CanonicalJSON JetTraceError! {
@@ -382,7 +448,7 @@ trace_native_to_json: fn(value: TraceNative) -> CanonicalJSON JetTraceError! {
 }
 
 trace_span_to_json: fn(value: TraceSpan) -> CanonicalJSON JetTraceError! {
-    jettrace_object([CanonicalJSONField]{jettrace_field("clock", .String(value.clock.copy())), jettrace_field("end_ns", jettrace_optional_uint(value.end_ns)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("parent_task_id", jettrace_optional_uint(value.parent_task_id)), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("start_ns", jettrace_optional_uint(value.start_ns)), jettrace_field("status", .String(value.status.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("task_id", jettrace_optional_uint(value.task_id))})
+    jettrace_object([CanonicalJSONField]{jettrace_field("awaited_task_id", jettrace_optional_uint(value.awaited_task_id)), jettrace_field("clock", .String(value.clock.copy())), jettrace_field("end_ns", jettrace_optional_uint(value.end_ns)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("parent_task_id", jettrace_optional_uint(value.parent_task_id)), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("spawn_line", jettrace_optional_uint(value.spawn_line)), jettrace_field("start_ns", jettrace_optional_uint(value.start_ns)), jettrace_field("status", .String(value.status.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("task_id", jettrace_optional_uint(value.task_id))})
 }
 
 trace_browser_to_json: fn(value: TraceBrowser) -> CanonicalJSON JetTraceError! {

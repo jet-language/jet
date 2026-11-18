@@ -1,0 +1,30 @@
+# `jet fmt --simplify` writes the old arm-table shapes of a value block in
+# the current form: a fallback-free table of returns and its default return
+# become one table with an explicit `else` arm, and the arms of a last-line
+# table end in their values. Comments, bindings, order and effects stay; an
+# early return and a block's own last-line return stay as written; fmt
+# reports nothing, a second pass keeps the output, and the program prints the
+# same before and after. Plain `jet fmt` leaves the shapes as written.
+fixture: FmtArmTableRewrite.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+step: jet run one/tables.jet
+exit: 0
+stdout: = "one:1\nother\nn negative\n-\n0\n+\n-1\n7\n"
+copy: one/tables.jet tables.before
+step: jet fmt one/tables.jet
+exit: 0 # plain fmt keeps the old shapes
+stdout: = ""
+stderr: = ""
+file: one/tables.jet == tables.before
+step: jet fmt --simplify one/tables.jet
+exit: 0
+stdout: = ""
+stderr: = ""
+file: one/tables.jet = "// The table and its default return become one table with an `else` arm.\ndescribe: fn(code: Int) -> String {\n    if code == {\n        1 -> \"one:{code}\"  // first\n        2 -> \"two\"\n        else -> \"other\"\n    }\n    // the fallback\n}\n\n// A last-line table's arms end in their values.\nsign: fn(n: Int) -> String {\n    label: \"n\"\n    if {\n        n < 0 -> {\n            print(\"{label} negative\")\n            \"-\"\n        }\n        n > 0 -> \"+\"\n        else -> \"0\"\n    }\n}\n\n// An early return and a block's own last-line return stay.\nfirst: fn(values: [Int]) -> Int {\n    if values.len() == 0 -> return -1\n    return values[0]\n}\n\nrun: fn() {\n    print(describe(1))\n    print(describe(7))\n    print(sign(-3))\n    print(sign(0))\n    print(sign(5))\n    print(first([Int]{}))\n    print(first([7, 8]))\n}\n"
+step: jet fmt --simplify --check one/tables.jet
+exit: 0 # the second pass keeps the first pass's output
+step: jet run one/tables.jet
+exit: 0
+stdout: = "one:1\nother\nn negative\n-\n0\n+\n-1\n7\n"

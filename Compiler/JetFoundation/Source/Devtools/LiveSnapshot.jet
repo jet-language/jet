@@ -1,4 +1,4 @@
-// The one JETLIVE1 codec and transport. The runtime publishes raw facts
+// The one JETLIVE2 codec and transport. The runtime publishes raw facts
 // (JetRuntime ObserveLive.jet) as little-endian words, with each text written
 // as a byte length (all ones when absent) followed by the bytes. This codec
 // validates the record and derives the view: record order, the effect and
@@ -19,8 +19,9 @@ JetLiveValue: struct {
     rendered_value: String?,
 }
 
-// `label` is the task's name (`task@<site>` when the program gave none) and
-// `spawn_site` the runtime's spawn-site ordinal.
+// `label` is the task's name (`task@<site>` when the program gave none),
+// `spawn_site` the runtime's spawn-site ordinal, `open_spans` the log spans
+// it has open and `arena_allocations` the arena allocations it has made.
 JetLiveTask: struct {
     id: Int,
     parent: Int,
@@ -30,6 +31,8 @@ JetLiveTask: struct {
     wait: String,
     deadline_ms: Int?,
     canceled: Bool,
+    open_spans: Int,
+    arena_allocations: Int,
 }
 
 JetLiveChannel: struct {
@@ -100,8 +103,8 @@ jet_live_error: fn(message: String) -> JetLiveSnapshotError Never! {
     JetLiveSnapshotError{message: message}
 }
 
-// "JETLIVE1" as a little-endian word.
-JET_LIVE_MAGIC: U64{3550338754064696650}
+// "JETLIVE2" as a little-endian word.
+JET_LIVE_MAGIC: U64{3622396348102624586}
 
 JET_LIVE_ABSENT: U64{18446744073709551615}
 
@@ -277,6 +280,8 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                 deadline_present: jet_live_word(cursor) != U64{0}
                 deadline: jet_live_signed(cursor)
                 task_canceled: jet_live_word(cursor) != U64{0}
+                open_spans: jet_live_unsigned(cursor)
+                arena_allocations: jet_live_unsigned(cursor)
                 label_recorded: jet_live_raw(cursor)
                 label_raw: label_recorded ?? [U8]{}
                 wait_recorded: jet_live_raw(cursor)
@@ -297,7 +302,7 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
                 }
                 if task_canceled -> canceled += 1
                 if state_word == (U64{1}) -> running += 1
-                tasks.push(JetLiveTask{id: id, parent: parent, label: jet_live_shown(label_raw, "live task `label`"), spawn_site: spawn_site, state: state, wait: jet_live_shown(wait_raw, "live task `wait`"), deadline_ms: if deadline_present -> Val(deadline) else -> None, canceled: task_canceled})
+                tasks.push(JetLiveTask{id: id, parent: parent, label: jet_live_shown(label_raw, "live task `label`"), spawn_site: spawn_site, state: state, wait: jet_live_shown(wait_raw, "live task `wait`"), deadline_ms: if deadline_present -> Val(deadline) else -> None, canceled: task_canceled, open_spans: open_spans, arena_allocations: arena_allocations})
             }
         } else if section == 2 {
             loop _ in 0..<count {
@@ -361,8 +366,8 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     if channels.len() > 4096 -> channels = channels[0..<4096].copy()
     effects["compute"] = tasks.len() - (effects.get("waiting") ?? 0)
     resources["running"] = running
-    resources["cancelled"] = canceled
-    Ok(JetLiveSnapshot{protocol: "jet.live.v1", session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: "", captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: JetLiveRuntime{elapsed_ns: elapsed_ns, cpu_ns: None, exit: exit}, event_records: events, events: None, boot_ns: boot_ns, start_ticks: start_ticks, clock_hz: clock_hz})
+    resources["canceled"] = canceled
+    Ok(JetLiveSnapshot{protocol: "jet.live.v2", session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: "", captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: JetLiveRuntime{elapsed_ns: elapsed_ns, cpu_ns: None, exit: exit}, event_records: events, events: None, boot_ns: boot_ns, start_ticks: start_ticks, clock_hz: clock_hz})
 }
 
 // A /proc/<pid>/stat tick count: decimal digits that fit U64.

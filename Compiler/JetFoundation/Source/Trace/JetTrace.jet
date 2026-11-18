@@ -1,7 +1,9 @@
-// Artifact wire; not CompilerTraceSink.
+// Artifact wire; not CompilerTraceSink. Version 2 names a task row's
+// canceled flag `canceled`; a version 1 trace is read only by the
+// american-tokens1 converter (Compiler/Migrations), which moves it to 2.
 TRACE_SCHEMA: "jet.trace"
 
-TRACE_VERSION: U32{1}
+TRACE_VERSION: U32{2}
 
 CAPTURE_POLICY_SCHEMA: "5"
 
@@ -80,6 +82,9 @@ verify_jettrace: fn(bytes: [U8]) -> CanonicalJSON JetTraceError! {
         .Integer(number) -> {
             supported: "{TRACE_VERSION}"
             if number != supported {
+                if number.len() < supported.len() || (number.len() == supported.len() && number < supported) {
+                    return Err(jettrace_error("jettrace version {number} is an older format this reader no longer reads (it reads {TRACE_VERSION}); the american-tokens1 migration converts it"))
+                }
                 return Err(jettrace_error("jettrace version {number} needs a newer jet toolchain (this reader supports {TRACE_VERSION})"))
             }
         }

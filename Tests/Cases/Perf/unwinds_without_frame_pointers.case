@@ -1,0 +1,22 @@
+# `jet perf run` keeps whole stacks through code without a frame pointer:
+# the sampler steps out of such a frame by the image's call frame
+# information, then follows the frame pointer chain from the first frame
+# that keeps one. `pick` returns from its frame-free prefix, before its
+# prologue sets rbp, so a sample there finds rbp still spin's frame. A frame
+# pointer walk alone goes from there to run's line and loses spin's loop
+# line, so that line's inclusive time falls short of run's line by each such
+# sample. With the call frame information every sample under run's line
+# holds the loop line too, but for a few at spin's entry and return.
+requires: os-name:linux
+fixture: UnwindsWithoutFramePointers.fixture
+env: NO_COLOR=1
+step: jet perf run -O2 --inline=off spin.jet --out {work}/spin.jettrace -- 300000000
+exit: 0
+stdout: = "spin=48723\n"
+step: jet perf view {work}/spin.jettrace
+exit: 0
+stdout: ~ "spin.jet#pick profile:cpu samples=" # the frameless function takes samples of its own
+stdout: ~ "  line 16 samples=" # spin's loop line
+stdout: ~ "  line 23 samples=" # run's line that calls spin
+capture: loop = text stdout.split("  line 16 samples=", 1).split("inclusive=", 1).split("\n", 0).trim
+json: stdout.split("  line 23 samples=", 1).split("inclusive=", 1).split("\n", 0).trim doc $ <= {cap:loop}+3 # each sample under run's call holds the loop line

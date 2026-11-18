@@ -12,7 +12,7 @@ jet_cli_live_text: fn(snapshot: JetLiveSnapshot) -> String Never! {
     loop live_task in snapshot.tasks {
         deadline: if live_task.deadline_ms == .Val(value) -> "{value}" else -> "-"
         wait: if live_task.wait == "" -> "-" else -> live_task.wait
-        out = "{out}  Task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} canceled={live_task.canceled} label={live_task.label}\n"
+        out = "{out}  Task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} canceled={live_task.canceled} label={live_task.label} open_spans={live_task.open_spans} arena_allocations={live_task.arena_allocations}\n"
     }
     out = "{out}\nChannels\n"
     if snapshot.channels.len() == 0 -> out = "{out}  (no live channels)\n"
@@ -22,7 +22,7 @@ jet_cli_live_text: fn(snapshot: JetLiveSnapshot) -> String Never! {
     }
     effects: snapshot.effects
     resources: snapshot.resources
-    out = "{out}\nEffects: compute={effects.get("compute") ?? 0} waiting={effects.get("waiting") ?? 0} channel={effects.get("channel") ?? 0} time={effects.get("time") ?? 0} io={effects.get("io") ?? 0}\nResources: workers={resources.get("workers") ?? 0} running={resources.get("running") ?? 0} queued={resources.get("queued") ?? 0} canceled={resources.get("cancelled") ?? 0} arenas={resources.get("arenas") ?? 0} arena_allocations={resources.get("arena_allocations") ?? 0} arena_bytes={resources.get("arena_bytes") ?? 0}\n\nValues\n"
+    out = "{out}\nEffects: compute={effects.get("compute") ?? 0} waiting={effects.get("waiting") ?? 0} channel={effects.get("channel") ?? 0} time={effects.get("time") ?? 0} io={effects.get("io") ?? 0}\nResources: workers={resources.get("workers") ?? 0} running={resources.get("running") ?? 0} queued={resources.get("queued") ?? 0} canceled={resources.get("canceled") ?? 0} arenas={resources.get("arenas") ?? 0} arena_allocations={resources.get("arena_allocations") ?? 0} arena_bytes={resources.get("arena_bytes") ?? 0}\n\nValues\n"
     if snapshot.values.len() == 0 -> out = "{out}  (no live value decisions)\n"
     loop value in snapshot.values {
         reason: if value.reason == "" -> "" else -> " reason={value.reason}"
@@ -83,7 +83,7 @@ jet_cli_live_json_report: fn(snapshot: JetLiveSnapshot, plane: String) -> String
     fields.push(jet_cli_status_field("tasks", jet_cli_status_array(snapshot.tasks.map(fn(live_task) { jet_cli_live_task_json(live_task) }))))
     fields.push(jet_cli_status_field("channels", jet_cli_status_array(snapshot.channels.map(fn(channel) { jet_cli_live_channel_json(channel) }))))
     fields.push(jet_cli_status_field("effects", jet_cli_live_counts_json(snapshot.effects, [String]{"compute", "waiting", "channel", "time", "io"})))
-    fields.push(jet_cli_status_field("resources", jet_cli_live_counts_json(snapshot.resources, [String]{"workers", "running", "queued", "cancelled", "arenas", "arena_allocations", "arena_bytes"})))
+    fields.push(jet_cli_status_field("resources", jet_cli_live_counts_json(snapshot.resources, [String]{"workers", "running", "queued", "canceled", "arenas", "arena_allocations", "arena_bytes"})))
     fields.push(jet_cli_status_field("values", jet_cli_status_array(values)))
     fields.push(jet_cli_status_field("shapes", jet_cli_status_array(shapes)))
     "{jet_cli_status_render("inspect.{plane}", true, fields)}\n"
@@ -102,6 +102,8 @@ jet_cli_live_task_json: fn(live_task: JetLiveTask) -> JetCLIStatusValue Never! {
             jet_cli_status_field("wait", jet_cli_status_text(live_task.wait)),
             jet_cli_status_field("deadline_ms", if live_task.deadline_ms == .Val(deadline) -> jet_cli_status_int(deadline) else -> JetCLIStatusValue.Null),
             jet_cli_status_field("canceled", jet_cli_status_bool(live_task.canceled)),
+            jet_cli_status_field("open_spans", jet_cli_status_int(live_task.open_spans)),
+            jet_cli_status_field("arena_allocations", jet_cli_status_int(live_task.arena_allocations)),
         ],
     )
 }
@@ -121,8 +123,7 @@ jet_cli_live_channel_json: fn(channel: JetLiveChannel) -> JetCLIStatusValue Neve
     )
 }
 
-// The named counters, in the text view's order, each 0 when unrecorded. The
-// snapshot's `cancelled` count is shown as `canceled`, as the text view does.
+// The named counters, in the text view's order, each 0 when unrecorded.
 jet_cli_live_counts_json: fn(counts: [String:Int], names: [String]) -> JetCLIStatusValue Never! {
-    jet_cli_status_object(names.map(fn(name) { jet_cli_status_field(if name == "cancelled" -> "canceled" else -> name, jet_cli_status_int(counts.get(name) ?? 0)) }))
+    jet_cli_status_object(names.map(fn(name) { jet_cli_status_field(name, jet_cli_status_int(counts.get(name) ?? 0)) }))
 }

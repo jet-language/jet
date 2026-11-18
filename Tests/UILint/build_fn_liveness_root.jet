@@ -1,0 +1,24 @@
+// The `build: fn(b: Build)` the compiler discovers is a liveness root, so
+// neither it nor the BuildError it fails with is reported unused. A
+// BuildError shown by bare interpolation draws no Display migration lint,
+// because its display is Core's. The neighbors still fire: a dead private
+// helper (L0104) and a user struct with no `Display` (L0520).
+build: fn(b: Build) BuildError! {
+    app: b.add_executable("app", ["run.jet"], [])
+    b.default(app)
+}
+
+explain: fn(error: BuildError) -> String { "build failed: {error}" }
+
+MissingDisplay: struct {
+    value: String,
+}
+
+priv internal: module {
+    unused_helper: fn() -> Int { 1 }
+}
+
+run: fn() {
+    value: MissingDisplay{value: "value"}
+    print("{value}")
+}

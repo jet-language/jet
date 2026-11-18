@@ -5569,7 +5569,9 @@ available. `clipboard.read_text` answers the clipboard text the page last
 observed (a paste, copy or cut, or its own `write_text`), because a browser
 lends the live clipboard only to a user gesture; before any is observed it
 fails with `HostFailure`. The core.ui.host file dialogs, which answer a path,
-and font shaping are absent there. The provider also answers the app's device
+and font shaping are absent there. A provider's dialog result is a record
+whose first field is `selected`, followed by the selected paths, or
+`canceled`. The provider also answers the app's device
 requests (`app.ask`, `app.take_photo`, `app.location`, `app.open_file`, the
 files dropped on an `app.drop_files` body, a page's file's bytes, and the
 sensor streams' readings); one whose
@@ -5785,9 +5787,11 @@ A hook point's fallback and a decision point's policy are literal data the
 build keeps. `NAME: event.new<T>()` as a module binding's whole value still
 declares an event point while Core's own `app.LIFECYCLE` is written that way.
 Any other module value that holds an event is refused as one the build cannot
-compute. A hook point that the program reads only to `run` it can have no
-handler, so it costs nothing: each `run` evaluates its payload and returns its
-fallback, with no call, no hook and no carrier.
+compute. A hook or decision point that the program reads only to `run` it
+can have no handler, so it costs nothing: a hook point's `run` evaluates its
+payload and returns its fallback, and a decision point's `run` is
+`HookOutcome.Continue` of its payload, with no dispatch, no hook and no
+carrier. `web.requests` is such a decision point.
 
 Provider event handles expose `.on`, `.emit`, `.listener_count`, and `.close`;
 subscriptions expose `.is_active`. Async events expose `.emit_async` and a
@@ -6974,6 +6978,8 @@ route list.
 | `bind<Settings: Decode>(address: String, prefix: String, build: fn(Settings) -> App, tls:, deadline:) -> HTTPServer HTTPError!` | server | Decode the typed settings, then bind the app `build` makes on `address`. |
 | `form(Model, action: handler) -> WebFormTyped` | form | Derive typed inputs and the named action contract at compile time (D-WEBFORM1=A). |
 | `openapi(routes: App or HTTPRouter) -> String OpenAPIError!` | text | Render OpenAPI from the checked facts of the same route value that is served. |
+| `requests: DecisionHook<HTTPRequest, HTTPResponse>` | point | The decision point every request an app serves passes before its routes; see below. |
+| `under(prefix: String, handler: fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse>) -> fn(HTTPRequest) -> HookDecision<HTTPRequest, HTTPResponse>` | handler | Scope a `web.requests` handler to the paths under `prefix`. |
 | `storage() -> String` | text | Select the local storage namespace. |
 | `sync(key: String, data: String) -> String` | text | Format a synchronized key/value update. |
 
@@ -7020,6 +7026,21 @@ server functions and static files are not API operations. `jet explain
 with its method, address, what answers it, how it was registered (`page`,
 `action`, `handler`, `mount`, `marked` or `static`) and its file:line;
 `--json` gives the same rows.
+
+`web.requests` is a declared decision point
+(`event.decision_point<HTTPRequest, HTTPResponse>(HookPolicy.FirstCancelElseTransform)`),
+the same point mechanism as any library's. Every App's outermost layer runs
+it before the app's own layers and rows. A handler attached with
+`web.requests.on(scope, handler)` lets the request on (`.Continue`), hands
+on a changed one (`.Transform(request)`), refuses it (`.Cancel`, answered
+`403`) or answers it itself (`.Fail(response)`), so the rows never run.
+`web.under(prefix, handler)` scopes a handler to one path prefix, segment by
+segment: under `"/admin"` it hears `/admin` and `/admin/users`, not
+`/administrator`, and every other request continues unchanged. A program
+that attaches no handler pays nothing for the point: each run is the
+request itself, continued, with no dispatch, no hook and no process cell.
+`Tests/Cases/Hooks/web_request_decision_scoped_by_prefix.case` is the
+executable proof.
 
 A page row takes a loader (`.loader(page, loader, preload)`), a pending
 boundary (`.pending(view)`) and an error boundary (`.error(view)`), and the
@@ -8102,7 +8123,7 @@ inferred from its Core source body like any other call. `service.tree` stays
 `-[]>`; `start` and the workflow waits reach `FS.Read`, `FS.Write` and
 `Time.Wait`. A canceled or deadline-blown
 `workflow.sleep` ends its wait without unwinding, so the workflow records
-`sleep-cancelled` or `sleep-deadline` before the call fails.
+`sleep-canceled` or `sleep-deadline` before the call fails.
 
 Restart/delivery policy constructors and runtime retention projection are Jet
 policy. `state_store` requires `FS.Read`: it inspects the target and lexical
@@ -8117,9 +8138,14 @@ All ten error cases carry a String; their service display is the message alone.
 Receipts retain every original field, including authority and signature, and
 their service display preserves the existing field order and labels.
 `TaskOutcome` is `Finished` or `Failed(TaskFailure)`, the prelude's one task
-failure enum. Its display is `Finished` or the failure's text (`Cancelled`,
+failure enum. Its display is `Finished` or the failure's text (`Canceled`,
 `DeadlineBlown`, or `Panicked(reason)` with the raw reason), while Debug quotes
-and escapes that reason.
+and escapes that reason. A canceled delivery's state shows as `Canceled`.
+Service state stores are `JET-SERVICE-STATE/2`, and delivery events and
+receipts are signed as `jet-service-delivery-event-v2` and
+`jet-service-delivery-receipt-v2`; version 1 spelled the canceled tokens the
+British way, and the `american-tokens1` migration converts its stores and
+authority logs.
 `core.rt.RealtimeReceipt` preserves the eight scalar provider facts in their
 original positional order. `Delivery` shows exactly `Delivery(` + its ID + `)`.
 `Delivery.show()` and `DeliveryReceipt.show()` return that same display text.
@@ -8379,6 +8405,15 @@ The source-owned lifecycle exposes the effects it actually consumes:
 startup value selects the database; otherwise `.jet/state/jobs.db` is used.
 Logical environment overlays do not redirect this provider. Set an isolated
 database path before launching examples or conformance programs.
+
+The database records its format version in a `jet_job_queue_format` table, so a
+queue can share a database with other tables. Version 2 stores a canceled job's
+state, and its event's, as `canceled`. A version 1 database (queue tables and no
+format table) is refused when the queue opens, with `ServiceError.Unavailable`
+naming the version; the offline converter `jet run
+Compiler/Migrations/Migrate.jet -- american-tokens1 --write <database>`
+moves it to version 2 in one migration, and `--against DIR` checks every row
+against the old copy.
 
 The queue binds to the package endpoint, so durable jobs need no service setup
 (D-DX-QUEUE1=A). Its authority is a private secret in `<database>.authority`.

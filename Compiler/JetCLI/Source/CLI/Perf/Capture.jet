@@ -7,6 +7,8 @@ JetCLIPerfObservation: struct {
     live: JetCLIPerfLive,
 }
 
+// `task_ids` maps each observed task's runtime id to the id its trace row
+// carries.
 JetCLIPerfCapture: struct {
     samples: [TraceSample],
     profile: TraceProfile,
@@ -20,10 +22,12 @@ JetCLIPerfCapture: struct {
     source_identity: [SourceIdentity],
     source_maps: [TraceSourceMap],
     policy: CapturePolicy,
+    receipts: [TraceReceiptSection],
+    task_ids: [U64:U64],
 }
 
 jet_cli_perf_capture_new: fn(profile: TraceProfile, sources: [SourceIdentity]) -> JetCLIPerfCapture Never! {
-    JetCLIPerfCapture{samples: [TraceSample]{}, profile: profile, allocations: [TraceAllocation]{}, browser: [TraceBrowser]{}, tasks: [TraceTask]{}, locks: [TraceLock]{}, io: [TraceIO]{}, native: [TraceNative]{}, spans: [TraceSpan]{}, source_identity: sources, source_maps: [TraceSourceMap]{}, policy: capture_policy_default_exclusions()}
+    JetCLIPerfCapture{samples: [TraceSample]{}, profile: profile, allocations: [TraceAllocation]{}, browser: [TraceBrowser]{}, tasks: [TraceTask]{}, locks: [TraceLock]{}, io: [TraceIO]{}, native: [TraceNative]{}, spans: [TraceSpan]{}, source_identity: sources, source_maps: [TraceSourceMap]{}, policy: capture_policy_default_exclusions(), receipts: [TraceReceiptSection]{}, task_ids: [U64:U64]{}}
 }
 
 // `wall_ns` is the session's wall time on the observations' clock (`jet perf
@@ -85,12 +89,13 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
         stable_parent: if observed_parent == (U64{0}) -> U64{0} else -> U64{task_indexes[observed_parent] + 1}
         capture.tasks[index].id = stable_id
         capture.tasks[index].parent = stable_parent
+        capture.task_ids[observed_id] = stable_id
         if observations.len() > 1 {
-            capture.spans.push(TraceSpan{clock: "monotonic", start_ns: Val(first_seen[observed_id]), end_ns: Val(last_seen[observed_id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", status: "captured", symbol: symbol, task_id: Val(stable_id)})
+            capture.spans.push(TraceSpan{awaited_task_id: None, clock: "monotonic", start_ns: Val(first_seen[observed_id]), end_ns: Val(last_seen[observed_id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", spawn_line: None, status: "captured", symbol: symbol, task_id: Val(stable_id)})
         }
     }
     if capture.spans.len() == 0 {
-        capture.spans.push(TraceSpan{clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", status: "unavailable", symbol: symbol, task_id: None})
+        capture.spans.push(TraceSpan{awaited_task_id: None, clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", spawn_line: None, status: "unavailable", symbol: symbol, task_id: None})
     }
     // `IOTimeline`: a real I/O wait is a span from the first observation that
     // shows its task blocked on it to the first that no longer does; one still
@@ -220,7 +225,7 @@ jet_cli_perf_capture_browser: fn(browser: JetCLIPerfBrowser, observations: [JetC
 
 // Only the shared JetTrace codec writes bytes, then authenticates its own wire.
 jet_cli_perf_capture_bytes: fn(capture: JetCLIPerfCapture, command: String, argv: [String], toolchain: TraceToolchain, hardware: TraceHardware) -> [U8] JetCLIReadError! {
-    skeleton: TraceSkeleton{command: command, argv: argv, toolchain: toolchain, hardware: hardware, capture_policy: capture.policy, samples: capture.samples, profile: capture.profile, allocations: capture.allocations, browser: capture.browser, game_frames: [TraceGameFrame]{}, game_draw_events: [TraceGameDrawEvent]{}, tasks: capture.tasks, locks: capture.locks, io: capture.io, native: capture.native, spans: capture.spans, receipt_sections: [TraceReceiptSection]{}, source_identity: capture.source_identity, source_maps: capture.source_maps}
+    skeleton: TraceSkeleton{command: command, argv: argv, toolchain: toolchain, hardware: hardware, capture_policy: capture.policy, samples: capture.samples, profile: capture.profile, allocations: capture.allocations, browser: capture.browser, game_frames: [TraceGameFrame]{}, game_draw_events: [TraceGameDrawEvent]{}, tasks: capture.tasks, locks: capture.locks, io: capture.io, native: capture.native, spans: capture.spans, receipt_sections: capture.receipts, source_identity: capture.source_identity, source_maps: capture.source_maps}
     bytes: build_skeleton_bytes(skeleton) ?? return Err(jet_cli_read_error(err.message))
     _: verify_jettrace(bytes) ?? return Err(jet_cli_read_error(err.message))
     Ok(bytes)

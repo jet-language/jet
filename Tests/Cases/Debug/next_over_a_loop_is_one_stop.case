@@ -1,0 +1,14 @@
+# `n` on a line that loops runs the whole loop and stops once, on the next
+# line: the loop turning back onto its own line is not a new line, and the
+# step runs between temporary traps on the function's other lines rather
+# than one stop per instruction. Fifty million turns would pass the
+# single-step limit long before the loop ends.
+fixture: NextOverALoopIsOneStop.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: next_over_a_loop_is_one_stop.stdin
+exit: 0
+stdout: ~ "(Jet) n\n3 |     loop i in 0..<50000000 -> total += i        <- here\n" # the first `n` reaches the loop line
+stdout: ~ "\n(Jet) n\n4 |     answer: total * 2        <- here\n" # one more `n` runs the loop and reaches the next line
+stdout: ~ "total = 1249999975000000" # with every turn of the loop run
+stdout: ~ "2499999950000000\nProgram finished\n" # the program's own result is unchanged

@@ -9,6 +9,7 @@ use {
         AST_NODE_GENERATED,
         AppliedRuleApplication,
         BinOp,
+        Binding,
         COMMENT_PREFIX,
         Diagnostic,
         DIAGNOSTIC_ERROR,
@@ -30,6 +31,8 @@ use {
         SwitchArm,
         TextEdit,
         Type,
+        UnOp,
+        expr_source_start,
         expr_span,
         foundation_byte_text,
         name_index,
@@ -44,6 +47,7 @@ use {
         TOKEN_EOF,
         TOKEN_GT,
         TOKEN_IDENT,
+        TOKEN_KW_ELSE,
         TOKEN_KW_PRIV,
         TOKEN_LBRACE,
         TOKEN_LBRACKET,
@@ -160,6 +164,10 @@ JetFmt: struct {
     // (jfmt_fmt_expanded_compound), for the check that a format keeps
     // meaning.
     compound_rewrites: [TextEdit]{[TextEdit]{}},
+    // Under `--simplify`, the source edits that inline each needless
+    // temporary a printed block holds (jfmt_note_inline_temporaries); the
+    // rewritten source is formatted again.
+    inline_rewrites: [TextEdit]{[TextEdit]{}},
     // The index of the `}` token that closes each `{` token of
     // `source_toks`, -1 for any other token (jfmt_brace_closes).
     brace_closes: [Int]{[Int]{}},
@@ -1872,6 +1880,448 @@ jfmt_note_compound_rewrite: fn(f: &JetFmt, op_start: Int, right_start: Int, grou
     f.compound_rewrites.push(TextEdit{span: Span{start: op_start, end: right_start}, new_text: text})
 }
 
+// ---- callable-body rewrites ----
+
+// A rewrite of whole callable bodies, collected as source edits from the
+// program as parsed, before `--simplify` rewrites it, and applied before
+// the format; the rewritten source is formatted again.
+JfmtBodyRewrite: enum {
+    // The old arm-table shapes of a value block (jfmt_value_tail_func_rewrites).
+    ValueTails,
+    // A trailing if/else as a guard clause and the work (`--simplify`,
+    // jfmt_guard_clause_edit).
+    GuardClauses,
+}
+
+// The `rewrite` edits of every callable body in `items`: free functions,
+// type and impl methods, and functions nested in code modules.
+jfmt_body_rewrites: fn(f: JetFmt, items: [Item], rewrite: JfmtBodyRewrite, edits: &[TextEdit]) -[]> {
+    loop item in items {
+        if item == {
+            .Func(function) -> { jfmt_func_rewrites(f, function, rewrite, edits) }
+            .Struct(definition) -> {
+                loop function in definition.methods {
+                    jfmt_func_rewrites(f, function, rewrite, edits)
+                }
+                loop conformance in definition.trait_impls {
+                    loop function in conformance.methods {
+                        jfmt_func_rewrites(f, function, rewrite, edits)
+                    }
+                }
+            }
+            .Enum(definition) -> {
+                loop function in definition.methods {
+                    jfmt_func_rewrites(f, function, rewrite, edits)
+                }
+                loop conformance in definition.trait_impls {
+                    loop function in conformance.methods {
+                        jfmt_func_rewrites(f, function, rewrite, edits)
+                    }
+                }
+            }
+            .Impl(definition) -> {
+                loop function in definition.methods {
+                    jfmt_func_rewrites(f, function, rewrite, edits)
+                }
+            }
+            .CodeModule(decl) -> {
+                if decl.body == .Val(body) -> jfmt_body_rewrites(f, body, rewrite, edits)
+            }
+            .GenericModule(decl) -> jfmt_body_rewrites(f, decl.body, rewrite, edits)
+            .Distinct(_) | .TypeAlias(_) | .UnitFamily(_) | .Trait(_) | .Tag(_) | .EffectDecl(_) | .Const(_) | .Test(_) | .ExternRust(_) | .Module(_) | .CModule(_) | .ErrorConv(_) | .Migration(_) | .ProtocolDecl(_) | .TemplateLoop(_) | .ModuleAlias(_) | .MarkerDecl(_) | .FactDecl(_) -> {}
+        }
+    }
+}
+
+jfmt_func_rewrites: fn(f: JetFmt, function: Func, rewrite: JfmtBodyRewrite, edits: &[TextEdit]) -[]> {
+    if rewrite == {
+        .ValueTails -> { jfmt_value_tail_func_rewrites(f, function, edits) }
+        .GuardClauses -> {
+            if jfmt_guard_clause_edit(f, function) == .Val(edit) -> edits.push(edit)
+        }
+    }
+}
+
+// The source edits that write the old tail shapes of a value-returning
+// callable body (parser_value_tails, the shapes `jet check` reports as
+// L0513 and L0530, here in the tables spelled as tables, braced arms
+// included) in the current form: a table of returns followed by a default
+// return gains that default as its explicit `else` arm, and an arm of a
+// last-line table that ends in `return value` ends in the value. A block's
+// own last-line `return` stays as written, as do the branches of a classic
+// `if cond { … } else { … }`, which cannot end in a value.
+jfmt_value_tail_func_rewrites: fn(f: JetFmt, function: Func, edits: &[TextEdit]) -[]> {
+    if !parser_return_type_has_value(function.return_type) {
+        return
+    }
+    tails := [ParserValueTail]{}
+    parser_value_tails(function.body, ParserTailReach.SpelledTables, f.src_bytes, tails)
+    // The default return an `else` arm takes in is part of that arm's edit.
+    taken := -1
+    loop tail in tails {
+        if tail == {
+            .ElseArm(table, returns, fallback, default) -> {
+                edit: parser_else_arm_edit(f.src_bytes, table, returns, fallback, default) ?? next
+                taken = fallback
+                edits.push(edit)
+            }
+            .FinalReturn(keyword, value, arm) -> {
+                if arm && keyword != taken -> edits.push(parser_final_return_edit(keyword, value))
+            }
+        }
+    }
+}
+
+// ---- guard clauses (`--simplify`) ----
+
+// The source edit that writes a callable body ending in a two-way
+// `if cond { … } else { … }`, one of whose branches is a single statement
+// that leaves the function (`return …`, `panic(…)`), as that statement's
+// guard clause followed by the other branch's statements: `if !cond ->
+// return err`, then the work. The condition still runs first and once, and
+// each branch still runs under the same outcome of it. A nested if/else the
+// work ends in is the body's last line on the next pass, so a chain unwinds
+// one guard at a time. None when the branches are not that shape, the work
+// would bind a name the body already holds or defer to the body's end, or
+// a comment sits in the parts that move.
+jfmt_guard_clause_edit: fn(f: JetFmt, function: Func) -[]> TextEdit? Never! {
+    count: function.body.len()
+    if count == 0 || jfmt_inside_markers(function.markers).len() > 0 -> return None
+    last: function.body[count - 1]
+    if last == .Switch(subject, arms, else_body, span) {
+        if !parser_is_subjectless_guard(subject, span) || arms.len() != 1 || arms[0].through != None {
+            return None
+        }
+        otherwise: else_body ?? return None
+        then_body: arms[0].body
+        if then_body.len() == 0 || otherwise.len() == 0 -> return None
+        then_leaves: then_body.len() == 1 && jfmt_statement_leaves(then_body[0])
+        else_leaves: otherwise.len() == 1 && jfmt_statement_leaves(otherwise[0])
+        if then_leaves == else_leaves -> return None
+        work: if then_leaves -> otherwise else -> then_body
+        // The work's bindings move to the body's own scope.
+        held := [String]{}
+        loop param in function.params -> held.push(param.name)
+        loop index in 0..<count - 1 {
+            if function.body[index] == .Val(binding) -> held.push(binding.name)
+        }
+        loop statement in work {
+            if statement == .Defer(_, _) || statement == .DeferClose(_, _) -> return None
+            if statement == .Val(binding) {
+                if binding.pattern != None || held.any(fn(name) { name == binding.name }) {
+                    return None
+                }
+            }
+        }
+        // The AST keeps only a call's name span and a block statement's last
+        // inner line, so the branches are read from the tokens.
+        cond: arms[0].cond
+        cond_start: expr_source_start(cond)
+        cond_end: jfmt_if_head_end(f, cond_start) ?? return None
+        then_part: jfmt_branch_part(f, jfmt_first_token_at(f, cond_end), TOKEN_KW_ELSE) ?? return None
+        if then_part.next >= f.source_toks.len() || f.source_toks[then_part.next].kind != TOKEN_KW_ELSE {
+            return None
+        }
+        else_part: jfmt_branch_part(f, then_part.next + 1, TOKEN_SEMI) ?? return None
+        guard_part: if then_leaves -> then_part.content else -> else_part.content
+        work_part: if then_leaves -> else_part.content else -> then_part.content
+        start: jfmt_stmt_start(last)
+        if jfmt_comment_between(f, start, then_part.content.start) || jfmt_comment_between(f, then_part.content.end, else_part.content.start) || jfmt_comment_between(f, else_part.content.end, else_part.end) || jfmt_comment_between(f, guard_part.start, guard_part.end) {
+            return None
+        }
+        head: if then_leaves -> jfmt_src_text(f, cond_start, cond_end) else -> jfmt_negated_condition(f, cond, cond_end)
+        text: "if {head} -> {jfmt_src_text(f, guard_part.start, guard_part.end)}\n{jfmt_src_text(f, work_part.start, work_part.end)}"
+        return Val(TextEdit{span: Span{start: start, end: else_part.end}, new_text: text})
+    }
+    None
+}
+
+// One branch of an `if` as written: its content, where the branch ends, and
+// the index of the token after it.
+JfmtBranchPart: struct {
+    content: Span,
+    end: Int,
+    next: Int,
+}
+
+// The branch whose opener is token `at`: a braced `{ … }` runs to its
+// matching `}`; an arrow `-> …` runs to the first `stop` token (or `}`) at
+// its own depth. None for any other spelling (an `else if`) or an empty
+// branch.
+jfmt_branch_part: fn(f: JetFmt, at: Int, stop: Int) -[]> JfmtBranchPart? Never! {
+    if at >= f.source_toks.len() -> return None
+    braced: f.source_toks[at].kind == TOKEN_LBRACE
+    if !braced && f.source_toks[at].kind != TOKEN_UNIFIED_ARROW -> return None
+    depth := 0
+    index := at + 1
+    loop index < f.source_toks.len() {
+        kind: f.source_toks[index].kind
+        if kind == TOKEN_EOF -> return None
+        if depth == 0 && (kind == TOKEN_RBRACE || (!braced && kind == stop)) -> break
+        if kind == TOKEN_LBRACE || kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
+        if kind == TOKEN_RBRACE || kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET -> depth -= 1
+        index += 1
+    }
+    if index >= f.source_toks.len() -> return None
+    last := index - 1
+    loop last > at && f.source_toks[last].kind == TOKEN_SEMI -> last -= 1
+    if last <= at -> return None
+    content: Span{start: f.source_toks[at + 1].span.start, end: f.source_toks[last].span.end}
+    if braced {
+        return Val(JfmtBranchPart{content: content, end: f.source_toks[index].span.end, next: index + 1})
+    }
+    Val(JfmtBranchPart{content: content, end: content.end, next: index})
+}
+
+// Whether `statement` leaves the function: a `return`, or a call that never
+// comes back (`panic(…)`, `todo`).
+jfmt_statement_leaves: fn(statement: Stmt) -[]> Bool Never! {
+    if statement == .Return(_, _) -> return true
+    if statement == .Expr(expr) -> return parser_expression_definitely_diverges(expr)
+    false
+}
+
+// Where the condition starting at `start` of an `if` ends: the end of the
+// last token before its branch opens (`{` or `->` outside any parentheses
+// or brackets). The AST keeps only a call's name span, so the tokens say
+// where a condition ending in a call ends.
+jfmt_if_head_end: fn(f: JetFmt, start: Int) -[]> Int? Never! {
+    depth := 0
+    previous := -1
+    loop index in jfmt_first_token_at(f, start)..<f.source_toks.len() {
+        token: f.source_toks[index]
+        kind: token.kind
+        if depth == 0 && (kind == TOKEN_LBRACE || kind == TOKEN_UNIFIED_ARROW) {
+            if previous < 0 -> return None
+            return Val(previous)
+        }
+        if kind == TOKEN_EOF -> return None
+        if kind == TOKEN_LPAREN || kind == TOKEN_LBRACKET -> depth += 1
+        if (kind == TOKEN_RPAREN || kind == TOKEN_RBRACKET) && depth > 0 -> depth -= 1
+        if !jfmt_is_comment_kind(kind) && kind != TOKEN_SEMI -> previous = token.span.end
+    }
+    None
+}
+
+// The source of `!cond` for the condition running to `end`: a `!x` loses
+// its `!` (and `!(x)` its parentheses), `a == b` and `a != b` trade
+// operators, a postfix-primary condition takes `!` directly, and any other
+// is parenthesized.
+jfmt_negated_condition: fn(f: JetFmt, cond: Expr, end: Int) -[]> String Never! {
+    start: expr_source_start(cond)
+    if cond == .Unary(op, operand, _, _) {
+        if op == UnOp.Not {
+            inner: expr_source_start(operand)
+            open: jfmt_first_token_at(f, inner)
+            close: jfmt_first_token_at(f, end) - 1
+            if operand == .Paren(_, _, _) && close > open + 1 && f.source_toks[open].kind == TOKEN_LPAREN && f.source_toks[close].kind == TOKEN_RPAREN {
+                return jfmt_src_text(f, f.source_toks[open + 1].span.start, f.source_toks[close - 1].span.end)
+            }
+            return jfmt_src_text(f, inner, end)
+        }
+    }
+    if cond == .Binary(op, _, right, _, _) {
+        if op == BinOp.Eq || op == BinOp.Ne {
+            right_start: expr_source_start(right)
+            operator: jfmt_first_token_at(f, right_start) - 1
+            if operator > 0 && f.source_toks[operator].span.end - f.source_toks[operator].span.start == 2 && f.src_bytes[f.source_toks[operator].span.start + 1] == (U8{61}) {
+                spelled: if op == BinOp.Eq -> "!=" else -> "=="
+                left_end: f.source_toks[operator - 1].span.end
+                return "{jfmt_src_text(f, start, left_end)} {spelled} {jfmt_src_text(f, right_start, end)}"
+            }
+        }
+    }
+    text: jfmt_src_text(f, start, end)
+    if jfmt_inline_value_class(cond) ?? false -> return "!{text}"
+    "!({text})"
+}
+
+// ---- inlined temporaries (`--simplify`) ----
+
+// Where the line after a temporary first reads a name: the identifier, and
+// whether the value written there must be a postfix-primary expression (a
+// receiver or an operand) or one without a `{` (an `if` header).
+JfmtInlineSlot: struct {
+    name: String,
+    span: Span,
+    primary: Bool{false},
+    header: Bool{false},
+}
+
+// Records the source edits that inline each needless temporary of `body`:
+// an immutable `name: value` whose one use in the rest of the block is the
+// first thing the next line evaluates, so `total: sum(prices)` then
+// `print(total)` reads `print(sum(prices))`. Nothing the next line
+// evaluates comes before the value, so it runs at the same point. A binding
+// that is the next line of one already inlined waits for the next pass, as
+// both would edit that line. A layout tried and rolled back prints the same
+// block again, so each binding is recorded once.
+jfmt_note_inline_temporaries: fn(f: &JetFmt, body: [Stmt]) -[]> Never! {
+    if body.len() < 2 {
+        return
+    }
+    block_end: jfmt_statement_source_end(f, body[body.len() - 1])
+    inlined_before := false
+    loop index in 0..<body.len() - 1 {
+        if inlined_before {
+            inlined_before = false
+            next
+        }
+        edits: jfmt_inline_temporary_edits(f, body[index], body[index + 1], block_end) ?? next
+        inlined_before = true
+        if f.inline_rewrites.any(fn(kept) { kept.span.start == edits[0].span.start }) -> next
+        f.inline_rewrites.extend(edits)
+    }
+}
+
+// The two edits that drop the binding `statement` and write its value at
+// its one use in `following`, or None when the binding is not a needless
+// temporary: it has a type, a pattern, a marker, a comment or a mutable
+// sigil, shares a line with another statement, its value spans lines (a
+// routed value loop keeps its name), or its name is read again anywhere
+// before `block_end`.
+jfmt_inline_temporary_edits: fn(f: JetFmt, statement: Stmt, following: Stmt, block_end: Int) -[]> [TextEdit]? Never! {
+    if statement == .Val(binding) {
+        return jfmt_inline_binding_edits(f, statement, binding, following, block_end)
+    }
+    None
+}
+
+jfmt_inline_binding_edits: fn(f: JetFmt, statement: Stmt, binding: Binding, following: Stmt, block_end: Int) -[]> [TextEdit]? Never! {
+    if binding.mutable || binding.markers.len() > 0 || binding.reactive_upgrade || binding.meta != None || binding.pattern != None || binding.ty != None || binding.is_comptime || binding.uninit || binding.arena_view || binding.string_view || binding.name.starts_with("_") {
+        return None
+    }
+    primary_value: jfmt_inline_value_class(binding.init) ?? return None
+    if jfmt_fenced_statement_for(f, statement) != None || jfmt_fenced_statement_for(f, following) != None {
+        return None
+    }
+    sigil: binding.sigil_span ?? return None
+    start: binding.name_span.start
+    end: jfmt_statement_source_end(f, statement)
+    next_start: jfmt_stmt_start(following)
+    if !jfmt_src_valid(f, start, block_end) || jfmt_src_text(f, sigil.start, sigil.end) != ":" || end > next_start || next_start > block_end {
+        return None
+    }
+    // The binding is alone on its lines and the next line follows at once.
+    line_start := start
+    loop line_start > 0 && f.src_bytes[line_start - 1] != 10 {
+        if f.src_bytes[line_start - 1] != 32 && f.src_bytes[line_start - 1] != 9 -> return None
+        line_start -= 1
+    }
+    next_line_start := next_start
+    loop next_line_start > end && f.src_bytes[next_line_start - 1] != 10 -> next_line_start -= 1
+    newlines := 0
+    loop at in end..<next_start {
+        byte: f.src_bytes[at]
+        if {
+            byte == 10 -> newlines += 1
+            byte != 32 && byte != 9 && byte != 13 -> return None
+        }
+    }
+    if newlines != 1 || jfmt_comment_between(f, line_start, next_start) -> return None
+    slot: jfmt_first_evaluated(following) ?? return None
+    if slot.name != binding.name || !jfmt_only_use_at(f, binding.name, next_start, block_end, slot.span.start) {
+        return None
+    }
+    value: jfmt_src_text(f, sigil.end, end).trim()
+    if value == "" || value.contains("\n") || (slot.primary && !primary_value) || (slot.header && value.contains("{{")) {
+        return None
+    }
+    Val([TextEdit]{TextEdit{span: Span{start: line_start, end: next_line_start}, new_text: ""}, TextEdit{span: slot.span, new_text: value}})
+}
+
+// Whether a value is worth inlining, and whether it then reads the same as a
+// receiver or an operand: None for a function, a branch, a pipe, a pattern
+// test, a place or a value whose type a binding fixes before the use gives
+// it one (a bare number, a collection literal, a leading-dot literal).
+jfmt_inline_value_class: fn(value: Expr) -[]> Bool? Never! {
+    if value == {
+        .Str(_, _, _) | .Bool(_, _, _) | .Char(_, _, _) | .Ident(_, _, _) | .Call(_, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Paren(_, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .CallValue(_, _, _, _) -> Val(true)
+        .Binary(_, _, _, _, _) | .Unary(_, _, _, _) | .CompareChain(_, _, _, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .Range(_, _, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Copy(_, _, _) | .Present(_, _, _) -> Val(false)
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Unit(_, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Place(_, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) | .TupleLit(_, _, _, _) -> None
+    }
+}
+
+// The name `statement` reads before it evaluates anything else: the first
+// argument of a call, the receiver of a method, the left operand, the
+// returned or bound value, an `if` statement's first condition.
+jfmt_first_evaluated: fn(statement: Stmt) -[]> JfmtInlineSlot? Never! {
+    if statement == {
+        .Expr(expr) -> jfmt_first_evaluated_in(expr)
+        .Val(binding) -> jfmt_first_evaluated_in(binding.init)
+        .Return(value, _) -> if value == .Val(inner) -> jfmt_first_evaluated_in(inner) else -> None
+        .Switch(subject, arms, _, span) -> {
+            if !parser_is_subjectless_guard(subject, span) {
+                return jfmt_first_evaluated_in_header(subject)
+            }
+            if arms.len() == 0 -> return None
+            jfmt_first_evaluated_in_header(arms[0].cond)
+        }
+        .Assign(_, _, _, _) | .While(_, _, _, _, _) | .For(_, _, _, _, _, _, _, _, _) | .Break(_) | .BreakValue(_, _) | .Continue(_) | .BreakLabel(_, _) | .BreakLabelValue(_, _, _, _) | .ContinueLabel(_, _) | .Loop(_, _, _, _) | .CountedLoop(_, _, _, _, _, _, _) | .Unsafe(_, _, _, _) | .Impure(_, _, _, _) | .Reactive(_, _) | .Shield(_, _) | .Defer(_, _) | .Switched(_, _, _) | .Region(_, _, _, _) | .Policy(_, _, _) | .TaskGroup(_, _, _, _, _) | .Layout(_, _, _, _) | .AuthorityScope(_, _, _, _, _) | .ComptimeIf(_, _, _, _, _, _) | .ComptimeSwitch(_, _, _, _) | .ComptimeBlock(_, _, _) | .ContextBlock(_, _, _) | .Live(_, _) | .AssumeDet(_, _, _, _) | .Transact(_, _, _, _, _) | .Yield(_, _) | .ScopeMember(_, _, _, _, _, _, _, _) | .DeferClose(_, _) -> None
+    }
+}
+
+// The first name an `if` header reads.
+jfmt_first_evaluated_in_header: fn(expr: Expr) -[]> JfmtInlineSlot? Never! {
+    slot := jfmt_first_evaluated_in(expr) ?? return None
+    slot.header = true
+    Val(slot)
+}
+
+// The first name a receiver or an operand reads: when it is the name
+// itself, the value written there must be a primary expression.
+jfmt_first_evaluated_operand: fn(expr: Expr) -[]> JfmtInlineSlot? Never! {
+    slot := jfmt_first_evaluated_in(expr) ?? return None
+    if expr == .Ident(_, _, _) -> slot.primary = true
+    Val(slot)
+}
+
+jfmt_first_evaluated_in: fn(expr: Expr) -[]> JfmtInlineSlot? Never! {
+    if expr == {
+        .Ident(name, span, _) -> Val(JfmtInlineSlot{name: name, span: span})
+        .Call(call, _) -> {
+            if call.args.len() == 0 || call.args[0].mark != None || call.args[0].spread || call.args[0].label != None {
+                return None
+            }
+            jfmt_first_evaluated_in(call.args[0].expr)
+        }
+        .MethodCall(receiver, _, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, _, _, _) -> jfmt_first_evaluated_operand(receiver)
+        .Field(base, _, _, _) | .OptField(base, _, _, _, _, _) | .Index(base, _, _, _, _) | .Slice(base, _, _, _, _, _) -> jfmt_first_evaluated_operand(base)
+        .Binary(_, left, _, _, _) -> jfmt_first_evaluated_operand(left)
+        .Unary(_, operand, _, _) | .Try(operand, _, _, _, _) | .OrFallback(operand, _, _, _, _) -> jfmt_first_evaluated_operand(operand)
+        .CompareChain(operands, _, _, _, _) -> if operands.len() > 0 -> jfmt_first_evaluated_operand(operands[0]) else -> None
+        .Paren(value, _, _) -> jfmt_first_evaluated_in(value)
+        .Str(_, _, _) | .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Int(_, _, _, _, _) | .Float(_, _, _, _, _) | .Bool(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Range(_, _, _, _, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .If(_, _, _, _, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .Pipe(_, _, _, _) | .TypeValue(_, _, _) | .TupleLit(_, _, _, _) -> None
+    }
+}
+
+// Whether the one whole-word `name` in [start, end) of the source, strings
+// and comments included, begins at `at`.
+jfmt_only_use_at: fn(f: JetFmt, name: String, start: Int, end: Int, at: Int) -[]> Bool Never! {
+    word: name.bytes()
+    width: word.len()
+    found := false
+    position := start
+    loop position + width <= end {
+        if {
+            f.src_bytes[position] != word[0] || jfmt_word_byte(f, position - 1) || jfmt_word_byte(f, position + width) || foundation_byte_text(f.src_bytes, position, position + width) != name -> position += 1
+            position != at || found -> return false
+            else -> {
+                found = true
+                position += width
+            }
+        }
+    }
+    found
+}
+
+// Whether the source byte at `at` continues a name.
+jfmt_word_byte: fn(f: JetFmt, at: Int) -[]> Bool Never! {
+    if at < 0 || at >= f.src_bytes.len() -> return false
+    byte: f.src_bytes[at]
+    (byte >= 97 && byte <= 122) || (byte >= 65 && byte <= 90) || (byte >= 48 && byte <= 57) || byte == 95
+}
+
 jfmt_apply_source_edits: fn(src: String, edits: [TextEdit]) -> String? Never! {
     source: src.bytes()
     ordered := edits
@@ -2292,7 +2742,7 @@ jfmt_trailing_marker_followed: fn(f: JetFmt, prog: Program, ordered_file_rules: 
 
 // Lex, parse, then format. Parse errors propagate; sema is not required.
 jet_format_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult {
-    jfmt_format_source_in(src, simplify_requested, false)
+    jfmt_format_source_in(src, simplify_requested, false, true)
 }
 
 // jet_format_source for a Core library or compiler prelude source. Those
@@ -2300,10 +2750,14 @@ jet_format_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult 
 // reads embedded Core (parse_generated_layout); a user file never formats
 // this way.
 jet_format_library_source: fn(src: String, simplify_requested: Bool) -> JetFormatResult {
-    jfmt_format_source_in(src, simplify_requested, true)
+    jfmt_format_source_in(src, simplify_requested, true, true)
 }
 
-jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool) -> JetFormatResult {
+// `settle` lets a `--simplify` format read its printed text once more: the
+// printer's own rewrites (an `else if` chain written as an arm table) can
+// leave a shape the source rewrites write in the current form. The settling
+// pass does not settle again, so an unstable print cannot recurse forever.
+jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool, settle: Bool) -> JetFormatResult {
     source: src.bytes()
     lexed: if library -> lex_generated(source) else -> lex(source)
     if lexed.diagnostics.len() > 0 {
@@ -2326,10 +2780,41 @@ jfmt_format_source_in: fn(src: String, simplify_requested: Bool, library: Bool) 
         }
     }
     prog := parsed.program
+    // The formatter's own items serve declaration lookups only, which
+    // `--simplify` leaves alone, so they can be the program as parsed.
+    f := jfmt_new(prog, src, lexed.tokens, simplify)
+    // Under `--simplify` each body rewrite is applied before the format and
+    // the rewritten source is formatted again, one rewrite at a time, so
+    // each reads the program the last one left: a trailing if/else whose
+    // branch only leaves becomes its guard clause, then, once no guard is
+    // left, the old value-tail shapes are written in the current form (which
+    // would otherwise take the guard's `return` away first). A rewrite that
+    // would not parse is left out.
+    if simplify && jfmt_structure_clean(parsed.diagnostics) {
+        body_rewrites := [TextEdit]{}
+        jfmt_body_rewrites(f, prog.items, JfmtBodyRewrite.GuardClauses, body_rewrites)
+        if body_rewrites.len() == 0 {
+            jfmt_body_rewrites(f, prog.items, JfmtBodyRewrite.ValueTails, body_rewrites)
+        }
+        if body_rewrites.len() > 0 && jfmt_apply_source_edits(src, body_rewrites) == .Val(rewritten) {
+            again: jfmt_format_source_in(rewritten, true, library, true)
+            if again.ok -> return again
+        }
+    }
     // Dropping a redundant `Val(x)` rewrites the program itself.
     if simplify -> prog.items = jfmt_strip_redundant_optional_returns(prog.items)
-    f := jfmt_new(prog, src, lexed.tokens, simplify)
     text: jfmt_format_program_with(f, prog)
+    // Each inlined temporary removes a binding, so formatting the rewritten
+    // source again reaches the form a second pass keeps; a rewrite that
+    // would not parse is left out.
+    if simplify && f.inline_rewrites.len() > 0 && jfmt_apply_source_edits(src, f.inline_rewrites) == .Val(rewritten) {
+        again: jfmt_format_source_in(rewritten, true, library, true)
+        if again.ok -> return again
+    }
+    if simplify && settle && text != src {
+        again: jfmt_format_source_in(text, true, library, false)
+        if again.ok -> return again
+    }
     // Without simplify, a format changes layout only: the text must parse to
     // the same program. A source the parser had to recover is repaired on
     // purpose, so only a clean parse is compared.

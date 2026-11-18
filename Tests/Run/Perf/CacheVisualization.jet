@@ -1,0 +1,41 @@
+// Where a program's loads leave the cache, by function and source line.
+// `fill` builds an array of Ints, touching each new page once: those are
+// page faults, the points that fall to the kernel's page cache or disk.
+// `sequential` reads the array in order, eight Ints to a 64-byte line that
+// the hardware prefetcher brings in before the walk reaches it. `strided`
+// reads the same elements a page and a line apart, which no prefetcher
+// follows: nearly every read misses L1D, and the array is larger than the
+// last-level cache, so many reads are served from RAM. Under
+// `jet perf run --method=memory`, `jet perf view` lists each line in its
+// memory table. The row count comes from the command line so nothing folds
+// at compile time.
+use core.process
+
+fill: fn(count: Int) -> [Int] Never! {
+    loop index in 0..<count -> index
+}
+
+sequential: fn(data: [Int]) -> Int Never! {
+    total := 0
+    loop index in 0..<data.len() -> total += data[index]
+    total
+}
+
+strided: fn(data: [Int], rows: Int) -> Int Never! {
+    total := 0
+    loop index in 0..<data.len() -> total += data[(index % rows) * 520 + index /% rows]
+    total
+}
+
+run: fn() {
+    args: process.args()
+    rows: if args.len() > 0 -> Int.parse(args[args.len() - 1]) ?? 8192 else -> 8192
+    data: fill(rows * 520)
+    in_order := 0
+    across := 0
+    loop _ in 0..<4 {
+        in_order += sequential(data)
+        across += strided(data, rows)
+    }
+    print("sequential={in_order} strided={across} same={in_order == across}")
+}

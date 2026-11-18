@@ -1,0 +1,87 @@
+use dn_files: core.files
+
+// Jet's debugger and profiler are its own engines. No text a user reads says
+// that `jet debug` runs under LLDB or GDB or that `jet perf` is Linux perf, and
+// no debug tier is named after one of them: the spellings below fail here, in
+// any letter case. Interop cases keep the tools' names: a `.case` that requires
+// lldb, gdb, perf, go or otelcol checks Jet's DWARF or symbol map against that
+// tool. Audits, research notes and proposals are dated records and are not read.
+DN_ROOTS: [String]{"Compiler", "Core", "Examples", "Jetpack", "Tools", "Tests", "Docs/Spec", "Docs/Site", "Docs/README.md"}
+
+DN_SKIPPED: [String]{"target", "node_modules"}
+
+DN_SPELLINGS: [String]{"under lldb", "under gdb", "under linux perf", "native-lldb", "nativelldb"}
+
+DN_INTEROP_TOOLS: [String]{"tool:lldb", "tool:gdb", "tool:perf", "tool:go", "tool:otelcol"}
+
+// This guard spells what it refuses.
+DN_GUARD: "Tests/Guards/debug_names_no_outside_debugger.jet"
+
+// The first refused spelling in `text`, in any letter case, or None.
+dn_spelling: fn(text: String) -[]> String? {
+    lower: text.to_lower()
+    loop spelling in DN_SPELLINGS {
+        if lower.contains(spelling) -> return Val(spelling)
+    }
+    None
+}
+
+// Whether `path` is a case that requires an outside tool, so checks Jet's
+// output against it.
+dn_interop_case: fn(path: String, text: String) -[]> Bool {
+    if !path.ends_with(".case") -> return false
+    loop line in text.lines() {
+        if !line.starts_with("requires:") -> next
+        loop tool in DN_INTEROP_TOOLS {
+            if line.contains(tool) -> return true
+        }
+    }
+    false
+}
+
+// Every line under `path` that spells a refused name, as `path:line: spelling`.
+// Symbolic links, hidden entries, build output and installed node modules are
+// skipped, and so are files that are not text.
+dn_lines: fn(path: String, out: &[String]) -[FS]> {
+    if dn_files.is_symlink(path) {
+        return
+    }
+    if dn_files.is_dir(path) {
+        loop child in (dn_files.list_dir(path) ?? panic("list {path}: {err}")) {
+            if child.name.starts_with(".") || DN_SKIPPED.contains(child.name) -> next
+            dn_lines(child.path, out)
+        }
+        return
+    }
+    if path == DN_GUARD {
+        return
+    }
+    text: dn_files.read(path) ?? return
+    if dn_spelling(text) == None || dn_interop_case(path, text) {
+        return
+    }
+    loop (index, line) in text.lines() {
+        spelling: dn_spelling(line) ?? next
+        out.push("{path}:{index + 1}: {spelling}")
+    }
+}
+
+#Test("debug_names_no_outside_debugger") {
+    guards_enter_root()
+    found := [String]{}
+    loop root in DN_ROOTS {
+        assert(dn_files.exists(root), "the root {root} must exist")
+        dn_lines(root, found)
+    }
+    assert_eq(found.join("\n"), "")
+    // The matcher sees each spelling in any letter case, and an interop case
+    // is one whose requires line names an outside tool.
+    assert(dn_spelling("// steps it under LLDB, with Core") == Val("under lldb"))
+    assert(dn_spelling("tier: \"Native-LLDB\"") == Val("native-lldb"))
+    assert(dn_spelling("    DebugTier.NativeLLDB") == Val("nativelldb"))
+    assert(dn_spelling("the samples Linux perf records under perf record") == None)
+    assert(dn_spelling("lldb reads the split debug file") == None)
+    assert(dn_interop_case("Tests/Cases/Debug/x.case", "requires: tool:lldb\nrun: jet build\n"))
+    assert(!dn_interop_case("Tests/Cases/Debug/x.case", "requires: os-name:linux\n"))
+    assert(!dn_interop_case("Tests/Cases/Debug/x.json", "requires: tool:lldb\n"))
+}

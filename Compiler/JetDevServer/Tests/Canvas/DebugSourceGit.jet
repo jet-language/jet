@@ -9,7 +9,7 @@ use {
 }
 
 test_debug_request: fn(src: String, graph_json: String, transcript: String, snapshot: DebugSnapshot?, status: SessionStatus, watches: [String]) -> DebugOkRequest Never! {
-    DebugOkRequest{src: src, graph_json: graph_json, transcript: transcript, snapshot: snapshot, status: status, session_id: "test-session", tier: .NativeLLDB, source_id: "main.jet", breakpoint_lines: [Int]{}, stale_breakpoints: [String]{}, watches: watches}
+    DebugOkRequest{src: src, graph_json: graph_json, transcript: transcript, snapshot: snapshot, status: status, session_id: "test-session", tier: .Native, source_id: "main.jet", breakpoint_lines: [Int]{}, stale_breakpoints: [String]{}, watches: watches}
 }
 
 #Test("running_state_ignores_spoofed_completion_output") {
@@ -24,7 +24,7 @@ test_debug_request: fn(src: String, graph_json: String, transcript: String, snap
     assert(out.contains("\"active_graph_id\":\"fn:main.jet.run@3-6\""), out)
     assert(out.contains("\"active_node_id\":\"fn:main.jet.run@3-6:expr:1:call:print\""), out)
     assert(out.contains("\"active_wire_id\":\"fn:main.jet.run@3-6:wire:1\""), out)
-    assert(out.contains("\"tier\":\"native-lldb\""), out)
+    assert(out.contains("\"tier\":\"native\""), out)
 }
 
 #Test("runtime_snapshot_projects_typed_values_and_wire_path") {
@@ -48,9 +48,9 @@ test_debug_request: fn(src: String, graph_json: String, transcript: String, snap
 
 #Test("only_the_native_tier_is_served") {
     defaulted: DebugTier.parse(None) ?? panic("default tier")
-    assert(defaulted == DebugTier.NativeLLDB)
-    named: DebugTier.parse(Val("native-lldb")) ?? panic("native tier")
-    assert(named == DebugTier.NativeLLDB)
+    assert(defaulted == DebugTier.Native)
+    named: DebugTier.parse(Val("native")) ?? panic("native tier")
+    assert(named == DebugTier.Native)
     if DebugTier.parse(Val("jet-dev-replay")) == {
         .Err(failure) -> { assert(failure.body.contains("\"kind\":\"unsupported\""), failure.body) }
         .Val(_) -> panic("the replay tier was accepted")
@@ -75,18 +75,18 @@ debug_test_local: fn(snapshot: DebugSnapshot, name: String) -> String Never! {
     debug_test_files.write(source, src) ?? panic("source: {err}")
     revision: source_revision(src)
     sessions := DebugSessions{jet: jet, next_id: 1, sessions: [String:DebugSession]{}, pause_on_input_end: true}
-    first: sessions.execute(source, "prog.jet", revision, None, ["continue"], [2], ["x"], .NativeLLDB) ?? panic("execute: {err.body}")
+    first: sessions.execute(source, "prog.jet", revision, None, ["continue"], [2], ["x"], .Native) ?? panic("execute: {err.body}")
     assert(first.status == SessionStatus.Running)
     paused: first.snapshot ?? panic("first stop has no snapshot: {first.transcript}")
     assert_eq(paused.function, "double")
     assert_eq(paused.line, 2)
     assert_eq(debug_test_local(paused, "x"), "0")
-    second: sessions.execute(source, "prog.jet", revision, Val(first.id), ["continue"], [2], ["x"], .NativeLLDB) ?? panic("resume: {err.body}")
+    second: sessions.execute(source, "prog.jet", revision, Val(first.id), ["continue"], [2], ["x"], .Native) ?? panic("resume: {err.body}")
     resumed: second.snapshot ?? panic("second stop has no snapshot: {second.transcript}")
     assert_eq(resumed.line, 2)
     assert_eq(debug_test_local(resumed, "x"), "1")
-    tier: sessions.stop(source, revision, revision, first.id, .NativeLLDB) ?? panic("stop: {err.body}")
-    assert(tier == DebugTier.NativeLLDB)
+    tier: sessions.stop(source, revision, revision, first.id, .Native) ?? panic("stop: {err.body}")
+    assert(tier == DebugTier.Native)
     assert(sessions.sessions.len() == 0)
     debug_test_files.remove_all(scratch.path) ?? panic("scratch cleanup: {err}")
 }

@@ -1,5 +1,5 @@
-// The jet.live.v1 view over the runtime's raw records, and the devserver
-// reader over real filesystem fixtures. The JETLIVE1 codec itself is
+// The jet.live.v2 view over the runtime's raw records, and the devserver
+// reader over real filesystem fixtures. The JETLIVE2 codec itself is
 // witnessed by JetCLI's Tests/LiveInspect.jet.
 use {
     jet_devserver.[live_inspect_read, live_view_json]
@@ -30,11 +30,11 @@ live_view_text: fn(out: &[U8], text: String) Never! {
 // `event_sequence` is set, one event record.
 live_view_fixture: fn(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int?) -> [U8] Never! {
     out := [U8]{}
-    live_view_words(out, [U64]{U64{3550338754064696650}, U64{1}, U64{pid}, U64{captured}, U64{7}, boot_ns, U64{3}, U64{100}, U64{1}, U64{1}, U64{2}, U64{64}, U64{1}, U64{0}})
+    live_view_words(out, [U64]{U64{3622396348102624586}, U64{1}, U64{pid}, U64{captured}, U64{7}, boot_ns, U64{3}, U64{100}, U64{1}, U64{1}, U64{2}, U64{64}, U64{1}, U64{0}})
     loop text in ([String]{"session", "app.jet", "build-1", "rev-1", "world\n1"}) {
         live_view_text(out, text)
     }
-    live_view_words(out, [U64]{U64{1}, U64{1}, U64{2}, U64{3}, U64{0}, U64{2}, U64{0}, U64{0}, U64{0}, U64{18446744073709551615}})
+    live_view_words(out, [U64]{U64{1}, U64{1}, U64{2}, U64{3}, U64{0}, U64{2}, U64{0}, U64{0}, U64{0}, U64{0}, U64{0}, U64{18446744073709551615}})
     live_view_text(out, "channel send")
     live_view_words(out, [U64]{U64{2}, U64{1}, U64{0}, U64{0}, U64{0}, U64{0}, U64{1}, U64{0}, U64{0}})
     if event_sequence == .Val(sequence) {
@@ -55,11 +55,11 @@ live_view_fixture: fn(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int
 #Test("raw_records_project_into_the_live_view") {
     snapshot: jet_live_decode(live_view_fixture(42, U64{20000000000}, 1, None)) ?? panic(err.message)
     view: live_view_json(snapshot)
-    assert(view.starts_with("{{\"protocol\":\"jet.live.v1\",\"session_id\":\"session\",\"source_id\":\"app.jet\",\"build_id\":\"build-1\",\"revision\":\"rev-1\",\"world_id\":\"world\\n1\",\"values\":[],\"schema_version\":1,\"pid\":42,\"start_id\":\"unbound\",\"captured_ms\":1,"))
-    assert(view.contains("\"tasks\":[{{\"id\":2,\"parent\":3,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":null,\"cancelled\":false}}]"))
+    assert(view.starts_with("{{\"protocol\":\"jet.live.v2\",\"session_id\":\"session\",\"source_id\":\"app.jet\",\"build_id\":\"build-1\",\"revision\":\"rev-1\",\"world_id\":\"world\\n1\",\"values\":[],\"schema_version\":2,\"pid\":42,\"start_id\":\"unbound\",\"captured_ms\":1,"))
+    assert(view.contains("\"tasks\":[{{\"id\":2,\"parent\":3,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":null,\"canceled\":false}}]"))
     assert(view.contains("\"channels\":[{{\"id\":0,\"depth\":0,\"capacity\":null,\"send_waiters\":0,\"recv_waiters\":0,\"closed\":false}}]"))
     assert(view.contains("\"effects\":{{\"compute\":0,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0}}"))
-    assert(view.contains("\"resources\":{{\"workers\":1,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":1,\"arena_allocations\":2,\"arena_bytes\":64}}"))
+    assert(view.contains("\"resources\":{{\"workers\":1,\"running\":0,\"queued\":0,\"canceled\":0,\"arenas\":1,\"arena_allocations\":2,\"arena_bytes\":64}}"))
     assert(view.ends_with("\"event_observations\":[],\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":null,\"exit\":true}}}}"))
     bound := jet_live_decode(live_view_fixture(42, U64{20000000000}, 1, Val(1))) ?? panic(err.message)
     jet_live_bind(bound, "42 (a) b) S 0 0 0 0 0 0 0 0 0 0 5 2 0 0 0 0 0 0 1234 0") ?? panic(err.message)

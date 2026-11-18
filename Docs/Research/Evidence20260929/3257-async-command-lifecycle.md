@@ -47,7 +47,7 @@ owner joined
 |---|---|---|
 | disabled activation | none; `if can_execute` guard | yes (one `if`) |
 | duplicate activation while Running | none; guard on the status value | yes (status check plus start counter) |
-| cancellation | `task.cancel()` then `^^t.join()` → `Err(TaskFailure.Cancelled)`. `slow_save`'s print after its sleep never runs (AOT, JIT) | no |
+| cancellation | `task.cancel()` then `^^t.join()` → `Err(TaskFailure.Canceled)`. `slow_save`'s print after its sleep never runs (AOT, JIT) | no |
 | domain error → Failed, not panic | A `-> T E!` job cannot be spawned bare: `task save(21)` is rejected with E2402 ("can't convert `SaveError` into `Err`") unless the enclosing function carries the error. The job must therefore own its domain result (`save_job` returns `Status`). The compiler forbids a silently dropped domain error across the task boundary | yes (a `Result`→status mapping in the job) |
 | task failure (panic, cancel, deadline) | `join()` returns `T !TaskFailure` (D-CONC-FAIL1); matched exhaustively | no |
 | owner teardown | `task.group` scope-end join (D-CONC-SPAWN1); explicit `cancel()` before the end gives cancel-and-join | cancel call only |

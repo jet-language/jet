@@ -410,7 +410,8 @@ log_sink_open: fn(path: I64) -> I64 {
 }
 
 // Push a clone of the span on the thread's active stack, with its start on
-// the monotonic clock when `jet perf run` keeps the spans' rows.
+// the monotonic clock when `jet perf run` keeps the spans' rows. The span
+// counts as open for the running task (Observe.jet) until it closes.
 #Export(c) jet_ring_log_enter: fn(span: I64) {
     state: log_state()
     length: rt_text_word(wrapping(state + LOG_STATE_SPANS_LEN))
@@ -429,6 +430,7 @@ log_sink_open: fn(path: I64) -> I64 {
     rt_text_store(wrapping(slot + I64{8}), jet_rt_string_clone(dyn_word(wrapping(span + LOG_SPAN_NAME))))
     rt_text_store(wrapping(slot + I64{16}), if (perf_spans_fd >= I64{0}) -> time_host_monotonic_i64() else -> I64{0})
     rt_text_store(wrapping(state + LOG_STATE_SPANS_LEN), length + I64{1})
+    observe_task_count(OBSERVE_TASK_SPANS, I64{1})
 }
 
 // Remove the last active span with this id (rposition), if any; under
@@ -447,6 +449,7 @@ log_sink_open: fn(path: I64) -> I64 {
             jet_rt_string_drop(rt_text_word(wrapping(slot + I64{8})))
             coll_copy(wrapping(slot + LOG_SPAN_SLOT), slot, (length - at - I64{1}) * LOG_SPAN_SLOT)
             rt_text_store(wrapping(state + LOG_STATE_SPANS_LEN), length - I64{1})
+            observe_task_count(OBSERVE_TASK_SPANS, I64{-1})
             return
         }
     }

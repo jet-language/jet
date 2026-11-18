@@ -1,18 +1,30 @@
 // A declared hook point no code attaches a handler to costs nothing: each
-// run is its fallback, with no call, no hook and no cell. A point a handler
-// is attached to keeps its dispatch.
+// run is its fallback, with no call, no hook and no cell. A declared
+// decision point no code attaches to costs nothing either: each run is its
+// own payload, continued. A point a handler is attached to keeps its
+// dispatch.
 use event: core.event
 
 page_size: event.hook_point<Int, Int>(50)
 
 doubled: event.hook_point<Int, Int>(0)
 
+gate: event.decision_point<Int, String>(HookPolicy.FirstCancelElseTransform)
+
 size: fn(n: Int) -> Int { page_size.run(n, 60) }
 
 double: fn(n: Int) -> Int { doubled.run(n, 1) }
 
+checked: fn(n: Int) -> Int {
+    if gate.run(n) == {
+        .Continue(kept) -> kept
+        .Cancel -> -1
+        .Fail(_) -> -2
+    }
+}
+
 run: fn() {
     scope: event.scope()
     doubled.on(scope, fn(n: Int) { n * 2 })
-    print("{size(3)} {double(4)}")
+    print("{size(3)} {double(4)} {checked(5)}")
 }

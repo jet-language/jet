@@ -586,7 +586,7 @@ queue_transition_fields: fn(observation: QueueTransition) -> String Never! {
         .Failed | .DeadLettered | .Canceled -> "failed"
     }
     failure := String?{None}
-    if observation.state == .Canceled -> failure = Val("cancelled")
+    if observation.state == .Canceled -> failure = Val("canceled")
     if observation.state == .Failed || observation.state == .DeadLettered {
         failure = Val("error")
         if observation.reason == .Val(reason) {
@@ -616,7 +616,7 @@ queue_publish_optional_transition: fn(observation: QueueTransition?) Never! {
 
 queue_publish_status: fn(status: JobQueueStatus) -[DB, Time]> Never! {
     entity: "{status.authority}:{status.queue}"
-    fields: "{{\"event\":\"status\",\"state\":\"status\",\"job_id\":{queue_json_text(entity)},\"name\":{queue_json_text(status.queue)},\"queue\":{queue_json_text(status.queue)},\"attempts\":0,\"duration_ms\":null,\"worker\":null,\"request_id\":null,\"failure\":null,\"reason\":null,\"sequence\":0,\"authority\":{queue_json_text(status.authority)},\"queued\":{status.queued},\"running\":{status.running},\"retrying\":{status.retrying},\"completed\":{status.completed},\"failed\":{status.failed},\"dead_lettered\":{status.dead_lettered},\"cancelled\":{status.canceled},\"depth\":{status.depth},\"wait_ms\":{status.wait_ms},\"throughput\":{status.throughput},\"capacity\":{status.capacity},\"paused\":{status.paused},\"freshness_ms\":{status.freshness_ms},\"labels\":{{}}}}"
+    fields: "{{\"event\":\"status\",\"state\":\"status\",\"job_id\":{queue_json_text(entity)},\"name\":{queue_json_text(status.queue)},\"queue\":{queue_json_text(status.queue)},\"attempts\":0,\"duration_ms\":null,\"worker\":null,\"request_id\":null,\"failure\":null,\"reason\":null,\"sequence\":0,\"authority\":{queue_json_text(status.authority)},\"queued\":{status.queued},\"running\":{status.running},\"retrying\":{status.retrying},\"completed\":{status.completed},\"failed\":{status.failed},\"dead_lettered\":{status.dead_lettered},\"canceled\":{status.canceled},\"depth\":{status.depth},\"wait_ms\":{status.wait_ms},\"throughput\":{status.throughput},\"capacity\":{status.capacity},\"paused\":{status.paused},\"freshness_ms\":{status.freshness_ms},\"labels\":{{}}}}"
     now: queue_now()
     timestamp: if now < 0 -> 0 else -> now
     #Unsafe("publish source-projected queue status through the existing validated Devtools event/sink boundary") {
@@ -736,7 +736,7 @@ queue_state_text: fn(state: JobQueueState) -> String Never! {
         .Completed -> "completed"
         .Failed -> "failed"
         .DeadLettered -> "dead_lettered"
-        .Canceled -> "cancelled"
+        .Canceled -> "canceled"
     }
 }
 
@@ -748,7 +748,7 @@ queue_state_parse: fn(value: String) -> JobQueueState ServiceError! {
         "completed" -> Ok(JobQueueState.Completed)
         "failed" -> Ok(JobQueueState.Failed)
         "dead_lettered" -> Ok(JobQueueState.DeadLettered)
-        "cancelled" -> Ok(JobQueueState.Canceled)
+        "canceled" -> Ok(JobQueueState.Canceled)
         else -> Err(queue_unavailable("queue state `{value}` is unknown"))
     }
 }
@@ -1108,6 +1108,30 @@ QUEUE_CREATE_DUE_INDEX: "CREATE INDEX IF NOT EXISTS jet_job_queue_due ON jet_job
 
 QUEUE_CREATE_EVENT_INDEX: "CREATE INDEX IF NOT EXISTS jet_job_queue_events_time ON jet_job_queue_events (authority, queue, state, timestamp_ms)"
 
+// The queue database's format version. Version 2 records a canceled job's
+// state as `canceled`; version 1 spelled it the British way and had no
+// format table. The american-tokens1 migration converts a version 1 database.
+QUEUE_FORMAT: 2
+
+QUEUE_CREATE_FORMAT: "CREATE TABLE jet_job_queue_format (version INTEGER NOT NULL)"
+
+// The format version of the queue a database holds: its format table's, 1
+// for queue tables without one, or 0 when the database holds no queue yet.
+queue_format_version: fn(driver: &db.DBDriver) -[DB]> Int ServiceError! {
+    tables: queue_query(driver, "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('jet_job_queue_format', 'jet_job_queue_jobs')", [DBValue]{}, "format") ?? return Err(err)
+    names := [String]{}
+    loop row in tables { names.push(queue_row_text(row, "name") ?? return Err(err)) }
+    if !names.contains("jet_job_queue_format") {
+        if names.contains("jet_job_queue_jobs") -> return Ok(1)
+        return Ok(0)
+    }
+    rows: queue_query(driver, "SELECT version FROM jet_job_queue_format", [DBValue]{}, "format") ?? return Err(err)
+    if rows.len() != 1 {
+        return Err(queue_unavailable("queue format table holds {rows.len()} rows, not one"))
+    }
+    queue_row_int(rows[0], "version")
+}
+
 queue_text_binding: fn(value: String?) -> DBValue Never! {
     if value == .Val(found) -> return DBValue.Text(found)
     DBValue.Null
@@ -1119,6 +1143,16 @@ queue_int_binding: fn(value: Int?) -> DBValue Never! {
 }
 
 queue_initialize_on_driver: fn(driver: &db.DBDriver, authority: String, name: String, capacity: Int) -[DB, Time]> ServiceError! {
+    version: queue_format_version(driver) ?? return Err(err)
+    if {
+        version == 0 -> {
+            _: queue_execute(driver, QUEUE_CREATE_FORMAT, [DBValue]{}, "schema") ?? return Err(err)
+            _: queue_execute(driver, "INSERT INTO jet_job_queue_format (version) VALUES (?)", [DBValue]{.Int(QUEUE_FORMAT)}, "schema") ?? return Err(err)
+        }
+        version != QUEUE_FORMAT -> {
+            return Err(queue_unavailable("queue database is format version {version}, which this runtime no longer reads; the american-tokens1 migration converts it"))
+        }
+    }
     statements: [String]{QUEUE_CREATE_META, QUEUE_CREATE_JOBS, QUEUE_CREATE_EVENTS, QUEUE_CREATE_DUE_INDEX, QUEUE_CREATE_EVENT_INDEX}
     loop statement in statements {
         _: queue_execute(driver, statement, [DBValue]{}, "schema") ?? return Err(err)
@@ -1775,7 +1809,7 @@ queue_status_on_driver: fn(driver: &db.DBDriver, authority: String, name: String
     bindings: [DBValue]{.Text(authority), .Text(name)}
     rows: queue_query(
         driver,
-        "SELECT COALESCE(SUM(CASE WHEN state = 'queued' THEN 1 ELSE 0 END), 0) AS queued, COALESCE(SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END), 0) AS running, COALESCE(SUM(CASE WHEN state = 'retrying' THEN 1 ELSE 0 END), 0) AS retrying, COALESCE(SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END), 0) AS completed, COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0) AS failed, COALESCE(SUM(CASE WHEN state = 'dead_lettered' THEN 1 ELSE 0 END), 0) AS dead_lettered, COALESCE(SUM(CASE WHEN state = 'cancelled' THEN 1 ELSE 0 END), 0) AS cancelled, MIN(CASE WHEN state IN ('queued', 'retrying') THEN accepted_at_ms END) AS oldest_accepted, MAX(updated_at_ms) AS latest_update FROM jet_job_queue_jobs WHERE authority = ? AND queue = ?",
+        "SELECT COALESCE(SUM(CASE WHEN state = 'queued' THEN 1 ELSE 0 END), 0) AS queued, COALESCE(SUM(CASE WHEN state = 'running' THEN 1 ELSE 0 END), 0) AS running, COALESCE(SUM(CASE WHEN state = 'retrying' THEN 1 ELSE 0 END), 0) AS retrying, COALESCE(SUM(CASE WHEN state = 'completed' THEN 1 ELSE 0 END), 0) AS completed, COALESCE(SUM(CASE WHEN state = 'failed' THEN 1 ELSE 0 END), 0) AS failed, COALESCE(SUM(CASE WHEN state = 'dead_lettered' THEN 1 ELSE 0 END), 0) AS dead_lettered, COALESCE(SUM(CASE WHEN state = 'canceled' THEN 1 ELSE 0 END), 0) AS canceled, MIN(CASE WHEN state IN ('queued', 'retrying') THEN accepted_at_ms END) AS oldest_accepted, MAX(updated_at_ms) AS latest_update FROM jet_job_queue_jobs WHERE authority = ? AND queue = ?",
         bindings,
         "status",
     ) ?? return Err(err)
@@ -1787,7 +1821,7 @@ queue_status_on_driver: fn(driver: &db.DBDriver, authority: String, name: String
     completed: queue_count(queue_row_int(row, "completed") ?? return Err(err), "completed") ?? return Err(err)
     failed: queue_count(queue_row_int(row, "failed") ?? return Err(err), "failed") ?? return Err(err)
     dead_lettered: queue_count(queue_row_int(row, "dead_lettered") ?? return Err(err), "dead-lettered") ?? return Err(err)
-    canceled: queue_count(queue_row_int(row, "cancelled") ?? return Err(err), "cancelled") ?? return Err(err)
+    canceled: queue_count(queue_row_int(row, "canceled") ?? return Err(err), "canceled") ?? return Err(err)
     now: queue_now()
     oldest_accepted: if queue_row_optional_int(row, "oldest_accepted") == {
         .Val(value) -> Val(value)
@@ -1860,13 +1894,13 @@ queue_prune_on_driver: fn(driver: &db.DBDriver, authority: String, name: String,
     cutoff: queue_saturating_sub(now, retention_ms)
     events: queue_execute(
         driver,
-        "DELETE FROM jet_job_queue_events WHERE authority = ? AND queue = ? AND job_id IN (SELECT id FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('completed', 'failed', 'dead_lettered', 'cancelled') AND finished_at_ms IS NOT NULL AND finished_at_ms <= ?)",
+        "DELETE FROM jet_job_queue_events WHERE authority = ? AND queue = ? AND job_id IN (SELECT id FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('completed', 'failed', 'dead_lettered', 'canceled') AND finished_at_ms IS NOT NULL AND finished_at_ms <= ?)",
         [DBValue]{.Text(authority), .Text(name), .Text(authority), .Text(name), .Int(cutoff)},
         "event retention",
     ) ?? return Err(err)
     jobs: queue_execute(
         driver,
-        "DELETE FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('completed', 'failed', 'dead_lettered', 'cancelled') AND finished_at_ms IS NOT NULL AND finished_at_ms <= ?",
+        "DELETE FROM jet_job_queue_jobs WHERE authority = ? AND queue = ? AND state IN ('completed', 'failed', 'dead_lettered', 'canceled') AND finished_at_ms IS NOT NULL AND finished_at_ms <= ?",
         [DBValue]{.Text(authority), .Text(name), .Int(cutoff)},
         "job retention",
     ) ?? return Err(err)

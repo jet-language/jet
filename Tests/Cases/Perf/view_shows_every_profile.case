@@ -1,0 +1,25 @@
+# `jet perf view` shows a trace's profiles with jet alone: in the terminal
+# the flame graph, the timeline and the per-line table, and with `--html` one
+# self-contained page a browser opens with no other program or download.
+requires: os-name:linux
+fixture: PerfView.fixture
+env: NO_COLOR=1
+step: jet perf run main.jet --out {work}/spin.jettrace
+exit: 0
+stdout: ~ "spun=" # the program ran to its end
+step text: jet perf view {work}/spin.jettrace
+exit: 0
+stdout: ~ "\nflamegraph\n" # the flame graph
+stdout: ~ "main.jet#spin_hot_loop profile:cpu samples=" # the hot function's row on the CPU-time clock
+stdout: ~ "\ntimeline\n" # the timeline
+stdout: ~ "\nper-line\n" # the per-line table
+stdout: ~ " spin_hot_loop samples=" # the hot function's lines
+step html: jet perf view {work}/spin.jettrace --html
+exit: 0
+stdout: ~ "<!doctype html>" # one page
+stdout: ~ "id=\"flame\"" # the flame graph
+stdout: ~ "id=\"timeline\"" # the timeline
+stdout: ~ "id=\"lines\"" # the per-line table
+stdout: ~ " spin_hot_loop samples=" # the hot function's lines
+stdout: !~ "src=" # nothing to fetch: no script, style or image from elsewhere
+stdout: !~ "href=" # and no link to follow for any of it
