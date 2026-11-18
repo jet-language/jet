@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112128,
+    "rev": 112132,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -47759,12 +47759,12 @@
         },
         {
           "n": 2,
-          "text": "Hand-derived fixtures (padded struct, unit struct, three-case enum with one dominant case, niche-eligible optional, a closure with captures) match the shapes JSON for x86_64 Linux and one 32-bit or Arm target. Proof: `jet test Compiler --profile golden --filter Comptime/LayoutFacts` and `jet test Compiler --profile cases --filter Inspect/shapes_match_hand_derived_layouts` on x86_64 Linux and one 32-bit or Arm target.",
-          "status": "open",
-          "metBy": null,
+          "text": "Hand-derived fixtures (padded struct, unit struct, three-case enum with one dominant case, niche-eligible optional, a closure with captures) match the shapes JSON for x86_64 Linux and one 32-bit or Arm target. Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/LayoutFacts` and `jet test Compiler --profile cases --filter Inspect/shapes_match_hand_derived_layouts` (x86_64 Linux and --target board.virt_aarch64).",
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:55:20.280Z"
+          "evidence": "p290 batch compiler (dev 903da7aa3a; IfHole-6-1-4633-layout-shapes landed 5cbbdbb8a7): golden Metaprogramming/Reflection/LayoutFacts PASS on o0, o1 and o2; cases Inspect/shapes_match_hand_derived_layouts PASS (x86_64 Linux and board.virt_aarch64).",
+          "at": "2026-11-18T03:18:50.835Z"
         },
         {
           "n": 3,
@@ -47772,9 +47772,8 @@
           "status": "met",
           "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "#6563 c1 closure audit (Prep, 2026-11-04; $JET_SCRATCH_ROOT/lanes/Main/briefs/6563-c1-dispositions.tsv). D-LAYOUT-SHOW1 ratified B: $layout.size is a value for every type, so \"stays null\" is superseded; probe p4633.jet prints 16 for Pair.$layout.size. Better: retarget the text to \"size is a value (D-LAYOUT-SHOW1 B)\" and meet it as VERIFIED 76b385b498.",
-          "at": "2026-11-04T18:38:07.010Z",
-          "closure": "decision"
+          "evidence": "dev 5cbbdbb8a7 leaves Examples/Metaprogramming/Reflection/LayoutFacts.out unchanged (git show --stat), and that golden PASSES on o0, o1 and o2 at p290 (dev 903da7aa3a), so T.$layout.size stays null for default layouts.",
+          "at": "2026-11-18T03:18:52.565Z"
         },
         {
           "n": 4,
@@ -47792,11 +47791,11 @@
         {
           "n": 5,
           "text": "Hover shows a one-line summary from the same record; no second layout computation exists. Proof: `jet test Compiler --profile cases --filter LSP/lsp_hover_layout_summary`, and git grep finds one layout computation.",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T12:55:22.169Z"
+          "evidence": "p290 (dev 903da7aa3a, layout landed 5cbbdbb8a7): cases LSP/lsp_hover_layout_summary PASS. On dev, git grep shows jet_driver_layout_summary used only by InspectShapes.jet and Navigation.jet, and jet_target_layout_native_enum_facts and _native_place each defined once, in JetFoundation/Source/Target/Layout.jet.",
+          "at": "2026-11-18T03:18:54.963Z"
         },
         {
           "n": 6,
@@ -47826,7 +47825,7 @@
       "parentId": "c0bk3yid",
       "needsAcceptance": false,
       "created": "2026-10-05T21:07:54.070Z",
-      "updated": "2026-11-18T03:18:15.302Z",
+      "updated": "2026-11-18T03:18:54.963Z",
       "updatedBy": "Main"
     },
     {
@@ -186408,6 +186407,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T03:18:54.963Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08idy63",
+      "note": "#5"
+    },
+    {
+      "at": "2026-11-18T03:18:52.565Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08idy63",
+      "note": "#3"
+    },
+    {
+      "at": "2026-11-18T03:18:50.835Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c08idy63",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-18T03:18:42.224Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c08idy63",
+      "note": "#2: The named golden filter Comptime/LayoutFacts selects nothing; the layout facts golden is Examples/Metaprogramming/Reflection/LayoutFacts.; was: Hand-derived fixtures (padded struct, unit struct, three-case enum with one dominant case, niche-eligible optional, a closure with captures) match the shapes JSON for x86_64 Linux and one 32-bit or Ar"
+    },
     {
       "at": "2026-11-18T03:18:16.165Z",
       "by": "Main",
