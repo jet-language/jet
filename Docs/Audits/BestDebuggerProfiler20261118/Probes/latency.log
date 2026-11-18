@@ -1,0 +1,18 @@
+== D1: the first stop on a prebuilt 120,004-line image (R11's bar)
+
+$ jet run <repo>/Tools/Perf/DebugLatency/Main.jet -- --jet jet --functions 20000 --runs 3 --bar 200
+# image out/prog sha256 59c4e32cdc396eeb9b6c3abbe043ea7ed5c6ae01c68b7ecf3661eac128163e97
+# jet jet a0.0.45-dev
+# lldb not timed: none on PATH and no `--lldb`
+# build: jet build -O0 --output-dir=out prog.jet
+# jet_debug first_stop: jet debug --break prog.jet:100003 out/prog < /dev/null
+# jet_debug per_step: the same with 20 `n` lines on stdin
+# 20000 functions, 120004 lines, 20 steps, median of 3 runs, milliseconds
+measure	jet_debug	lldb
+build	31533	-
+first_stop	57	-
+per_step	0	-
+# bar: jet_debug first_stop at most 200 ms: met
+note: <repo>/Tools/Perf/DebugLatency/Main.jet reads environment variables, reads and writes files and reads the clock; it starts other programs, which this list does not limit (-A hides this)
+(exit 0)
+
