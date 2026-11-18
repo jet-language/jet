@@ -35,7 +35,9 @@ jet_cli_perf_capture_new: fn(profile: TraceProfile, sources: [SourceIdentity]) -
 
 // `wall_ns` is the session's wall time on the observations' clock (`jet perf
 // run`: spawn to exit); None (an attach) takes the runtime's own elapsed time,
-// the attached process's age.
+// the attached process's age. The locks and the arena's allocations are taken
+// over every observation, not the last alone: by a run's exit snapshot the
+// program has dropped its arenas and its waiters have gone.
 jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations: [JetCLIPerfObservation], symbol: JetSymbolRef, target: String, wall_ns: U64?) JetCLIReadError! {
     if observations.len() == 0 {
         return Err(jet_cli_read_error("perf capture requires a real runtime observation"))
@@ -49,6 +51,9 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
     first_seen := [U64:U64]{}
     last_seen := [U64:U64]{}
     previous := U64{0}
+    lock_indexes := [U64:Int]{}
+    arena_allocations := U64{0}
+    arena_bytes := U64{0}
     loop observed in observations {
         live: observed.live
         if live.pid != first.live.pid || live.start_id != first.live.start_id || live.session_id != first.live.session_id || live.source_id != first.live.source_id || live.build_id != first.live.build_id || live.revision != first.live.revision || live.world_id != first.live.world_id {
@@ -58,6 +63,18 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
             return Err(jet_cli_read_error("perf observation clock is not monotonic"))
         }
         previous = observed.at_ns
+        // Each channel that had waiters, as last seen with them.
+        loop channel in live.channels {
+            if channel.send_waiters == (U64{0}) && channel.recv_waiters == (U64{0}) -> next
+            lock: TraceLock{kind: "channel", id: channel.id, depth: channel.depth, capacity: channel.capacity, send_waiters: channel.send_waiters, recv_waiters: channel.recv_waiters, closed: channel.closed, symbol: symbol}
+            if lock_indexes.has_key(channel.id) -> capture.locks[lock_indexes[channel.id]] = lock else {
+                lock_indexes[channel.id] = capture.locks.len()
+                capture.locks.push(lock)
+            }
+        }
+        // The arena's peak.
+        if live.arena_allocations > arena_allocations -> arena_allocations = live.arena_allocations
+        if live.arena_bytes > arena_bytes -> arena_bytes = live.arena_bytes
         loop observed_task in live.tasks {
             if !([String]{"running", "queued", "blocked", "done"}).contains(observed_task.state) {
                 next
@@ -107,12 +124,8 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
             capture.tasks[index].wait = ""
         }
     }
-    loop channel in latest.live.channels {
-        if channel.send_waiters == (U64{0}) && channel.recv_waiters == (U64{0}) -> next
-        capture.locks.push(TraceLock{kind: "channel", id: channel.id, depth: channel.depth, capacity: channel.capacity, send_waiters: channel.send_waiters, recv_waiters: channel.recv_waiters, closed: channel.closed, symbol: symbol})
-    }
-    if latest.live.arena_allocations > (U64{0}) || latest.live.arena_bytes > (U64{0}) {
-        capture.allocations.push(TraceAllocation{count: latest.live.arena_allocations, bytes: latest.live.arena_bytes, symbol: symbol})
+    if arena_allocations > (U64{0}) || arena_bytes > (U64{0}) {
+        capture.allocations.push(TraceAllocation{count: arena_allocations, bytes: arena_bytes, symbol: symbol})
     }
     root := U64?{None}
     loop observed_task in capture.tasks {
