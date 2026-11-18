@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112077,
+    "rev": 112078,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -43032,6 +43032,15 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-15T03:14:15.651Z"
+        },
+        {
+          "n": 16,
+          "text": "A struct literal moves a named binding at its last use instead of sharing it: Particles{x: xs, v: vs}, where xs and vs are not used again, owns both buffers, and the first write to p.x copies nothing. Measured on the p286 seed, 2026-11-18: 16M-Float lists, the literal path requested 384 MB against 256 MB for a consuming && join, because the first write detached a full copy of x (probes in $JET_SCRATCH_ROOT/lanes/Main/ballot-rework/probes/zipcolumns). Proof: a cases row whose program counts allocations with the counting program allocator and shows 0 bytes requested by the first write after the literal, on O0, O1 and O2.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T01:54:34.575Z"
         }
       ],
       "refs": [
@@ -43045,9 +43054,9 @@
       "parentId": "c00e9u2p",
       "needsAcceptance": false,
       "created": "2026-09-30T03:02:08.223Z",
-      "updated": "2026-11-17T01:39:42.281Z",
+      "updated": "2026-11-18T01:54:34.575Z",
       "updatedBy": "Main",
-      "criteriaLastN": 15
+      "criteriaLastN": 16
     },
     {
       "id": "c0flvd7x",
@@ -213592,6 +213601,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T01:54:34.575Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0jxsy7l",
+      "note": "14 criteria, soft limit 6: A gap belongs on the card that owns last-use moves (owner order: no new card for a gap)"
+    },
+    {
+      "at": "2026-11-18T01:54:34.575Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0jxsy7l",
+      "note": "#16 A struct literal moves a named binding at its last use inste"
+    },
     {
       "at": "2026-11-18T01:53:20.483Z",
       "by": "Main",
