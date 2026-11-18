@@ -77,12 +77,15 @@ shared_acquire: fn(shared: I64, editable: Bool) {
 
 // Takes the permit unless `deadline_ns` (sync_now_ns; -1: none) passes
 // first, true when it was taken. A waiting writer that gives up withdraws
-// its claim and wakes the readers it held back.
+// its claim and wakes the readers it held back. Under `jet perf run` a
+// task's block on the lock records its wait, and a release or a withdrawal
+// that may end one its wake (PerfSamples.jet perf_samples_lock_block).
 shared_acquire_until: fn(shared: I64, editable: Bool, deadline_ns: I64) -> Bool {
     mutex: wrapping(shared + I64{8})
     sync_mutex_lock(mutex)
     if editable -> _ := sync_add(wrapping(shared + I64{40}), I64{1})
     round := I64{0}
+    began := I64{0}
     loop {
         available: sync_load(wrapping(shared + I64{32})) == I64{0} && (if editable -> sync_load(wrapping(shared + I64{24})) == I64{0} else -> sync_load(wrapping(shared + I64{40})) == I64{0})
         if available {
@@ -94,20 +97,26 @@ shared_acquire_until: fn(shared: I64, editable: Bool, deadline_ns: I64) -> Bool 
                 else -> { _ := sync_add(wrapping(shared + I64{24}), I64{1}) }
             }
             sync_mutex_unlock(mutex)
+            perf_samples_lock_wait(wrapping(shared + I64{16}), began)
             return true
         }
         if (deadline_ns >= I64{0} && sync_now_ns() >= deadline_ns) {
+            at := I64{0}
             if editable {
                 _ := sync_add(wrapping(shared + I64{40}), I64{-1})
+                at = perf_samples_lock_release()
                 sync_cond_notify_all(wrapping(shared + I64{16}))
             }
             sync_mutex_unlock(mutex)
+            perf_samples_lock_wait(wrapping(shared + I64{16}), began)
+            if (at != I64{0}) { perf_samples_wake(wrapping(shared + I64{16}), at, I64{-1}) }
             return false
         }
         if shared_spin(mutex, round) {
             round += I64{1}
             next
         }
+        if (began == I64{0}) { began = perf_samples_lock_block() }
         wake: sync_deadline(I64{10000000})
         // These callback doors never observe cancellation.
         _ := sync_cond_wait(wrapping(shared + I64{16}), mutex, if (deadline_ns >= I64{0} && deadline_ns < wake) -> deadline_ns else -> wake)
@@ -120,8 +129,10 @@ shared_release: fn(shared: I64, editable: Bool) {
         editable -> sync_store(wrapping(shared + I64{32}), I64{0})
         else -> { _ := sync_add(wrapping(shared + I64{24}), I64{-1}) }
     }
+    at: perf_samples_lock_release()
     sync_cond_notify_all(wrapping(shared + I64{16}))
     sync_mutex_unlock(wrapping(shared + I64{8}))
+    if (at != I64{0}) { perf_samples_wake(wrapping(shared + I64{16}), at, I64{-1}) }
 }
 
 shared_revision_stop: fn() {
@@ -686,11 +697,15 @@ shared_physical_guard_release: fn(guard: I64, commit: Bool) {
     sync_mutex_lock(mutex)
     if editable -> _ := sync_add(wrapping(cell + I64{40}), I64{1})
     round := I64{0}
+    began := I64{0}
     loop {
         if (cancel_flag != I64{0} && sync_load(cancel_flag) != I64{0}) || condition_interrupted() {
             if editable -> _ := sync_add(wrapping(cell + I64{40}), I64{-1})
+            at: perf_samples_lock_release()
             sync_cond_notify_all(wrapping(cell + I64{16}))
             sync_mutex_unlock(mutex)
+            perf_samples_lock_wait(wrapping(cell + I64{16}), began)
+            if (at != I64{0}) { perf_samples_wake(wrapping(cell + I64{16}), at, I64{-1}) }
             return false
         }
         available: sync_load(wrapping(cell + I64{32})) == I64{0} && (if editable -> sync_load(wrapping(cell + I64{24})) == I64{0} else -> sync_load(wrapping(cell + I64{40})) == I64{0})
@@ -702,12 +717,14 @@ shared_physical_guard_release: fn(guard: I64, commit: Bool) {
             // Native payloads are already canonical; refreshing means read the live slot after reacquisition.
             sync_store(wrapping(guard + I64{16}), I64{1})
             sync_mutex_unlock(mutex)
+            perf_samples_lock_wait(wrapping(cell + I64{16}), began)
             return true
         }
         if shared_spin(mutex, round) {
             round += I64{1}
             next
         }
+        if (began == I64{0}) { began = perf_samples_lock_block() }
         _ := sync_cond_wait(wrapping(cell + I64{16}), mutex, sync_deadline(I64{10000000}))
     }
 }

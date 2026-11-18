@@ -18,11 +18,12 @@
 // bits 48..58 above the program counter's low 48, and its kind in bits
 // 59..62: 0 for a CPU-time sample, a counter's index plus one for that
 // counter's sample, PERF_SAMPLES_SPAWN for a task's spawn,
-// PERF_SAMPLES_JOIN for a join's wait and PERF_SAMPLES_CLOCK for the CPU
-// time the process used while sampled, written at exit
-// (perf_samples_exit). The handler allocates nothing and never waits.
-// Beside the samples, `<samples>.spans` keeps a row for each core.log span
-// the program closes (RouteALog.jet log_span_row_write).
+// PERF_SAMPLES_WAIT for a task's wait, PERF_SAMPLES_WAKE for the wake of a
+// waiter and PERF_SAMPLES_CLOCK for the CPU time the process used while
+// sampled, written at exit (perf_samples_exit). The handler allocates
+// nothing and never waits. Beside the samples, `<samples>.spans` keeps a
+// row for each core.log span the program closes (RouteALog.jet
+// log_span_row_write).
 //
 // Under the `memory` lens, which JET_PERF_LENSES names as it names `cpu`,
 // the start opens four counters of the thread that starts the observation,
@@ -57,11 +58,14 @@ PERF_SAMPLES_ADDRESS_MASK: I64{281474976710655}
 // A record's first word: its kind above bit 59, its word count below.
 PERF_SAMPLES_KIND_BITS: I64{59}
 
-// The kinds of a task's spawn record (perf_samples_spawn) and of a join's
-// wait record (perf_samples_join), above every counter's.
+// The kinds of a task's spawn record (perf_samples_spawn), of a task's wait
+// record (perf_samples_wait) and of a wake's record (perf_samples_wake),
+// above every counter's.
 PERF_SAMPLES_SPAWN: I64{15}
 
-PERF_SAMPLES_JOIN: I64{14}
+PERF_SAMPLES_WAIT: I64{14}
+
+PERF_SAMPLES_WAKE: I64{12}
 
 // The kind of the record of the CPU time the process used since sampling
 // started (perf_samples_exit): its second word, in nanoseconds.
@@ -72,8 +76,20 @@ PERF_SAMPLES_CLOCK: I64{13}
 // record words, then PERF_CFI_SCRATCH_BYTES of call frame rules.
 PERF_SAMPLES_SLOTS: I64{64}
 
-// The most call sites a spawn record keeps.
-PERF_SAMPLES_SPAWN_DEPTH: I64{32}
+// The most call sites a spawn, wait or wake record keeps.
+PERF_SAMPLES_STACK_DEPTH: I64{32}
+
+// The most bytes of its wait's name a wait record keeps.
+PERF_SAMPLES_WAIT_NAME: I64{256}
+
+// What a wait is for (perf_samples_object), above its id's 48 bits: a task
+// a join awaits, a channel by its observed id (Observe.jet
+// jet_rt_observe_channel_new), or a Shared value's lock, which has no id.
+PERF_SAMPLES_OBJECT_TASK: I64{1}
+
+PERF_SAMPLES_OBJECT_CHANNEL: I64{2}
+
+PERF_SAMPLES_OBJECT_LOCK: I64{3}
 
 // A realtime signal, so that each counter's overflow is queued with its
 // own siginfo, never merged with another's or with SIGPROF.
@@ -114,7 +130,8 @@ perf_samples_code_high := I64{0}
 // PERF_SAMPLES_DEPTH words after it; 0 when the start could not map it.
 // After them come the PERF_COUNTERS_COUNT counters' descriptors, -1 for
 // one that is not open, then the nanoseconds every handler has run
-// (perf_samples_charge).
+// (perf_samples_charge), then how many recorded lock waits are blocked now
+// (perf_samples_lock_block).
 perf_samples_buffer := I64{0}
 
 // PERF_SAMPLES_SLOTS more record buffers (perf_samples_claim), 0 when the
@@ -166,7 +183,9 @@ perf_samples_start: fn() {
     low: perf_samples_code_edge(image, false)
     high: perf_samples_code_edge(image, true)
     perf_cfi_start(image)
-    buffer: alloc_map_try(wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) + I64{1}) * I64{8}))
+    // The spawn, wait and wake records walk their stacks (perf_samples_stack).
+    alloc_frames_start()
+    buffer: alloc_map_try(wrapping(wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{1}) + PERF_COUNTERS_COUNT) + I64{2}) * I64{8}))
     slots: alloc_map_try(wrapping(PERF_SAMPLES_SLOTS * perf_samples_slot_bytes()))
     #Unsafe("the observation start runs before the timer whose handler reads these is armed") {
         perf_samples_bias = bias
@@ -394,23 +413,31 @@ perf_spans_fd_set: fn(fd: I64) {
 }
 
 // The record of task `id`'s spawn, under `jet perf run`: the id in place of
-// a sample's program counter, then the call site of each caller up the
-// spawning thread's frame pointer chain, innermost first, each less the
-// load bias, while it is Jet code (Alloc.jet alloc_check_frames). `jet perf
-// run` names the task's spawn by the innermost of them on a line of the
-// checked source.
+// a sample's program counter, then the spawning stack (perf_samples_stack).
+// `jet perf run` names the task's spawn by the innermost of its call sites
+// on a line of the checked source.
 perf_samples_spawn: fn(id: I64) {
     fd: perf_samples_fd
     if (fd < I64{0} || id == I64{0}) {
         return
     }
-    size: wrapping(wrapping(PERF_SAMPLES_SPAWN_DEPTH + I64{1}) * I64{8})
+    size: wrapping(wrapping(PERF_SAMPLES_STACK_DEPTH + I64{1}) * I64{8})
     record: jet_rt_alloc(size, I64{8})
-    chain: wrapping(record + I64{8})
-    alloc_check_frames(chain, PERF_SAMPLES_SPAWN_DEPTH)
+    words: wrapping(perf_samples_stack(wrapping(record + I64{8})) + I64{1})
+    rt_text_store(record, (id & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_SPAWN << PERF_SAMPLES_KIND_BITS))
+    _ := host_write_all(fd, record, wrapping(words * I64{8}))
+    jet_rt_free(record, size, I64{8})
+}
+
+// The call site of each caller up this thread's frame pointer chain, into
+// the PERF_SAMPLES_STACK_DEPTH words at `chain`, innermost first, each less
+// the load bias, while it is in the image's code (Alloc.jet
+// alloc_check_frames): how many it stored.
+perf_samples_stack: fn(chain: I64) -> I64 {
+    alloc_check_frames(chain, PERF_SAMPLES_STACK_DEPTH)
     bias: perf_samples_bias
     count := I64{0}
-    loop count < PERF_SAMPLES_SPAWN_DEPTH {
+    loop count < PERF_SAMPLES_STACK_DEPTH {
         address: rt_text_word(wrapping(chain + wrapping(count * I64{8})))
         if (address == I64{0}) { break }
         site: wrapping(wrapping(address - I64{1}) - bias)
@@ -418,28 +445,121 @@ perf_samples_spawn: fn(id: I64) {
         rt_text_store(wrapping(chain + wrapping(count * I64{8})), site)
         count = wrapping(count + I64{1})
     }
-    words: wrapping(count + I64{1})
-    rt_text_store(record, (id & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_SPAWN << PERF_SAMPLES_KIND_BITS))
+    count
+}
+
+// What a wait is for, as its record keeps it (perf_samples_wait): `class`
+// (PERF_SAMPLES_OBJECT_TASK and the others; 0 for nothing the wait names)
+// above the low 48 bits of `id`.
+perf_samples_object: fn(class: I64, id: I64) -> I64 {
+    (class << PERF_SAMPLES_ADDRESS_BITS) | (id & PERF_SAMPLES_ADDRESS_MASK)
+}
+
+// The record of a task's wait on `slot`, under `jet perf run`, from `start`
+// to now on the monotonic clock, the clock of the log spans' rows: the
+// waiting task's id in place of a sample's program counter, then the slot,
+// the start, the end, `object` (perf_samples_object), the byte length of
+// the wait's name `name` (the text its task's observed state shows, at most
+// PERF_SAMPLES_WAIT_NAME bytes of it), the name in whole words, then the
+// waiting stack (perf_samples_stack). The wake that ended the wait is the
+// last wake of the same slot before its end (perf_samples_wake); a wait
+// with none ended by its own timeout.
+perf_samples_wait: fn(slot: I64, name: I64, object: I64, start: I64) {
+    fd: perf_samples_fd
+    if (fd < I64{0}) {
+        return
+    }
+    end: time_host_monotonic_i64()
+    full: if (name == I64{0}) -> I64{0} else -> rt_text_len(name)
+    length: if (full > PERF_SAMPLES_WAIT_NAME) -> PERF_SAMPLES_WAIT_NAME else -> full
+    text_words: wrapping(length + I64{7}) >> I64{3}
+    head: wrapping(I64{6} + text_words)
+    size: wrapping(wrapping(head + PERF_SAMPLES_STACK_DEPTH) * I64{8})
+    record: jet_rt_alloc(size, I64{8})
+    rt_text_store(wrapping(record + I64{8}), slot)
+    rt_text_store(wrapping(record + I64{16}), start)
+    rt_text_store(wrapping(record + I64{24}), end)
+    rt_text_store(wrapping(record + I64{32}), object)
+    rt_text_store(wrapping(record + I64{40}), length)
+    if (text_words != I64{0}) {
+        text: wrapping(record + I64{48})
+        thread_zero(text, wrapping(text_words * I64{8}))
+        rt_text_bytes_copy(text, rt_text_data(name), length)
+    }
+    words: wrapping(head + perf_samples_stack(wrapping(record + wrapping(head * I64{8}))))
+    rt_text_store(record, (observe_current_task() & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_WAIT << PERF_SAMPLES_KIND_BITS))
     _ := host_write_all(fd, record, wrapping(words * I64{8}))
     jet_rt_free(record, size, I64{8})
 }
 
-// The record of a join's wait, under `jet perf run`: the joining task's id
-// in place of a sample's program counter, then the awaited task's id and
-// the wait's start (`start`) and end on the monotonic clock, the clock of
-// the log spans' rows.
-perf_samples_join: fn(joiner: I64, awaited: I64, start: I64) {
+// The record of a wake of `slot` at `at` on the monotonic clock, read
+// before the wake was published, so never later than the end of the wait it
+// ends: the waking task's id in place of a sample's program counter, then
+// the slot, `at` and the waking stack (perf_samples_stack). `waker` -1 is
+// the current task, 0 outside every task (the runtime: an I/O poller, a
+// timer); any other is the id of a task whose body has returned (Task.jet
+// task_run's wake of its joiner), whose wake keeps no stack: the stack is
+// its carrier's.
+perf_samples_wake: fn(slot: I64, at: I64, waker: I64) {
     fd: perf_samples_fd
-    if (fd < I64{0} || awaited == I64{0}) {
+    if (fd < I64{0}) {
         return
     }
-    record: jet_rt_alloc(I64{32}, I64{8})
-    rt_text_store(record, (joiner & PERF_SAMPLES_ADDRESS_MASK) | (I64{4} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_JOIN << PERF_SAMPLES_KIND_BITS))
-    rt_text_store(wrapping(record + I64{8}), awaited)
-    rt_text_store(wrapping(record + I64{16}), start)
-    rt_text_store(wrapping(record + I64{24}), time_host_monotonic_i64())
-    _ := host_write_all(fd, record, I64{32})
-    jet_rt_free(record, I64{32}, I64{8})
+    size: wrapping(wrapping(PERF_SAMPLES_STACK_DEPTH + I64{3}) * I64{8})
+    record: jet_rt_alloc(size, I64{8})
+    rt_text_store(wrapping(record + I64{8}), slot)
+    rt_text_store(wrapping(record + I64{16}), at)
+    current: waker < I64{0}
+    words: if current -> wrapping(perf_samples_stack(wrapping(record + I64{24})) + I64{3}) else -> I64{3}
+    id := waker
+    if current {
+        id = if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task()
+    }
+    rt_text_store(record, (id & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_WAKE << PERF_SAMPLES_KIND_BITS))
+    _ := host_write_all(fd, record, wrapping(words * I64{8}))
+    jet_rt_free(record, size, I64{8})
+}
+
+// The record buffer's count of recorded lock waits blocked now; 0 when the
+// start could not map the buffer.
+perf_samples_lock_count: fn() -> I64 {
+    buffer: perf_samples_buffer
+    if (buffer == I64{0}) -> I64{0} else -> wrapping(buffer + wrapping(wrapping(wrapping(PERF_SAMPLES_DEPTH + I64{2}) + PERF_COUNTERS_COUNT) * I64{8}))
+}
+
+// Under `jet perf run`, a task about to block on a Shared value's lock,
+// holding the lock's mutex: one more recorded lock wait blocked, and the
+// monotonic clock now, for its perf_samples_lock_wait; 0, recording
+// nothing, outside `jet perf run` or outside every task.
+perf_samples_lock_block: fn() -> I64 {
+    count: perf_samples_lock_count()
+    if (perf_samples_fd < I64{0} || count == I64{0} || scheduler_control_current() == I64{0}) {
+        return I64{0}
+    }
+    _ := sync_add(count, I64{1})
+    time_host_monotonic_i64()
+}
+
+// The record of the lock wait perf_samples_lock_block began at `start`
+// (none when 0), on the lock's condition word `slot`, which the wait no
+// longer holds the mutex of.
+perf_samples_lock_wait: fn(slot: I64, start: I64) {
+    if (start == I64{0}) {
+        return
+    }
+    _ := sync_add(perf_samples_lock_count(), I64{-1})
+    perf_samples_wait(slot, rt_static_text("shared lock"), perf_samples_object(PERF_SAMPLES_OBJECT_LOCK, I64{0}), start)
+}
+
+// A Shared value's release, holding its mutex, before it wakes the waiters
+// on its condition word: the monotonic clock now, for the release's
+// perf_samples_wake once it no longer holds the mutex, while a recorded lock
+// wait is blocked; else 0, and the release records nothing. A waiter counts
+// itself under the same mutex (perf_samples_lock_block), so none is missed.
+perf_samples_lock_release: fn() -> I64 {
+    count: perf_samples_lock_count()
+    if (perf_samples_fd < I64{0} || count == I64{0} || sync_load(count) == I64{0}) { return I64{0} }
+    time_host_monotonic_i64()
 }
 
 // The lenses JET_PERF_LENSES names: `cpu` when it starts with `cpu`,

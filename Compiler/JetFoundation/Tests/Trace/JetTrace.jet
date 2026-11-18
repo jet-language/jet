@@ -253,7 +253,7 @@ jettrace_test_window: fn(status: &&String, wall: U64?, cpu: U64?) -> Bool Never!
     pairs: [{id: U64, parent: U64}]{{id: U64{1}, parent: U64{0}}, {id: U64{2}, parent: U64{1}}}
     loop pair in pairs {
         skeleton.tasks.push(jettrace_test_task(pair.id, pair.parent, "done", ""))
-        skeleton.spans.push(TraceSpan{awaited_task_id: None, clock: "monotonic", end_ns: Val(U64{90} + pair.id), kind: "task_observed", parent_task_id: if pair.parent == (U64{0}) -> None else -> Val(pair.parent), reason: "", spawn_line: None, start_ns: Val(U64{10} + pair.id), status: "captured", symbol: jettrace_test_symbol(), task_id: Val(pair.id)})
+        skeleton.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", end_ns: Val(U64{90} + pair.id), kind: "task_observed", parent_task_id: if pair.parent == (U64{0}) -> None else -> Val(pair.parent), reason: "", spawn_line: None, start_ns: Val(U64{10} + pair.id), status: "captured", symbol: jettrace_test_symbol(), task_id: Val(pair.id), wait_line: None, waker: "", waker_line: None, waker_task_id: None})
     }
     text: jettrace_test_text(skeleton)
     assert(text.contains("\"spans\":[{{"))
@@ -262,16 +262,16 @@ jettrace_test_window: fn(status: &&String, wall: U64?, cpu: U64?) -> Bool Never!
     skeleton.spans[1].parent_task_id = Val(U64{99})
     assert(jettrace_test_error(skeleton).contains("parent_task_id does not match"))
     skeleton.tasks = [TraceTask]{}
-    skeleton.spans = [TraceSpan]{TraceSpan{awaited_task_id: None, clock: "monotonic", end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", spawn_line: None, start_ns: None, status: "unavailable", symbol: jettrace_test_symbol(), task_id: None}}
+    skeleton.spans = [TraceSpan]{TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", spawn_line: None, start_ns: None, status: "unavailable", symbol: jettrace_test_symbol(), task_id: None, wait_line: None, waker: "", waker_line: None, waker_task_id: None}}
     _: jettrace_test_valid(skeleton)
 }
 
 #Test("log_spans_are_captured_rows_of_no_task_beside_the_task_spans") {
     skeleton := jettrace_sample_skeleton()
-    skeleton.spans.push(TraceSpan{awaited_task_id: None, clock: "monotonic", end_ns: Val(U64{30}), kind: "log_span", parent_task_id: None, reason: "", spawn_line: None, start_ns: Val(U64{10}), status: "captured", symbol: jettrace_test_symbol(), task_id: None})
+    skeleton.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", end_ns: Val(U64{30}), kind: "log_span", parent_task_id: None, reason: "", spawn_line: None, start_ns: Val(U64{10}), status: "captured", symbol: jettrace_test_symbol(), task_id: None, wait_line: None, waker: "", waker_line: None, waker_task_id: None})
     assert(jettrace_test_text(skeleton).contains("\"kind\":\"log_span\""))
     _: jettrace_test_valid(skeleton)
-    skeleton.spans.push(TraceSpan{awaited_task_id: None, clock: "monotonic", end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", spawn_line: None, start_ns: None, status: "unavailable", symbol: jettrace_test_symbol(), task_id: None})
+    skeleton.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", spawn_line: None, start_ns: None, status: "unavailable", symbol: jettrace_test_symbol(), task_id: None, wait_line: None, waker: "", waker_line: None, waker_task_id: None})
     _: jettrace_test_valid(skeleton)
     skeleton.spans[0].task_id = Val(U64{1})
     assert(jettrace_test_error(skeleton).contains("log span must not claim a task"))
@@ -280,20 +280,24 @@ jettrace_test_window: fn(status: &&String, wall: U64?, cpu: U64?) -> Bool Never!
     assert(jettrace_test_error(skeleton).contains("must be captured for a log span"))
     skeleton.spans[0].status = "captured"
     skeleton.spans[0].kind = "guessed"
-    assert(jettrace_test_error(skeleton).contains("kind must be task_observed, log_span or task_join"))
+    assert(jettrace_test_error(skeleton).contains("kind must be task_observed, log_span or task_wait"))
     skeleton.spans[0].kind = "log_span"
     skeleton.spans[0].spawn_line = Val(U64{4})
-    assert(jettrace_test_error(skeleton).contains("only a join names an awaited task or a spawn line"))
+    assert(jettrace_test_error(skeleton).contains("only a wait names an awaited task, a spawn line, a channel, a line or a waker"))
+    skeleton.spans[0].spawn_line = None
+    skeleton.spans[0].waker = "timeout"
+    assert(jettrace_test_error(skeleton).contains("only a wait names"))
 }
 
-#Test("a_join_names_its_task_the_task_it_awaits_and_that_task_s_spawn_line") {
+#Test("a_wait_names_its_task_its_line_what_it_awaits_and_its_waker") {
     skeleton := jettrace_sample_skeleton()
     skeleton.tasks.push(jettrace_test_task(U64{1}, U64{0}, "done", ""))
     skeleton.tasks.push(jettrace_test_task(U64{2}, U64{1}, "done", ""))
-    skeleton.spans.push(TraceSpan{awaited_task_id: Val(U64{2}), clock: "monotonic", end_ns: Val(U64{30}), kind: "task_join", parent_task_id: None, reason: "", spawn_line: Val(U64{4}), start_ns: Val(U64{10}), status: "captured", symbol: jettrace_test_symbol(), task_id: Val(U64{1})})
+    skeleton.spans.push(TraceSpan{awaited_task_id: Val(U64{2}), channel_id: None, clock: "monotonic", end_ns: Val(U64{30}), kind: "task_wait", parent_task_id: None, reason: "", spawn_line: Val(U64{4}), start_ns: Val(U64{10}), status: "captured", symbol: jettrace_test_symbol(), task_id: Val(U64{1}), wait_line: Val(U64{5}), waker: "task", waker_line: Val(U64{11}), waker_task_id: Val(U64{2})})
     text: jettrace_test_text(skeleton)
     assert(text.contains("\"awaited_task_id\":2"))
     assert(text.contains("\"spawn_line\":4"))
+    assert(text.contains("\"wait_line\":5,\"waker\":\"task\",\"waker_line\":11,\"waker_task_id\":2"))
     _: jettrace_test_valid(skeleton)
     skeleton.spans[0].spawn_line = None
     _: jettrace_test_valid(skeleton)
@@ -304,12 +308,33 @@ jettrace_test_window: fn(status: &&String, wall: U64?, cpu: U64?) -> Bool Never!
     assert(jettrace_test_error(skeleton).contains("awaited_task_id refers to missing task 7"))
     skeleton.spans[0].awaited_task_id = Val(U64{1})
     assert(jettrace_test_error(skeleton).contains("join must not await its own task"))
-    skeleton.spans[0].awaited_task_id = Val(U64{2})
+    skeleton.spans[0].awaited_task_id = None
+    assert(jettrace_test_error(skeleton).contains("spawn_line needs an awaited task"))
+    skeleton.spans[0].spawn_line = None
+    skeleton.spans[0].channel_id = Val(U64{3})
+    _: jettrace_test_valid(skeleton)
+    skeleton.spans[0].wait_line = Val(U64{0})
+    assert(jettrace_test_error(skeleton).contains("wait_line must be a line, from 1"))
+    skeleton.spans[0].wait_line = Val(U64{5})
+    skeleton.spans[0].waker_task_id = Val(U64{9})
+    assert(jettrace_test_error(skeleton).contains("waker_task_id refers to missing task 9"))
+    skeleton.spans[0].waker_task_id = Val(U64{2})
+    skeleton.spans[0].waker = "runtime"
+    assert(jettrace_test_error(skeleton).contains("the runtime's wake names no task"))
+    skeleton.spans[0].waker_task_id = None
+    _: jettrace_test_valid(skeleton)
+    skeleton.spans[0].waker = "timeout"
+    assert(jettrace_test_error(skeleton).contains("a timeout names no waker"))
+    skeleton.spans[0].waker_line = None
+    _: jettrace_test_valid(skeleton)
+    skeleton.spans[0].waker = "guessed"
+    assert(jettrace_test_error(skeleton).contains("waker must be task, runtime or timeout"))
+    skeleton.spans[0].waker = "timeout"
     skeleton.spans[0].start_ns = Val(U64{40})
     assert(jettrace_test_error(skeleton).contains("ends before it starts"))
     skeleton.spans[0].start_ns = Val(U64{10})
     skeleton.spans[0].parent_task_id = Val(U64{1})
-    assert(jettrace_test_error(skeleton).contains("join must not claim a parent"))
+    assert(jettrace_test_error(skeleton).contains("wait must not claim a parent"))
 }
 
 #Test("capture_policy_audits_fixed_row_caps_and_truncation") {
@@ -424,7 +449,7 @@ jettrace_test_window: fn(status: &&String, wall: U64?, cpu: U64?) -> Bool Never!
 #Test("current capture policy rejects malformed native and span rows") {
     skeleton := jettrace_sample_skeleton()
     skeleton.tasks.push(jettrace_test_task(U64{1}, U64{0}, "done", ""))
-    skeleton.spans.push(TraceSpan{awaited_task_id: None, clock: "monotonic", end_ns: Val(U64{10}), kind: "task_observed", parent_task_id: None, reason: "", spawn_line: None, start_ns: Val(U64{20}), status: "captured", symbol: jettrace_test_symbol(), task_id: Val(U64{1})})
+    skeleton.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", end_ns: Val(U64{10}), kind: "task_observed", parent_task_id: None, reason: "", spawn_line: None, start_ns: Val(U64{20}), status: "captured", symbol: jettrace_test_symbol(), task_id: Val(U64{1}), wait_line: None, waker: "", waker_line: None, waker_task_id: None})
     assert(jettrace_test_error(skeleton).contains("ends before it starts"))
     skeleton.spans = [TraceSpan]{}
     skeleton.native.push(TraceNative{clock: "process_cpu", duration_ns: Val(U64{42}), observed_at_ns: U64{99}, reason: "", status: "forged", symbol: jettrace_test_symbol(), target: "x86_64-unknown-linux-gnu", task_id: Val(U64{1})})

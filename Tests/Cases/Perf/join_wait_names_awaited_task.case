@@ -1,4 +1,4 @@
-# `jet perf run` records each join's wait: the trace's `task_join` span
+# `jet perf run` records each join's wait: the trace's `task_wait` span
 # names the joining task, the task it awaits and the source line that
 # spawned it, on the clock of every other span, so `jet perf view` shows the
 # wait on the timeline beside the tasks with no manual alignment.
@@ -10,6 +10,6 @@ exit: 0
 stdout: = "joined=42\n"
 step: jet perf view {work}/join.jettrace
 exit: 0
-stdout: ~ "joins count=1 · task 1 waited " # the run's one join, by the task that waited
-stdout: ~ "ns for task 2 spawned at main.jet:4" # the awaited task and the line that spawned it
-stdout: ~ "] join task 1 awaits task 2 spawned at main.jet:4" # the wait on the timeline
+stdout: ~ "waits count=" # the join and the awaited task's sleep
+stdout: ~ "] task 1 in task join at main.jet:5 for task 2 spawned at main.jet:4, woken by task 2" # the join on the timeline, woken by the task it awaited
+stdout: ~ "] task 2 in time sleep at main.jet:10, woken by its timeout" # the awaited task's sleep

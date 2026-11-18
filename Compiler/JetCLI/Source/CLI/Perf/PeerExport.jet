@@ -142,9 +142,10 @@ jet_cli_perf_hex16: fn(value: Int) -> String Never! {
 // request, then on the next line its per-line totals as another
 // (jet_cli_perf_otlp_metrics). Its trace id is the first 32 hex digits of
 // the trace's id. A span's id is its row's place among the rows, and a task
-// span's parent is the span of its parent task. The span's kind, task,
-// awaited task and spawn line are `jet.*` attributes. Times count from the
-// session's start, since a trace records no wall-clock origin.
+// span's parent is the span of its parent task. The span's kind, task, and
+// a wait's awaited task, spawn line, channel, line and waker are `jet.*`
+// attributes. Times count from the session's start, since a trace records
+// no wall-clock origin.
 jet_cli_perf_otlp: fn(trace: CanonicalJSON) -> String Never! {
     id: trace_id(trace) ?? ""
     trace_hex: if id.count_bytes() >= 32 -> id.slice(0..<32) else -> "00000000000000000000000000000001"
@@ -164,11 +165,14 @@ jet_cli_perf_otlp: fn(trace: CanonicalJSON) -> String Never! {
             end: jet_cli_perf_member_number(item, "end_ns") ?? next
             kind: jet_cli_perf_member_text(item, "kind") ?? "span"
             attributes := [perf_log.LogField]{perf_log.field("jet.kind", kind)}
-            loop key in ([String]{"task_id", "awaited_task_id", "spawn_line"}) {
+            keys: [String]{"task_id", "awaited_task_id", "spawn_line", "channel_id", "wait_line", "waker_task_id", "waker_line"}
+            loop key in keys {
                 if jet_cli_perf_member_integer(item, key) == .Val(digits) {
                     attributes.push(perf_log.field("jet.{key}", digits))
                 }
             }
+            waker: jet_cli_perf_member_text(item, "waker") ?? ""
+            if waker.len() > 0 -> attributes.push(perf_log.field("jet.waker", waker))
             parent := ""
             if kind == "task_observed" && jet_cli_perf_member_number(item, "parent_task_id") == .Val(task) && tasks.has_key(task) {
                 parent = jet_cli_perf_hex16(tasks[task])

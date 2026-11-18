@@ -11,6 +11,12 @@ channel_update: fn(channel: I64) {
     jet_rt_observe_channel_update(sync_load(wrapping(channel + I64{136})), sync_load(wrapping(channel + I64{16})), sync_load(wrapping(channel + I64{152})), sync_load(wrapping(channel + I64{144})), sync_load(wrapping(channel + I64{88})))
 }
 
+// A wait on `channel`, for its record under `jet perf run`: the channel's
+// observed id (PerfSamples.jet perf_samples_object).
+channel_wait_object: fn(channel: I64) -> I64 {
+    perf_samples_object(PERF_SAMPLES_OBJECT_CHANNEL, sync_load(wrapping(channel + I64{136})))
+}
+
 channel_new: fn(bound: I64, kind: I64, delay_ms: I64) -> I64 {
     channel: jet_rt_alloc(I64{160}, I64{8})
     thread_zero(channel, I64{160})
@@ -207,7 +213,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
         channel_wait_add(channel, node, false)
         channel_update(channel)
         sync_mutex_unlock(channel)
-        status: scheduler_yield(reason, slot, I64{-1})
+        status: scheduler_yield_policy(reason, slot, I64{-1}, true, channel_wait_object(channel))
         sync_mutex_lock(channel)
         channel_wait_remove(channel, node, false)
         channel_update(channel)
@@ -281,7 +287,7 @@ channel_receive: fn(channel: I64, out: I64) -> Bool {
         channel_wait_add(channel, node, true)
         channel_update(channel)
         sync_mutex_unlock(channel)
-        status: scheduler_yield(reason, park, I64{-1})
+        status: scheduler_yield_policy(reason, park, I64{-1}, true, channel_wait_object(channel))
         sync_mutex_lock(channel)
         channel_wait_remove(channel, node, true)
         channel_update(channel)
@@ -453,7 +459,7 @@ channel_reserve_send: fn(channel: I64, meta: I64) -> I64 {
         channel_wait_add(channel, node, true)
         channel_update(channel)
         sync_mutex_unlock(channel)
-        status: scheduler_yield(reason, park, I64{-1})
+        status: scheduler_yield_policy(reason, park, I64{-1}, true, channel_wait_object(channel))
         sync_mutex_lock(channel)
         channel_wait_remove(channel, node, true)
         channel_update(channel)

@@ -61,10 +61,10 @@ the trace's captured spans and browser rows, then an
 `jet.profile.samples` with a point for each row named by its
 `code.file.path`, `code.line.number` and `code.function.name`. Its trace id
 is the first 32 hex digits of the trace's id. A task span's parent is its
-parent task's span, and each span's kind, task, awaited task and spawn line
-are `jet.*` attributes. Span times count from the session's start, since a
-trace records no wall-clock origin. `--out <path>` writes any export to a
-file instead of stdout.
+parent task's span, and each span's kind and task, and a wait's awaited task,
+spawn line, channel, line and waker, are `jet.*` attributes. Span times count
+from the session's start, since a trace records no wall-clock origin.
+`--out <path>` writes any export to a file instead of stdout.
 
 Both exports are interop for other tools; jet reads them back itself.
 `jet perf view <profile.pb.gz>` (or `.pb`) and `jet perf view
@@ -188,21 +188,37 @@ left L1D, `llc_misses` were served from RAM, and `page_faults` fell to the
 page cache or disk. A counter the profile did not capture shows
 `unavailable`. Tests/Run/Perf/CacheVisualization is the worked example.
 
-`jet perf run` records each join's wait too. When a task spawns another, the
-runtime writes the new task's id with the Jet call sites of the spawning
-stack. When a join finds its task not yet done, the runtime writes the joining
-task, the awaited task and the wait's start and end on the monotonic clock.
-Each wait becomes a `task_join` row of the trace's `spans`. Its `task_id` is
-the joining task and its `awaited_task_id` the awaited one, both by the ids
-their `tasks` rows carry. Its `spawn_line` is the line of the checked source
-that spawned the awaited task, from the innermost call site on such a line,
-or null when no call site was in that source. Its start and end are measured
-from the session's start, on the same clock as the task and log spans, so the
-wait lines up with them with no manual alignment. A join of a task no
-observation saw has no task id to name and records no row. `jet perf view`
-prints `joins count=1 · task 1 waited 400212345ns for task 2 spawned at
-main.jet:4`. Its timeline shows each wait as `[start..end] join task 1 awaits
-task 2 spawned at main.jet:4`, beside the task spans.
+`jet perf run` records every wait of a task too, and what ended it. When a
+task spawns another, the runtime writes the new task's id with the Jet call
+sites of the spawning stack. When a task parks (a join, a channel's receive
+or send, a sleep, an I/O wait) or blocks on a `Shared` value's lock, the
+runtime writes the waiting task, the wait's name as the task's state shows
+it, what it waits for (the awaited task or the channel), its start and end
+on the monotonic clock and the Jet call sites of its stack. Whatever wakes a
+parked task writes a wake: the waking task and the call sites of its stack,
+or the runtime outside every task. A lock's release writes a wake only while
+a recorded wait is blocked on some lock, so an uncontended lock costs
+nothing more. Each wait becomes a `task_wait` row of the trace's `spans`.
+Its `task_id` is the waiting task, by the id its `tasks` row carries, its
+symbol's name the wait's name (`task join`, `channel receive`, `time sleep`,
+`shared lock`, ...) and its `wait_line` the innermost line of the checked
+source on its stack. A join's `awaited_task_id` is the awaited task and its
+`spawn_line` the line that spawned it; a channel wait's `channel_id` is the
+channel's. Its `waker` is `task` when a task's wake ended it, with that
+task's `waker_task_id` and the line it woke it from as `waker_line`,
+`runtime` when the runtime's did, and `timeout` when no wake did: a sleep,
+or a wait that gave up. The wake that ended a wait is the last one on the
+same park slot at or before its end, and after the task's previous wait on
+that slot. Its start and end are measured from the session's start, on the
+same clock as the task and log spans, so the wait lines up with them with no
+manual alignment. A wait of a task no observation saw has no task id to name
+and records no row. Each record is one write; a run that waits a million
+times writes a million records. `jet perf view` prints `waits count=3 ·
+longest 400212345ns: task 1 in task join at main.jet:5 for task 2 spawned at
+main.jet:4, woken by task 2`. Its timeline shows up to 8 waits as
+`[start..end] task 1 in channel receive at main.jet:11 for channel 1, woken
+by task 2 at main.jet:28`, beside the task spans.
+Tests/Cases/Perf/every_wait_names_its_waker.case is the worked example.
 
 A `core.game` run under `jet run --observe` relays its frames through its live
 snapshots: each frame callback records the frame's index, its start and wall

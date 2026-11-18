@@ -205,7 +205,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
         jet_cli_perf_native_summary(trace),
         jet_cli_perf_span_summary(trace),
         jet_cli_perf_log_span_summary(trace),
-        jet_cli_perf_join_summary(trace),
+        jet_cli_perf_wait_summary(trace),
     }
     loop summary in summaries {
         if summary == .Val(line) -> out = "{out}{line}\n"
@@ -800,35 +800,63 @@ jet_cli_perf_log_span_summary: fn(trace: CanonicalJSON) -> String? Never! {
     Val("log spans count={count} window={start}..{end}ns · {symbol}")
 }
 
-// The joins' waits (`task_join` rows): how many, and the first: the task
-// that waited, how long, and the task it awaited.
-jet_cli_perf_join_summary: fn(trace: CanonicalJSON) -> String? Never! {
+// The tasks' waits (`task_wait` rows): how many, and the longest
+// (jet_cli_perf_wait_text).
+jet_cli_perf_wait_summary: fn(trace: CanonicalJSON) -> String? Never! {
     items: jet_cli_perf_rows(trace, "spans") ?? return None
     count := 0
-    first := ""
+    longest := -1
+    text := ""
     loop item in items {
-        if (jet_cli_perf_member_text(item, "kind") ?? "") != "task_join" -> next
-        if count == 0 {
-            start: jet_cli_perf_member_number(item, "start_ns") ?? return None
-            end: jet_cli_perf_member_number(item, "end_ns") ?? return None
-            first = "task {jet_cli_perf_member_integer(item, "task_id") ?? "?"} waited {end - start}ns for {jet_cli_perf_join_awaited(item)}"
-        }
+        if (jet_cli_perf_member_text(item, "kind") ?? "") != "task_wait" -> next
         count += 1
+        start: jet_cli_perf_member_number(item, "start_ns") ?? next
+        end: jet_cli_perf_member_number(item, "end_ns") ?? next
+        if end - start <= longest -> next
+        longest = end - start
+        text = jet_cli_perf_wait_text(item)
     }
     if count == 0 -> return None
-    Val("joins count={count} · {first}")
+    if longest < 0 -> return Val("waits count={count}")
+    Val("waits count={count} · longest {longest}ns: {text}")
 }
 
-// The task a join row `item` awaits and, when the trace knows it, the line
-// that spawned it: `task 2 spawned at main.jet:4`.
-jet_cli_perf_join_awaited: fn(item: CanonicalJSON) -> String Never! {
-    awaited: "task {jet_cli_perf_member_integer(item, "awaited_task_id") ?? "?"}"
-    line: jet_cli_perf_member_integer(item, "spawn_line") ?? return awaited
-    fields: jettrace_object_view(item, "jettrace row") ?? return awaited
-    at: jet_cli_perf_key(fields, "symbol") ?? return awaited
-    symbol: jettrace_object_view(fields[at].value, "symbol") ?? return awaited
-    path: jet_cli_perf_field_text(symbol, "path") ?? return awaited
-    "{awaited} spawned at {path}:{line}"
+// A wait row `item` in words: its task, its name and line, what it waited
+// for and what ended it: `task 1 in task join at main.jet:5 for task 2
+// spawned at main.jet:4, woken by task 2 at main.jet:11`. A channel's wait
+// waits for `channel 3`; a wake outside every task is `the runtime`'s, and
+// a wait no wake ended ended at `its timeout`.
+jet_cli_perf_wait_text: fn(item: CanonicalJSON) -> String Never! {
+    path: jet_cli_perf_member_symbol_text(item, "path") ?? "?"
+    text := "task {jet_cli_perf_member_integer(item, "task_id") ?? "?"} in {jet_cli_perf_member_symbol_text(item, "name") ?? "wait"}"
+    if jet_cli_perf_member_integer(item, "wait_line") == .Val(line) {
+        text = "{text} at {path}:{line}"
+    }
+    if jet_cli_perf_member_integer(item, "awaited_task_id") == .Val(awaited) {
+        text = "{text} for task {awaited}"
+        if jet_cli_perf_member_integer(item, "spawn_line") == .Val(line) {
+            text = "{text} spawned at {path}:{line}"
+        }
+    }
+    if jet_cli_perf_member_integer(item, "channel_id") == .Val(channel) {
+        text = "{text} for channel {channel}"
+    }
+    waker: jet_cli_perf_member_text(item, "waker") ?? ""
+    if waker == "runtime" -> return "{text}, woken by the runtime"
+    if waker != "task" -> return "{text}, woken by its timeout"
+    text = "{text}, woken by task {jet_cli_perf_member_integer(item, "waker_task_id") ?? "?"}"
+    if jet_cli_perf_member_integer(item, "waker_line") == .Val(line) {
+        text = "{text} at {path}:{line}"
+    }
+    text
+}
+
+// The text `key` of a row `item`'s symbol: its `path` or `name`.
+jet_cli_perf_member_symbol_text: fn(item: CanonicalJSON, key: String) -> String? Never! {
+    fields: jettrace_object_view(item, "jettrace row") ?? return None
+    at: jet_cli_perf_key(fields, "symbol") ?? return None
+    symbol: jettrace_object_view(fields[at].value, "symbol") ?? return None
+    jet_cli_perf_field_text(symbol, key)
 }
 
 // Whether the object `value` has `key` set to null.
@@ -840,7 +868,7 @@ jet_cli_perf_member_is_null: fn(value: CanonicalJSON, key: String) -> Bool Never
 
 // Whether the trace holds any typed evidence a summary reads.
 jet_cli_perf_has_evidence: fn(trace: CanonicalJSON) -> Bool Never! {
-    jet_cli_perf_first_sample(trace) != None || jet_cli_perf_profile_summary(trace) != None || jet_cli_perf_allocation_summary(trace) != None || jet_cli_perf_browser_summary(trace) != None || jet_cli_perf_task_summary(trace) != None || jet_cli_perf_lock_summary(trace) != None || jet_cli_perf_io_summary(trace) != None || jet_cli_perf_native_summary(trace) != None || jet_cli_perf_span_summary(trace) != None || jet_cli_perf_log_span_summary(trace) != None || jet_cli_perf_join_summary(trace) != None || jet_cli_perf_game_lines(trace).len() > 0
+    jet_cli_perf_first_sample(trace) != None || jet_cli_perf_profile_summary(trace) != None || jet_cli_perf_allocation_summary(trace) != None || jet_cli_perf_browser_summary(trace) != None || jet_cli_perf_task_summary(trace) != None || jet_cli_perf_lock_summary(trace) != None || jet_cli_perf_io_summary(trace) != None || jet_cli_perf_native_summary(trace) != None || jet_cli_perf_span_summary(trace) != None || jet_cli_perf_log_span_summary(trace) != None || jet_cli_perf_wait_summary(trace) != None || jet_cli_perf_game_lines(trace).len() > 0
 }
 
 // A core.game run's frames and draw events: `game frames=… draw_events=…
@@ -1132,18 +1160,18 @@ jet_cli_perf_timeline: fn(trace: CanonicalJSON) -> [String] Never! {
         }
     }
     if jet_cli_perf_rows(trace, "spans") == .Ok(items) {
-        // Up to 8 task and log spans and up to 8 joins' waits, all on the
+        // Up to 8 task and log spans and up to 8 tasks' waits, all on the
         // one clock of every span.
         spans := 0
-        joins := 0
+        waits := 0
         loop item in items {
             if (jet_cli_perf_member_text(item, "status") ?? "") != "captured" -> next
             start: jet_cli_perf_member_integer(item, "start_ns") ?? next
             end: jet_cli_perf_member_integer(item, "end_ns") ?? next
-            if (jet_cli_perf_member_text(item, "kind") ?? "") == "task_join" {
-                if joins >= 8 -> next
-                joins += 1
-                rows.push("[{start}..{end}] join task {jet_cli_perf_member_integer(item, "task_id") ?? "?"} awaits {jet_cli_perf_join_awaited(item)}")
+            if (jet_cli_perf_member_text(item, "kind") ?? "") == "task_wait" {
+                if waits >= 8 -> next
+                waits += 1
+                rows.push("[{start}..{end}] {jet_cli_perf_wait_text(item)}")
                 next
             }
             if spans >= 8 -> next

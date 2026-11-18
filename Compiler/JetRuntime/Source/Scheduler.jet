@@ -1083,13 +1083,15 @@ scheduler_observe_update: fn(state: I64, wait: I64) {
 
 // Including its per-site interrupt order.
 scheduler_yield: fn(wait_kind: I64, slot: I64, timeout_ns: I64) -> I64 {
-    scheduler_yield_policy(wait_kind, slot, timeout_ns, true)
+    scheduler_yield_policy(wait_kind, slot, timeout_ns, true, I64{0})
 }
 
 // scheduler_yield whose park observes the ambient deadline only when
 // `deadline` holds: a join of a typed task its own deadline already bounds
-// waits for that task's result instead.
-scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline: Bool) -> I64 {
+// waits for that task's result instead. Under `jet perf run` a task's park
+// that is not a yield records its wait (PerfSamples.jet perf_samples_wait),
+// naming `object` (perf_samples_object; 0 for none).
+scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline: Bool, object: I64) -> I64 {
     // A canceled root wait point returns its fallback without parking.
     if scheduler_root_cancel_observed() -> return I64{0}
     world: world_current()
@@ -1126,7 +1128,10 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
         if (wait < I64{0} || wait > cap) { wait = cap }
     }
     sync_store(wrapping(thread_base() + I64{72}), slot)
+    recorded: control != I64{0} && timeout_ns != I64{0} && perf_samples_fd >= I64{0}
+    began: if recorded -> time_host_monotonic_i64() else -> I64{0}
     sync_park(slot, wait)
+    if recorded -> perf_samples_wait(slot, wait_kind, object, began)
     sync_store(wrapping(thread_base() + I64{72}), I64{0})
     scheduler_cancel_waiter_remove(control, waiter)
     if (deadline && !virtual_wait && !shielded && jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}) {

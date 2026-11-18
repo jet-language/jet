@@ -2741,7 +2741,7 @@ priv alloc_arena_give: fn(pointer: I64) {
 // by the AT_PHDR load bias for a PIE; runtime-internal functions have no
 // symbol and print as ??), then aborts.
 // State page words: quarantine lock 16, ring 24, pushes 32, parked count 40,
-// parked bytes 48, frame-pointer stub 56 (alloc_check_start).
+// parked bytes 48, frame-pointer stub 56 (alloc_frames_start).
 ALLOC_CHECK_LIVE: I64{2397417249457849674}
 
 ALLOC_CHECK_FREED: I64{2397398596314219850}
@@ -2754,23 +2754,40 @@ ALLOC_CHECK_SLOTS: I64{4096}
 
 ALLOC_CHECK_BUDGET: I64{67108864}
 
-// The frame walk needs rbp, which no admitted asm leaf reads (and a new leaf
-// would not assemble with a seed that predates it), so checked mode maps a
-// four-byte read-only executable stub `mov rax, rbp; ret` called through
-// os_call_address_i64: rbp is unchanged across the call, so it returns the
-// calling function's frame pointer.
+// Checked mode's start: the quarantine's ring, and the frame walk's stub
+// (alloc_frames_start).
 alloc_check_start: fn() {
     ring: alloc_map(wrapping(ALLOC_CHECK_SLOTS * I64{8}), wrapping(ALLOC_CHECK_SLOTS * I64{8}))
-    stub: alloc_map(I64{4096}, I64{4096})
-    #Unsafe("the fresh state page and stub page are private to initialization, which precedes every allocation; the stub page becomes read+execute before any call") {
-        os_store_i64(stub, I64{3286796616})
-        if (os_syscall_i64(I64{10}, stub, I64{4096}, I64{5}, I64{0}, I64{0}, I64{0}) == I64{0}) {
-            os_store_i64(wrapping(alloc_root + I64{56}), stub)
-        }
+    alloc_frames_start()
+    #Unsafe("the fresh state page is private to initialization, which precedes every allocation") {
         os_store_i64(wrapping(alloc_root + I64{24}), ring)
     }
     #Unsafe("checked-heap start runs during runtime-init, before any other thread exists") {
         alloc_class_limit = I64{0}
+    }
+}
+
+// The frame walk needs rbp, which no admitted asm leaf reads (and a new leaf
+// would not assemble with a seed that predates it), so this maps a
+// four-byte read-only executable stub `mov rax, rbp; ret` called through
+// os_call_address_i64: rbp is unchanged across the call, so it returns the
+// calling function's frame pointer. Mapped once, by checked mode's start
+// and by `jet perf run`'s (PerfSamples.jet perf_samples_start); until then
+// every walk (alloc_check_frames) is empty.
+alloc_frames_start: fn() {
+    mapped := I64{0}
+    #Unsafe("the state page's stub word, written only here") {
+        mapped = os_load_i64(wrapping(alloc_root + I64{56}))
+    }
+    if (mapped != I64{0}) {
+        return
+    }
+    stub: alloc_map(I64{4096}, I64{4096})
+    #Unsafe("the fresh stub page is private until its address is stored; it becomes read+execute before any call") {
+        os_store_i64(stub, I64{3286796616})
+        if (os_syscall_i64(I64{10}, stub, I64{4096}, I64{5}, I64{0}, I64{0}, I64{0}) == I64{0}) {
+            os_store_i64(wrapping(alloc_root + I64{56}), stub)
+        }
     }
 }
 
@@ -2785,7 +2802,7 @@ alloc_check_prefix: fn(align: I64) -> I64 Never! {
 // thread's stacks.
 priv alloc_check_frames: fn(out: I64, count: I64) {
     frame := I64{0}
-    #Unsafe("the checked-mode stub only copies rbp to rax and returns; a missing stub leaves no chain") {
+    #Unsafe("the frame stub (alloc_frames_start) only copies rbp to rax and returns; a missing stub leaves no chain") {
         stub: os_load_i64(wrapping(alloc_root + I64{56}))
         if (stub != I64{0}) { frame = os_call_address_i64(stub, I64{0}) }
     }

@@ -1,0 +1,32 @@
+use time: core.time
+
+Counter: struct {
+    count: Int,
+}
+
+run: fn() {
+    counter: Shared{Counter{count: 1}}
+    { sender: sender, receiver: ready }: channel<Int>()
+    holder: task hold(counter, sender)
+    first: ready.receive() ?? 0
+    counter.count += first
+    print("total={(holder.join() ?? 0) + counter.count}")
+}
+
+// Sleeps, holds the lock while run's write waits for it, then sleeps again
+// so run's join waits for this task.
+hold: fn(counter: Shared<Counter>, sender: Sender<Int>) -[Time.Wait]> Int {
+    time.sleep(100ms)
+    held: locked(counter, sender)
+    time.sleep(100ms)
+    held
+}
+
+// Takes the lock, wakes run's receive, and keeps the lock 200ms.
+locked: fn(counter: Shared<Counter>, sender: Sender<Int>) -[Time.Wait]> Int {
+    guard: counter.guard_edit()
+    sender.send(1)
+    time.sleep(200ms)
+    guard.value.count += 1
+    guard.value.count
+}
