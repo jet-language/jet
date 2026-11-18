@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112280,
+    "rev": 112284,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -62097,8 +62097,8 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-30T15:51:10.176Z",
-      "updated": "2026-11-18T21:32:18.623Z",
-      "updatedBy": "owner",
+      "updated": "2026-11-18T21:36:46.869Z",
+      "updatedBy": "Main",
       "criteriaLastN": 6
     },
     {
@@ -87062,7 +87062,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-18T21:33:59.486Z",
+      "updated": "2026-11-18T21:36:45.972Z",
       "updatedBy": "Main",
       "criteriaLastN": 58
     },
@@ -164502,38 +164502,52 @@
       "id": "D-GUARD-LINT1",
       "cardId": "c06he0ee",
       "group": "syntax",
-      "title": "Single-case checks stay free; wider enum decisions require named cases or an #Unlisted fallback",
-      "situation": "An enum has named cases, such as Circle, Square, Line and Dot. Jet currently rejects even a one-case table with else, while an equivalent if/else-if chain runs. A fallback can hide a case added later, but listing every case makes small checks noisy. The owner wants single-case checks free and incomplete wider decisions rejected unless their fallback explicitly opts in. r3 (owner, 2026-11-18): the owner rejected the name #Rest (\"sounds like data at rest or sleeping, not the rest of them\") and asked for at least two better names. The rule is unchanged; A, B and C differ only in the marker's word, D keeps named-only coverage. No candidate collides with a registered marker (Compiler/Prelude/Markers.jet, dev 3c593a7f16).",
+      "title": "Single-case checks stay free; wider enum decisions require named cases or a marked fallback",
+      "situation": "An enum has named cases, such as Circle, Square, Line and Dot. Jet currently rejects even a one-case table with else, while an equivalent if/else-if chain runs. A fallback can hide a case added later, but listing every case makes small checks noisy. The owner wants single-case checks free and incomplete wider decisions rejected unless their fallback explicitly opts in. r4 (owner, 2026-11-18): the owner rejected #Unlisted, #Others and #AnyOther as poor names and asked for a much better set. The rule is unchanged; A to E differ only in the marker word, and F keeps named-only coverage. No candidate collides with a registered marker (Compiler/Prelude/Markers.jet).",
       "gist": "Should wider enum decisions require named cases or a marked fallback, and what should the marker be called?",
-      "lesson": "A single-case check asks about one enum case. A wider decision tests at least two distinct cases of the same enum value. Naming the remaining cases makes enum growth request review; #Unlisted deliberately accepts future cases too.",
+      "lesson": "A single-case check asks about one enum case. A wider decision tests at least two distinct cases of the same enum value. Naming the remaining cases makes enum growth request review; #CatchAll deliberately accepts future cases too.",
       "explainer": "One case stays easy. Two or more distinct cases require complete coverage, or a marked fallback; this is a hard error before execution, not a tidy check reserved for shipping.",
       "story": "Area handles circles and squares and deliberately returns zero for every other shape. Saving must handle each shape by name. Adding Triangle must stop saving, but may use area's explicitly marked fallback.",
       "inWild": "Odin documents #partial switch as an explicit escape from exhaustive enum checking. That is a precedent for explicit intent, not identical placement or semantics.",
-      "detail": "r3 renames the marker only. Each name sits where #Rest sat, after the final else arm's body, like the existing arm marker #Through. The name must say \"this fallback also takes cases nobody listed, including ones added later\":\n- #Unlisted says exactly that.\n- #Others is plain English, but else already means \"the others\", so it signals no future-case intent.\n- #AnyOther hints at future cases through \"any\", but runs two words together.\n\nr2 corrects r1's violation of BRIEF.md: 'tidy error, still runs' weakens the owner's default ERROR. The proposed error stops run, dev, test, check and build, cannot be downgraded by lint policy, and offers both repairs. D-NO-WARNINGS1 only categorizes lint checks; it does not require semantic errors to become tidy errors. Earlier answers proposing unrestricted else or shipping-only checks are superseded by the latest owner direction. A remains A; B retains named-only coverage; the old permissive option is removed because it does not implement the requested default.\n\nReplayed on gate-p275 with nice -n 19. The probe review-single.jet fails E0641 and names .Square(_) | .Line | .Dot. The probe e2.jet fails E0641 for multi-arm and or-pattern fallbacks. The probe e3.jet shows the coarse nested .Val(_) | .None repair. The probe review-chain.jet runs and prints 0.\n\nprobes/t1.jet runs, while check exits 1 with L0101, demonstrating why the tidy tier is not this contract. These observations establish the present discrepancy, not the proposed behavior. The author's e1.jet has main rather than run and cannot establish its claimed output.\n\nMarker audit: Compiler/Prelude/Markers.jet registers Through at the Arm site; Compiler/JetFoundation/Data/Syntax/Markers.jet delegates marker names to that registry. Compiler/JetParser/Source/Parser/Statements.jet:1098-1103 requires an arrow immediately after else, and :1125-1140 recognizes #Through after the arm body. Neither 'else #Unlisted ->' nor a post-body #Unlisted is accepted today: the isolated review-marker probes fail E0003.\n\nUse the existing #Name vocabulary and post-body Arm position: 'else -> { body } #Unlisted'. Register Rest with site Arm, legal only on a final else; generalize the existing arm-marker reader instead of adding a special else-head grammar. Regular chain tails use the same post-body attachment. Both parser paths and the registry fixture are required implementation work, not an existing feature.\n\nThe research report Docs/Research/2026-11-16-enum-branching-in-real-code.md uses heuristic scans, not a reproduced frequency measurement. It distinguishes short tests from longer fallbacks; Java/TypeScript/Go and Jet/Rust do not have the same distribution. This recommendation follows the owner's distinction, not a claim that single checks dominate every corpus. Odin's official overview, #partial-switch, documents an explicit exhaustive-check escape. Swift @unknown default is not a synonym for silently accepting unlisted known and future cases, so that comparison is removed.\n\nD-IFHOLE2's once-evaluated table subject stays intact. D-LANG-MIGRATE1 requires behavior-preserving registered edits. Chains are checked in place: no rewrite may cache a repeatedly read mutable subject merely to enable this check.",
+      "detail": "r4 renames the marker only. Each word sits after the final else arm's body, like the existing arm marker #Through. The word must tell a reader that this arm also takes cases nobody listed, including ones added later.\n- #CatchAll: the everyday word for an arm that takes everything.\n- #Open: the decision stays open to growth.\n- #Partial: Odin's word for the same escape.\n- #Fallback: the arm's role, but true of every else.\n- #Wildcard: the pattern word for matching anything.\n\nr2 corrects r1's violation of BRIEF.md: 'tidy error, still runs' weakens the owner's default ERROR. The proposed error stops run, dev, test, check and build, cannot be downgraded by lint policy, and offers both repairs. D-NO-WARNINGS1 only categorizes lint checks; it does not require semantic errors to become tidy errors. Earlier answers proposing unrestricted else or shipping-only checks are superseded by the latest owner direction. A remains A; B retains named-only coverage; the old permissive option is removed because it does not implement the requested default.\n\nReplayed on gate-p275 with nice -n 19. The probe review-single.jet fails E0641 and names .Square(_) | .Line | .Dot. The probe e2.jet fails E0641 for multi-arm and or-pattern fallbacks. The probe e3.jet shows the coarse nested .Val(_) | .None repair. The probe review-chain.jet runs and prints 0.\n\nprobes/t1.jet runs, while check exits 1 with L0101, demonstrating why the tidy tier is not this contract. These observations establish the present discrepancy, not the proposed behavior. The author's e1.jet has main rather than run and cannot establish its claimed output.\n\nMarker audit: Compiler/Prelude/Markers.jet registers Through at the Arm site; Compiler/JetFoundation/Data/Syntax/Markers.jet delegates marker names to that registry. Compiler/JetParser/Source/Parser/Statements.jet:1098-1103 requires an arrow immediately after else, and :1125-1140 recognizes #Through after the arm body. Neither 'else #CatchAll ->' nor a post-body #CatchAll is accepted today: the isolated review-marker probes fail E0003.\n\nUse the existing #Name vocabulary and post-body Arm position: 'else -> { body } #CatchAll'. Register CatchAll with site Arm, legal only on a final else; generalize the existing arm-marker reader instead of adding a special else-head grammar. Regular chain tails use the same post-body attachment. Both parser paths and the registry fixture are required implementation work, not an existing feature.\n\nThe research report Docs/Research/2026-11-16-enum-branching-in-real-code.md uses heuristic scans, not a reproduced frequency measurement. It distinguishes short tests from longer fallbacks; Java/TypeScript/Go and Jet/Rust do not have the same distribution. This recommendation follows the owner's distinction, not a claim that single checks dominate every corpus. Odin's official overview, #partial-switch, documents an explicit exhaustive-check escape. Swift @unknown default is not a synonym for silently accepting unlisted known and future cases, so that comparison is removed.\n\nD-IFHOLE2's once-evaluated table subject stays intact. D-LANG-MIGRATE1 requires behavior-preserving registered edits. Chains are checked in place: no rewrite may cache a repeatedly read mutable subject merely to enable this check.",
       "options": [
         {
           "key": "A",
-          "name": "Free single checks; fallback marked #Unlisted",
-          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Unlisted. An unmarked incomplete decision is a hard error, even when only one case remains. #Unlisted names what the arm takes: every case not listed above, including cases added later.",
-          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Unlisted or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Unlisted for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Unlisted lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
-          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Unlisted\n}"
+          "name": "Free single checks; fallback marked #CatchAll",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #CatchAll. An unmarked incomplete decision is a hard error, even when only one case remains. #CatchAll is the common word for an arm that takes everything, so a reader sees that every unlisted case lands here, now or later.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #CatchAll or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #CatchAll for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #CatchAll lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #CatchAll\n}"
         },
         {
           "key": "B",
-          "name": "The same rule; fallback marked #Others",
-          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Others. An unmarked incomplete decision is a hard error, even when only one case remains. #Others names what the arm takes: every case not listed above, including cases added later. Plain English, but it restates else and does not say future cases are included.",
-          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Others or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Others for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Others lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
-          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Others\n}"
+          "name": "The same rule; fallback marked #Open",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Open. An unmarked incomplete decision is a hard error, even when only one case remains. #Open names the trade itself: the decision stays open to cases added later, instead of closed against them.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Open or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Open for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Open lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Open\n}"
         },
         {
           "key": "C",
-          "name": "The same rule; fallback marked #AnyOther",
-          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #AnyOther. An unmarked incomplete decision is a hard error, even when only one case remains. #AnyOther names what the arm takes: every case not listed above, including cases added later. Hints at future cases through \"any\"; two words run together.",
-          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #AnyOther or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #AnyOther for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #AnyOther lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
-          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #AnyOther\n}"
+          "name": "The same rule; fallback marked #Partial",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Partial. An unmarked incomplete decision is a hard error, even when only one case remains. #Partial follows Odin, whose #partial switch is the same deliberate escape from listing every case.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Partial or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Partial for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Partial lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Partial\n}"
         },
         {
           "key": "D",
+          "name": "The same rule; fallback marked #Fallback",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Fallback. An unmarked incomplete decision is a hard error, even when only one case remains. #Fallback names the arm by its role, in a word every programmer knows.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Fallback or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Fallback for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Fallback lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Fallback\n}"
+        },
+        {
+          "key": "E",
+          "name": "The same rule; fallback marked #Wildcard",
+          "detail": "One distinct case needs no marker. A decision testing two or more distinct cases must cover the enum, or mark its final else with #Wildcard. An unmarked incomplete decision is a hard error, even when only one case remains. #Wildcard borrows the pattern-matching word for a pattern that matches anything, like _.",
+          "technical": "Counting: count distinct discriminants, not arm count. '.A | .B' tests two cases; '.A(0) | .A(1)' tests one. Guards do not make partially covered payloads complete. Evaluate nested coverage at each enum projection actually tested: .Val(.A) and .Val(.B) test two inner cases, not merely one outer Val.\n\nUnmentioned deeper payloads remain wildcards; this is a finite pattern-coverage analysis, not infinite expansion of recursive data. More than one tested case at a projection requires exhaustive residual coverage there, including unmatched payloads and failed guards. Explicit residual patterns retain their original ordered position; repeated discriminants with wildcard payloads cover residual guarded values without re-evaluating guards.\n\nThe rule applies to subject tables and a single syntactic if/else-if chain repeatedly testing the same resolved local, parameter or field place. Include chains with no final else: a wider incomplete chain still errors; offer an explicit final else with #Wildcard or explicit residual arms. Independent if statements and early-return guards are never grouped by proximity.\n\nTests of different subjects are not one decision. Compare resolved places, not identifier text. Mutable places still get the syntactic audit, but its guarantee is case visibility, not that intervening effects cannot change the value. Preserve every read, guard, mutation and evaluation order; never silently turn such a chain into a once-read table.\n\nSingle-case checks may omit else in statement position; value-producing forms keep ordinary result completeness rules. A plain else after two tested cases errors even if it covers exactly one case; this avoids changing policy as the enum grows. Unreachable else remains an ordinary reachability issue.\n\nBool, Int, ranges and non-enum subjects do not acquire enum rules. Imported closed enums use their visible case set. Where a boundary deliberately withholds cases, a wider decision must use #Wildcard for that unnameable remainder; do not fabricate case names or claim an exhaustive named repair exists.\n\nDiagnostics show the residual cases and both choices. For closed, visible enums, a coverage trie derives a named residual pattern at every tested enum projection, keeping nested distinctions rather than .Val(_) shortcuts that hide growth. Patterns not expressible as a compact complement are safely covered by repeating the relevant full discriminant/payload wildcard AFTER the previous ordered arms, preserving fallthrough.\n\nThe marker repair changes only the final else attachment and accepts current plus future remainder. Both are explicit selectable Safe repairs: current inputs, effects and evaluation order are unchanged. Default jet fix chooses naming, never silently chooses future catch-all intent. For chains with no else, adding an empty statement fallback preserves current behavior; do not invent a result for value expressions. Where no behavior-preserving repair exists, present a manual diagnostic, not a fake Safe edit.\n\nRest is a registered zero-argument Arm marker, final else only, after a braced body. It neither suppresses other errors nor creates wildcard-pattern aliases. Reject it on ordinary named arms, declarations, a non-enum fallback or a single-case fallback where no opt-in is needed. Check identical semantics in every execution tier.\n\nHover on #Wildcard lists the cases it covers today, so the deliberate fallback stays reviewable as the enum grows.",
+          "code": "// PROPOSED: Shape has Circle, Square, Line and Dot.\nif shape == {\n    .Circle(r) -> 3 * r * r\n    .Square(s) -> s * s\n    else -> { 0 } #Wildcard\n}"
+        },
+        {
+          "key": "F",
           "name": "Always name every case",
           "detail": "Keep the table's strict named-case rule and extend it consistently to wider chains. This exposes future additions without a marker escape, but even a one-case table must list its remainder.",
           "technical": "Strongest benefit: every exhaustive table is reviewed after enum growth and there is no new marker. Single-case ordinary if checks remain ordinary control flow, but tables retain today's E0641 restriction. This does not meet the owner's requested free one-case table and deliberate inclusive fallback.",
@@ -164549,7 +164563,7 @@
       ],
       "rec": "A",
       "recommendation": {
-        "why": "Same rule as r2. #Unlisted is the only name that says what the marked arm deliberately takes: every case not listed, including future ones. It cannot be read as data at rest or idleness.",
+        "why": "Free single checks, error by default, and the marker word most programmers already read as \"takes everything\", which covers cases added later. The other words each lose something: overloaded, about the decision rather than the arm, true of every else, or jargon.",
         "gains": [
           "Single-case checks stay free; alternatives cannot bypass the wider-case rule.",
           "Named cases force review; one registered marker expresses deliberate future fallback."
@@ -164560,34 +164574,43 @@
             "mitigation": "One selectable local edit adds it; named repair is the default. No repeated guards or subject evaluation are introduced."
           },
           {
-            "loss": "#Unlisted gives up future-case review at that site, by design.",
-            "mitigation": "That is the owner's requested meaning. jet fix defaults to naming the cases, and hover on #Unlisted lists every case it covers today."
+            "loss": "#CatchAll gives up future-case review at that site, by design.",
+            "mitigation": "That is the owner's requested meaning. jet fix defaults to naming the cases, and hover on #CatchAll lists every case it covers today."
           }
         ],
         "whyNot": [
           {
             "key": "B",
-            "reason": "#Others restates else; a reader cannot tell the marker opts into future cases."
+            "reason": "#Open is short but overloaded; readers must learn this meaning."
           },
           {
             "key": "C",
-            "reason": "#AnyOther carries the meaning less directly and reads as two words run together."
+            "reason": "#Partial describes the decision, not the arm, and reads like unfinished code."
           },
           {
             "key": "D",
-            "reason": "Strong audit guarantee, but cannot express the owner's deliberate inclusive fallback and keeps noisy one-case tables."
+            "reason": "#Fallback fits every else, so it does not signal future cases."
+          },
+          {
+            "key": "E",
+            "reason": "#Wildcard is jargon and does not stress future cases."
+          },
+          {
+            "key": "F",
+            "reason": "Cannot express the requested deliberate fallback."
           }
         ],
-        "tradeoff": "#Unlisted deliberately forgoes future-case review at that site; it is never inserted without choosing that intent."
+        "tradeoff": "#CatchAll deliberately forgoes future-case review at that site; it is never inserted without choosing that intent.",
+        "rec": "A"
       },
       "hybrid": null,
       "ballotMode": "full",
       "shortAuthorizedBy": null,
       "ballotProcessVersion": 5,
       "reviewPasses": {
-        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. Verdict: ready to post as a proposed contract with a hard error, post-body #Unlisted and named-case default repair, not an implemented feature. r3 (Main, 2026-11-18): rename only, answering owner question q6eygb5d; the names were checked against Markers.jet for collisions."
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: GPT. Fresh agent: BallotReview. It found the contract ready to post; r3 and r4 (Main, 2026-11-18) rename the marker only, answering owner questions q6eygb5d and q11zs39j, with names checked against Markers.jet."
       },
-      "checkInstructions": "Implementation acceptance, not run in this review. Registry and parser fixtures cover #Unlisted on tables and chains. The error is hard in every command. Fixtures cover alternatives, guards, nested and imported coverage, one-remaining-case and missing-else chains, and mutable reads. Selectable Safe edits preserve output and effects. No benchmark claim is made.",
+      "checkInstructions": "Implementation acceptance, not run in this review. Registry and parser fixtures cover #CatchAll on tables and chains. The error is hard in every command. Fixtures cover alternatives, guards, nested and imported coverage, one-remaining-case and missing-else chains, and mutable reads. Selectable Safe edits preserve output and effects. No benchmark claim is made.",
       "surface": {
         "gist": "Should wider enum decisions require named cases or a marked fallback, and what should the marker be called?",
         "lesson": "An enum has named cases. A one-case check stays free. Testing two or more distinct cases requires complete coverage; a marked fallback deliberately accepts future cases too.",
@@ -164605,53 +164628,86 @@
         "options": [
           {
             "key": "A",
-            "name": "#Unlisted fallback",
-            "gist": "A wider incomplete decision is a hard error before execution, not a tidy check.",
+            "name": "#CatchAll fallback",
+            "gist": "Wider incomplete decisions are a hard error before execution.",
             "gains": [
               "Names force review after enum growth.",
-              "#Unlisted deliberately accepts future cases."
+              "The everyday word for an arm that takes everything."
             ],
             "losses": [
-              "Inclusive wider fallbacks need one marker; a selectable edit supplies it."
+              "A selectable edit adds the marker.",
+              "\"Catch\" may recall exception handling."
             ],
             "proposed": {
-              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Unlisted"
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #CatchAll"
             }
           },
           {
             "key": "B",
-            "name": "#Others fallback",
-            "gist": "A wider incomplete decision is a hard error before execution, not a tidy check.",
+            "name": "#Open fallback",
+            "gist": "Wider incomplete decisions are a hard error before execution.",
             "gains": [
               "Names force review after enum growth.",
-              "#Others deliberately accepts future cases."
+              "One short word naming the trade."
             ],
             "losses": [
-              "Inclusive wider fallbacks need one marker; a selectable edit supplies it.",
-              "Restates else; does not signal future cases."
+              "A selectable edit adds the marker.",
+              "\"Open\" already means files and types."
             ],
             "proposed": {
-              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Others"
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Open"
             }
           },
           {
             "key": "C",
-            "name": "#AnyOther fallback",
-            "gist": "A wider incomplete decision is a hard error before execution, not a tidy check.",
+            "name": "#Partial fallback",
+            "gist": "Wider incomplete decisions are a hard error before execution.",
             "gains": [
               "Names force review after enum growth.",
-              "#AnyOther deliberately accepts future cases."
+              "Odin uses it for this escape."
             ],
             "losses": [
-              "Inclusive wider fallbacks need one marker; a selectable edit supplies it.",
-              "Less direct; two words run together."
+              "A selectable edit adds the marker.",
+              "Describes the decision, not the arm."
             ],
             "proposed": {
-              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #AnyOther"
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Partial"
             }
           },
           {
             "key": "D",
+            "name": "#Fallback fallback",
+            "gist": "Wider incomplete decisions are a hard error before execution.",
+            "gains": [
+              "Names force review after enum growth.",
+              "Plain and familiar."
+            ],
+            "losses": [
+              "A selectable edit adds the marker.",
+              "Every else is a fallback; new cases go unsaid."
+            ],
+            "proposed": {
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Fallback"
+            }
+          },
+          {
+            "key": "E",
+            "name": "#Wildcard fallback",
+            "gist": "Wider incomplete decisions are a hard error before execution.",
+            "gains": [
+              "Names force review after enum growth.",
+              "Precise for pattern-matching readers."
+            ],
+            "losses": [
+              "A selectable edit adds the marker.",
+              "Jargon for beginners."
+            ],
+            "proposed": {
+              "code": "// PROPOSED post-body marker; registration/parser work required.\nelse -> { 0 } #Wildcard"
+            }
+          },
+          {
+            "key": "F",
             "name": "Always name every case",
             "gist": "Keep strict named tables; no inclusive marker escape.",
             "gains": [
@@ -164667,31 +164723,39 @@
         ],
         "recommendation": {
           "rec": "A",
-          "why": "Free single checks, error by default, and the one marker name that says it takes every case not listed, now or later.",
+          "why": "Free single checks, error by default, and the marker word most programmers already read as \"takes everything\", which covers cases added later.",
           "gains": [
             "Same rule for tables and wider chains; no adjacency guesses."
           ],
           "losses": [
             {
-              "loss": "#Unlisted gives up future-case review at that site, by design.",
-              "mitigation": "Naming cases stays the default repair; #Unlisted appears only where a writer chose it, and hover lists the cases it covers."
+              "loss": "#CatchAll gives up future-case review at that site, by design.",
+              "mitigation": "Naming cases stays the default repair; #CatchAll appears only where a writer chose it, and hover lists the cases it covers."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Restates else."
+              "reason": "#Open is short but overloaded; readers must learn this meaning."
             },
             {
               "key": "C",
-              "reason": "Less direct."
+              "reason": "#Partial describes the decision, not the arm, and reads like unfinished code."
             },
             {
               "key": "D",
+              "reason": "#Fallback fits every else, so it does not signal future cases."
+            },
+            {
+              "key": "E",
+              "reason": "#Wildcard is jargon and does not stress future cases."
+            },
+            {
+              "key": "F",
               "reason": "Cannot express the requested deliberate fallback."
             }
           ],
-          "tradeoff": "Named cases for review, #Unlisted for a deliberate inclusive fallback."
+          "tradeoff": "Named cases for review, #CatchAll for a deliberate inclusive fallback."
         }
       },
       "draft": false,
@@ -164699,10 +164763,10 @@
       "created": "2026-11-13T06:10:18.821Z",
       "designAway": [
         "Never downgrade the required default error to a lint.",
-        "Reuse the registered marker mechanism and post-body Arm position; do not pretend Rest already parses.",
+        "Reuse the registered marker mechanism and post-body Arm position; do not pretend CatchAll already parses.",
         "Count discriminants and preserve nested residual coverage.",
         "Check chains without changing repeated reads or grouping separate guards.",
-        "Hover on #Unlisted lists the cases it covers; jet fix defaults to naming them."
+        "Hover on #CatchAll lists the cases it covers; jet fix defaults to naming them."
       ]
     },
     {
@@ -174313,7 +174377,7 @@
       "cardId": "c0nwrfck",
       "group": "tooling",
       "title": "The debugger and profiler window is Canvas, grown to RemedyBG's panels and one timeline",
-      "situation": "The best native debuggers show source, stack, locals, watches and threads at once, and the best profilers draw a timeline you can zoom. Jet already has one graphical surface, Canvas, opened with jet dev --canvas in a browser. Its debugger view can step, show locals, evaluate named watches, print and list up to 32 stack frames. It has no task list, no replay controls and no profile timeline. You decide where the full debugger and profiler window lives. We recommend growing Canvas, so Jet keeps one graphical tool. The other paths are a separate native window or a terminal interface.",
+      "situation": "The best native debuggers show source, stack, locals, watches and threads at once, and the best profilers draw a timeline you can zoom. Jet already has one graphical surface, Canvas, opened with jet dev --canvas in a browser. Its debugger view can step, show locals, evaluate named watches, print and list up to 32 stack frames. It has no task list, no replay controls and no profile timeline. You decide where the full debugger and profiler window lives. We recommend growing Canvas, so Jet keeps one graphical tool. The other paths are a separate native window or a terminal interface. r2 (owner, 2026-11-18): Canvas is meant to run natively or in a browser, whichever the user prefers, so option A now includes both hosts.",
       "gist": "Should the full debugger and profiler window be Canvas, grown, rather than a second graphical tool?",
       "lesson": "RemedyBG and the RAD Debugger show every debugger panel at once in a fast native window. Tracy and Superluminal draw a zoomable timeline of every thread. Jet's Canvas already shares one live session between its editor, preview and debugger views, so a debugger panel there sees the same source and edits.",
       "explainer": "Beginner path: run `jet dev --canvas app.jet`. The Debug view shows source with breakpoints, the call stack, locals, watches and the task list together. The Profile view opens a trace and draws samples, zones, waits and I/O on one zoomable timeline. A crash dump or a recording opens in the Debug view.\n\nExpert path: the views read the existing Canvas session and debug documents, extended with watches, tasks, frames and replay positions. The Profile view reads the canonical trace. The console and DAP stay for terminals and other editors. Canvas sends source edits through its checked transactions, so a fix made while stopped goes through the same path as any edit.",
@@ -174324,7 +174388,7 @@
         {
           "key": "A",
           "name": "Grow Canvas",
-          "detail": "Canvas's Debug view gains every panel at once: source, stack, locals, watches, tasks, and replay controls. A Profile view draws the trace timeline. Dumps, recordings and traces open there. No new command.",
+          "detail": "Canvas's Debug view gains every panel at once: source, stack, locals, watches, tasks, and replay controls. A Profile view draws the trace timeline. Dumps, recordings and traces open there. No new command. Canvas runs in a native window or in a browser, whichever the user prefers; both hosts show the same views from one session.",
           "technical": "Extends the Canvas debug document with tasks, frames and replay positions, and raises its watch and stack bounds or pages them. Adds a profile document over the canonical trace, which the server reduces to the zoom level shown, so a large trace never ships whole to the browser. The console and DAP remain.",
           "code": "$ jet dev --canvas game.jet\n# Debug view: source | stack | locals | watches | tasks\n# Profile view: open game.jettrace, zoom the timeline"
         },
@@ -174365,8 +174429,8 @@
         ],
         "losses": [
           {
-            "loss": "The window runs in a browser, not a native window.",
-            "mitigation": "The console and DAP need no browser; a native Canvas client could be added later on the same documents."
+            "loss": "Canvas needs two hosts, a native window and a browser page, that must show the same views.",
+            "mitigation": "Both hosts render the same Canvas documents from one session, so a view is written once."
           },
           {
             "loss": "Each step is an HTTP round trip, slower than a native debugger's in-process redraw.",
@@ -174380,7 +174444,7 @@
         "whyNot": [
           {
             "key": "B",
-            "reason": "Two graphical tools would show the same session in two ways and drift apart."
+            "reason": "A second native tool would drift from Canvas; Canvas's own native host already gives a native window."
           },
           {
             "key": "C",
@@ -174405,11 +174469,11 @@
             "gist": "Every debugger panel and a profile timeline inside jet dev --canvas.",
             "gains": [
               "One graphical tool for edit, debug and profile.",
-              "No new command."
+              "Native window or browser, as the user prefers."
             ],
             "losses": [
-              "Runs in a browser.",
-              "Each step is a local web request."
+              "Two hosts must show the same views.",
+              "A browser step is a local web request."
             ],
             "proposed": {
               "code": "$ jet dev --canvas game.jet\n# Debug: source | stack | locals | watches | tasks\n# Profile: open game.jettrace"
@@ -174453,21 +174517,21 @@
           ],
           "losses": [
             {
-              "loss": "It runs in a browser.",
-              "mitigation": "The console and DAP need no browser."
+              "loss": "Two hosts must show the same views.",
+              "mitigation": "Both render the same Canvas documents."
             }
           ],
           "whyNot": [
             {
               "key": "B",
-              "reason": "Two graphical tools drift apart."
+              "reason": "Canvas has its own native host."
             },
             {
               "key": "C",
               "reason": "Timelines need pixels."
             }
           ],
-          "tradeoff": "A browser window, for one graphical tool."
+          "tradeoff": "One graphical tool, native or in a browser."
         },
         "trio": {
           "current": {
@@ -177869,9 +177933,11 @@
       "by": "owner",
       "kind": "question",
       "text": "The goal for canvas is to be able to run it natively or on a browser whichever the user prefers. So having canvas per the recommended option is fine",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-18T21:29:42.380Z"
+      "status": "answered",
+      "answer": "Updated to r2. Option A (recommended) now says it outright: Canvas runs in a native window or in a browser, whichever the user prefers, and both show the same views from one session. The browser-only loss is replaced by the real cost: two hosts must render the same Canvas documents. Why not B now reads: Canvas has its own native host, so a second native tool would only drift. Ready for your vote.",
+      "created": "2026-11-18T21:29:42.380Z",
+      "answeredAt": "2026-11-18",
+      "answeredBy": "Main"
     },
     {
       "id": "q11zs39j",
@@ -177880,9 +177946,11 @@
       "by": "owner",
       "kind": "question",
       "text": "The offered names are crap. Give me a much better set of options",
-      "status": "open",
-      "answer": "",
-      "created": "2026-11-18T21:32:18.623Z"
+      "status": "answered",
+      "answer": "Revised to r4 with five new words; the rule is unchanged. The marker goes after the final else arm, e.g. `else -> { 0 } #CatchAll`. A, recommended: #CatchAll, the everyday word for an arm that takes everything, so a reader sees that unlisted and future cases land there (it may recall exception catching, which Jet does not have). B: #Open, the decision stays open to cases added later (short, but overloaded). C: #Partial, Odin's word for this exact escape (it describes the decision rather than the arm). D: #Fallback, plain (but every else is a fallback, so it says nothing about future cases). E: #Wildcard, the pattern-matching word (jargon). F: name every case, no marker. None collides with a registered marker.",
+      "created": "2026-11-18T21:32:18.623Z",
+      "answeredAt": "2026-11-18",
+      "answeredBy": "Main"
     }
   ],
   "ideas": [
@@ -178715,6 +178783,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T21:36:46.869Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q11zs39j",
+      "note": ""
+    },
+    {
+      "at": "2026-11-18T21:36:45.972Z",
+      "by": "Main",
+      "action": "question.answer",
+      "ref": "q0a16d25",
+      "note": ""
+    },
+    {
+      "at": "2026-11-18T21:36:36.025Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-GUARD-LINT1",
+      "note": ""
+    },
+    {
+      "at": "2026-11-18T21:36:34.626Z",
+      "by": "Main",
+      "action": "decision.update",
+      "ref": "D-DBG-UI1",
+      "note": ""
+    },
     {
       "at": "2026-11-18T21:33:59.486Z",
       "by": "Main",
