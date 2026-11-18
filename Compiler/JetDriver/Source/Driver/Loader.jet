@@ -2613,12 +2613,11 @@ jet_driver_find_module_import_target: fn(
 ) -> Int? {
     source_package_index: jet_driver_find_package_by_root(packages, source_unit.root_index) ?? return None
     source_package := packages[source_package_index]
-    path_parts: module_name.split("::").to_list()
-    if path_parts.len() == 0 || path_parts[0].len() == 0 {
+    if module_name.len() == 0 {
         diagnostics.push(jet_driver_diagnostic("E0603", span, "the module import has no package or module name", "module references resolve through one direct package binding or local module", "name a local module or a declared direct dependency"))
         return None
     }
-    dependency: jet_driver_find_dependency(source_package, path_parts[0])
+    dependency: jet_driver_find_dependency(source_package, module_name)
     if dependency == .Val(selected_dependency) {
         if selected_dependency.target_root_index < 0 {
             // A version dependency resolves only to the toolchain's
@@ -2641,28 +2640,12 @@ jet_driver_find_module_import_target: fn(
                 return None
             }
         }
-        module_path := ""
-        pascal_path := ""
-        loop path_index in 1..<path_parts.len() {
-            part: path_parts[path_index]
-            if part.len() == 0 || part == "." || part == ".." || part.contains("/") || part.contains("\\") {
-                diagnostics.push(jet_driver_diagnostic("E0602", span, "the module import contains an unsafe package-relative component", "module resolution cannot traverse outside a declared dependency root", "use non-empty module names without `.` or `..` components"))
-                return None
-            }
-            if module_path.len() > 0 -> module_path = "{module_path}/{part}" else {
-                module_path = part
-            }
-            pascal: jet_driver_pascal_segment(part)
-            if pascal_path.len() > 0 -> pascal_path = "{pascal_path}/{pascal}" else {
-                pascal_path = pascal
-            }
-        }
-        candidate_paths: if module_path.len() > 0 -> [String]{"{module_path}.jet", "{pascal_path}.jet", "{module_path}/run.jet", "{pascal_path}/run.jet"} else -> [String]{"{selected_dependency.name}.jet", "{selected_dependency.name}/run.jet"}
+        candidate_paths: [String]{"{selected_dependency.name}.jet", "{selected_dependency.name}/run.jet"}
         // Only this lookup's own problems stop the fallbacks; earlier imports' errors don't.
         lookup_start: diagnostics.len()
         target := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, candidate_paths, diagnostics, span)
         if target != None -> return target
-        if module_path.len() == 0 && diagnostics.len() == lookup_start {
+        if diagnostics.len() == lookup_start {
             root_entry := jet_driver_find_source_path(source_units, selected_dependency.target_root_index, [String]{"run.jet"}, diagnostics, span)
             if root_entry != None -> return root_entry
             // A dependency package is one namespace; any member
@@ -2680,29 +2663,18 @@ jet_driver_find_module_import_target: fn(
         diagnostics.push(jet_driver_diagnostic("E0603", selected_version.span, "a local module import cannot select a package version", "inline versions bind only direct package dependencies", "remove the version selector or import a declared package dependency"))
         return None
     }
-    module_path := ""
-    pascal_path := ""
-    loop path_index in 0..<path_parts.len() {
-        part: path_parts[path_index]
-        if part.len() == 0 || part == "." || part == ".." || part.contains("/") || part.contains("\\") {
-            diagnostics.push(jet_driver_diagnostic("E0602", span, "the local module path contains an unsafe component", "module resolution stays within the current package root", "use module names without `.` or `..` path components"))
-            return None
-        }
-        if module_path.len() > 0 -> module_path = "{module_path}/{part}" else -> module_path = part
-        pascal: jet_driver_pascal_segment(part)
-        if pascal_path.len() > 0 -> pascal_path = "{pascal_path}/{pascal}" else {
-            pascal_path = pascal
-        }
+    if module_name == "." || module_name == ".." || module_name.contains("/") || module_name.contains("\\") {
+        diagnostics.push(jet_driver_diagnostic("E0602", span, "the local module path contains an unsafe component", "module resolution stays within the current package root", "use module names without `.` or `..` path components"))
+        return None
     }
-    candidate_paths: [String]{"{module_path}.jet", "{pascal_path}.jet", "{module_path}/run.jet", "{pascal_path}/run.jet"}
+    pascal_path: jet_driver_pascal_segment(module_name)
+    candidate_paths: [String]{"{module_name}.jet", "{pascal_path}.jet", "{module_name}/run.jet", "{pascal_path}/run.jet"}
     diagnostics_before: diagnostics.len()
     target := jet_driver_find_source_path(source_units, source_unit.root_index, candidate_paths, diagnostics, span)
     if target != None -> return target
     if diagnostics.len() != diagnostics_before -> return None
-    if path_parts.len() == 1 {
-        target = jet_driver_find_module_target(index, source_units, source_unit.package_identity, module_name, span, diagnostics)
-        if target != None -> return target
-    }
+    target = jet_driver_find_module_target(index, source_units, source_unit.package_identity, module_name, span, diagnostics)
+    if target != None -> return target
     diagnostics.push(jet_driver_diagnostic("E0603", span, "the imported module is not present in the package source snapshot", "module lookup stays within the selected package or one explicit direct dependency", "provide the module in the current package or declare its dependency"))
     None
 }

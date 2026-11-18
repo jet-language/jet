@@ -390,7 +390,7 @@
     if (/Map|Dict/.test(t)) return TYPE_COLOR_MAP.Map;
     if (/Enum|Variant/.test(t)) return TYPE_COLOR_MAP.Enum;
     if (/Fn|fn\(|=>/.test(t)) return TYPE_COLOR_MAP.Fn;
-    if (/^[A-Z][A-Za-z0-9_]*(::[A-Z][A-Za-z0-9_]*)*$/.test(t)) return TYPE_COLOR_MAP.Struct;
+    if (/^[A-Z][A-Za-z0-9_]*(\.[A-Z][A-Za-z0-9_]*)*$/.test(t)) return TYPE_COLOR_MAP.Struct;
     return TYPE_COLOR_MAP.unknown;
   }
 
