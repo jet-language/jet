@@ -153,6 +153,22 @@ period=10007` or `counter l1d_misses unavailable errno=2` per counter and
 adds each count to a line (`line 30 samples=40 inclusive=40 allocations=0
 l1d_misses=1600000`).
 
+`jet perf run` records each join's wait too. When a task spawns another, the
+runtime writes the new task's id with the Jet call sites of the spawning
+stack. When a join finds its task not yet done, the runtime writes the joining
+task, the awaited task and the wait's start and end on the monotonic clock.
+Each wait becomes a `task_join` row of the trace's `spans`. Its `task_id` is
+the joining task and its `awaited_task_id` the awaited one, both by the ids
+their `tasks` rows carry. Its `spawn_line` is the line of the checked source
+that spawned the awaited task, from the innermost call site on such a line,
+or null when no call site was in that source. Its start and end are measured
+from the session's start, on the same clock as the task and log spans, so the
+wait lines up with them with no manual alignment. A join of a task no
+observation saw has no task id to name and records no row. `jet perf view`
+prints `joins count=1 · task 1 waited 400212345ns for task 2 spawned at
+main.jet:4`. Its timeline shows each wait as `[start..end] join task 1 awaits
+task 2 spawned at main.jet:4`, beside the task spans.
+
 A `jet perf run` or `jet perf test` trace records one receipt section, `perf`
 (type `JetPerfReceipt`). Its `build` names the build the program compiled
 under: `profile`, the profile the run's words select (null for none), and

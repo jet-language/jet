@@ -1,0 +1,12 @@
+use time: core.time
+
+run: fn() {
+    worker: task { slow() }
+    print("joined={worker.join() ?? 0}")
+}
+
+// The awaited task's work: long enough that the join waits for it.
+slow: fn() -[Time.Wait]> Int {
+    time.sleep(400ms)
+    42
+}

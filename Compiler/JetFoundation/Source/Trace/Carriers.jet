@@ -250,12 +250,19 @@ TraceNative: struct {
     task_id: U64?,
 }
 
+// A span row: a task's observed span (`task_observed`), a closed core.log
+// span (`log_span`) or a join's wait (`task_join`), whose `task_id` is the
+// joining task and `awaited_task_id` the task it waits for, which the line
+// `spawn_line` of `symbol.path` spawned (null when the spawning stack held
+// no line of it). Only a join has either.
 TraceSpan: struct {
+    awaited_task_id: U64?,
     clock: String,
     end_ns: U64?,
     kind: String,
     parent_task_id: U64?,
     reason: String,
+    spawn_line: U64?,
     start_ns: U64?,
     status: String,
     symbol: JetSymbolRef,
@@ -441,7 +448,7 @@ trace_native_to_json: fn(value: TraceNative) -> CanonicalJSON JetTraceError! {
 }
 
 trace_span_to_json: fn(value: TraceSpan) -> CanonicalJSON JetTraceError! {
-    jettrace_object([CanonicalJSONField]{jettrace_field("clock", .String(value.clock.copy())), jettrace_field("end_ns", jettrace_optional_uint(value.end_ns)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("parent_task_id", jettrace_optional_uint(value.parent_task_id)), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("start_ns", jettrace_optional_uint(value.start_ns)), jettrace_field("status", .String(value.status.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("task_id", jettrace_optional_uint(value.task_id))})
+    jettrace_object([CanonicalJSONField]{jettrace_field("awaited_task_id", jettrace_optional_uint(value.awaited_task_id)), jettrace_field("clock", .String(value.clock.copy())), jettrace_field("end_ns", jettrace_optional_uint(value.end_ns)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("parent_task_id", jettrace_optional_uint(value.parent_task_id)), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("spawn_line", jettrace_optional_uint(value.spawn_line)), jettrace_field("start_ns", jettrace_optional_uint(value.start_ns)), jettrace_field("status", .String(value.status.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("task_id", jettrace_optional_uint(value.task_id))})
 }
 
 trace_browser_to_json: fn(value: TraceBrowser) -> CanonicalJSON JetTraceError! {

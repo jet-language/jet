@@ -205,6 +205,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
         jet_cli_perf_native_summary(trace),
         jet_cli_perf_span_summary(trace),
         jet_cli_perf_log_span_summary(trace),
+        jet_cli_perf_join_summary(trace),
     }
     loop summary in summaries {
         if summary == .Val(line) -> out = "{out}{line}\n"
@@ -744,6 +745,37 @@ jet_cli_perf_log_span_summary: fn(trace: CanonicalJSON) -> String? Never! {
     Val("log spans count={count} window={start}..{end}ns · {symbol}")
 }
 
+// The joins' waits (`task_join` rows): how many, and the first: the task
+// that waited, how long, and the task it awaited.
+jet_cli_perf_join_summary: fn(trace: CanonicalJSON) -> String? Never! {
+    items: jet_cli_perf_rows(trace, "spans") ?? return None
+    count := 0
+    first := ""
+    loop item in items {
+        if (jet_cli_perf_member_text(item, "kind") ?? "") != "task_join" -> next
+        if count == 0 {
+            start: jet_cli_perf_member_number(item, "start_ns") ?? return None
+            end: jet_cli_perf_member_number(item, "end_ns") ?? return None
+            first = "task {jet_cli_perf_member_integer(item, "task_id") ?? "?"} waited {end - start}ns for {jet_cli_perf_join_awaited(item)}"
+        }
+        count += 1
+    }
+    if count == 0 -> return None
+    Val("joins count={count} · {first}")
+}
+
+// The task a join row `item` awaits and, when the trace knows it, the line
+// that spawned it: `task 2 spawned at main.jet:4`.
+jet_cli_perf_join_awaited: fn(item: CanonicalJSON) -> String Never! {
+    awaited: "task {jet_cli_perf_member_integer(item, "awaited_task_id") ?? "?"}"
+    line: jet_cli_perf_member_integer(item, "spawn_line") ?? return awaited
+    fields: jettrace_object_view(item, "jettrace row") ?? return awaited
+    at: jet_cli_perf_key(fields, "symbol") ?? return awaited
+    symbol: jettrace_object_view(fields[at].value, "symbol") ?? return awaited
+    path: jet_cli_perf_field_text(symbol, "path") ?? return awaited
+    "{awaited} spawned at {path}:{line}"
+}
+
 // Whether the object `value` has `key` set to null.
 jet_cli_perf_member_is_null: fn(value: CanonicalJSON, key: String) -> Bool Never! {
     fields: jettrace_object_view(value, "jettrace row") ?? return false
@@ -753,7 +785,7 @@ jet_cli_perf_member_is_null: fn(value: CanonicalJSON, key: String) -> Bool Never
 
 // Whether the trace holds any typed evidence a summary reads.
 jet_cli_perf_has_evidence: fn(trace: CanonicalJSON) -> Bool Never! {
-    jet_cli_perf_first_sample(trace) != None || jet_cli_perf_profile_summary(trace) != None || jet_cli_perf_allocation_summary(trace) != None || jet_cli_perf_browser_summary(trace) != None || jet_cli_perf_task_summary(trace) != None || jet_cli_perf_lock_summary(trace) != None || jet_cli_perf_io_summary(trace) != None || jet_cli_perf_native_summary(trace) != None || jet_cli_perf_span_summary(trace) != None || jet_cli_perf_log_span_summary(trace) != None
+    jet_cli_perf_first_sample(trace) != None || jet_cli_perf_profile_summary(trace) != None || jet_cli_perf_allocation_summary(trace) != None || jet_cli_perf_browser_summary(trace) != None || jet_cli_perf_task_summary(trace) != None || jet_cli_perf_lock_summary(trace) != None || jet_cli_perf_io_summary(trace) != None || jet_cli_perf_native_summary(trace) != None || jet_cli_perf_span_summary(trace) != None || jet_cli_perf_log_span_summary(trace) != None || jet_cli_perf_join_summary(trace) != None
 }
 
 // A bar of `count` marks, 1 to 40 wide.
@@ -994,12 +1026,23 @@ jet_cli_perf_timeline: fn(trace: CanonicalJSON) -> [String] Never! {
         }
     }
     if jet_cli_perf_rows(trace, "spans") == .Ok(items) {
-        limit: if items.len() > 8 -> 8 else -> items.len()
-        loop index in 0..<limit {
-            if (jet_cli_perf_member_text(items[index], "status") ?? "") != "captured" -> next
-            start: jet_cli_perf_member_integer(items[index], "start_ns") ?? next
-            end: jet_cli_perf_member_integer(items[index], "end_ns") ?? next
-            rows.push("[{start}..{end}] {jet_cli_perf_member_symbol(items[index]) ?? "span"}")
+        // Up to 8 task and log spans and up to 8 joins' waits, all on the
+        // one clock of every span.
+        spans := 0
+        joins := 0
+        loop item in items {
+            if (jet_cli_perf_member_text(item, "status") ?? "") != "captured" -> next
+            start: jet_cli_perf_member_integer(item, "start_ns") ?? next
+            end: jet_cli_perf_member_integer(item, "end_ns") ?? next
+            if (jet_cli_perf_member_text(item, "kind") ?? "") == "task_join" {
+                if joins >= 8 -> next
+                joins += 1
+                rows.push("[{start}..{end}] join task {jet_cli_perf_member_integer(item, "task_id") ?? "?"} awaits {jet_cli_perf_join_awaited(item)}")
+                next
+            }
+            if spans >= 8 -> next
+            spans += 1
+            rows.push("[{start}..{end}] {jet_cli_perf_member_symbol(item) ?? "span"}")
         }
     }
     rows

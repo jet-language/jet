@@ -11,8 +11,9 @@
 // names the same image's samples. A record is one write of little-endian
 // words; its first word holds the record's word count in bits 48..58 above
 // the program counter's low 48, and its kind in bits 59..62: 0 for a
-// CPU-time sample, a counter's index plus one for that counter's sample.
-// The handler allocates nothing and never waits. Beside the samples,
+// CPU-time sample, a counter's index plus one for that counter's sample,
+// PERF_SAMPLES_SPAWN for a task's spawn and PERF_SAMPLES_JOIN for a join's
+// wait. The handler allocates nothing and never waits. Beside the samples,
 // `<samples>.spans` keeps a row for each core.log span the program closes
 // (RouteALog.jet log_span_row_write).
 //
@@ -46,6 +47,15 @@ PERF_SAMPLES_ADDRESS_MASK: I64{281474976710655}
 
 // A record's first word: its kind above bit 59, its word count below.
 PERF_SAMPLES_KIND_BITS: I64{59}
+
+// The kinds of a task's spawn record (perf_samples_spawn) and of a join's
+// wait record (perf_samples_join), above every counter's.
+PERF_SAMPLES_SPAWN: I64{15}
+
+PERF_SAMPLES_JOIN: I64{14}
+
+// The most call sites a spawn record keeps.
+PERF_SAMPLES_SPAWN_DEPTH: I64{32}
 
 // A realtime signal, so that each counter's overflow is queued with its
 // own siginfo, never merged with another's or with SIGPROF.
@@ -159,6 +169,55 @@ perf_spans_fd_set: fn(fd: I64) {
     #Unsafe("the observation start runs before the entry, whose span closes read it") {
         perf_spans_fd = fd
     }
+}
+
+// The record of task `id`'s spawn, under `jet perf run`: the id in place of
+// a sample's program counter, then the call site of each caller up the
+// spawning thread's frame pointer chain, innermost first, each less the
+// load bias, while it is Jet code (Alloc.jet alloc_check_frames). `jet perf
+// run` names the task's spawn by the innermost of them on a line of the
+// checked source.
+perf_samples_spawn: fn(id: I64) {
+    fd: perf_samples_fd
+    if (fd < I64{0} || id == I64{0}) {
+        return
+    }
+    size: wrapping(wrapping(PERF_SAMPLES_SPAWN_DEPTH + I64{1}) * I64{8})
+    record: jet_rt_alloc(size, I64{8})
+    chain: wrapping(record + I64{8})
+    alloc_check_frames(chain, PERF_SAMPLES_SPAWN_DEPTH)
+    bias: perf_samples_bias
+    count := I64{0}
+    loop count < PERF_SAMPLES_SPAWN_DEPTH {
+        address: rt_text_word(wrapping(chain + wrapping(count * I64{8})))
+        if (address == I64{0}) { break }
+        site: wrapping(wrapping(address - I64{1}) - bias)
+        if (!perf_samples_in_code(site)) { break }
+        rt_text_store(wrapping(chain + wrapping(count * I64{8})), site)
+        count = wrapping(count + I64{1})
+    }
+    words: wrapping(count + I64{1})
+    rt_text_store(record, (id & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_SPAWN << PERF_SAMPLES_KIND_BITS))
+    _ := host_write_all(fd, record, wrapping(words * I64{8}))
+    jet_rt_free(record, size, I64{8})
+}
+
+// The record of a join's wait, under `jet perf run`: the joining task's id
+// in place of a sample's program counter, then the awaited task's id and
+// the wait's start (`start`) and end on the monotonic clock, the clock of
+// the log spans' rows.
+perf_samples_join: fn(joiner: I64, awaited: I64, start: I64) {
+    fd: perf_samples_fd
+    if (fd < I64{0} || awaited == I64{0}) {
+        return
+    }
+    record: jet_rt_alloc(I64{32}, I64{8})
+    rt_text_store(record, (joiner & PERF_SAMPLES_ADDRESS_MASK) | (I64{4} << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_JOIN << PERF_SAMPLES_KIND_BITS))
+    rt_text_store(wrapping(record + I64{8}), awaited)
+    rt_text_store(wrapping(record + I64{16}), start)
+    rt_text_store(wrapping(record + I64{24}), time_host_monotonic_i64())
+    _ := host_write_all(fd, record, I64{32})
+    jet_rt_free(record, I64{32}, I64{8})
 }
 
 // `<samples>.counters` when JET_PERF_COUNTERS asks for the counters, else
