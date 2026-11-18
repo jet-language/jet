@@ -6,19 +6,19 @@ fixture: Pipeline.fixture
 session app raw: jet run --observe pipeline.jet
 stdout: null
 stderr: null
-poll view: jet inspect live --attach {pid:app} --once until exit: 0 && stdout: ~ "label=transform" && stdout: ~ "depth 4/4 blocked send=1" timeout 10s every 25ms
-stdout: ~ "blocked  wait=channel send deadline=- canceled=false label=transform"
-stdout: ~ "Channel 2     depth 4/4 blocked send=1 recv=0 closed=false"
-stdout: ~ "label=ingest"
-stdout: ~ "label=root"
-stdout: ~ "Effects: "
-stdout: ~ "channel=1"
+poll view: jet inspect live --attach {pid:app} --once until exit: 0 && stdout: ~ "label=transform" && stdout: ~ "depth 4/4 blocked send=1" timeout 10s every 25ms # transform has filled its channel
+stdout: ~ "blocked  wait=channel send deadline=- canceled=false label=transform" # the blocked task, by name
+stdout: ~ "Channel 2     depth 4/4 blocked send=1 recv=0 closed=false" # the full channel and its waiting sender
+stdout: ~ "label=ingest" # the other tasks of the tree
+stdout: ~ "label=root" # the root task
+stdout: ~ "Effects: " # the effects the tasks wait on
+stdout: ~ "channel=1" # one task waits on a channel
 step: jet inspect live --attach {pid:app} --once --json
 exit: 0
-stdout: ~ "\"label\":\"transform\",\"spawn_site\":"
-stdout: ~ "\"wait\":\"channel send\""
-stdout: ~ "\"depth\":4,\"capacity\":4,\"send_waiters\":1"
-stdout: ~ "\"effects\":{\"compute\":"
+stdout: ~ "\"label\":\"transform\",\"spawn_site\":" # the JSON view carries the same tree
+stdout: ~ "\"wait\":\"channel send\"" # the same wait
+stdout: ~ "\"depth\":4,\"capacity\":4,\"send_waiters\":1" # the same channel
+stdout: ~ "\"effects\":{\"compute\":" # the same effect counts
 signal app: KILL
 close app
-exit: any
+exit: any # the program is killed, so its status is the signal's

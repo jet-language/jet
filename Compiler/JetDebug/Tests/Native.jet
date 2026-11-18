@@ -4,7 +4,8 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NativeBlock, NativeBreak, NativeDebugError, NativeFrame, NativeLocal, NativeMemory, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string]
+    jet_debug.[NativeBlock, NativeBreak, NativeDebugError, NativeFrame, NativeLocal, NativeMemory, NativeSession, NativeStop, NativeStopKind, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_jet_spelling]
+    jet_backend.[x64_jetline_sleb]
     jet_foundation.[DeepChecks]
 }
 
@@ -61,6 +62,33 @@ native_test_bytes: fn(words: [Int], size: Int) -> [U8] {
     diagnostic: NativeDebugError{detail: "the program has no Jet debug information"}.diagnostic()
     assert_eq(diagnostic.code, "E2203")
     assert(diagnostic.what.contains("the program has no Jet debug information"))
+}
+
+#Test("a_debug_type_name_is_spelled_as_jet_writes_it") {
+    assert_eq(native_jet_spelling("module:29:package:12:case_fixture:0.1.0:main.jet::Point"), "Point")
+    assert_eq(native_jet_spelling("[module:14:source-root:0::prog.jet::Point]"), "[Point]")
+    assert_eq(native_jet_spelling("module:16:package:4:ring:1:ring.jet::Ring"), "Ring")
+    assert_eq(native_jet_spelling("[main::Point]"), "[Point]")
+    assert_eq(native_jet_spelling("<corelib>/core.math::Decimal"), "Decimal")
+}
+
+#Test("a_sleb_keeps_every_bit_of_a_64_bit_value") {
+    loop value in ([Int]{0, 63, -64, 4611686018427387904, -4611686018427387904, 4611686018427387903}) {
+        bytes := [U8]{}
+        rest := value
+        loop {
+            low: rest & 127
+            rest = rest >> 7
+            if (rest == 0 && (low & 64) == 0) || (rest == -1 && (low & 64) != 0) {
+                bytes.push(U8{low})
+                break
+            }
+            bytes.push(U8{low | 128})
+        }
+        at := 0
+        assert_eq(x64_jetline_sleb(bytes, at), value)
+        assert_eq(at, bytes.len())
+    }
 }
 
 // The checkout these tests run in: the program is built outside it, so the

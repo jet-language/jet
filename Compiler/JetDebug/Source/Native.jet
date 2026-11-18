@@ -9,7 +9,7 @@ use {
     native_files: core.files
     native_math: core.math
     jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_trace_close, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_spawn, x64_trace_wait]
-    jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
+    jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
 }
 
 #Error
@@ -1334,9 +1334,12 @@ native_type_name: fn(image: NativeImage, ty: Int) -> String Never! {
 }
 
 // `name` without the module path before each `::` in it: `[main::Point]`
-// is `[Point]`, `<corelib>/core.math::Decimal` is `Decimal`.
+// is `[Point]`, `<corelib>/core.math::Decimal` is `Decimal`, and a source
+// type's key `module:<len>:<package>:<path>::Point` is `Point`
+// (diagnostic_display_identities, as a diagnostic prints it).
 native_jet_spelling: fn(name: String) -> String Never! {
-    bytes: name.bytes()
+    shown: diagnostic_display_identities(name, [String]{})
+    bytes: shown.bytes()
     corelib: "<corelib>".bytes()
     colon: U8{58}
     kept := [U8]{}
@@ -1357,7 +1360,7 @@ native_jet_spelling: fn(name: String) -> String Never! {
         if !native_path_byte(bytes[k]) -> run = kept.len()
         k += 1
     }
-    String.from_bytes(kept) ?? "{name}"
+    String.from_bytes(kept) ?? shown
 }
 
 // Whether `bytes` ends with `suffix`.
@@ -1429,9 +1432,11 @@ native_render: fn(image: NativeImage, memory: NativeMemory, ty: Int, bytes: [U8]
                 return native_debug_list(image, memory, image.members[group], bytes, at, depth)
             }
             fields: native_debug_fields(image, memory, image.members[group], bytes, at, depth) ?? return None
-            // A record or tuple type is spelled by its fields, so its value
-            // is too.
-            if found.name.starts_with("{{") -> return Val("{{{fields.join(", ")}}}")
+            // A record or tuple type is spelled by its fields, `{n: Int}` or
+            // `(n: Int)` as its carrier identity, so its value is too.
+            if found.name.starts_with("{{") || found.name.starts_with("(") {
+                return Val("{{{fields.join(", ")}}}")
+            }
             Val("{native_type_name(image, ty)}{{{fields.join(", ")}}}")
         }
         found.tag == NATIVE_TAG_ENUM -> {
