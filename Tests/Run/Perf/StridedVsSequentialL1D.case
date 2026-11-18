@@ -12,5 +12,8 @@ env: NO_COLOR=1
 exit: 0
 stdout: = StridedVsSequentialL1D.out
 json: file walk.jettrace doc $.content.profile.counters[?name="l1d_misses"][?status="captured"] #= 1
-capture: sequential file walk.jettrace doc $.content.profile.rows[?source.start_line=21].l1d_miss_count
-json: file walk.jettrace doc $.content.profile.rows[?source.start_line=25].l1d_miss_count > 2*{cap:sequential} # a miss at nearly every strided read, at most one per line in order
+capture: sequential file walk.jettrace doc $.content.profile.rows[?source.start_line=21][0].l1d_miss_count
+step: jet perf view {work}/walk.jettrace
+exit: 0
+stdout: ~ "StridedVsSequentialL1D.jet:25 run l1d_misses=" # the strided walk's line, with its counts
+json: file walk.jettrace doc $.content.profile.rows[?source.start_line=25][0].l1d_miss_count > 2*{cap:sequential} # a miss at nearly every strided read, at most one per line in order
