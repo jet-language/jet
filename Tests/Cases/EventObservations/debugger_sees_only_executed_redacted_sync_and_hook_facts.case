@@ -2,19 +2,12 @@
 # The debugger reads the runtime's event observations through `jet inspect <plane> --live PID`,
 # which renders the closed, payload-free record lines (JetCLI LiveEvents.jet). The original also read
 # the Canvas runtime_events projection; Canvas has no CLI route, and it projects the same records.
+# The program runs under `jet run --observe`, the way a user makes a program observable.
 fixture: Fixtures/DebuggerSeesOnlyExecutedRedactedSyncAndHookFacts
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 env: JETPACK_ROOT={work}/jetpack
-step: jet build main.jet
-exit: 0
-session app raw: built
-env: JET_OBSERVE=1
-env: JET_DEVTOOLS_RELAY_SESSION_ID=event-observation-session
-env: JET_DEVTOOLS_RELAY_SOURCE_ID=observed
-env: JET_DEVTOOLS_RELAY_BUILD_ID=event-observation-build
-env: JET_DEVTOOLS_RELAY_REVISION=event-observation-revision
-env: JET_DEVTOOLS_RELAY_WORLD_ID=event-observation-world
+session app raw: jet run --observe main.jet
 env: JET_SCHEDULER_THREADS=2
 recv app until = "READY\n" within 30s
 poll events: jet inspect structure --live {pid:app} until exit: 0 && stdout: ~ "terminal=Fail" timeout 5s every 25ms # original debugger_events waits for the Fail terminal, 5s deadline, 25ms polling
