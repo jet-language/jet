@@ -20,6 +20,65 @@ name_facts_leaf: fn(name: String) -> String Never! {
     foundation_byte_text(bytes, start, bytes.len())
 }
 
+// Where a dotted path splits over a program's module graph: at its longest
+// prefix that names a module, `cut` bytes long, so the rest after the `.`
+// (empty when the whole path is the module) names a declaration in it.
+// `named` counts the modules that prefix names: 1 is the split, more is
+// ambiguous, and 0 (with `cut` 0) means no prefix names a module.
+DottedPathSplit: struct {
+    cut: Int,
+    named: Int,
+}
+
+// The split of `path` over the program's modules, each named by its dotted
+// `alias`; a name two modules share is ambiguous.
+dotted_path_split: fn(path: String, modules: [NameModule]) -> DottedPathSplit Never! {
+    bytes: path.bytes()
+    cut := bytes.len()
+    loop cut > 0 {
+        named: dotted_path_named(path.slice(0..<cut), modules)
+        if named > 0 -> return DottedPathSplit{cut: cut, named: named}
+        cut -= 1
+        loop cut > 0 && bytes[cut] != 46 -> cut -= 1
+    }
+    DottedPathSplit{cut: 0, named: 0}
+}
+
+// How many of `modules` are named `name`.
+dotted_path_named: fn(name: String, modules: [NameModule]) -> Int Never! {
+    named := 0
+    loop row in modules {
+        if row.alias == name -> named += 1
+    }
+    named
+}
+
+// How many module names an E2122 fix offers before `and N more`.
+DOTTED_PATH_SHOWN: 3
+
+// The E2122 report of a path whose split names no one module: its fix offers
+// the names only one module has among those of `package`, the program's own,
+// in graph order.
+dotted_path_unresolved: fn(path: String, modules: [NameModule], package: String, split: DottedPathSplit) -> Diagnostic Never! {
+    start: if split.named > 1 -> "`{path.slice(0..<split.cut)}`, the name of more than one module of this program" else -> "no module of this program"
+    shown := [String]{}
+    more := 0
+    loop row in modules {
+        if row.package != package || dotted_path_named(row.alias, modules) != 1 -> next
+        if shown.len() == DOTTED_PATH_SHOWN -> more += 1 else -> shown.push("`{row.alias}`")
+    }
+    offered: if {
+        shown.len() == 0 -> "this program has none"
+        more > 0 -> "{shown.join(", ")} and {more} more"
+        else -> shown.join(", ")
+    }
+    row: diagnostic_registry_row("E2122") ?? panic("E2122 is not registered")
+    what: row.what.replace("{{path}}", path).replace("{{start}}", start).replace("{{modules}}", offered)
+    why: row.why.replace("{{path}}", path).replace("{{start}}", start).replace("{{modules}}", offered)
+    fix: row.fix.replace("{{path}}", path).replace("{{start}}", start).replace("{{modules}}", offered)
+    diagnostic_from_registry("E2122", None, what, why, fix)
+}
+
 // A map keeps its keys sorted and an insert moves every later key, so each
 // map is filled in key order, where it grows at its end; filling it in row
 // order would cost time quadratic in the rows. A repeated key keeps its last

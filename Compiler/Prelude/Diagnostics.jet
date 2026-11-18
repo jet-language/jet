@@ -20367,6 +20367,33 @@ DeepCheckScopeHoldsNone: struct {
     }
 }
 
+DottedPathPrefixUnresolved: struct {
+    path: String,
+    start: String,
+    modules: String,
+
+    impl Diagnostic {
+        code: "E2122",
+        safety_class: .Soundness,
+        safety_reason: "A path whose prefix names no one module would be read against a guessed module, so the answer would describe a declaration the path never named.",
+        expert_path: "none: the path starts with the name of exactly one module",
+        stage: [.Jet],
+        meaning: "A dotted path starts with no module of the program, or with a name more than one of its modules has",
+        detail: true,
+        no_fix: .Ambiguous,
+
+        what: fn(self) -> String { "`{self.path}` starts with {self.start}." }
+
+        why: fn(self) -> String {
+            "A dotted path splits at its longest prefix that names one module of the program, and the rest names a declaration in that module."
+        }
+
+        fix: fn(self) -> String {
+            "Start the path with the dotted name of exactly one module of the program: {self.modules}."
+        }
+    }
+}
+
 RetiredDevPrescan: struct {
     impl Diagnostic {
         code: "E2201",

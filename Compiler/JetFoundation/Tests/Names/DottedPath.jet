@@ -1,0 +1,53 @@
+use jet_foundation.[
+    DottedPathSplit,
+    NameModule,
+    dotted_path_split,
+    dotted_path_unresolved,
+]
+
+// A program's module graph: its own modules, two of which share a name, and
+// one Core module it imports.
+dotted_path_modules: fn() -> [NameModule] Never! {
+    [NameModule]{
+        NameModule{alias: "main", path: "main.jet", package: "app"},
+        NameModule{alias: "geo.shapes", path: "geo/shapes.jet", package: "app"},
+        NameModule{alias: "geo", path: "geo.jet", package: "app"},
+        NameModule{alias: "core.process", path: "core/process.jet", package: "core"},
+        NameModule{alias: "util", path: "a/util.jet", package: "app"},
+        NameModule{alias: "util", path: "b/util.jet", package: "app"},
+    }
+}
+
+dotted_path_test_split: fn(path: String, modules: [NameModule]) -> String Never! {
+    split: dotted_path_split(path, modules)
+    if {
+        split.named == 0 -> "unknown"
+        split.named == 1 -> "module {path.slice(0..<split.cut)}"
+        else -> "ambiguous {path.slice(0..<split.cut)}"
+    }
+}
+
+#Test("dotted path splits at its longest module prefix") {
+    modules: dotted_path_modules()
+    assert_eq(dotted_path_test_split("geo.shapes.Circle.area", modules), "module geo.shapes")
+    assert_eq(dotted_path_test_split("geo.area", modules), "module geo")
+    assert_eq(dotted_path_test_split("core.process.spawn", modules), "module core.process")
+    assert_eq(dotted_path_test_split("main.run", modules), "module main")
+    assert_eq(dotted_path_test_split("main", modules), "module main")
+    assert_eq(dotted_path_test_split("util.trim", modules), "ambiguous util")
+    assert_eq(dotted_path_test_split("geography.area", modules), "unknown")
+    assert_eq(dotted_path_test_split("nowhere.square", modules), "unknown")
+}
+
+#Test("dotted path a module does not start is E2122") {
+    modules: dotted_path_modules()
+    unknown: dotted_path_unresolved("nowhere.square", modules, "app", dotted_path_split("nowhere.square", modules))
+    assert_eq(unknown.code, "E2122")
+    assert_eq(unknown.what, "`nowhere.square` starts with no module of this program.")
+    assert_eq(unknown.fix, "Start the path with the dotted name of exactly one module of the program: `main`, `geo.shapes`, `geo`.")
+    ambiguous: dotted_path_unresolved("util.trim", modules, "app", dotted_path_split("util.trim", modules))
+    assert_eq(ambiguous.code, "E2122")
+    assert_eq(ambiguous.what, "`util.trim` starts with `util`, the name of more than one module of this program.")
+    alone: dotted_path_unresolved("x.y", [NameModule]{}, "app", DottedPathSplit{cut: 0, named: 0})
+    assert_eq(alone.fix, "Start the path with the dotted name of exactly one module of the program: this program has none.")
+}

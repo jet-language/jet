@@ -6,7 +6,7 @@ An error refuses a program for one of two reasons. A soundness error stops a mem
 
 Each row states its class in `safety_class` and why in `safety_reason`. A soundness row also states its `expert_path`: the opt-in that reaches the same program, or `none:` and why nothing can.
 
-Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 861 active error rows: 738 soundness and 123 opinion. The other ranges hold 0 active error rows with no class yet.
+Classified ranges: E00xx, E01xx, E02xx, E03xx, E04xx, E05xx, E06xx, E07xx, E08xx, E09xx, E10xx, E11xx, E12xx, E13xx, E14xx, E18xx, E20xx, E21xx, E22xx, E23xx, E24xx, E25xx, E26xx, E27xx, E28xx, E29xx, E30xx, E31xx, E32xx, E33xx, E34xx, E35xx, E36xx, E42xx, E-Axx, E-Cxx, E-Exx, E-Fxx, E-Mxx, E-Oxx, E-Sxx, E-Txx, E-Wxx, JT0xx, L11xx, R08xx. They hold 862 active error rows: 739 soundness and 123 opinion. The other ranges hold 0 active error rows with no class yet.
 
 ## Sealed floors
 
@@ -165,7 +165,7 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E0515 | DeepCheckLeavesItsBody | Compiler/JetSema/Source/Sema/Statements.jet:8066 | take the exit out of the `#On(.Deep)` body |
 | E0516 | DeepCheckPropagatesFailure | Compiler/JetSema/Source/Sema/Statements.jet:8103 | handle the failure inside the body |
 | E0517 | DeepCheckChangesState | Compiler/JetSema/Source/Sema/Ownership/Checks.jet:3323 | change a copy the body makes itself |
-| E0603 | UseTargetNotFound | Compiler/JetCLI/Source/CLI/Inspect.jet:1733 | no opt-in imports a file that is not there |
+| E0603 | UseTargetNotFound | Compiler/JetCLI/Source/CLI/Inspect.jet:1743 | no opt-in imports a file that is not there |
 | E0604 | UseCycle | Compiler/JetDriver/Source/Driver/Loader.jet:2905 | move the shared names into a module both import |
 | E0605 | PrivateItem | Compiler/JetSema/Source/Sema/Calls/Core.jet:460 | reach the item through its module's public declarations |
 | E0606 | AmbiguousModule | Compiler/JetCLI/Source/CLI/Project.jet:124 | the full module path names one module |
@@ -512,14 +512,15 @@ A sealed floor is a soundness error that no `#Unsafe` block or other opt-in lift
 | E2119 | DeepCheckScopeMalformed | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:395 | the scope is a package name, then `::` and dotted names |
 | E2120 | DeepCheckScopeUnknown | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:403 | the scope names a declaration of this program |
 | E2121 | DeepCheckScopeHoldsNone | Compiler/JetFoundation/Source/Registry/BuildOptions.jet:404 | the scope names declarations that hold deep checks |
+| E2122 | DottedPathPrefixUnresolved | Compiler/JetFoundation/Source/Names/Names.jet:75 | the path starts with the name of exactly one module |
 | E2203 | DebuggerUnavailable | Compiler/JetDebug/Source/Native.jet:25 | the program is a native -O0 image this machine can run traced |
 | E2204 | DebugSessionQuit | Compiler/JetCLI/Source/CLI/Debug.jet:138 | let the program run to its end |
 | E2305 | ViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:326 | the view's owner lives as long as the view |
 | E2307 | StringViewOutlivesOwner | Compiler/JetSema/Source/Sema/Calls/Checking.jet:326 | the string's owner lives as long as the view, or the string is copied |
-| E2389 | UnprovenEntryResolution | Compiler/JetCLI/Source/CLI/Inspect.jet:2038 | the entry resolves |
-| E2390 | UnprovenModuleGraph | Compiler/JetCLI/Source/CLI/Inspect.jet:2039 | the module graph resolves |
-| E2391 | UnprovenCoreClosure | Compiler/JetCLI/Source/CLI/Inspect.jet:2040 | the Core closure resolves |
-| E2392 | UnprovenTierLowering | Compiler/JetCLI/Source/CLI/Inspect.jet:2041 | every applicable tier lowers |
+| E2389 | UnprovenEntryResolution | Compiler/JetCLI/Source/CLI/Inspect.jet:2076 | the entry resolves |
+| E2390 | UnprovenModuleGraph | Compiler/JetCLI/Source/CLI/Inspect.jet:2077 | the module graph resolves |
+| E2391 | UnprovenCoreClosure | Compiler/JetCLI/Source/CLI/Inspect.jet:2078 | the Core closure resolves |
+| E2392 | UnprovenTierLowering | Compiler/JetCLI/Source/CLI/Inspect.jet:2079 | every applicable tier lowers |
 | E2393 | ImportWithoutProject | Compiler/JetCLI/Source/CLI/Entry.jet:1583 | the file sits in a package or workspace |
 | E2401 | InvalidDelegationTarget | Compiler/JetSema/Source/Sema/Registration/Checked.jet:3778 | the field implements the trait |
 | E2402 | MissingErrorConversion | Compiler/JetSema/Source/Sema/Expressions/Control.jet:1165 | declare the conversion |
@@ -1429,6 +1430,7 @@ These soundness rows have no expert path, but no line under Compiler, Core, Jetp
 | E2119 | DeepCheckScopeMalformed | soundness | The text is no scope, so it selects nothing. |
 | E2120 | DeepCheckScopeUnknown | soundness | The scope names nothing in the program, so it would keep no deep check while the command reads as if it kept some. |
 | E2121 | DeepCheckScopeHoldsNone | soundness | The selected declarations hold no deep check, so the scope would keep none while the command reads as if it kept some. |
+| E2122 | DottedPathPrefixUnresolved | soundness | A path whose prefix names no one module would be read against a guessed module, so the answer would describe a declaration the path never named. |
 | E2203 | DebuggerUnavailable | soundness | Without a working debugger session there is no program to step through. |
 | E2204 | DebugSessionQuit | soundness | Quitting stopped the program before it finished, so it has no result. |
 | E2305 | ViewOutlivesOwner | soundness | A view that outlives its owner would read freed memory. |
