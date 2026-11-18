@@ -16,6 +16,7 @@ use jet_foundation.[
     SymbolKind,
     TFailureCarrier,
     TGenericParam,
+    TFieldRef,
     StrPart,
     Type,
     core_identity_is,
@@ -250,7 +251,7 @@ sema_services_check_core_method: fn(api: String, contract: SemaServiceCoreMethod
             endpoint = sema_services_typed_endpoint(updated_args[index].expr, environment, program, scopes, state, tail_store, context, diagnostics)
         }
         value := if endpoint == {
-            .Val(endpoint_type) -> sema_services_endpoint_id(updated_args[index].expr, endpoint_type, environment, program, scopes, state, tail_store, context, diagnostics)
+            .Val(endpoint_type) -> sema_services_endpoint_id(updated_args[index].expr, endpoint_type, contract.parameters[index], environment, program, scopes, state, tail_store, context, diagnostics)
             .None -> sema_check_expression(updated_args[index].expr, Val(contract.parameters[index]), environment, program, scopes, state, tail_store, context, diagnostics)
         }
         typed.push(endpoint != None)
@@ -306,14 +307,12 @@ sema_services_typed_endpoint: fn(argument: Expr, environment: SemaScopeEnvironme
 }
 
 // The worker's identity in the tree, read from a typed endpoint: its `id`,
-// which only Core reads, as the compiler's own read of a Core field.
-sema_services_endpoint_id: fn(argument: Expr, endpoint_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+// a `priv` field only Core reads, as the compiler's own read of a Core field
+// (a Tensor's `data`, a Duration's `ns`), which the program's module can't
+// spell.
+sema_services_endpoint_id: fn(argument: Expr, endpoint_type: Type, id_type: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     endpoint: sema_check_expression(argument, Val(endpoint_type), environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
-    generated: context.compiler_generated
-    context.compiler_generated = true
-    id: sema_expression_field_checked(endpoint, "id", expr_span(argument), None, environment, program, scopes, context, diagnostics)
-    context.compiler_generated = generated
-    id
+    Val(sema_tree_node(id_type, TExprKind.Field{receiver: endpoint, field: TFieldRef{owner: None, name: "id", ty: id_type, boxed: false}}, expr_span(argument)))
 }
 
 // The source call `core.service.<member>(receiver, args…)` at `type_args`, as
@@ -848,7 +847,11 @@ sema_check_delivery_state_method: fn(method: String, receiver: Expr, receiver_va
 }
 
 // `ServiceRuntime.<method>` is the Core source call
-// `core.service.runtime_<method>(runtime, args…)`.
+// `core.service.runtime_<method>(runtime, args…)`. A program spells only the
+// method, so each source is a Core source route:
+// ("core.service", "runtime_send"), ("core.service", "runtime_commit"),
+// ("core.service", "runtime_retry"), ("core.service", "runtime_retain"),
+// ("core.service", "runtime_dead_letter").
 sema_check_service_runtime_method: fn(method: String, receiver: Expr, receiver_value: TExpr, args: [CallArg], expected: Type?, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck? {
     if !sema_services_receiver_is(receiver_value.ty, "ServiceRuntime") -> return None
     delivery: Type.Named{name: "Delivery"}
