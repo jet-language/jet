@@ -36463,6 +36463,602 @@
       "outcome": "A",
       "ratifiedAt": "2026-10-31",
       "retiredAt": "2026-11-18T01:03:23.566Z"
+    },
+    {
+      "id": "D-PRIVATE-NATIVE-CARRIER1",
+      "cardId": "c0ayfc4w",
+      "group": "core",
+      "title": "How a public Core type holds a native value that user code can neither name nor build",
+      "situation": "The ratified HTTP law wants one public `Body` type over a private native stream that reads the body lazily. Today `Body` is a plain enum that holds every byte in memory, so `chunks()` on a large download first buffers the whole body. The stream needs a native value that only Core may create, and Jet has no checked way to hide one.\n\nWe recommend that the native value's type live in a `priv module` inside core.http, and that `Body` hold it in a `priv` field. Both forms already exist in the visibility law. The checker then refuses any user code that names the type or builds a `Body` by hand.",
+      "gist": "How should Core's `Body` hold a native stream that user code must never name or build?",
+      "lesson": "Some Core values wrap a native resource, such as an open socket stream. If user code could build one with any contents, it could read from a resource it never opened. Jet already has `priv` modules and `priv` fields, which keep names and contents inside one module.",
+      "explainer": "Words used here. A facade is the public type users hold, here `Body`. A carrier is the native value inside it, here the stream that pulls the body's bytes from the connection. Forging means building a value by hand, with a struct literal, instead of getting it from the library.\n\nA `priv module` is usable only by its enclosing module. A `priv` field can be read and written only by code in its type's own module.",
+      "story": "Ines downloads a 2 GB file and reads it with `chunks()`. Today her program first holds all 2 GB in memory, because `Body` is a buffered enum. Under A the chunks arrive from the network one at a time. Her test builds a fake body with `http.body_text(\"…\")`, and a typo that builds `Body{…}` by hand is a clear compile error.",
+      "inWild": "// Rust: a private field makes the struct impossible to build outside its module\npub struct Body { inner: Inner }   // Inner is private to the crate\nlet b = Body { inner: … };            // error[E0451]: field `inner` is private",
+      "detail": "Source: card #4903, which blocks the HTTP Body cutover and six HTTP goldens. The ratified HTTP law wants one public, source-owned `Body` over a private, lazy native transport.\n\nToday. Core/Http/Http.jet:89 declares `enum Body { Empty, Text(String), Bytes([U8]) }`. `chunks()` (line 216) copies the whole body into a byte list first, so a large download is held in memory. A shared cell gives read-once behavior.\n\nThe forging gap, measured on the tree14 compiler (probes ballot/xb/carrier.jet and carrier2.jet). A user program that builds `files.Directory{path: \"x\", handle: 3}`, `files.FileWriter{path: \"x\"}` or a struct literal that sets another module's `priv` field passes `jet check`. Reading that `priv` field from another module also passes, and `jet run` prints it. The ui row import_private_field, which expects E0605, fails for the same reason.\n\nSo the draft's premise, a public carrier \"with no public constructor\", is not enforced for any Core carrier today.\n\nThe law already has the parts. Syntax-decisions S18 says a `priv` field is readable and writable only by its type's module. It says a `priv module` is usable only by its enclosing module. A only needs these enforced on struct literals and field reads, and the native-carrier registry to accept a carrier declared in a `priv module`.\n\nWhat the registry holds. FileWriter is a known native carrier whose rows give its clone and drop behavior (core_types). The card notes that these rows are accepted only for public carriers today. A lifts that restriction: the carrier row names its module, and Sema applies ordinary privacy. No new attribute and no new IR kind are needed; the card's joint Core and native review found `Type.Named` sufficient.\n\nTest bodies. User tests still build bodies with the public `http.body_text`, `body_bytes` and `body_empty` (Http.jet:734-741). These return a `Body` whose carrier is an in-memory stream.\n\nSame rule for existing carriers. `Directory.handle` and `AdvisoryLock.handle` become `priv` fields, which closes the measured forging of a folder handle.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Carrier type in a `priv module`, held in a `priv` field",
+          "detail": "Core declares the native stream type inside a `priv module` of core.http, and `Body` becomes a struct that holds it in a `priv` field. User code cannot name the stream type and cannot build a `Body` by hand; both give E0605. Bodies come from responses, requests or the public `body_text`, `body_bytes` and `body_empty`.\n\nThe checker enforces the existing `priv` rules on struct literals and field reads, which also closes the forging of `Directory` and `FileWriter` measured today.",
+          "technical": "Sema: report E0605 when a struct literal or field read names a `priv` field outside its type's module. This is the rule S18 states, and it fixes the import_private_field ui row. Registry: a native carrier row may name a carrier declared in a `priv module`; its clone and drop entries match FileWriter's. A known native carrier's native part counts as a `priv` field, so `FileWriter{path: \"x\"}` outside Core is E0605 too.\n\nCore/Http: `priv module transport { struct BodyStream }` over the runtime body kernel. `struct Body { priv stream: transport.BodyStream }`. `chunks()` pulls from the stream. Core/Files: `Directory.handle` and `AdvisoryLock.handle` become `priv`.",
+          "code": "// Simple: read a response, then try to forge a body\nuse core.http as http\n\nfn run() -[Net, Time.Wait, IO]> {\n    response :: http.get(\"https://example.com/notes.txt\") ?? return\n    print(response.text() ?? return)\n    forged :: http.Body{stream: 0}\n    // error[E0605]: `stream` is private to its module\n}\n\n// Complex: stream a large download and test a handler with a fake body\nuse core.http as http\n\nfn download_size(response: http.HTTPResponse) -[Net]> Int http.HTTPError! {\n    total := 0\n    loop chunk in response.body.chunks(65536) {\n        total += chunk?.len()\n    }\n    Ok(total)    // chunks arrive from the network; memory stays at one chunk\n}\n\n#Test(\"handler reads a fake body\") {\n    body :: http.body_text(\"{\\\"id\\\": 7}\")    // public constructor, in-memory stream\n    assert(body.text(1024) == .Ok(\"{\\\"id\\\": 7}\"))\n}"
+        },
+        {
+          "key": "B",
+          "name": "A new `#Carrier(native)` attribute checked for every wrapper",
+          "detail": "Core marks the facade with a new attribute that tells the checker it wraps a native value. The checker refuses literals of any marked type outside Core and tracks the native value's lifecycle.\n\nThe attribute is a second privacy spelling beside `priv`, and every carrier must adopt it.",
+          "technical": "Add `#Carrier(native)` to the syntax tables, with a Sema rule refusing literals of marked types outside their module. Lifecycle rows key on the attribute rather than on the registry row. `Directory`, `FileWriter` and `AdvisoryLock` are re-marked.",
+          "code": "// Simple: read a response, then try to forge a body\nuse core.http as http\n\nfn run() -[Net, Time.Wait, IO]> {\n    response :: http.get(\"https://example.com/notes.txt\") ?? return\n    print(response.text() ?? return)\n    forged :: http.Body{stream: 0}\n    // error: `Body` is a native carrier; build it with http.body_text\n}\n\n// Core/Http/Http.jet\n#Carrier(native)\nstruct Body { stream: BodyStream }\n\n// Complex: stream a large download and test a handler with a fake body\nuse core.http as http\n\nfn download_size(response: http.HTTPResponse) -[Net]> Int http.HTTPError! {\n    total := 0\n    loop chunk in response.body.chunks(65536) {\n        total += chunk?.len()\n    }\n    Ok(total)    // chunks arrive from the network\n}\n\n#Test(\"handler reads a fake body\") {\n    body :: http.body_text(\"{\\\"id\\\": 7}\")    // public constructor, in-memory stream\n    assert(body.text(1024) == .Ok(\"{\\\"id\\\": 7}\"))\n}"
+        },
+        {
+          "key": "C",
+          "name": "Drop the facade; the native stream is the public `Body`",
+          "detail": "The native stream type itself becomes the public `Body`, registered as a known native type like FileWriter. There is no wrapper.\n\nThe type must stay literal-free by a special case in the registry, and its methods are native signatures rather than Jet source.",
+          "technical": "Register `Body` as a known native carrier with native method signatures. The facade's Jet-source methods (`text`, `json`, `chunks`) move into the runtime. The forging gap on other carriers is untouched.",
+          "code": "// Simple: read a response, then try to forge a body\nuse core.http as http\n\nfn run() -[Net, Time.Wait, IO]> {\n    response :: http.get(\"https://example.com/notes.txt\") ?? return\n    print(response.text() ?? return)\n    forged :: http.Body{}\n    // accepted today for known carriers (FileWriter{path: \"x\"} passes); a special case must refuse it\n}\n\n// Complex: stream a large download and test a handler with a fake body\nuse core.http as http\n\nfn download_size(response: http.HTTPResponse) -[Net]> Int http.HTTPError! {\n    total := 0\n    loop chunk in response.body.chunks(65536) {\n        total += chunk?.len()\n    }\n    Ok(total)    // chunks come from the runtime's own Body methods\n}\n\n#Test(\"handler reads a fake body\") {\n    body :: http.body_text(\"{\\\"id\\\": 7}\")    // public constructor, in-memory stream\n    assert(body.text(1024) == .Ok(\"{\\\"id\\\": 7}\"))\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "A struct with a private field cannot be built outside its module, so `hyper::body::Incoming` comes only from the library. Source: Rust Reference, Visibility and privacy; hyper docs, body::Incoming.",
+          "code": "let b = Incoming { .. };   // error[E0451]: field is private"
+        },
+        {
+          "lang": "Go",
+          "note": "`http.Response.Body` is an `io.ReadCloser` interface; the concrete type is unexported, so user code cannot build the library's body. Source: pkg.go.dev/net/http, Response.",
+          "code": "resp.Body.Read(buf)   // concrete body type is unexported"
+        },
+        {
+          "lang": "Swift",
+          "note": "`private` and `fileprivate` stored properties block memberwise initializers outside the file. Source: The Swift Programming Language, Access Control.",
+          "code": "struct Body { private let stream: Stream }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A uses two forms the visibility law already has, a `priv module` and a `priv` field. User code cannot name or forge the stream, and the same rule closes the forging of Core's other carriers.",
+        "gains": [
+          "Large bodies stream; memory stays at one chunk.",
+          "No new marker and no new public type.",
+          "Directory and FileWriter forging is closed too."
+        ],
+        "losses": [],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "A second privacy spelling beside `priv`, which every carrier must adopt."
+          },
+          {
+            "key": "C",
+            "reason": "The body's methods move into the runtime, and a special case must refuse literals."
+          }
+        ],
+        "tradeoff": "The checker starts enforcing `priv` on struct literals and field reads, so Core code that relied on the gap must use the module's functions. In return no user code can forge a native value."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: UiGreen-1 adversarial self-review pass. It found that the draft's 'no public constructor' is not enforced: user code forges Directory, FileWriter and priv-field structs today. A now enforces the existing priv rules and hides the carrier in a priv module, so no public carrier name or new marker remains."
+      },
+      "checkInstructions": "Owner acceptance for A, once built. `http.Body{stream: 0}` in user code is E0605, and so is naming `http.transport.BodyStream`. The probes ballot/xb/carrier.jet and carrier2.jet, which pass today, fail with E0605, and the ui row import_private_field passes. Reading a 2 GB body with `chunks(65536)` keeps peak memory near one chunk. `http.body_text(\"x\").text(16)` returns \"x\" in a user test. The six blocked HTTP goldens pass.",
+      "surface": {
+        "gist": "How should Core's `Body` hold a native stream that user code must never name or build?",
+        "lesson": "If user code could build a native stream by hand, it could read from a connection it never opened. Jet's `priv` modules and fields keep names and contents inside one module.",
+        "trio": {
+          "current": {
+            "note": "`Body` is a buffered enum, and Core's carriers can be forged by struct literal today.",
+            "code": "dir :: files.Directory{path: \"x\", handle: 3}   // passes jet check\nwriter :: files.FileWriter{path: \"x\"}          // passes jet check"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "A private field blocks the struct literal outside its module.",
+            "code": "let b = Incoming { .. };   // error[E0451]: field is private"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "priv module carrier, priv field",
+            "gist": "The stream type is private to core.http; `Body` holds it in a `priv` field.",
+            "gains": [
+              "Large bodies stream; memory stays at one chunk.",
+              "No new marker and no new public type.",
+              "Directory and FileWriter forging is closed too."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "priv module transport { struct BodyStream }\nstruct Body { priv stream: transport.BodyStream }\n\nhttp.Body{stream: 0}   // E0605: `stream` is private to its module"
+            }
+          },
+          {
+            "key": "B",
+            "name": "A #Carrier(native) attribute",
+            "gist": "Mark each wrapper with a new attribute the checker enforces.",
+            "gains": [
+              "One explicit marker per carrier."
+            ],
+            "losses": [
+              "A second privacy spelling beside `priv`."
+            ],
+            "proposed": {
+              "code": "#Carrier(native)\nstruct Body { stream: BodyStream }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Native Body, no facade",
+            "gist": "The native stream type is the public `Body`.",
+            "gains": [
+              "No wrapper type."
+            ],
+            "losses": [
+              "Methods move into the runtime.",
+              "Literals need a special-case refusal."
+            ],
+            "proposed": {
+              "code": "http.Body{}   // must be refused by a registry special case"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A uses two forms the visibility law already has, a `priv module` and a `priv` field. User code cannot name or forge the stream, and the same rule closes the forging of Core's other carriers.",
+          "gains": [
+            "Large bodies stream; memory stays at one chunk.",
+            "No new marker and no new public type.",
+            "Directory and FileWriter forging is closed too."
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A second privacy spelling beside `priv`, which every carrier must adopt."
+            },
+            {
+              "key": "C",
+              "reason": "The body's methods move into the runtime, and a special case must refuse literals."
+            }
+          ],
+          "tradeoff": "The checker starts enforcing `priv` on struct literals and field reads, so Core code that relied on the gap must use the module's functions. In return no user code can forge a native value."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-23T01:40:50.509Z",
+      "designAway": [
+        {
+          "loss": "Each new wrapper adds one public carrier type.",
+          "attempts": [
+            "A public carrier with no constructor: rejected, it adds a public name."
+          ],
+          "result": "Removed: the carrier type lives in a `priv module`, so it has no public name."
+        },
+        {
+          "loss": "\"No public constructor\" is not enforced for any Core carrier today.",
+          "attempts": [],
+          "result": "Removed: Sema enforces the S18 `priv` field rule on literals and reads; probes ballot/xb/carrier.jet and carrier2.jet become E0605."
+        },
+        {
+          "loss": "The registry accepts only public native carriers.",
+          "attempts": [
+            "A new IR kind for private carriers: rejected, `Type.Named` is enough."
+          ],
+          "result": "Removed: a carrier row may name a `priv module` type; ordinary privacy applies."
+        },
+        {
+          "loss": "User tests cannot build a body without a network.",
+          "attempts": [],
+          "result": "Removed: `body_text`, `body_bytes` and `body_empty` stay public and return an in-memory stream."
+        },
+        {
+          "loss": "Revisit with a general mechanism when more wrappers arrive.",
+          "attempts": [],
+          "result": "Removed: `priv module` plus `priv` field is the general mechanism; each new carrier is one registry row."
+        }
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-11-01",
+      "retiredAt": "2026-11-18T01:13:46.582Z"
+    },
+    {
+      "id": "D-OWES1",
+      "cardId": "c0kz2hdf",
+      "group": "language",
+      "title": "Values that must finish in a named way, such as commit or rollback",
+      "gist": "Should a type list the methods that finish it, like commit or rollback, so forgetting one is a compile error?",
+      "lesson": "Some values must not just disappear. A database transaction must end in commit or rollback. Today `#SingleUse` makes a value end exactly once, but any consuming call counts, and errors only say \"owes consume\". This ballot lets a type name its finishing methods and what runs when an error exits early. It is not a general rule system: effects, call order, and permissions keep their own tools.",
+      "explainer": "",
+      "story": "Omar writes a payment handler. On one early return he forgets to roll back the transaction, and Jet compiles it, because transactions are plain values (card #4151). He wants the compiler to say \"commit or rollback is missing here\", and wants errors to roll back without a hand-written branch at every `?`.",
+      "inWild": "// Austral: linear values must be consumed exactly once (austral-lang.org/linear-types)\n// Vale: higher RAII, a value with no implicit drop must reach a named method\n// Mojo: struct Example(Deinitable where (False, \"call 'cleanup()'\"))\n// Rust sqlx: Transaction rolls back on drop unless commit() was called\n// Swift: ~Copyable types with consuming methods (SE-0390)",
+      "detail": "What the marker does, and only this. `#MustFinish(commit, rollback, on_fail: rollback)` on a type says how a value of that type may end. The compiler tracks each value through four states.\n\n- Created: it must still finish.\n\n- Borrowed (`&txn.charge(...)`) or read: it must still finish.\n\n- Finished: one listed method took it (`^txn.commit()`). Done; any later use is the existing use-after-move error.\n\n- Handed on: passed with `^` to another function, or returned. The receiver now must finish it, by a listed method, by handing it on again, or by returning it. A wrapper function cannot make the duty disappear.\n\nEvery path that leaves the scope while the value must still finish is a compile error naming the missing methods. The listed methods are alternatives (commit OR rollback). If a type needs two steps in order, its API expresses that with typestate (`#State`/`#Transition`) or one method that does both.\n\nWhat it is not. It does not add effects, permissions, value checks, or call-order rules. Those keep their tools: effect rows `-[IO]>` and `#FX`, typestate `#State`/`#Transition`, taint `#Input`/`#Scrub`, and capability authority. `#MustUse` stays separate: it only forbids ignoring a returned value, and reading the value satisfies it.\n\nHow `#SingleUse` is replaced. Today `#SingleUse` (D-LIN1) means: end exactly once, by passing with `^`, returning, or `#Unsafe(\"reason\") { consume(x) }`. Any consuming method ends it, and the error says \"owes consume\" (E0140-E0143).\n\n`#MustFinish(...)` keeps that same exactly-once check and changes three things. Among the type's own consuming methods, only the listed ones finish the value. Errors name those methods. And `on_fail:` can finish it automatically on error exits. Each `#SingleUse` type migrates by listing its consuming methods, for example `#MustFinish(close)`. Abandoning a value keeps the audited gate, `#Unsafe(\"reason\") { consume(x) }` (D-DROP-WORD1=A).\n\n`on_fail: m` runs `m` on a value that is still owned and unfinished when a failure leaves the scope. Failures are `?` propagation, `return Err(...)`, panic unwinding, and task cancellation. It never runs on a value already handed on. For example, if `^txn.commit()` fails, the value was handed to `commit` and counts as finished whether `commit` returns or fails. Mojo's explicit destructors follow the same rule.\n\n`on_fail` does not run on abort, process kill, or power loss. `m` must be one of the listed methods and take only `^self`. If `m` itself fails, its error is attached as a note to the error already leaving; the value counts as finished. Without `on_fail`, every error exit must finish the value by hand, as `#SingleUse` requires today. An early success return is never finished automatically; that is the mistake the marker exists to catch.\n\nTasks: D-CONC-UNIT1=A already gives task handles the same single-use duty, and D-CONC-JOIN1=A lets reading a task's result count as joining. Under A, Core declares `Task<T>` as `#MustFinish(join, detach)`, and reading the result still counts as `join`. Behavior is unchanged; only the messages name `join` or `detach`.\n\nUnbound spawns keep their scope-end join (D-CONC-SPAWN1). Containers of such values must finish each element, and generic code keeps the D-LIN1 rules.\n\nSpelling: `#MustFinish` is new, chosen by the drafter to pair with `#MustUse` and to say plainly what is required. The earlier draft's `#Owes` is a metaphor; the owner may keep it, and nothing else depends on the name.\n\nConflicts: E0140 to E0143 merge into one diagnostic family with new snapshots (I4). Receivers follow D-CAP-RECEIVER1=D (`&txn.charge`, `^txn.commit`). In option B's example, `err` names the failure inside a `??` block (D-FAIL-BIND1=A). Card #4151 (transactions) is the first user.\n\nThe earlier option \"Core marks buffered writers and locks too\" is not lost. If A wins, which Core types adopt the marker is a separate ballot, because it changes beginner file code.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Named finishing methods",
+          "detail": "`#MustFinish(m1, m2, on_fail: m)` on a type lists the methods that finish it and, optionally, the one that runs on error exits. `#SingleUse` is replaced; task handles declare `#MustFinish(join, detach)`.",
+          "technical": "Same exactly-once checker as D-LIN1, in the self-hosted ownership checker (Compiler/JetSema/Source/Sema/Ownership), with a per-type list of finishing methods. Existing E0140-E0143 snapshots must stay at least as strict.",
+          "code": "#MustFinish(commit, rollback, on_fail: rollback)\nstruct Txn { conn: DBLease }"
+        },
+        {
+          "key": "B",
+          "name": "Keep #SingleUse",
+          "detail": "No change. Any consuming call finishes the value, and every error exit needs a hand-written rollback.",
+          "technical": "No change.",
+          "code": "#SingleUse\nstruct Txn { conn: DBLease }"
+        },
+        {
+          "key": "C",
+          "name": "Automatic rollback at scope end",
+          "detail": "No new marker. `Txn` is an ordinary resource: the existing scope-end cleanup (S63) rolls it back if `commit` never ran, as Rust's sqlx does.",
+          "technical": "Library change only: Txn's close rolls back.",
+          "code": "struct Txn { conn: DBLease }  // close() rolls back"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Austral",
+          "note": "Every resource is linear; operations thread new handles. Strong guarantee, heavy ergonomics.",
+          "code": "close(db3);"
+        },
+        {
+          "lang": "Mojo",
+          "note": "A type can forbid implicit destruction and name the fix; a `deinit self` method ends the value.",
+          "code": "struct Example(Deinitable where (False, \"call 'cleanup()'\")):\n    def cleanup(deinit self): ..."
+        },
+        {
+          "lang": "Rust (sqlx)",
+          "note": "A dropped Transaction rolls back automatically; forgetting commit is not a compile error.",
+          "code": "let mut tx = pool.begin().await?;\ncharge(&mut tx).await?;\ntx.commit().await?;"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A turns a forgotten commit or rollback into a compile error that names the fix. It also removes the hand-written rollback at every error exit.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B's errors say \"consume\" instead of naming the job, and every `?` before commit needs its own rollback branch."
+          },
+          {
+            "key": "C",
+            "reason": "C compiles a forgotten commit, so every payment can silently roll back."
+          }
+        ],
+        "tradeoff": "Types that opt in must be finished on purpose; everything else keeps automatic cleanup."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: RliOwes. Skill: rli5. The beginner pass tested the complete ballot and found an incomplete example and a lesson that contradicted option C, both repaired. Inherited from the earlier text; not rerun after the 2026-10-02 rewrite (new spelling, new option C, state table).",
+        "adversarial": "Author model family: claude. Adversarial model family: claude-opus. Fresh agent: OpusAdversary. The adversarial review kept #MustUse separate, kept the #Unsafe abandon gate, and added an on_fail settlement for failure exits. Inherited from the earlier text; the 2026-10-02 rewrite had an advisory review only, by SolBallotAdvisor."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should a type list the methods that finish it, like commit or rollback, so forgetting one is a compile error?",
+        "lesson": "Some values must not just disappear. A database transaction must end in commit or rollback. Today `#SingleUse` makes a value end exactly once, but any consuming call counts, and errors only say \"owes consume\". This ballot lets a type name its finishing methods and what runs when an error exits early. It is not a general rule system: effects, call order, and permissions keep their own tools.",
+        "trio": {
+          "current": {
+            "note": "Probe J2: `#SingleUse` knows only `consume`, and discarding needs `#Unsafe`.",
+            "code": "#SingleUse struct Lock { resource: String }\nfn acquire(resource: String) -> Lock { Lock{resource: ~resource} }\nfn run() { db :: acquire(\"db\") }\n// Error [E0140]: `db` still owes `consume`\n// Fix: move it with `^`, `return` it, or\n// `#Unsafe(\"reason\") { consume(db) }`"
+          },
+          "wild": {
+            "lang": "Mojo",
+            "note": "A type can forbid silent destruction and name the method that must end it (mojolang.org manual, explicit destroy).",
+            "code": "struct Example(Deinitable where (False, \"call 'cleanup()'\")):\n    def cleanup(deinit self): ...\n\ndef use_it():\n    var e = Example()\n    e^.cleanup()   # without this line: error, call 'cleanup()'"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Named finishing methods",
+            "gist": "`#MustFinish(commit, rollback, on_fail: rollback)` names the ways a Txn may end.",
+            "gains": [
+              "Errors name the real job: commit or rollback.",
+              "Error exits roll back on their own.",
+              "A forgotten commit never compiles."
+            ],
+            "losses": [
+              "`#SingleUse` types migrate to a listed form.",
+              "Opted-in values must be finished on purpose."
+            ],
+            "proposed": {
+              "code": "#MustFinish(commit, rollback, on_fail: rollback)\nstruct Txn { conn: DBLease }\n\nfn pay(db: &DB, cents: Int) -> Unit PayError! {\n    txn :: db.begin()\n    if cents == 0 -> return Ok(())\n    &txn.charge(cents)?(\"charge\")  // fails: rollback runs\n    ^txn.commit()?(\"commit\")\n}\n// Error: `txn` must finish with `commit` or `rollback`\n//   before the return on line 6\n// Fix: call ^txn.rollback() first"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep #SingleUse",
+            "gist": "No change; every error exit rolls back by hand.",
+            "gains": [
+              "No migration.",
+              "A forgotten commit still never compiles."
+            ],
+            "losses": [
+              "Errors say `consume`, not commit or rollback.",
+              "Each `?` before commit needs a rollback branch."
+            ],
+            "proposed": {
+              "code": "#SingleUse\nstruct Txn { conn: DBLease }\n\nfn pay(db: &DB, cents: Int) -> Unit PayError! {\n    txn :: db.begin()\n    if cents == 0 -> return Ok(())\n    &txn.charge(cents) ?? {\n        ^txn.rollback()\n        return Err(err)\n    }\n    ^txn.commit()?(\"commit\")\n}\n// Error [E0140]: `txn` still owes `consume`\n//   (the return on line 6)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Automatic rollback at scope end",
+            "gist": "No marker; an unfinished Txn rolls back by itself when its scope ends.",
+            "gains": [
+              "Nothing new to learn.",
+              "Error exits roll back on their own."
+            ],
+            "losses": [
+              "A forgotten commit compiles and silently rolls back."
+            ],
+            "proposed": {
+              "code": "struct Txn { conn: DBLease }  // close() rolls back (S63)\n\nfn pay(db: &DB, cents: Int) -> Unit PayError! {\n    txn :: db.begin()\n    if cents == 0 -> return Ok(())   // compiles; rolls back\n    &txn.charge(cents)?(\"charge\")     // fails: rolls back\n    ^txn.commit()?(\"commit\")\n}\n// Delete the commit line: still compiles,\n// and every payment silently rolls back."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A turns a forgotten commit or rollback into a compile error that names the fix. It also removes the hand-written rollback at every error exit.",
+          "gains": [
+            "Transactions, locks, and tasks say exactly what is missing."
+          ],
+          "losses": [
+            {
+              "loss": "`#SingleUse` types migrate to a listed form.",
+              "mitigation": "Greenfield law keeps one spelling, so the old marker cannot stay as an alias."
+            },
+            {
+              "loss": "Opted-in values must be finished on purpose.",
+              "mitigation": "Catching a forgotten commit means the compiler cannot finish the value silently."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B's errors say \"consume\" instead of naming the job, and every `?` before commit needs its own rollback branch."
+            },
+            {
+              "key": "C",
+              "reason": "C compiles a forgotten commit, so every payment can silently roll back."
+            }
+          ],
+          "tradeoff": "Types that opt in must be finished on purpose; everything else keeps automatic cleanup."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-02T02:18:11.821Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-10-02",
+      "retiredAt": "2026-11-18T01:24:54.714Z"
+    },
+    {
+      "id": "D-JAI-COMPTIME1",
+      "cardId": "c06y0cef",
+      "group": "syntax",
+      "title": "Changeable globals computed while compiling, of any storable type, with no startup copy",
+      "situation": "A program often needs data worked out in advance, such as a table of opcodes or a list of names, that it later changes while running. Jai computes such data while compiling and stores it in the program file, ready to change. In Jet only an unchangeable value may be computed early, so the program must copy the data each time it starts. The earlier draft allowed only fixed-size number tables, because strings and growable lists live in memory the program later grows and frees. The vote decides how far the change goes. We recommend allowing any storable value, stored so the program can grow and free it like memory it made itself.",
+      "gist": "May a changeable global start from any value computed while compiling, with no copy when the program starts?",
+      "lesson": "A global is a variable declared outside functions; `fn run()` is where the program starts. `NAME :: value` is unchangeable and `name := value` is changeable. Heap memory is memory a running program asks for, grows and gives back; the allocator is the code that hands it out. Strings and growable lists keep their contents on the heap. Baked means computed while compiling and stored in the program file.",
+      "explainer": "",
+      "story": "Ana's emulator works out an opcode table and a list of instruction names while compiling. At run time it patches table entries and adds names when a cartridge defines new instructions. Jet makes her copy both when the program starts. The earlier draft would have baked the table but still refused the list of names, because it holds strings.",
+      "inWild": "// Jai: a #run initializer is stored in the program and stays writable\ntable: [256] u32 = #run make_table();\nnames: [..] string = #run default_names();\nmain :: () { table[0] = 1; array_add(*names, \"extra\"); }",
+      "detail": "Owner question q4tk0q5m asked for a design without the downside of the earlier recommendation, using full control of the compiler and runtime. No keyword is needed for the rule below; `comptime { }`, the ratified respelling of today's `prep { }`, appears only for file reads. Copies are spelled `x.copy()` (D-COPY-WORD1=A). Audit rows A10-A12 in Docs/audits/jai-parity-2026-10-16.md.\n\nTHE DOWNSIDE, PRECISELY. The earlier draft, now option B, accepted only fixed-size plain data: numbers, Bool, fixed-size lists and plain structs of those. Such data needs no heap; it is stored inline, as writable data. Strings, growable lists, maps and structs holding them were refused. Their contents live in heap blocks the allocator owns. Bytes in a program file are not allocator blocks today, so growing or freeing them would corrupt the heap.\n\nThe only alternative offered, rebuilding such values on the heap before `fn run`, brought back the copy the feature exists to remove.\n\nTHE DESIGN UNDER A: A BAKED HEAP. This is written against the native runtime's allocator (Compiler/JetRuntime/Source/Alloc.jet). Small blocks, up to 4096 bytes, live in 64 KiB slabs; larger blocks are their own page-aligned mappings. Each block has two header words; the slab header holds its links, its free list, its live count and a pointer to its size class's list.\n\nThe compiler lays out each baked heap value in exactly that format, in a writable, page-aligned section of the program file. Small blocks fill whole 64 KiB slabs that hold nothing else. Each large block gets its own whole pages, with the usual two header words. Executables load at a fixed address, so every pointer inside baked data is written as its final address at link time.\n\nAt start, before user code, the runtime's existing allocator setup does one more thing. It walks a table of baked slabs that the compiler emits, and writes one word into each: the address of that size class's list, which only exists at run time. Full slabs start unlinked with their real live count. A partly filled last slab per size class is also linked into its class's list, a few more stores. That is about one store per 64 KiB of baked data, about 16 stores per MiB.\n\nFrom then on, baked blocks are ordinary heap blocks. Writing writes in place; growing moves the value to new heap memory and frees the old block; freeing returns the block for reuse. When a baked slab empties, the allocator keeps it as its spare slab or unmaps it, as it does today. Unmapping is safe because those pages hold only that slab.\n\nThe same is true for a freed large block's pages. So the free path is unchanged: no new branch, and the same lock as every other block.\n\nStrings keep their two blocks, a 24-byte header and a data block, with capacity equal to length. An empty string is a real 24-byte header block whose data pointer is the runtime's shared empty value, 1, with capacity 0, as today. Baked blocks are not counted as allocations in the counting allocator mode; the counting mode gains a baked-bytes fact, and freeing one takes the same path as any untracked block.\n\nWHAT IT COSTS. First, start time: one store per baked slab. That first write makes the operating system copy that slab's first 4 KiB page; other pages are copied only when the program first writes them. Second, file size: the program file holds the baked bytes. That is inherent to precomputed data in any language. Each build prints the bytes per baked global, extending D-COMPTIME-WORD1's line with the total bytes of early values.\n\nThird, build time: each value is cached by key like every early value and recomputed only when its inputs change. The 10,000,000-step budget applies; `#StepLimit` is ratified, not yet built.\n\nFourth, scope. The baked heap is built for native executables on the Linux x86-64 runtime first. Other targets, shared libraries (which load at varying addresses) and the Rust tier until it is retired run the same program with the same meaning. They copy baked heap values into the heap before `fn run`, until their allocator gains the same setup step. The receipt names which path a build used.\n\nTHE RULE. A changeable file global's starting value is computed while compiling, with no keyword, under the same rule D-COMPTIME-WORD1=A gives file constants. A value that cannot be computed early is an error naming the reason, such as reading the clock; an exhausted budget is E0952, exactly as for file constants. Reading a file still needs `comptime { embed_file(...) }`, as for constants.\n\nThe value must be storable. D-COMPTIME-WORD1=A defines it: 'Storable means no tie to a running process and no identity. Handles, resources, borrowed views, live links, raw addresses, shared cells, Atomic<T> and anything holding them are not storable. Functions are storable because they name code in the program; closures are storable when everything they capture is.' A function value in a baked global is a link-time address too.\n\nLIFETIME. Each launch starts from the baked value, and run-time changes are lost on exit. `#Persist` globals are unchanged. Under `jet dev --swap`, a global keeps its live value unless its starting value changed; then it resets, the new value is copied onto the live heap, and dev says so. Blocks from the original program file stay valid and are freed normally.\n\nAMENDS. D-COMPTIME-WORD1=A has two sentences on this. One: 'Mutable and #Persist globals, which are storage the program changes, keep today's literal-only rule'. Two: 'Mutable and #Persist globals keep E0622'. Under A, both become: '#Persist globals keep the literal-only rule and E0622; changeable globals follow the file-constant rule'.\n\nD-COMPTIME-WORD1=A also says 'Jet runs no hidden code before fn run().' A keeps that. The setup step and the fallback copy are runtime work with no user code and no initialization order. They sit beside the allocator setup that already runs before user code. Runtime work: a baked-heap writer in the backend and the slab setup step in Alloc.jet. Registered diagnostics with UI snapshots (I4).\n\nWHY NOT B. B is simple for the runtime but refuses strings, growable lists and maps, the downside the owner asked to remove. WHY NOT C. C keeps today's rule and copies every computed value at each start.\n\nBEGINNER AND EXPERT PATHS. A beginner writes `names := default_names()` at file level and it works. An expert reads the per-global byte line in the build output, and moves a huge, cheap-to-compute value into `fn run` when file size matters more than start time.\n\nEVIDENCE. The Jai Primer shows `#run` initializers baked into the program; Blow notes compile-time heap data is duplicated into static storage (OHZwYYW9koI 00:18:04, 00:21:48). The Way to Jai Appendix C documents `#no_reset`. GraalVM Native Image ships build-time objects as an image heap in the executable.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Any storable value, baked as ready heap blocks",
+          "detail": "A changeable file global's starting value is computed while compiling, like a file constant's. Any storable value works: numbers, strings, growable lists, maps and structs. The program file holds heap values in the allocator's own block format, so they grow and free like any heap memory, with no startup copy.",
+          "technical": "Sema lifts E0622 for changeable file globals with storable, early-computable initializers. The backend writes baked slabs (whole 64 KiB, one size class each) and page-owned large blocks with final addresses; allocator setup stores one size-class address per baked slab. Free path unchanged. Native Linux x86-64 executables first; other outputs copy before `fn run`.",
+          "code": "table := make_table()      // [U32#256]: plain data, stored inline\nnames := default_names()   // [String]: baked heap blocks\nfn run() {\n    table[0] = 1           // writes in place\n    &names.push(\"extra\")   // & marks the change; grows into new heap memory\n}"
+        },
+        {
+          "key": "B",
+          "name": "Fixed-size plain data only",
+          "detail": "The earlier draft. A changeable global may start from a computed value only if it is plain fixed-size data, with no heap memory inside: numbers, Bool, fixed-size lists and plain structs of those. Strings, growable lists and maps are a build error.",
+          "technical": "Sema accepts a computed initializer for plain fixed-size types only; anything else is a new registered error.",
+          "code": "table := make_table()      // [U32#256]: fine\nnames := default_names()   // build error: [String] holds heap memory\nfn run() { table[0] = 1 }"
+        },
+        {
+          "key": "C",
+          "name": "Keep today's rule",
+          "detail": "A changeable global starts only from a number or Bool literal. Computed data is an unchangeable constant, copied at each start when it must change.",
+          "technical": "No change.",
+          "code": "TABLE :: make_table()\nfn run() {\n    table := TABLE.copy()  // one copy per launch\n    table[0] = 1\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Jai",
+          "note": "A #run initializer is stored in the program and stays writable; compile-time heap data is copied into static storage.",
+          "code": "table: [256] u32 = #run make_table();"
+        },
+        {
+          "lang": "Zig",
+          "note": "A var may start from a comptime value, but comptime values cannot hold heap memory the program later frees.",
+          "code": "var table = comptime makeTable();"
+        },
+        {
+          "lang": "GraalVM Native Image",
+          "note": "Objects built at build time ship in the executable as an image heap, mapped when the program starts.",
+          "code": "native-image --initialize-at-build-time=app.Tables -jar app.jar"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A lifts the limit to number tables and removes the startup copy for every storable type. Baked data is laid out as the allocator's own blocks, so the program grows and frees it like memory it made itself.",
+        "gains": [
+          "Any storable value can start a changeable global.",
+          "No startup copy, and no extra cost per access or free.",
+          "Same rule as file constants, with no keyword."
+        ],
+        "losses": [
+          {
+            "loss": "Start does one store per 64 KiB of baked data.",
+            "mitigation": "About 16 stores per MiB, far cheaper than copying the data."
+          },
+          {
+            "loss": "Some outputs still copy at start until their allocator catches up.",
+            "mitigation": "Same meaning everywhere; the receipt names the path, and each target gains the setup step."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B refuses strings, growable lists and maps, the downside this revision was asked to remove."
+          },
+          {
+            "key": "C",
+            "reason": "C copies every computed value each time the program starts."
+          }
+        ],
+        "tradeoff": "A baked-heap writer and one allocator setup step, for computed globals of any storable type with no startup copy."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: BegComptime2. Skill: rli5. The beginner pass tested the complete ballot. It found that the file bytes were called both non-heap and heap, and that heap, allocator and storable were undefined; the lesson now defines them and the detail quotes the storable rule.",
+        "adversarial": "Author model family: claude-opus. Adversarial model family: claude-haiku. Fresh agent: AdvComptime2. The review found that slab headers need run-time addresses, that freeing could unmap the program image, and that large blocks and other targets were ignored. The design now uses whole slabs, page-owned large blocks, per-slab setup and a stated target scope."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "May a changeable global start from any value computed while compiling, with no copy when the program starts?",
+        "lesson": "A global is declared outside functions; `NAME :: value` is unchangeable and `name := value` is changeable. Heap memory is memory a running program asks for, grows and gives back. Strings and growable lists keep their contents there. Baked means computed while compiling and stored in the program file.",
+        "trio": {
+          "current": {
+            "note": "Today only unchangeable globals are computed early; a changeable copy is made at each start.",
+            "code": "TABLE :: make_table()\nfn run() {\n    table := TABLE.copy()  // one copy per launch\n    table[0] = 1\n}"
+          },
+          "wild": {
+            "lang": "Jai",
+            "note": "A #run initializer is stored in the program and stays writable (Jai Primer).",
+            "code": "table: [256] u32 = #run make_table();\nmain :: () { table[0] = 1; }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Any value, baked as heap blocks",
+            "gist": "Values are stored in the heap's own format, ready to grow and free, with no copy.",
+            "gains": [
+              "Strings, lists and maps work too.",
+              "No startup copy, no cost per access.",
+              "Same rule as constants; no keyword."
+            ],
+            "losses": [
+              "One store per 64 KiB of baked data at start."
+            ],
+            "proposed": {
+              "code": "table := make_table()      // computed while compiling\nnames := default_names()   // [String], baked too\nfn run() {\n    table[0] = 1\n    &names.push(\"extra\")   // grows like any list\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Fixed-size plain data only",
+            "gist": "The earlier draft: number tables only.",
+            "gains": [
+              "Simplest runtime."
+            ],
+            "losses": [
+              "Strings, growable lists and maps are refused."
+            ],
+            "proposed": {
+              "code": "table := make_table()      // fine\nnames := default_names()   // build error: holds heap memory"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Keep today's rule",
+            "gist": "Changeable globals start only from literals.",
+            "gains": [
+              "No change."
+            ],
+            "losses": [
+              "A copy at every start."
+            ],
+            "proposed": {
+              "code": "TABLE :: make_table()\nfn run() { table := TABLE.copy() }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A lifts the limit to number tables and removes the startup copy for every storable type. Baked data uses the heap's own format, so the program grows and frees it normally.",
+          "gains": [
+            "Computed globals of any storable type, no startup copy."
+          ],
+          "losses": [
+            {
+              "loss": "One store per 64 KiB of baked data at start.",
+              "mitigation": "About 16 stores per MiB, far cheaper than a copy."
+            },
+            {
+              "loss": "Some outputs copy at start for now.",
+              "mitigation": "Same meaning everywhere; the build receipt names the path."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Refuses strings, lists and maps, the downside to remove."
+            },
+            {
+              "key": "C",
+              "reason": "Copies every computed value at each start."
+            }
+          ],
+          "tradeoff": "One allocator setup step, for computed globals of any storable type."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-10-16T11:40:04.149Z",
+      "designAway": [
+        {
+          "loss": "Only fixed-size plain data could be baked.",
+          "attempts": [
+            "Rebuild heap values at startup; rejected because it is the copy the feature removes.",
+            "Lay baked values out in the allocator's own block format, with whole slabs and whole pages, so the unchanged free path works on them."
+          ],
+          "result": "Removed: any storable value grows and frees like heap memory."
+        },
+        {
+          "loss": "Start does one store per 64 KiB of baked data.",
+          "attempts": [
+            "Keep slab metadata relative to a fixed base; rejected because every allocation and free would pay an extra add.",
+            "One store per baked slab during existing allocator setup; pointers inside data are final at link time."
+          ],
+          "result": "Negligible: about 16 stores per MiB, once per launch."
+        },
+        {
+          "loss": "Some outputs still copy at start until their allocator catches up.",
+          "attempts": [
+            "Block the feature on those targets; rejected because the same program must mean the same thing everywhere.",
+            "Copy before `fn run` on those outputs, name the path in the receipt, and add the setup step per allocator."
+          ],
+          "result": "Reduced: only a start-time cost on those outputs, never a difference in meaning."
+        },
+        {
+          "loss": "The program file holds the baked bytes.",
+          "attempts": [
+            "Compress the section; rejected because unpacking it is a startup cost.",
+            "Print bytes per baked global so the cost is reviewable, and let experts move huge values into `fn run`."
+          ],
+          "result": "Reduced: only the data the author asked to precompute is stored."
+        }
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-10-18",
+      "retiredAt": "2026-11-18T01:24:54.714Z"
     }
   ]
 }

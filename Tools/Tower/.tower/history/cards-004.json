@@ -108731,6 +108731,555 @@
       "completedAt": "2026-11-15T01:01:41.437Z",
       "questions": [],
       "retiredAt": "2026-11-18T01:03:23.566Z"
+    },
+    {
+      "id": "c0ayfc4w",
+      "num": 4903,
+      "title": "Build D-PRIVATE-NATIVE-CARRIER1: HTTP Body holds a private native stream in a priv field, and the HTTP Body cutover lands on it",
+      "body": "Owner decision needed (new mechanism / public API). The ratified HTTP law (D-HTTPDEPTH1=A; Core + runtime joint ruling) wants ONE public source-owned Body capability facade over a PRIVATE opaque lazy native transport (the existing Arc<Mutex<JetHTTPBody>> kernel). NativeLead24-2 confirmed no mechanism for that exists today: opaque_methods only registers Source impl signatures on PUBLIC known native carriers; the old browser facade (BrowserServer { private native: BrowserTestServer? }) used an already-public carrier and the current line removed it; JetForeignHandle is public and needs a real C library / typedef / close metadata. Missing: a PRIVATE checked native identity with scope, default-constructor rejection, ownership / lifecycle and physical mapping on every tier (I9). Stand-ins (empty record, private RawInt, host RuntimeValue, public alias) are rejected. Blocks GoldenPareto1's Body cutover (6 HTTP goldens). Options (same program: req.body.text() on an incoming request): A) Make the transport a PUBLIC documented native carrier type (e.g. core.http.BodyTransport), not user-constructible, used as Body's field. Beginner: one more type name visible in docs / errors, never needed. Expert: can name the type; no new mechanism. B) Add ONE general private native-carrier mechanism: a Core module can declare a native kernel type private to that module (sema rejects naming / constructing it outside; ownership / drop / clone rules from its native metadata; mapped identically on all tiers). Beginner: never sees it. Expert: clean facades. Cost: a new mechanism (I8, needs this ratification), reusable for other facades. C) Drop the facade: Body IS the native carrier directly (public, as today's incoming body), with the outgoing Empty / Text / Bytes constructors as functions returning it. Beginner: one type. Cost: re-opens the Core + runtime ruling. Main recommends B if more Core facades over native kernels are expected (likely: streams, sockets), else A. Related but distinct: #4896 (which modules may IMPORT toolchain-private Core seams).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-01",
+          "by": "Main",
+          "text": "PROGRESS ONLY, sema part only: E0605 for omitted priv fields in literals and priv-module type paths, with 3 new ui tests; the Http Body cutover stays parked (IrTypes-45) Landed in wave 28 as dev bb770de593 (IrTypes-45)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: the open decision in this card is drafted as owner ballot D-PRIVATE-NATIVE-CARRIER1 (draft for Main to file). The card text is background, not the decision."
+        },
+        {
+          "at": "2026-10-08",
+          "by": "Pip",
+          "text": "Joint Core + Native conclusion (CoreReview5-2-2): a Source facade privately holding a PUBLIC opaque seed handle DOES exist (encoding/stream JSONPush 870-877: private output: FileWriter; JSONWriter 201 output: JSONPush; constructor factory 1327; FileWriter known in core_types 303 with opaque constructability). That pattern supports option A directly (public, non-constructible native carrier held privately by the facade). What does NOT exist is a PRIVATE internal native kernel identity with constructor privacy + lifecycle / clone / drop carrier metadata (option B). Type.Named is a sufficient representation either way; no new Opaque IR kind is needed. Main's updated recommendation: A, following the JSONPush / FileWriter precedent, unless the owner wants B as a general mechanism for future facades."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-PRIVATE-NATIVE-CARRIER1=A is built: core.http declares its native stream type in a `priv module`, and `Body` is a struct holding it in a `priv` field; Bodies come only from responses, requests, `body_text`, `body_bytes` and `body_empty`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since 43873ce5e6: Core/Http/Http.jet declares `priv body_carrier: module { BodyStream }` and `Body: struct { priv stream: body_carrier.BodyStream }`; Bodies come from requests, responses and the body_* / Body.* constructors. Proven by `jet test Compiler --profile ui --filter http_body_carrier_is_private` and `--filter http_body_literal_is_private`: PASS on the gate-p136 batch jet.",
+          "at": "2026-11-15T01:10:49.074Z"
+        },
+        {
+          "n": 2,
+          "text": "Naming the stream type or building a `Body` (or a `Directory` or `FileWriter`) by hand from user code is E0605, with UI snapshots; the HTTP Body cutover lands on the new carrier and the http goldens pass on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since 43873ce5e6 (with 4c64794ac9 streaming bodies on it). `jet test Compiler --profile ui --filter` http_body_carrier_is_private, http_body_literal_is_private, directory_literal_is_private and forged_file_writer_literal: each PASS (E0605); `jet test Compiler --profile golden --filter Network/HTTP/`: 51 PASS, 0 FAIL over O0/O1/O2, on the gate-p136 batch jet.",
+          "at": "2026-11-15T01:10:50.040Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ballot",
+        "owner-gate",
+        "core",
+        "native",
+        "goal2a",
+        "wayfinder:decision"
+      ],
+      "parentId": "c0w9o2sz",
+      "needsAcceptance": false,
+      "created": "2026-10-08T12:42:12.406Z",
+      "updated": "2026-11-15T01:10:59.933Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-15T01:10:59.933Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T01:13:46.575Z"
+    },
+    {
+      "id": "c0nxjs80",
+      "num": 6704,
+      "title": "A range-typed Int(lo..hi) argument is rejected for a plain Int parameter (E0108); no explicit widening exists",
+      "body": "Found by WaylandLead (#6701 c5, range-typed OS-edge params). Seed a0_039:\nplain: fn(value: Int) -> Int { value * 2 }\nranged: fn(size: Int(1..1073741824)) -> Int { plain(size) }   // E0108\nInt{size} and size.raw() are rejected too; only arithmetic (size + 0) widens. A value of a refined range type is always a valid Int, so widening to the unrefined type should be implicit (or have one ratified explicit spelling). Repro: $JET_SCRATCH_ROOT/lanes/WaylandLead/probe/range_widen_repro.jet.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": "jet run of the repro prints 10 on O0, O1 and O2; a case under tests/cases covers the call, a return and an assignment of a range value to Int",
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c2 sweep by G5DevX-1 on dev 16f96f3c7a. Narrow form: git grep -nE \"wrapping\\([a-z_]+ \\+ 0\\)\" -- Core Compiler Tools tests hits only Core/Sys/Sys.jet (14 sites), all removed by G5DevX-range1b2, so 0 hits on its tree. Broad form: git grep -nE \"[A-Za-z_)\\]] \\+ 0\\b\"; every other hit is Float arithmetic (+ 0.5 and the like), index symmetry (base + 0, start + 0 in generated lexer rows), Int + 0 on an Int, comments, or awk/shell text, none of them a widening workaround. Meets after range2 (b15) and range1b2 (b16) land and the range-widening cases pass at O0/O1/O2."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Main sweep 2026-11-12: still E0108 on seed-b13 (repro $JET_SCRATCH_ROOT/lanes/Main/sweep/r6704/main.jet). spec.md says safe widening is implicit, so Int(lo..hi) to Int is implicit with no new spelling; routed to G5DevX-1 as G5DevX-range1."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Passing, returning or assigning an Int(lo..hi) value where Int is expected type-checks and runs with the same value on O0, O1 and O2 (case under tests/cases).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 03d5f7b309 (merged batch, GoalsB-2-6704-widening-close). On the gate-p66 jet built from it: jet test Compiler --profile cases --filter numeric_widening/safe_widening_fills_every_typed_slot_on_every_tier -> PASS 1, FAIL 0 (runs O0, O1, O2).",
+          "at": "2026-11-14T14:32:01.256Z"
+        },
+        {
+          "n": 2,
+          "text": "Safe widening is one rule applied at every place a value meets a declared type: call and Core-call arguments, returns, local and place assignment, struct-literal fields, list and map items, and returned field reads. A ranged Int or a narrower fixed-width integer passes where Int is expected at each place, at O0, O1 and O2, and narrowing stays refused. Proof: the tests/cases range-widening case covers every position and its refused case. No `+ 0` widening workaround remains in Core, Compiler, Tools or tests.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since b41eaf314b (with e6e08afe22, which dropped Core's `+ 0` widening; the remaining `+ 0` hits are index offsets like `start + 0`, not widening). `jet test Compiler --profile cases --filter numeric_widening/safe_widening_fills_every_typed_slot_on_every_tier` (every slot at -O0/-O1/-O2, plus 5 refused narrowings) on the gate-p136 batch jet: PASS.",
+          "at": "2026-11-15T01:10:48.133Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "sema",
+        "types",
+        "bug"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-08T20:32:10.659Z",
+      "updated": "2026-11-15T01:10:58.369Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-15T01:10:58.369Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T01:13:46.582Z"
+    },
+    {
+      "id": "c0x3vq4p",
+      "num": 6731,
+      "title": "Core range fill: one call fills a span of a list or buffer (owner: no ballot)",
+      "body": "OWNER RULING 2026-11-09 (chat): no ballot; build it with an idiomatic Jet API design. The UI canvas's full redraw is ~15 ms at 2560x1440 (36 ms at 3440x1362), and 74% of it is per-byte fill stores, about a 5.2 ms floor, because Jet has no range-write primitive. Add a whole-span fill on lists and buffers that the runtime lowers to memset/word stores, with one meaning on every tier (I9). The canvas fill uses it. Target: a full redraw ≤ 6 ms at 2560x1440 O2. It needs a paired perf cell (the plain loop against the fill) per the performance gate, plus an example with golden output.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Spelling decision (Main, 2026-11-10, within the owner ruling that a public whole-span fill needs no ballot). xs.fill(range, value) is the plain form. xs.fill_repeat(range, pattern) repeats a multi-element pattern across the span, for RGBA pixels and gradient rows. Neither clamps: a range outside 0..len stops with the same bounds fault as range indexing, and an empty pattern stops the same way; a span that is not a whole number of patterns ends with a partial pattern. Both methods share the one fast path that replaces the internal xs.__fill, and every caller moves in one cutover. G6Lead is building it."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "Landed in train 2 (dev c057ea659d): 75ae287c5f makes core.ui opaque fills write in place through xs.__fill and deletes the stitch rebuild; a5a8142d89 gives the program one built-in face. WaylandLead3-10cr measured a full 2560x1440 redraw at 4.9-5.2 ms on its compiler (it was 223-240 ms). Still open: __fill is internal, so the public spelling, the perf pair and the example remain; criteria 1-4 track them."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A public, idiomatic whole-span fill on lists and byte buffers (not a double-underscore internal) lowers to memset or word stores, with one meaning on O0, O1, O2 and web (I9).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6Lead-6731a + G6Lead-6731b. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). fill and fill_repeat are public [T] methods with one shared fast path; __fill and its route are removed.",
+          "at": "2026-11-10T16:27:50.436Z"
+        },
+        {
+          "n": 2,
+          "text": "core.ui's canvas fill uses it, and a full redraw at 2560x1440 on O2 takes at most 6 ms, measured on a landed compiler.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since 55904de918 (core.ui full redraw under 6 ms on O2; Draw fills through the public fill_repeat since 3c4f26d466). `jet build --release Tools/perf/redraw/Main.jet` with the gate-p136 batch jet, run twice on a loaded host (load 21): median 5.64 ms and 5.95 ms per 2560x1440 full redraw, \"median within the 6.00 ms limit\", rc 0.",
+          "at": "2026-11-15T01:10:51.945Z"
+        },
+        {
+          "n": 3,
+          "text": "A paired perf cell compares the plain per-element loop with the fill, per the performance gate, and the fill strictly beats it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6Lead-6731a. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). Paired perf cells list_fill_vs_index_loop (ratio 0.169) and list_fill_repeat_vs_index_loop (ratio 0.056) are in the measurement manifest; the pair lines rerun rc=0 with a git identity.",
+          "at": "2026-11-10T16:27:52.610Z"
+        },
+        {
+          "n": 4,
+          "text": "An example with golden output shows the fill, passing on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6Lead-6731a. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). golden Collections/ListFill and ListFillBounds PASS on O0/O1/O2; documented in core-library.md.",
+          "at": "2026-11-10T16:27:54.650Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T15:32:55.781Z",
+      "updated": "2026-11-15T01:11:01.670Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-15T01:11:01.670Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T01:13:46.586Z"
+    },
+    {
+      "id": "c0aqtwkf",
+      "num": 6823,
+      "title": "`jet inspect choices`: placement, exposure and context reads, per function",
+      "body": "Gap card K10 from the #6792 r2 proposal (Docs/proposals/2026-11-13-web-app-framework-shape.md) and review round 1 (Docs/audits/2026-11-13-web-app-framework-shape-review.md). This build card waits on the D-WEBAPP-SHAPE1 ratification.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-13): the D-AUTOPIN1 pin hint appears only on automatic placement rows. An exposure row is written by its marker, and a context read is no effect (D-CONTEXT-EFFECT1), so neither has a placement lock to name. Built in G5DevX2-inspect-choices-exposure-context."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The command lists each function's placement, whether it is an endpoint and under which marker, and which context fields it reads, with a pin hint (D-AUTOPIN1). Proof: `jet test Compiler --profile cases --filter inspect_choices_` runs `jet inspect choices` on a fixture app with a server-only, a client-placed and an #App.SignedIn function, and matches its expected listing (placement, marker, context reads, and the pin hint on automatic placement rows only). (#6792 r2 gap K10)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since 64158ab782 (one app case pins placement, exposure, context reads and the pin hint). `jet test Compiler --profile cases --filter inspect_choices_` on the gate-p136 batch jet: 8 PASS, 0 FAIL, including web_app/inspect_choices_lists_one_apps_placement_exposure_and_context_reads (a #Target(JS) client fn, an automatic row with its pin hint, a server-only method, an #App.SignedIn endpoint and its context reads).",
+          "at": "2026-11-15T01:10:47.170Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0snkbac",
+      "needsAcceptance": false,
+      "created": "2026-11-13T15:43:38.888Z",
+      "updated": "2026-11-15T01:10:56.824Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T01:10:56.824Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T01:13:46.586Z"
+    },
+    {
+      "id": "c0c3gh6u",
+      "num": 6840,
+      "title": "Optimization levels are spelled O0, O1 and O2: the -O0/-O1/-O2 flags replace --optimize=none|basic|full",
+      "body": "Owner order (2026-11-14): \"The flags for o0 o1 o2 should be o0 o1 o2 not optimize=basic.\"\n\nToday the optimize build option (Compiler/JetFoundation/Source/Registry/BuildOptions.jet:48) has the values none, basic and full, spelled --optimize=basic on the command line, optimize: basic in a build profile and b.optimize(.Basic) in a build fn, with -O<n> accepted as a second spelling of the same flag. The levels are named O0, O1 and O2 everywhere else (AGENTS.md I9, the specs, traces and reports).\n\nDecision (Main, within the owner order): one spelling of a level everywhere, with no alias (greenfield cutover). The flag is -O0, -O1 or -O2. The option's values are O0, O1 and O2, so a profile writes optimize: O2 and a build fn writes b.optimize(.O2). --optimize=<word> and the words none, basic and full are removed. Every in-repository caller moves in one cutover.",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c1 holds except its jet explain clause: build_entry/optimize_levels_are_flags_and_trace_their_level PASSES on gate-p131 and jet build --help lists -O0/-O1/-O2, but local jet explain fails with E1227 (jetpack a0.0.44 against jet a0.0.45). c1 stays open for the explain proof after the next release admit."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The optimize option's values are O0, O1 and O2 in the BuildOptions registry. `jet build -O0|-O1|-O2`, `jet run`, `jet test` and every command that takes the option accept only these flags. `--optimize=none|basic|full` and `--optimize` with any value fail as ordinary unknown flags, with no teaching error, alias or jet fix rule. A build profile writes `optimize: O1` and a build fn `b.optimize(.O1)`. Help text and `jet explain` name the levels O0, O1 and O2. Proof: a cases row runs `jet build -O0`, `-O1` and `-O2` on one program, checks the level each traces, and shows that `--optimize=basic` is refused.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since c85b927fab (with 41f5054d46): the optimize option's registry values are O0/O1/O2, -O0/-O1/-O2 are its flags and --optimize with or without a value is jet.UnknownFlag. `jet test Compiler --profile cases --filter build_entry/optimize_levels_are_flags_and_trace_their_level` on the gate-p136 batch jet: PASS (1 PASS, 0 FAIL).",
+          "at": "2026-11-15T01:10:43.954Z"
+        },
+        {
+          "n": 2,
+          "text": "Every in-repository caller moves in the same cutover: Compiler, Core, Jetpack, Tools (agent, release, ci, perf, gauntlet, tower), tests cases and UI snapshots, Examples, package.jet profiles, Docs/spec and the website source. Proof: `git grep -n -e '--optimize' -e 'optimize: \\(none\\|basic\\|full\\)' -e 'optimize(\\.\\(None\\|Basic\\|Full\\))' -- Compiler Core Jetpack Tools tests Examples Docs/spec` prints nothing, and the touched cases and goldens pass on the batch jet.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "The criterion's git grep over Compiler Core Jetpack Tools tests Examples Docs/spec finds no caller: its only hits are the board's own records quoting this criterion (Tools/tower/.tower/tower.json 67, history.json 37) and tests/cases/build_entry/optimize_levels_are_flags_and_trace_their_level.case (7), the proof that --optimize is refused as UnknownFlag, which passes; zero hits in Compiler, Core, Jetpack, Examples, Docs/spec or any other Tools or tests file on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 529aba0d26",
+          "at": "2026-11-14T23:17:27.182Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T08:59:10.868Z",
+      "updated": "2026-11-15T01:10:53.610Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-15T01:10:53.610Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T01:13:46.586Z"
+    },
+    {
+      "id": "c0kz2hdf",
+      "num": 4139,
+      "title": "Principle: a value can owe a transition (one debt concept for must-use, single-use, and tasks)",
+      "body": "Elegance principle hunt, 2026-10-01. Jet checks several kinds of value debt with separate rules, words, and escapes: `#MustUse` (E0419, discard `.drop(\"reason\")`), `#SingleUse` (E0140-E0143, discard `consume(x)` inside `#Unsafe(\"reason\")`), and a bound task that owes a join (L1101, discharge `.join()` or `.detach()`). Ratified D-CONC-UNIT1=A already moved tasks onto the single-use obligation checker. Typestate and taint already share one flow store, `Facts<P>` (`crates/jet-sema/src/Sema/FlowFacts.rs:1-80`). `GateKind` already has `DutyDrop` and `StateTransition` (`crates/jet-foundation/src/Authority.rs:671-672`). Users cannot declare a debt for their own types.\n\nClosed-book prediction test: 6 hit, 0 near, 0 miss.\n\nOwner choice: ballot D-OWES1.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": "After ratification: add the ratified debt declaration, express #MustUse, #SingleUse, and task join as instances, unify the diagnostic sentence, and make `.drop(\"reason\")` the single abandon gate per the ratified option.",
+      "checkSteps": null,
+      "probe": "jet run Examples/features/effects/single_use.jet",
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 1 criteria from archived #3840: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Landed on dev at undefined in CardClose-3 (patch row: criterion/count 4): CardClose-3 pins .detail (lint name), .source, .location.start and .span of the lint_allow gate entry in tests/cases/gate_law/lint_gate_keeps_the_source_reason.case; w11 testkit cases: PASS (FAIL with span.end changed to 64)"
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #4151, #4078; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #4151, #4078; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed ; their criteria are carried here verbatim as [#n] rows."
+        },
+        {
+          "at": "2026-10-02",
+          "by": "Pip",
+          "text": "Correction (2026-10-02, owner direction): the mining probes p1-p12 ran on target-rel/release/jet built 2026-10-01 22:14, which the owner says is obsolete. Every probe-based claim in the earlier 2026-10-02 mining log on this card is withdrawn until it is reproduced on a fresh build. Source-level citations (file:line) still stand as reading evidence only."
+        },
+        {
+          "at": "2026-10-02",
+          "by": "Pip",
+          "text": "Correction to the 2026-10-02 mining log above: the retained report path is Docs/research/mine-for-jet-2026-10-02-vale-valen.md; the proposal is Docs/proposals/memory-model-next-level-2026-10-02.md."
+        },
+        {
+          "at": "2026-10-02",
+          "by": "Pip",
+          "text": "Mining 2026-10-02 (Vale/Valen; report Docs/research/mine-for-jet-vale-2026-10-02.md). External evidence for D-OWES1 option A: Vale's Higher RAII restricts destruction of a linear value to named consuming functions in the defining file, which may take extra arguments (video https://www.youtube.com/watch?v=UavYVf0UEoc 14:20-17:45; https://verdagon.dev/blog/higher-raii-uses-linear-types, 'Higher RAII = Linear types + whitelisted destroyers'). Its separate zero-argument onException hook for unwinding matches A's on_fail field (same article, side notes 31-36). Live probes on target-rel/release/jet 2026-10-01 22:14 (~/.cache/jet-test-scratch/vale-probes): p5 a consumer with extra arguments works; p3 a plain fn sink(lock: ^Lock) {} silently discards a #SingleUse value (exit 0); p4 a generic fn ignore<T>(value: ^T) {} does the same. Source: crates/jet-sema/src/Sema/Registration.rs:736-741, parameters never carry the consume duty. So today any ^ helper is an unaudited discard, bypassing E0143. Vale's answer is that the callee inherits the duty. Also relevant: Vale's linear key (insert returns a key that proves the entry exists; remove consumes it) and the observation that 'remember to' comments mark missing debts."
+        },
+        {
+          "at": "2026-10-02",
+          "by": "pip-mine-20261001",
+          "text": "Mining run 2026-10-01 (Docs/research/mine-for-jet-2026-10-01-systems-langs.md): ballot D-OWES1 raised on this card with linear-type evidence from Austral (linear values, explicit close), Vale (Higher RAII named settling methods), Mojo (`not Deinitable else \"msg\"`), Swift SE-0390 (~Copyable), and Rust (affine + #[must_use]). Live probe J2: E0140 already says \"`db` still owes `consume`\". Owner asked that the ballot may propose a beginner-visible default; option C does."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "D-OWES1 is ratified.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-OWES1 ratified A on 2026-10-02 on Tower.",
+          "at": "2026-11-15T01:18:42.932Z",
+          "closure": "decision"
+        },
+        {
+          "n": 2,
+          "text": "Every owed-transition diagnostic uses one sentence shape, and each existing safety check stays at least as strict, proven by the existing UI snapshots.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since 49f6bf6fe6: every value-debt diagnostic (E0140, E0141, E0142, E0143, E0419, L1101) opens \"`x` still owes <transition>\", with the same code, span, why and fix as before. The UI snapshots that commit touched all pass on the gate-p136 batch jet: `jet test Compiler --profile ui --filter must_use_` 4 PASS 0 FAIL, `--filter task_list` 12 PASS 0 FAIL, `--filter iter_unconsumed` 1 PASS, `--filter scope_guard_discarded` 4 PASS, and `--filter single_use_` 12 PASS for single_use_aliased, single_use_branch, single_use_branch_expr and single_use_consume_unaudited (its 1 FAIL, ownership/single_use_copy_is_refused, is a newer d93656f4c3 snapshot with a caret-width mismatch, not a debt line).",
+          "at": "2026-11-15T01:18:21.688Z"
+        },
+        {
+          "n": 3,
+          "text": "[#4151]  • The owner-design criterion is met by D-OWES1=A (ratified 2026-10-02: `#MustFinish(commit, rollback, on_fail: rollback)`). • A function that can return with an open transaction is rejected at compile time (UI snapshot). A failed commit cannot be ignored. • Database begin/commit/rollback stop returning Bool (Database.jet:38-45,61-68).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since 3ad0f3310a: core.db Database.begin returns a #SingleUse DBTransaction (`-[DB]> DBTransaction DBError!`, Core/Db/Db.jet:719), and its commit and rollback fail with DBError!, so none returns Bool. The D-OWES1 debt is spelled #SingleUse rather than #MustFinish. `jet test Compiler --profile ui --filter single_use_` PASSes ownership/single_use_return_leaves_transaction_open (a return that leaves the transaction open is a compile error), and `--filter db_commit_failure_cannot_be_ignored` gives 1 PASS, on the gate-p136 batch jet.",
+          "at": "2026-11-15T01:18:22.753Z"
+        },
+        {
+          "n": 4,
+          "text": "[#4078]  • Every `#allow(lint)` site appears in `jet inspect gates` with lint names and span (golden). • Suppression behaviour is unchanged. The Jet gate-ledger port is part of this card.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev e6097d14bb added tests/cases/gate_law/lint_gate_keeps_the_source_reason.case, which pins every #allow(lint) site in jet inspect gates (lint name, span, source, reason, status) and PASSes; suppression behaviour unchanged (L0515 still reported at its site).",
+          "at": "2026-11-15T01:18:44.392Z"
+        }
+      ],
+      "refs": [
+        "Docs/audits/elegance-audit-2026-09-30.md"
+      ],
+      "tags": [
+        "elegance-audit",
+        "ready-for-agent",
+        "wayfinder:task"
+      ],
+      "parentId": "c0w9o2sz",
+      "needsAcceptance": false,
+      "created": "2026-10-01T12:23:21.776Z",
+      "updated": "2026-11-15T01:18:46.473Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 5,
+      "completedAt": "2026-11-15T01:18:46.472Z",
+      "questions": [
+        {
+          "id": "qhgccvuw",
+          "cardId": "c0kz2hdf",
+          "decisionId": "D-OWES1",
+          "by": "owner",
+          "kind": "question",
+          "text": "is this effectively a customizable way to enforce different effects, limitations, restrictions, requirements, debts/etc on a type? It isnt clear to me exactly how single use is replaced and how code will become easier to reason about, read, and write",
+          "status": "answered",
+          "answer": "# D-OWES1 — answer\n\n**Owner (verbatim):** \"is this effectively a customizable way to enforce\ndifferent effects, limitations, restrictions, requirements, debts/etc on a\ntype? It isnt clear to me exactly how single use is replaced and how code will\nbecome easier to reason about, read, and write\"\n\n**Short answer: no, it is much narrower than that.** It answers one question\nabout a type: *how is a value of this type allowed to end?* For a database\ntransaction the answer is \"commit or rollback\". The compiler then makes sure\nevery path through the code ends the value in one of those ways.\n\nIt does not add effects, permissions, or general rules. Jet already has a\nseparate tool for each of those, and they stay:\n\n| Need | Existing tool |\n| --- | --- |\n| What a function may do (I/O, files) | effect rows `-[IO]>`, `#FX` |\n| Which methods are allowed in which state | `#State` / `#Transition` |\n| Untrusted data must be cleaned first | `#Input` / `#Scrub` |\n| A returned value must not be ignored | `#MustUse` |\n| **How a value must end** | **this ballot** |\n\n**How `#SingleUse` is replaced.** `#SingleUse` already makes a value end exactly\nonce. But any consuming call counts, and the error only says \"`txn` still owes\n`consume`\". The new marker keeps the same exactly-once check and adds three\nthings:\n\n1. **Only the listed methods finish it.** `#MustFinish(commit, rollback)`.\n2. **Errors name the job.** \"`txn` must finish with `commit` or `rollback`\n   before the return on line 6.\"\n3. **Error exits can finish it automatically.** With `on_fail: rollback`, a\n   failing `?` rolls back on its own. Today you write a rollback branch before\n   every `?`.\n\nEach `#SingleUse` type moves to the new marker by listing its consuming\nmethods, for example `#MustFinish(close)`.\n\n**Why code gets easier to read, write, and reason about.** Here is the same\npayment function each way:\n\n```jet\n// Today (#SingleUse): a rollback branch at every failure point\ntxn :: db.begin()\n&txn.charge(cents) ?? {\n    ^txn.rollback()\n    return Err(err)\n}\n^txn.commit()?(\"commit\")\n\n// Proposed (#MustFinish(commit, rollback, on_fail: rollback))\ntxn :: db.begin()\n&txn.charge(cents)?(\"charge\")   // on failure, rollback runs by itself\n^txn.commit()?(\"commit\")\n```\n\n- **Reading:** the type's declaration lists every legal way its values end.\n- **Writing:** no repeated rollback branches.\n- **Reasoning:** if it compiles, no path leaves the function with an unfinished\n  transaction. Automatic rollback, as in Rust's sqlx, cannot promise that: a\n  forgotten `commit` compiles and every payment silently rolls back. That is\n  now option C, so you can compare the two directly.\n\n**What I changed in the ballot.**\n\n- I propose renaming the marker from `#Owes` to `#MustFinish`. This is my\n  suggestion, not something you asked for: \"owes/debt\" is a metaphor, and\n  `#MustFinish` pairs with the existing `#MustUse`. Keep `#Owes` if you prefer;\n  nothing else depends on the name.\n- Handing the value to another function with `^` passes the duty along. That\n  function must finish it, pass it on, or return it, so a wrapper cannot make\n  the duty disappear. Reading a task's result still counts as joining it.\n- The lesson now says what the feature is *not*. The detail has a four-state\n  table and an exact `on_fail` rule. For example, it never runs on a value that\n  was already handed to `commit`, and never on abort or process kill.\n- The examples use the real receiver marks (`&txn.charge`, `^txn.commit`).\n- Old option C (\"Core also marks buffered writers and locks\") is now a later,\n  separate question. New option C is the real alternative most languages use:\n  automatic rollback at scope end.\n- The old claim that tasks get \"one rule\" for the first time is corrected.\n  Tasks already share the single-use rule (D-CONC-UNIT1). Only their messages\n  change.\n\nReview note for Main: substantive rewrite. The stored reader passes are labeled\ninherited and were not rerun. Run fresh beginner and adversarial passes before\nmarking it ready. SolBallotAdvisor's note (advisor/D-OWES1.md) shaped the\nnarrow answer, the state table, the on_fail edges, and the new option C.",
+          "created": "2026-10-02T17:11:06.401Z",
+          "answeredAt": "2026-10-02",
+          "answeredBy": "Pip"
+        }
+      ],
+      "retiredAt": "2026-11-18T01:24:54.713Z"
+    },
+    {
+      "id": "c06y0cef",
+      "num": 5029,
+      "title": "Mutable globals initialized while compiling (Jai #no_reset)",
+      "body": "## Outcome\n\nDecision D-JAI-COMPTIME1 (short ballot). Jai keeps globals changed at compile time in the binary (`#no_reset`) and copies compile-time heap data into static storage. Jet's E0622 (D-MODULE-VALUE1) requires mutable module globals to start from a literal. Audit rows: A10, A11, A12.\n\nThe ballot carries the full design; this card holds the vote and, once ratified, the delivery plan.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-10-23",
+          "by": "agent",
+          "text": "Board burndown 2026-10-22: ratified D-JAI-COMPTIME1 already decides mutable globals computed while compiling; implementation remains."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The syntax this card adds has its Compiler/JetFoundation/Data/Syntax row, its Docs/spec/syntax-decisions.md entry and regenerated editor grammars in the same change (comptime-initialized mutable globals, D-JAI-COMPTIME1=A). Proof: after `jet self devtools grammars`, `git status --short Tools/editors` is empty, and `jet test tests/guards --filter grammar` and `jet test tests/guards --filter syntax_reconciliation` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G6Meta-4 on dev 3685eb41cb, gate-p27 jet (2026-11-13). Data/Syntax Spellings.jet LEXICAL_LEDGER has the row \"name := value — mutable module global… starts from any storable value its initializer computes while building\", and Docs/spec/syntax-decisions.md:441 has the full D-JAI-COMPTIME1=A entry. jet self devtools grammars regenerated the sections, and diff -rq of Tools/editors against an untouched copy is empty. jet test tests/guards --filter grammar gives 13/0, and --filter syntax_reconciliation gives 15/0, now selecting tests since filterstem (batch 19, c01ff2ad91). Logs: $JET_SCRATCH_ROOT/lanes/G6Meta/grj.sx_{gram,gg,sr}.out. c5 and c6 (the storable values and static layout) stay open.",
+          "at": "2026-11-14T02:20:17.336Z"
+        },
+        {
+          "n": 5,
+          "text": "A module global written `name := <value>` starts from any storable value computed while compiling, including `[U8]`, `[T]`, maps and structs holding them, with no startup copy (D-JAI-COMPTIME1=A). E0622 is retired for these. `spec.md:255-259` is updated, and a golden mutates a module-global `[U8]` at O0/O2. Found by the 2026-11-05 Doom port investigation (ratified, not built; compiler 0ccdff27ea).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev bda8175585: jet test Compiler --profile golden --filter tests/run/Comptime/MutableGlobalStarts on batch compiler gate-p131 (dev 8d83659ef3): 6 PASS, 0 FAIL (MutableGlobalStartsFromComputedValue and MutableGlobalStartsFromAnyStorableValue at o0/o1/o2)",
+          "at": "2026-11-14T22:58:36.262Z"
+        },
+        {
+          "n": 6,
+          "text": "A module global written `name := <value>` whose computed value holds exact Ints beyond a machine word, or a map keyed by a nominal type, is laid out as static data while compiling, with no first-use build or startup copy (D-JAI-COMPTIME1=A, \"no startup copy\"). The first-use build (atomic ready word plus compare-exchange) is left only for values that hold runtime handles, which cannot exist while compiling. A golden mutates each kind at O0/O1/O2, and an IR or object test shows no first-use helper for them. (Gap found in G6Meta-5029c5-r2, Main.)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since bced5762a5 (with ce550d258a, G6Meta-5029f1): a mutable module global holding a 2^70 Int, an enum-keyed map, struct-keyed maps and wide Int keys is laid out as static data, and only a Shared cell keeps a first-use start helper. `jet test Compiler --profile cases --filter module_storage/module_globals_start_laid_out_unless_they_hold_a_handle` on the gate-p136 batch jet: PASS 1, FAIL 0. The case mutates each global at -O0/-O1/-O2 and in the -O2 AOT build, and `jet inspect decisions -O1` counts 0 `storage.start` calls and 0 ready-word loads in the laid-out reader.",
+          "at": "2026-11-15T01:18:24.136Z"
+        }
+      ],
+      "refs": [
+        "Docs/audits/jai-parity-2026-10-16.md",
+        "#5021"
+      ],
+      "tags": [
+        "mining-2026-10-16",
+        "jai-vs-jet",
+        "jai-parity",
+        "comptime",
+        "needs-owner",
+        "wayfinder:decision"
+      ],
+      "parentId": "c02y3vkg",
+      "needsAcceptance": false,
+      "created": "2026-10-16T10:54:47.130Z",
+      "updated": "2026-11-15T01:18:28.766Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 6,
+      "completedAt": "2026-11-15T01:18:28.766Z",
+      "questions": [
+        {
+          "id": "q4tk0q5m",
+          "cardId": "c06y0cef",
+          "decisionId": "D-JAI-COMPTIME1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Can we design/engineer a better solution that doesn’t have the downside that the current recommendation has? We have full stack control so we can get creative to solve these challenges and have best of all worlds with no downsides",
+          "status": "answered",
+          "answer": "# D-JAI-COMPTIME1 — answer to q4tk0q5m\n\n**Question (owner):** \"Can we design/engineer a better solution that doesn't have the downside that the current recommendation has? We have full stack control so we can get creative to solve these challenges and have best of all worlds with no downsides.\"\n\n**The downside, precisely.** The old recommendation let a changeable global start from a computed value only if the value was *fixed-size plain data* (numbers, Bool, fixed-size lists and plain structs of those; these need no heap and are stored inline). Strings, growable lists, maps and structs holding them were refused. Their contents live in heap blocks the allocator owns, and bytes stored in the program file are not allocator blocks, so growing or freeing them would corrupt the heap. The only alternative offered, rebuilding such values on the heap before `fn run`, brought back the startup copy the feature exists to remove.\n\n**The engineered fix: a baked heap**, designed against the native runtime's actual allocator (`Compiler/JetRuntime/Source/Alloc.jet`: 64 KiB slabs for blocks up to 4096 bytes, one size class per slab, two header words per block; larger blocks are their own page-aligned mappings).\n\n1. The compiler writes each baked heap value **in the allocator's own block format** into a writable, page-aligned section of the program file. Small blocks fill whole 64 KiB slabs that hold nothing else; each large block owns whole pages.\n2. Executables load at a fixed address, so every pointer inside baked data is written as its final address at link time.\n3. At start, the allocator's existing setup writes **one word per baked slab**: the address of that size class's list, which only exists at run time. That is about 16 stores per MiB of baked data.\n4. From then on baked blocks are ordinary heap blocks. Writes go in place; growing moves to new heap memory and frees the old block; freeing returns the block. An emptied baked slab is kept or unmapped exactly as today, which is safe because those pages hold only that slab (likewise a freed large block's own pages). **The free path is unchanged**: no new branch, same lock.\n\nStrings keep their two blocks (24-byte header plus data). The counting allocator mode reports baked bytes separately instead of as allocations.\n\n**Costs, honestly stated:**\n\n- Start: one store per 64 KiB slab, which makes the OS copy that slab's first 4 KiB page. Other pages are copied only when first written.\n- File size: the program file holds the baked bytes, as precomputed data does in every language. Each build prints bytes per baked global.\n- Build time: each value is cached by key and recomputed only when its inputs change; the step budget applies (`#StepLimit` is ratified but not built).\n- Scope: native Linux x86-64 executables get it first. Other targets, shared libraries (which load at varying addresses) and the Rust tier until it retires keep the **same meaning** but copy baked values before `fn run` until their allocator gains the same setup step. The receipt names which path a build used.\n\n**The rule becomes simpler, too.** A changeable file global follows the rule file constants already follow under D-COMPTIME-WORD1=A: its starting value is computed while compiling, with no keyword, if it is *storable* (that decision's definition, quoted verbatim in the ballot). Otherwise it is E0622 with the reason. This amends one ratified sentence, \"Mutable and #Persist globals keep E0622\", to \"#Persist globals keep E0622; changeable globals follow the file-constant rule.\"\n\n```jet\ntable := make_table()      // [U32#256]: plain data, stored inline\nnames := default_names()   // [String]: baked heap blocks\nfn run() {\n    table[0] = 1           // writes in place\n    &names.push(\"extra\")   // grows into ordinary heap memory\n}\n```\n\n**Options.** **A** any storable value, baked as ready heap blocks (recommended); **B** the old fixed-size-only rule; **C** today's rule (`TABLE.copy()` at each start).\n\nRuntime work this implies (for the card plan): a baked-heap writer in the backend and the per-slab setup step in `Alloc.jet`; then the same setup step per other target allocator.\n\nRevised ballot: `D-JAI-COMPTIME1.json` (full profile, syntax group; Tower gate passes; fresh beginner and adversarial passes run, findings repaired).",
+          "created": "2026-10-17T22:52:19.566Z",
+          "answeredAt": "2026-10-17",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-18T01:24:54.714Z"
     }
   ]
 }
