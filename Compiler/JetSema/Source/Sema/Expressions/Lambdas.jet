@@ -2114,7 +2114,7 @@ sema_expression_lambda_with_host: fn(lambda: Lambda, expected: Type?, environmen
 }
 
 // A lambda's written, expected and inferred returns are one type when they
-// agree in resolved form: an expected `[module::Name]` (resolved by the slot
+// agree in resolved form: an expected `[module.Name]` (resolved by the slot
 // that supplied it) and a body's bare `[Name]` name the same declaration.
 sema_expression_lambda_return_fits: fn(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if sema_type_assignable(required, offered) -> return true
@@ -2305,7 +2305,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
             diagnostics.push(sema_error("E0119", parameter.ty_span ?? parameter.name_span, "a lambda parameter can't have type `{sema_type_show(parameter_type)}`", "`Group` is a type only a direct function or method parameter can name; a lambda could carry the group past the block that joins it", "move the work into a function that takes `group: Group` and call it directly"))
             return None
         }
-        // A written `(item: Item)` and an expected `module::Item` (resolved
+        // A written `(item: Item)` and an expected `module.Item` (resolved
         // by the generic slot that supplied it) name one declaration.
         if parameter.ty != None && expected_params == .Val(required_params) {
             if index < required_params.len() && !type_identity_equal(sema_expr_expected_type(parameter_type, environment, program), sema_expr_expected_type(required_params[index], environment, program)) {
@@ -2522,7 +2522,7 @@ sema_expression_lambda_with_host_in_frame: fn(lambda: Lambda, expected: Type?, e
                 diagnostics.push(sema_error("E0073", lambda.span, "this collecting loop path produces no item", "every accepted iteration must contribute one non-unit value unless `next` omits it", "return a value on this path, or remove `->`"))
                 return None
             }
-            // A declared `module::Name` slot and a written `Name` item are one
+            // A declared `module.Name` slot and a written `Name` item are one
             // type: both sides are compared in their resolved form.
             if expected_ret == .Val(.List(expected_item)) {
                 resolved_expected: sema_expr_expected_type(expected_item, environment, program)

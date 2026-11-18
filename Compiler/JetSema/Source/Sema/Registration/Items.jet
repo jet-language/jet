@@ -241,7 +241,7 @@ sema_registration_unit_leaf_name: fn(ty: Type) -> String? {
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> None
     }
     name_value: name ?? return None
-    parts: name_value.split("::").to_list()
+    parts: name_value.split(".").to_list()
     if parts.len() == 0 -> return None
     Val(parts[parts.len() - 1])
 }
@@ -316,7 +316,7 @@ sema_registration_unit_family_type_names: fn(definition: UnitFamilyDef) -> [Name
 // The compiler-owned unit facts every program has, before any family's:
 // core.units' `Duration` and `Instant` carriers on the Time axis.
 sema_registration_builtin_unit_facts: fn() -> [SemaRegistrationUnitFact] Never! {
-    time_dimension: Val(Dimension{axes: [DimensionAxis]{DimensionAxis{name: "core.units::Time", exponent: Measure.SignedLiteral{kind: "dimension", value: 1}}}})
+    time_dimension: Val(Dimension{axes: [DimensionAxis]{DimensionAxis{name: "core.units.Time", exponent: Measure.SignedLiteral{kind: "dimension", value: 1}}}})
     [SemaRegistrationUnitFact]{
         SemaRegistrationUnitFact{name: "Duration", package: "core.units", family: "Time", member: "ns", dimension: time_dimension, scale: UnitRatio{numerator: 1, denominator: 1}, scale_provenance: UnitScaleProvenance.Rational, offset: UnitRatio{numerator: 0, denominator: 1}, kind: QuantityKind.Delta},
         SemaRegistrationUnitFact{name: "Instant", package: "core.units", family: "Time", member: "ns", dimension: time_dimension, scale: UnitRatio{numerator: 1, denominator: 1}, scale_provenance: UnitScaleProvenance.Rational, offset: UnitRatio{numerator: 0, denominator: 1}, kind: QuantityKind.Point},
@@ -385,7 +385,7 @@ sema_registration_unit_member_type: fn(graph: SemaRegistrationGraph, ty: Type) -
 }
 
 // The package identity of the module declaring the qualified nominal `ty`
-// (`{module_name}::{name}`), or None when no registered nominal is spelled so.
+// (`{module_name}.{name}`), or None when no registered nominal is spelled so.
 sema_registration_unit_type_package: fn(graph: SemaRegistrationGraph, ty: Type) -> String? Never! {
     if ty == .Tagged(_, inner) -> return sema_registration_unit_type_package(graph, inner)
     spelled := ""
@@ -436,7 +436,7 @@ sema_registration_unit_fact_is_builtin_time: fn(fact: SemaRegistrationUnitFact) 
 sema_registration_unit_type_is_qualified: fn(ty: Type) -> Bool Never! {
     if ty == {
         .Tagged(_, inner) -> sema_registration_unit_type_is_qualified(inner)
-        .Named(value) | .Apply(value, _) -> value.contains("::")
+        .Named(value) | .Apply(value, _) -> value.contains(".")
         .Int | .Float | .Bool | .String | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> false
     }
 }
@@ -1039,7 +1039,7 @@ SemaRegistrationGraph: struct {
     // the driver leaves their functions out of the shipped program.
     comptime_only_modules: [ModuleID]{[ModuleID]{}},
     // One table per package namespace (Rust
-    // `NameLedger::namespace_owner`): namespace -> slot, and per slot name ->
+    // `NameLedger.namespace_owner`): namespace -> slot, and per slot name ->
     // entry; entry -> declaring module and name. Entries are numbered in
     // module order, then declaration order.
     namespace_slots: [String:Int]{[String:Int]{}},
@@ -1130,7 +1130,7 @@ SemaRegistrationGraph: struct {
     marker_catalog: SemaScopeMembersMarkerRegistry?{None},
 }
 
-// `{module_name}::{name}` of every nominal row registered by the end of graph
+// `{module_name}.{name}` of every nominal row registered by the end of graph
 // construction. Rows never move and their symbols never rename, so a row the
 // table holds keeps its spelling; a row pushed later is spelled where it is read.
 SemaCanonicalNominals: struct {
@@ -1138,8 +1138,8 @@ SemaCanonicalNominals: struct {
     names: [[String]],
     // Canonical spelling -> row of `owners`/`leaves`: the module `module_rows`
     // gives its `module_name` and its leaf name, exactly the module and name a
-    // cut at its last `::` finds (sema_type_graph_lookup_symbol_at). Spellings
-    // whose leaf holds `::`, or whose module is not registered, are left out.
+    // cut at its last `.` finds (sema_type_graph_lookup_symbol_at). Spellings
+    // whose leaf holds `.`, or whose module is not registered, are left out.
     rows: NameRows,
     owners: [Int],
     leaves: [String],
@@ -1806,9 +1806,9 @@ sema_registration_index_canonical_nominals: fn(graph: &SemaRegistrationGraph) Ne
     loop module_index in 0..<graph.modules.len() {
         names := [String]{}
         loop row in 0..<graph.modules[module_index].nominals.len() {
-            spelling: "{module_text(graph.module_table, graph.modules[module_index].nominals[row].symbol.module_identity)}::{graph.modules[module_index].nominals[row].symbol.name}"
+            spelling: "{module_text(graph.module_table, graph.modules[module_index].nominals[row].symbol.module_identity)}.{graph.modules[module_index].nominals[row].symbol.name}"
             names.push(spelling.copy())
-            if graph.modules[module_index].nominals[row].symbol.name.contains("::") -> next
+            if graph.modules[module_index].nominals[row].symbol.name.contains(".") -> next
             owner: sema_registration_module_index(graph, graph.modules[module_index].nominals[row].symbol.module_identity) ?? next
             if name_rows_get_text(table.rows, spelling) != None -> next
             name_rows_set(table.rows, spelling, table.owners.len())
@@ -1820,7 +1820,7 @@ sema_registration_index_canonical_nominals: fn(graph: &SemaRegistrationGraph) Ne
     graph.canonical_nominals = Val(table.move())
 }
 
-// `{module_name}::{name}` of nominal row `row`: the spelling built with the
+// `{module_name}.{name}` of nominal row `row`: the spelling built with the
 // graph, or spelled here for a row registered after it.
 sema_registration_nominal_spelling: fn(graph: SemaRegistrationGraph, row: SemaRegistrationRowRef) -> String Never! {
     if graph.canonical_nominals == .Val(table) {
@@ -1828,7 +1828,7 @@ sema_registration_nominal_spelling: fn(graph: SemaRegistrationGraph, row: SemaRe
             return table.names[row.module_index][row.row]
         }
     }
-    "{module_text(graph.module_table, graph.modules[row.module_index].nominals[row.row].symbol.module_identity)}::{graph.modules[row.module_index].nominals[row.row].symbol.name}"
+    "{module_text(graph.module_table, graph.modules[row.module_index].nominals[row.row].symbol.module_identity)}.{graph.modules[row.module_index].nominals[row.row].symbol.name}"
 }
 
 sema_registration_index_all_nominal_names: fn(graph: &SemaRegistrationGraph) Never! {
@@ -2130,7 +2130,7 @@ sema_registration_operator_owner: fn(owner: SymbolID, symbols: &SymbolTable, mod
     if !owned_trait_keyed_by_argument(trait_value) -> return owner.copy()
     right: rhs ?? left
     owner_key: symbol_table_key(symbols, owner)
-    symbol_mint(symbols, SymbolKind.Impl, module_identity, owner_key, "{type_name(left)}::{trait_value}<{type_name(right)}>")
+    symbol_mint(symbols, SymbolKind.Impl, module_identity, owner_key, "{type_name(left)}.{trait_value}<{type_name(right)}>")
 }
 
 // Whether the struct or enum `item` writes an `impl` block of `trait_name`
@@ -2712,7 +2712,7 @@ sema_registration_reserved_type_rule: fn(module_text: String, item: Item, name: 
     if kind == "" || !sema_reserved_type_name(name) -> return true
     // `item` is the loaded declaration; canonical identity supplies the exact
     // source path and name from CORE_SOURCE_OWNED_TYPES, never the export superset.
-    if core_source_owns_type("{module_text}::{name}") -> return true
+    if core_source_owns_type("{module_text}.{name}") -> return true
     diagnostics.push(sema_error("E0106", sema_registration_root_span(item), "the name `{name}` is built in and can't be redefined", "`{name}` is provided by the language itself", "choose a different name for this {kind}"))
     false
 }

@@ -12,7 +12,7 @@ use jet_sema.[sema_core_error_family_member, sema_core_error_family_names, sema_
 
 #Test("the Prelude's members are in the family and its component types are not") {
     assert(sema_core_error_family_member("NetError"))
-    assert(sema_core_error_family_member("<corelib>/core.crypto.uuid::UUIDError"))
+    assert(sema_core_error_family_member("<corelib>/core.crypto.uuid.UUIDError"))
     assert(sema_core_error_family_member("SendError"))
     assert(sema_core_error_family_member("AllocError"))
     assert(!sema_core_error_family_member("TaskFailure"))
@@ -21,7 +21,7 @@ use jet_sema.[sema_core_error_family_member, sema_core_error_family_names, sema_
 }
 
 #Test("a Core type its source marks `#Error` and a compiler-owned error are error domains") {
-    errors: [String]{"NetError", "ColorError", "TaskFailure", "SendError", "<corelib>/core.crypto.uuid::UUIDError", "core.net.WsError", "IOError", "ParseError", "BuildError", "Expired"}
+    errors: [String]{"NetError", "ColorError", "TaskFailure", "SendError", "<corelib>/core.crypto.uuid.UUIDError", "core.net.WsError", "IOError", "ParseError", "BuildError", "Expired"}
     loop name in errors { assert(sema_core_error_type(name), "{name} is not an error domain") }
     others: [String]{"Color", "NetErrorDetail", "TaskStatus", "MarkerArgValue", "UIPreviewContext"}
     loop name in others { assert(!sema_core_error_type(name), "{name} is an error domain") }

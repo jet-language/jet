@@ -224,7 +224,7 @@ pap_cap_source: fn(receipt: String) -> String {
     defer close(owner)
     prelude_api: pap_api(root, "prelude", "physics", "Measure: trait {{\n    scale: fn(value: Meter) -> Meter,\n}}\n")
     method: pap_find(prelude_api, "Measure.scale")
-    assert_eq(method.signature, "require Measure.scale(value: Meter[core.units%3A%3ALength:1]) Meter[core.units%3A%3ALength:1]")
+    assert_eq(method.signature, "require Measure.scale(value: Meter[core.units.Length:1]) Meter[core.units.Length:1]")
     frozen: pap_frozen("physics", prelude_api)
     assert_eq(pap_find(frozen, "Measure.scale").signature, method.signature)
     local_api: pap_api(root, "local", "physics", "#UnitFamily(Length, base: meter) {{\n    meter\n}}\nMeasure: trait {{\n    scale: fn(value: Meter) -> Meter,\n}}\n")

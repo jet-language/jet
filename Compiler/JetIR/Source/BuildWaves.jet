@@ -467,7 +467,7 @@ ir_wave_glues: fn(inputs: Shared<IRWaveInputs>, slot: Shared<IRWaveWorker>) -> I
 // left with nothing to claim while it is counted as building.
 ir_build_stop_test_run: fn(count: Int) -> String Never! {
     p := ir_program_declared([TTypeDef]{}, [TImplDef]{}, [TConstantDef]{}, [FnBody]{}, symbol_table())
-    roots := [IRWaveJob]{IRWaveJob{key: "test:stop.jet::gone", row: 0, args: [Type]{Type.Int}, lambda: -1, part: -1, local: -1}}
+    roots := [IRWaveJob]{IRWaveJob{key: "test:stop.jet.gone", row: 0, args: [Type]{Type.Int}, lambda: -1, part: -1, local: -1}}
     kept := ir_build_waves_parted(p.move(), roots.move(), false, count, None)
     "the build ended with {kept.result.failures.len()} failures"
 }
@@ -479,7 +479,7 @@ ir_build_stop_test_run: fn(count: Int) -> String Never! {
             run: task ir_build_stop_test_run(count)
             stop = run.join() ?? compiler_threads_failure_text(err)
         }
-        assert(stop.contains("the IR build of test:stop.jet::gone stopped: "), stop)
+        assert(stop.contains("the IR build of test:stop.jet.gone stopped: "), stop)
     }
 }
 

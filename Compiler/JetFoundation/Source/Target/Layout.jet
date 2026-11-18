@@ -406,7 +406,7 @@ jet_target_layout_engine_target: fn(engine: TargetLayoutEngine) -> JetTargetLayo
 // `module_text` is the declaring module identity's text ("" for none).
 jet_target_layout_struct_facts_in_module: fn(engine: TargetLayoutEngine, definition: StructDef, module_text: String) -> LayoutFacts Never! {
     query := jet_target_layout_query()
-    identity: if module_text == "" -> definition.name else -> "{module_text}::{definition.name}"
+    identity: if module_text == "" -> definition.name else -> "{module_text}.{definition.name}"
     jet_target_layout_struct_facts_inner_named(engine, definition, identity, identity, query)
 }
 
@@ -501,7 +501,7 @@ jet_target_layout_marker_expression: fn(marker: Marker, index: Int) -> Expr? {
 
 jet_target_layout_enum_facts_in_module: fn(engine: TargetLayoutEngine, definition: EnumDef, module_text: String) -> LayoutFacts Never! {
     query := jet_target_layout_query()
-    identity: if module_text == "" -> definition.name else -> "{module_text}::{definition.name}"
+    identity: if module_text == "" -> definition.name else -> "{module_text}.{definition.name}"
     jet_target_layout_enum_facts_inner_named(engine, definition, identity, identity, query)
 }
 
@@ -509,7 +509,7 @@ jet_target_layout_enum_facts_in_module: fn(engine: TargetLayoutEngine, definitio
 // laid out with.
 jet_target_layout_distinct_facts_in_module: fn(engine: TargetLayoutEngine, definition: DistinctDef, module_text: String) -[Mem.Alloc]> LayoutFacts Never! {
     query := jet_target_layout_query()
-    identity: if module_text == "" -> definition.name else -> "{module_text}::{definition.name}"
+    identity: if module_text == "" -> definition.name else -> "{module_text}.{definition.name}"
     if !jet_target_layout_enter(query, identity) {
         return LayoutFacts{bytes: None, fields: [FieldLayoutFacts]{}}
     }
@@ -887,7 +887,7 @@ jet_target_layout_type_inner: fn(engine: TargetLayoutEngine, ty: Type, owner_qua
 }
 
 jet_target_layout_is_atomic_name: fn(name: String) -> Bool Never! {
-    name == "Atomic" || name.ends_with("::Atomic") || name.ends_with(".Atomic")
+    name == "Atomic" || name.ends_with(".Atomic")
 }
 
 jet_target_layout_atomic_layout: fn(engine: TargetLayoutEngine, args: [Type]) -> ByteLayout? {

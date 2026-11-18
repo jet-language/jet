@@ -42,7 +42,7 @@ ir_unit_convert: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argumen
 // helper's `Float String!` result is this node's Result of the unit.
 ir_unit_convert_checked: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, argument: Int, scale: String, offset: String, rounding: BodyUnitRounding?, span: Span) -> Int Never! {
     helper: ir_unit_conversion_helper(rounding != None)
-    row: ir_function_row(p, "function:<corelib>/core.math::{helper}") ?? return ir_fail_slot(b, span, "unit conversion to {ir_type_name(ty)} without core.math")
+    row: ir_function_row(p, "function:<corelib>/core.math.{helper}") ?? return ir_fail_slot(b, span, "unit conversion to {ir_type_name(ty)} without core.math")
     value: ir_expr(m, p, b, argument)
     if ir_failed(b) -> return -1
     values := [Int]{value}

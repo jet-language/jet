@@ -32,7 +32,7 @@ hole_header_errors: fn(failures: &[String], source: String) -> [Diagnostic]? {
     parsed := parse_source(source.bytes())
     if parsed.diagnostics.len() != 0 -> return Val(parsed.diagnostics.move())
     table := module_table()
-    main_id: module_intern(table, "hole-header::main")
+    main_id: module_intern(table, "hole-header.main")
     effects: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\nPanic: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
         failures.push("canonical effect module declares no effects")
         return None

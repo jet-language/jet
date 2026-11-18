@@ -81,7 +81,7 @@ lp_types: fn(m: &IRModule) -> LPTypes {
         pair: ir_intern_type(m, "(Int, Int)", IRType{ty: Type.Named{name: "Pair"}, kind: IRTypeKind.Aggregate, size: 16, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
         code: ir_intern_type(m, "{IR_CODE_TYPE}:twice", IRType{ty: Type.Apply{name: IR_CODE_TYPE, args: [Type]{twice_ty}}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: ""}),
         // A handle whose drop is the module's `release` (function 1).
-        guard: ir_intern_type(m, "Guard", IRType{ty: Type.Named{name: "Guard"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "test:lint.jet::release"}),
+        guard: ir_intern_type(m, "Guard", IRType{ty: Type.Named{name: "Guard"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "test:lint.jet.release"}),
     }
 }
 
@@ -93,7 +93,7 @@ lp_add: fn(m: &IRModule, f: IRFunction) -> Int {
 }
 
 lp_fn: fn(name: String) -> IRFunction {
-    ir_function_new(name, "test:lint.jet::{name}", "", "lint.jet", 1)
+    ir_function_new(name, "test:lint.jet.{name}", "", "lint.jet", 1)
 }
 
 lp_temp: fn(f: &IRFunction, ty: Int) -> Int { ir_slot(f, ty, IRSlotKind.Temp, -1, 0) }
@@ -403,7 +403,7 @@ lp_narrow_address: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
 
 // A drop whose routine is `twice`, which takes an Int and has a result.
 lp_drop_routine: fn(m: &IRModule, t: LPTypes, f: &IRFunction) {
-    wrong: ir_intern_type(m, "Doubled", IRType{ty: Type.Named{name: "Doubled"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "test:lint.jet::twice"})
+    wrong: ir_intern_type(m, "Doubled", IRType{ty: Type.Named{name: "Doubled"}, kind: IRTypeKind.Pointer, size: 8, align: 8, class: IRClass.Pointer, signed: false, bits: 64, drop: "test:lint.jet.twice"})
     slot: lp_temp(f, wrong)
     _ := ir_emit(f, IROp.Drop, -1, slot, -1, -1, 1)
     lp_return(f, -1)

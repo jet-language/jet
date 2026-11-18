@@ -1540,34 +1540,36 @@ native_type_name: fn(image: NativeImage, ty: Int) -> String Never! {
     native_jet_spelling(found.name)
 }
 
-// `name` without the module path before each `::` in it: `[main::Point]`
-// is `[Point]`, `<corelib>/core.math::Decimal` is `Decimal`, and a source
-// type's key `module:<len>:<package>:<path>::Point` is `Point`
+// `name` without the module path before each `.` in it: `[main.Point]`
+// is `[Point]`, `<corelib>/core.math.Decimal` is `Decimal`, and a source
+// type's key `module:<len>:<package>:<path>.Point` is `Point`
 // (diagnostic_display_identities, as a diagnostic prints it).
 native_jet_spelling: fn(name: String) -> String Never! {
     shown: diagnostic_display_identities(name, [String]{})
-    bytes: shown.bytes()
     corelib: "<corelib>".bytes()
-    colon: U8{58}
     kept := [U8]{}
-    // Where in `kept` the run of path bytes before the next `::` starts.
+    // Where in `kept` the run of path bytes before the next `.` starts.
     run := 0
-    k := 0
-    loop k < bytes.len() {
-        if k + 1 < bytes.len() && bytes[k] == colon && bytes[k + 1] == colon {
+    loop byte in shown.bytes() {
+        if byte == (U8{46}) {
             loop kept.len() > run -> _: kept.pop()
             if native_bytes_end_with(kept, corelib) {
                 loop _ in 0..<corelib.len() -> _: kept.pop()
             }
             run = kept.len()
-            k += 2
             next
         }
-        kept.push(bytes[k])
-        if !native_path_byte(bytes[k]) -> run = kept.len()
-        k += 1
+        kept.push(byte)
+        if !native_path_byte(byte) -> run = kept.len()
     }
     String.from_bytes(kept) ?? shown
+}
+
+#Test("a native type name drops the module path before each `.`") {
+    assert_eq(native_jet_spelling("[main.Point]"), "[Point]")
+    assert_eq(native_jet_spelling("<corelib>/core.math.Decimal"), "Decimal")
+    assert_eq(native_jet_spelling("module:3:app:src/prog.jet.Ring"), "Ring")
+    assert_eq(native_jet_spelling("[String:main.Point]"), "[String:Point]")
 }
 
 // Whether `bytes` ends with `suffix`.
@@ -1580,11 +1582,11 @@ native_bytes_end_with: fn(bytes: [U8], suffix: [U8]) -> Bool Never! {
     true
 }
 
-// Whether `byte` may be part of a module path: a letter, digit, `_`, `.`
-// or `/`.
+// Whether `byte` may be part of a module path segment: a letter, digit, `_`
+// or `/` (a `.` ends the segment, native_jet_spelling).
 native_path_byte: fn(byte: U8) -> Bool Never! {
     code: Int{byte}
-    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 46 || code == 47
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 95 || code == 47
 }
 
 // The byte size of type `ty`, through typedefs.

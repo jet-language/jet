@@ -213,7 +213,7 @@ sema_expression_present: fn(value: Expr, span: Span, expected: Type?, environmen
     }
     payload: sema_check_expression(value, expected_inner, environment, program, scopes, state, tail_store, context, diagnostics) ?? return None
     // The payload fills the declared slot through the registration graph: a
-    // declared `module::Name` and a literal's written `Name` are one type. A
+    // declared `module.Name` and a literal's written `Name` are one type. A
     // refusal is reported here, never dropped silently.
     if expected_inner == .Val(inner_ty) {
         fits: sema_expr_expected_assignable(inner_ty, payload.ty, environment, program) ?? return None
@@ -688,7 +688,7 @@ sema_failure_conversion_function_name: fn(source: Type, target: Type) -> String 
 // A declared `impl Source -> Target` registers under the leaf names of both
 // sides (the Rust reference names the routine by the declared names), so a
 // site whose failure types are canonical owner identities
-// (`module:…::OuterError`) or qualified spellings finds the same routine.
+// (`module:….OuterError`) or qualified spellings finds the same routine.
 sema_failure_declared_conversion_name: fn(source_leaf: String, target_leaf: String) -> String Never! {
     "errconv_{sema_failure_conversion_name_part(source_leaf)}_to_{sema_failure_conversion_name_part(target_leaf)}"
 }
@@ -927,7 +927,7 @@ sema_failure_method_key: fn(graph: SemaRegistrationGraph, key: String) -> String
     if sema_registration_callable_row(graph, key) != None -> return Val(key.copy())
     loop module_index in 0..<graph.modules.len() {
         module_identity: module_text(graph.module_table, graph.modules[module_index].module_identity)
-        if !key.starts_with("function:{module_identity}:") -> next
+        if !key.starts_with("function:{module_identity}.") -> next
         loop owner in 0..<graph.modules[module_index].nominals.len() {
             loop row in 0..<graph.modules[module_index].nominals[owner].methods.len() {
                 if symbol_key_text(SymbolKind.Function, module_identity, graph.modules[module_index].nominals[owner].symbol.name, graph.modules[module_index].nominals[owner].methods[row].declaration.name) == key {
@@ -3223,7 +3223,7 @@ sema_expression_type_table: fn(param: String, condition: Expr, then_body: [Stmt]
 }
 
 // Rust `nominal_type_identity`: two spellings of one declared type (the
-// written `Kind` and the canonical `module::Kind` a resolved type carries)
+// written `Kind` and the canonical `module.Kind` a resolved type carries)
 // are the same type at a merge.
 sema_expression_nominal_identity: fn(left: Type, right: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if type_identity_equal(left, right) -> return true

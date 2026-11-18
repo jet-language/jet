@@ -147,7 +147,7 @@ ir_environment_status: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, route: IREn
     if m.types[err_row].kind != .Word -> return ir_fail_slot(b, span, carriers)
     definition: ir_enum_def(m, p, err_row) ?? return ir_fail_slot(b, span, "environment error has no definition")
     name: p.types[definition].name
-    if name != "EnvError" && !name.ends_with("::EnvError") {
+    if name != "EnvError" && !name.ends_with(".EnvError") {
         return ir_fail_slot(b, span, "environment mutation requires checked EnvError")
     }
     invalid_name: ir_variant_index(p, definition, "InvalidName") ?? return ir_fail_slot(b, span, "environment error lacks InvalidName")

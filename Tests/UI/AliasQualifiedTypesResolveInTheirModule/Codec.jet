@@ -1,0 +1,9 @@
+// The failure and parameter types are spelled through this file's own
+// import alias; `run.jet` has no `enc` alias.
+use enc: core.encoding
+
+refuse: fn(reason: String) -> Int enc.EncodingError! {
+    Err(enc.EncodingError{format: enc.EncodingFormat.JSON, kind: enc.EncodingErrorKind.Unsupported, byte_offset: 0, line: None, column: None, path: "$", reason: reason, cause: None})
+}
+
+describe: fn(error: enc.EncodingError) -> String { "{error.path}: {error.reason}" }

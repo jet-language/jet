@@ -53,6 +53,7 @@ use jet_foundation.[
     symbol_is_local,
     symbol_is_none,
     symbol_none,
+    symbol_key_leaf,
     symbol_key_text,
     symbol_table_key,
     TTargetOS,
@@ -350,8 +351,7 @@ sema_call_try_type_param_hook_method: fn(receiver_value: TExpr, method: String, 
     current: parameter ?? return unhandled
     hook_trait := String?{None}
     loop bound in current.bounds {
-        segments: sema_program_symbol_key(program, bound).split(":").to_list()
-        trait_name: segments[segments.len() - 1]
+        trait_name: symbol_key_leaf(sema_program_symbol_key(program, bound))
         if sema_type_builtin_trait_symbol(trait_name) == .Val(builtin) && builtin.id == bound {
             if owned_trait_operator_hook(trait_name) == (Val(method)) {
                 hook_trait = Val(trait_name)
@@ -781,8 +781,7 @@ sema_call_typecheck_host_bound_arguments: fn(callee: String, params: [SemaCallPa
 
 // Whether `owner` is a builtin trait (sema_type_builtin_trait_symbol).
 sema_call_builtin_trait: fn(graph: SemaRegistrationGraph, owner: SymbolID) -> Bool Never! {
-    parts: symbol_table_key(graph.symbols, owner).split(":").to_list()
-    builtin: sema_type_builtin_trait_symbol(parts[parts.len() - 1]) ?? return false
+    builtin: sema_type_builtin_trait_symbol(symbol_key_leaf(symbol_table_key(graph.symbols, owner))) ?? return false
     builtin.id == owner
 }
 
@@ -1830,7 +1829,7 @@ sema_call_receiver_method_label: fn(receiver: Type) -> String Never! {
 }
 
 sema_call_method_leaf: fn(name: String) -> String Never! {
-    parts: name.split("::").to_list()
+    parts: name.split(".").to_list()
     parts[parts.len() - 1]
 }
 
@@ -1841,7 +1840,7 @@ sema_call_push_arity: fn(arities: &[Int], arity: Int) Never! {
 // The argument counts the receiver's built-in method table accepts for one
 // method name: the collection contracts, the value-method rows, the
 // dedicated parallel adapters and the built-in handle families (Rust
-// `Collections::builtin_method_return`, probed per arity as
+// `Collections.builtin_method_return`, probed per arity as
 // `builtin_method_names` and `builtin_method_arity_diagnostic` do).
 sema_call_builtin_method_arities: fn(receiver: Type, method: String) -> [Int] Never! {
     arities := [Int]{}
@@ -2258,8 +2257,8 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
         }
     }
     suggestion: sema_call_method_suggestion(method, nominal, actual, environment, program)
-    // A module-qualified receiver name (`module::Type`) names its module.
-    owner_module: if type_name_value.contains("::") -> foundation_byte_text(type_name_value.bytes(), 0, type_name_value.rfind("::")) else -> ""
+    // A module-qualified receiver name (`module.Type`) names its module.
+    owner_module: if type_name_value.contains(".") -> foundation_byte_text(type_name_value.bytes(), 0, type_name_value.rfind(".")) else -> ""
     protected: sema_call_core_nominal(nominal, environment, program) || (!source_owned && (sema_reserved_type_name(display) || sema_module_is_core_source(owner_module)))
     if protected {
         reached: if suggestion == None -> sema_call_method_reached_through(method, nominal, environment, program) else -> None
@@ -2270,8 +2269,7 @@ sema_call_missing_method_diagnostic: fn(receiver: Type, method: String, actual: 
         if param.name != type_name_value -> next
         bound_names := [String]{}
         loop bound in param.bounds {
-            segments: sema_program_symbol_key(program, bound).split(":").to_list()
-            bound_names.push("`{segments[segments.len() - 1]}`")
+            bound_names.push("`{symbol_key_leaf(sema_program_symbol_key(program, bound))}`")
         }
         if sema_variadic_bound_slot_parameter(type_name_value) == .Val(pack) {
             traits: if bound_names.len() == 0 -> "no trait" else -> bound_names.join(" + ")

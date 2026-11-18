@@ -237,14 +237,14 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 }
 
 #Test("from_core_apis_sorts_dedups_and_derives_capabilities") {
-    usage: jet_target_machine_use_from_core_apis([String]{"core.time::sleep", "core.term", "core.mem::Atomic", "core.time::sleep", "core.crypto.uuid"})
-    assert_eq(usage.core_apis, [String]{"core.crypto.uuid", "core.mem::Atomic", "core.term", "core.time::sleep"})
+    usage: jet_target_machine_use_from_core_apis([String]{"core.time.sleep", "core.term", "core.mem.Atomic", "core.time.sleep", "core.crypto.uuid"})
+    assert_eq(usage.core_apis, [String]{"core.crypto.uuid", "core.mem.Atomic", "core.term", "core.time.sleep"})
     assert_eq(usage.required_capabilities, [TargetCapability]{.Entropy, .Atomic64, .IORead, .IOWrite, .TimeSleep})
     assert(usage.heap_required)
-    assert(jet_target_capabilities_for_core_usage("core.time::duration").is_empty())
-    assert_eq(jet_target_capabilities_for_core_usage("core.time::elapsed"), [TargetCapability]{.TimeMonotonic})
-    assert_eq(jet_target_capabilities_for_core_usage("core.time::zone"), [TargetCapability]{.TimeZoneData})
-    assert_eq(jet_target_capabilities_for_core_usage("core.time::now"), [TargetCapability]{.TimeWall})
+    assert(jet_target_capabilities_for_core_usage("core.time.duration").is_empty())
+    assert_eq(jet_target_capabilities_for_core_usage("core.time.elapsed"), [TargetCapability]{.TimeMonotonic})
+    assert_eq(jet_target_capabilities_for_core_usage("core.time.zone"), [TargetCapability]{.TimeZoneData})
+    assert_eq(jet_target_capabilities_for_core_usage("core.time.now"), [TargetCapability]{.TimeWall})
 }
 
 #Test("named_wasm_profiles_have_distinct_provider_identities") {
@@ -272,7 +272,7 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
 }
 
 // Rust-computed oracle: CLI-37/identity_oracle.py extracts unmodified Rust
-// TargetMachine::provider_identity, board constructors, facts; rustc
+// TargetMachine.provider_identity, board constructors, facts; rustc
 // CARGO_PKG_VERSION=0.0.1. No Jet values fed to the oracle. The layout
 // identities are still the oracle's; the provider identities were re-pinned
 // when the provider dossier gained the Target.Memory and Target.Panic facts,
@@ -472,8 +472,8 @@ target_test_provider: fn(name: String, hash: String) -> ProviderContract Never! 
     assert(!jet_target_no_whitespace(String.from_bytes([U8]{226, 128, 169}) ?? panic("PS")))
     assert(jet_target_no_whitespace("ä字😀"))
     assert(jet_target_no_whitespace("​"))
-    assert_eq(jet_target_capabilities_for_core_usage("core.time::sleep::extra"), [TargetCapability]{.TimeWall})
-    assert(jet_target_capabilities_for_core_usage("core.mem::Atomic::extra").is_empty())
+    assert_eq(jet_target_capabilities_for_core_usage("core.time.sleep.extra"), [TargetCapability]{.TimeWall})
+    assert(jet_target_capabilities_for_core_usage("core.mem.Atomic.extra").is_empty())
     assert(jet_target_capabilities_for_core_usage("").is_empty())
 }
 

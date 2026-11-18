@@ -35,6 +35,7 @@ use {
         ENV_JET_FACTS_ANSWER,
         Span,
         TComptimeValue,
+        symbol_key_names,
     ]
     jet_sema.[SemaComptimeItemKind]
 }
@@ -422,11 +423,11 @@ jet_cli_facts_answer: fn(kind: String) -> JetCLIFactsOutcome Never! {
         if value.kind != SemaComptimeItemKind.Constant -> next
         key: value.key
         if {
-            key.ends_with(":JET_FACTS_IDENTITY") -> snapshot = jet_cli_facts_text(value.value)
-            key.ends_with(":JET_FACTS_ROWS") -> answer.rows = value.value.copy()
-            key.ends_with(":JET_FACTS_LINES") -> answer.lines = jet_cli_facts_text(value.value)
-            key.ends_with(":JET_FACTS_FAILURE") -> answer.failure = value.value.copy()
-            key.ends_with(":JET_FACTS_FAILURE_TEXT") -> {
+            key.ends_with(".JET_FACTS_IDENTITY") -> snapshot = jet_cli_facts_text(value.value)
+            key.ends_with(".JET_FACTS_ROWS") -> answer.rows = value.value.copy()
+            key.ends_with(".JET_FACTS_LINES") -> answer.lines = jet_cli_facts_text(value.value)
+            key.ends_with(".JET_FACTS_FAILURE") -> answer.failure = value.value.copy()
+            key.ends_with(".JET_FACTS_FAILURE_TEXT") -> {
                 answer.failure_text = jet_cli_facts_text(value.value)
             }
             else -> next
@@ -457,7 +458,7 @@ jet_cli_facts_run_answer: fn(path: String, kind: String) -> JetCLIFactsOutcome N
         }
     }
     loop value in result.comptime_values {
-        if value.kind == SemaComptimeItemKind.Constant && value.key.ends_with(":{JET_CLI_FACTS_RUN_ANSWER}") {
+        if value.kind == SemaComptimeItemKind.Constant && symbol_key_names(value.key, JET_CLI_FACTS_RUN_ANSWER) {
             return jet_cli_facts_record(value.value)
         }
     }

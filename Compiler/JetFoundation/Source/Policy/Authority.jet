@@ -1,4 +1,4 @@
-// Ported from jet_foundation::Authority: one rights tree and one holds
+// Ported from jet_foundation.Authority: one rights tree and one holds
 // relation.
 //
 // A rights set (Rust `Holds`, a `BTreeSet<String>`) is a sorted,
@@ -7,7 +7,7 @@
 // PackageModel area (Authority/SandboxAuthority.jet); this file stays
 // compiler-free.
 
-// jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS: reading the program's own
+// jet_foundation.Syntax.EFFECT_LEAF_EXEC_ARGS: reading the program's own
 // arguments, a leaf of `Exec`. The `Exec` root also covers spawning processes.
 AUTHORITY_EXEC_ARGS_LEAF: "Exec.Args"
 
@@ -27,14 +27,14 @@ AUTHORITY_AMBIENT_BASIC_EFFECTS: #run { [String]{"IO", "Mem.Alloc", AUTHORITY_EX
 // The deny-only stop root.
 AUTHORITY_PANIC_ROOT: "Panic"
 
-// jet_foundation::Syntax::EFFECT_LEAF_TIME_WAIT: waiting on the program's own
+// jet_foundation.Syntax.EFFECT_LEAF_TIME_WAIT: waiting on the program's own
 // work, a deny-only leaf.
 AUTHORITY_TIME_WAIT_LEAF: "Time.Wait"
 
 // The deny-only root of reaching `#Unsafe` code outside Core.
 AUTHORITY_UNSAFE_ROOT: "Unsafe"
 
-// jet_foundation::Authority::is_deny_only: `Panic`, the `Mem` root, the
+// jet_foundation.Authority.is_deny_only: `Panic`, the `Mem` root, the
 // `Time.Wait` leaf and `Unsafe` (reaching `#Unsafe` code) may be refused but
 // never have to be granted, so the application policy never asks for them or
 // writes them into `allow:`.
@@ -127,7 +127,7 @@ authority_parse_root: fn(right: String) -> String? Never! {
 // Preserve a right's leaf spelling and scope argument while normalizing its
 // canonical root.
 authority_parse_right: fn(right: String) -> String? Never! {
-    // #4303: Main-approved host-emitter binding workaround; restore :: with the emitter fix.
+    // #4303: Main-approved host-emitter binding workaround; bind `trimmed:` once the emitter is fixed.
     trimmed := right.trim()
     split: effect_scope_split(trimmed)
     root: authority_parse_root(split.base) ?? return None
@@ -285,7 +285,7 @@ CanonicalAuthority: struct {
 }
 
 // Plain words for what a program does when it uses `right`
-// (jet_foundation::Authority::effect_action). Unlisted leaves fall back to
+// (jet_foundation.Authority.effect_action). Unlisted leaves fall back to
 // their root's words.
 authority_effect_action: fn(right: String) -> String Never! {
     canonical: authority_parse_right(right) ?? right

@@ -64,13 +64,13 @@ effect_origin_input: fn(module_index: Int, file: String) -> SemaEffectModuleInpu
 }
 
 #Test("effect_diagnostic_origins") {
-    caller := effect_origin_node("main::ceiling", 0)
+    caller := effect_origin_node("main.ceiling", 0)
     caller.has_declared_row = true
     caller.declared = [String]{"IO"}
-    caller.call_edges = [String]{"worker::inspect"}
+    caller.call_edges = [String]{"worker.inspect"}
     caller.call_targets = [Int]{1}
-    helper := effect_origin_node("worker::inspect", 1)
-    helper.dispatches = [TEffectSpan]{TEffectSpan{name: "Shape::area", span: Span{start: 30, end: 34}}}
+    helper := effect_origin_node("worker.inspect", 1)
+    helper.dispatches = [TEffectSpan]{TEffectSpan{name: "Shape.area", span: Span{start: 30, end: 34}}}
     nodes: [SemaEffectNode]{caller.copy(), helper.copy()}
     // callers[i] lists the nodes that call node i.
     reach: sema_effect_dispatch_reach(nodes, [[Int]]{[Int]{}, [Int]{0}})

@@ -2,7 +2,9 @@
 // This never runs a second checker; callers pass the registered graph and its
 // finalized checked result so imported modules and solved effects stay intact.
 use jet_foundation.[
+    foundation_byte_text,
     symbol_is_local,
+    symbol_key_leaf_start,
     symbol_local_keys_count,
     symbol_local_keys_text_at,
     symbol_local_row,
@@ -171,7 +173,7 @@ sema_compiler_index_module_file: fn(registration: SemaRegistrationGraph, module_
 }
 
 // The identity a compiler value names the declaration keyed `key` by
-// (`symbol_id`'s `kind:module:owner:name`): a kind word, then the dotted
+// (symbol_key_text's `kind:module.owner.name`): a kind word, then the dotted
 // path of its module's name, its owner and its own name, as in
 // `fn:app.helper`, `method:app.Point.area` or `param:app.helper.x`. A text
 // that is no declaration key, such as an ambient call's name, is its own
@@ -179,28 +181,30 @@ sema_compiler_index_module_file: fn(registration: SemaRegistrationGraph, module_
 sema_compiler_identity: fn(registration: SemaRegistrationGraph, key: String) -> String {
     kind: (key.split_once(":") ?? return key.copy()).before
     rest: key.slice(kind.len() + 1, key.len())
-    named: rest.cut_last(":") ?? return key.copy()
-    head: named.before
-    // A module key may hold colons of its own: the shortest prefix of `head`
-    // that keys a registered module is the module, and the rest its owner.
+    name_start: symbol_key_leaf_start(rest)
+    if name_start == 0 -> return key.copy()
+    head: foundation_byte_text(rest.bytes(), 0, name_start - 1)
+    name: foundation_byte_text(rest.bytes(), name_start, rest.count_bytes())
+    // A module identity may hold `.` and `:` of its own: the longest prefix
+    // of `head`, cut at a `.`, that keys a registered module is the module,
+    // and the rest its owner.
     declaring := ""
     owner := ""
     found := false
-    first := true
-    prefix := ""
-    loop part in head.split(":") {
-        prefix = if first -> part.copy() else -> "{prefix}:{part}"
-        first = false
-        if sema_registration_module_index_text(registration, prefix) == .Val(row) {
-            declaring = registration.modules[row].module_name.copy()
-            start: prefix.len() + 1
-            owner = if start >= head.len() -> "" else -> head.slice(start, head.len())
-            found = true
-            break
+    bytes: head.bytes()
+    at := bytes.len()
+    loop at > 0 && !found {
+        if at == bytes.len() || bytes[at] == (U8{46}) {
+            if sema_registration_module_index_text(registration, foundation_byte_text(bytes, 0, at)) == .Val(row) {
+                declaring = registration.modules[row].module_name.copy()
+                owner = if at == bytes.len() -> "" else -> foundation_byte_text(bytes, at + 1, bytes.len())
+                found = true
+            }
         }
+        at -= 1
     }
     if !found {
-        split: head.cut_last(":")
+        split: head.cut_last(".")
         declaring = if split == .Val(parts) -> parts.before.copy() else -> head.copy()
         owner = if split == .Val(parts) -> parts.after.copy() else -> ""
     }
@@ -217,7 +221,7 @@ sema_compiler_identity: fn(registration: SemaRegistrationGraph, key: String) -> 
         nested -> sema_compiler_identity_path(sema_compiler_identity(registration, owner))
         else -> "{declaring}.{owner}"
     }
-    "{word}:{scope}.{named.after}"
+    "{word}:{scope}.{name}"
 }
 
 // The dotted path of an identity: the text after its kind word.

@@ -47,8 +47,8 @@ sema_stream_handle_owner: fn(ty: Type) -> String? {
             loop owner in
                 ([String]{"Sender", "Receiver", "MappedFile", "FileScope", "FileReader", "FileWriter", "TempDir", "TempFile", "FileLock", "StdinHandle", "Stdout", "Stderr", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "XMLReader", "XMLWriter", "Reader", "Cursor", "Path"}) {
                 // The built-in `Path` has no declaring module: a canonical
-                // `<module>::Path` is a different record (`core.files.path`).
-                if name == owner || (owner != "Path" && name.ends_with("::{owner}")) {
+                // `<module>.Path` is a different record (`core.files.path`).
+                if name == owner || (owner != "Path" && name.ends_with(".{owner}")) {
                     return Val(owner)
                 }
             }
@@ -97,7 +97,7 @@ sema_stream_handle_is_canonical: fn(ty: Type, owner: String, environment: SemaSc
 sema_stream_handle_source_lines_owner: fn(ty: Type, method: String) -> String? {
     if method != "lines" -> return None
     if ty == .Named(name) {
-        if name.ends_with("::StdinHandle") && core_source_owns_type(name) {
+        if name.ends_with(".StdinHandle") && core_source_owns_type(name) {
             return Val("StdinHandle")
         }
     }

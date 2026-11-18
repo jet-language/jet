@@ -563,12 +563,14 @@ jet_cli_web_contract: fn(function: Func?) -> JetCLIWebContract {
 // The solved effect row of `name`: the entry module's own function first, then
 // any user module's; a function sema did not summarize keeps its declared row.
 jet_cli_web_function_effects: fn(modules: [JetDriverDocModule], entry_identity: String, function: Func) -> [String] {
+    identities := [String:String]{}
+    loop doc_module in modules -> identities[doc_module.module_identity] = ""
     loop pass in 0..<2 {
         loop doc_module in modules {
             if pass == 0 && doc_module.module_identity != entry_identity -> next
             loop body in doc_module.functions {
                 if body.synthetic -> next
-                key: semindex_function_key(body.key) ?? next
+                key: semindex_function_key(body.key, identities) ?? next
                 if key.local == function.name -> return body.effects.solved.copy()
             }
         }

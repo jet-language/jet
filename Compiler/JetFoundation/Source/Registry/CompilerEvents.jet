@@ -172,7 +172,7 @@ COMPILER_EVENT_PAYLOADS: [CompilerEventPayload]{
 
 // The Core enum every moment is a variant of, `core.compiler.Event`; each
 // payload is the Core struct its row names.
-COMPILER_EVENT_TYPE: "<corelib>/core.compiler::Event"
+COMPILER_EVENT_TYPE: "<corelib>/core.compiler.Event"
 
 // One moment as a compile met it: its row name and its payload, a value of
 // the payload row's struct whose fields are the row's, in row order. The
@@ -209,7 +209,7 @@ compiler_event_payload: fn(payload: String, values: &&[TComptimeValue]) -> TComp
             fields.push(TComptimeField{name: COMPILER_EVENT_PAYLOADS[at].fields[fields.len()].name, value: value})
         }
     }
-    TComptimeValue.Struct{type_name: "<corelib>/{home}::{payload}", fields: fields}
+    TComptimeValue.Struct{type_name: "<corelib>/{home}.{payload}", fields: fields}
 }
 
 // The record of the moment `name`, its payload's field values given in the
@@ -256,7 +256,7 @@ compiler_event_value_json: fn(value: TComptimeValue) -> String Never! {
             }
             "{{{members.join(",")}}}"
         }
-        .Enum(type_name, variant, args) -> if type_name.ends_with("::Effect") && args.len() == 0 -> foundation_json_quote(variant) else -> "null"
+        .Enum(type_name, variant, args) -> if type_name.ends_with(".Effect") && args.len() == 0 -> foundation_json_quote(variant) else -> "null"
         .Float(_, _) | .Char(_) | .BigInt(_) | .Bytes(_) | .Map(_) | .Present(_) | .Failed(_) | .Unit | .Function(_) -> "null"
     }
 }

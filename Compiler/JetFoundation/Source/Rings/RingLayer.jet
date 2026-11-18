@@ -126,7 +126,7 @@ jet_ring_is_namespace_only: fn(module_name: String) -> Bool Never! {
 }
 
 jet_ring_is_closure_marker: fn(usage: String) -> Bool Never! {
-    usage.starts_with("__core_source::") || usage.starts_with("__core_intrinsic::")
+    usage.starts_with("__core_source.") || usage.starts_with("__core_intrinsic.")
 }
 
 jet_ring_layer_rank: fn(layer: RuntimeLayer) -> Int Never! {
@@ -205,35 +205,21 @@ jet_ring_helper_layer: fn(module_name: String, helper: String) -> RuntimeLayer? 
 }
 
 jet_ring_core_usage_layer: fn(usage: String) -> RuntimeLayer Never! {
-    if usage.starts_with("core::") {
-        bytes: usage.bytes()
-        rest: String.from_bytes(bytes.slice(6, bytes.len())) ?? ""
-        return if rest == {
-            "json" | "bytes" -> RuntimeLayer.Alloc
+    parts: core_path_parts(usage)
+    if parts.module_name == "core" && parts.member != "" {
+        return if parts.member == {
+            "bytes" -> RuntimeLayer.Alloc
             "from_bytes" | "from_bytes_lossy" -> RuntimeLayer.Core
             else -> RuntimeLayer.Std
         }
     }
-    parts := usage.split("::").to_list()
-    module_name := parts[0]
-    helper := ""
-    if parts.len() > 1 {
-        helper_parts := [String]{}
-        loop index in 1..<parts.len() -> helper_parts.push(parts[index])
-        helper = helper_parts.join("::")
-    }
-    jet_ring_helper_layer(module_name, helper) ?? jet_ring_layer_of_module(module_name)
+    jet_ring_helper_layer(parts.module_name, parts.member) ?? jet_ring_layer_of_module(parts.module_name)
 }
 
 jet_ring_dependency_keys: fn(usage: String) -> [String] Never! {
-    parts := usage.split("::").to_list()
-    module_name := parts[0]
-    helper := ""
-    if parts.len() > 1 {
-        helper_parts := [String]{}
-        loop index in 1..<parts.len() -> helper_parts.push(parts[index])
-        helper = helper_parts.join("::")
-    }
+    parts: core_path_parts(usage)
+    module_name: parts.module_name
+    helper: parts.member
     dependencies := [String]{}
     loop row in jet_ring_dependency_rows() {
         if row.module_name == module_name {
@@ -244,8 +230,7 @@ jet_ring_dependency_keys: fn(usage: String) -> [String] Never! {
     if helper.len() > 0 && module_name != "core" {
         jet_ring_insert_string(dependencies, module_name)
     }
-    if usage == "core::json" -> jet_ring_insert_string(dependencies, "core.encoding.json")
-    if usage == "core::bytes" -> jet_ring_insert_string(dependencies, "core.encoding")
+    if usage == "core.bytes" -> jet_ring_insert_string(dependencies, "core.encoding")
     if !jet_ring_is_namespace_only(module_name) {
         module_parts := module_name.split(".").to_list()
         if module_parts.len() > 1 {

@@ -28,6 +28,7 @@ use {
         jet_config_string_escape,
         sema_casing_marker_qualifier,
         stage_hook,
+        symbol_key_names,
     ]
     jet_lexer.[TOKEN_DOT, TOKEN_EOF, TOKEN_HASH, TOKEN_IDENT, TOKEN_LBRACE, TOKEN_LPAREN, TOKEN_RBRACE, TOKEN_RPAREN, lex, token_text]
     jet_parser.[parse_source]
@@ -287,7 +288,7 @@ jet_driver_tool_stage_answers: fn(stage: String, bodies: [Span], values: &&[Sema
     loop value in values.move() {
         if value.kind != SemaComptimeItemKind.Constant -> next
         loop (index, body) in bodies {
-            if !value.key.ends_with(":{JET_DRIVER_TOOL_STAGE_VALUE}_{index}") -> next
+            if !symbol_key_names(value.key, "{JET_DRIVER_TOOL_STAGE_VALUE}_{index}") -> next
             answers[index] = jet_driver_tool_stage_rows(stage, body, value.value.move())
             break
         }
@@ -611,7 +612,7 @@ jet_driver_moment_plan: fn(hooks: [JetDriverMomentHook], records: [CompilerEvent
 // its compile; None when it has none or it is malformed.
 jet_driver_link_stage_action: fn(values: &&[SemaComptimeItemValue]) -> JetDriverBuildAction? Never! {
     loop value in values.move() {
-        if value.kind != SemaComptimeItemKind.Constant || !value.key.ends_with(":{JET_DRIVER_LINK_STAGE_VALUE}") {
+        if value.kind != SemaComptimeItemKind.Constant || !symbol_key_names(value.key, JET_DRIVER_LINK_STAGE_VALUE) {
             next
         }
         return jet_driver_build_action_of(value.value)

@@ -304,7 +304,7 @@ ir_line_reader_key: fn(functions: [FnBody], handle: Type) -> String Never! {
 // The unqualified nominal name of `ty`, or "".
 ir_line_reader_owner: fn(ty: Type) -> String Never! {
     name: ir_nominal_name(ir_untag(ty)) ?? return ""
-    parts: name.split("::").to_list()
+    parts: name.split(".").to_list()
     parts[parts.len() - 1].copy()
 }
 
@@ -763,7 +763,7 @@ ir_precise_rendered_owners: fn(ty: Type, owners: &[String]) Never! {
             if short != "Decimal" && short != "Fraction" && short != "Complex" {
                 return
             }
-            if name != short && !name.ends_with("core.math::{short}") && !name.ends_with("core.math.{short}") {
+            if name != short && !name.ends_with("core.math.{short}") && !name.ends_with("core.math.{short}") {
                 return
             }
             if !owners.contains(short) -> owners.push(short)

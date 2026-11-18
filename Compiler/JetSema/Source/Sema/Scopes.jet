@@ -1341,12 +1341,12 @@ sema_scope_checked_type_row: fn(environment: SemaScopeEnvironment, program: Sema
     sema_scope_checked_type_row_in(program, module_identity, name)
 }
 
-// The checked declaration a qualified `module::Name` spelling names.
+// The checked declaration a qualified `module.Name` spelling names.
 sema_scope_checked_type_row_qualified: fn(program: SemaProgramTables, qualified: String) -> Int? {
-    parts: qualified.split("::").to_list()
+    parts: qualified.split(".").to_list()
     if parts.len() < 2 -> return None
     if program.registration_graph == .Val(graph) {
-        owner: module_find(graph.module_table, parts.slice(0, parts.len() - 1).join("::")) ?? return None
+        owner: module_find(graph.module_table, parts.slice(0, parts.len() - 1).join(".")) ?? return None
         return sema_scope_checked_type_row_in(program, owner, parts[parts.len() - 1])
     }
     None

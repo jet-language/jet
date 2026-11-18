@@ -191,7 +191,7 @@ body_codec_declared: fn(failures: &[String], package: String, core: Bool, loadin
         return None
     }
     table := module_table()
-    main_id: module_intern(table, if core -> "<corelib>/body-codec" else -> "body-codec::main")
+    main_id: module_intern(table, if core -> "<corelib>/body-codec" else -> "body-codec.main")
     canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
         failures.push("canonical effect module declares no effects")
         return None
@@ -205,7 +205,7 @@ body_codec_declared: fn(failures: &[String], package: String, core: Bool, loadin
     if own_entry {
         entry_source: "start: fn() {{}}\n"
         entry_parsed := parse_source(entry_source.bytes())
-        entry_id = module_intern(table, "body-codec::entry")
+        entry_id = module_intern(table, "body-codec.entry")
         entry_segment: SemaSourceSegment{generated: Span{start: 0, end: entry_source.len()}, source_file: "entry.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
         inputs.push(SemaRegistrationModuleInput{package_identity: package, module_identity: entry_id, module_name: "entry", core_source_alias: "", module_path: "entry.jet", source_file: "entry.jet", source_segments: [SemaSourceSegment]{entry_segment}, source_origin: SemaSourceOrigin.Snapshot, program: entry_parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: entry_source})
     }
@@ -580,7 +580,7 @@ body_codec_packets: fn(failures: &[String]) -> [SemaParallelBody] {
     hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, core_bodies: Val(bodies)}}
     _ := body_codec_check(failures, "core", hooks, true, ranked, own_entry: true) ?? panic("BodyCodec could not load module `main`:\n{failures.join("\n")}")
     permit: hooks.guard_read()
-    if !sema_core_bodies_loaded_keys(permit.value.core_bodies, permit.value.core_bodies_loaded).has_key("function:<corelib>/body-codec::rank") {
+    if !sema_core_bodies_loaded_keys(permit.value.core_bodies, permit.value.core_bodies_loaded).has_key("function:<corelib>/body-codec.rank") {
         panic("BodyCodec: `rank`, which names `Ordering`, was checked from text in a compile with another entry")
     }
 }

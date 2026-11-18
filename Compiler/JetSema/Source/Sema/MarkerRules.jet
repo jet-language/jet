@@ -658,7 +658,7 @@ sema_marker_rules_argument_path: fn(expression: Expr) -> String? {
 }
 
 sema_marker_rules_staged_argument_value: fn(values: [SemaComptimeItemValue], environment: SemaScopeEnvironment, program: SemaProgramTables, marker: Marker, source_index: Int) -> TComptimeValue? {
-    destination_suffix := if source_index == 0 -> "::marker::{marker.name}::{marker.name_span.start}" else -> "::marker::{marker.name}::{marker.name_span.start}::arg::{source_index}"
+    destination_suffix: if source_index == 0 -> ".marker.{marker.name}.{marker.name_span.start}" else -> ".marker.{marker.name}.{marker.name_span.start}.arg.{source_index}"
     loop value in values {
         if value.kind == SemaComptimeItemKind.MarkerArgument && value.module_identity == environment.module_identity && value.destination_key.ends_with(destination_suffix) {
             return Val(value.value)
@@ -718,10 +718,10 @@ sema_marker_rules_constant_value: fn(checked: TExpr, marker: Marker, source_inde
 // instead of a second check on a copy of the graph.
 sema_marker_rules_comptime_source: fn(marker: Marker, source_index: Int, expression: Expr, expected_type: Type?, reference_start: Int, context: SemaCheckContext, environment: SemaScopeEnvironment, program: SemaProgramTables, values: [SemaComptimeItemValue]) -> SemaComptimeItemSource? {
     if program.registration_graph == .Val(graph) {
-        destination_key := "{marker.name}::marker::{marker.name_span.start}::arg::{source_index}"
+        destination_key: "{marker.name}.marker.{marker.name_span.start}.arg.{source_index}"
         source := SemaComptimeItemSource{
             module_identity: environment.module_identity,
-            key: "{module_text(graph.module_table, environment.module_identity)}::{destination_key}",
+            key: "{module_text(graph.module_table, environment.module_identity)}.{destination_key}",
             destination_key: destination_key,
             name: "#{marker.name} argument {source_index + 1}",
             source_file: environment.source_file,
@@ -1643,7 +1643,7 @@ sema_marker_rules_is_guest_marker: fn(marker: Marker, site: RuleSite?) -> Bool N
 }
 
 // Whether a function marker is the ratified `#Export(c)` spelling (Rust
-// `Sema::Guest::is_guest_export_marker`).
+// `Sema.Guest.is_guest_export_marker`).
 sema_marker_is_guest_export: fn(marker: Marker) -> Bool Never! {
     !marker.negated && sema_marker_is_hook(marker, MarkerHook.Export) && sema_marker_c_argument(marker)
 }

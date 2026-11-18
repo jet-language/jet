@@ -16,7 +16,7 @@ use {
         jet_driver_present_diagnostics,
         jet_driver_report_problems,
     ]
-    jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all]
+    jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all, symbol_key_names]
     jet_ir.[IRBuildResult, IRFunction, ir_build_all, ir_build_program, ir_checks_stock, ir_function_text, ir_lint_module]
     jet_parser.[parse_source]
 }
@@ -116,8 +116,8 @@ jet_cli_emit_ir_selected: fn(built: IRBuildResult, package: String, function: St
     loop (row, candidate) in built.program.functions {
         if function == .Val(name) {
             // The function's own name or the last segment of its key
-            // (`Type:method`, `module:function`).
-            if candidate.name != name && !candidate.key.ends_with(":{name}") -> next
+            // (`Type.method`, `module.function`).
+            if candidate.name != name && !symbol_key_names(candidate.key, name) -> next
         }
         if candidate.key.starts_with(prefix) -> selected.push(row) else -> others.push(row)
     }

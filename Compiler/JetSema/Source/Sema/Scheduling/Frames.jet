@@ -204,7 +204,7 @@ sema_frame_hardware_register_operation: fn(receiver: Expr, method: String, sourc
     block: sema_hardware_register_block_fact(machine, path.segments[1]) ?? return None
     register: sema_hardware_register_fact(block, path.segments[2]) ?? return None
     mode := if method == "read" -> ResourceAccessMode.Read else -> ResourceAccessMode.Write
-    resource := "mmio::{path.profile_id}::{block.name}::{register.name}"
+    resource: "mmio.{path.profile_id}.{block.name}.{register.name}"
     Val(FrameOperation{
         name: "hardware.register.{path.profile_id}.{block.name}.{register.name}.{method}",
         source_index: source_index,
@@ -353,7 +353,7 @@ sema_frame_schedule_produce: fn(operations: [FrameOperation], environment: SemaS
             premises.push("{operation.name}@{operation.source_index}")
         }
         identity := derivation_identity(module_path, "", "", source_bytes)
-        record := derivation_record("{module_path}::on_frame@{lambda_start}", "checked frame resource schedule", "jet-sema", DerivationMethod.StaticDerivation, "checked-frame-accesses", premises, identity)
+        record := derivation_record("{module_path}.on_frame@{lambda_start}", "checked frame resource schedule", "jet-sema", DerivationMethod.StaticDerivation, "checked-frame-accesses", premises, identity)
         record = derivation_record_with_payload(record, DerivationPayload.FrameSchedule{schedule: schedule})
         return SemaFrameScheduleFacts{
             schedule: Val(schedule),

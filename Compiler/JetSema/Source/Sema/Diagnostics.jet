@@ -600,7 +600,7 @@ sema_wrong_core_arity: fn(name: String, expected: Int, actual: Int, span: Span) 
 }
 
 // The plain-words type name diagnostics print (the Rust reference's
-// `Type::show`): scalars carry a gloss and nominal names are quoted.
+// `Type.show`): scalars carry a gloss and nominal names are quoted.
 sema_type_show: fn(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int (a whole number)"
@@ -664,7 +664,7 @@ sema_type_int_range_text: fn(signed: Bool, bits: Int) -> String Never! {
 sema_type_nominal_leaf: fn(ty: Type) -> String Never! {
     if ty == {
         .Named(name) -> {
-            parts := name.split("::").to_list()
+            parts := name.split(".").to_list()
             if parts.len() < 2 -> parts = name.split(".").to_list()
             parts[parts.len() - 1]
         }
@@ -760,12 +760,12 @@ sema_return_value_mismatch: fn(function: String?, want: Type, want_alias: String
 // (`core.crypto`) in `source` (`Core/Crypto/Crypto.jet`), in either identity
 // spelling the registration graph gives it.
 sema_core_canonical_leaf: fn(name: String, module_name: String, source: String) -> String? {
-    parts: name.split("::").to_list()
+    parts: name.split(".").to_list()
     if parts.len() < 2 -> return None
     leaf: parts[parts.len() - 1]
-    owner: parts.slice(0, parts.len() - 1).join("::")
+    owner: parts.slice(0, parts.len() - 1).join(".")
     core_owner: "<corelib>/{module_name}"
-    source_suffix: "::{source}"
+    source_suffix: ".{source}"
     if owner == core_owner || (owner.starts_with("<corelib>/") && owner.ends_with(source_suffix)) {
         return Val(leaf)
     }

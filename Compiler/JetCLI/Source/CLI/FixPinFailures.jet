@@ -47,11 +47,13 @@ jet_cli_fix_pin_failures: fn(file: String, before: String, color: Bool) -> JetCL
 
 jet_cli_pin_facts: fn(modules: [JetDriverDocModule], entry: String) -> JetCLIPinFacts {
     facts := JetCLIPinFacts{carriers: [String:TFailureCarrier]{}, minted: [String:EnumDef]{}}
+    identities := [String:String]{}
+    loop doc_module in modules -> identities[doc_module.module_identity] = ""
     loop doc_module in modules {
         if jet_cli_sem_normalize(doc_module.physical_path) != entry -> next
         loop function in doc_module.functions {
             if function.synthetic -> next
-            key: semindex_function_key(function.key) ?? next
+            key: semindex_function_key(function.key, identities) ?? next
             facts.carriers[key.local] = function.failure_carrier
         }
         loop item in doc_module.items {
@@ -121,7 +123,7 @@ jet_cli_pin_function: fn(function: Func, local: String, end: Int, tokens: [Token
         return
     }
     carrier: facts.carriers.get(local) ?? return
-    // The checked carrier names each nominal by its `module::` key; the
+    // The checked carrier names each nominal by its `module.` key; the
     // contract and the minted enum's lookup read the name as written.
     error: if carrier == {
         .Infallible -> Type.Named{name: "Never"}

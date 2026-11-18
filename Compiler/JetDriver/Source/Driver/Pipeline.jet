@@ -242,6 +242,8 @@ use {
         target_os_parse,
         source_file_id,
         symbol_key,
+        symbol_key_leaf,
+        symbol_key_leaf_start,
         symbol_key_text,
         symbol_table_key,
         body_each_expr_child,
@@ -4430,11 +4432,14 @@ jet_driver_deep_checks: fn(load: JetDriverLoadResult, functions: [FnBody], reque
         loaded: load.modules[at]
         package: packages.get(loaded.package_identity) ?? ""
         if package == "" -> next
-        // The key is `fn:<module>:<owner>:<name>`; the module may hold `:`.
-        parts: function.key.split(":").to_list()
-        if parts.len() < 4 -> next
-        name: parts[parts.len() - 1]
-        owner: parts[parts.len() - 2]
+        // The key is `function:{module}.{owner}.{name}`, with no owner
+        // segment for a free function (symbol_key_text); the module may hold
+        // `.` and `:`, so its own text is cut off first.
+        head: symbol_key_text(SymbolKind.Function, module_text(load.module_table, function.module_identity), "", "")
+        if !function.key.starts_with(head) -> next
+        name: symbol_key_leaf(function.key)
+        owner_end: symbol_key_leaf_start(function.key) - 1
+        owner: if owner_end <= head.count_bytes() -> "" else -> foundation_byte_text(function.key.bytes(), head.count_bytes(), owner_end)
         lifted: if owner == "" -> name else -> owner
         home: if loaded.declared_module == "" -> package else -> "{package}.{loaded.declared_module}"
         inline: sema_inline_member_module(lifted)
@@ -4503,7 +4508,7 @@ jet_driver_test_plan: fn(test_modules: [U32:Bool], graph: SemaGraphResult, table
                 function: functions[row]
                 output_checks.push(
                     TOutputCheckFact{
-                        key: "{module_text(table, graph_module.module_identity)}::output-check::{output.output_name}@{output.definition.start}..{output.definition.end}",
+                        key: "{module_text(table, graph_module.module_identity)}.output-check.{output.output_name}@{output.definition.start}..{output.definition.end}",
                         // copy: the fact owns its name and function ref; `output`
                         // and `function` are views of rows the compile keeps.
                         name: output.output_name.copy(),
@@ -4582,7 +4587,7 @@ jet_driver_job_rows: fn(graph: SemaRegistrationGraph, entry_module_identity: Mod
 }
 
 // The one native spelling of an exported C symbol (Rust
-// `Sema::Guest::guest_export_native_symbol`).
+// `Sema.Guest.guest_export_native_symbol`).
 jet_driver_c_symbol: fn(name: String) -> String Never! {
     bytes := [U8]{}
     loop byte in name.bytes() {
@@ -7013,7 +7018,7 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
         }
         unit: load.source_units[loaded.source_unit_index]
         if unit.root_index < 0 || unit.path.starts_with("<build-generated>/") -> next
-        // A site reads `module::function`; a module name another module
+        // A site reads `module.function`; a module name another module
         // already shows keeps its full identity.
         segments: loaded.module_name.split(".").to_list()
         alias := if segments.len() > 0 -> segments[segments.len() - 1].copy() else -> loaded.module_name.copy()
@@ -7099,13 +7104,13 @@ jet_driver_package_effect_rows: fn(load: JetDriverLoadResult, functions: [FnBody
             }
         }
     }
-    // The enforcer's keys: `module::function`, a method `module::Type::name`.
+    // The enforcer's keys: `module.function`, a method `module.Type.name`.
     sites := (loop _ in functions -> "")
     loop (index, function) in functions {
         row: rows[index]
         if row < 0 -> next
         effect_key := sema_effect_chain_name(function)
-        sites[index] = "{program.modules[row].alias}::{effect_key}"
+        sites[index] = "{program.modules[row].alias}.{effect_key}"
         // A witness is the function's name; a function registration does not
         // name (a lambda, a generated body) is its declaration.
         program.modules[row].function_spans[effect_key] = name_spans.get(function.key) ?? function.source_span

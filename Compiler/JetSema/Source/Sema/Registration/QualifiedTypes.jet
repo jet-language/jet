@@ -224,6 +224,7 @@ sema_registration_module_qualified_keys: fn(graph: SemaRegistrationGraph, module
     keys := [String:Type]{}
     identity: graph.modules[module_index].module_identity
     loop name in names {
+        if sema_registration_canonical_spelling(graph, name) -> next
         if !name.contains(".") && (!sema_registration_bare_user_type(graph, module_index, identity, name) || sema_registration_module_spells_parameter(graph.modules[module_index], name)) {
             next
         }
@@ -232,6 +233,14 @@ sema_registration_module_qualified_keys: fn(graph: SemaRegistrationGraph, module
         if !type_identity_equal(resolved, written) -> keys[name] = resolved
     }
     keys
+}
+
+// Whether `name` is a canonical key, `{module identity}.{Name}` of a module
+// the graph holds: already resolved. An alias-qualified name (`alias.Name`)
+// is dotted too, but its prefix is an import alias, never a module identity.
+sema_registration_canonical_spelling: fn(graph: SemaRegistrationGraph, name: String) -> Bool Never! {
+    cut: name.cut_last(".") ?? return false
+    sema_registration_module_index_text(graph, cut.before) != None
 }
 
 // Whether the bare `name` names a declaration of a user package in module
@@ -340,9 +349,9 @@ sema_registration_canonical_heads: fn(ty: Type, keys: [String:Type]) -> Type Nev
     }
 }
 
-// The alias-qualified type names in `ty`: `Named` types and generic heads
-// (`alias.Name`, `alias.Name<T>`; a canonical key holds `::` and is already
-// resolved).
+// The alias-qualified and bare type names in `ty`: `Named` types and generic
+// heads (`alias.Name`, `alias.Name<T>`), canonical keys among them
+// (sema_registration_canonical_spelling).
 sema_registration_type_qualified_names: fn(ty: Type, names: &[String]) Never! {
     if ty == {
         .Named(name) -> sema_registration_push_qualified_name(name, names)
@@ -375,10 +384,9 @@ sema_registration_type_qualified_names: fn(ty: Type, names: &[String]) Never! {
     }
 }
 
-// An alias-qualified name, or a bare one an import may bind; a canonical key
-// holds `::` and is already resolved.
+// An alias-qualified name, a bare one an import may bind, or a canonical key.
 sema_registration_push_qualified_name: fn(name: String, names: &[String]) Never! {
-    if name != "" && !name.contains("::") && !name.starts_with("type:") && !names.contains(name) {
+    if name != "" && !name.starts_with("type:") && !names.contains(name) {
         names.push(name.copy())
     }
 }

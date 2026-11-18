@@ -192,12 +192,12 @@ diagnostic_sentence_case_line: fn(value: String) -> String Never! {
     String.from_bytes(bytes) ?? value
 }
 
-// One type identity in diagnostic prose: `module:<len>:<package>:<path>::Name`
-// (the driver's key for a source type) or `<corelib>/<module>::Name` (a Core
+// One type identity in diagnostic prose: `module:<len>:<package>:<path>.Name`
+// (the driver's key for a source type) or `<corelib>/<module>.Name` (a Core
 // type). `start..end` is its whole spelling and `name` the name the source
-// wrote, after the last `::`. `head` is the name's first identifier, which a
+// wrote, after the last `.`. `head` is the name's first identifier, which a
 // clash compares, and `qualifier` the module as the user writes it: `crypto`
-// for `<corelib>/core.crypto::Secret`, the file stem for a source module.
+// for `<corelib>/core.crypto.Secret`, the file stem for a source module.
 DiagnosticIdentity: struct {
     start: Int,
     end: Int,
@@ -263,7 +263,10 @@ diagnostic_identities_in: fn(bytes: [U8]) -> [DiagnosticIdentity] Never! {
 
 // Reads the identity starting at `index` into `found` and returns its end, or
 // -1 when no identity starts there. A module identity's package part is
-// skipped by its length prefix, since it may hold `:`.
+// skipped by its length prefix, since it may hold `:`; its path is a `.jet`
+// file, so the name starts after the first `.jet.` in the path's last
+// segment. A Core identity's module is its longest Core-module prefix
+// (core_path_module), or all before its last `.` when Core has none.
 diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentity]) -> Int Never! {
     // Both forms start with `m` or `<`; every other byte position returns
     // before any prefix bytes are built.
@@ -271,10 +274,9 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentit
     if first != 109 && first != 60 -> return -1
     module_form: diagnostic_bytes_at(bytes, index, "module:")
     if !module_form && !diagnostic_bytes_at(bytes, index, "<corelib>/") -> return -1
-    cursor := -1
-    qualifier := ""
+    path_start := index + 10
     if module_form {
-        cursor = index + 7
+        cursor := index + 7
         length := 0
         digits := 0
         loop diagnostic_is_sentence_digit(diagnostic_byte_at(bytes, cursor)) {
@@ -285,43 +287,45 @@ diagnostic_identity_push: fn(bytes: [U8], index: Int, found: &[DiagnosticIdentit
         if digits == 0 || diagnostic_byte_at(bytes, cursor) != 58 -> return -1
         cursor += 1 + length
         if diagnostic_byte_at(bytes, cursor) != 58 -> return -1
-        cursor += 1
-        path_start: cursor
-        loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) && !diagnostic_colons_at(bytes, cursor) {
-            cursor += 1
-        }
+        path_start = cursor + 1
+    }
+    end := path_start
+    loop end < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, end)) -> end += 1
+    leaf := -1
+    qualifier := ""
+    if module_form {
         stem_start := path_start
-        stem_end := cursor
-        loop at in path_start..<cursor {
+        loop at in path_start..<end {
             if diagnostic_byte_at(bytes, at) == 47 -> stem_start = at + 1
         }
-        loop at in stem_start..<cursor {
-            if diagnostic_byte_at(bytes, at) == 46 -> stem_end = at
+        at := stem_start
+        loop leaf < 0 && at + 5 < end {
+            if diagnostic_bytes_at(bytes, at, ".jet.") -> leaf = at + 5
+            at += 1
         }
-        qualifier = foundation_byte_text(bytes, stem_start, stem_end)
+        if leaf < 0 -> return -1
+        qualifier = foundation_byte_text(bytes, stem_start, leaf - 5)
     } else {
-        cursor = index + 10
-        segment := cursor
-        loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) && !diagnostic_colons_at(bytes, cursor) && diagnostic_byte_at(bytes, cursor) != 47 {
-            if diagnostic_byte_at(bytes, cursor) == 46 -> segment = cursor + 1
-            cursor += 1
+        path: foundation_byte_text(bytes, path_start, end)
+        // Not a Core module: the module is the path before its last `.`.
+        module_name := core_path_module(path) ?? ""
+        if module_name == "" {
+            dot := end - 1
+            loop dot >= path_start && diagnostic_byte_at(bytes, dot) != 46 -> dot -= 1
+            if dot < path_start -> return -1
+            module_name = foundation_byte_text(bytes, path_start, dot)
         }
-        qualifier = foundation_byte_text(bytes, segment, cursor)
+        module_end: path_start + module_name.count_bytes()
+        leaf = module_end + 1
+        qualifier_start := module_end
+        loop qualifier_start > path_start && diagnostic_byte_at(bytes, qualifier_start - 1) != 46 -> qualifier_start -= 1
+        qualifier = foundation_byte_text(bytes, qualifier_start, module_end)
     }
-    leaf := -1
-    loop cursor < bytes.len() && !diagnostic_identity_ends(diagnostic_byte_at(bytes, cursor)) {
-        if diagnostic_colons_at(bytes, cursor) {
-            leaf = cursor + 2
-            cursor += 2
-            next
-        }
-        cursor += 1
-    }
-    if leaf < 0 || leaf >= cursor -> return -1
+    if leaf >= end -> return -1
     head_end := leaf
-    loop head_end < cursor && diagnostic_byte_at(bytes, head_end) != 46 -> head_end += 1
-    found.push(DiagnosticIdentity{start: index, end: cursor, name: foundation_byte_text(bytes, leaf, cursor), head: foundation_byte_text(bytes, leaf, head_end), qualifier: qualifier})
-    cursor
+    loop head_end < end && diagnostic_byte_at(bytes, head_end) != 46 -> head_end += 1
+    found.push(DiagnosticIdentity{start: index, end: end, name: foundation_byte_text(bytes, leaf, end), head: foundation_byte_text(bytes, leaf, head_end), qualifier: qualifier})
+    end
 }
 
 // Whether `head` also appears in `context` as a plain type name outside every
@@ -364,11 +368,6 @@ diagnostic_bytes_match: fn(bytes: [U8], index: Int, expected: [U8]) -> Bool Neve
         if bytes[index + offset] != expected[offset] -> return false
     }
     true
-}
-
-// Whether a `::` path separator starts at `index`.
-diagnostic_colons_at: fn(bytes: [U8], index: Int) -> Bool Never! {
-    diagnostic_byte_at(bytes, index) == 58 && diagnostic_byte_at(bytes, index + 1) == 58
 }
 
 diagnostic_is_word_byte: fn(value: Int) -> Bool Never! {

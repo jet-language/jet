@@ -477,7 +477,7 @@ sema_expression_field_checked: fn(base: TExpr, member: String, span: Span, expec
     // A Core `SocketAddr` keeps the provider's native address, so its
     // declared `host` and `port` are read through their core.net accessors
     // (`addr.port` is `net.socket_port(addr)`, #6121), never as stored fields.
-    if owner_name.ends_with("/core.net::SocketAddr") && (member == "host" || member == "port") {
+    if owner_name.ends_with("/core.net.SocketAddr") && (member == "host" || member == "port") {
         if sema_call_core_module_identity(environment, program, "core.net") == .Val(net_identity) {
             target: sema_call_core_source_target(environment, program, net_identity, "socket_{member}", [Type]{}, span, true, diagnostics) ?? return None
             callee: sema_call_callee_decl(program, target.symbol.id, span, diagnostics) ?? return None
@@ -1502,7 +1502,7 @@ sema_expression_swizzle_slots: fn(ty: Type, environment: SemaScopeEnvironment, p
 // The lanes of a Core vector or lane type `nominal` declares, or None for any
 // other declaration.
 sema_expression_swizzle_lane_slots: fn(graph: SemaRegistrationGraph, nominal: SemaRegistrationNominal, ty: Type) -> SemaSwizzleSlots? {
-    if !core_source_owns_type("{module_text(graph.module_table, nominal.symbol.module_identity)}::{nominal.symbol.name}") {
+    if !core_source_owns_type("{module_text(graph.module_table, nominal.symbol.module_identity)}.{nominal.symbol.name}") {
         return None
     }
     reads_lane := false
@@ -1656,7 +1656,7 @@ sema_expression_secret_declared_by: fn(graph: SemaRegistrationGraph, ty: Type, c
     leaf: sema_call_reflection_leaf_name(name)
     loop row in 0..<graph.modules[caller].nominals.len() {
         if graph.modules[caller].nominals[row].symbol.name != leaf -> next
-        if sema_call_reflection_secret_bearing(Type.Named{name: "{module_text(graph.module_table, graph.modules[caller].nominals[row].symbol.module_identity)}::{leaf}"}) {
+        if sema_call_reflection_secret_bearing(Type.Named{name: "{module_text(graph.module_table, graph.modules[caller].nominals[row].symbol.module_identity)}.{leaf}"}) {
             return true
         }
     }

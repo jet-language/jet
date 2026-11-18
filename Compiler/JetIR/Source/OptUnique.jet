@@ -699,7 +699,7 @@ ir_opt_unique_field_test: fn(spoil: Int) -> String Never! {
     flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
     canvas_row: ir_intern_type(m, "Canvas", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "Canvas"}, 56, 8, IRClass.Memory, false, 0, ""))
     list_row: ir_intern_type(m, "[I64]", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "[I64]"}, 24, 8, IRClass.Memory, false, 0, ""))
-    f := ir_function_new("fill", "test:fill.jet::fill", "", "fill.jet", 1)
+    f := ir_function_new("fill", "test:fill.jet.fill", "", "fill.jet", 1)
     canvas: ir_slot(f, canvas_row, IRSlotKind.Param, ir_intern_name(m, "canvas"), 1)
     outside: ir_slot(f, list_row, IRSlotKind.Temp, -1, 1)
     _ := ir_emit(f, IROp.Offset, outside, canvas, 32, -1, 1)
@@ -734,7 +734,7 @@ ir_opt_unique_field_test: fn(spoil: Int) -> String Never! {
     ir_end(f, 2)
     _ := ir_emit(f, IROp.Return, -1, -1, -1, -1, 3)
     ir_opt_compact(f)
-    keys: [String]{"test:fill.jet::fill", "#unique<Aggregate:24:64:false:[I64]>", "test:fill.jet::keep"}
+    keys: [String]{"test:fill.jet.fill", "#unique<Aggregate:24:64:false:[I64]>", "test:fill.jet.keep"}
     notes := [String]{}
     moved: ir_opt_hoist_unique(m, f, keys, notes)
     assert_eq(notes.len(), 1)
@@ -769,7 +769,7 @@ ir_opt_unique_callers_test: fn(words: Int) -> [Int] Never! {
     m := ir_module_new()
     word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
     list_row: ir_intern_type(m, "[I64]", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "[I64]"}, 24, 8, IRClass.Memory, false, 0, ""))
-    main := ir_function_new("main", "test:main.jet::main", "", "main.jet", 1)
+    main := ir_function_new("main", "test:main.jet.main", "", "main.jet", 1)
     list: ir_slot(main, list_row, IRSlotKind.Temp, -1, 1)
     loop _ in 0..<2 {
         list_args: ir_args(main, [Int]{list})
@@ -785,7 +785,7 @@ ir_opt_unique_callers_test: fn(words: Int) -> [Int] Never! {
     helper := ir_function_new("#unique", "#unique<Aggregate:24:64:false:[I64]>", "", "", 1)
     _ := ir_slot(helper, list_row, IRSlotKind.Param, ir_intern_name(m, "xs"), 1)
     _ := ir_emit(helper, IROp.Return, -1, -1, -1, -1, 1)
-    fill := ir_function_new("fill", "test:main.jet::fill", "", "main.jet", 2)
+    fill := ir_function_new("fill", "test:main.jet.fill", "", "main.jet", 2)
     xs: ir_slot(fill, list_row, IRSlotKind.Param, ir_intern_name(m, "xs"), 2)
     unique_args: ir_args(fill, [Int]{xs})
     _ := ir_emit(fill, IROp.Call, -1, 1, unique_args, 1, 2)
@@ -793,7 +793,7 @@ ir_opt_unique_callers_test: fn(words: Int) -> [Int] Never! {
     m.entry = 0
     functions := [IRFunction]{main.move(), helper.move(), fill.move()}
     loop id in 0..<functions.len() -> ir_opt_compact(functions[id])
-    keys := [String]{"test:main.jet::main", "#unique<Aggregate:24:64:false:[I64]>", "test:main.jet::fill"}
+    keys := [String]{"test:main.jet.main", "#unique<Aggregate:24:64:false:[I64]>", "test:main.jet.fill"}
     notes := [String]{}
     _ := ir_opt_unique_to_callers(m, functions, keys, notes, compiler_threads_single())
     counts := [Int]{}

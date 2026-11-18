@@ -14,11 +14,11 @@ use jet_foundation.[
 ]
 
 sema_comptime_body_destination_key: fn(function_key: String, source_span: Span, site_span: Span) -> String Never! {
-    "{function_key}::body-comptime::{site_span.start}:{site_span.end}::{source_span.start}:{source_span.end}"
+    "{function_key}.body-comptime.{site_span.start}:{site_span.end}.{source_span.start}:{source_span.end}"
 }
 
 sema_comptime_body_source_key: fn(module_identity: ModuleID, function_key: String, source_span: Span, site_span: Span) -> String Never! {
-    "{module_identity.id}::{sema_comptime_body_destination_key(function_key, source_span, site_span)}"
+    "{module_identity.id}.{sema_comptime_body_destination_key(function_key, source_span, site_span)}"
 }
 
 // Module slots keep both identity components separate: `modules` holds each
@@ -296,7 +296,7 @@ sema_comptime_body_capture_site: fn(
 ) -> SemaComptimeBodySource Never! {
     function_key := sema_scope_function_owner_key(scopes)
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
-    key: "{environment.module_identity.id}::{destination_key}"
+    key: "{environment.module_identity.id}.{destination_key}"
     if sema_comptime_module_slot(context.comptime_body_source_modules, environment.module_identity) == .Val(slot) {
         if context.comptime_body_source_rows[slot].get(key) == .Val(row) {
             return context.comptime_body_sources[row]

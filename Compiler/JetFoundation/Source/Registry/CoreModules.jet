@@ -61,28 +61,10 @@ core_module_has_type: fn(module_name: String, name: String) -> Bool Never! {
     core_module_export_has_name(row.type_exports, name)
 }
 
+// The declared leaf of a Core type name: what follows its last `.`
+// (`<corelib>/core.net.TCPStream`, `net.TCPStream` -> `TCPStream`).
 core_module_type_leaf: fn(name: String) -> String Never! {
-    bytes: name.bytes()
-    namespace_separator := -1
-    module_separator := -1
-    index := 0
-    loop index < bytes.len() {
-        if {
-            index + 1 < bytes.len() && bytes[index] == (U8{58}) && bytes[index + 1] == (U8{58}) -> {
-                namespace_separator = index
-                index += 1
-            }
-            else -> {
-                if bytes[index] == (U8{46}) -> module_separator = index
-                index += 1
-            }
-        }
-    }
-    if {
-        namespace_separator >= 0 -> String.from_bytes(bytes[namespace_separator + 2..<bytes.len()]) ?? name
-        module_separator >= 0 -> String.from_bytes(bytes[module_separator + 1..<bytes.len()]) ?? name
-        else -> name
-    }
+    symbol_key_leaf(name)
 }
 
 core_type_modules: fn(name: String) -> [String] Never! {
@@ -113,7 +95,7 @@ CoreSourceOwnedType: struct {
 }
 
 // Rust `CoreModuleExports.core_source_owns_type`: whether a checked Core
-// identity (`<corelib>/core.net.url::URL`) names a source-owned
+// identity (`<corelib>/core.net.url.URL`) names a source-owned
 // Core nominal, including exact registered source value-hook owners. An owned
 // type remains the Jet declaration on every tier, never a native projection.
 core_source_owns_type: fn(name: String) -> Bool Never! {
@@ -123,7 +105,7 @@ core_source_owns_type: fn(name: String) -> Bool Never! {
 // The table is a read parameter, so the scan reads its rows in place.
 core_source_owns_type_in: fn(rows: [CoreSourceOwnedType], name: String) -> Bool Never! {
     module_name: core_identity_module(name) ?? return false
-    parts: name.split("::").to_list()
+    parts: name.split(".").to_list()
     if parts.len() < 2 -> return false
     leaf: parts[parts.len() - 1]
     file: core_module_source_path(module_name) ?? return false
@@ -138,8 +120,10 @@ core_source_owns_type_in: fn(rows: [CoreSourceOwnedType], name: String) -> Bool 
 // runtime carrier and no types column, so every nominal it declares, generic
 // ones included, is its Jet declaration.
 core_source_part_owns_type: fn(name: String) -> Bool Never! {
-    if !name.contains("::") -> return false
-    module_name: core_identity_module(name) ?? return false
+    if !name.starts_with("<corelib>/") -> return false
+    parts: core_path_parts(name.slice("<corelib>/".len(), name.len()))
+    if parts.member == "" -> return false
+    module_name: parts.module_name
     loop row in CORE_SOURCE_OWNED_ROWS {
         if row.module_name == module_name -> return row.owner != "" && !row.runtime
     }
@@ -451,13 +435,46 @@ CoreRecordLiteralRow: struct {
     core_only: Bool{false},
 }
 
+// The Core module a dotted Core path names or starts with: its longest
+// prefix, cut at a `.`, that Core.rows declares or that is a loaded Core
+// source of its own, a private part or a runtime unit (`core.archive.gzip`
+// -> `core.archive.gzip`, `core.time.sleep` -> `core.time`,
+// `__core_crypto_aead.GCMKey` -> `__core_crypto_aead`); None when no prefix
+// is a Core module.
+core_path_module: fn(path: String) -> String? Never! {
+    bytes: path.bytes()
+    end := bytes.len()
+    loop {
+        head: foundation_byte_text(bytes, 0, end)
+        if core_module_export(head) != None || core_module_source_path(head) != None -> return Val(head)
+        loop end > 0 && bytes[end - 1] != (U8{46}) -> end -= 1
+        if end == 0 -> return None
+        end -= 1
+    }
+}
+
+CorePathParts: struct {
+    module_name: String,
+    // The member path after the module (`Atomic.extra`), or "" when the path
+    // names the module itself.
+    member: String,
+}
+
+// A dotted Core path cut into its Core module (core_path_module) and the
+// member path after it (`core.mem.Atomic.extra` -> `core.mem`,
+// `Atomic.extra`); a path no Core module starts is a module of its own.
+core_path_parts: fn(path: String) -> CorePathParts Never! {
+    module_name: core_path_module(path) ?? return CorePathParts{module_name: path.copy(), member: ""}
+    member: if module_name.len() == path.len() -> "" else -> path.slice(module_name.len() + 1, path.len())
+    CorePathParts{module_name: module_name, member: member}
+}
+
 // The Core module a Core declaration key or module identity names
-// (`<corelib>/core.crypto.vault::Secret` -> `core.crypto.vault`).
+// (`<corelib>/core.crypto.vault.Secret` -> `core.crypto.vault`).
 core_identity_module: fn(key: String) -> String? Never! {
     if !key.starts_with("<corelib>/") -> return None
     rest: key.slice("<corelib>/".len(), key.len())
-    if rest.split_once("::") == .Val(parts) -> return Val(parts.before)
-    Val(rest)
+    Val(core_path_parts(rest).module_name)
 }
 
 // The source path of Core module `module_name` (`core.crypto.vault` ->
@@ -471,7 +488,7 @@ core_module_source_path: fn(module_name: String) -> String? Never! {
 
 // Whether `key` is exactly the declaration `leaf` of Core module `module_name`.
 core_identity_is: fn(key: String, module_name: String, leaf: String) -> Bool Never! {
-    expected: "<corelib>/{module_name}::{leaf}"
+    expected: "<corelib>/{module_name}.{leaf}"
     key == expected
 }
 
@@ -479,14 +496,14 @@ core_identity_is: fn(key: String, module_name: String, leaf: String) -> Bool Nev
 // `module_name` (`core.sync`) or one of its submodules (`core.sync.rows`).
 core_identity_in_module: fn(key: String, module_name: String) -> Bool Never! {
     prefix: "<corelib>/{module_name}"
-    key == prefix || key.starts_with("{prefix}::") || key.starts_with("{prefix}.")
+    key == prefix || key.starts_with("{prefix}.")
 }
 
 // Corelib nominal types carry a source identity; the record oracle is keyed
-// by the declared leaf (`<corelib>/core.process::ProcessReceipt`).
+// by the declared leaf (`<corelib>/core.process.ProcessReceipt`).
 core_record_leaf: fn(owner: String) -> String Never! {
     if !owner.starts_with("<corelib>/") -> return "{owner}"
-    parts: owner.split("::").to_list()
+    parts: owner.split(".").to_list()
     "{parts[parts.len() - 1]}"
 }
 
@@ -516,16 +533,24 @@ core_record_field_in: fn(rows: [CoreRecordFieldRow], owner: String, field: Strin
 // names the record.
 core_record_field_types: fn(owner: String) -> [Type]? {
     leaf: core_record_leaf(owner)
-    fields := [String]{}
+    taken := [Int]{}
     types := [Type]{}
-    loop row in CORE_RECORD_FIELD_ROWS {
-        if row.owner != leaf || fields.contains(row.field) -> next
+    loop (index, row) in CORE_RECORD_FIELD_ROWS {
+        if row.owner != leaf || core_record_field_taken(taken, row.field) -> next
+        taken.push(index)
         // copy: the global row table can't be moved from.
-        fields.push(row.field.copy())
         types.push(row.ty.copy())
     }
     if types.len() == 0 -> return None
     Val(types)
+}
+
+// Whether one of the CORE_RECORD_FIELD_ROWS at `taken` names `field`.
+core_record_field_taken: fn(taken: [Int], field: String) -> Bool Never! {
+    loop index in taken {
+        if CORE_RECORD_FIELD_ROWS[index].field == field -> return true
+    }
+    false
 }
 
 // The field types of many Core records in one pass over the rows:

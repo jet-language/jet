@@ -601,15 +601,15 @@ ir_core_cells_bind: fn(m: &IRModule, image: IRCoreImage) Never! {
     one: ir_core_symbol("core.text.split")
     assert(one.starts_with("jet_core_fn_core_text_split_"), "the symbol spells the key: {one}")
     assert_eq(one.len(), "jet_core_fn_core_text_split_".len() + 8)
-    assert(ir_core_symbol("core.text::split") != ir_core_symbol("core.text.split"), "keys that spell the same identifier get different symbols")
+    assert(ir_core_symbol("core.text.split") != ir_core_symbol("core.text.split"), "keys that spell the same identifier get different symbols")
     assert_eq(ir_core_symbol("core.text.split"), one)
     assert(ir_core_cell_symbol("storage:core.log.level").starts_with("jet_core_cell_storage_core_log_level_"), "a cell's symbol spells its key")
 }
 
 #Test("a bound program finds each Core export row by its symbol in the sorted list") {
-    keys: [String]{"<corelib>/core.text::split", "<corelib>/core.text::join", "<corelib>/core.math::abs", "<corelib>/core.files::read"}
+    keys: [String]{"<corelib>/core.text.split", "<corelib>/core.text.join", "<corelib>/core.math.abs", "<corelib>/core.files.read"}
     rows := loop key in keys -> IRCoreExport{symbol: ir_core_symbol(key), key: key.copy(), signature: "(8/8/Integer)->8/8/Integer"}
-    cell: "storage:<corelib>/core.log::level"
+    cell: "storage:<corelib>/core.log.level"
     rows.push(IRCoreExport{symbol: ir_core_cell_symbol(cell), key: cell, signature: IR_CORE_DATA})
     rows.sort_by(fn(left: IRCoreExport, right: IRCoreExport) { left.symbol <=> right.symbol })
     exports: ir_core_exports_text(rows).bytes()
@@ -620,34 +620,34 @@ ir_core_cells_bind: fn(m: &IRModule, image: IRCoreImage) Never! {
     }
     data: ir_core_image_row(exports, ir_core_cell_symbol(cell)) ?? panic("no row for the cell")
     assert_eq(data.signature, IR_CORE_DATA)
-    assert(ir_core_image_row(exports, ir_core_symbol("<corelib>/core.text::trim")) == None, "a key the image lacks has no row")
-    assert(ir_core_image_row([U8]{}, ir_core_symbol("<corelib>/core.text::split")) == None, "an empty list has no row")
+    assert(ir_core_image_row(exports, ir_core_symbol("<corelib>/core.text.trim")) == None, "a key the image lacks has no row")
+    assert(ir_core_image_row([U8]{}, ir_core_symbol("<corelib>/core.text.split")) == None, "an empty list has no row")
 }
 
 #Test("the Core facts list agrees with the export list only row for row") {
-    keys := [String]{"<corelib>/core.text::split", "<corelib>/core.text::join", "<corelib>/core.math::abs"}
+    keys := [String]{"<corelib>/core.text.split", "<corelib>/core.text.join", "<corelib>/core.math.abs"}
     rows := [IRCoreExport]{}
     loop keys.len() > 0 {
         key: keys.pop() ?? break
         rows.push(IRCoreExport{symbol: ir_core_symbol(key), key: key, signature: "(8/8/Integer)->8/8/Integer"})
     }
-    cell: "storage:<corelib>/core.log::level"
+    cell: "storage:<corelib>/core.log.level"
     rows.push(IRCoreExport{symbol: ir_core_cell_symbol(cell), key: cell, signature: IR_CORE_DATA})
     rows.sort_by(fn(left: IRCoreExport, right: IRCoreExport) { left.symbol <=> right.symbol })
     exports: ir_core_exports_text(rows)
-    sealed: ir_core_fact_line("<corelib>/core.text::split", IR_CORE_SEALED)
-    valued: ir_core_fact_line("<corelib>/core.text::join", "function_value")
-    inlined: ir_core_fact_line("<corelib>/core.math::abs", "inline_always")
-    open: ir_core_fact_line("<corelib>/core.text::dyn_join", "open_dispatch")
-    generic: ir_core_fact_line("<corelib>/core.text::map", "generic")
+    sealed: ir_core_fact_line("<corelib>/core.text.split", IR_CORE_SEALED)
+    valued: ir_core_fact_line("<corelib>/core.text.join", "function_value")
+    inlined: ir_core_fact_line("<corelib>/core.math.abs", "inline_always")
+    open: ir_core_fact_line("<corelib>/core.text.dyn_join", "open_dispatch")
+    generic: ir_core_fact_line("<corelib>/core.text.map", "generic")
     assert_eq(ir_core_facts_disagree(ir_core_facts_text([String]{inlined, open, valued, generic, sealed}), exports).len(), 0)
     missing: ir_core_facts_disagree(ir_core_facts_text([String]{open, valued, generic, sealed}), exports)
     assert_eq(missing.len(), 1)
     assert(missing[0].contains("has no facts row"), "an export without a facts row disagrees: {missing[0]}")
-    extra: ir_core_fact_line("<corelib>/core.text::trim", IR_CORE_SEALED)
+    extra: ir_core_fact_line("<corelib>/core.text.trim", IR_CORE_SEALED)
     named: ir_core_facts_disagree(ir_core_facts_text([String]{inlined, open, valued, generic, sealed, extra}), exports)
     assert_eq(named.len(), 1)
-    assert(named[0].contains("core.text::trim"), "a sealed row the exports lack disagrees: {named[0]}")
-    unknown: ir_core_facts_disagree(ir_core_fact_line("<corelib>/core.text::split", "maybe"), exports)
+    assert(named[0].contains("core.text.trim"), "a sealed row the exports lack disagrees: {named[0]}")
+    unknown: ir_core_facts_disagree(ir_core_fact_line("<corelib>/core.text.split", "maybe"), exports)
     assert(unknown.any(fn(problem) { problem.contains("unknown reason") }), "an unknown reason disagrees")
 }
