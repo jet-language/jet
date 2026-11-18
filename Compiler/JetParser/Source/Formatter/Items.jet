@@ -2918,14 +2918,16 @@ jfmt_fmt_reexport_group: fn(f: &JetFmt, imports: [ImportDecl]) {
         imp: imports[index]
         jfmt_emit_leading(f, imp.span.start)
         jfmt_write(f, "{imp.alias}: ")
-        if imp.kind == .Module(_, span) {
-            path: jfmt_src_text(f, span.start, span.end)
-            jfmt_write(f, path)
+        written := ""
+        if imp.kind == {
+            .Module(_, span) | .File(_, span) -> {
+                written = jfmt_src_text(f, span.start, span.end)
+            }
+            .Unqualified(_, head_span, _, items_span, _) -> {
+                written = jfmt_src_text(f, head_span.start, items_span.end)
+            }
         }
-        if imp.kind == .File(_, span) {
-            name: jfmt_src_text(f, span.start, span.end)
-            jfmt_write(f, name)
-        }
+        jfmt_write(f, written)
         jfmt_emit_trailing(f, imp.span.end)
     }
 }
