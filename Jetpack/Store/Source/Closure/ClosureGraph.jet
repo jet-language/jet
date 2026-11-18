@@ -912,14 +912,14 @@ store_descriptor_for_entry: fn(verification: &StoreVerification, roots: HangarRo
                 if actual != digest {
                     return Err(StoreError.Other("dependency object `{path}` records `{digest}`, re-hash produced `{actual}`"))
                 }
-                objects.push(ClosureObject{digest: digest, path: path, external: !store_path_starts_with(path, hangar)})
+                objects.push(ClosureObject{digest: digest, path: path.copy(), external: !store_path_starts_with(path, hangar)})
             }
         }
         .None -> {
             loop name in store_sorted_keys(outputs) {
                 digest: outputs[name]
                 path: if name == "out" -> entry.out else -> files.join(object_root, digest)
-                objects.push(ClosureObject{digest: digest, path: path, external: !store_path_starts_with(path, hangar)})
+                objects.push(ClosureObject{digest: digest, path: path.copy(), external: !store_path_starts_with(path, hangar)})
             }
         }
     }

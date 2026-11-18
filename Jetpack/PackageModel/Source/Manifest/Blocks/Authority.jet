@@ -328,7 +328,7 @@ pkg_parse_grants: fn(body: String) -> [PackageGrant] PackageParseError! {
             return Err(PackageParseError.Composition("grant `{dep}` is declared more than once"))
         }
         seen.push(dep.copy())
-        out.push(PackageGrant{package: dep, rights: pkg_parse_effect_list(dep, entry.value.trim())})
+        out.push(PackageGrant{package: dep.copy(), rights: pkg_parse_effect_list(dep, entry.value.trim())})
     }
     Ok(out)
 }

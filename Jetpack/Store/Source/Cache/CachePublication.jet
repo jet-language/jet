@@ -622,7 +622,7 @@ store_cache_admissions_for_explain: fn(roots: HangarRoots, entry: StoreEntry) ->
         reason: "cache provenance is not admissible: {err.message()}"
         denied := [CacheAdmission]{}
         loop binding in bindings {
-            denied.push(CacheAdmission{role: binding.role, decision: CacheAdmissionDecision.Denied, builder: "", provenance: "", receipt_version: None, receipt_expires_unix: None, reason: reason})
+            denied.push(CacheAdmission{role: binding.role, decision: CacheAdmissionDecision.Denied, builder: "", provenance: "", receipt_version: None, receipt_expires_unix: None, reason: reason.copy()})
         }
         return Ok(denied)
     }
@@ -634,7 +634,7 @@ store_cache_admissions_for_explain: fn(roots: HangarRoots, entry: StoreEntry) ->
     admissions := [CacheAdmission]{}
     loop binding in bindings {
         pin_path: store_cache_receipt_pin_path(roots, binding.role, store_name)
-        admission := CacheAdmission{role: binding.role, decision: CacheAdmissionDecision.Denied, builder: builder, provenance: provenance, receipt_version: None, receipt_expires_unix: None, reason: "cache builder is revoked; rebuild before reuse"}
+        admission := CacheAdmission{role: binding.role, decision: CacheAdmissionDecision.Denied, builder: builder.copy(), provenance: provenance.copy(), receipt_version: None, receipt_expires_unix: None, reason: "cache builder is revoked; rebuild before reuse"}
         if !builder_revoked {
             if store_cache_read_receipt_pin(pin_path) == {
                 .Ok(pin) -> {

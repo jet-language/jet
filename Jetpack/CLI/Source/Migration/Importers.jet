@@ -448,11 +448,11 @@ cli_import_toml_string: fn(raw: String, key: String) -> String? Never! {
     loop raw_line in raw.lines() {
         line: raw_line.trim()
         if line.starts_with("[") && line.ends_with("]") {
-            section = cli_import_trim_chars(line, "[]").trim()
+            section = cli_import_trim_chars(line.copy(), "[]").trim()
             next
         }
         if section != "package" -> next
-        pair: line.split_once("=") ?? next
+        pair: line.copy().split_once("=") ?? next
         if pair.before.trim() == key -> return Val(cli_import_toml_value_text(pair.after))
     }
     None
@@ -519,7 +519,7 @@ cli_import_cargo_dependency_sections: fn(raw: String) -> [CargoDependencySection
     loop raw_line in raw.lines() {
         line: raw_line.trim()
         if !line.starts_with("[") || line.starts_with("[[") || !line.ends_with("]") -> next
-        section: line.removeprefix("[").removesuffix("]").trim()
+        section: line.copy().removeprefix("[").removesuffix("]").trim()
         matched := false
         found := CargoDependencyKind.Runtime
         platform := String?{None}
@@ -556,12 +556,12 @@ cli_import_dependency_keys: fn(raw: String, section: String) -> [String] Never! 
     loop raw_line in raw.lines() {
         line: raw_line.trim()
         if line.starts_with("[") {
-            current: cli_import_trim_end_char(cli_import_trim_start_char(line, "["), "]")
+            current: cli_import_trim_end_char(cli_import_trim_start_char(line.copy(), "["), "]")
             in_section = current == wanted
             next
         }
         if in_section {
-            pair: line.split_once("=") ?? next
+            pair: line.copy().split_once("=") ?? next
             out.push(pair.before.trim())
         }
     }
@@ -622,7 +622,7 @@ cli_import_lock_versions: fn(raw: String, package: String) -> [String] Never! {
             next
         }
         if !in_package -> next
-        pair: line.split_once("=") ?? next
+        pair: line.copy().split_once("=") ?? next
         if pair.before.trim() == {
             "name" -> name = provider_trim_quotes(pair.after.trim())
             "version" -> version = provider_trim_quotes(pair.after.trim())
@@ -648,7 +648,7 @@ cli_import_lock_field: fn(raw: String, package: String, field: String) -> String
             next
         }
         if !in_package -> next
-        pair: line.split_once("=") ?? next
+        pair: line.copy().split_once("=") ?? next
         key: pair.before.trim()
         if {
             key == "name" -> name = provider_trim_quotes(pair.after.trim())

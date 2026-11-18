@@ -1547,7 +1547,8 @@ sema_call_prepare_variadic_elements: fn(typed: SemaCallTypedArguments, params: [
                 if !sema_expression_list_check_clone(value.ty, value.span, environment, program, context, diagnostics) {
                     return false
                 }
-                value = sema_tree_node(value.ty, TExprKind.Clone{value: value, fact: CopyFact.Materialize}, value.span)
+                fact: sema_copy_hidden_fact_of(value.ty, CopyFact.Materialize, environment, program, context.generic_params)
+                value = sema_tree_node(value.ty, TExprKind.Clone{value: value, fact: fact}, value.span)
             } else {
                 if !sema_ownership_mark_unmarked_move(state, args[index].expr, scopes, "the variadic list", diagnostics) {
                     return false

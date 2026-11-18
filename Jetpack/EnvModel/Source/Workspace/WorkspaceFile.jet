@@ -130,7 +130,7 @@ envmodel_workspace_evaluate_package_source: fn(source: WorkspaceSource, resolver
     loop member in checked_members {
         resolver.revalidate_member(member.member)
         canonical_path: resolver.relative_identity(member.member.directory)
-        members.push(WorkspacePlanMember{name: member.facts.name, path: canonical_path, canonical_path: canonical_path})
+        members.push(WorkspacePlanMember{name: member.facts.name, path: canonical_path.copy(), canonical_path: canonical_path})
     }
     resolver.revalidate_source(source)
     Ok(WorkspacePlan{members: members, comptime_inputs: [ComptimeInput]{}, overlay_policy: OverlayPolicy.empty(), source_digest: pkg_sha256_hex(source.source.bytes())})

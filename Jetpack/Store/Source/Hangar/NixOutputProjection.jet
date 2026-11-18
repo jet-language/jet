@@ -81,18 +81,18 @@ store_record_locked_nix: fn(verification: &StoreVerification, roots: HangarRoots
     entries := [StoreEntry]{}
     loop digest in digests {
         producer: store_locked_nix_producer(reference, lock_envelope, closure, lock_digest, cache_identity, digest, [String]{})
-        identity := cache_identity
-        identity.source_fingerprint = digest
+        identity := cache_identity.copy()
+        identity.source_fingerprint = digest.copy()
         entries.push(
             StoreEntry{
                 id: store_content_addressed_entry_id("__nix_cas", digest, "nix-cas:{digest}", digest),
                 name: "__nix_cas",
-                version: digest,
+                version: digest.copy(),
                 reference: "nix-cas:{digest}",
                 out: files.join(object_root, digest),
                 bin: "",
                 rlib: "",
-                envelope: Envelope{output_hash: digest, platform: lock_envelope.platform, signature: lock_envelope.signature, provenance: lock_envelope.provenance},
+                envelope: Envelope{output_hash: digest.copy(), platform: lock_envelope.platform, signature: lock_envelope.signature, provenance: lock_envelope.provenance},
                 cache_identity: identity,
                 references: [String]{},
                 named_outputs: [String:String]{"out": digest},
@@ -188,13 +188,13 @@ store_project_nix_outputs_unlocked: fn(roots: HangarRoots, realized: Realized, g
         if name == "out" && digest != realized.envelope.output_hash {
             return Err(StoreError.Other("Nix primary output changed during Store projection: expected {realized.envelope.output_hash}, got {digest}"))
         }
-        canonical := source
+        canonical := source.copy()
         if trusted_digest == None {
             if seen_sources.get(source) == {
                 .Val(existing) -> { canonical = existing }
                 .None -> {
                     canonical = store_project_nix_output_unlocked(roots, source, digest, transaction)
-                    seen_sources[source] = canonical
+                    seen_sources[source] = canonical.copy()
                 }
             }
         }
@@ -397,7 +397,7 @@ store_locked_nix_missing_members: fn(roots: HangarRoots, candidate: StoreEntry) 
         index += 1
         member: by_hash.get(digest)
         if !store_reuse_lexists(store_reuse_object_path(roots, digest)) {
-            label := digest
+            label := digest.copy()
             if member == .Val(found) {
                 if ProducerRecord.decode(found.producer_record) == .Ok(producer) {
                     label = producer.facts.get("nix.store-path") ?? digest

@@ -187,7 +187,7 @@ jet_cli_perf_otlp: fn(trace: CanonicalJSON) -> String Never! {
             start: jet_cli_perf_member_number(item, "start_ns") ?? next
             duration: jet_cli_perf_member_number(item, "duration_ns") ?? next
             attributes: [perf_log.LogField]{perf_log.field("jet.kind", "browser")}
-            spans.push(perf_log.TraceSpan{trace_id: trace_hex, span_id: jet_cli_perf_hex16(rows + index + 1), parent_span_id: "", name: jet_cli_perf_member_symbol(item) ?? "browser", kind: .Internal, start_ns: start, end_ns: start + duration, attributes: attributes, status: .Unset})
+            spans.push(perf_log.TraceSpan{trace_id: trace_hex.copy(), span_id: jet_cli_perf_hex16(rows + index + 1), parent_span_id: "", name: jet_cli_perf_member_symbol(item) ?? "browser", kind: .Internal, start_ns: start, end_ns: start + duration, attributes: attributes, status: .Unset})
         }
     }
     "{perf_log.otlp_traces_json("jet perf", spans)}\n{jet_cli_perf_otlp_metrics(trace)}"

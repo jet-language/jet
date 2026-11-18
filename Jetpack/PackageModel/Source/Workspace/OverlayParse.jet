@@ -349,7 +349,7 @@ pkg_overlay_parse_patch_list: fn(input: String) -> [String] OverlayError! {
     patches := [String]{}
     loop entry in pkg_overlay_parse_list(input) {
         item: entry.trim()
-        patches.push(pkg_overlay_unquote(pkg_overlay_strip_wrapped(item, "patch(", ")") ?? item.copy()))
+        patches.push(pkg_overlay_unquote(pkg_overlay_strip_wrapped(item.copy(), "patch(", ")") ?? item.copy()))
     }
     Ok(patches)
 }
@@ -564,7 +564,7 @@ pkg_overlay_exact_field_value: fn(body: String, field: String) -> String? Overla
     values := [String]{}
     loop piece in pkg_overlay_top_level_commas(body) {
         entry: piece.trim()
-        if pkg_overlay_split_colon(entry) == {
+        if pkg_overlay_split_colon(entry.copy()) == {
             .Val(parts) -> {
                 name: parts.before.trim()
                 if name == {
@@ -578,7 +578,7 @@ pkg_overlay_exact_field_value: fn(body: String, field: String) -> String? Overla
                 if name == field -> values.push(parts.after.trim())
             }
             .None -> {
-                name: pkg_overlay_first_word(entry)
+                name: pkg_overlay_first_word(entry.copy())
                 if name != "" -> return Err(OverlayError.Malformed("`policy.{name}` needs `:`"))
             }
         }

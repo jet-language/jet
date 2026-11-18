@@ -1,0 +1,76 @@
+// L2511, the no-fire pair of cost_hidden_copy_in_loop: a view
+// read in place by a scalar read of its receiver, a copy written as
+// `.copy()`, a copy that is bitwise (a struct of Ints) or a Shared handle's
+// count bump, and a hidden copy outside any loop are not hidden copies that
+// a loop repeats, so the check is clean.
+Tag: struct {
+    name: String,
+    turn: Int,
+}
+
+Extent: struct {
+    start: Int,
+    end: Int,
+}
+
+Box: struct {
+    n: Int,
+}
+
+Holder: struct {
+    cell: Shared<Box>?,
+    extent: Extent,
+}
+
+widths: fn(lines: [String]) -> Int {
+    total := 0
+    loop line in lines {
+        trimmed: line.trim()
+        if trimmed.len() > total -> total = trimmed.len()
+    }
+    total
+}
+
+keep_trimmed: fn(lines: [String]) -> [String] {
+    out := [String]{}
+    loop line in lines {
+        trimmed: line.trim()
+        out.push(trimmed.copy())
+    }
+    out
+}
+
+tags: fn(turns: Int) -> [Tag] {
+    label: "turn"
+    out := [Tag]{}
+    loop turn in 0..<turns {
+        out.push(Tag{name: label.copy(), turn: turn})
+    }
+    out
+}
+
+holders: fn(turns: Int) -> [Holder] {
+    cell: Shared{Box{n: 1}}
+    extent: Extent{start: 0, end: 1}
+    out := [Holder]{}
+    loop turn in 0..<turns {
+        held := extent
+        held.end = turn
+        out.push(Holder{cell: Val(cell), extent: held})
+    }
+    out
+}
+
+first_trimmed: fn(lines: [String]) -> [String] {
+    trimmed: lines[0].trim()
+    [String]{trimmed}
+}
+
+run: fn() {
+    lines: [String]{" a ", "bb "}
+    print(widths(lines))
+    print(keep_trimmed(lines).len())
+    print(tags(2).len())
+    print(holders(2).len())
+    print(first_trimmed(lines).len())
+}

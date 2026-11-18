@@ -343,7 +343,7 @@ ForeignBoundaryContract: struct {
         coverage_digest: artifact_coverage.digest()
         obligations := [ForeignObligationEvidence]{}
         loop obligation in FOREIGN_BOUNDARY_OBLIGATIONS {
-            obligations.push(ForeignObligationEvidence{obligation: obligation, basis: FFIEvidenceBasis.Unknown, checker: "not-established", assumptions: [String]{"descriptor declarations do not prove the foreign implementation"}, coverage_digest: coverage_digest})
+            obligations.push(ForeignObligationEvidence{obligation: obligation, basis: FFIEvidenceBasis.Unknown, checker: "not-established", assumptions: [String]{"descriptor declarations do not prove the foreign implementation"}, coverage_digest: coverage_digest.copy()})
         }
         alignment: if {
             is_cpp -> "opaque-handle; native class layout intentionally unclaimed"
@@ -466,7 +466,7 @@ ForeignBoundaryContract: struct {
         out := self
         digest: coverage.digest()
         out.artifact_coverage = coverage
-        loop index in 0..<out.obligations.len() -> out.obligations[index].coverage_digest = digest
+        loop index in 0..<out.obligations.len() -> out.obligations[index].coverage_digest = digest.copy()
         out
     }
 

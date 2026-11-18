@@ -332,7 +332,7 @@ pkg_build_option_value: fn(row: BuildOptionRow, written: String) -> String? {
         item: piece.trim()
         if item == "" -> next
         if item.starts_with("\"") == hooks -> return None
-        items.push(if hooks -> item else -> pkg_unquote(item))
+        items.push(if hooks -> item.copy() else -> pkg_unquote(item.copy()))
     }
     Val(build_option_list_value(items))
 }

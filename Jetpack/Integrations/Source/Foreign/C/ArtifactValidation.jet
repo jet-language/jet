@@ -207,7 +207,7 @@ pkg_cffi_validate_cpp_symbols: fn(actual: String, lib: String, generated_archive
     generated_name: "{pkg_foreign_bridge_prefix(CPP_MODULE_ROOT)}{actual}"
     libraries := [String]{}
     loop name in flags.link_names {
-        bare := name
+        bare := name.copy()
         if {
             name.starts_with("static=") -> bare = name.removeprefix("static=")
             name.starts_with("dylib=") -> bare = name.removeprefix("dylib=")

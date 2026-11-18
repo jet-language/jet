@@ -6432,7 +6432,8 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         // --cost`) first proves the projection complete: a checked body that
         // reaches a callee with neither a checked body nor a foreign row is
         // refused. The report's sites are placed on their lines and its
-        // L2510 lints join the check's diagnostics.
+        // L2510 lints join the check's diagnostics. Any other check lists
+        // the L2511 tidy errors of the hidden copies its loops repeat.
         cost_report := TCostReport?{None}
         if request.capture_cost_report {
             jet_driver_trace_step_begin(request.trace_sink, "driver.check.cost")
@@ -6449,6 +6450,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
             loop lint in jet_driver_cost_lints(load, report) -> load.diagnostics.push(lint)
             cost_report = Val(report.move())
             jet_driver_trace_step_end(request.trace_sink, "driver.check.cost", cost_cover.covered.len())
+        }
+        if !request.capture_cost_report {
+            loop lint in jet_driver_cost_copy_lints(load, checked_functions) -> load.diagnostics.push(lint)
         }
         jet_driver_trace_step_begin(request.trace_sink, "driver.check.facts")
         result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)

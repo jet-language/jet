@@ -5,6 +5,7 @@
 // string-view fact; it does not read a mutable scope singleton or guess
 // nominal capabilities from a successful lowering.
 use jet_foundation.[
+    CopyFact,
     symbol_key_names,
     symbol_table_key,
     Diagnostic,
@@ -1084,6 +1085,21 @@ sema_copy_classify: fn(
         accepted: accepted,
         complete: source_facts.complete && target_facts.complete,
     }
+}
+
+// The fact a copy sema makes that the source never writes records: `hidden`
+// (Share or Materialize) when the copy allocates and walks data because its
+// type's clone deep-copies (a String, List or Map, or a value holding one),
+// else Scalar: a bitwise copy or a Shared handle's reference-count bump,
+// which costs a loop nothing worth naming.
+sema_copy_hidden_fact: fn(facts: SemaCopyFacts, hidden: CopyFact) -> CopyFact Never! {
+    if facts.memory == SemaCopyMemoryKind.Allocation -> return hidden.copy()
+    CopyFact.Scalar
+}
+
+// sema_copy_hidden_fact for a copy of a `ty` value that is no view.
+sema_copy_hidden_fact_of: fn(ty: Type, hidden: CopyFact, environment: SemaScopeEnvironment, program: SemaProgramTables, generic_params: [TGenericParam]) -> CopyFact Never! {
+    sema_copy_hidden_fact(sema_copy_classify(ty, SemaCopyIntent.Clone, environment, program, generic_params, false), hidden)
 }
 
 // Whether a value of `ty` holds a Clock that is not deterministic at any

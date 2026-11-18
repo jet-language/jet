@@ -291,7 +291,7 @@ pkg_dart_parse: fn(source: String) -> [DartFunction] ForeignBindError! {
             if item.contains("{{") || item.contains("}}") || item.contains("[") || item.contains("]") {
                 return Err(ForeignBindError.Source("Dart entry point `{name}` cannot use named or optional parameters"))
             }
-            words: pkg_binder_words(item)
+            words: pkg_binder_words(item.copy())
             if words.len() != 2 {
                 return Err(ForeignBindError.Source("Dart entry point `{name}` needs explicit positional parameter types"))
             }

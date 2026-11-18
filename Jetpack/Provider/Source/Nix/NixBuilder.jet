@@ -171,7 +171,7 @@ nix_builder_run_in_scratch: fn(scratch: NixBuildScratch, source_dir: String, eva
         nix_builder_validate_built_output(name, path, declared)
         store_seal_local_output(path) ?? return Err(NativeNixBuildError.Store("sealing output `{name}`: {err.message()}"))
         digest: pkg_try_output_hash_of(path) ?? return Err(NativeNixBuildError.Store("output `{name}`: {err.message()}"))
-        outputs[name] = NativeNixOutput{name: name, store_path: declared.path, path: path, digest: digest}
+        outputs[name] = NativeNixOutput{name: name.copy(), store_path: declared.path, path: path, digest: digest}
     }
     Ok({outputs: outputs, mechanism: sandbox.mechanism, policy: sandbox.policy})
 }

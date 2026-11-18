@@ -193,10 +193,11 @@ CRecordDefinitions: struct {
     priv source: String,
     priv names: [String:String],
     priv aliases: [String:Type],
+    priv records: [CRecordDecl],
     priv handle_names: [String],
 
     empty: fn() -> CRecordDefinitions Never! {
-        CRecordDefinitions{source: "", names: [String:String]{}, aliases: [String:Type]{}, handle_names: [String]{}}
+        CRecordDefinitions{source: "", names: [String:String]{}, aliases: [String:Type]{}, records: [CRecordDecl]{}, handle_names: [String]{}}
     }
 
     is_record_type: fn(self, ty: Type) -> Bool Never! {
@@ -562,7 +563,7 @@ pkg_ffi_collect_c_record_definitions: fn(program: RustBridgeProgram) -> CRecordD
     loop fact in facts {
         if !handle_names.contains(fact.jet_name) -> handle_names.push(fact.jet_name)
     }
-    definitions := CRecordDefinitions{source: "", names: names, aliases: aliases, handle_names: handle_names}
+    definitions := CRecordDefinitions{source: "", names: names, aliases: aliases, records: records, handle_names: handle_names}
     source := ""
     loop record in records {
         repr: if record.alignment == {

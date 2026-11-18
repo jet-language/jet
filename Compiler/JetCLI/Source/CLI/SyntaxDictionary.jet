@@ -89,7 +89,7 @@ jet_cli_syntax_meanings_text: fn(meanings: [JetCLISyntaxMeaning]) -> String Neve
             indent = "  "
         }
         text = "{text}{indent}{meaning.text}\n{indent}Example:\n"
-        loop line in meaning.example.lines() -> text = "{text}{indent}  {line}\n"
+        loop line in meaning.example.split("\n") -> text = "{text}{indent}  {line}\n"
         if meaning.afterwards != "" -> text = "{text}{indent}Afterwards: {meaning.afterwards}\n"
         if meaning.related_codes.len() > 0 {
             text = "{text}{indent}Related: {meaning.related_codes.join(", ")}\n"

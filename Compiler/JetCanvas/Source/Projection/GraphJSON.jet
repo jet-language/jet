@@ -450,7 +450,7 @@ canvas_hint_lines: fn(src: String, kind: String) -> [CommentHint] Never! {
     loop line in src.split("\n") {
         trimmed: line.trim()
         if trimmed.starts_with(prefix) {
-            body: trimmed.remove_prefix(prefix)
+            body: trimmed.copy().remove_prefix(prefix)
             anchor: attr_span(body, "span") ?? Span{start: 0, end: 0}
             hint_span: Span{start: offset, end: offset + line.len()}
             if {

@@ -250,13 +250,13 @@ provider_import_projection: fn(facts: DevShellFacts, catalog: ImportCatalog) -> 
             }
         }
         if catalog.is_authoritative() && !catalog.names.contains(name) {
-            gaps.push(ImportGap{item: package, candidate: catalog.nearest(package, packages)})
+            gaps.push(ImportGap{item: package.copy(), candidate: catalog.nearest(package, packages)})
             next
         }
         if !packages.contains(name) -> packages.push(name)
     }
     loop item in facts.unmapped {
-        gaps.push(ImportGap{item: item, candidate: catalog.nearest(item, packages)})
+        gaps.push(ImportGap{item: item.copy(), candidate: catalog.nearest(item, packages)})
     }
     packages.sort()
     {packages: packages, gaps: provider_sorted_unique_gaps(gaps)}
@@ -458,7 +458,7 @@ provider_cmd_import: fn(theme: Theme, dir: String, requested: String?, fixtures:
     system: provider_bridge_host_system()
     loop package in packages {
         provider_ref: "{package}{REF_PROVIDER_AT}{REF_SOURCE_JETPACK}"
-        hash: pkg_sha256_hex(provider_nul_joined([String]{"catalog", provider_ref, fingerprint}))
+        hash: pkg_sha256_hex(provider_nul_joined([String]{"catalog", provider_ref.copy(), fingerprint.copy()}))
         lock.record_catalog_selection("env.dev", package, provider_ref, hash, system, "imported from bounded Nix devShell `{file}`")
     }
     gaps = provider_sorted_unique_gaps(gaps)

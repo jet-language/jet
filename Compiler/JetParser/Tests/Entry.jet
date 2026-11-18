@@ -282,23 +282,6 @@ use jet_foundation.[ByteTextPart, expr_span, pattern_binding_names]
     assert(formatted.contains("\n        .geo.Pair<Int, [String]>(p) -> "), formatted)
 }
 
-// L0107's fix renames a case nothing builds to `_Name`; its arms still read as
-// case patterns, in a statement table and in a value table.
-#Test("underscore_case_arms_are_patterns") {
-    source: "\nK: enum {{\n    Kept,\n    _Held,\n}}\n\nrun: fn(k: K) {{\n    if k == {{\n        .Kept -> print(1)\n        ._Held -> print(2)\n    }}\n    n: if k == {{\n        ._Held -> 2\n        .Kept -> 1\n    }}\n    print(n)\n}}\n"
-    result: parser_test_result(source)
-    assert(result.diagnostics.is_empty(), "underscore case arms should parse: {result.diagnostics:Debug}")
-    result.program.items[1] == .Func(function) ?? panic("function")
-    function.body[0] == .Switch(_, arms, _, _) ?? panic("arm table")
-    names := [String]{}
-    loop arm in arms {
-        if arm.cond == .PatternTest(_, pattern, _, _) {
-            if pattern == .Variant(variant, _, leading_dot, _) && leading_dot -> names.push(variant)
-        }
-    }
-    assert(names == ["Kept", "_Held"], "{names:Debug}")
-}
-
 // #6281: the retired result-only `value ? ok -> … ! err -> …` spelling is
 // an ordinary parse error, with no teaching of its own.
 #Test("retired_result_handler_spelling_does_not_parse") {

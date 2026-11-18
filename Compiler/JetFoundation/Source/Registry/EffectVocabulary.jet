@@ -365,8 +365,8 @@ effect_vocabulary_fact: fn(body: String?, cases: [String], member: String?) -> B
             term == "true" -> holds = true
             term == "false" -> {}
             term.starts_with("self == .") -> {
-                named: term.removeprefix("self == .")
-                if member == None || !cases.contains(named) -> return None
+                named: term.after("self == .")
+                if member == None || !cases.contains(named.copy()) -> return None
                 if member == .Val(case_name) && case_name == named -> holds = true
             }
             else -> return None

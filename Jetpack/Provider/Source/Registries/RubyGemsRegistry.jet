@@ -17,7 +17,7 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
     loop raw_line in lines {
         line: raw_line.trim()
         if line == "" -> next
-        halves: line.split_once("|") ?? return Err(RegistryError.Reason("compact-index info line has no attributes"))
+        halves: line.copy().split_once("|") ?? return Err(RegistryError.Reason("compact-index info line has no attributes"))
         left: halves.before
         version_end: provider_registry_find(left, " ", 0)
         version: if version_end == {
@@ -36,7 +36,7 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
         loop attribute in attributes {
             field: attribute.trim()
             if field.starts_with("checksum:") {
-                checksum = field.removeprefix("checksum:")
+                checksum = field.copy().removeprefix("checksum:")
                 break
             }
         }
@@ -50,7 +50,7 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
                 loop item in items {
                     raw_dependency: item.trim()
                     if raw_dependency == "" -> next
-                    pair: raw_dependency.split_once(":")
+                    pair: raw_dependency.copy().split_once(":")
                     dependency_name: if pair == {
                         .Val(split) -> split.before
                         .None -> raw_dependency
@@ -71,7 +71,7 @@ provider_rubygems_parse_info: fn(repository: String, name: String, raw: String) 
         out.push(
             RegistryPackage{
                 name: name,
-                version: version,
+                version: version.copy(),
                 url: "{repository}/gems/{name}-{version}.gem",
                 integrity: RegistryIntegrity.SHA256(pkg_ascii_lower(checksum)),
                 dependencies: dependencies,

@@ -192,7 +192,7 @@ jet_cli_lock_kv_field: fn(inline: String, key: String) -> String? Never! {
     loop raw_part in parts {
         part: raw_part.trim()
         if !part.starts_with(key) -> next
-        rest: part.slice(key.len()..<part.len()).trim()
+        rest: part.after(key).trim()
         if !rest.starts_with("=") -> return None
         value: rest.slice(1..<rest.len()).trim()
         if value.starts_with("\"") -> return Val(jet_cli_lock_unescape(value))
@@ -351,15 +351,15 @@ jet_cli_lock_load: fn(root: String) -[FS]> JetCLILockLoad Never! {
             }
             next
         }
+        line_bytes: line.copy().bytes()
         equals := -1
-        loop (index, byte) in line.bytes() {
+        loop (index, byte) in line_bytes {
             if byte == (U8{61}) {
                 equals = index
                 break
             }
         }
         if equals < 0 -> return JetCLILockLoad.Missing
-        line_bytes: line.bytes()
         key: foundation_byte_text(line_bytes, 0, equals).trim()
         value: foundation_byte_text(line_bytes, equals + 1, line_bytes.len()).trim()
         if key == "version" && section != "package" && section != "toolchain" && !in_root {

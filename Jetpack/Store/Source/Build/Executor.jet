@@ -576,7 +576,7 @@ build_start_action: fn(plan: HermeticBuildPlan, declared: HermeticBuildAction, p
             }
             real: files.realpath(source) ?? return Err(build_io_action(action, BuildIOError.from(err)))
             files.symlink(real, link) ?? return Err(build_io_action(action, BuildIOError.from(err)))
-            mounts.push(NativeSandboxMount{source: real, destination: real.copy()})
+            mounts.push(NativeSandboxMount{source: real.copy(), destination: real.copy()})
         }
     }
     if made_tool {

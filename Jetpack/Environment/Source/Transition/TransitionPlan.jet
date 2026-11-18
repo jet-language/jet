@@ -110,7 +110,7 @@ TransitionPlan: struct {
         snapshots := [TransitionSnapshot]{}
         loop change in self.changes {
             path: env_transition_safe_path(self.root, change.relative)
-            snapshots.push(TransitionSnapshot{path: path, state: env_transition_read_state(path)})
+            snapshots.push(TransitionSnapshot{path: path.copy(), state: env_transition_read_state(path)})
         }
         // Publish the exact recovery record before touching any authored or
         // generated file: `jet fold` can then restore every path that reached

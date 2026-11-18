@@ -498,7 +498,7 @@ pkg_cpp_flatten_tool_version: fn(bytes: [U8]) -> String Never! {
     lines := [String]{}
     loop line in pkg_binder_lines(String.from_bytes_lossy(bytes)) {
         trimmed: line.trim()
-        if trimmed != "" -> lines.push(trimmed)
+        if trimmed != "" -> lines.push(trimmed.copy())
     }
     if lines.len() == 0 -> return "unknown"
     lines.join(" | ")
@@ -521,11 +521,11 @@ pkg_cpp_launder: fn(value: [U8]) -> String Never! {
     lines: pkg_binder_lines(String.from_bytes_lossy(value))
     loop line in lines {
         trimmed: line.trim()
-        if trimmed.contains("error:") -> return pkg_binder_take_chars(trimmed, 240)
+        if trimmed.contains("error:") -> return pkg_binder_take_chars(trimmed.copy(), 240)
     }
     loop line in lines {
         trimmed: line.trim()
-        if trimmed != "" -> return pkg_binder_take_chars(trimmed, 240)
+        if trimmed != "" -> return pkg_binder_take_chars(trimmed.copy(), 240)
     }
     "the tool returned a failure status"
 }

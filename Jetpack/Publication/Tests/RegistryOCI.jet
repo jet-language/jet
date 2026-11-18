@@ -255,7 +255,7 @@ publication_oci_test_evidence: fn(repo: String, entry: PublicationIndexEntry) -[
     descriptors := publication_oci_test_descriptors()
     loop index in 0..<4 {
         digest: "sha256-{pkg_sha256_hex(payloads[index].bytes())}"
-        descriptors[index].digest = digest
+        descriptors[index].digest = digest.copy()
         descriptors[index].size = payloads[index].bytes().len()
         publication_write_oci_file(files.join(files.join(root, "blobs"), digest), payloads[index].bytes(), "OCI referrer blob") ?? panic("blob")
     }

@@ -138,7 +138,7 @@ provider_member_dirs_from_listing: fn(listing: String) -> [String] Never! {
     loop line in listing.split("\n") {
         path: line.trim()
         dir := ""
-        if path.ends_with("/{PACKAGE_FILE}") -> dir = path.removesuffix("/{PACKAGE_FILE}")
+        if path.ends_with("/{PACKAGE_FILE}") -> dir = path.copy().removesuffix("/{PACKAGE_FILE}")
         if dir != "" && !out.contains(dir) -> out.push(dir)
     }
     out.sort()

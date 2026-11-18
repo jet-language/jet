@@ -170,7 +170,7 @@ pkg_cffi_automatic_operation: fn(name: String, source: String) -> BindingOperati
     loop raw in pkg_bridge_text_lines(source) {
         line: raw.trim()
         if line.contains(call) {
-            declaration = line
+            declaration = line.copy()
             break
         }
     }
@@ -241,7 +241,7 @@ pkg_cffi_record_obligation_marker: fn(contract: &ForeignBoundaryContract, line: 
                 assumptions = [String]{}
                 loop item in value.split("|") {
                     trimmed: item.trim()
-                    if trimmed != "" -> assumptions.push(trimmed)
+                    if trimmed != "" -> assumptions.push(trimmed.copy())
                 }
             }
             else -> {}

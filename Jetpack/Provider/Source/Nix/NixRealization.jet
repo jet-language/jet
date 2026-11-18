@@ -698,7 +698,7 @@ provider_realization_from_index: fn(spec: RefSpec, key: NixIndexKey, verified: N
             return Err(ProviderError.BadOutput("Nix cache output `{name}` has no Hangar path"))
         }
         named_outputs[name] = object.hangar_path
-        facts["nix.output.{name}"] = store_path
+        facts["nix.output.{name}"] = store_path.copy()
         facts["nix.output.{name}.digest"] = object.hangar_digest
         facts["nix.cache.output.{name}.proof.sha256"] = object.upstream_proof_sha256
         replay_facts["nix.output.{name}"] = store_path

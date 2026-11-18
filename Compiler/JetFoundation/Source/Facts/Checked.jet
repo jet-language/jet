@@ -144,7 +144,10 @@ boundary_head_carrier_module: fn(name: String) -> String? {
 
 // #4318: why a checked clone duplicates its operand. Every copy carries the
 // sema decision that made it; lowering and backends never print a clone
-// without one.
+// without one. Share (a value still used later) and Materialize (an argument
+// copied into place) are copies sema made that allocate and walk data; a
+// copy the source never writes that is bitwise or a Shared handle's
+// reference-count bump is Scalar.
 CopyFact: enum {
     Explicit,
     Materialize,

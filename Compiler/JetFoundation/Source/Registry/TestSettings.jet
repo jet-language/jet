@@ -288,7 +288,7 @@ test_setting_value: fn(row: TestSettingRow, text: String) -> String? Never! {
         .Size -> {
             loop unit in TEST_SETTING_SIZE_UNITS {
                 if !trimmed.ends_with(unit.suffix) -> next
-                plain: trimmed.removesuffix(unit.suffix).trim().replace("_", "")
+                plain: trimmed.copy().removesuffix(unit.suffix).trim().replace("_", "")
                 count: test_setting_whole(plain) ?? return None
                 if count < 1 -> return None
                 return Val("{count * unit.bytes}")

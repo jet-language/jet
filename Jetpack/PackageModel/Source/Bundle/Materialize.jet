@@ -111,10 +111,10 @@ pkg_bundle_native_version: fn(run: NativeSandboxOutput) -> String BundleMaterial
         loop line in text.split("\n") {
             value: line.trim()
             if value == "" -> next
-            if pkg_text_has_control(value) {
+            if pkg_text_has_control(value.copy()) {
                 return Err(BundleMaterializeError{reason: "package materializer tool version contains a control character"})
             }
-            return Ok(value)
+            return Ok(value.copy())
         }
     }
     Err(BundleMaterializeError{reason: "package materializer tool returned no version text"})

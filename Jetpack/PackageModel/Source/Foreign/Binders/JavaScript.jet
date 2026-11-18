@@ -122,12 +122,12 @@ pkg_javascript_parse_params: fn(source: String, line: Int) -> [ForeignScalar] Fo
         if param.contains("?") || param.contains("=") || param.starts_with("...") {
             return Err(ForeignBindError.Source("line {line}: optional, default, and rest JavaScript parameters are not in the typed ABI"))
         }
-        colon: pkg_binder_find(param, ":", 0)
+        colon: pkg_binder_find(param.copy(), ":", 0)
         if colon < 0 {
             return Err(ForeignBindError.Source("line {line}: JavaScript parameter {param} needs a scalar type"))
         }
-        name: pkg_binder_slice(param, 0, colon).trim()
-        annotation: pkg_binder_tail(param, colon + 1).trim()
+        name: pkg_binder_slice(param.copy(), 0, colon).trim()
+        annotation: pkg_binder_tail(param.copy(), colon + 1).trim()
         if !pkg_binder_is_ident(name) {
             return Err(ForeignBindError.Source("line {line}: {name} is not a bindable JavaScript parameter"))
         }

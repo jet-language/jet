@@ -227,16 +227,16 @@ provider_toml_assignments: fn(document: String) -> [TOMLAssignment] Never! {
             next
         }
         if line.starts_with("[[") && line.ends_with("]]") {
-            section = line.removeprefix("[[").removesuffix("]]").trim()
+            section = line.copy().removeprefix("[[").removesuffix("]]").trim()
             array_table = true
             next
         }
         if line.starts_with("[") && line.ends_with("]") {
-            section = line.removeprefix("[").removesuffix("]").trim()
+            section = line.copy().removeprefix("[").removesuffix("]").trim()
             array_table = false
             next
         }
-        pair: line.split_once("=") ?? next
+        pair: line.copy().split_once("=") ?? next
         key: pair.before.trim()
         if key == "" -> next
         assignments.push(TOMLAssignment{section: section.copy(), array_table: array_table, key: key, value: pair.after.trim()})

@@ -20,7 +20,7 @@ language_roots: fn(text: String) -> [String] {
                 found = false
             }
             open && trimmed.starts_with("root: \"") && trimmed.ends_with("\",") -> {
-                roots.push(trimmed.slice(7, trimmed.len() - 2))
+                roots.push(trimmed.after("root: \"").removesuffix("\","))
                 found = true
             }
             open && trimmed == "}}" -> {

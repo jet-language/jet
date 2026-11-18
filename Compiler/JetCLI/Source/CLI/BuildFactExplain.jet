@@ -111,7 +111,7 @@ jet_cli_module_value: fn(query: String, source: String) -> JetCLIModuleValue? Ne
     loop (index, argument) in arguments {
         written: argument.trim()
         if !written.starts_with("#build.settings.") || index >= parameters.len() -> next
-        return Val(JetCLIModuleValue{query: query.copy(), binding: parts[0].copy(), instantiation: instantiation.copy(), function: parts[1].copy(), parameter: parameters[index].copy(), setting: written.removeprefix("#build.settings.")})
+        return Val(JetCLIModuleValue{query: query.copy(), binding: parts[0].copy(), instantiation: instantiation.copy(), function: parts[1].copy(), parameter: parameters[index].copy(), setting: written.after("#build.settings.")})
     }
     None
 }

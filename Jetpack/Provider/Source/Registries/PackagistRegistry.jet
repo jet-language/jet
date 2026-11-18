@@ -236,7 +236,7 @@ provider_packagist_install: fn(artifact: RegistryArtifact, out: String, scratch:
     loop line in lines {
         pair: line.split_once("\t") ?? return Err(RegistryError.Reason("Packagist zip type listing is malformed"))
         entry: pair.after
-        trimmed := entry
+        trimmed := entry.copy()
         loop trimmed.ends_with("/") -> trimmed = trimmed.removesuffix("/")
         if entry == "" || !provider_registry_safe_relative(trimmed) {
             return Err(RegistryError.Reason("Packagist zip contains unsafe path `{entry}`"))

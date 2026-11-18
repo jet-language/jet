@@ -79,7 +79,7 @@ trust_strip_semantic_sections: fn(raw: String) -> String Never! {
     loop line in trust_text_lines(raw) {
         trimmed: line.trim()
         if trimmed.starts_with("[") {
-            skipping = SemanticLockSection.from_header(trimmed) != None
+            skipping = SemanticLockSection.from_header(trimmed.copy()) != None
             if skipping -> next
         }
         if skipping -> next
@@ -264,14 +264,14 @@ trust_parse_semantic_lock: fn(raw: String) -> SemanticLockFile Never! {
     loop raw_line in trust_text_lines(raw) {
         line: raw_line.trim()
         if line == "" || line.starts_with("#") -> next
-        if SemanticLockSection.from_header(line) == {
+        if SemanticLockSection.from_header(line.copy()) == {
             .Val(section) -> {
                 reader.open(section)
                 next
             }
             .None -> {}
         }
-        parts: trust_text_split_first(line, TRUST_EQUALS) ?? next
+        parts: trust_text_split_first(line.copy(), TRUST_EQUALS) ?? next
         key: parts.before.trim()
         unquoted: trust_text_trim_byte(parts.after.trim(), TRUST_QUOTE)
         value: trust_text_replace_all(trust_text_replace_all(unquoted, "\\\"", "\""), "\\\\", "\\")

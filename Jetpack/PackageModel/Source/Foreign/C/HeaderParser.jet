@@ -52,12 +52,12 @@ CTypeCatalog: struct {
                     seed: record.alias ?? (record.struct_tag ?? "CRecord")
                     jet_name: pkg_bind_unique_name(used_names, foundation_generated_type_name(pkg_cbind_trim_end_matches(seed, "_t"), "CRecord"))
                     if record.struct_tag == {
-                        .Val(struct_tag) -> { catalog.names[struct_tag] = jet_name }
+                        .Val(struct_tag) -> { catalog.names[struct_tag] = jet_name.copy() }
                         .None -> {}
                     }
                     if record.alias == {
                         .Val(alias) -> {
-                            catalog.names[alias] = jet_name
+                            catalog.names[alias] = jet_name.copy()
                             catalog.aliases[alias] = record.struct_tag ?? ""
                         }
                         .None -> {}
@@ -86,9 +86,9 @@ CTypeCatalog: struct {
             key: entry.record.alias ?? (entry.record.struct_tag ?? next)
             fields: pkg_cbind_parse_record_fields(entry.record.body, catalog) ?? next
             def: CStructDef{jet_name: entry.jet_name, fields: fields}
-            catalog.records[key] = def
+            catalog.records[key] = def.copy()
             if entry.record.struct_tag == {
-                .Val(struct_tag) -> { catalog.records[struct_tag] = def }
+                .Val(struct_tag) -> { catalog.records[struct_tag] = def.copy() }
                 .None -> {}
             }
             if entry.record.alias == {

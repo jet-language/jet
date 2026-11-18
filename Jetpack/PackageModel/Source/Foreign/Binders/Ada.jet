@@ -214,11 +214,11 @@ pkg_ada_parse: fn(source: String) -> [AdaRoutine] ForeignBindError! {
         }
         if names.get(name) == {
             .Val(previous) -> return Err(ForeignBindError.Source("Ada overload `{name}` is ambiguous for Jet; exported name already maps to `{previous}`"))
-            .None -> names[name] = symbol
+            .None -> names[name] = symbol.copy()
         }
         if symbols.get(symbol) == {
             .Val(previous) -> return Err(ForeignBindError.Source("Ada exports `{symbol}` for both `{previous}` and `{name}`; use unique External_Name values"))
-            .None -> symbols[symbol] = name
+            .None -> symbols[symbol] = name.copy()
         }
         routines.push(AdaRoutine{name: name, symbol: symbol, params: params, result: result.scalar})
     }
@@ -349,7 +349,7 @@ pkg_ada_launder: fn(bytes: [U8]) -> String Never! {
     loop line in lines {
         trimmed: line.trim()
         if trimmed == "" -> next
-        return pkg_binder_take_chars(pkg_binder_after_last(trimmed, ": "), 160)
+        return pkg_binder_take_chars(pkg_binder_after_last(trimmed.copy(), ": "), 160)
     }
     BINDER_TOOL_FAILURE_DETAIL
 }

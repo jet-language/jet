@@ -275,7 +275,12 @@ sema_services_check_core_method: fn(api: String, contract: SemaServiceCoreMethod
     core_arguments := [TExpr]{receiver_value}
     loop (at, value) in values {
         written.push(if typed[at] -> AccessConvention.Read else -> accesses[at])
-        core_arguments.push(if typed[at] && accesses[at] != AccessConvention.Read -> sema_tree_node(value.ty, TExprKind.Clone{value: value.copy(), fact: CopyFact.Materialize}, value.span) else -> value)
+        if typed[at] && accesses[at] != AccessConvention.Read {
+            fact: sema_copy_hidden_fact_of(value.ty, CopyFact.Materialize, environment, program, context.generic_params)
+            core_arguments.push(sema_tree_node(value.ty, TExprKind.Clone{value: value.copy(), fact: fact}, value.span))
+            next
+        }
+        core_arguments.push(value)
     }
     params := sema_services_method_params(contract.parameters, written)
     sema_call_note_route_implicit_takes(params, updated_args, values, environment, program, scopes, state, context)

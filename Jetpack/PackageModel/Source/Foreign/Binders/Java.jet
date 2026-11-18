@@ -202,7 +202,7 @@ pkg_java_parse_javap: fn(class: String, text: String) -> JavaSurface ForeignBind
         loop stripped.starts_with("descriptor:") -> stripped = stripped.removeprefix("descriptor:")
         descriptor: stripped.trim()
         if sig.contains(" {class}(") || sig.starts_with("public {class}(") {
-            types: pkg_java_descriptor_types(descriptor)
+            types: pkg_java_descriptor_types(descriptor.copy())
             if types.result != JavaScalar.Void {
                 return Err(ForeignBindError.Source("JVM constructor descriptor must return void"))
             }
@@ -222,7 +222,7 @@ pkg_java_parse_javap: fn(class: String, text: String) -> JavaSurface ForeignBind
             return Err(ForeignBindError.Source("overloaded Java method `{name}` needs an explicit overlay"))
         }
         names.push(name.copy())
-        types: pkg_java_descriptor_types(descriptor)
+        types: pkg_java_descriptor_types(descriptor.copy())
         if types.result == JavaScalar.Void {
             return Err(ForeignBindError.Source("void Java method `{name}` needs a typed overlay"))
         }

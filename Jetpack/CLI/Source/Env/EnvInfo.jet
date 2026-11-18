@@ -386,7 +386,7 @@ cli_env_info_json: fn(plan: RunPlan, preset: String, selected_presets: [String],
     loop service in plan.dev_services -> services.push(cli_env_info_service_json(service))
     variables := [Dyn]{}
     loop name in variable_names {
-        variables.push(Dyn.Object(["name": Dyn.Text(name), "sources": cli_json_texts(variable_sources.get(name) ?? [String]{})]))
+        variables.push(Dyn.Object(["name": Dyn.Text(name.copy()), "sources": cli_json_texts(variable_sources.get(name) ?? [String]{})]))
     }
     managed := [String]{}
     loop file in facts.files -> managed.push(file.destination)

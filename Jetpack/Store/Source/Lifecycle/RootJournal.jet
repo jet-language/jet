@@ -379,7 +379,7 @@ store_lifecycle_snapshot_from_state: fn(roots: [String:LifecycleRoot], closure_h
     canonical: store_lifecycle_canonical_state(roots)
     revision: LifecycleRevision{value: "sha256-{pkg_sha256_hex(canonical.bytes())}"}
     composite: "jet-store-revision-v1\nclosure\t{closure_head}\nlifecycle\t{revision.as_str()}\n"
-    store_revision: StoreRevision{closure_head: closure_head, digest: "sha256-{pkg_sha256_hex(composite.bytes())}"}
+    store_revision: StoreRevision{lifecycle: revision, closure_head: closure_head, digest: "sha256-{pkg_sha256_hex(composite.bytes())}"}
     Ok(LifecycleSnapshot{roots: roots, protected_targets: protected_targets, revision: revision, store_revision: store_revision})
 }
 

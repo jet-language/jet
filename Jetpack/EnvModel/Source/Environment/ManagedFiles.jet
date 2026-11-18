@@ -121,7 +121,7 @@ envmodel_files_from_value: fn(value: CtValue) -> [ManagedFile] ManagedFileError!
         .Struct(_, fields) -> {
             unique: envmodel_checked_unique_fields(fields, "files")
             loop name in envmodel_sorted_keys(unique) {
-                entries.push(ManagedFileEntry{destination: name, value: unique[name]})
+                entries.push(ManagedFileEntry{destination: name.copy(), value: unique[name]})
             }
         }
         .List(values) -> {

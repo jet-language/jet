@@ -26,7 +26,7 @@ kit_cases_retired: fn(root: String) -> [String] {
     loop raw in source.split("\n") {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
-        fields: line.split("\t").to_list()
+        fields: line.copy().split("\t").to_list()
         assert(fields.len() == 2 && fields[1] != "", "retired case rows need an exact ID and reason")
         if fields[0].starts_with("Tests/Cases/") && fields[1].starts_with("Retired with Rust:") {
             retired.push(fields[0])
@@ -131,7 +131,7 @@ kit_known_load: fn(path: String) -> [String:String] {
     loop raw in ledger.split("\n") {
         line: raw.trim()
         if line == "" || line.starts_with("#") -> next
-        fields: line.split("\t").to_list()
+        fields: line.copy().split("\t").to_list()
         if fields.len() != 3 || (known.get(fields[0]) ?? "") != "" -> next
         known[fields[0]] = "{fields[1]} {fields[2]}"
     }

@@ -346,7 +346,7 @@ pkg_dotnet_launder: fn(stdout: [U8], stderr: [U8]) -> String Never! {
     loop raw in lines {
         line: raw.trim()
         if !line.contains(": error CS") -> next
-        compiler: line.split_once(": error CS") ?? break
+        compiler: line.copy().split_once(": error CS") ?? break
         detail_parts: compiler.after.split_once(": ") ?? break
         detail := detail_parts.after
         project_at: pkg_binder_rfind(detail, " [")
@@ -358,7 +358,7 @@ pkg_dotnet_launder: fn(stdout: [U8], stderr: [U8]) -> String Never! {
         if line == "" || line.starts_with("Determining projects") || line.starts_with("Restore") || line.starts_with("Build FAILED") || line.starts_with("The build failed") {
             next
         }
-        return pkg_binder_take_chars(pkg_binder_after_last(line, ": "), 160)
+        return pkg_binder_take_chars(pkg_binder_after_last(line.copy(), ": "), 160)
     }
     "the managed tool returned a failure status"
 }

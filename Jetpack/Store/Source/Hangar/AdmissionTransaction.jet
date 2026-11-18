@@ -106,7 +106,7 @@ AdmissionTransaction: struct {
             if files.create_dir_all(candidate) == {
                 .Ok(_) -> return Ok(AdmissionTransaction{verification: verification.copy(), roots: roots, stage: candidate, objects: [AdmissionObject]{}, published: [PublishedObject]{}, receipts: [String]{}, committed: false})
                 .Err(error) -> {
-                    if !StoreError.IO(error).is_already_exists() -> return Err(StoreError.IO(error))
+                    if !StoreError.IO(error.copy()).is_already_exists() -> return Err(StoreError.IO(error))
                 }
             }
         }
@@ -185,7 +185,7 @@ AdmissionTransaction: struct {
         loop index in 0..<entries.len() {
             entry := entries[index]
             wrote: store_prepare_entry_receipt_with_status(self.roots, entry)
-            entries[index] = entry
+            entries[index] = entry.copy()
             if wrote -> self.receipts.push(files.join(receipts_dir, entry.receipt))
         }
         store_injected_failure(AdmissionFailurePoint.AfterReceiptPublication)

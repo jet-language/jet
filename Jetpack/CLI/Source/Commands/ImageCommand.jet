@@ -193,7 +193,7 @@ cli_cmd_image: fn(verification: &StoreVerification, theme: Theme, parsed: CLIPar
         if image.from_environment && cli_image_layer_path_conflicts(layer_files, "jet/supervise") {
             conflicting_path := "jet/supervise"
             loop file in layer_files {
-                if cli_image_layer_path_conflicts([LayerFile]{file}, "jet/supervise") {
+                if cli_image_layer_path_conflicts([LayerFile]{file.copy()}, "jet/supervise") {
                     conflicting_path = file.path
                     break
                 }

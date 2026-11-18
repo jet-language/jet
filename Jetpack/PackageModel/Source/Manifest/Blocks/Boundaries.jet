@@ -55,7 +55,7 @@ pkg_parse_boundaries: fn(body: String) -> [ImportBoundary] PackageParseError! {
     loop piece in pkg_top_level_commas(list) {
         entry: piece.trim()
         if entry == "" -> next
-        record: pkg_strip_wrapped(entry, "{{", "}}") ?? return Err(PackageParseError.Composition("each `boundaries.deny` entry must be an edge record"))
+        record: pkg_strip_wrapped(entry.copy(), "{{", "}}") ?? return Err(PackageParseError.Composition("each `boundaries.deny` entry must be an edge record"))
         from := String?{None}
         to := String?{None}
         loop field in pkg_key_value_entries(record) {

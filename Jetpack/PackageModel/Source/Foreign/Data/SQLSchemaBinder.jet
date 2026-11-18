@@ -65,7 +65,7 @@ pkg_data_strip_sql_comments: fn(input: String) -> String DataBindError! {
         }
         if {
             pkg_data_sql_is_quote(ch) -> {
-                quote = ch
+                quote = ch.copy()
                 out.push(ch.copy())
                 index += 1
             }
@@ -120,7 +120,7 @@ pkg_data_split_sql_statements: fn(input: String) -> [String] DataBindError! {
             next
         }
         if pkg_data_sql_is_quote(ch) {
-            quote = ch
+            quote = ch.copy()
             current.push(ch.copy())
         } else {
             if ch == {
@@ -853,7 +853,7 @@ pkg_data_parse_sql_table: fn(statement: String) -> SQLTable DataBindError! {
     }
     out := [FieldSeed]{}
     loop field in fields {
-        seeded := field
+        seeded := field.copy()
         if required_columns.contains(pkg_ascii_lower(field.wire_name)) -> seeded.optional = false
         out.push(seeded)
     }
