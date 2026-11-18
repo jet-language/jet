@@ -312,7 +312,7 @@ the text before it.
 | `JET_NATIVE_TEST_REPORT_PATH` | `Compiler/JetCLI/Source/CLI/NativeTests.jet` | The outcome file a native test program reports, instead of running its tests. |
 | `JET_OBSERVE` | `Compiler/JetCLI/Source/CLI/Host.jet` | Marks a program that an observed run started. |
 | `JET_ORG_UNSAFE_POLICY` | `Compiler/JetFoundation/Data/Syntax/CoreSurface.jet` | CI and admin input naming an organization's unsafe-policy file; a configured file that cannot be read fails closed. |
-| `JET_PERF_SAMPLES` | `Compiler/JetRuntime/Source/PerfSamples.jet` | The file `jet perf run` has its program append its CPU-time samples to (`Compiler/JetRuntime/Source/PerfSamples.jet`), each the program counter the sample interrupted; jet writes the program's image beside it, as `<path>.image`, to name each one's function and line. |
+| `JET_PERF_SAMPLES` | `Compiler/JetRuntime/Source/PerfSamples.jet` | The file `jet perf run` has its program append its CPU-time samples to (`Compiler/JetRuntime/Source/PerfSamples.jet`), each the program counter the sample interrupted; jet writes the program's image beside it, as `<path>.image`, to name each one's function and line. The program also appends a row to `<path>.spans` for each core.log span it closes, which becomes a `log_span` row of the trace. |
 | `JET_PROFILE` | `Jetpack/Recipe/Source/Build/Fetch.jet` | Set to `default` for a recipe build. |
 | `JET_PROJECT_ROOT` | `Compiler/JetCLI/Source/CLI/Host.jet` | The project root `jet test` hands its test child. |
 | `JET_PROVE_CAPTURE_JOURNAL` | `Compiler/JetCLI/Source/CLI/ProveReplay.jet` | The journal a program `jet prove` captures appends each raw read to. |

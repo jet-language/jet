@@ -1,0 +1,69 @@
+// Spans close when the block that holds them ends: `frame` on an early
+// return, `query` on a failure that propagates, `inner` at an explicit close
+// and `request` at the end of its function. `kept` lives in module state
+// past the end of run, so the process's exit reports it. The program prints
+// each record of its sink file with the spans it carries.
+use {
+    files: core.files
+    log: core.log
+}
+
+Holder: struct {
+    span: LogSpan?,
+}
+
+KEPT: Shared{Holder{span: None}}
+
+#Error
+QueryError: enum {
+    NoSuchTable,
+}
+
+early: fn(stop: Bool) -[Log]> {
+    frame: log.span("frame")
+    log.info("in {frame.name()}")
+    if stop {
+        return
+    }
+    log.info("not reached")
+}
+
+failing: fn() -[Log]> Int QueryError! {
+    query: log.span("query")
+    log.info("in {query.name()}")
+    Err(QueryError.NoSuchTable)
+}
+
+// The body and the active spans of one JSON line of the sink.
+shown: fn(line: String) -> String Never! {
+    body: line.split("\"body\":\"").to_list()[1].split("\"").to_list()[0]
+    if !line.contains("\"spans\":[") -> return body
+    "{body} in {line.split("\"spans\":[").to_list()[1].split("]").to_list()[0]}"
+}
+
+handled: fn() -[Log]> {
+    request: log.span("request")
+    early(true)
+    got: failing() ?? 0
+    log.info("after early and failing {got} in {request.name()}")
+    inner: log.span("inner")
+    log.info("in inner")
+    log.close(inner)
+    log.info("after close")
+}
+
+run: fn() {
+    // The sink appends, and the case's steps share one directory: each run
+    // starts the file empty, so it holds only this run's records.
+    files.write("events.jsonl", "") ?? panic("the sink file cannot be emptied")
+    log.otlp_file("events.jsonl")
+    handled()
+    log.info("after the request")
+    KEPT.span = Val(log.span("kept"))
+    log.info("kept open")
+    log.flush()
+    text: files.read("events.jsonl") ?? panic("the sink file is missing")
+    loop line in text.split("\n") {
+        if line.len() > 0 -> print(shown(line))
+    }
+}

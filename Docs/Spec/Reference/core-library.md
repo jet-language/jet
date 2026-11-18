@@ -4931,8 +4931,8 @@ package source is [`Core/Log/Log.jet`](../../../Core/Log/Log.jet).
 | `float(key: String, value: Float) -> LogField` | field | Create a floating-point field. |
 | `bool(key: String, value: Bool) -> LogField` | field | Create a Boolean field. |
 | `redact(key: String) -> LogField` | field | Mark a key as redacted. |
-| `span(name: String) -[Log]> LogSpan` | span | Open a named span. |
-| `enter(span: LogSpan) -[Log]>` / `close(span: LogSpan) -[Log]>` | — | Enter or close a span. |
+| `span(name: String) -[Log]> LogSpan` | span | Open a named span and enter it; the calling thread's records carry it until it closes. |
+| `close(span: &&LogSpan) -[Log]>` | — | Close a span before its block ends; it takes the span. |
 | `set_sink(kind: String, path: String) -[Log]>` | — | Select the output. |
 | `set_level(level: LogLevel, path: String{""}) -[Log]>` | — | Set the code's level for the module at `path` and every module under it; `""` is every module. |
 | `sample_every(n: Int) -[Log]>` | — | Sample every positive number of records. |
@@ -4946,6 +4946,15 @@ package source is [`Core/Log/Log.jet`](../../../Core/Log/Log.jet).
 
 The emitting functions, `handle`, `set_level` and `enabled` also take a
 trailing `at: SourceLocation{#caller}`; callers leave it to the compiler.
+
+**Spans.** A span closes when the block that holds it ends, on every way out
+of the block: a normal end, an early return, a failure that propagates and a
+stop. `close` ends it sooner and takes it, so a second close is a use after
+move. A span still open when its thread ends, or when the process exits on
+its thread, is reported as one `warn` record that names it (Log span
+\`name\` was never closed), never dropped in silence. Under `jet perf run`
+each closed span is a `log_span` row of the `.jettrace` `spans`, named by the
+span and timed on the trace's monotonic clock.
 
 **Level filter.** A filter is comma-separated pairs: a bare `level` covers
 every module, and `module=level` covers that dotted module path and every

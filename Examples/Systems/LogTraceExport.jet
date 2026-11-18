@@ -39,11 +39,9 @@ run: fn() {
 
     emitted := 0
     request: log.span("request")
-    log.enter(request)
     log.info_fields("received", [log.field("route", "/login"), log.redact("password")])
     emitted += 1
     query: log.span("db.query")
-    log.enter(query)
     log.info_fields("queried", [log.int("rows", 3), log.bool("cached", false)])
     emitted += 1
     log.close(query)

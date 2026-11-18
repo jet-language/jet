@@ -8,7 +8,9 @@
 // link-time address in the image `jet run` writes beside the file, where the
 // image's location table names its function and line, as Linux perf names
 // the same image's samples. The handler allocates nothing and takes no lock:
-// it is one write of a stack word.
+// it is one write of a stack word. Beside the samples, `<samples>.spans`
+// keeps a row for each core.log span the program closes (RouteALog.jet
+// log_span_row_write).
 
 // O_WRONLY|O_CREAT|O_APPEND|O_CLOEXEC.
 PERF_SAMPLES_OPEN: I64{525377}
@@ -24,6 +26,9 @@ perf_samples_fd := I64{-1}
 
 perf_samples_bias := I64{0}
 
+// The log spans file, `<samples>.spans`, -1 unless the start opened it.
+perf_spans_fd := I64{-1}
+
 // Start sampling when JET_PERF_SAMPLES names a file; once per process.
 perf_samples_start: fn() {
     if (perf_samples_fd >= I64{0}) {
@@ -38,6 +43,7 @@ perf_samples_start: fn() {
         name: fd_c_path(path)
         fd = host_call(I64{2}, name, PERF_SAMPLES_OPEN, I64{384})
         fd_c_path_drop(name, path)
+        if (fd >= I64{0}) { perf_spans_open(path) }
     }
     jet_rt_string_drop(path)
     if (fd < I64{0}) {
@@ -67,6 +73,25 @@ perf_samples_start: fn() {
             perf_samples_fd = I64{-1}
         }
         _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    }
+}
+
+// Open `<samples>.spans` for the closed log spans' rows; a file that cannot
+// be opened leaves the spans without rows, as before.
+perf_spans_open: fn(samples: I64) {
+    builder: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(builder, samples)
+    jet_rt_string_builder_push(builder, rt_static_text(".spans"))
+    path: jet_rt_string_builder_finish(builder)
+    name: fd_c_path(path)
+    fd: host_call(I64{2}, name, PERF_SAMPLES_OPEN, I64{384})
+    fd_c_path_drop(name, path)
+    jet_rt_string_drop(path)
+    if (fd < I64{0}) {
+        return
+    }
+    #Unsafe("the observation start runs before the entry, whose span closes read it") {
+        perf_spans_fd = fd
     }
 }
 

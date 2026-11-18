@@ -146,11 +146,14 @@ main_exit_tasks_install: fn(code: I64) {
     }
 }
 
-// Every exit's steps: the exit callbacks, then the observe writer's exit
-// publication.
+// Every exit's steps: the exit callbacks, the log's exit step (RouteALog.jet
+// jet_rt_log_start with 1: a span still open on this thread is reported),
+// then the observe writer's exit publication.
 main_exit_cleanup: fn() {
     handlers: main_exit_handlers_code
     if (handlers != I64{0}) { _ := coll_call1(handlers, I64{0}) }
+    log: log_start_code
+    if (log != I64{0}) { _ := coll_call1(log, I64{1}) }
     observe: main_observe_exit_code
     if (observe != I64{0}) { _ := coll_call1(observe, I64{0}) }
 }

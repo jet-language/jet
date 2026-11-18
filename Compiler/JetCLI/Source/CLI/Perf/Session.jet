@@ -188,6 +188,11 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
         }
     }
     capture.policy.allowlist = parsed.allowlist.move()
+    // The core.log spans the program closed, which its runtime keeps beside
+    // the samples, on the clock of `started`.
+    if samples == .Val(file) && parsed.source == .Val(source) {
+        jet_cli_perf_log_spans_read(capture, "{file}.spans", source, started.start_ns)
+    }
     full := [String]{action}
     loop arg in args {
         // copy: the perf argv keeps its words; the trace's recorded argv owns its own.
