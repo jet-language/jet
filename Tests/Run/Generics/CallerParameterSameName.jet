@@ -1,18 +1,18 @@
 // A generic function may call another generic function whose type parameter
-// has the same name. Inside `pick<T>`, the call `keep(x)` binds `keep`'s own
+// has the same name. Inside `pick<T>`, the call `hold(x)` binds `hold`'s own
 // `T` to the caller's `T?`; the shared spelling is not a cycle. A generic
 // call in tail position returns its inferred optional result as it is.
 
-keep: fn<T>(value: T) -> T { value }
+hold: fn<T>(value: T) -> T { value }
 
-pick: fn<T>(x: T?) -> T? { keep(x) }
+pick: fn<T>(x: T?) -> T? { hold(x) }
 
 pick_inner: fn<T>(x: T?) -> T? {
-    inner: keep(x?)
+    inner: hold(x?)
     Val(inner)
 }
 
-concrete: fn(x: Int?) -> Int? { return keep(x) }
+concrete: fn(x: Int?) -> Int? { return hold(x) }
 
 run: fn() {
     print(pick(Int?{Val(4)}) ?? 0)

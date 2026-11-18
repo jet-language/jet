@@ -7882,21 +7882,28 @@ AutoDerive: struct {
 }
 
 PreludeAliasShadow: struct {
+    name: String,
+
     impl Diagnostic {
         code: "L0510",
-        meaning: "A declaration that replaces a Core prelude alias",
+        meaning: "A declaration that silently replaces a Core prelude alias",
         severity: .Lint,
+        tier: .Tidy,
         lint_name: "prelude_alias_shadow",
         detail: true,
         no_fix: .Behavior,
 
-        what: fn(self) -> String { "Declaration replaces a readable Core prelude alias" }
-
-        why: fn(self) -> String {
-            "User declarations win over the compiler-opened alias, but the replacement is worth seeing"
+        what: fn(self) -> String {
+            "Declaration `{self.name}` replaces the Core prelude alias `{self.name}`."
         }
 
-        fix: fn(self) -> String { "Keep the declaration, or rename it to use the prelude alias" }
+        why: fn(self) -> String {
+            "The readable Core prelude opens `{self.name}` in every file, and this declaration silently wins over it in its file, so a call that reads like the prelude's runs this one."
+        }
+
+        fix: fn(self) -> String {
+            "Rename `{self.name}` and its calls to a name the prelude does not open."
+        }
     }
 }
 

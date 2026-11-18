@@ -3,7 +3,7 @@
 // as a parameter, a return and a list element.
 describe: fn(err: ParseError) -> String { "rejected: {err.message}" }
 
-keep: fn(err: &&ParseError) -> ParseError { err }
+hold: fn(err: &&ParseError) -> ParseError { err }
 
 run: fn() {
     whole: Int.parse("x") ?? {
@@ -11,7 +11,7 @@ run: fn() {
         0
     }
     real: Float.parse("1.5.2") ?? {
-        print(describe(keep(err)))
+        print(describe(hold(err)))
         0.0
     }
     seen := [ParseError]{}

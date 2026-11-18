@@ -850,7 +850,7 @@ first_line: fn(argv: [String], cwd: String) -> String {
 
 // A compile's trace, out and err stay; its copy, store and cache go. Its
 // rows go to --out.
-keep: fn(options: Options, run: Run, commit: String, jet: String, load: String) {
+keep_run: fn(options: Options, run: Run, commit: String, jet: String, load: String) {
     loop dir in ([String]{"project", "store", "cache"}) {
         files.remove_all(files.join(slot_dir(options, run.compiler, run.mode, run.repeat), dir)) ?? ()
     }
@@ -873,7 +873,7 @@ run_modes: fn(options: Options, jet: String, identity: String) -> Int {
         loop repeat in 1..<(options.runs + 1) {
             load: (files.read("/proc/loadavg") ?? "-").partition(" ").head
             run: measure(options, inputs, lines, jet, identity, "", mode, repeat)
-            keep(options, run, commit, jet, load)
+            keep_run(options, run, commit, jet, load)
             runs.push(run)
         }
     }
@@ -1110,7 +1110,7 @@ run_gate: fn(options: Options, jet: String, identity: String) -> Int {
                 compiler_identity: if compiler == "seed" -> seed_identity else -> identity
                 load: (files.read("/proc/loadavg") ?? "-").partition(" ").head
                 run: measure(options, inputs, lines, compiler_jet, compiler_identity, compiler, mode, repeat)
-                keep(options, run, commit, compiler_jet, load)
+                keep_run(options, run, commit, compiler_jet, load)
                 runs.push(run)
             }
         }
@@ -1392,7 +1392,7 @@ batch_ab: fn(options: Options) -> String {
                 compiler_identity: if compiler == "previous" -> previous_identity else -> current_identity
                 load: (files.read("/proc/loadavg") ?? "-").partition(" ").head
                 run: measure(ab, inputs, lines, compiler_jet, compiler_identity, compiler, mode, repeat)
-                keep(ab, run, "-", compiler_jet, load)
+                keep_run(ab, run, "-", compiler_jet, load)
                 runs.push(run)
             }
         }

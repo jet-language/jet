@@ -4,14 +4,14 @@
 // That holds at the smallest and largest one-word Ints, just past them, and
 // for the smallest one-word Int divided by -1, whose quotient no longer fits
 // in a word. A zero divisor stops the program.
-keep: fn(n: Int) -> Int { n }
+opaque: fn(n: Int) -> Int { n }
 
 show: fn(a: Int, b: Int) { print("{a} {b}: {a /% b} {a % b} {a %% b}") }
 
 run: fn() {
-    low: keep(-4611686018427387904)
-    high: keep(4611686018427387903)
-    values: [Int]{0, 1, -1, 7, -7, 1000003, -1000003, high, low, high + 1, low - 1, keep(9223372036854775807), keep(-9223372036854775808)}
+    low: opaque(-4611686018427387904)
+    high: opaque(4611686018427387903)
+    values: [Int]{0, 1, -1, 7, -7, 1000003, -1000003, high, low, high + 1, low - 1, opaque(9223372036854775807), opaque(-9223372036854775808)}
     divisors: [Int]{1, -1, 2, -2, 3, -3, 7, -7, 8, -8, 1000003, high, low, high + 1, low - 1}
     loop a in values {
         loop b in divisors -> show(a, b)
@@ -28,6 +28,6 @@ run: fn() {
     s := 0
     loop i in 1..<100001 -> s = (s + i * 7) % 1000003
     print(s)
-    print(keep(5) % keep(0))
+    print(opaque(5) % opaque(0))
     print("unreachable")
 }

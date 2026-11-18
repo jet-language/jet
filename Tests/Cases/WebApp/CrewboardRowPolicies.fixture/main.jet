@@ -165,7 +165,7 @@ Stores: struct {
 
 STORE: Shared{Stores{store: None}}
 
-keep: fn(store: db.Store) {
+remember: fn(store: db.Store) {
     stores := STORE.guard_edit()
     stores.value.store = Val(store.copy())
 }
@@ -311,7 +311,7 @@ join_launch: fn(account: auth.AccountID, task: Int, title: String) -> String {
 step: fn(label: String, outcome: String) { print("{label}: {outcome}") }
 
 run: fn() {
-    keep(db.open_memory())
+    remember(db.open_memory())
 
     step("mia creates launch", app.as_caller(mia(), fn() { create_project(1, "launch") }))
     step("mia adds ben as a Member", app.as_caller(mia(), fn() { member_wrote(tables().members.add(Member{project: 1, account: ben(), owner: false})) }))

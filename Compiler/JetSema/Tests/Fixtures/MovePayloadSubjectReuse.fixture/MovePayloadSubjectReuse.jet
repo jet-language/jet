@@ -5,11 +5,11 @@ Slot: enum {
     Empty,
 }
 
-keep: fn(items: &&[Int]) -> Int { items.len() }
+hold: fn(items: &&[Int]) -> Int { items.len() }
 
 reuse: fn(slot: &&Slot) -> Int {
     total := 0
-    if slot == .Full(items) -> total = keep(items.move())
+    if slot == .Full(items) -> total = hold(items.move())
     if slot == .Full(again) -> total += again.len()
     total
 }

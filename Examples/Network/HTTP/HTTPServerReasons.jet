@@ -29,7 +29,7 @@ status_of: fn(path: String) -> Int Never! {
 
 // The raw response to one request line, so the status line shows exactly as
 // sent.
-fetch: fn(addr: String, request_line: String) -> String {
+send: fn(addr: String, request_line: String) -> String {
     wire: net.tcp_connect(addr) ?? panic("connect failed")
     request := "".bytes()
     loop line in [request_line, "Host: local", "Connection: close", ""] {
@@ -59,12 +59,12 @@ run: fn() (HTTPError | NetError | TaskFailure)! {
         loop _ in 0..<C_PATHS.len() + 1 { app.serve_once(listener) ?? panic("serve failed") }
     }
     loop path in C_PATHS {
-        raw: fetch(addr, "GET {path} HTTP/1.1")
+        raw: send(addr, "GET {path} HTTP/1.1")
         line: raw.split("\r\n").to_list()[0]
         print("{path}: [{line}]")
         if path == "/missing" -> print("{path} body: {raw.split("\r\n\r\n").to_list()[1]}")
     }
-    refused: fetch(addr, "GET /busy HTTP/2.0")
+    refused: send(addr, "GET /busy HTTP/2.0")
     print("HTTP/2.0: [{refused.split("\r\n").to_list()[0]}]")
     print("table 503: {http.reason_phrase(503)}")
     print("table 299: [{http.reason_phrase(299)}]")

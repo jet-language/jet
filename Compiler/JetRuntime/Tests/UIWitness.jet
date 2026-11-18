@@ -177,7 +177,7 @@ run_binary: fn(binary: String, args: [String], timeout: Duration) -[Exec, FS, IO
     }
 }
 
-write_file: fn(path: String, bytes: [U8]) -[FS, IO]> Bool Never! {
+save_bytes: fn(path: String, bytes: [U8]) -[FS, IO]> Bool Never! {
     if files.write_bytes(path, bytes) == {
         .Ok(_) -> true
         .Err(error) -> {
@@ -291,7 +291,7 @@ ui_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         if crypto.sha256(goldens.copy()).hex() != ORACLE_SHA256 {
             return fail("char Debug goldens differ from the frozen bytes")
         }
-        if !write_file(oracle, goldens) -> return 1
+        if !save_bytes(oracle, goldens) -> return 1
     }
     loop item in spec.cases {
         run_args := item.args.copy()
@@ -300,9 +300,9 @@ ui_witness: fn(args: [String]) -[Exec, Env, FS, IO, Time.Wait]> Int Never! {
         status: if outcome.exited -> "{outcome.status}" else -> "null"
         signal: if outcome.signal == "" -> "null" else -> json_text(outcome.signal)
         error: if outcome.error == "" -> "null" else -> json_text(outcome.error)
-        if !write_file("{out}/{item.name}.stdout", outcome.stdout) -> return 1
-        if !write_file("{out}/{item.name}.stderr", outcome.stderr) -> return 1
-        if !write_file("{out}/{item.name}.status.json", "{{\"status\":{status},\"signal\":{signal},\"error\":{error}}}\n".bytes()) {
+        if !save_bytes("{out}/{item.name}.stdout", outcome.stdout) -> return 1
+        if !save_bytes("{out}/{item.name}.stderr", outcome.stderr) -> return 1
+        if !save_bytes("{out}/{item.name}.status.json", "{{\"status\":{status},\"signal\":{signal},\"error\":{error}}}\n".bytes()) {
             return 1
         }
         if outcome.error != "" || outcome.signal != "" || !outcome.exited || outcome.status != item.status {

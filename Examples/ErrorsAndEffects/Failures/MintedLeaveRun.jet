@@ -17,8 +17,8 @@ StoreError: enum {
 
 open_store: fn(name: String) -> Int StoreError! { Err(StoreError.Locked(name)) }
 
-// `find` writes no contract, so its cases mint `FindError`.
-find: fn(key: String) -> Int {
+// `find_key` writes no contract, so its cases mint `FindKeyError`.
+find_key: fn(key: String) -> Int {
     if key == "" -> return Err(.Empty)
     if key == "gone" -> return Err(.NotFound(key))
     key.len()
@@ -30,7 +30,7 @@ lookup: fn(store: String, key: String) -> Int Err! {
         opened: open_store(store)
         return opened
     }
-    find(key)
+    find_key(key)
 }
 
 report: fn(store: String, key: String) {
@@ -46,6 +46,6 @@ run: fn() {
     report("", "")
     report("", "gone")
     // Unhandled here, the minted failure leaves `run` itself.
-    value: find("gone")
+    value: find_key("gone")
     print(value)
 }

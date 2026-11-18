@@ -12,7 +12,7 @@ FileReader: struct {
     stream: Stream,
 }
 
-keep: fn(r: FileReader) -> Int { r.stream.fd }
+hold: fn(r: FileReader) -> Int { r.stream.fd }
 
 run: fn() {
     a: Stream{fd: 1}
@@ -20,5 +20,5 @@ run: fn() {
     print("moved {b.fd}")
     r: FileReader{stream: Stream{fd: 2}}
     s: r
-    print("kept {keep(s)}")
+    print("kept {hold(s)}")
 }

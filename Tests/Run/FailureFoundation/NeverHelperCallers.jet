@@ -37,7 +37,7 @@ load: fn(text: String) -> Int AppErr! {
 }
 
 // An Option-return caller uses the helper's value directly.
-find: fn(items: [String], wanted: String) -> String? {
+find_label: fn(items: [String], wanted: String) -> String? {
     loop item in items {
         if item == wanted -> return Val(label(item))
     }
@@ -55,8 +55,8 @@ run: fn() {
         .Ok(value) -> { print(value) }
         .Err(_error) -> { print("error") }
     }
-    print(find(["a", "b"], "b") ?? "none")
-    print(find(["a"], "z") ?? "none")
+    print(find_label(["a", "b"], "b") ?? "none")
+    print(find_label(["a"], "z") ?? "none")
     print(explicit(5))
     print(label("x"))
 }

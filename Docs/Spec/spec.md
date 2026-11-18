@@ -537,8 +537,9 @@ are unchanged.
 The readable prelude is a closed set. A candidate must satisfy its seven
 membership tests: measured frequency; total and safe behavior; names that never
 carry semantics; no better home; first-hour coverage; one fixed set for every
-file; and collision-conscious naming. A user declaration that replaces an alias
-earns L0510; adding a name uses the edition migration lint L2001. Prelude entries
+file; and collision-conscious naming. A top-level user function that replaces
+an alias still wins in its file, and is the tidy error L0510 (rename it and its
+calls); adding a name uses the edition migration lint L2001. Prelude entries
 may be total or return a `Result`, but may not add an implicit conversion
 (D-CORE-PRELUDE1=A).
 

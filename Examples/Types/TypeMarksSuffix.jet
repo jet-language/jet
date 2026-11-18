@@ -30,7 +30,7 @@ Note: struct {
     author: String?{None},
 }
 
-find: fn(id: Int) -> Entry? {
+find_entry: fn(id: Int) -> Entry? {
     if id > 0 -> return Val(Entry{id: id})
     return None
 }
@@ -42,10 +42,10 @@ recent: fn(n: Int) -> [Int]? {
 }
 
 // An optional success with a union error contract; the union is grouped.
-fetch: fn(id: Int) -> Entry? (DBError | TimeoutError)! {
+load_entry: fn(id: Int) -> Entry? (DBError | TimeoutError)! {
     if id < 0 -> return Err(DBError.Down)
     if id > 100 -> return Err(TimeoutError.Late)
-    return find(id)
+    return find_entry(id)
 }
 
 // A unit-fallible contract follows the parameters.
@@ -95,16 +95,16 @@ run: fn() {
     author: note.author ?? "anon"
     print("{note.text} from {author}")
 
-    entry: fetch(3) ?? return
+    entry: load_entry(3) ?? return
     save(entry) ?? return
     big: Entry{id: 500}
     if save(big) == {
         .Err(_) -> { print("save full") }
         .Ok(_) -> {}
     }
-    fallback: fetch(-1) ?? Entry{id: 0}
+    fallback: load_entry(-1) ?? Entry{id: 0}
     print("fallback {fallback.id}")
-    absent: fetch(0) ?? Entry{id: -2}
+    absent: load_entry(0) ?? Entry{id: -2}
     print("absent {absent.id}")
 
     good: parse_count("12") ?? 0

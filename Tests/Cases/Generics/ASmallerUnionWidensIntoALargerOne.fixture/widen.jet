@@ -14,7 +14,7 @@ store: fn(cell: Bool | Int | String) -> String {
     }
 }
 
-keep: fn(cell: Int | String) -> String { store(cell) }
+hold: fn(cell: Int | String) -> String { store(cell) }
 
 small: fn(text: Bool) -> Int | String {
     if text -> return "jet"
@@ -30,8 +30,8 @@ lift: fn(cell: Int | String) -> Bool | Int | String { cell.copy() }
 run: fn() {
     word: small(true)
     number: small(false)
-    print(keep(number))
-    print(keep(word))
+    print(hold(number))
+    print(hold(word))
     print(store(lift(number)))
     print(store(taken(word)))
     box: Slot{value: number.copy()}
@@ -42,5 +42,5 @@ run: fn() {
     print(store(slot))
     row: [Bool | Int | String]{number.copy(), word.copy(), false}
     loop item in row -> print(store(item))
-    print(keep(word))
+    print(hold(word))
 }

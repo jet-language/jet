@@ -8,13 +8,13 @@ FetchError: enum {
     Slow,
 }
 
-fetch: fn(raw: String) -> Int FetchError! {
+fetch_count: fn(raw: String) -> Int FetchError! {
     if raw == "" -> return Err(.Missing("blank"))
     if raw == "s" -> return Err(.Slow)
     7
 }
 
-find: fn(raw: String) -> Int {
+find_age: fn(raw: String) -> Int {
     if raw == "" -> return Err(.Blank)
     if raw == "z" -> return Err(.NotFound(raw.copy()))
     36
@@ -22,12 +22,12 @@ find: fn(raw: String) -> Int {
 
 age_of: fn(raw: String) -> Int {
     if raw == "x" -> return Err("odd input")
-    find(raw) + 1
+    find_age(raw) + 1
 }
 
-via_fetch: fn(raw: String) -> Int Err! { fetch(raw) }
+via_fetch: fn(raw: String) -> Int Err! { fetch_count(raw) }
 
-via_find: fn(raw: String) -> Int Err! { find(raw) }
+via_find: fn(raw: String) -> Int Err! { find_age(raw) }
 
 via_age: fn(raw: String) -> Int Err! { age_of(raw) }
 

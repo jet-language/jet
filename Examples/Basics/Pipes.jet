@@ -19,7 +19,7 @@ scaled: fn(values: [Int], factor_text: String) -> [Int] {
         |> values.map(fn(v) { v * <> })
 }
 
-clamp: fn(n: Int, low: Int, high: Int) -> Int {
+bound: fn(n: Int, low: Int, high: Int) -> Int {
     if n < low -> low else if n > high -> high else -> n
 }
 
@@ -29,7 +29,7 @@ label: fn(name: String, size: Int) -> String { "{name}#{size}" }
 badge: fn(raw: [U8]) -> String {
     raw
         |> String.from_bytes(<>) ?? return "?"
-        |> label(<>.trim(), <>.len() |> clamp(<>, 0, 9))
+        |> label(<>.trim(), <>.len() |> bound(<>, 0, 9))
 }
 
 run: fn() {

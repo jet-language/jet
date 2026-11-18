@@ -79,7 +79,7 @@ add_note: fn(scope: db.DBScope, body: String) {
     _: scope.execute(SQL{"INSERT INTO notes (owner, body) VALUES ({owner}, {body})"}) ?? panic("insert note")
 }
 
-keep: fn(tasks: db.DBScope, notes: db.DBScope) {
+remember: fn(tasks: db.DBScope, notes: db.DBScope) {
     store := STORE.guard_edit()
     store.value.tasks = Val(tasks.copy())
     store.value.notes = Val(notes.copy())
@@ -94,7 +94,7 @@ run: fn() {
     _: db.migrate(tasks, "tasks-v1", [db.SQL]{SQL{"CREATE TABLE tasks (owner TEXT, board TEXT, title TEXT)"}}) ?? panic("migrate tasks")
     _: db.migrate(notes_scope, "notes-v1", [db.SQL]{SQL{"CREATE TABLE notes (owner TEXT, body TEXT)"}}) ?? panic("migrate notes")
     add_task(tasks, "jet", "one")
-    keep(tasks, notes_scope)
+    remember(tasks, notes_scope)
 
     // app.live returns a typed binding; reading it runs the query once.
     board: app.live(task_titles, "jet")

@@ -88,14 +88,14 @@ runs: fn() -> String {
     "task runs={boards.value.task_runs} note runs={boards.value.note_runs}"
 }
 
-keep: fn(store: db.Store) {
+remember: fn(store: db.Store) {
     boards := BOARDS.guard_edit()
     boards.value.store = Val(store.copy())
 }
 
 run: fn() {
     store: db.open_memory()
-    keep(store)
+    remember(store)
     tasks: tasks_of(store)
     notes: notes_of(store)
     _: tasks.add(Task{id: 1, board: "jet", title: "one"}) ?? panic("add one")
