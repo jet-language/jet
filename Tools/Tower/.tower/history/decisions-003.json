@@ -59584,6 +59584,162 @@
       "comment": "this should fit in cleanly with jetpack which is targeting being a nix replacement and improvement on nix",
       "ratifiedAt": "2026-11-01",
       "retiredAt": "2026-11-18T05:20:59.701Z"
+    },
+    {
+      "id": "D-CRYPTO-SALTROW1",
+      "cardId": "c0hs3czc",
+      "group": "stdlib",
+      "title": "The password-hash row that no program can call",
+      "gist": "What happens to `crypto.password_hash_with_salt`, a public core function that the compiler refuses on every call?",
+      "lesson": "A password hash needs a salt: random bytes mixed in so two equal passwords hash differently. Jet makes the salt for you in `crypto.password_hash`. A second function lets the caller pass the salt. The compiler rejects every call to it with E2702, because a caller-chosen salt can be fixed and predictable. The function is still listed as public, so the conformance census, which must run every public function, cannot cover it.",
+      "explainer": "",
+      "story": "Mara reads the core library page, sees `password_hash_with_salt`, and writes a test that stores a known salt so her fixture is stable. The compiler refuses the call. She reads E2702, switches to `crypto.password_hash`, and her fixture now changes on every run. The census that checks every public function on every run mode hits the same wall and cannot record a result for the row.",
+      "inWild": "// Rust, argon2 crate: the caller passes the salt; a fixed salt is allowed and is the caller's mistake.\nlet salt = SaltString::generate(&mut OsRng);\nlet hash = Argon2::default().hash_password(password, &salt)?;\n// Python: bcrypt.gensalt() is the documented way; bcrypt.hashpw(pw, salt) accepts any salt bytes.",
+      "detail": "",
+      "options": [
+        {
+          "key": "A",
+          "name": "Delete the row",
+          "detail": "The function leaves the public core surface. `crypto.password_hash` keeps making the salt. Fixed-salt tests use `expert.argon2id` inside `#Unsafe`, which already exists for that job. Gains: no public function that always fails; the census covers every row. Loss: none found.",
+          "technical": "Remove the `(core.crypto, password_hash_with_salt)` row from CORE_CALLS, module_items.rs, and fixed_sigs.rs. Remove its E2702 arm in core_call.rs, its ledger entry, and its core-library table row. Replace the crypto_release_entropy_seam UI fixture with one that shows the unknown-item path. The DeterministicEntropy reason class stays for the `expert.argon2id` literal checks.",
+          "code": "stored :: crypto.password_hash(password) ?? return\n// fixed-vector test, expert path, audited:\n#Unsafe(\"fixed salt for a known-answer test\") {\n    digest :: crypto.expert.argon2id(password, salt, 65536, 3, 4, 32)\n}"
+        },
+        {
+          "key": "B",
+          "name": "Keep the row, count it as an exclusion",
+          "detail": "The function stays public and always rejected. The census lists it as an owner-ratified excluded row. Gains: no source change. Losses: a documented function that cannot be called; every new reader hits the wall Mara hit; the exclusion list grows by one permanent entry.",
+          "technical": "Add `core.crypto\tpassword_hash_with_salt\talways-rejected (E2702)` to tests/conformance/exclusions.tsv with this decision id as the ratifying reference.",
+          "code": "_ :: crypto.password_hash_with_salt(\"password\", salt)\n// Error [E2702]: crypto API misuse\n// Why: `password_hash_with_salt` would use caller-controlled salt bytes ...\n// (stays this way forever; census row: excluded)"
+        },
+        {
+          "key": "C",
+          "name": "Make the row callable inside #Unsafe",
+          "detail": "The function stays public. A call outside `#Unsafe` is still E2702; inside an audited `#Unsafe` block it runs with the caller's salt. Gains: one name for the expert case. Losses: two ways to do the same expert job (`expert.argon2id` already exists); the safe-looking name becomes an expert door.",
+          "technical": "The E2702 arm in core_call.rs reads the enclosing `#Unsafe` fact and returns None inside it. A Prelude symbol `jet_crypto_password_hash_with_salt` is added. The census gains a witness that wraps the call in `#Unsafe`.",
+          "code": "#Unsafe(\"fixed salt for a known-answer test\") {\n    stored :: crypto.password_hash_with_salt(password, salt) ?? return\n}"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust (argon2 crate)",
+          "note": "The caller always supplies the salt; the crate documents `SaltString::generate` as the right source. There is no compile-time refusal.",
+          "code": "let salt = SaltString::generate(&mut OsRng);\nlet hash = Argon2::default().hash_password(password.as_bytes(), &salt)?;"
+        },
+        {
+          "lang": "Python (bcrypt)",
+          "note": "`hashpw` accepts any salt bytes; `gensalt()` is the documented source. Misuse is a runtime fact, not a compile error.",
+          "code": "hashed = bcrypt.hashpw(password, bcrypt.gensalt())"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "Jet is greenfield and the expert path already exists. A public function that always fails teaches nothing and blocks the census. Deleting it leaves one safe door and one audited expert door.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps a permanent trap on the public page and a permanent hole in the census."
+          },
+          {
+            "key": "C",
+            "reason": "C adds a second expert spelling for the job `expert.argon2id` already does, against the one-mechanism rule."
+          }
+        ],
+        "tradeoff": "Designed away: fixed-salt tests keep a home in `expert.argon2id` inside `#Unsafe`, so deleting the row removes no capability. No remaining loss was found."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": "D-BALLOT-PROCESS1: one mechanism, three options",
+      "ballotProcessVersion": 3,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "What happens to `crypto.password_hash_with_salt`, a public core function that the compiler refuses on every call?",
+        "lesson": "A password hash needs a salt: random bytes mixed in so equal passwords hash differently. `crypto.password_hash` makes the salt for you. A second function lets the caller pass the salt, and the compiler rejects every call to it with E2702. The row is still public, so the census that runs every public function cannot cover it.",
+        "trio": {
+          "current": {
+            "note": "Every call is refused; the census cannot record the row",
+            "code": "$ jet check hash.jet\nError [E2702]: crypto API misuse\n  5 |     _ :: crypto.password_hash_with_salt(\"password\", [0, 1, 2, 3, 4, 5, 6, 7])\nWhy: `password_hash_with_salt` would use caller-controlled salt bytes ...\nFix: Use `crypto.password_hash` so Jet generates the salt, or move a fixed vector to `expert.argon2id` inside `#Unsafe`"
+          },
+          "wild": {
+            "lang": "Rust (argon2 crate)",
+            "note": "The caller supplies the salt; the docs point at a random generator",
+            "code": "// https://docs.rs/argon2 — hash_password takes any salt\nlet salt = SaltString::generate(&mut OsRng);\nlet hash = Argon2::default().hash_password(password.as_bytes(), &salt)?;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Delete the row",
+            "gist": "The function leaves the public surface; safe and expert paths already exist.",
+            "gains": [
+              "No public function that always fails",
+              "The census covers every public row",
+              "One safe door, one audited expert door"
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "// A: the safe path stays; a fixed salt is an expert, audited job\nstored :: crypto.password_hash(password) ?? return\n#Unsafe(\"fixed salt for a known-answer test\") {\n    digest :: crypto.expert.argon2id(password, salt, 65536, 3, 4, 32)\n}"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep the row as a counted exclusion",
+            "gist": "Public, always rejected, listed as an owner-ratified exclusion.",
+            "gains": [
+              "No source change"
+            ],
+            "losses": [
+              "A documented function nobody can call",
+              "A permanent census exclusion"
+            ],
+            "proposed": {
+              "code": "// B: unchanged\n_ :: crypto.password_hash_with_salt(\"password\", salt)\n// Error [E2702]: crypto API misuse  (forever; census row: excluded)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Callable inside #Unsafe",
+            "gist": "Refused outside `#Unsafe`, runs inside an audited block.",
+            "gains": [
+              "One name covers the expert case"
+            ],
+            "losses": [
+              "Second expert spelling beside expert.argon2id",
+              "A safe-looking name becomes an expert door"
+            ],
+            "proposed": {
+              "code": "// C\n#Unsafe(\"fixed salt for a known-answer test\") {\n    stored :: crypto.password_hash_with_salt(password, salt) ?? return\n}"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Jet is greenfield and the expert path already exists. A public function that always fails teaches nothing and blocks the census.",
+          "gains": [
+            "No public function that always fails",
+            "The census covers every public row",
+            "One safe door, one audited expert door"
+          ],
+          "losses": [],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B keeps a permanent trap on the public page and a permanent hole in the census."
+            },
+            {
+              "key": "C",
+              "reason": "C adds a second expert spelling for a job `expert.argon2id` already does."
+            }
+          ],
+          "tradeoff": "Designed away: fixed-salt tests keep a home in `expert.argon2id` inside `#Unsafe`, so deleting the row removes no capability."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-09-03T10:52:18.248Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-03",
+      "retiredAt": "2026-11-18T05:23:05.392Z"
     }
   ]
 }
