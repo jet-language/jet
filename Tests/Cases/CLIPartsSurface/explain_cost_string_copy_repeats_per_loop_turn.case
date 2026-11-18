@@ -1,0 +1,24 @@
+# The cost law's example. `log.lines()` copies each line of `log`
+# out into an owned String, so `out.push(log.lines().first() ?? "")` copies a
+# String every loop turn. `jet explain --cost` reports that copy on its line,
+# naming the copied type and marking it as repeating every loop turn, beside
+# the `first()` Option the `??` takes apart (optimizer-proven removed);
+# `jet lint --cost` reports it as the one L2510.
+fixture: Fixtures/Cost
+step: jet explain --cost {work}/tests/cli/cost_headers.jet
+env: NO_COLOR=1
+exit: 0
+stdout: count "cost_headers.jet:4 fn headers — view materialization of `String` — semantic remainder (loop depth 1, repeats every loop turn; tier=shared-tir)" = 1 # the per-turn String copy `lines()` makes
+stdout: count "cost_headers.jet:4 fn headers — outcome construction — optimizer-proven removed (loop depth 1; tier=shared-tir)" = 1 # the `first()` Option the `??` takes apart
+stdout: ~ "No typed cost sites in fn run (tier=shared-tir)" # the call outside any loop has no site
+step: jet explain --cost {work}/tests/cli/cost_headers.jet --json
+env: NO_COLOR=1
+exit: 0
+stdout: count "\"kind\":\"view materialization\"" = 1 # the copy is one typed site
+stdout: ~ "\"line\":4,\"kind\":\"view materialization\",\"state\":\"semantic remainder\",\"loop_depth\":1" # on the push's line, inside the loop
+step: jet lint --cost {work}/tests/cli/cost_headers.jet
+env: NO_COLOR=1
+exit: 1
+stderr: count "This copy of `String` view into an owned slot inside a loop" = 1 # the L2510 the copy raises
+stderr: ~ "cost_headers.jet:4" # on the push's line
+stderr: ~ "1 hidden dynamic cost warning" # the only finding

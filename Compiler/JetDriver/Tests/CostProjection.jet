@@ -2,7 +2,8 @@
 // sites of the program's own functions with their loop depths, a generic
 // function's once per specialization it is called at, the gap a reachable
 // callee without a checked body leaves, a captured report's lines and L2510
-// lints, and the implicit copy a loop repeats.
+// lints, the implicit copy a loop repeats, the String copy `lines()` makes,
+// and the Int arithmetic a range loop's counter keeps on the packed rail.
 use {
     jet_driver.[
         JetDriverAuthorizedSourceFile,
@@ -140,4 +141,63 @@ cost_projection_copy_source: fn() -> String {
         if row.code == "L2510" -> lints.push(row.what)
     }
     assert(lints.contains("Implicitly copying a `[Int]` inside a loop"), "the copy is linted: {lints}")
+}
+
+// Arithmetic on a range loop's counter, whose values the range bounds, and a
+// counter no range bounds, which a loop raises until it breaks.
+cost_projection_counter_source: fn() -> String {
+    [String]{
+        "spread: fn() -> Int {{",
+        "    loop index in 0..<4 {{",
+        "        print(index * 2 + 1)",
+        "    }}",
+        "    count := Int{{0}}",
+        "    loop {{",
+        "        count += 1",
+        "        if count > 1000 -> break",
+        "    }}",
+        "    count",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+#Test("a range loop's counter stays on the packed Int rail; a counter no range bounds may spill") {
+    request := cost_projection_request(cost_projection_counter_source())
+    request.capture_cost_report = true
+    compiled := jet_driver_compile(request)
+    assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
+    report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
+    sites: loop site in report.sites -> "{site.kind:Debug} {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}"
+    assert_eq(sites, [String]{"ExactIntSpill OptimizerRemoved main.jet:3 depth 1", "ExactIntSpill OptimizerRemoved main.jet:3 depth 1", "ExactIntSpill SemanticRemainder main.jet:7 depth 1"})
+}
+
+// The cost law's example: `log.lines()` copies each line of `log` out into an
+// owned String on every turn.
+cost_projection_lines_source: fn() -> String {
+    [String]{
+        "headers: fn(logs: [String]) -> [String] {{",
+        "    out := [String]{{}}",
+        "    loop log in logs {{",
+        "        out.push(log.lines().first() ?? \"\")",
+        "    }}",
+        "    out",
+        "}}",
+        "",
+    }.join("\n")
+}
+
+#Test("the String copy `lines()` makes each loop turn is a view materialization site and an L2510 lint") {
+    request := cost_projection_request(cost_projection_lines_source())
+    request.capture_cost_report = true
+    compiled := jet_driver_compile(request)
+    assert(compiled.complete, "the fixture checks: {compiled.diagnostics.map(fn(row) { row.what })}")
+    report: compiled.cost_report.move() ?? panic("a captured check keeps its cost report")
+    sites: loop site in report.sites -> "{site.kind:Debug} `{site.view}` {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}"
+    assert_eq(sites, [String]{"OutcomeConstruction `` OptimizerRemoved main.jet:4 depth 1", "ViewMaterialization `String` SemanticRemainder main.jet:4 depth 1"})
+    lints := [String]{}
+    loop row in compiled.diagnostics {
+        if row.code == "L2510" -> lints.push(row.what)
+    }
+    assert_eq(lints, [String]{"This copy of `String` view into an owned slot inside a loop"})
 }

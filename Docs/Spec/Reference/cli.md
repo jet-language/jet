@@ -1435,10 +1435,13 @@ architecture advice and check provenance. Shared-callee and consumer-agreement
 candidates retain definition/call-site spans, effects, behavioral-check
 statuses, and uncertainty; they neither execute user code nor apply a refactor.
 
-The checked program's fact channel classifies view materialization, implicit
+The checked program's fact channel classifies view materialization (a view
+local stored into an owned slot, and `text.lines()`, which copies each line
+out as an owned `String`), implicit
 copy, collection copy-on-write, exact-integer spill, retained outcome
 construction, and representation fallback. Inline-integer removal is a proof
-from typed operand intervals, not an assumption about the runtime value. The
+from typed operand intervals, not an assumption about the runtime value: a
+range loop's counter takes its range's bounds. The
 cost query first proves callable coverage using sema-owned roots, direct calls
 and stored function references, including source methods and selected outputs.
 A reachable callable without a complete checked body or specialization refuses
@@ -1450,7 +1453,9 @@ does not report L2510. Findings exit 1 on stderr (diagnostic JSON Lines under
 `--json`) with a `N hidden dynamic cost warnings found` line; clean
 invocations exit 0. `explain --cost` lists every cost site, removed ones
 included, one `file:line fn name — kind — state (loop depth N;
-tier=shared-tir)` line each, then one `No typed cost sites in fn name
+tier=shared-tir)` line each, a copy's kind naming the copied type
+(``view materialization of `String` ``) and a retained cost inside a loop marked
+`loop depth N, repeats every loop turn`; then one `No typed cost sites in fn name
 (tier=shared-tir)` line for each covered function without a site, a generic
 function named per specialization (`name__generic__<type arguments>`); or the
 `explain.cost` status envelope under `--json` with a `functions` list of every
