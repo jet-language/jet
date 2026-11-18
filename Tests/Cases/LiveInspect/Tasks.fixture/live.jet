@@ -1,4 +1,7 @@
-use time: core.time
+use {
+    log: core.log
+    time: core.time
+}
 
 run: fn() {
     { sender: secret_sender, receiver: _secrets }: channel<String>(1)
@@ -6,8 +9,10 @@ run: fn() {
     { sender: ready_sender, receiver: ready }: channel<Int>()
     { sender: _sender, receiver: blocked }: channel<Int>(1)
     child: task {
+        span: log.span("transform")
         ready_sender.send(1)
         blocked.receive() ?? panic("closed")
+        log.info("{span.name()} done")
     }
     child.detach()
     ready.receive() ?? panic("closed")

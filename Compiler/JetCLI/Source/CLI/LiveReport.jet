@@ -12,7 +12,7 @@ jet_cli_live_text: fn(snapshot: JetLiveSnapshot) -> String Never! {
     loop live_task in snapshot.tasks {
         deadline: if live_task.deadline_ms == .Val(value) -> "{value}" else -> "-"
         wait: if live_task.wait == "" -> "-" else -> live_task.wait
-        out = "{out}  Task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} canceled={live_task.canceled} label={live_task.label}\n"
+        out = "{out}  Task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} canceled={live_task.canceled} label={live_task.label} open_spans={live_task.open_spans} arena_allocations={live_task.arena_allocations}\n"
     }
     out = "{out}\nChannels\n"
     if snapshot.channels.len() == 0 -> out = "{out}  (no live channels)\n"
@@ -102,6 +102,8 @@ jet_cli_live_task_json: fn(live_task: JetLiveTask) -> JetCLIStatusValue Never! {
             jet_cli_status_field("wait", jet_cli_status_text(live_task.wait)),
             jet_cli_status_field("deadline_ms", if live_task.deadline_ms == .Val(deadline) -> jet_cli_status_int(deadline) else -> JetCLIStatusValue.Null),
             jet_cli_status_field("canceled", jet_cli_status_bool(live_task.canceled)),
+            jet_cli_status_field("open_spans", jet_cli_status_int(live_task.open_spans)),
+            jet_cli_status_field("arena_allocations", jet_cli_status_int(live_task.arena_allocations)),
         ],
     )
 }

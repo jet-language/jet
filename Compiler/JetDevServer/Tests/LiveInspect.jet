@@ -1,5 +1,5 @@
 // The jet.live.v1 view over the runtime's raw records, and the devserver
-// reader over real filesystem fixtures. The JETLIVE1 codec itself is
+// reader over real filesystem fixtures. The JETLIVE2 codec itself is
 // witnessed by JetCLI's Tests/LiveInspect.jet.
 use {
     jet_devserver.[live_inspect_read, live_view_json]
@@ -30,11 +30,11 @@ live_view_text: fn(out: &[U8], text: String) Never! {
 // `event_sequence` is set, one event record.
 live_view_fixture: fn(pid: Int, boot_ns: U64, captured: Int, event_sequence: Int?) -> [U8] Never! {
     out := [U8]{}
-    live_view_words(out, [U64]{U64{3550338754064696650}, U64{1}, U64{pid}, U64{captured}, U64{7}, boot_ns, U64{3}, U64{100}, U64{1}, U64{1}, U64{2}, U64{64}, U64{1}, U64{0}})
+    live_view_words(out, [U64]{U64{3622396348102624586}, U64{1}, U64{pid}, U64{captured}, U64{7}, boot_ns, U64{3}, U64{100}, U64{1}, U64{1}, U64{2}, U64{64}, U64{1}, U64{0}})
     loop text in ([String]{"session", "app.jet", "build-1", "rev-1", "world\n1"}) {
         live_view_text(out, text)
     }
-    live_view_words(out, [U64]{U64{1}, U64{1}, U64{2}, U64{3}, U64{0}, U64{2}, U64{0}, U64{0}, U64{0}, U64{18446744073709551615}})
+    live_view_words(out, [U64]{U64{1}, U64{1}, U64{2}, U64{3}, U64{0}, U64{2}, U64{0}, U64{0}, U64{0}, U64{0}, U64{0}, U64{18446744073709551615}})
     live_view_text(out, "channel send")
     live_view_words(out, [U64]{U64{2}, U64{1}, U64{0}, U64{0}, U64{0}, U64{0}, U64{1}, U64{0}, U64{0}})
     if event_sequence == .Val(sequence) {

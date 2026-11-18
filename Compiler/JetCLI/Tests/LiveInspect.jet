@@ -40,7 +40,7 @@ live_inspect_state: fn(state: String) -> Int Never! {
 
 live_inspect_bytes: fn(snapshot: JetLiveSnapshot) -> [U8] Never! {
     out := [U8]{}
-    live_inspect_word(out, 3550338754064696650)
+    live_inspect_word(out, 3622396348102624586)
     live_inspect_word(out, 1)
     live_inspect_word(out, snapshot.pid)
     live_inspect_word(out, snapshot.captured_ms)
@@ -67,6 +67,8 @@ live_inspect_bytes: fn(snapshot: JetLiveSnapshot) -> [U8] Never! {
         live_inspect_word(out, if row.deadline_ms == None -> 0 else -> 1)
         live_inspect_word(out, row.deadline_ms ?? 0)
         live_inspect_word(out, if row.canceled -> 1 else -> 0)
+        live_inspect_word(out, row.open_spans)
+        live_inspect_word(out, row.arena_allocations)
         live_inspect_text(out, row.label)
         live_inspect_put(out, Val(row.wait.copy()))
     }
@@ -147,7 +149,7 @@ live_inspect_fixture: fn() -> JetLiveSnapshot Never! {
         start_id: "",
         captured_ms: 1,
         values: [JetLiveValue]{live_inspect_value("static:app.counter", "Int", "kept", Val("7"))},
-        tasks: [JetLiveTask]{JetLiveTask{id: 2, parent: 1, label: "transform", spawn_site: 3, state: "blocked", wait: "channel send", deadline_ms: Val(480), canceled: false}},
+        tasks: [JetLiveTask]{JetLiveTask{id: 2, parent: 1, label: "transform", spawn_site: 3, state: "blocked", wait: "channel send", deadline_ms: Val(480), canceled: false, open_spans: 2, arena_allocations: 5}},
         channels: [JetLiveChannel]{JetLiveChannel{id: 1, depth: 4, capacity: Val(4), send_waiters: 1, recv_waiters: 0, closed: false}},
         effects: [String:Int]{},
         resources: resources,
@@ -190,7 +192,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     assert(snapshot.values[0].rendered_value == Val("7"))
     assert(snapshot.runtime == JetLiveRuntime{elapsed_ns: 7, cpu_ns: None, exit: false})
     assert((jet_cli_live_event_render(snapshot.event_records) ?? panic(err.message)) == "sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None")
-    expected: "jet inspect live · pid 42\nprotocol=jet.live.v1 session=session source=app.jet build=build-1 revision=rev-1 world=world-1\n\nTask Tree\n  Task 2     parent 1     blocked  wait=channel send deadline=480 canceled=false label=transform\n\nChannels\n  Channel 1     depth 4/4 blocked send=1 recv=0 closed=false\n\nEffects: compute=0 waiting=1 channel=1 time=0 io=0\nResources: workers=1 running=0 queued=0 canceled=0 arenas=1 arena_allocations=2 arena_bytes=64\n\nValues\n  static:app.counter type=Int kept value=7\n\nEvents\n  sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None\n"
+    expected: "jet inspect live · pid 42\nprotocol=jet.live.v1 session=session source=app.jet build=build-1 revision=rev-1 world=world-1\n\nTask Tree\n  Task 2     parent 1     blocked  wait=channel send deadline=480 canceled=false label=transform open_spans=2 arena_allocations=5\n\nChannels\n  Channel 1     depth 4/4 blocked send=1 recv=0 closed=false\n\nEffects: compute=0 waiting=1 channel=1 time=0 io=0\nResources: workers=1 running=0 queued=0 canceled=0 arenas=1 arena_allocations=2 arena_bytes=64\n\nValues\n  static:app.counter type=Int kept value=7\n\nEvents\n  sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None\n"
     assert(jet_cli_live_text(snapshot) == expected)
     loop plane in
         ([String]{"types", "rights", "claims", "shapes", "structure", "build", "gates", "live"}) {
@@ -199,7 +201,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
         assert(json.contains("\"rendered_value\":\"7\""))
         assert(json.contains("\"shapes\":[{{\"type_identity\":\"Int\",\"value_ids\":[\"static:app.counter\"]}}]"))
         // The tree, the channels and the counters the text view shows.
-        assert(json.contains("\"tasks\":[{{\"id\":2,\"parent\":1,\"label\":\"transform\",\"spawn_site\":3,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":480,\"canceled\":false}}]"))
+        assert(json.contains("\"tasks\":[{{\"id\":2,\"parent\":1,\"label\":\"transform\",\"spawn_site\":3,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":480,\"canceled\":false,\"open_spans\":2,\"arena_allocations\":5}}]"))
         assert(json.contains("\"channels\":[{{\"id\":1,\"depth\":4,\"capacity\":4,\"send_waiters\":1,\"recv_waiters\":0,\"closed\":false}}]"))
         assert(json.contains("\"effects\":{{\"compute\":0,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0}}"))
         assert(json.contains("\"resources\":{{\"workers\":1,\"running\":0,\"queued\":0,\"canceled\":0,\"arenas\":1,\"arena_allocations\":2,\"arena_bytes\":64}}"))
@@ -207,11 +209,11 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     // The view derives order and counters from the records.
     derived := live_inspect_fixture()
     derived.tasks = [JetLiveTask]{
-        JetLiveTask{id: 9, parent: 1, label: "task@1", spawn_site: 1, state: "blocked", wait: "time sleep", deadline_ms: None, canceled: true},
-        JetLiveTask{id: 3, parent: 1, label: "task@2", spawn_site: 2, state: "blocked", wait: "net tcp receive", deadline_ms: None, canceled: false},
-        JetLiveTask{id: 5, parent: 1, label: "task@3", spawn_site: 3, state: "blocked", wait: "io read", deadline_ms: None, canceled: false},
-        JetLiveTask{id: 1, parent: 0, label: "run", spawn_site: 0, state: "running", wait: "", deadline_ms: None, canceled: false},
-        JetLiveTask{id: 4, parent: 1, label: "task@4", spawn_site: 4, state: "paused", wait: "network", deadline_ms: None, canceled: false},
+        JetLiveTask{id: 9, parent: 1, label: "task@1", spawn_site: 1, state: "blocked", wait: "time sleep", deadline_ms: None, canceled: true, open_spans: 0, arena_allocations: 0},
+        JetLiveTask{id: 3, parent: 1, label: "task@2", spawn_site: 2, state: "blocked", wait: "net tcp receive", deadline_ms: None, canceled: false, open_spans: 0, arena_allocations: 0},
+        JetLiveTask{id: 5, parent: 1, label: "task@3", spawn_site: 3, state: "blocked", wait: "io read", deadline_ms: None, canceled: false, open_spans: 0, arena_allocations: 0},
+        JetLiveTask{id: 1, parent: 0, label: "run", spawn_site: 0, state: "running", wait: "", deadline_ms: None, canceled: false, open_spans: 1, arena_allocations: 3},
+        JetLiveTask{id: 4, parent: 1, label: "task@4", spawn_site: 4, state: "paused", wait: "network", deadline_ms: None, canceled: false, open_spans: 0, arena_allocations: 0},
     }
     derived.channels = [JetLiveChannel]{
         JetLiveChannel{id: 7, depth: 0, capacity: None, send_waiters: 0, recv_waiters: 0, closed: true},
@@ -221,6 +223,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     assert(view.tasks.map(fn(row) { row.id }) == [Int]{1, 3, 4, 5, 9})
     assert(view.tasks[2].state == "paused" && view.tasks[0].wait == "")
     assert(view.tasks[0].label == "run" && view.tasks[4].label == "task@1" && view.tasks[4].spawn_site == 1)
+    assert(view.tasks[0].open_spans == 1 && view.tasks[0].arena_allocations == 3 && view.tasks[1].open_spans == 0)
     assert(view.channels[0].id == 2 && view.channels[1].capacity == None)
     assert(view.effects.get("compute") == Val(2) && view.effects.get("waiting") == Val(3) && view.effects.get("channel") == Val(0) && view.effects.get("time") == Val(1) && view.effects.get("io") == Val(2))
     assert(view.resources.get("running") == Val(1) && view.resources.get("cancelled") == Val(1))
@@ -265,7 +268,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     // Corrupt records are refused.
     good: live_inspect_bytes(live_inspect_fixture())
     magic := good.copy()
-    magic[7] = U8{50}
+    magic[7] = U8{51}
     live_inspect_rejected(magic, "unsupported schema")
     live_inspect_rejected(good[0..<good.len() - 1].copy(), "truncated")
     trailing := good.copy()
@@ -297,7 +300,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     many_values.values.push(live_inspect_value("static:app.counter", "Int", "kept", Val("7")))
     live_inspect_rejected(live_inspect_bytes(many_values), "too many values")
     many_tasks := live_inspect_fixture()
-    many_tasks.tasks = loop index in 0..<4097 -> JetLiveTask{id: index, parent: 0, label: "", spawn_site: 0, state: "queued", wait: "", deadline_ms: None, canceled: false}
+    many_tasks.tasks = loop index in 0..<4097 -> JetLiveTask{id: index, parent: 0, label: "", spawn_site: 0, state: "queued", wait: "", deadline_ms: None, canceled: false, open_spans: 0, arena_allocations: 0}
     live_inspect_rejected(live_inspect_bytes(many_tasks), "too many tasks")
     mixed := live_inspect_fixture()
     mixed.values = [JetLiveValue]{live_inspect_value("static:app.counter", "Int", "kept", Val("7")), live_inspect_value("static:app.counter", "Int", "kept", Val("7")), live_inspect_value("static:app.b", "Bool", "reset", None)}

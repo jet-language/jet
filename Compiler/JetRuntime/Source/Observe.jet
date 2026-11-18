@@ -3,9 +3,9 @@
 // mutex0/next-task8/next-channel16/tasks24/task-count32/channels40/
 // workers48/queued56/exit-reported64/writer72/event-sequence80/events88/
 // event-tail96/event-count104/values112/value-count120/task-table128.
-// Task96: next0/id8/parent16/site24/label32/state40/wait48/deadline-present56/
-// deadline64/canceled72/control80/previous88. Channel64: next0/id8/depth16/
-// bounded24/capacity32/send40/recv48/closed56.
+// Task112: next0/id8/parent16/site24/label32/state40/wait48/deadline-present56/
+// deadline64/canceled72/control80/previous88/open-spans96/arena-allocations104.
+// Channel64: next0/id8/depth16/bounded24/capacity32/send40/recv48/closed56.
 observe_root := I64{0}
 
 observe_task_key := I64{0}
@@ -39,7 +39,14 @@ observe_current_task: fn() -> I64 {
 // observed (its id is 0).
 OBSERVE_TASK_CAP: I64{4096}
 
-OBSERVE_TASK_BYTES: I64{96}
+OBSERVE_TASK_BYTES: I64{112}
+
+// The log spans the task has open (RouteALog.jet jet_ring_log_enter and
+// jet_ring_log_close) and the arena allocations it has made (MemStorage.jet
+// storage_arena_alloc): the existing producers' facts, kept per task.
+OBSERVE_TASK_SPANS: I64{96}
+
+OBSERVE_TASK_ALLOCATIONS: I64{104}
 
 // The task table maps an id to its node in O(1) under the registry mutex:
 // open addressing with linear probing over twice the cap's slots, so it is
@@ -289,6 +296,21 @@ observe_task_linked := I64{0}
         if (canceled >= I64{0}) {
             sync_store(wrapping(node + I64{72}), if (canceled != I64{0}) -> I64{1} else -> I64{0})
         }
+    }
+    sync_mutex_unlock(observe_root)
+}
+
+// Adds `delta` to the count at `field` of the task running on this thread
+// (the root's when none is). Only a run with an observe writer counts: a
+// count is published nowhere else, and any other run pays one load.
+observe_task_count: fn(field: I64, delta: I64) {
+    if (observe_root == I64{0} || sync_load(wrapping(observe_root + I64{72})) == I64{0}) {
+        return
+    }
+    sync_mutex_lock(observe_root)
+    node: observe_task_find(observe_current_task())
+    if (node != I64{0}) {
+        sync_store(wrapping(node + field), wrapping(sync_load(wrapping(node + field)) + delta))
     }
     sync_mutex_unlock(observe_root)
 }

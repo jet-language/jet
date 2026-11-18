@@ -1,16 +1,17 @@
-# Port of tests/live_inspect.rs:19-119; program bytes unchanged but for its unused `tasks` import, which `jet build` refuses.
+# Port of tests/live_inspect.rs:19-119; program bytes unchanged but for its unused `tasks` import, which `jet build` refuses, and the child's open `transform` log span.
 # PUBLIC-PROJECTION approved TestLead1: inspect live calls the same LiveInspect::read.
 # PENDING-GRAMMAR(batch-four), PENDING-SEAM(read_bytes); no reference receipt claimed.
+# The program is compiled at O1 and run the way a user makes a program observable,
+# `jet run --observe` (Docs/Spec/observability.md); its process is the program's.
 fixture: Tasks.fixture
-step: jet build live.jet
-session app raw: built
-env: JET_OBSERVE=1
+session app raw: jet run -O1 --observe live.jet
 stdout: null
 stderr: null
 poll snapshot: jet inspect live --attach {pid:app} --once --json until exit: 0 && stdout: ~ "\"wait\":\"channel receive\"" && stdout: ~ "\"depth\":1,\"capacity\":1" timeout 5s every 25ms # original ed77c235f tests/live_inspect.rs:73-85 same snapshot contains channel-receive AND depth1/capacity1 with 5s deadline and 25ms polling
 stdout: ~ "\"parent\":1" # original ed77c235f tests/live_inspect.rs:86 snapshot.contains parent1
 stdout: ~ "\"label\":\"task@" # original ed77c235f tests/live_inspect.rs:87 snapshot.contains task label prefix
 stdout: ~ "\"spawn_site\":" # original ed77c235f tests/live_inspect.rs:88 snapshot.contains spawn_site field
+stdout: ~ "\"canceled\":false,\"open_spans\":1,\"arena_allocations\":" # the blocked child's open `transform` span and its arena allocation count, per task
 stdout: ~ "\"effects\":" # original ed77c235f tests/live_inspect.rs:89 snapshot.contains effects field
 stdout: ~ "\"arena_bytes\":" # original ed77c235f tests/live_inspect.rs:90 snapshot.contains arena_bytes field
 stdout: !~ "TOP_SECRET_CHANNEL_PAYLOAD" # original ed77c235f tests/live_inspect.rs:91 snapshot excludes secret bytes
