@@ -75,12 +75,12 @@ FRAGMENT_HOST: "Tests/Fixtures/runtime_fragment_host.c"
 // the inventory walk lists directory entries in.
 ROOT_PRIMARY_ORDER: " _-,;:!?.'\"()[]{{}}@*/\\&#%`^+<=>|~$0123456789abcdefghijklmnopqrstuvwxyz"
 
-CRYPTO: [String]{"AgeCodec", "AgeV1", "CryptoAead", "CryptoChaCha", "CryptoEd25519", "CryptoEd25519Signature", "CryptoEntropy", "CryptoHash", "CryptoHkdf", "CryptoOsEntropy", "CryptoWipe", "CryptoX25519", "Sha256"}
+CRYPTO: [String]{"AgeCodec", "AgeV1", "CryptoAead", "CryptoChaCha", "CryptoEd25519", "CryptoEd25519Signature", "CryptoEntropy", "CryptoHash", "CryptoHkdf", "CryptoOSEntropy", "CryptoWipe", "CryptoX25519", "SHA256"}
 
 // The crypto witnesses whose committed stdout files pin a sha256 in their
 // fixtures JSON, and the counts the World entropy provider must refuse
 // before any provider call.
-CRYPTO_FROZEN: [String]{"CryptoEd25519Signature", "CryptoEntropy", "CryptoHash", "CryptoOsEntropy", "CryptoWipe"}
+CRYPTO_FROZEN: [String]{"CryptoEd25519Signature", "CryptoEntropy", "CryptoHash", "CryptoOSEntropy", "CryptoWipe"}
 
 WORLD_ENTROPY_COUNTS: [String]{"0", "-1", "1048577", "7"}
 
@@ -852,13 +852,13 @@ runner_calls: fn(name: String) -> [RunnerCall] Never! {
             runner_call("data-sequence", "DynWitness", "8 Dyn List/Entries std Vec bounds/capacity process goldens passed"),
             runner_call("scalar-reflect", "ScalarReflectWitness", "ScalarReflect bounds: exit 101, exact unsigned-index body and stdout flushed"),
         }
-        "UiWitness" -> [RunnerCall]{
+        "UIWitness" -> [RunnerCall]{
             runner_call("char-debug", "CharDebugWitness", "Char Debug: exhaustive real-route oracle byte-identical"),
-            runner_call("choices", "UiCarriersChoicesWitness", "UI choices: ownership and record-variant stop byte-identical"),
-            runner_call("cursor", "UiCursorWitness", "UI canonical Cursor: real-provider ownership byte-identical"),
-            runner_call("events", "UiEventsWitness", "UI events: real-provider ownership byte-identical"),
-            runner_call("form-action-error", "UiFormActionErrorWitness", "UI ActionError: real consumed producers and transitive ownership byte-identical"),
-            runner_call("view-snapshots", "UiViewSnapshotsWitness", "UI view snapshots: real-provider ownership byte-identical"),
+            runner_call("choices", "UICarriersChoicesWitness", "UI choices: ownership and record-variant stop byte-identical"),
+            runner_call("cursor", "UICursorWitness", "UI canonical Cursor: real-provider ownership byte-identical"),
+            runner_call("events", "UIEventsWitness", "UI events: real-provider ownership byte-identical"),
+            runner_call("form-action-error", "UIFormActionErrorWitness", "UI ActionError: real consumed producers and transitive ownership byte-identical"),
+            runner_call("view-snapshots", "UIViewSnapshotsWitness", "UI view snapshots: real-provider ownership byte-identical"),
         }
         else -> [RunnerCall]{}
     }
@@ -1092,7 +1092,7 @@ crypto_inputs: fn(name: String) -> [String] Never! {
     if name == "AgeV1" -> return [String]{"{RT}AgeV1Fixtures.json"}
     if !CRYPTO_FROZEN.contains(name) -> return [String]{}
     inputs := [String]{"{RT}{name}Fixtures.json"}
-    if name == "CryptoOsEntropy" -> inputs.push("{RT}CryptoOsEntropyWorld.stderr")
+    if name == "CryptoOSEntropy" -> inputs.push("{RT}CryptoOSEntropyWorld.stderr")
     inputs
 }
 
@@ -1180,10 +1180,10 @@ static_text_literal: fn(source: String, what: String) -> String Problem! {
 trap_literal: fn(repo: String, name: String) -[FS]> String Problem! {
     text: files.read("{repo}/Compiler/JetRuntime/Source/TrapMessages.jet") ?? return Err(problem("TrapMessages.jet cannot be read: {err}"))
     raw: "\n{text}".bytes()
-    static_head: "\n{name}_text: fn() -> I64 {{ "
+    static_head: "\n{name}_text: fn() -> I64 {{"
     line: index_of(raw, static_head, 0)
     if line >= 0 {
-        end: index_of(raw, "\n", line + 1)
+        end: index_of(raw, "\n}}", line + 1)
         if end < 0 -> return Err(problem("missing frozen trap literal {name}"))
         source: String.from_bytes(raw.slice(line, end)) ?? return Err(problem("trap literal {name} is not UTF-8"))
         decoded: static_text_literal(source, "trap literal {name}") ?? return Err(err)
@@ -1776,7 +1776,7 @@ crypto_verdict: fn(lane: &Lane, name: String, binary: String) -[Env, Exec, FS, I
         }
         timeout: if name == "CryptoEd25519Signature" -> 300000 else -> 60000
         failures.extend(step_failures(name, execute(lane, binary, [String]{}, lane.out.copy(), [Setting]{}, 0, timeout), expected, ""))
-        if name == "CryptoOsEntropy" {
+        if name == "CryptoOSEntropy" {
             failures.extend(world_entropy_failures(lane, binary) ?? return Err(err))
         }
     }
@@ -1786,14 +1786,14 @@ crypto_verdict: fn(lane: &Lane, name: String, binary: String) -[Env, Exec, FS, I
 
 // The deterministic World refuses every listed count with the frozen stop.
 world_entropy_failures: fn(lane: &Lane, binary: String) -[Env, Exec, FS, IO, Time, Time.Wait]> [String] Problem! {
-    metadata: read_json("{lane.repo}/{RT}CryptoOsEntropyFixtures.json") ?? return Err(err)
+    metadata: read_json("{lane.repo}/{RT}CryptoOSEntropyFixtures.json") ?? return Err(err)
     world: field(metadata, "world")
-    path: "{lane.repo}/{RT}CryptoOsEntropyWorld.stderr"
+    path: "{lane.repo}/{RT}CryptoOSEntropyWorld.stderr"
     expected: files.read(path) ?? return Err(problem("`{path}` cannot be read: {err}"))
-    code: int_field(world, "exitCode") ?? return Err(problem("CryptoOsEntropyFixtures.json names no World exit code"))
+    code: int_field(world, "exitCode") ?? return Err(problem("CryptoOSEntropyFixtures.json names no World exit code"))
     failures := [String]{}
     if crypto.sha256(expected).hex() != text_field(world, "stderrSha256") {
-        failures.push("CryptoOsEntropy: the frozen World stop reference is damaged")
+        failures.push("CryptoOSEntropy: the frozen World stop reference is damaged")
     }
     loop count in WORLD_ENTROPY_COUNTS {
         failures.extend(step_failures("world {count}", execute(lane, binary, [String]{"world", count.copy()}, lane.out.copy(), [Setting]{}, code, 60000), "", expected))
@@ -2408,12 +2408,20 @@ run_entry: fn(result: &[String:Dyn], entry: Dyn, manifest: Dyn, repo: String, je
         items: listed ?? [Dyn]{}
         passed: int_field(report, "passed") ?? -1
         expected_failures: int_field(report, "expectedFailures") ?? -1
-        if items.len() != count || passed < 0 || expected_failures < 0 || passed + expected_failures != count {
-            return Err(problem("executed test count does not match registry"))
+        if passed < 0 || expected_failures < 0 || passed + expected_failures != items.len() {
+            return Err(problem("executed test count does not match its report"))
         }
-        ran_names: items.map(fn(test) { text_field(test, "name") })
-        names: array_field(entry, "testNames").map(fn(name) { if name == .Text(text) -> text.copy() else -> "" })
-        if sorted_texts(ran_names) != sorted_texts(names) {
+        ran_names: sorted_texts(items.map(fn(test) { text_field(test, "name") }))
+        names: sorted_texts(array_field(entry, "testNames").map(fn(name) { if name == .Text(text) -> text.copy() else -> "" }))
+        // `jet test FILE` of a file inside a package runs every #Test of the
+        // package, so a package entry's own tests must all be among the passing
+        // tests it ran; any other entry runs exactly its registry's tests.
+        if kind == "package" {
+            missing: names.filter(fn(name) { !ran_names.contains(name) })
+            if names.len() != count || missing.len() > 0 {
+                return Err(problem("the package run lacks registry tests: {missing.join(", ")}"))
+            }
+        } else if items.len() != count || ran_names != names {
             return Err(problem("executed test names do not match complete registry"))
         }
         result["report"] = report
@@ -2546,7 +2554,7 @@ fragment_registry: fn(name: String) -> Registry Never! {
 #Test("crypto, codec and process rows are plain transports over their real fixtures") {
     repo: test_repo()
     loop name in
-        ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves", "ProcessExecution", "TerminalProcess", "AgeV1", "CryptoHash", "CryptoOsEntropy", "Sha256"}) {
+        ([String]{"CodecCSV", "CodecEnv", "DynCodec", "CompilerFileLeaves", "ProcessExecution", "TerminalProcess", "AgeV1", "CryptoHash", "CryptoOSEntropy", "SHA256"}) {
         entry: prepare_transport(repo, fragment_registry(name), "/native/registries", "{repo}{TOOL}") ?? panic("{name}: no transport")
         found: specification(transport_key(text_field(entry, "id"))) ?? panic("{name}: no specification")
         assert_eq(found.kind, "plain")
@@ -2572,9 +2580,9 @@ fragment_registry: fn(name: String) -> Registry Never! {
         }
     }
     assert(codec_driver("CompilerFileLeaves", "jet_rt_compiler_file_leaves_fixture").contains("unlink(fixture_path)"))
-    assert_eq(crypto_inputs("CryptoOsEntropy"), [String]{"{RT}CryptoOsEntropyFixtures.json", "{RT}CryptoOsEntropyWorld.stderr"})
+    assert_eq(crypto_inputs("CryptoOSEntropy"), [String]{"{RT}CryptoOSEntropyFixtures.json", "{RT}CryptoOSEntropyWorld.stderr"})
     assert_eq(crypto_inputs("AgeV1"), [String]{"{RT}AgeV1Fixtures.json"})
-    assert_eq(crypto_inputs("Sha256"), [String]{})
+    assert_eq(crypto_inputs("SHA256"), [String]{})
 }
 
 #Test("a plain transport runs its committed C host") {
@@ -2682,8 +2690,8 @@ fragment_registry: fn(name: String) -> Registry Never! {
     assert_eq(text_field(fragment, "id"), "JetRuntime/Tests/Fragments.fixture/AllocTests")
     assert_eq(transport_key("JetRuntime/Tests/Fragments.fixture/AllocTests"), "JetRuntime/Tests/AllocTests")
     row: Census{package: "JetRuntime", source: "Compiler/JetRuntime/Tests/UIWitness.jet", sha256: "", names: [String]{"t"}, entry: true, role: "registry"}
-    entry: prepare_transport(repo, Registry{row: row, id: "JetRuntime/Tests/UiWitness.run", mode: "run"}, "/native/registries", "{repo}{TOOL}") ?? panic("UiWitness: no transport")
-    assert_eq(text_field(entry, "id"), "JetRuntime/Tests/UiWitness.run")
+    entry: prepare_transport(repo, Registry{row: row, id: "JetRuntime/Tests/UIWitness.run", mode: "run"}, "/native/registries", "{repo}{TOOL}") ?? panic("UIWitness: no transport")
+    assert_eq(text_field(entry, "id"), "JetRuntime/Tests/UIWitness.run")
     transport: field(entry, "transport")
     assert_eq(text_field(transport, "type"), "runner")
     assert_eq(text_field(transport, "runner"), "Compiler/JetRuntime/Tests/UIWitness.jet")
