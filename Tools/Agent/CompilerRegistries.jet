@@ -1571,13 +1571,13 @@ drive: fn(lane: &Lane, found: Spec) -[Env, Exec, FS, IO, Time, Time.Wait]> Probl
     if found.kind == "indices" || found.kind == "roots" {
         if found.kind == "roots" -> pack_roots_inputs(lane) ?? return Err(err)
         expected: if found.kind == "indices" -> "link section indexes: pass\n" else -> "runtime pack object roots: pass\n"
-        ran: execute(lane, staged, [String]{"run", "{repo}/{found.runner}"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        ran: execute(lane, staged, [String]{"run", "-A", "{repo}/{found.runner}"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         exact(ran, expected, "") ?? return Err(err)
         if found.kind == "indices" -> return Ok()
     }
     if found.kind == "link" {
         pack_roots_inputs(lane) ?? return Err(err)
-        linked: execute(lane, staged, [String]{"run", "{repo}/{found.runner}", "--", "{out}/consumer", "{out}/consumer.o", "{out}/runtime.o", "{out}/runtime.a"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        linked: execute(lane, staged, [String]{"run", "-A", "{repo}/{found.runner}", "--", "{out}/consumer", "{out}/consumer.o", "{out}/runtime.o", "{out}/runtime.a"}, out, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         receipt: regex.compile("linked .+: [0-9]+ bytes; read [0-9]+ ms, link [0-9]+ ms, write [0-9]+ ms\\n") ?? return Err(problem("linker pattern: {err}"))
         if !receipt.full_match(linked.stdout) || linked.stderr != "" {
             return Err(problem("linker artifact receipt differs"))
@@ -1588,7 +1588,7 @@ drive: fn(lane: &Lane, found: Spec) -[Env, Exec, FS, IO, Time, Time.Wait]> Probl
         return exact(consumer, "", "")
     }
     if found.kind == "cli" {
-        ran: execute(lane, staged, [String]{"run", "{repo}/{found.runner}", "--", staged.copy(), "{out}/scratch"}, repo, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
+        ran: execute(lane, staged, [String]{"run", "-A", "{repo}/{found.runner}", "--", staged.copy(), "{out}/scratch"}, repo, [Setting]{}, 0, TRANSPORT_TIMEOUT_MS) ?? return Err(err)
         return exact(ran, found.expected, "")
     }
     Err(problem("unimplemented transport {found.kind}"))
@@ -2098,7 +2098,8 @@ generate: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Time.Wai
 // --- run ------------------------------------------------------------------------
 
 // Testkit's one-based I/N convention over the id-sorted manifest; validate the
-// full manifest before calling.
+// full manifest before calling. The package test entries of one package share
+// one shard, since one `jet test` run of the package judges them all.
 partition: fn(entries: [Dyn], shard: String) -> [Dyn] Problem! {
     if shard == "" -> return entries.copy()
     shape: regex.compile("([1-9][0-9]*)/([1-9][0-9]*)") ?? return Err(problem("shard pattern: {err}"))
@@ -2111,11 +2112,32 @@ partition: fn(entries: [Dyn], shard: String) -> [Dyn] Problem! {
     }
     sorted := entries.copy()
     sorted.sort_by(fn(left: Dyn, right: Dyn) { text_field(left, "id") <=> text_field(right, "id") })
+    groups := [String:Int]{}
     picked := [Dyn]{}
-    loop offset in 0..<sorted.len() {
-        if offset % count == index - 1 -> picked.push(sorted[offset].copy())
+    loop entry in sorted {
+        key: package_run_key(entry) ?? text_field(entry, "id")
+        if !groups.has_key(key) -> groups[key] = groups.len()
+        if groups[key] % count == index - 1 -> picked.push(entry.copy())
     }
     picked
+}
+
+// The package whose one `jet test` run judges `entry`: a package test entry's
+// package, else none.
+package_run_key: fn(entry: Dyn) -> String? Never! {
+    if text_field(entry, "kind") != "package" || text_field(entry, "mode") != "test" -> return None
+    package: text_field(entry, "package")
+    if package == "" -> None else -> Val("package:{package}")
+}
+
+// One `jet test` run of a package, kept for its other registry entries.
+PackageRun: struct {
+    command: [String],
+    code: Dyn,
+    signal: Dyn,
+    stdout: String,
+    stderr: String,
+    failure: String,
 }
 
 native_runtime: fn(jet: String, runtime: String) -[FS]> Runtime Problem! {
@@ -2226,6 +2248,7 @@ run_registries: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Ti
         tally.runtime = Val(Dyn.Object([String:Dyn]{"runtimeDir": Dyn.Text(found.dir.copy()), "runtimePack": Dyn.Text(found.pack.copy()), "runtimeObject": Dyn.Text(found.object.copy()), "packSha256": Dyn.Text(found.pack_sha256.copy()), "objectSha256": Dyn.Text(found.object_sha256.copy())}))
     }
     adapter: sys.executable()
+    runs := [String:PackageRun]{}
     loop entry in selected {
         result := [String:Dyn]{"id": field(entry, "id"), "mode": field(entry, "mode"), "testCount": field(entry, "testCount")}
         if text_field(entry, "status") == "BLOCKED" {
@@ -2237,7 +2260,7 @@ run_registries: fn(repo: String, options: Options) -[Env, Exec, FS, IO, Time, Ti
             result["reason"] = Dyn.Text("runtime prerequisite: {loaded.error}")
             tally.blocked += 1
         } else {
-            if run_entry(result, entry, manifest, repo, jet, log_dir, loaded.runtime, adapter) == {
+            if run_entry(result, entry, manifest, repo, jet, log_dir, loaded.runtime, adapter, runs) == {
                 .Ok(_) -> {
                     result["status"] = Dyn.Text("PASS")
                     tally.passed += 1
@@ -2289,7 +2312,7 @@ exit_problem: fn(what: String, ran: ProcessReceipt, timeout_ms: Int) -> String N
 }
 
 // Execute one manifest entry; `result` gathers the command, logs and report.
-run_entry: fn(result: &[String:Dyn], entry: Dyn, manifest: Dyn, repo: String, jet: String, log_dir: String, runtime: Runtime?, adapter: String) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
+run_entry: fn(result: &[String:Dyn], entry: Dyn, manifest: Dyn, repo: String, jet: String, log_dir: String, runtime: Runtime?, adapter: String, runs: &[String:PackageRun]) -[Env, Exec, FS, IO, Time, Time.Wait]> Problem! {
     mode: text_field(entry, "mode")
     count: int_field(entry, "testCount") ?? 0
     path: text_field(entry, "path")
@@ -2373,12 +2396,25 @@ run_entry: fn(result: &[String:Dyn], entry: Dyn, manifest: Dyn, repo: String, je
         // it runs from the repository root; its scratch (TMPDIR) stays under
         // the entry's own directory.
         if kind == "package" -> cwd = repo.copy()
-        child: registry_spec(command, cwd, repo, extra, timeout_ms).run() ?? return Err(problem("the registry cannot start: {err}"))
-        stdout = child.output.copy()
-        stderr = child.errors.copy()
-        if !child.timed_out && child.signal == None -> code = Dyn.Int(child.code)
-        signal = signal_dyn(child.signal)
-        failure = if child.timed_out || child.signal != None || child.code != 0 -> exit_problem("registry", child, timeout_ms) else -> ""
+        // One run of a package judges each of its test entries.
+        key: package_run_key(entry) ?? ""
+        if key != "" && runs.has_key(key) {
+            kept: runs[key].copy()
+            command = kept.command.copy()
+            code = kept.code.copy()
+            signal = kept.signal.copy()
+            stdout = kept.stdout.copy()
+            stderr = kept.stderr.copy()
+            failure = kept.failure.copy()
+        } else {
+            child: registry_spec(command, cwd, repo, extra, timeout_ms).run() ?? return Err(problem("the registry cannot start: {err}"))
+            stdout = child.output.copy()
+            stderr = child.errors.copy()
+            if !child.timed_out && child.signal == None -> code = Dyn.Int(child.code)
+            signal = signal_dyn(child.signal)
+            failure = if child.timed_out || child.signal != None || child.code != 0 -> exit_problem("registry", child, timeout_ms) else -> ""
+            if key != "" -> runs[key] = PackageRun{command: command.copy(), code: code.copy(), signal: signal.copy(), stdout: stdout.copy(), stderr: stderr.copy(), failure: failure.copy()}
+        }
     }
     files.write("{stem}.stdout", stdout) ?? return Err(problem("`{stem}.stdout` cannot be written: {err}"))
     files.write("{stem}.stderr", stderr) ?? return Err(problem("`{stem}.stderr` cannot be written: {err}"))
@@ -2389,7 +2425,13 @@ run_entry: fn(result: &[String:Dyn], entry: Dyn, manifest: Dyn, repo: String, je
     result["milliseconds"] = Dyn.Int((time.unix_ns() - started) /% 1000000)
     result["stdoutLog"] = Dyn.Text("{stem}.stdout")
     result["stderrLog"] = Dyn.Text("{stem}.stderr")
-    if failure != "" -> return Err(problem(failure))
+    // `jet test FILE` of a file inside a package runs every #Test of the
+    // package, so a package test entry is judged by its own tests in the
+    // package's report: a failing test of another file is that file's entry's
+    // failure, not this one's. Every other entry runs exactly its registry's
+    // tests and passes only on a clean run.
+    by_tests: kind == "package" && mode == "test" && code != Dyn.Null
+    if failure != "" && !by_tests -> return Err(problem(failure))
     if mode == "test" {
         reports := [Dyn]{}
         loop line in stdout.split("\n") {
@@ -2397,31 +2439,36 @@ run_entry: fn(result: &[String:Dyn], entry: Dyn, manifest: Dyn, repo: String, je
             if text_field(parsed, "schema") == text_field(entry, "stdout") -> reports.push(parsed)
         }
         if reports.len() != 1 {
-            return Err(problem("exact canonical jet.test.v1 success report required"))
+            return Err(problem(if failure != "" -> failure.copy() else -> "exact canonical jet.test.v1 success report required"))
         }
         report: reports[0].copy()
         tests: field(report, "tests")
         listed: if tests == .Array(items) -> Val(items.copy()) else -> None
-        if field(report, "ok") != .Bool(true) || int_field(report, "failed") != Val(0) || int_field(report, "skipped") != Val(0) || int_field(report, "unexpectedPasses") != Val(0) || listed == None {
-            return Err(problem("test report contains failure, skip, or invalid success fields"))
-        }
-        items: listed ?? [Dyn]{}
-        passed: int_field(report, "passed") ?? -1
-        expected_failures: int_field(report, "expectedFailures") ?? -1
-        if passed < 0 || expected_failures < 0 || passed + expected_failures != items.len() {
-            return Err(problem("executed test count does not match its report"))
-        }
-        ran_names: sorted_texts(items.map(fn(test) { text_field(test, "name") }))
+        items: listed ?? return Err(problem("test report lists no tests"))
         names: sorted_texts(array_field(entry, "testNames").map(fn(name) { if name == .Text(text) -> text.copy() else -> "" }))
-        // `jet test FILE` of a file inside a package runs every #Test of the
-        // package, so a package entry's own tests must all be among the passing
-        // tests it ran; any other entry runs exactly its registry's tests.
-        if kind == "package" {
-            missing: names.filter(fn(name) { !ran_names.contains(name) })
-            if names.len() != count || missing.len() > 0 {
+        if by_tests {
+            own: items.filter(fn(test) { names.contains(text_field(test, "name")) })
+            ran_names: sorted_texts(own.map(fn(test) { text_field(test, "name") }))
+            if names.len() != count || ran_names != names {
+                missing: names.filter(fn(name) { !ran_names.contains(name) })
                 return Err(problem("the package run lacks registry tests: {missing.join(", ")}"))
             }
-        } else if items.len() != count || ran_names != names {
+            bad: own.filter(fn(test) { field(test, "ok") != .Bool(true) || field(test, "skipped") == .Bool(true) })
+            result["report"] = Dyn.Object([String:Dyn]{"schema": field(report, "schema"), "tests": Dyn.Array(own.copy())})
+            if bad.len() > 0 {
+                return Err(problem("registry tests fail: {bad.map(fn(test) { text_field(test, "name") }).join(", ")}"))
+            }
+            return Ok()
+        }
+        if field(report, "ok") != .Bool(true) || int_field(report, "failed") != Val(0) || int_field(report, "skipped") != Val(0) || int_field(report, "unexpectedPasses") != Val(0) {
+            return Err(problem("test report contains failure, skip, or invalid success fields"))
+        }
+        passed: int_field(report, "passed") ?? -1
+        expected_failures: int_field(report, "expectedFailures") ?? -1
+        if items.len() != count || passed < 0 || expected_failures < 0 || passed + expected_failures != count {
+            return Err(problem("executed test count does not match registry"))
+        }
+        if sorted_texts(items.map(fn(test) { text_field(test, "name") })) != names {
             return Err(problem("executed test names do not match complete registry"))
         }
         result["report"] = report
