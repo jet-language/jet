@@ -161,6 +161,22 @@ use {
     files.remove_all(root) ?? panic("remove opt verify scratch")
 }
 
+#Test("Debug and Perf cases prove jet alone and refuse to require an outside debugger or profiler") {
+    assert(kit_cases_jet_alone("Tests/Cases/Debug/native_breakpoint_reads_a_jet_local.case"))
+    assert(kit_cases_jet_alone("Tests/Cases/JetPerfTracePartsCaptureRun/perf_run_short.case"))
+    assert(kit_cases_jet_alone("Tests/Cases/PerfRun/no_counters_reports_unavailable.case"))
+    assert(!kit_cases_jet_alone("Tests/Cases/ToolInterop/symbols_carry_jet_names.case"))
+    assert(!kit_cases_jet_alone("Tests/Cases/group/Debug.case"))
+    root: cases_test_root("jet-alone")
+    debug: "Tests/Cases/Debug/needs_lldb.case"
+    kit_exec_write(files.join(root, debug), "requires: tool:lldb|gdb\nstep: printf ok\n")
+    context: cases_test_context(root, files.join(root, "scratch"))
+    refused: kit_cases_run(KitEntry{path: debug, expected: debug, project: "Tests/Cases/Debug", suite: "cases", mode: ""}, context)[0].verdict
+    assert_eq(refused.status, "REFUSED")
+    assert(refused.detail.contains("Tests/Cases/ToolInterop"), refused.detail)
+    files.remove_all(root) ?? panic("remove jet alone scratch")
+}
+
 #Test("typed JSON normalization attaches only to its step and preserves semantic assertions") {
     root: cases_test_root("json-normalizer-attachment")
     directory: files.join(root, "Tests/Cases/group")

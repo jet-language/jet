@@ -57,11 +57,32 @@ kit_test_golden_env: fn(root: String) -> KitEnv {
 // caller's JET, so its `#!/usr/bin/env jet` never runs the host's `jet`.
 #Test("a CLI double's children find the caller's jet first on PATH") {
     inherited: sys.get("PATH") ?? ""
-    path: kit_exec_path(kit_test_golden_fixture("compiler.jet")) ?? ""
+    env: kit_test_golden_env(kit_test_golden_scratch("double-path"))
+    path: kit_exec_path(env, env.scratch) ?? ""
     caller: files.canonicalize(sys.get("JET") ?? "") ?? ""
     if caller != "" && files.basename(caller) == "jet" {
         assert_eq(path, "{files.dirname(caller)}:{inherited}")
     } else { assert_eq(path, inherited) }
+    files.remove_all(env.scratch) ?? panic("remove double path scratch")
+}
+
+// A Debug or Perf case runs with no outside debugger or profiler on PATH: a
+// directory that holds one is replaced by a mirror of its other entries.
+#Test("a path without hidden tools mirrors only the directories that hold them") {
+    scratch: kit_test_golden_scratch("hidden-tools")
+    tools: files.join(scratch, "tools")
+    plain: files.join(scratch, "plain")
+    kit_exec_write(files.join(tools, "lldb"), "")
+    kit_exec_write(files.join(tools, "cc"), "")
+    kit_exec_write(files.join(plain, "nm"), "")
+    path: kit_exec_path_without("{tools}:{plain}", [String]{"lldb", "gdb"}, files.join(scratch, "case"))
+    mirror: files.join(scratch, "case/path/0")
+    assert_eq(path, "{mirror}:{plain}")
+    assert(!files.exists(files.join(mirror, "lldb")))
+    assert_eq(files.canonicalize(files.join(mirror, "cc")) ?? "", files.canonicalize(files.join(tools, "cc")) ?? "missing")
+    // A second child of the case reuses the mirror.
+    assert_eq(kit_exec_path_without("{tools}:{plain}", [String]{"lldb", "gdb"}, files.join(scratch, "case")), path)
+    files.remove_all(scratch) ?? panic("remove hidden tools scratch")
 }
 
 kit_test_golden_step: fn(argv: [String], action: String) -> KitStep {

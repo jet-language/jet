@@ -65,10 +65,13 @@ kit_cases_run: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
     annotation: kit_cases_known_failure(entry, context.known, source)
     env := context.env
     if annotation != "" -> env.answer_limit = KIT_KNOWN_ANSWER_LIMIT
-    // A Debug case's debugger reads the code a build ships: no build a user
-    // runs makes the verifier's SSA round trip, which moves a named local's
-    // value at a join into a fresh unnamed slot.
-    if entry.path.starts_with("Tests/Cases/Debug/") -> env.opt_verify = false
+    // A Debug or ToolInterop case's debugger reads the code a build ships: no
+    // build a user runs makes the verifier's SSA round trip, which moves a
+    // named local's value at a join into a fresh unnamed slot.
+    if entry.path.starts_with("Tests/Cases/Debug/") || entry.path.starts_with("Tests/Cases/ToolInterop/") {
+        env.opt_verify = false
+    }
+    env.jet_alone = kit_cases_jet_alone(entry.path)
     steps: kit_steps_context(
         plan,
         entry.path,
@@ -79,6 +82,20 @@ kit_cases_run: fn(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
         context.bless,
     )
     [kit_cases_known_verdict(kit_steps_execute(steps, kit_steps_hooks()), annotation)]
+}
+
+// The host debuggers and profilers a Debug or Perf case runs without.
+KIT_OUTSIDE_TOOLS: [String]{"lldb", "gdb", "perf", "go", "otelcol"}
+
+// Whether the case at `path` proves a jet debug or jet perf behavior: its
+// suite (the folder under Tests/Cases) is a Debug or Perf one. A case that
+// checks Jet's DWARF or symbol map with an outside tool is an interop case,
+// in Tests/Cases/ToolInterop.
+kit_cases_jet_alone: fn(path: String) -> Bool {
+    prefix: "Tests/Cases/"
+    if !path.starts_with(prefix) -> return false
+    suite: path.after(prefix).before("/")
+    suite.ends_with("Debug") || suite.contains("Perf")
 }
 
 // How long a known-failing case waits for each answer (recv, poll, await, a

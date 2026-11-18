@@ -29,9 +29,13 @@ KitEnv: struct {
     resident_tree: Bool{false},
     env_clear: Bool{false},
     // Builds under test run IR Lint after each optimizer pass
-    // (JET_OPT_VERIFY), with its SSA round trip; Debug cases, which read the
-    // code a build ships, run without it (kit_cases_run).
+    // (JET_OPT_VERIFY), with its SSA round trip; Debug and ToolInterop cases,
+    // which read the code a build ships, run without it (kit_cases_run).
     opt_verify: Bool{true},
+    // A Debug or Perf case proves what jet does alone: no outside debugger or
+    // profiler (KIT_OUTSIDE_TOOLS) is on its children's PATH, and it may not
+    // require one (kit_cases_run).
+    jet_alone: Bool{false},
     // The tested jet's JET_VERSION (`a0.0.43`, `{jet-semver}`) and its whole
     // `jet --version` spelling after `jet ` (`a0.0.43-dev+29517f5447`); a
     // `normalize: version` row writes each as VERSION.
