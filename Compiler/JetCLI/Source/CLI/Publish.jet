@@ -20,7 +20,7 @@ use {
         publication_redact_registry_url,
         publication_resolve_publish_registry,
     ]
-    jet_sema.[sema_public_api_canonical, sema_public_api_cap, sema_public_api_items]
+    jet_sema.[sema_public_api_canonical, sema_public_api_cap, sema_public_api_items, sema_public_api_reexport_rows]
     jetpack_foundation.[foundation_tree_hash]
     jetpack_publication.[
         PublicationIndexEntry,
@@ -567,6 +567,7 @@ jet_cli_publish_public_api: fn(root: String, entry: String, package: String, col
                 is_entry: path == entry_path
                 prefix: if is_entry -> "" else -> "{module_name}."
                 sema_public_api_items(doc.items, doc.functions, prefix, rows)
+                sema_public_api_reexport_rows(doc.reexports, prefix, rows)
                 sema_public_api_cap(doc.file_cap, if is_entry -> package else -> module_name, rows)
             }
             return JetCLIPublishAPI{rows: sema_public_api_canonical(rows), refusal: ""}

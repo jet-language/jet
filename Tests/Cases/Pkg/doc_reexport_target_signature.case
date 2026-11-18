@@ -1,0 +1,91 @@
+# A re-export is listed with its target's signature: `jet doc` shows the
+# declaration as written and the signature of the declaration it names, and
+# the public API snapshot `jet registry publish` uploads holds a `reexport`
+# row with that signature. Retargeting the re-export under a minor bump is a
+# public API change the SemVer gate reports (E1218), and the registry is
+# untouched.
+fixture: DocReexportTargetSignature.fixture
+requires: tool:git
+mkdir: store
+step: jet doc --json {work}/proj/run.jet
+exit: 0
+stdout: ~ "blend: core.math.lerp" # the re-export as written
+stdout: ~ "Target: fn core.math.lerp(a: Float, b: Float, t: Float)" # the signature of the declaration it names
+stdout: ~ "Blends two values" # its doc comment
+step: git init --bare {work}/registry.git
+exit: 0
+step: git init -b main
+cwd: {work}/proj
+exit: 0
+step: git config user.email test@jet.test
+cwd: {work}/proj
+exit: 0
+step: git config user.name "Jet Test"
+cwd: {work}/proj
+exit: 0
+step: git add .
+cwd: {work}/proj
+exit: 0
+step: git commit -m init
+cwd: {work}/proj
+exit: 0
+step: git --git-dir {work}/registry.git symbolic-ref HEAD refs/heads/main
+exit: 0
+step: git clone file://{work}/registry.git {work}/review
+exit: 0
+mkdir: review/reviews/blender
+copy: reviews/blender/1.0.0.review review/reviews/blender/1.0.0.review
+copy: reviews/blender/1.1.0.review review/reviews/blender/1.1.0.review
+step: git config user.email test@jet.test
+cwd: {work}/review
+exit: 0
+step: git config user.name "Jet Test"
+cwd: {work}/review
+exit: 0
+step: git add .
+cwd: {work}/review
+exit: 0
+step: git commit -m "approve core package"
+cwd: {work}/review
+exit: 0
+step: git push origin HEAD:main
+cwd: {work}/review
+exit: 0
+remove: review
+step: jet registry publish --no-sign
+cwd: {work}/proj
+env: JET_REGISTRY_URL=file://{work}/registry.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JET_KEYS_DIR={work}/keys
+exit: 0
+stdout: ~ "Semver: first release" # the gate's progress line; the rest is the publish log
+step: git --git-dir {work}/registry.git show HEAD:apis/blender/1.0.0.api
+exit: 0
+stdout: ~ "\nreexport blend = fn core.math.lerp(a: Float, b: Float, t: Float)" # the re-export's row
+step: git add .
+cwd: {work}/proj
+exit: 0
+step: git commit -m "snapshot api"
+cwd: {work}/proj
+exit: 0
+# `blend` names another Core function under a minor bump: E1218, and the
+# registry is untouched.
+copy: run-retarget.jet proj/run.jet
+copy: package-1.1.0.jet proj/package.jet
+step: git commit -am "retarget blend"
+cwd: {work}/proj
+exit: 0
+step: jet registry publish --no-sign
+cwd: {work}/proj
+env: JET_REGISTRY_URL=file://{work}/registry.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JET_KEYS_DIR={work}/keys
+exit: 1
+stderr: ~ "breaks the public API item `blend`"
+stderr: ~ "public reexport `blend` changed signature"
+stderr: ~ "| was: reexport blend = fn core.math.lerp(a: Float, b: Float, t: Float)"
+stderr: ~ "| now: reexport blend = fn core.math.clamp_float(value: Float, low: Float, high: Float)"
+step: git --git-dir {work}/registry.git cat-file -e HEAD:apis/blender/1.1.0.api
+exit: nonzero

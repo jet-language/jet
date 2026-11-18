@@ -19,6 +19,7 @@ use {
         Span,
         type_name,
     ]
+    jet_sema.[SemaPublicAPIReexport]
     jet_semindex.[
         SemCallable,
         SemDef,
@@ -294,6 +295,16 @@ jet_cli_doc_add_item: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, kind: St
 
 jet_cli_doc_add_function: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, function: Func, parent: String, inherited_public: Bool) Never! {
     jet_cli_doc_add_item(output, unit, "function", function.name, parent, function.is_pub || inherited_public, function.is_package_pub, function.span, function.name_span, jet_cli_doc_marker_names(function.markers))
+}
+
+// Each re-export as an item: its declaration as written, then `Target: ` and
+// the signature of the declaration its path reaches.
+jet_cli_doc_add_reexports: fn(output: &[JetCLIDocItem], unit: JetCLIDocUnit, reexports: [SemaPublicAPIReexport]) -[]> {
+    loop reexport in reexports {
+        jet_cli_doc_add_item(output, unit, "reexport", reexport.name, "", true, false, reexport.span, reexport.span, [String]{})
+        last: output.len() - 1
+        output[last].signature = "{output[last].signature}\nTarget: {reexport.signature}"
+    }
 }
 
 jet_cli_doc_sorted_names: fn(functions: [Func]) -> [String] Never! {
@@ -781,6 +792,7 @@ jet_cli_build_doc_graph: fn(modules: [JetDriverDocModule], index: SemIndex) -> J
         )
         loop test in jet_cli_doc_discover_doctests(unit) -> graph.doctests.push(test)
         jet_cli_doc_collect_items(doc_module.items, unit, "", false, protocol_names, graph.items, graph.impls)
+        jet_cli_doc_add_reexports(graph.items, unit, doc_module.reexports)
     }
     jet_cli_doc_enrich(graph.items, index)
     jet_cli_doc_sort_modules(graph.modules)

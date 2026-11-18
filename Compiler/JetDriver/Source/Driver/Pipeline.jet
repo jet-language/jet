@@ -31,6 +31,7 @@ use {
         SemaCoreCaptures,
         sema_comptime_reflection_layout_engine,
         sema_checked_layout_projections,
+        sema_public_api_reexports,
         SemaModuleMetaSource,
         SemaModulePackage,
         SemaLookupCounts,
@@ -660,6 +661,7 @@ jet_driver_doc_modules: fn(request: JetDriverCompileRequest, load: JetDriverLoad
                 layout_facts: sema_checked_layout_projections(registration, registered_index, graph.programs[index].items, layout_engine, module_text(registration.module_table, graph_module.module_identity)),
                 app_route_roots: graph.programs[index].app_route_roots,
                 file_cap: graph.programs[index].file_cap,
+                reexports: sema_public_api_reexports(registration, graph, registered_index),
             },
         )
     }
