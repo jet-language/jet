@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112175,
+    "rev": 112182,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -43,7 +43,7 @@
         "radar:e18"
       ]
     },
-    "completionCursor": "2026-11-18T07:53:27.301Z",
+    "completionCursor": "2026-11-18T07:53:28.091Z",
     "dayStart": {
       "date": "2026-11-18",
       "openCards": 330,
@@ -87281,6 +87281,11 @@
         {
           "at": "2026-11-18",
           "by": "Main",
+          "text": "Owner direction (2026-11-18): the work's product is a jet-native debugger and profiler that need nothing but jet. Code audit: jet debug already runs its own ptrace engine (JetDebug/Source/Native.jet, Loader.jet ptrace primitives, DebugDap.jet), jet perf its own SIGPROF sampler (JetRuntime/Source/PerfSamples.jet) and viewer (Perf/Command.jet); lldb, Linux perf, go pprof and otelcol appear only as interop checks or comparators. Criteria reframed so every proof is jet-only: c11 reworded (native viewer, jet-side export round trip), new criteria for tool-free case runs, native equivalents of the lldb interop cases, everyday debugger workflow, no 'LLDB' wording, and CFI unwinding in the sampler. c12 (Linux perf as comparator) and c22 (latency vs lldb) stay as peer comparisons."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
           "text": "Owner order 2026-11-18: one agent works this card full-time so the team can dogfood the debugger and profiler as soon as possible. DeclTypes-6-1 is reassigned from #6048 and #4613. Order: jet debug basics (Debug rows at p287: 17 pass, 8 fail, 2 timeout, 9 KF; Jet values for locals) first, then jet perf run per-line sampling, then the rest. c3/c6 wait on the instrumentation ballot (c2), which is queued for drafting."
         },
         {
@@ -87652,6 +87657,55 @@
             "profile": "cases",
             "filter": "perf_run_short_program_has_repeatable_source_attribution"
           }
+        },
+        {
+          "n": 34,
+          "text": "jet alone debugs and profiles: every Debug and Perf case that proves a product behavior runs with no lldb, gdb, Linux perf, go or otelcol on PATH (the case kit scrubs them for these suites), and the cases that need one of those tools are marked interop checks of Jet's DWARF or symbol map, never the proof of a jet debug or jet perf feature. Proof: `jet test Compiler --profile cases --filter Debug/` and `--filter Perf` with those tools removed from PATH report no SKIP-HOST.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T07:54:44.348Z"
+        },
+        {
+          "n": 35,
+          "text": "jet debug's own engine does what the lldb interop cases prove: on an -O2 build it shows inlined frames and their live locals, finds the split debug file under .jet/symbols through the debug link, and reads a local joined at a loop's break exit. Proof: `jet test Compiler --profile cases --filter Debug/native_` (one case per behavior, no lldb on PATH).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T07:54:45.381Z"
+        },
+        {
+          "n": 36,
+          "text": "jet debug covers the everyday debugger workflow natively, in the (Jet) console and over DAP: breakpoints by file:line and by function, conditional breakpoints and logpoints, step in, over and out, finish, backtrace, frame select, print and watch expressions, and attach to a running PID the user owns. Proof: one Debug case per command, each running jet debug with no other debugger on PATH.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T07:54:46.603Z"
+        },
+        {
+          "n": 37,
+          "text": "No text tells a user that Jet's debugger or profiler is lldb, gdb or Linux perf: the 'under LLDB' comments in Compiler/Examples/Tooling/Debugging (Debug.jet, DebugNative.jet) say jet debug runs its own engine, and the Canvas debug tier `native-lldb` is renamed `native` with its cases. Proof: `jet test Tests/Guards --filter debug_names_no_outside_debugger` (a guard that fails on those spellings outside interop cases).",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T07:54:47.536Z"
+        },
+        {
+          "n": 38,
+          "text": "jet perf's own sampler keeps whole stacks without frame pointers: a sample taken in code built without frame pointers (an O2 leaf, the runtime, a C library frame) unwinds through Jet's own CFI/DWARF unwinder, not a truncated frame-pointer walk.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-18T07:54:48.457Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "Perf/unwinds_without_frame_pointers"
+          }
         }
       ],
       "refs": [],
@@ -87659,9 +87713,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-18T06:36:29.046Z",
+      "updated": "2026-11-18T07:54:50.172Z",
       "updatedBy": "Main",
-      "criteriaLastN": 33
+      "criteriaLastN": 38
     },
     {
       "id": "c0oo8eeq",
@@ -178599,6 +178653,90 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T07:54:50.172Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-18T07:54:48.457Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "38 criteria, soft limit 6: owner: jet-native debugger and profiler"
+    },
+    {
+      "at": "2026-11-18T07:54:48.457Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#38 jet perf's own sampler keeps whole stacks without frame poin"
+    },
+    {
+      "at": "2026-11-18T07:54:47.536Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "37 criteria, soft limit 6: owner: jet-native debugger and profiler"
+    },
+    {
+      "at": "2026-11-18T07:54:47.536Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#37 No text tells a user that Jet's debugger or profiler is lldb"
+    },
+    {
+      "at": "2026-11-18T07:54:46.603Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "36 criteria, soft limit 6: owner: jet-native debugger and profiler"
+    },
+    {
+      "at": "2026-11-18T07:54:46.603Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#36 jet debug covers the everyday debugger workflow natively, in"
+    },
+    {
+      "at": "2026-11-18T07:54:45.381Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "35 criteria, soft limit 6: owner: jet-native debugger and profiler"
+    },
+    {
+      "at": "2026-11-18T07:54:45.381Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#35 jet debug's own engine does what the lldb interop cases prov"
+    },
+    {
+      "at": "2026-11-18T07:54:44.348Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "34 criteria, soft limit 6: owner: jet-native debugger and profiler"
+    },
+    {
+      "at": "2026-11-18T07:54:44.348Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#34 jet alone debugs and profiles: every Debug and Perf case tha"
+    },
+    {
+      "at": "2026-11-18T07:53:28.091Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-18T07:53:28.091Z"
+    },
     {
       "at": "2026-11-18T07:53:27.301Z",
       "by": "owner",
