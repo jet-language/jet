@@ -455,6 +455,9 @@ ir_quiet_hook_run: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, args:
     ir_release(m, b, payload)
     if ir_unit_type(ty) -> return -1
     if fallback < 0 -> return -1
+    // An integer literal's constant is the run's own value: it moves out
+    // instead of cloning, as a binding's does.
+    if ir_body_node(p, b, args[1]).kind == .IntLit(_, _) -> b.fresh[fallback] = true
     owned: if b.fresh[fallback] -> fallback else -> ir_copy_value(m, p, b, fallback, span)
     if ir_failed(b) -> return -1
     b.fresh[owned] = true
