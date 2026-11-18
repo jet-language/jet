@@ -60542,6 +60542,675 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-13",
       "retiredAt": "2026-11-18T08:30:44.208Z"
+    },
+    {
+      "id": "D-HOST-NONCE1",
+      "cardId": "c0mf9ybj",
+      "group": "effects",
+      "title": "Which permission covers the small reads that only make unique names or inspect the running program?",
+      "situation": "Some library operations quietly read a small fact from the computer while they work. A safe file save picks a throwaway name from the process number, and a temporary folder name mixes in the clock. Starting another program looks it up on PATH, and the scheduler reads files about its own process. Today none of these reads is listed under its own permission, so denying Env, Rand or Time does not stop them. They never change what a program computes: they only keep names from colliding, find the program to start, or watch the program itself. You are asked how a denial should treat them. We recommend writing them into the effect rules as part of the operation's own permission, so a denial means exactly what the rules say.",
+      "gist": "Should name-making and self-inspection reads count under the operation's own permission?",
+      "lesson": "A permission (an effect) names what code may touch: files, the clock, the environment. A denial says the program must never touch it. A few library steps read tiny facts only to make a unique throwaway name, to find the program being started, or to inspect the running program. The question is whether those steps belong to the operation's permission or need their own.",
+      "explainer": "",
+      "story": "Sam's backup tool may write files, and he runs it with Env, Rand and Time denied. It saves notes.txt with a safe write that first writes a hidden temporary file. Sam wants the save to keep working, and he wants the deny list to mean exactly what it says.",
+      "inWild": "// Deno documentation example, not executed in this review.\n// deno run --allow-write save.ts\n// Making a temporary folder needs only write permission,\n// though the name is random and the folder comes from TMPDIR.\nconst dir = await Deno.makeTempDir();\nawait Deno.writeTextFile(`${dir}/notes.txt`, \"hello\");\n// Source: https://docs.deno.com/api/deno/~/Deno.makeTempDir",
+      "detail": "The four reads come from Docs/spec/reference/host-reads.md. H6 is the clock sample and TMPDIR for a temporary name (core.files mkdtemp, files_temp_path and the temp_* constructors, -[FS]>). H7 is the process id in an atomic write's candidate name `.jet_tmp_<pid>_<sequence>` (core.files and core.crypto, FS.Write). H7 also covers a core.service store's temporary name (core.service __host_pid).\n\nH9 is PATH from the logical environment, read to resolve a command (runtime ProcessExecutionAuthority.jet, Exec). H10 is the process's own /proc/self and cgroup files (scheduler monitor, process scopes, Unix-socket paths, test reads; no row).\n\nThe reads that can change a result are already declared. They are core.service's clock, entropy and working directory (H3), the terminal-capability variables (H5) and path.home (H8). core.files mktemp already declares -[FS, Env, Time]> for H6's reads. Until this ballot is ruled, host-reads.md lists the four rows as open. No page or diagnostic claims that a denial blocks every host read of its kind.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Count them under the operation's own permission, written into the rules",
+          "detail": "spec.md \"Effects\" gains one rule. A read that only makes a collision-avoiding name, finds the program an Exec call starts, or inspects the running process belongs to the calling operation's effect. The temporary-name and atomic-write reads are part of FS.Write, the PATH lookup is part of Exec, and /proc/self reads are part of whatever call makes them.\n\nhost-reads.md lists each read by name under that rule. A new host read must either fit the rule or declare its own effect. Nothing changes for programs. A name such a read makes is documented as unspecified, so a program that prints it sees a different name each run under every option.",
+          "code": "// save.jet\npackage: { name: \"save\", authority: { allow: [FS] } }\nuse { files: core.files }\nrun: fn() {\n    // Writes a hidden temporary file, then renames it into place.\n    files.write_atomic(\"notes.txt\", \"hello\".bytes()) ?? panic(\"save\")\n    print(\"saved\")\n}\n// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED A: prints \"saved\". The process id in the hidden name is part of FS.Write."
+        },
+        {
+          "key": "B",
+          "name": "Declare Env, Rand or Time on each operation that makes such a read",
+          "detail": "write_atomic, the temp_* constructors and mkdtemp declare Env and Time next to FS; core.process starts declare Env for PATH; every scheduler and process-scope entry declares FS.Read for /proc/self. A written authority row that allows only FS no longer covers a safe save.",
+          "code": "// save.jet\npackage: { name: \"save\", authority: { allow: [FS] } }\nuse { files: core.files }\nrun: fn() {\n    // Writes a hidden temporary file, then renames it into place.\n    files.write_atomic(\"notes.txt\", \"hello\".bytes()) ?? panic(\"save\")\n    print(\"saved\")\n}\n// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED B: refused before it runs. write_atomic reaches Env (the process id)."
+        },
+        {
+          "key": "C",
+          "name": "Remove the reads where possible",
+          "detail": "Temporary and atomic-write names come from a per-process counter, seeded once by one start-up read that the runtime declares with its other start-up controls. No file operation reads the clock or the process id. PATH lookup and /proc/self reads can't be removed, because finding the program is the start and the scheduler must watch its own threads, so those two still need option A's rule.",
+          "code": "// save.jet\npackage: { name: \"save\", authority: { allow: [FS] } }\nuse { files: core.files }\nrun: fn() {\n    // Writes a hidden temporary file, then renames it into place.\n    files.write_atomic(\"notes.txt\", \"hello\".bytes()) ?? panic(\"save\")\n    print(\"saved\")\n}\n// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED C: prints \"saved\". The hidden name comes from a counter seeded at start-up."
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "why": "These reads can't change what a program computes or prints beyond a throwaway name, so a denial that refused them would only break safe saves and program starts. Writing the rule down keeps every denial honest, because the rules list exactly which reads it covers.",
+        "tradeoff": "A denial of Env does not stop the process-id read inside a safe save. The effect rules say so by name, and that read can't leak anything into the program's results.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Beginners who allow only FS could no longer save a file safely, and every authority row grows for reads that never change a result."
+          },
+          {
+            "key": "C",
+            "reason": "It rewrites file naming and still needs option A's rule for PATH and the process's own files, so it adds work without removing the rule."
+          }
+        ],
+        "losses": [
+          {
+            "loss": "Denying Env still allows a hidden name's process-id read.",
+            "mitigation": "The effect rules list that read by name, and its only use is a throwaway name the program never relies on."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "Should reads that only make unique names, or inspect the running program, count under the operation's own permission?",
+        "lesson": "A permission names what code may touch, like files or the clock. A few library steps read tiny facts only to make a unique throwaway name, find the program being started, or inspect the running program. Should those steps belong to the operation's permission, or need their own?",
+        "trio": {
+          "current": {
+            "note": "Today a safe save reads the process id, and no permission lists that read.",
+            "code": "// save.jet\npackage: { name: \"save\", authority: { allow: [FS] } }\nuse { files: core.files }\nrun: fn() {\n    files.write_atomic(\"notes.txt\", \"hello\".bytes()) ?? panic(\"save\")\n    print(\"saved\")\n}\n// jet run --deny=Env,Rand,Time save.jet\n// Today: prints \"saved\", and no rule says why the process-id read is allowed."
+          },
+          "wild": {
+            "note": "Deno's temporary folder needs only write permission, though it reads TMPDIR and draws a random name.",
+            "lang": "TypeScript",
+            "code": "// deno run --allow-write save.ts\nconst dir = await Deno.makeTempDir();\nawait Deno.writeTextFile(`${dir}/notes.txt`, \"hello\");"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Part of the operation's own permission",
+            "gist": "Write the rule down: name-making, program lookup and self-inspection reads belong to the calling operation.",
+            "gains": [
+              "Safe saves and program starts keep working under any denial.",
+              "Every such read is listed by name in the rules.",
+              "Nothing changes for existing programs."
+            ],
+            "losses": [],
+            "proposed": {
+              "code": "// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED A: prints \"saved\".\n// The process id in the hidden name is part of FS.Write."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Declare Env, Rand or Time on each operation",
+            "gains": [
+              "A denial of Env refuses every environment read, with no exceptions."
+            ],
+            "gist": "Each operation that makes such a read lists the extra permission.",
+            "losses": [
+              "A program allowing only FS can no longer save safely.",
+              "Authority lists grow for reads that never change a result."
+            ],
+            "proposed": {
+              "code": "// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED B: refused before it runs.\n// write_atomic reaches Env through the process id."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Remove the reads where possible",
+            "gist": "Make hidden names from a counter seeded once at start-up.",
+            "gains": [
+              "File operations stop reading the clock and process id."
+            ],
+            "losses": [
+              "Program lookup and self-inspection still need option A's rule.",
+              "File naming code must be rewritten and tested again."
+            ],
+            "proposed": {
+              "code": "// jet run --deny=Env,Rand,Time save.jet\n// PROPOSED C: prints \"saved\".\n// The hidden name comes from a counter seeded at start-up."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "These reads can't change what a program computes or prints, so refusing them would only break safe saves and program starts. Writing the rule down keeps each denial honest.",
+          "gains": [
+            "Denials mean exactly what the written rules say.",
+            "Beginners write nothing new; experts read one listed rule."
+          ],
+          "losses": [
+            {
+              "loss": "Denying Env still allows a hidden name's process-id read.",
+              "mitigation": "The rules list that read by name, and it only makes a throwaway name."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Programs that only write files could no longer save safely."
+            },
+            {
+              "key": "C",
+              "reason": "It still needs option A's rule for program lookup and self-inspection."
+            }
+          ],
+          "tradeoff": "One written rule covers a few listed reads, instead of longer permission lists everywhere."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-12T07:05:21.448Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-12",
+      "retiredAt": "2026-11-18T11:43:43.123Z"
+    },
+    {
+      "id": "D-HOST-NONCE2",
+      "cardId": "c0mf9ybj",
+      "group": "library",
+      "title": "Reads of another process's /proc entry: the child read joins Exec and a kernel lock replaces the lock read, both reads join their operation, declare FS.Read, or remove both",
+      "situation": "D-HOST-NONCE1 said some small host reads belong to the operation that makes them. Two reads found since then look at a different process. When Jet starts a program with a memory or open-file limit, it reads that child's /proc entry to tell which limit stopped it. When a secrets-vault write finds an old lock, it reads the /proc entry of the program that left it. The owner asked for the best greenfield design, and said old code is never a reason to pick a worse one. We recommend A, which was the posted D. The child read is part of Exec, and the vault uses a lock the kernel drops when its holder exits, so it reads no /proc entry.",
+      "gist": "Should the child read count as part of Exec, and should the vault switch to a lock the kernel releases, so it reads no other process?",
+      "lesson": "Some operations look at the host to do their job. A process start with a memory limit watches the child it started. A vault write that finds an old lock checks whether the program that left it still runs. This vote decides whether those looks are part of the operation, need a permission, or should go away.",
+      "explainer": "Words used here. /proc is a folder Linux fills with live facts about each running program, one entry per process id (pid). An effect is a permission that a function's row names, such as Exec to start programs, Secret to use the secrets vault, or FS.Read to read files. A denial such as --deny=FS.Read refuses every call whose row needs that effect.\n\nA kernel lock, such as flock, is a lock on an open file that the operating system releases by itself when the program holding it exits or crashes. Docs/spec/reference/host-reads.md lists each read the runtime makes under another effect, and whether a denial covers it.",
+      "story": "Ravi's grading helper starts each student's program with a 32 MiB memory limit. His package allows Exec and IO, and he runs it with FS.Read denied. He wants an over-limit program to report ResourceLimit(.Memory). He also stores an API key in the vault, and last week his laptop died during a vault write.\n\nUnder A and B the memory error keeps working. Under A his next vault write proceeds at once, because the kernel dropped the dead writer's lock. Under B he waits ten minutes. Under C every process start needs FS.Read. Under D the memory error is gone.",
+      "inWild": "// Rust (fs2): an exclusive file lock the kernel releases if the holder dies.\nlet file = File::create(\".secrets.age.lock\")?;\nfile.lock_exclusive()?;",
+      "detail": "What this ballot decides. Whether two runtime reads of another process's /proc entry belong to the effect of the operation that makes them, or are replaced or removed.\n\nThe owner's question (q2i7dehp). The owner asked for the best greenfield design, and noted the posted ballot passed over D only because older toolchains would need updating. That is not a valid reason, so the recommendation moves to D, now listed first as A. The other options are renamed: B was A, C was B, and D was C.\n\nThe first read, H22. HostSpawn sets the kernel limits RLIMIT_AS and RLIMIT_NOFILE in the child before it runs. While a limited child runs, Compiler/JetRuntime/Source/ProcessExecutionLimits.jet reads /proc/<child>/status (VmSize) and lists /proc/<child>/fd. When VmSize comes within 1 MiB of memory_limit, or the descriptors reach open_file_limit, Jet stops the child. The run then fails with IOError.ResourceLimit(.Memory) or ResourceLimit(.OpenFiles).\n\nThe kernel reports neither limit by a signal, so without this read Jet cannot tell these failures apart from any other. No other interface gives a per-process open-file count. That is why every option except D keeps the read.\n\nThe second read, H23. The vault lock is .jet/.secrets.age.lock, created with O_EXCL. A writer records its pid and its start time, read from its own /proc/<pid>/stat (VaultLinux.jet:768). A later writer that finds the file waits until it is ten minutes old (VaultLinux.jet:853). Only then does it read the recorded owner's /proc entry and decide whether the owner is gone.\n\nWhy a kernel lock is better, not just cheaper to rule. Under A the writer opens the lock file and takes flock, through HostFileLock.jet, the leaf core.files locks already use. The kernel releases it the moment the holder exits, so there is no stale state, no ten-minute wait and no pid. The pid check is also wrong when the vault sits on a shared network folder, where a pid names a process on another machine. The revision and hash checks that choose the current or backup store stay.\n\nOlder Jet builds. A Jet from before the change takes no flock and expects a pid= line. A new Jet that finds an old-format file treats it as held by an older Jet. It refuses with a message naming the file, and never steals it.\n\nThe reverse is stricter. The new file is never removed, so once a new Jet has written a vault, an older Jet refuses every write to it. The older Jet reports the vault locked until someone deletes .jet/.secrets.age.lock.\n\nJet is greenfield and owes its older builds no compatibility, so A accepts this, and a release note names the file. If mixed builds ever must share a vault, the writer can unlink the file on release and recheck the file's identity after locking. That costs one stat per write and removes the file between writes.\n\nThe rule A adds. spec.md Effects extends the D-HOST-NONCE1=A sentence with one case. Reading the state of a child process the operation started, its /proc entry or a control group (cgroup) the operation created for it, belongs to the operation's effect. host-reads.md H22 moves to ruled and H23 to fixed.\n\nRelation to other ballots. D-HOST-NONCE1=A is the rule this one extends. D-NET-HOSTREADS1=A covers TLS reads and is unaffected.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Count the child read as part of Exec, and replace the stale-lock read with a kernel lock",
+          "detail": "This was the posted D. Reading the /proc entry of a child the operation started belongs to Exec, so the typed memory and open-file errors stay. The vault lock becomes a flock the kernel drops when its holder exits, so no vault call reads another process's entry, and a crashed writer's lock is free at once.\n\nBeginner path: nothing to learn. Limits report which one stopped the child, and a crash never blocks the vault. Expert path: host-reads.md lists the one remaining read, and --deny=FS.Read says exactly what it does not cover.",
+          "technical": "spec.md Effects extends the D-HOST-NONCE1 sentence with the started-child case, naming its /proc entry and any cgroup the operation creates for it. host-reads.md H22 moves to ruled.\n\nVaultLinux.jet opens .jet/.secrets.age.lock with O_CREAT and takes flock through HostFileLock.jet, waiting under the call's deadline. The file is never unlinked, which avoids the unlink race of lock files. It drops vault_process_start, the pid and start-time fields, the pidfd check and the ten-minute age check. A file holding the old pid= format is refused as held by an older Jet, with a message naming the file. host-reads.md H23 becomes fixed. No Core row changes.",
+          "code": "use process: core.process\n\nrun: fn() {\n    if process.cmd([\"./student\"]).memory_limit(33554432).run() == {\n        .Ok(_) -> print(\"finished\")\n        .Err(error) -> print(\"stopped: {error}\")\n    }\n}\n// jet run --deny=FS.Read grader.jet\n// A: an over-limit student prints its ResourceLimit(.Memory) error.\n// A vault write after a crash proceeds at once; it reads no /proc entry."
+        },
+        {
+          "key": "B",
+          "name": "Count both reads as part of their operation",
+          "detail": "This was the posted A. The rule gains two named cases: the child the operation started, under Exec, and the owner recorded in a lock file the vault's own protocol wrote, under Secret. Nothing changes for programs, including the ten-minute wait after a crashed writer.",
+          "technical": "spec.md Effects extends the D-HOST-NONCE1 sentence with both cases. host-reads.md H22 and H23 move to ruled. No runtime change.",
+          "code": "use process: core.process\n\nrun: fn() {\n    if process.cmd([\"./student\"]).memory_limit(33554432).run() == {\n        .Ok(_) -> print(\"finished\")\n        .Err(error) -> print(\"stopped: {error}\")\n    }\n}\n// jet run --deny=FS.Read grader.jet\n// B: as A for the child. A vault write after a crash waits ten minutes,\n// then reads the dead writer's /proc entry under Secret."
+        },
+        {
+          "key": "C",
+          "name": "Declare FS.Read on the operations that make them",
+          "detail": "This was the posted B. Rows are fixed in the source, so every process start and run that can carry a limit names FS.Read, and so does every vault write. A package that allows Exec but not FS.Read can no longer start a program, even one with no limit.",
+          "technical": "core.process start and run entry points, the pipeline runners and core.crypto.vault prepare and commit add FS.Read to their rows. The compiler's call effect rows and IR route effects follow.",
+          "code": "use process: core.process\n\nrun: fn() {\n    if process.cmd([\"./student\"]).memory_limit(33554432).run() == {\n        .Ok(_) -> print(\"finished\")\n        .Err(error) -> print(\"stopped: {error}\")\n    }\n}\n// jet run --deny=FS.Read grader.jet\n// C: refused before it runs; process starts now need FS.Read, limit or not."
+        },
+        {
+          "key": "D",
+          "name": "Remove both reads",
+          "detail": "This was the posted C. The child read goes: the kernel still enforces the limits, but a child that hits one ends however its own code handles the failed allocation or open. The run no longer says which limit stopped it. The vault lock becomes the same kernel lock as in A.",
+          "technical": "Delete ProcessExecutionLimits.jet's polling and the parent-side stop, and the ResourceLimit(.Memory) and ResourceLimit(.OpenFiles) results with their cases. The vault change is A's.",
+          "code": "use process: core.process\n\nrun: fn() {\n    if process.cmd([\"./student\"]).memory_limit(33554432).run() == {\n        .Ok(_) -> print(\"finished\")\n        .Err(error) -> print(\"stopped: {error}\")\n    }\n}\n// jet run --deny=FS.Read grader.jet\n// D: the limit holds, but an over-limit student reports its own exit,\n// not ResourceLimit(.Memory). The vault is as in A."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "File locks such as fs2's lock_exclusive and std's File::lock use flock, which the kernel releases when the holder exits; no pid file is involved. Source: doc.rust-lang.org/std/fs/struct.File.html#method.lock",
+          "code": "let file = File::create(\".secrets.age.lock\")?;\nfile.lock()?;   // released by the kernel if this process dies"
+        },
+        {
+          "lang": "systemd",
+          "note": "A unit's MemoryMax is enforced by a cgroup, and systemd reads that cgroup's memory.events to report that the limit stopped the unit. It reads the state of the child it started to report the cause, as A rules. Source: www.freedesktop.org/software/systemd/man/latest/systemd.resource-control.html",
+          "code": "systemd-run --scope -p MemoryMax=32M ./student\n# result: oom-kill, read from the cgroup's memory.events"
+        },
+        {
+          "lang": "Deno",
+          "note": "--allow-run grants starting programs, and Deno gives no limits of its own. Reading a child's /proc entry needs --allow-read like any file. Source: docs.deno.com/runtime/fundamentals/security",
+          "code": "const child = new Deno.Command(\"./student\").spawn();\nawait Deno.readTextFile(`/proc/${child.pid}/status`); // needs --allow-read"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps the typed limit errors that only the child read can give, and rules that read under the narrowest case: the child the operation itself started. It removes the other read entirely and fixes two vault weaknesses. A crashed writer no longer blocks it for ten minutes, and a pid on another machine can no longer fool it.",
+        "gains": [
+          "Programs keep ResourceLimit(.Memory) and ResourceLimit(.OpenFiles).",
+          "No vault call reads another process's /proc entry; a crashed writer's lock is free at once.",
+          "The rule grows by one narrow case, and host-reads.md has no open rows.",
+          "Exec and Secret grants keep working with FS.Read denied."
+        ],
+        "losses": [
+          {
+            "loss": "A denial of FS.Read does not stop the parent reading its own child's /proc entry.",
+            "mitigation": "The read returns only which limit stopped the child, never file contents, and host-reads.md names it."
+          },
+          {
+            "loss": "Once a new Jet has written a vault, an older Jet build refuses every write to it until .jet/.secrets.age.lock is deleted.",
+            "mitigation": "Jet owes older builds no compatibility, and a release note names the file. Unlinking on release, with an identity recheck after locking, removes the file between writes if mixed builds must share."
+          },
+          {
+            "loss": "The child read is a 1 ms sample, so a child that jumps past the limit between samples meets the kernel limit with no typed error.",
+            "mitigation": "This is today's behavior under every option but D. A cgroup the operation creates gives exact memory reports and falls under the same rule."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps three flaws a kernel lock removes. It reads another program's /proc entry, waits ten minutes after a crash, and trusts a pid that is wrong on a shared network folder."
+          },
+          {
+            "key": "C",
+            "reason": "Rows are static, so C charges FS.Read to every process start and vault write, even with no limit or old lock, which breaks the common Exec-only grant."
+          },
+          {
+            "key": "D",
+            "reason": "D drops the typed memory and open-file errors, and nothing else can give them."
+          }
+        ],
+        "tradeoff": "One named read of the operation's own child stays under Exec, for typed limit errors and a vault that reads no other process."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: BallotReview-3. The review checked the /proc reads and the vault lock code. A never-unlinked lock file locks older Jet builds out for good; that cost is now named with its mitigation."
+      },
+      "checkInstructions": "In the Jet repository, read Compiler/JetRuntime/Source/ProcessExecutionLimits.jet. process_execution_memory_used reads /proc/<pid>/status for VmSize, and process_execution_files_used lists /proc/<pid>/fd. The 1 MiB memory threshold is at line 97.\n\nRead Compiler/JetRuntime/Source/VaultLinux.jet. Line 768 reads the writer's own pid and line 769 its start time from /proc. Line 853 is the ten-minute age check, and lines 857-862 read the recorded owner's fields, its /proc entry and a pidfd.\n\nRead Compiler/JetRuntime/Source/HostFileLock.jet: jet_fs_lock_try_raw and jet_fs_lock_wait_raw call flock (syscall 73) with LOCK_EX, and the final drop closes without unlinking. That is the leaf A's vault lock uses. host-reads.md rows H22 and H23 are open on dev. VaultLinux.jet lines 857-862 also show what an older Jet does with a file it cannot parse: it reports the vault locked and never steals it. Validate this payload with Tools/agent/ballots/Validate.jet.",
+      "surface": {
+        "gist": "Should the child read count as part of Exec, and the vault switch to a lock the kernel releases?",
+        "lesson": "A process start with a memory limit watches its child. A vault write that finds an old lock checks whether its owner still runs. This vote decides whether those looks need a permission or should go.",
+        "trio": {
+          "current": {
+            "note": "Both reads run under Exec and Secret and are listed as open.",
+            "code": "process.cmd([\"./student\"]).memory_limit(33554432).run()\n// over the limit: ResourceLimit(.Memory), even with FS.Read denied"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "A file lock the kernel releases if its holder dies.",
+            "code": "let file = File::create(\".secrets.age.lock\")?;\nfile.lock()?;"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Child read is Exec; kernel lock",
+            "gist": "The child read counts as Exec; the vault uses a lock the kernel releases.",
+            "gains": [
+              "Typed limit errors stay.",
+              "The vault reads no other process.",
+              "A crash never blocks the vault."
+            ],
+            "losses": [
+              "FS.Read denial doesn't cover the child read."
+            ],
+            "proposed": {
+              "code": "process.cmd([\"./student\"]).memory_limit(33554432).run()\n// ResourceLimit(.Memory); a crashed vault writer frees its lock"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Both are part of the operation",
+            "gist": "Both reads are listed by name under Exec and Secret.",
+            "gains": [
+              "No runtime change."
+            ],
+            "losses": [
+              "Ten-minute wait after a crash.",
+              "Reads another program's /proc entry."
+            ],
+            "proposed": {
+              "code": "process.cmd([\"./student\"]).memory_limit(33554432).run()\n// ResourceLimit(.Memory)"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Declare FS.Read",
+            "gist": "Process starts and vault writes name FS.Read.",
+            "gains": [
+              "A denial covers every read."
+            ],
+            "losses": [
+              "Exec-only packages can't start programs."
+            ],
+            "proposed": {
+              "code": "process.cmd([\"./student\"]).memory_limit(33554432).run()\n// refused under --deny=FS.Read"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Remove both reads",
+            "gist": "No child read; the vault uses A's kernel lock.",
+            "gains": [
+              "No host reads at all."
+            ],
+            "losses": [
+              "No typed memory or open-file errors."
+            ],
+            "proposed": {
+              "code": "process.cmd([\"./student\"]).memory_limit(33554432).run()\n// the student's own exit, not ResourceLimit(.Memory)"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Typed limit errors stay under one narrow named read, and the vault drops its other-process read and its ten-minute wait.",
+          "gains": [
+            "Typed limit errors stay.",
+            "The vault reads no other process.",
+            "A crash never blocks the vault."
+          ],
+          "losses": [
+            {
+              "loss": "FS.Read denial doesn't cover the child read.",
+              "mitigation": "It returns only which limit hit; host-reads.md names it."
+            },
+            {
+              "loss": "An older Jet can't write a vault a new Jet has used.",
+              "mitigation": "Older builds aren't supported; deleting the lock file frees it."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Keeps the wait and the other-process read."
+            },
+            {
+              "key": "C",
+              "reason": "Breaks Exec-only packages."
+            },
+            {
+              "key": "D",
+              "reason": "Loses the typed limit errors."
+            }
+          ],
+          "tradeoff": "One named child read under Exec, for typed limits and a vault that reads no other process."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-13T08:49:54.799Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-13",
+      "retiredAt": "2026-11-18T11:43:43.123Z"
+    },
+    {
+      "id": "D-MEM-CHOKEPOINT1",
+      "cardId": "c0oo8eeq",
+      "group": "library",
+      "title": "Memory chokepoint: kernel files with owners and checked views; kernel files with single-use handles; a kernel of raw primitives; today's blocks plus a report; or Core only",
+      "situation": "Jet code that touches raw memory opens an #Unsafe block and writes a reason. There are 1,528 such blocks, and 656 of them read, write, allocate or free memory directly. The runtime also has 248 ordinary functions that read or write at an address their caller picks, used 17,528 times with no block at the call. The owner asked that every raw memory action go through one small, heavily audited place. Probes show that moving raw operations alone changes nothing: a read after free still compiles, and a release build runs it silently. Single-use handles stopped some of these bugs. But a handle can be copied, directly or inside a struct, and the release build then reads freed memory. Jet's view checker, which already guards list and arena views, refused every read after close that the probes tried.",
+      "gist": "Should raw memory live in kernel files that hand out owners and checked views, in kernel files with single-use handles, in raw primitives, in today's blocks, or only in Core?",
+      "lesson": "Raw memory means reading and writing bytes at an address the program computed. If the address is wrong, or the memory was already freed, the program reads garbage or crashes, and a release build does not check. Jet makes such code open an #Unsafe block and write why it is safe. This vote decides whether those blocks may sit anywhere, or only in a few small kernel files, and what those files hand the rest of the program.",
+      "explainer": "Words used here. A kernel file is a file a package names as allowed to hold raw memory code. An owner is a value that holds a piece of memory and frees it when it closes. Only the kernel can make one, and Jet refuses to copy it.\n\nA view is a window into memory that an owner hands out, like a slice of a list. Jet ties each view to its owner, so the owner cannot close, move or grow while the view is still used. A single-use handle is a value that must be spent exactly once. A release build is the fast build. It runs without the sentries that watch memory in the default and hardened builds.",
+      "story": "Ana writes a ring buffer for audio over memory she allocates herself. Today she opens #Unsafe blocks in four files. A teammate later keeps a copy of a pointer after the buffer is freed. The default build stops at the bad read, but the release build prints stale samples.\n\nUnder A, Ana puts the buffer in one kernel file. It hands out a Ring owner and views of its samples. The teammate's view, kept past the close, does not compile, and the audit report lists her one file.\n\nUnder B the Ring is a single-use handle. The teammate copies it with .copy(), and the release build still reads freed samples. Under C she calls kernel read and write functions, and the stale copy still compiles. Under D nothing changes, but the report lists all four blocks. Under E she cannot write the buffer at all unless Core ships one.",
+      "inWild": "// Rust: a slice borrows its owner, so the owner can't be freed first.\nlet v = vec![1, 2, 3];\nlet s = &v[0..2];\ndrop(v);   // error[E0505]: cannot move out of `v` because it is borrowed\nprintln!(\"{}\", s[0]);",
+      "detail": "What this ballot decides. Where Jet code may perform raw memory actions, and what the rest of a program uses instead.\n\nWhat the review measured. The raw primitives are already defined in three places: the core memory module, the compiler's intrinsic rows and the operating-system leaves. What is scattered is the reasoning at each use. 656 blocks address memory directly, and 248 runtime functions take an address from their caller with no block at the call. The runtime's raw code sits in 81 files of about 36,600 lines.\n\nWhat probes showed. A read through a copy of a freed pointer compiles under every build, and the release build prints the stale value. Moving the read into a kernel function changes nothing, because the caller still vouches for the address. A word-sized read through a kernel function built to the same image size and ran in the same time as the direct read.\n\nWhat a second, fresh review found. Single-use handles refuse forging and a plain use after release. But .copy() of a handle compiles, a struct that holds one copies freely, and a raw window handed out by one outlives it. Each case reads or frees freed memory silently in a release build. Jet's own Core memory block copies the same way.\n\nWhat already works. Jet ties a view returned by an owner's method to that owner. Closing, moving or growing the owner while the view is used is a compile error, and so is returning a view of a dead owner. Owners that close themselves cannot be copied, even inside a struct, and can be lent to helpers. One escape remains: a view stored in a field of a returned record.\n\nWhat it costs. With the loop in its own function, a view read runs at raw speed and a checked handle read costs 1.4 times. With the loop in the main function, the view costs 1.8 times and the handle 3.6 times. The existing raw window boxes every element, about 15 times slower.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Kernel files that hand out owners and checked views",
+          "detail": "A package lists its kernel files in its policy. Raw memory operations anywhere else are refused, and the message names the safe type to use instead. A single-file program is its own kernel, so small scripts keep working. Kernels hand out owners: memory, regions, mappings, device registers and shared atomic words. An owner hands out views tied to itself. Beginners use lists and never see a kernel. Experts write their own kernel file, still behind #Unsafe.",
+          "technical": "A new policy field, memory: .Kernel([paths]), next to unsafe: .Paths. A package without it has no kernel files. A type declared in a kernel file keeps its private fields private to the kernel files, not the whole package. A kernel's public function that is not #Unsafe may not take an integer or pointer that reaches a raw address.\n\nOwners are Close resources: copies are refused, lending is plain, and scope end closes them. Inside a kernel, mem.window(owner, pointer, count) builds a View<T> whose owner is the first argument. It replaces the copyable mem.Window<T>, which amends that row of D-RAWPTR2. Sema's existing view rules then refuse closing, moving or growing the owner while a view lives. Two gaps close first: a view inside a returned record, and the close duty of pattern bindings.\n\nKernel primitives are intrinsics or always inlined. The compiler's lowering rows are the kernel for generated loads, and proven accesses stay plain loads. jet audit memory lists every kernel file, raw operation, adopting or view constructor, lowering row, asm leaf and vouch block. The runtime, below Core, gets its own kernel.",
+          "code": "// package.jet: policy: { memory: .Kernel([\"src/kernel\"]) }\n// src/kernel/Words.jet, a kernel file:\nWords: struct {\n    priv base: Int      // private to the kernel files\n    priv count: Int\n    all: fn(self) -> View<I64> {\n        #Unsafe(\"base names count live I64s while this Words lives\") {\n            mem.window(self, mem.Ptr<I64>.from_addr(self.base), self.count)\n        }\n    }\n    impl Close {\n        close: fn(&&self) {\n            #Unsafe(\"base came from alloc_raw in zeroed and is freed once, here\") {\n                mem.free_raw(mem.Ptr<U8>.from_addr(self.base))\n            }\n        }\n    }\n}\n\n// any other file:\nwords: kernel.Words.zeroed(4) ?? panic(\"no memory\")\nview: words.all()   // a View<I64> tied to words\ntotal := I64{0}\nloop i in 0..<view.len() -> total += view[i]\nwords.close()       // won't compile while view is used below\nprint(view[0])"
+        },
+        {
+          "key": "B",
+          "name": "Kernel files that hand out single-use handles",
+          "detail": "The same kernel files as A, but kernels hand out single-use handles instead of owners and views. A handle carries its own bounds and is spent exactly once. Today a handle can be copied, directly or inside a struct, and a release build then reads freed memory. A handle cannot be passed to a helper function at all.",
+          "technical": "The same policy, kernel privacy and address rule as A, with #SingleUse handles instead of owners and views. Four sema changes are needed first. Copies of single-use values must be refused, and their duty must pass through struct fields. Handles must not hand out copyable views. Lending with & must be allowed, which amends D-LIN1. A bounds-checked read costs 1.4 times with the loop in a handle method and 3.6 times with it in the main function.",
+          "code": "// src/kernel/Words.jet, a kernel file:\n#SingleUse Words: struct {\n    priv base: Int\n    priv count: Int\n    len: fn(self) -> Int { self.count }\n    read: fn(self, index: Int) -> I64 {\n        if index < 0 || index >= self.count -> panic(\"outside\")\n        #Unsafe(\"base names count live I64s while Words lives\") {\n            mem.Ptr<I64>.from_addr(self.base).offset(index).*\n        }\n    }\n}\n\n// any other file:\nwords: kernel.acquire(4) ?? panic(\"no memory\")\ntotal := I64{0}\nloop i in 0..<words.len() -> total += words.read(i)\nkernel.release(words)   // spent once\n// today words.copy() compiles, and releasing both frees twice"
+        },
+        {
+          "key": "C",
+          "name": "A kernel of raw primitives",
+          "detail": "Each package has one kernel of typed raw primitives: read, write, step, copy, allocate and free. Raw syntax elsewhere is refused. Callers still open an #Unsafe block around each primitive call and vouch for the address. There are no owners or handles, so the bugs the probes found still compile.",
+          "technical": "The same policy field and report as A, without kernel privacy, owners or the address rule. Primitives are always inlined. The 42 runtime one-word wrappers become kernel primitives that callers gate, so their 17,528 calls each open a block.",
+          "code": "words: kernel.acquire(4) ?? panic(\"no memory\")\ntotal := I64{0}\n#Unsafe(\"words names 4 live I64s until release\") {\n    loop i in 0..<4 -> total += kernel.read(words, i)\n}\nkernel.release(words)"
+        },
+        {
+          "key": "D",
+          "name": "Today's blocks plus a report",
+          "detail": "#Unsafe blocks stay where they are. Jet adds the generated jet audit memory report and refuses safe functions that take a raw address. Packages may still opt in to path limits.",
+          "technical": "The existing unsafe: .Paths policy stays opt-in. The address rule applies everywhere, so the runtime's 248 address-taking wrappers become #Unsafe functions. Their 17,528 calls open blocks or move to typed views. No new types.",
+          "code": "total := I64{0}\n#Unsafe(\"bytes holds 4 live I64s until free_raw\") {\n    bytes: mem.alloc_raw(32, 8) ?? panic(\"no memory\")\n    words: bytes.cast<I64>()\n    loop i in 0..<4 -> total += words.offset(i).*\n    mem.free_raw(bytes)\n}\n// jet audit memory lists this block"
+        },
+        {
+          "key": "E",
+          "name": "Core only",
+          "detail": "Only Core and the runtime may hold raw memory code. User code gets owners and views and nothing else, so a user allocator or driver needs Core to ship it or goes through FFI.",
+          "technical": "Removes the user raw-pointer set the owner ratified earlier. Core's kernel and the runtime's kernel are the only kernel files; package policy cannot add one. A foreign vouch block in a user package is raw memory outside Core, so it must be banned or listed as a kernel.",
+          "code": "words: mem.Buffer<I64>.zeroed(4) ?? panic(\"no memory\")   // an owner Core ships\nview: words.all()\ntotal := I64{0}\nloop i in 0..<view.len() -> total += view[i]\n// no raw pointers outside Core and the runtime"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "Unsafe code may appear in any crate. Soundness rests on module privacy, and safe code gets owners and borrowed slices that the borrow checker ties to them.",
+          "code": "let s = &v[1..];   // drop(v) won't compile while s is used"
+        },
+        {
+          "lang": "Tock",
+          "note": "Drivers may not use unsafe at all; only the core kernel and chip crates may. Privileged calls take capability objects only trusted code can make.",
+          "code": "#![forbid(unsafe_code)]   // every capsule crate"
+        },
+        {
+          "lang": "Swift",
+          "note": "Span is a safe, non-escaping view of contiguous memory tied to its owner, and strict memory safety marks each unsafe use when a module opts in.",
+          "code": "let s: Span<Int> = array.span\nlet x = s[i]   // checked, no copy"
+        },
+        {
+          "lang": "Java",
+          "note": "The foreign memory API replaced raw access with MemorySegment handles that carry bounds and an arena lifetime. A closed arena turns later access into a run-time error, not a compile error.",
+          "code": "MemorySegment seg = arena.allocate(32);\nlong x = seg.get(ValueLayout.JAVA_LONG, 8);"
+        },
+        {
+          "lang": "Zig",
+          "note": "Raw pointers work anywhere. Allocation is explicit through an allocator argument, and safe builds keep bounds checks.",
+          "code": "const words = try allocator.alloc(i64, 4);\ndefer allocator.free(words);"
+        },
+        {
+          "lang": "Go",
+          "note": "Raw pointer code must import unsafe, which is easy to search for. Tools check the documented conversion rules at run time.",
+          "code": "p := unsafe.Pointer(&x)   // vet and checkptr check this"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A is the only option where every probed read after free stops compiling. It reuses the view rules Jet already enforces for lists and arenas. Its views read at raw speed in a function, and experts keep raw code in small listed files.",
+        "gains": [
+          "Forged owners, reads after close, copied owners and views that outlive their owner are compile errors.",
+          "One generated report lists every kernel file, raw operation and generated load.",
+          "Word reads through a kernel cost nothing once inlined, and views read at raw speed in a function.",
+          "Experts keep raw pointers in their own kernel files."
+        ],
+        "losses": [
+          {
+            "loss": "There are about five audit places in this repository, plus one per package with raw code, not one.",
+            "mitigation": "One generated report lists them all with their sizes, and kernels stay small."
+          },
+          {
+            "loss": "The runtime migration is large: raw code in 81 files and 17,528 wrapper uses.",
+            "mitigation": "The 42 one-word wrappers collapse mechanically into owners and views first; the rest is counted down by subsystem."
+          },
+          {
+            "loss": "Release builds do not watch kernel code, so a kernel bug is silent there.",
+            "mitigation": "Kernel tests run under the hardened build and under fuzzing, and views shrink what the sentries must catch."
+          },
+          {
+            "loss": "Views last only for their scope and stay on one task.",
+            "mitigation": "Owners carry long-lived memory and can be stored and lent. Shared memory uses a shared owner with checked atomic offsets, as Core's shared-word API does."
+          },
+          {
+            "loss": "Two checker gaps must close before raw-backed views ship: a view in a returned record field, and the close duty of pattern bindings.",
+            "mitigation": "Both are criteria on this card, and the probes that show them are written."
+          },
+          {
+            "loss": "mem.window gains an owner argument, which amends one row of the ratified raw-pointer decision.",
+            "mitigation": "The old copyable window is 15 times slower and readable after free, so nothing worth keeping is lost."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B's handles can be copied directly or inside a struct, and the release build then reads freed memory. Closing those holes rebuilds A's rules, amends the ratified single-use rule for lending, and still costs 1.4 to 3.6 times per checked read."
+          },
+          {
+            "key": "C",
+            "reason": "C moves raw reads into named functions but leaves each caller vouching for the address, so the read after free still compiles."
+          },
+          {
+            "key": "D",
+            "reason": "D shows every raw memory operation in a report but turns no memory bug into a compile error."
+          },
+          {
+            "key": "E",
+            "reason": "E takes raw pointers away from users, so allocators and drivers need Core or FFI."
+          }
+        ],
+        "tradeoff": "Several small listed kernel files, a large runtime migration and two checker fixes, for memory bugs that stop compiling and one report of every raw memory operation."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: Claude Opus. Fresh agent: MemReview-1. The fresh pass reran the probes and found that single-use handles copy directly and inside structs, so release builds read freed memory. It added the owner-and-view option, which Jet's view checker already enforces, and moved the recommendation to it."
+      },
+      "checkInstructions": "The audit is Docs/audits/2026-11-14-memory-chokepoint-review.md. The probes, the census script and their outputs sit in the submission's tests directory. With JET set to the gate jet, run-checks.sh reruns the first pass's compile and run checks, and run-timing.sh rebuilds and times its release loops. run-review2.sh reruns the fresh pass: the copy, struct, view and owner probes and the same-shape timings. python3 census.py on the repository prints the counts.",
+      "surface": {
+        "gist": "Where should raw memory live: kernel files with owners and views, kernel files with handles, raw primitives, today's blocks, or Core?",
+        "lesson": "Raw memory code reads bytes at an address the program computed. A wrong or freed address reads garbage, and a release build does not check. Jet code opens an #Unsafe block for this today, anywhere. This vote decides whether such code must sit in a few kernel files, and what those files hand everyone else.",
+        "trio": {
+          "current": {
+            "note": "A read after free compiles, and the release build prints the stale value.",
+            "code": "kept: bytes.cast<Int>()\nmem.free_raw(bytes)\nprint(kept.*)   // release: 5, no error"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "A slice borrows its owner, so freeing the owner first won't compile.",
+            "code": "let s = &v[0..2];\ndrop(v);   // error: v is still borrowed by s\nprintln!(\"{}\", s[0]);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Kernel files with owners and views",
+            "gist": "Raw memory only in listed kernel files; others get owners and checked views.",
+            "gains": [
+              "Probed reads after free stop compiling.",
+              "Uses view rules Jet already enforces."
+            ],
+            "losses": [
+              "About five audit places, not one.",
+              "A large runtime migration."
+            ],
+            "proposed": {
+              "code": "words: kernel.Words.zeroed(4) ?? panic(\"no memory\")\nview: words.all()   // a View<I64> tied to words\ntotal := I64{0}\nloop i in 0..<view.len() -> total += view[i]\nwords.close()       // won't compile while view is used below\nprint(view[0])"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Kernel files with single-use handles",
+            "gist": "Raw memory only in listed kernel files; others get single-use handles.",
+            "gains": [
+              "Forged handles and plain use after release stop compiling."
+            ],
+            "losses": [
+              "Copied handles read freed memory silently in release.",
+              "Handles can't be passed to helpers."
+            ],
+            "proposed": {
+              "code": "words: kernel.acquire(4) ?? panic(\"no memory\")\ntotal := I64{0}\nloop i in 0..<words.len() -> total += words.read(i)\nkernel.release(words)   // spent once\n// today words.copy() compiles and frees twice"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Kernel of raw primitives",
+            "gist": "Raw memory only through kernel functions; callers still vouch for addresses.",
+            "gains": [
+              "Raw operations have one home per package."
+            ],
+            "losses": [
+              "Read after free still compiles.",
+              "Every caller still opens #Unsafe."
+            ],
+            "proposed": {
+              "code": "words: kernel.acquire(4) ?? panic(\"no memory\")\ntotal := I64{0}\n#Unsafe(\"words names 4 live I64s until release\") {\n    loop i in 0..<4 -> total += kernel.read(words, i)\n}\nkernel.release(words)"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Today plus a report",
+            "gist": "Blocks stay where they are; a generated report lists them all.",
+            "gains": [
+              "The report shows every raw memory operation."
+            ],
+            "losses": [
+              "Prevents no new bug.",
+              "Runtime wrapper calls still need blocks."
+            ],
+            "proposed": {
+              "code": "total := I64{0}\n#Unsafe(\"bytes holds 4 live I64s until free_raw\") {\n    bytes: mem.alloc_raw(32, 8) ?? panic(\"no memory\")\n    words: bytes.cast<I64>()\n    loop i in 0..<4 -> total += words.offset(i).*\n    mem.free_raw(bytes)\n}\n// jet audit memory lists this block"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Core only",
+            "gist": "Only Core and the runtime hold raw memory; users get owners and views.",
+            "gains": [
+              "Fewest audit places."
+            ],
+            "losses": [
+              "No raw pointers for users.",
+              "Allocators and drivers need Core or FFI."
+            ],
+            "proposed": {
+              "code": "words: mem.Buffer<I64>.zeroed(4) ?? panic(\"no memory\")\nview: words.all()\ntotal := I64{0}\nloop i in 0..<view.len() -> total += view[i]\n// no raw pointers outside Core"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Only A turns every probed read after free into a compile error. It reuses view rules Jet already enforces, its views read at raw speed, and experts keep raw code in listed files.",
+          "gains": [
+            "Probed memory bugs stop compiling.",
+            "One report lists every raw memory operation.",
+            "Views cost nothing in a function."
+          ],
+          "losses": [
+            {
+              "loss": "About five audit places, not one.",
+              "mitigation": "One generated report lists them all, with sizes."
+            },
+            {
+              "loss": "A large runtime migration.",
+              "mitigation": "Mechanical wrapper rewrite first, then a countdown by subsystem."
+            },
+            {
+              "loss": "Two checker gaps must close first.",
+              "mitigation": "Both are fixes on this card, with probes written."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Copied handles read freed memory; fixing that rebuilds A."
+            },
+            {
+              "key": "C",
+              "reason": "Callers still vouch for addresses, so bugs still compile."
+            },
+            {
+              "key": "D",
+              "reason": "Shows risk but prevents nothing."
+            },
+            {
+              "key": "E",
+              "reason": "Takes raw pointers from experts."
+            }
+          ],
+          "tradeoff": "A few kernel files, a migration and two checker fixes, for memory bugs that stop compiling."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-14T23:42:11.192Z",
+      "reports": [
+        {
+          "title": "Adversarial design review (dev 08aa682149)",
+          "path": "Docs/audits/2026-11-14-memory-chokepoint-review.md"
+        }
+      ],
+      "outcome": "A",
+      "ratifiedAt": "2026-11-15",
+      "retiredAt": "2026-11-18T11:43:43.123Z"
     }
   ]
 }

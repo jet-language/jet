@@ -4219,6 +4219,535 @@
         }
       ],
       "retiredAt": "2026-11-18T08:30:44.207Z"
+    },
+    {
+      "id": "c0hvgx07",
+      "num": 6743,
+      "title": "Inline asm rdtsc crashes the compiler instead of reporting a diagnostic",
+      "body": "An inline asm block using rdtsc crashes the compiler; checked input must lower or get a registered diagnostic (I2/I3). Found by the 2026-11-09 native-debugger probes (DebuggerProposal).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Every criterion met. It holds on dev 980e02feb4 (fix 2c4f9d8383), proved on the batch-16 jet."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Main sweep 2026-11-12: still an ICE on seed-b13 at O0/O1/O2, \"ir.build unlowered: inline asm: unsupported mnemonic rdtsc\" (repro $JET_SCRATCH_ROOT/lanes/Main/sweep/r6743/main.jet). Routed to G6Meta-4 as G6Meta-asm1: sema refuses unencodable mnemonics with a registered diagnostic, and rdtsc is encoded."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Inline asm using rdtsc either lowers or gets a registered diagnostic (code, what/why/fix, UI snapshot); the compiler never crashes on it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 980e02feb4, proved by G6Meta-4 on the batch-16 jet (gate-p21): cases backend_ice/rdtsc_lowers_on_every_tier_and_an_unencoded_mnemonic_is_e3221 1/0 (rdtsc lowers on every tier; landed in 68461dd578) and ui ffi_asm_unencoded_mnemonic 1/0 (registered E3221).",
+          "at": "2026-11-14T01:34:36.331Z"
+        },
+        {
+          "n": 2,
+          "text": "Inline asm 'add reg, imm' passes sema (E3221) but the template assembler cannot encode it: the native runtime pack's lowering ICEs with E3505 'unsupported register or stale placeholder (add rax, 1)' (found in census206, dev 92742e9897 plus compare-vector-step-r4, 2026-11-15). Sema's operand-form check and the assembler's encodable forms must be one table: either the assembler encodes every form sema admits (reg,imm for add/sub/and/or/xor/cmp at least), or sema refuses the form with a registered diagnostic and snapshot. Proof: a UI or run case with 'add rax, 1' in an #Asm leaf either runs at O0/O1/O2 or is refused by sema, never an ICE.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-15T10:10:05.378Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T16:00:03.093Z",
+      "updated": "2026-11-15T10:10:05.378Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-14T03:02:07.220Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T10:19:54.552Z"
+    },
+    {
+      "id": "c09z2sp5",
+      "num": 6676,
+      "title": "The remaining Tools/ scripts and Tower itself run on Jet",
+      "body": "Owner ruling 11-07 (Docs/spec/philosophy.md priority 6): Jet fills every role; a capability Core lacks is a Core gap to close, never a reason to use sh, node, Python or C. The 11-07 census found non-Jet scripts that no open card owns. Tools/agent-eval (run-cold-context.mjs, test-cold-context.mjs, the foundations-trust, domain-foundations, ffi-assurance and test-economics drivers), Tools/adoption (validate.py, tests), Tools/cli-census/census.mjs, Tools/foreign-build-hosts/jet-library.sh, Tools/jet-nix-eval/differential-report.mjs and Tools/datetime_accuracy.py are ported to Jet. Tools/compiler-modules (dissolve-collections, drop-file-imports, inventory, migrate-examples, migrate) are finished one-off migrations: delete them. Tower (Tools/tower, a node application with 29 app and 40 test files) is the work ledger: port it to Jet, with its browser UI produced by the web target. Editor packages stay in the format their editor requires (the VS Code extension's JS, tree-sitter's grammar.js).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "G1Lead landed (a) 1893c623ad (JSON reader memory and render) and (b) c884e9421c (Board.jet). Worker figures, old to new peak RSS and wall: card show #6096 162 to 56 MB; archived card show 785 to 117 MB, 1.32 to 1.1 s; card list 198 to 117 MB, 0.56 to 0.39 s; milestone list --archived 785 to 118 MB; lint --docs 784 to 117 MB, 1.6 to 1.18 s; five dumps 1.56 to 0.39 s, byte-identical; Board parity 149/149. w06 decode 507 to 369 MB, encode 1.33 to 0.98 s with identical bytes. Main verifies in the next batch."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Board memory took down the a0_038 retry, 2026-11-08 07:11 (release of c902740d37). The release scope cap is 18 GB (memory.max 18874368 kB). The kernel OOM killer fired with 24 concurrent Board processes at 0.6-0.9 GB RSS each, the largest 223k pages, spawned by the cases suite at --jobs 6 across 4 shards; oom.group killed the whole release. The release was rerun with --jobs 3 as a stopgap. Root: Tools/tower/Board.jet parses all of tower.json and the history shards into Dyn trees (json.parse_with_limits, lines 374 and 427). Fix direction: Board decodes only the fields a projection needs, through typed json.decode<T> on the #6082 D streaming reader, so no document tree is built. It is routed to G1Lead as D's first real consumer, after D's first step lands."
+        },
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Main 2026-11-08 03:35 defect: Tools/tower/Board.jet uses 22-60x the board file in memory. `card show #6096 --json` peaks at 309 MB RSS (0.95 s) on the 14 MB tower.json, and the projections the gates run reached 670-860 MB anon each. In the a0_037 release cases suite, 14 concurrent Boards (spawned by gate-running cases) plus compiles filled the 18 GB release memcg, and the OOM killed the whole release (rc 137 at 03:24). Root fix: read the board without materializing the whole Dyn tree, or project only what each command needs (the JSON event reader from 5ed4a14dcd fits), so each Board stays near the file size. Meanwhile the release runs admit with --jobs."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "3c8544784c: Tools/tower/Board.jet (card show/list, decision show/list, milestone list, all with --json) is the read path. CloseoutGate, CoreSurfaceLedger, DecisionIndex and CompiledWorkloads read the board through it. Identity against tower.mjs: 170/171 rows the same on the main board and 155/156 on the dev board; the one difference, the human card list without --json, stays in tower.mjs by design. CloseoutGate's milestone closeout write still goes through node (criterion stays open)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Tower's write path is Jet: the Tower CLI (card, decision and milestone writes) runs as Jet under Tools/tower with no node process, and no Tools/agent gate spawns node. Proof: `git ls-files Tools/tower | rg '\\.mjs$'` is empty and `git grep -nE '\"node\"|tower\\.mjs' -- Tools/agent` is empty.",
+          "status": "met",
+          "metBy": "TowerKeeper-2",
+          "verifiedBy": null,
+          "evidence": "Merged into #6311 c4: #6311 c4 owns the same Tower cutover to Jet with no node fallback. The other Tools/ ports in this body are out of scope under AGENTS.md (4add2b9357) and #5072 c20, and Tools/compiler-modules is gone.",
+          "at": "2026-11-15T11:38:35.183Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [
+        "6035",
+        "2858"
+      ],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T16:32:42.207Z",
+      "updated": "2026-11-15T11:39:43.677Z",
+      "updatedBy": "TowerKeeper-2",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T11:39:43.677Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T11:43:43.123Z"
+    },
+    {
+      "id": "c0mf9ybj",
+      "num": 6755,
+      "title": "Effects-on-types follow-ups: write charging, lambda rows, comptime input effects, host-read inventory, explain effects",
+      "body": "The open criteria of #6129 and #6551, moved here when G8 closed (owner order, 2026-11-11). Each keeps its original text, finding and proof. Each criterion names its source criterion.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c6 progress landed on dev as 732b6cd343 (G5DevX2-host-nonce-rule). spec.md Effects states the ratified D-HOST-NONCE1=A rule, and host-reads.md rules H6, H7, H9, H10 and H21. The census adds three runtime /proc reads it had missed. c6 stays open on H22 (a child /proc read under Exec limits) and H23 (the vault stale-lock owner /proc/<pid>/stat), which reach past the running process the rule names. Ballot D-HOST-NONCE2 is being drafted."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Decision for c6, made by Main within the ratified D-NET-HOSTREADS1 scope (denials are truthful), 2026-11-12 01:3x. No owner ballot is needed: these are effect declarations on existing Core API, not new syntax or new behavior. The rule: a host read whose value can change what the program does or prints is declared under its own effect; a read that is an internal nonce or the process's view of itself, and cannot change observable behavior, is exempt and listed as such in the inventory. Applied: H3 declare Time, Rand and Env on the core.service entry points that read them. H4 drop the timestamp from the JSON coercion audit (it adds a hidden clock read for no user value). H5 declare Env on the TUI terminal reads (TERM, COLUMNS and similar change the output). H6 and H7 exempt the temp-name and atomic-write pid nonces. H8 declare Env on path.home(). H9 exempt the PATH lookup as part of Exec, which resolves a program by name, and the Exec docs say so. H10 exempt /proc/self introspection. G5DevX-1 codes H3, H4, H5 and H8 and flips the exempt rows in host-reads.md."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Moved from #6129 c64. A function with an empty effect row cannot write module state through a parameter, an alias, a separately checked lambda or a trait dispatch: the write is refused or charged to the caller. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R3, high; c48 was closed on the direct-name path only): Scopes.jet:2225-2230 records a module write only when the syntactic root is a Constant, and c962b0554e disclosed the parameter, alias, lambda and trait limits. Proof: probes/alias.jet (fn(c: Shared<Count>) -[]> Int { c.value += 1; ... } called with module HITS) is refused or accounted, plus one case per path at O0/O1/O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander5 loop run on seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:1x-01:3x, G5DevX-effects-snapshots landed 1338c039e8 with all 6 lines rc 0. tests/cases/pure/pure_fn_cannot_write_held_state_on_every_tier.case PASS: alias.jet, held.jet and trait.jet are checked and run at --optimize=none, basic and full; a write through a parameter, an alias, a lambda and a trait dispatch is refused with E3401 (trait.jet: total reaches a write of module state HITS).",
+          "at": "2026-11-12T06:36:41.860Z"
+        },
+        {
+          "n": 2,
+          "text": "Moved from #6129 c66. The E3413 UI snapshot passes, rather than staying KNOWN-FAILING under #6419. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap E1): c38 says the E3410-E3413 tests pass unchanged, but the a0.0.44 receipt keeps E3413 KNOWN-FAILING, and dev now has an E3413 emitter (BuildAdapter.jet:513), so the receipt's no-emit-site explanation is stale. Proof: jet test Compiler --profile ui --filter E3413 passes on a train compiler.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5h on dev ec6bdb7feb with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:24: jet test Compiler --profile ui --filter e3413 (tests/ui/comptime_fetch_pin_mismatch_e3413.jet): PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. No known-failing row remains for it.",
+          "at": "2026-11-12T06:24:47.790Z"
+        },
+        {
+          "n": 3,
+          "text": "Moved from #6129 c68. An effectful lambda publishes its effect row: calling a local lambda that performs IO from a function declared -[IO]> is accepted with that row, not rejected as E0740 with the maximal row (probe: a: fn() -[IO]> Int { step: () -> { print(\"x\") }; step(); 1 }). Cases on O0/O1/O2 and a UI snapshot for the over-row case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander5 loop run on seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:1x-01:3x, G5DevX-effects-snapshots landed 1338c039e8. jet test Compiler --profile ui --filter local_lambda_effect_over_row: PASS tests/ui/local_lambda_effect_over_row_e0740.jet (the over-row UI snapshot); tests/cases/effects/local_lambda_call_uses_its_written_row_on_every_tier.case PASS on O0, O1 and O2: a local IO lambda called from a -[IO]> function is accepted with its row.",
+          "at": "2026-11-12T06:36:42.857Z"
+        },
+        {
+          "n": 4,
+          "text": "Moved from #6129 c69. A call of a local lambda from inside another lambda's body publishes the callee's effect row, as a direct call does since c68: a nested call is no longer treated as maximal. Cases on O0/O1/O2, and the spec's stated limit is removed.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5h on dev ec6bdb7feb with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:24: landed in 8616f97118. jet test Compiler --profile cases tests/cases/effects/nested_local_lambda_call_uses_its_row.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0; the case runs O0, O1 and O2 plus a narrow refusal. Docs/spec no longer has the sentence that the nested call makes the lambda row maximal (git grep finds nothing); spec.md now says the nested call adds the callee effects.",
+          "at": "2026-11-12T06:24:49.057Z"
+        },
+        {
+          "n": 5,
+          "text": "Moved from #6129 c70. Compile-time input calls publish their effects: net.fetch(url, sha256:) carries Net, and embed_file/find carry FS.Read, so a function declared -[!Net]> or without FS.Read is refused (tests/ui/build_io_net_denied and an FS.Read denial snapshot), and jet explain effects lists them. Found by G6Meta-2 on dev b181be688c, 2026-11-11: dev's net.fetch and embed_file record no effect.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5h on dev ec6bdb7feb with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:24: jet test Compiler --profile ui --filter build_io_net_denied, --filter comptime_input_fs_read_denied, and --profile cases tests/cases/effects/explain_effects_reaches_comptime_inputs.case: each PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. The UI pair refuses net.fetch under -[!Net]> and denies embed_file without FS.Read; the case shows explain effects listing Net and FS.Read.",
+          "at": "2026-11-12T06:24:50.025Z"
+        },
+        {
+          "n": 6,
+          "text": "Moved from #6129 c71. From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). Denials are truthful beyond TLS. An inventory lists every host read that runtime or Core code performs under an effect other than its own: resolver reads such as /etc/hosts, pure runtime clock access, FFI and loader boundaries. Each one is classified (declared, ruled exempt by an owner decision, or fixed). No doc or diagnostic claims universal truthful denial until the inventory is complete. This does not wait on D-NET-HOSTREADS1's TLS fix.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev since 10123844b2, which turned the last unclassified rows H22 and H23 into ruled (D-HOST-NONCE2=A: a child's /proc read is Exec) and fixed (the vault lock is a kernel flock). Every row H1-H23 of Docs/spec/reference/host-reads.md is now declared, ruled or fixed, none open. Built on 70cfb9499a: `jet test Compiler --profile cases --filter authority/deny_refuses_host_reads_under_their_own_effect` on the gate-p136 batch jet gives PASS 1, FAIL 0.",
+          "at": "2026-11-15T01:23:17.832Z"
+        },
+        {
+          "n": 7,
+          "text": "Moved from #6551 c4. jet explain effects shows an instantiated generic module's cap in its ladder and in --caps, and never prints a compiler-generated name such as __jet_counter_dbump. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R4, medium; c2 and c3): ExplainEffects.jet:366 descends through GenericModule without adding nested.cap, and the report prints the lowered function.name. Repair the shared source and fact projection, not a label for one example. Proof: probes/generic.jet shows the #FX(IO,!FS) cap at the generic module's rung and in --caps, under its source name, with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "meet-G5h on dev ec6bdb7feb with seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:24: jet test Compiler --profile cases tests/cases/effects/explain_effects_module_caps.case: PASS 1; FAIL, KNOWN-FAILING, UNEXPECTED-PASS, SKIP-HOST, REFUSED, ERROR and TIMEOUT 0. Byte-exact stdout pins the generic module cap in the ladder (module #FX(IO, !FS) generic.jet:1) and in --caps (generic.jet:1  #FX(IO, !FS)  module tally), and the output contains no __jet_ name.",
+          "at": "2026-11-12T06:24:50.973Z"
+        },
+        {
+          "n": 8,
+          "text": "Moved from #6551 c5. jet explain effects reports every effect a site reaches, including the deny-only ones (Panic, Mem, Time.Wait), as the ratified command contract promises. Found by the G8 fresh-context review by Review3 (sol-reviewer), 2026-11-11, $JET_SCRATCH_ROOT/lanes/Review3/G8-review.md, probes beside it, run on a0.0.44 and read against origin/dev d8a82024a7 (gap R5, medium): ExplainEffects.jet:456 drops deny-only authorities in jet_cli_effects_reach_add. Proof: probes/panic.jet lists Panic in its reaches line, with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Lander5 loop on seed-b10 (jet@a0.0.45#c089d4d3), 2026-11-12 01:5x. G5DevX-deny-only-wait landed e3c3c99d7b with its line passing: jet test Compiler --profile cases tests/cases/effects/explain_effects_reaches_deny_only.case gives PASS. jet explain effects lists every deny-only effect a site reaches, Time.Wait included, pinned byte for byte with its call site: reaches: Panic via deny_only.nap (deny_only.jet:13), Time.Wait via deny_only.nap (deny_only.jet:13). Earlier steps pin Panic and Mem (Mem via deny_only.make, Panic via deny_only.stop), and the JSON reaches carry \"effect\":\"Time.Wait\" and \"effect\":\"Panic\".",
+          "at": "2026-11-12T06:56:00.610Z"
+        },
+        {
+          "n": 9,
+          "text": "D-HOST-NONCE2=A is built (ratified 2026-11-13). Reading the /proc entry of a child the operation started counts as Exec, so the typed memory and open-file limit errors stay. The vault lock becomes a kernel-released flock (HostFileLock), so no vault call reads another process's entry, a crashed writer's lock is free at once, and the ten-minute stale wait and the pid check are gone. The lock file is deleted on release, and its identity is rechecked after locking. host-reads.md lists the one remaining read, and --deny=FS.Read states what it does not cover. Proof: a case where a writer is killed mid-write and the next write proceeds at once, a case for two concurrent writers, and the child-limit cases still reporting which limit stopped the child.",
+          "status": "met",
+          "metBy": "TowerKeeper-2",
+          "verifiedBy": null,
+          "evidence": "dev 10123844b2: the vault write lock is a kernel-released flock (HostFileLock) with no process-entry read, deleted on release and rechecked after locking; its witness (VaultProviderWitness.c, VaultProviderTests.jet) forks a writer that takes the lock, gets Locked for a second writer, SIGKILLs the writer, and the next commit succeeds at once and leaves no lock file; census OK line, rc=0 (seed-b14). dev c490f18529: spec.md and host-reads.md H22 rule the child /proc read under Exec, cli.md says what --deny=FS.Read does not cover, and process_session_resource_limit_exhaustion_names_each_limit_all_tiers and process_session_resource_limits_match_all_execution_tiers pass on the g6-cut3b jet.",
+          "at": "2026-11-15T11:38:36.148Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T01:52:19.959Z",
+      "updated": "2026-11-15T11:39:45.488Z",
+      "updatedBy": "TowerKeeper-2",
+      "criteriaLastN": 9,
+      "completedAt": "2026-11-15T11:39:45.488Z",
+      "questions": [
+        {
+          "id": "q2i7dehp",
+          "cardId": "c0mf9ybj",
+          "decisionId": "D-HOST-NONCE2",
+          "by": "owner",
+          "kind": "question",
+          "text": "what is the best greenfield solution? seems like you would recommend d if not for the fact that we would need to update old code. that is NOT at all a valid reason to go with a worse solution EVER.",
+          "status": "answered",
+          "answer": "Yes, the posted D is the best greenfield design, and the reworked ballot recommends it as A. The child read stays and counts as part of Exec, because nothing else can tell a memory or open-file limit from any other failure. The vault drops its read of another program's /proc entry and uses a kernel file lock, the same flock core.files locks already use, which the system releases the moment the holder exits. That removes the ten-minute wait after a crash, and it fixes a real bug where a pid on a shared network folder names a process on another machine. A new Jet never steals an old-format lock file. The reverse cost is named plainly: the new lock file is never removed, so once a new Jet has written a vault, an older Jet build refuses to write it until the file is deleted. Under greenfield Jet owes its older builds no compatibility; if mixed builds ever must share a vault, unlinking the file on release with an identity recheck removes it between writes.",
+          "created": "2026-11-13T11:11:13.880Z",
+          "answeredAt": "2026-11-13",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-18T11:43:43.123Z"
+    },
+    {
+      "id": "c0oo8eeq",
+      "num": 6842,
+      "title": "One audited memory chokepoint: every raw memory action goes through one small, heavily audited module",
+      "body": "Owner direction, 2026-11-14: memory actions go through a single inspectable place that is heavily audited, so any memory-safety risk is found by looking in one spot, and memory bugs are prevented structurally rather than reviewed site by site.\n\nToday raw memory actions sit in about 1528 #Unsafe regions spread across Compiler (about 791), the runtime and Core (Docs/spec/safety.md, Tools/agent/UnsafeRatchet.jet). The ratchet counts them but does not concentrate them.\n\nShape (to be attacked by the adversarial review before anything is built): one memory kernel module owns a small set of typed primitives (allocate, free, resize, raw read and write, pointer offset, copy and move of bytes, atomics, OS mapping, foreign-pointer crossing), each with stated preconditions and its own tests. The chokepoint is enforced in source by sema, not paid for at run time: sema refuses a raw memory operation anywhere outside the kernel, and the primitives inline at O1/O2, so the chokepoint costs nothing. Accesses that sema already proves safe (checked indexing, owned fields) stay ordinary loads and stores; the kernel covers what sema cannot prove. Centralizing the operation does not by itself centralize the reasoning about why a call site meets a precondition, so the primitives should carry typed capabilities (handles a caller cannot forge) to make most preconditions type-enforced rather than reviewed.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": "e3",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Closed 2026-11-15 by Main. All 12 remaining criteria are met with exercised evidence (c1-c5 and c7-c10, c12-c14). The two performance criteria (c6 zero cost, c11 ceiling) moved to #6975 (G11) under the owner order of 2026-11-15. #Unsafe count over the kernel cutover, lines with a #Unsafe(...) region, dev e1ef911ec1 (2026-11-14 16:55) against 604cc6eb7a (2026-11-15 06:15): runtime 643 to 488 (-155), Core/Crypto -5, Core/Encoding -2, Core/Testing -1, Core/Mem +4 (the kernel itself), JetBackend +13 and JetFoundation +3 (non-kernel work tonight), tests and UI fixtures +56, Examples/Memory +3, Tools/perf +6. Whole repository 1426 to 1348. Shipped code (runtime, Core, Compiler) net -143."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c12 route decision (Main): with the runtime-identity scope removed, a sema probe finds 109 E3114 hits in the kernel files (Alloc 64, RawWords 25, Sync 9, Fault 5, Secret 3, Thread 3; 87 functions). The ratified address rule exempts package-private (priv) and #Unsafe functions, so the kernel helpers whose every Jet caller is inside the runtime package become priv. That uses the ratified rule, with no scope. A runtime function that another package calls by Jet name stays public and gets a typed owner or view signature. C ABI exports keep their symbols. The scope is deleted, and a guard keeps any later public raw-address runtime function under E3114. What is not done: c12's text also describes moving about 13,400 runtime-internal call sites of rt_text_word and sync_load to typed owners and views. Those sites raise no E3114 once the helpers are package-private, and the ratified rule does not require that migration, so it is not part of meeting c12. A typed internal API would be a separate design choice. Owner: CardCloser-3, in slices per file group."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c14 boundary decision (Main): two direct kernel-call sites stay as the boundary of 'no direct mmap', each with a stated reason at the site: the loader's emitted OS_SYS_MUNMAP executor rows, which run before the runtime and its sentry exist, and Assets/FaultReport/report.S, a relocation-free dying-path blob that cannot call Jet. The allocator's large-block mremap goes through the kernel primitive family (an untracked heap remap beside os_map and os_unmap), not a raw syscall. SUB CardCloser-3-kernel-maps-untracked-form is queued; the remap follow-up is stacked on it."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c14 decision (Main, within approved scope): the sentry tracks live storage precisely. (1) The allocator's own slab, large-object and page-map mappings are the heap; per-block MemStorage registration covers them, and registering whole slabs would make freed blocks look live. They still go through the kernel map primitive, in its untracked form, not a raw mmap. (2) Mappings on paths that must not allocate (Fault, auxv and Secret pages) and the ProductionReceipt scratch also use the untracked kernel form, each with a stated reason. The comptime reply mapping named in c14 stays tracked; only a separate refused-frame scratch on the dying path may be untracked. (3) Done means: a grep of Compiler/ and JetRuntime for raw mmap/munmap finds only the kernel primitive, and the c14 R0801 case passes on every tier. Owner: CardCloser-3."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "p164 (dev 8cf16ffb9e): memory_kernel/ PASS 10, FAIL 1: a_mapping_is_live_storage_until_it_is_unmapped (exit 1). Its runtime-mappings-sentry change (3852240eb4) is in the runtime, which a compiler links from its seed, so it shows one batch later; recheck on p165 before c7. Separately, single-use-holders (df9300826a) broke 6 context_allocator cases (E0140/E0142 on a counter allocator); CardCloser-3 owns the fix and the sweep of every source the rule reaches."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Kernel cells on p160r (dev c6bef63395: one-header, the branchless alloc fast path, alloc-try-no-poll, the leaf register pool and clobber facts, the Result out slot on every tier), cycles vs the asm reference (code bytes vs asm): mapping 4.73x (26.3x; p157 5.31x), allocfree 2.77x (24.4x; p157 3.36x), compare 3.19x (1.04x), resize 1.88x (10.9x; p157 1.98x), rawword 1.35x (0.80x), atomics 1.00x (1.56x). All but atomics are still over 1.00."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c11 allocfree root (CardCloser-3, p157 release build, disassembly and perf): both fast paths are hit (alloc_try's thread-cache path; free's cache push; 0 samples in refill, slab, validate and lock). Per operation: 361 instructions and 108 cycles; cycles: run loop 47%, alloc 42%, free 11%. Roots: (1) the Core wrapper adds a 16 B header on top of the runtime's 24 B, so a 1-byte request takes 41 B and lands in the 64 B class; (2) the alloc fast path is about 75 instructions (a class ladder, 5 callee-saved pushes, two header stores), and free recomputes the class from the size; (3) the loop carries a stop poll after every call and int_clone tests on Int. Order: (1), (2), then the Result out slot (mapping), then (3) in codegen."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c11 on p157 (dev 058d3b0303, 2026-11-15 02:21): mapping 5.31x cycles (was 6.03x on p156; the window thread stacks 4b16946457); allocfree 3.36x and resize 1.98x unchanged, although p157 links p156's runtime, which carries the raw-heap runtime half; compare 3.17x; rawword 1.36x; atomics 0.99x. Since then: region-record slab d7ac865ff3 and the page-map reference 524ed1eefd landed (seen from p158)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c11 kernel cells on p156 (dev aa5f5f1bba, 2026-11-15 02:09), Jet release vs the asm reference, cycles ratio (code bytes ratio): compare 3.18x (1.04x), was 11.13x on p152 (list bytes-equal af277c2051); allocfree 3.32x (28.6x), was 8.12x (Core half of the raw-heap fast path 8375d732e6; the runtime half reaches programs from p157); resize 1.97x (13.3x), was 2.14x; mapping 6.03x (27.75x), was 5.88x (the window thread stacks landed 4b16946457 after this compiler); rawword 1.35x (0.80x); atomics 0.99x (1.56x). All but atomics still fail cycles."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Finding (CardCloser-3, 2026-11-15): tests/cases/runtime_fragments/*.case copy Compiler/JetRuntime/package.jet, so jet doc fails with E3113 over the repository; raw/package.jet works. Outside the kernel criteria; recorded here so it is not lost."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c11 mapping (CardCloser-3 profile on p152; 400 cycles and 1080 instructions per pass): ~35% is the boxed Result<Region> return (a 40-byte heap box plus a store-forward stall), ~17% the two lock cmpxchg on the window stack, ~10% the region record's heap alloc/free, and the rest page-map work plus madvise. Ruling (Main, under the AGENTS.md performance-gate rule that the reference includes the smallest hand-written implementation of each feature the Jet program delivers): the mapping asm reference registers the region in a minimal page map. Work order: window stack without locked cmpxchg; region record from a per-thread free list; reference update; then general Result lowering (a two-word payload returns in registers) split into items of an hour or less."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "atomic-bytes after rows (CardCloser-3-atomic-bytes landed 5ce1d999d1; feature: x86-64 frame homes ranked by loop-weighted references, the inline atomic add's register partner, store(0) as xor). p153 (dev 84df7e8189), asm-parity --gate, 2026-11-15 01:17: atomics cell code bytes 99 -> 25 B (6.19x -> 1.56x of the 16 B reference), cycles 0.99x ok, output same; second program (served 81920000) code bytes 159 -> 50 B, cycles 1318059459. Code bytes is still over its gate at 1.56x."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "p152 kernel rows (batch compiler from dev 9ae575e506, the first with mapping-window aa4b73320c in its runtime; 2026-11-15 00:57, asm-parity --gate, perf pinned). Cycles vs the ceiling, code bytes vs the reference: mapping 5.88x (12.5x on p146) / 2554 B vs 91 (28.07x); compare 11.13x / 423 B vs 730 (0.58x, ok); allocfree 8.12x / 7030 B vs 261; resize 2.14x / 5851 B vs 477; atomics 1.00x ok / 99 B vs 16; rawword 1.38x / 8 B vs 10, ok. Every output is the same as the reference. 6 Jet rows miss a gate. Next in flight: atomic-bytes (code bytes), compare's equality lowering, the allocator slab (allocfree, resize)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "p149 after-rows (batch compiler from dev 413cddeab5; 2026-11-15 00:20, perf 7.2.9, pinned). Atomics cell (4bf7c65a48), asm-parity --gate: ref 16 B / 1432.5M cycles; jet-release 99 B code (6.19x, over) / 1417.5M cycles (0.99x, ok), output same. On p144: 642 B (40.13x) / 1.37x. The atomics second program (ticket dispenser on two Atomic<U64> words): 750 B / 2.56G cycles on p144, 124 B / 1.32G on p149, output served 81920000 unchanged. Rawword re-measured on p149: 8 B (0.80x, ok) / 1.40x cycles (1.28x on p146; load noise; still over)."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "p146 after-rows (batch compiler from dev 02cb957084; run on 2026-11-14 23:45 with perf 7.2.9, pinned). rawword (u32 cell, b2d7cb512c), asm-parity --gate: ref 10 B / 287974739 cycles; jet-release 8 B code (code_x 0.80, ok) / 368598222 cycles (1.28x, over), output same. On p144: 32 B (3.20x) / 1.50x. The pointer-step-fold second program (CardCloser-3-pointer-step-fold/second/measure.sh, 11 pinned runs of run 20000): 166 B / 694.2M cycles on p144, 114 B / 254.9M on p146, output sum 81920000 unchanged. The fold (9a82866572) cuts the general pointer step's code 31% and its cycles 63% on a program unlike the cell. rawword cycles stay over at 1.28x; the gap is open."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c11 decisions (Main, 2026-11-14 23:35). (1) Each remaining primitive cell (mapping, compare, alloc/free, resize) lands as an honest measurement even while it fails the ceiling. (2) No easier substitute: Region.claim is an extra cell, never alloc/free's replacement. The alloc/free and resize references implement the same features at minimum size: a slab with size classes, the page map, and cross-thread free. (3) Compare adds no primitive (I8): the cell measures existing [U8] equality against a memcmp-class SIMD reference; a byte-loop loss is fixed in the general equality lowering. (4) Mapping: the runtime fix carves page-map units from one aligned VA reservation (no trim munmaps) and keeps the global lock off the fast path, general for every Region.reserve."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c11 rawword (CardCloser-3, 2026-11-14 23:25). The Int-to-word conversion for a raw pointer offset is already inline: an add/jo tag test, about 12 B per access, with the call only on the cold big-Int path. OptRange deletes it when it proves the Int inline. rawword paid it because its Op table held Int fields while ref.S holds 4-byte fields; the cell moves to U32 fields so both sides do the same work on the same data. Known general cost: a raw access indexed by an Int that OptRange can't prove inline pays the 12 B tag test."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "OWNER ORDER 2026-11-14 ~21:00, standing overnight and superseding earlier orderings. Agents work ONLY this list, in this order, closing it out: (1) precompiled Core, #6328 c22/c37 and #6759; (2) speed plan steps 1-5 of #5479 exactly as its plan defines them (step 2 = #5479 c6 + #6328 c23; step 3 = #5479 c7 + #5910; step 4 = #5479 c8; step 5 = #5910 c6 + #5479 c2), with no other speed or size work until G11; (3) the memory kernel #6842, including c11; (4) G6; (5) G9; (6) G3; (7) G5; (8) G10; (9) G7. No other cards and no side work. Finished, ready work is never pulled: it lands. The only exceptions are fixes for failures that block the list's own work and owner-requested ballots, and Main decides them. TowerKeeper-1 (temporary, owner-approved) rebuilds the board: frozen cards untouched, nothing obsoleted without a ratified authority, no work lost."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Owner order 2026-11-14 ~21:15 (standing; supersedes earlier allocation and goal orders). Five agent slots: (1) FINISH precompiled Core ASAP (#6328 c22/c37 and #6759: a measured win over no precompiled Core), then help finish speed steps 1-5 (#5479). (2) Finish speed steps 1-5 (#5479) ASAP. (3) Finish the memory kernel (#6842, D-MEM-CHOKEPOINT1=A) ASAP. (4) and (5) Finish G6 and G9 ASAP. When slots 1-3 are done, they help on G6 and G9. After G6 and G9: G3, then G5, then G10; then G7, then G11, then G13. Pareto wins land first (a hard requirement). Main self-evaluates every 30 minutes against these goals and the overnight timeline and corrects course; the order is recorded durably (Tower, plus Main's handoff file) so compaction cannot lose it."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Main 2026-11-14 (operational, within ratified D-MEM-CHOKEPOINT1=A): c3's 'one memory kernel module' reads as the ratified form. Each package names its kernel files in policy memory: .Kernel([...]). A file goes in only if it implements a primitive (allocation, free, region, mapping, atomic word, device register, copy or fill) or an owner type that hands out views. Files that only use raw memory migrate to call those primitives. After Core's kernel, 483 regions remain: the runtime 387 across 80 files, OS/Linux.jet 57, and the image Loader and SessionHost 39. CardCloser-3 migrates the small-site files by area, then the JetRuntime and JetBackend kernel policies, which need a batch compiler carrying r3."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Main 2026-11-14: c6's zero-cost bar against the direct spelling stays, now proved by exact codegen-catalog equality with a zero_cost_pairs timed pair beside it; the new ceiling criterion adds the machine-code maximum on top. Owners: CardCloser-3 (kernel policy, sema, View, c8 and c10); GoalsA-1-3 (c2 inventory, the kernel public-fn rule, the c4 cutover); PrecompiledCore-4 (c6, c7 and the ceiling cells, with the primitives' lowering)."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Main, 2026-11-14: c1 met; ballot D-MEM-CHOKEPOINT1 is open (recommended A: kernel files hand out close owners plus owner-tied views, checked by the existing E0212/E2305/E0211). c3-c7 wait on the ballot. The review found I1 holes that hold in today's code regardless of the ballot, so they are fixed now under this card: (1) .copy() of a #SingleUse handle compiles, and so does copying a struct that holds one; releasing both frees twice and release builds exit 0 with no #Unsafe in user code; Core mem.Block copies the same way. (2) a mem.Window handed out by a handle reads after the handle is released. (3) a view stored in a field of a returned record escapes its owner. (4) values bound by a pattern skip close duties (owners are not closed; handles skip the drop error E0140). Probes are in the review's tests (inbox MemKernel-2-review/tests/adv)."
+        },
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Created by Main from the owner direction of 2026-11-14 (a single inspectable memory chokepoint). Built only after criterion 1's adversarial review passes."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Adversarial review first: a dated audit in Docs/audits attacks each claimed strength of the one-chokepoint design (structural prevention, single audit spot, zero run-time cost) against the strongest existing practice, with sources: Rust's unsafe concentrated in std and audited crates (and its unsafe-code guidelines), seL4's verified kernel boundary, CHERI capabilities, Zig's explicit allocator interface, Go's runtime-only unsafe and Swift's UnsafePointer surface. It checks each claim with a runnable probe or measurement, and ends with a verdict per claim. Nothing below is built until the verdict holds or every gap is redesigned and reviewed again.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 08aa682149 Docs/audits/2026-11-14-memory-chokepoint-review.md: the adversarial review (MemKernel-1, repaired and re-probed by fresh reviewer MemReview-1) attacks all five claimed strengths with probes; verdicts recorded; owner ballot D-MEM-CHOKEPOINT1 filed with options A-E, validator ok",
+          "at": "2026-11-14T23:42:29.327Z"
+        },
+        {
+          "n": 2,
+          "text": "Inventory: a generated list classifies every #Unsafe region in Compiler, the runtime, Core and Jetpack by the memory action it performs (allocate, free, resize, raw read or write, pointer offset, byte copy or move, atomic, OS mapping, foreign-pointer crossing, other) with its file and line, produced by a tool from the code, never maintained by hand.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 98bd11c4a8 (GoalsA-1-3-mem-inventory-r2): jet Tools/agent/UnsafeRatchet.jet --inventory (and --json) prints every #Unsafe region in Compiler (runtime and OS layer apart), Core and Jetpack with file, line and memory-action class, generated from the code. --check ratchets the count of non-kernel raw-action regions, 511 today and 0 is c4's target. Proof on gate-p136: jet test Tools/agent/UnsafeRatchet.jet gives 10 passed; --check, --inventory and --json all rc 0.",
+          "at": "2026-11-15T00:54:12.127Z"
+        },
+        {
+          "n": 3,
+          "text": "One memory kernel module holds the only implementations of those memory actions, as a small set of typed primitives, each with stated preconditions and typed capabilities that callers cannot forge, so that most preconditions are type-enforced. Sema refuses a raw memory action anywhere outside the kernel with a registered error (what, why and fix text plus a UI snapshot). User #Unsafe code reaches raw memory only by calling kernel primitives. Proof: `jet test Compiler --profile ui --filter raw_memory_outside_kernel` and `jet test tests/guards --filter memory_kernel_single_home`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 3410ca0816 (guard landed a2218d7759), batch compiler p162, 2026-11-15 04:35: jet test tests/guards --filter memory_kernel_single_home -> 4 passed, 0 failed (Core/Mem/Mem.jet declares each raw memory primitive exactly once with its precondition in its #Unsafe gate; no other compiler, Core or Jetpack source declares one; every .Kernel([...]) entry is a real path; the unsafe ratchet's count of raw memory regions outside a kernel stays zero). jet test Compiler --profile ui --filter raw_memory_outside_kernel -> PASS tests/ui/E3113_raw_memory_outside_kernel (registered error with what/why/fix and snapshot).",
+          "at": "2026-11-15T09:32:43.970Z"
+        },
+        {
+          "n": 4,
+          "text": "Cutover: every Compiler, runtime, Core and Jetpack caller is migrated in one change. The count of #Unsafe regions outside the kernel performing a raw memory action is 0, and Docs/spec/safety.md and the unsafe ratchet read the kernel as the one audited place.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 3297ea019a (sema-kernel-intrinsics-r3) + 168e1e9e92 (baseline). p142 batch compiler (built from dev 0487a6552b), 2026-11-14 22:40: jet Tools/agent/UnsafeRatchet.jet --check -> 1385 regions, baseline unchanged; Docs/spec/safety.md records memory-kernel:outside 0 (was 294); ui E3113 PASS 3 (raw memory outside kernel, package without kernel files, runtime unit source outside kernel), E3114 PASS 1; the census self-check of the compiler with the enforcement is clean (848854fbad). The runtime address API (E3114 scoped to the runtime identities) is c12.",
+          "at": "2026-11-15T03:40:28.914Z"
+        },
+        {
+          "n": 5,
+          "text": "Codegen emits raw memory instructions for checked code only through the kernel's lowering rows. Accesses that sema already proves safe (checked indexing, owned fields) stay ordinary loads and stores and need no kernel call.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 3410ca0816 (guard landed 624e058aa1), batch compiler p162, 2026-11-15 04:35: jet test tests/guards --filter raw_memory_lowering_rows -> 4 passed, 0 failed. The guard is a closed census: the IR builder calls the runtime's raw memory routines only from named rows (List buffer, map slots, boxed value, the core.mem IR_CORE_INTRINSICS rows, at least 10), each with its exact call count; a new raw call outside the rows fails, a row whose calls are gone fails; checked index and field accesses are plain loads and stores, never a row.",
+          "at": "2026-11-15T09:32:45.097Z",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "tests/guards",
+              "--filter",
+              "raw_memory_lowering_rows"
+            ]
+          }
+        },
+        {
+          "n": 7,
+          "text": "Each primitive has a test per stated precondition, plus a fuzz run over allocate, resize and free sequences, and O0, O1, O2 and web agree on every kernel test (I9). Proof: `jet test Compiler --profile cases --filter memory_kernel/` on O0, O1, O2 and web, including `memory_kernel/alloc_resize_free_fuzz`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Batch compiler p166 (dev 92742e9897, with f0391ab771 memory-kernel cases, 3852240eb4 runtime-mappings-sentry and a8a71ca8a6 single-use-lend), 2026-11-15 05:10: jet test Compiler --profile cases --filter memory_kernel/ -> PASS 11, FAIL 0, ERROR 0. tests/cases/memory_kernel holds one case per primitive (raw heap take and release, mapping live from map to unmap, raw read and write needing a live aligned value, pointer cast, pointer step, window index checks, byte fill, byte move at every size and overlap, block copy and fill, list append and copy), each stated precondition pinned. alloc_resize_free_fuzz runs a seeded 2000-step allocate, resize and free sequence over up to 24 blocks (1 to 74000 bytes, aligns 1 to 4096). Every case runs step o0, o1 and o2 (jet run -O0, -O1 and -O2) and web (jet build --target web, then node app.js) with one expected stdout, so the four tiers agree (I9).",
+          "at": "2026-11-15T10:03:57.488Z"
+        },
+        {
+          "n": 8,
+          "text": "A #SingleUse value (and any struct, list or enum payload that holds one) cannot be copied: .copy() and an implicit copy are refused by sema with a registered code and UI snapshot, and Core mem.Block follows the same rule. Proof: the review's copy probes fail to compile, and a case pins each.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Batch compiler p166 (dev 92742e9897), 2026-11-15 05:05: jet test Compiler --profile cases --filter copy_is_refused_at_every_depth -> PASS tests/cases/single_use/copy_is_refused_at_every_depth.case: jet check --json reports exactly 8 E0211 refusals: .copy() of a #SingleUse value alone, inside a record, an enum payload, a list and an option; of Core mem.Block itself and in a record holding one; and the implicit copy of an element read out of the list that keeps it (each count pinned). jet test Compiler --profile ui --filter single_use_copy_is_refused -> PASS tests/ui/ownership/single_use_copy_is_refused.jet (the registered code E0211 and its UI snapshot).",
+          "at": "2026-11-15T10:02:37.399Z"
+        },
+        {
+          "n": 9,
+          "text": "A mem.Window (and every view a handle hands out) cannot be read after its owner is released, and a view stored in a field of a returned record cannot outlive its owner: both refused by sema with a registered code and UI snapshot. Proof: the review's window and escape probes fail to compile; a case pins each.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Batch compiler p164 (dev 8cf16ffb9e, with ab52e5d9fc view-record-field), 2026-11-15 04:50: the window half: jet test Compiler --profile ui --filter raw_window_read_after_its_owner_is_released -> PASS (a mem.Window read after its owner is released is refused, E0212, snapshot); the record half: --profile ui --filter view_in_returned_record_field -> PASS tests/ui/ownership/view_in_returned_record_field_outlives_its_owner (ViewOutlivesOwner, snapshot), and --profile cases --filter a_view_in_a_returned_record_field -> PASS 1 (the case pins it). Both failed on p162/p163 (the sweep row), so the fix is proved by the change.",
+          "at": "2026-11-15T09:48:37.898Z"
+        },
+        {
+          "n": 10,
+          "text": "A value bound by a pattern (if/match .Val(x)) keeps its close and drop duties: an owner bound so is closed or refused (E0140), exactly as a plain binding. Proof: the review's pattern probes; a case per tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Batch compiler p162 (dev b80809b698), 2026-11-15 03:55: jet test Compiler --profile cases --filter resource_close/pattern_bound_resource_closes PASS 1 (a resource bound through an if/match pattern is closed on O0/O1/O2 and checked); --filter single_use/pattern_binding_owes_consume PASS 1 (E0140 twice for an unconsumed pattern-bound owner); --filter single_use/pattern_binding_consumed_runs PASS 1 (O0/O1/O2). CardCloser-3's review probe e7_autoclose prints closed for both forms on p160.",
+          "at": "2026-11-15T08:55:39.242Z"
+        },
+        {
+          "n": 12,
+          "text": "The runtime's address API (rt_text_word, sync_load, rt_text_store, jet_rt_alloc and jet_rt_free; about 13,400 call sites, 97 E3114 hits in Alloc, RawWords, Sync, Fault, Thread and Secret, plus 6 in fixtures) moves to typed owners and views under D-MEM-CHOKEPOINT1=A, so the E3114 address rule needs no scope for the runtime identities (jet_runtime, jet_runtime_tests). Today that scope keeps E3114 at its state before the cutover, while E3113 holds everywhere. Proof: the scope is deleted, and jet check of Compiler/JetRuntime and its fixtures reports E3114=0.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 50b866567e (b7deb87e67, CardCloser-3-runtime-kernel-priv-r2), batch compiler p174 built from it, 2026-11-15:\n(1) jet check Compiler/JetRuntime reports E3114 0 and E3113 0. RuntimePack unit --check (the runtime composed with every Fragments.fixture source) reports E3114 0 and E3113 0; its rc 1 comes from the same 5 errors outside the unit that dev had before (sys, files and process defined twice; SysTargetPointer $layout; the stalled comptime graph).\n(2) The scope is deleted: git grep sema_unsafe_runtime_package in JetSema/Source shows only its definition and its one use in sema_unsafe_unit_map, which now applies E3114 to a composed runtime unit.\n(3) Guard: Compiler/JetSema/Tests/UnsafeObligations.fixture runs rc 0. runtime_kernel expects 2 E3114, and runtime_unit_refused expects 1 E3114 for a public kernel fn and none for a priv one, so a new public raw-address runtime function is refused.\n(4) Symbols are unchanged: runtime.exports and runtime.abi.json (jq -S) are identical between the p173 and p174 packs.\nRoute, recorded on 2026-11-14: 88 runtime and 6 fragment helpers whose every caller is inside the runtime became priv, and no outside Jet caller needed a typed view. The 13,400-site typed-owner migration the criterion's first sentence names was not done. E3114 now holds for the runtime with no scope, which is what the proof line requires.",
+          "at": "2026-11-15T11:12:08.188Z"
+        },
+        {
+          "n": 13,
+          "text": "#Policy(sentries: .Off) takes effect or is removed: sema builds TStmt.SentryPolicy so a nested #Unsafe { #Policy(sentries: .Off) { mem.list_copy ... } } runs without the R0801 sentry check, with a case that proves it on every tier; or, if the policy should not exist, the spelling, the dead Core/Mem/Mem.jet wrapper and every caller are removed in one cutover. (Found by Speed-3 on 2026-11-14: nothing constructs TStmt.SentryPolicy.) Proof: `jet test Compiler --profile cases --filter memory/sentry_policy_off_skips_r0801` on every tier, or git grep finds no `sentries: .Off` after the removal.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "CardCloser-3-context-allocator-root landed d68250c6ae (sema builds TStmt.SentryPolicy) and CardCloser-3-sentry-policy-case landed bd95993738. on batch compiler p155 (dev 49836bd978), 2026-11-15 01:45: jet test Compiler --profile cases --filter memory/sentry_policy_off_skips_r0801 PASS 1; context/context_ PASS 8 (the 5 that regressed on p152 included); context_scratch_block_rewinds_and_moves_what_leaves PASS 1; UnsafeRatchet --check baseline unchanged (1413 regions).",
+          "at": "2026-11-15T06:47:25.464Z"
+        },
+        {
+          "n": 14,
+          "text": "Kernel mappings are sentry-tracked: os_map, Region.reserve and every kernel map path register the mapped (page-rounded) range with the sentry after mapping, and os_unmap and trim unmaps quarantine it first, inline and free in non-sentry builds. Every compiler and runtime mapping site (loader_c_string page, image reservation, loader_view, child start stack, comptime reply mapping) goes through them, with no direct mmap. Proof: a case where a checked mem.list_copy into a fresh mapping passes and the same copy after unmap stops with R0801, on every tier. (Root found by Speed-3 on 2026-11-14; it blocks #5479 S2.)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 726c4aea9c (1ef8f75731), p171, 2026-11-15. tests/cases/memory_kernel/a_mapping_is_live_storage_until_it_is_unmapped.case PASSes. A checked list_copy into a fresh mapping prints 3 4 5 at O0, O1, O2 and web; the same copy after the unmap stops with a located R0801 (after_close.jet:22, with the gate's audit text) at O0, O1, O2 and web (node exits 70). memory_kernel/ is 11/0 on p170. The raw-syscall grep: git grep -nE '(syscall\\w*|host_call)\\((I64\\{)?(9|11|25)\\}?,|loader_record\\(rows, OS_SYS_MUNMAP|^\\s*push (9|11|25)\\b' -- Compiler, excluding Image/Loader.jet and FaultReport/report.S, prints only Linux.jet's three kernel-primitive lines (167, 175, 185: map, unmap, remap). Those two path exclusions are the recorded boundary: the loader's executor rows run before the runtime and its sentry exist, and report.S is a dying-path blob with no relocations; each says so at the site (d682db1d23).",
+          "at": "2026-11-15T10:43:36.217Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-14T22:51:11.682Z",
+      "updated": "2026-11-15T11:21:21.639Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 14,
+      "completedAt": "2026-11-15T11:21:21.639Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T11:43:43.123Z"
     }
   ]
 }
