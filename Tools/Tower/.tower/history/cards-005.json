@@ -4978,6 +4978,803 @@
       "completedAt": "2026-11-15T15:57:23.053Z",
       "questions": [],
       "retiredAt": "2026-11-18T19:44:25.563Z"
+    },
+    {
+      "id": "c0gpih2e",
+      "num": 5458,
+      "title": "Targeted security patching (grafts) without a full rebuild, recorded and reconciled in the declaration",
+      "body": "To ship a fix for a widely used library fast, replace it in existing outputs without rebuilding every dependent (Guix calls these grafts). Trade-off: the result is no longer bit-identical to a from-scratch build. Proposal: the graft is recorded in the declaration and the next full build reconciles it. Whether grafts are allowed at all (Q3 on the parent) is on Main's ballot list (2026-11-15).",
+      "kind": "idea",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #5457: its 1 open criteria now live there, each tagged (was #5458 cN). Board cleanup, one card per stream."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c1, body reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Owner gate: grafts (a patched dependency without a full rebuild) are new product behavior and new declaration syntax. No ballot exists on Tower; Main drafts one before any work."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Whether grafts are allowed is on Main's ballot list (2026-11-15); if they are, a graft is recorded in the declaration, applied without rebuilding dependents, and reconciled by the next full build. Proof: `tower decision show <id>` ratified, then `jet test Compiler --profile packages --filter graft/recorded_applied_reconciled`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #5457 c2 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:58.322Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c00tizy7",
+      "needsAcceptance": false,
+      "created": "2026-10-23T08:10:34.985Z",
+      "updated": "2026-11-15T22:46:00.329Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:46:00.329Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.014Z"
+    },
+    {
+      "id": "c07yeb2k",
+      "num": 5459,
+      "title": "Capability diff on dependency update: widened effects or #Unsafe are reported with the call path, and --locked refuses them",
+      "body": "Jet tracks authority and effects in the type system, so an update can be diffed by what it is allowed to do, not only by its text. \"This update now wants network access\" or \"this update adds an #Unsafe block\" is shown at update time. Defends against maintainer takeovers (xz style), typosquatting and AI-generated or hallucinated packages. Q2 on the parent (block or flag) is settled by D-AUTH-DEFAULT1=A: an update reports each widening, and --locked refuses it (c1). Related: #3418, #5070.",
+      "kind": "idea",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #5457: its 1 open criteria now live there, each tagged (was #5459 cN). Board cleanup, one card per stream."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): body reworded; the text waited on an owner answer that ratified decisions already give, or on a choice within ratified scope; it is recorded as decided (Main's operational authority) and nothing waits."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Updating a dependency whose new version adds an effect (for example Net.Connect) or a `#Unsafe` block reports each widened effect with the dependency function that needs it, at update time and on the next run (D-AUTH-DEFAULT1=A); `--locked` refuses the update with a registered error, and a written authority row is a ceiling. Proof: `jet test Compiler --profile packages --filter capability_diff/widened_effect_on_update` against a fixture registry.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #5457 c3 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:46:03.047Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c00tizy7",
+      "needsAcceptance": false,
+      "created": "2026-10-23T08:10:36.632Z",
+      "updated": "2026-11-15T22:46:05.256Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-15T22:46:05.256Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.014Z"
+    },
+    {
+      "id": "c0yozzfl",
+      "num": 5460,
+      "title": "Verified reproducibility: independent builders must agree bit-for-bit, published to a transparency log",
+      "body": "If independent builders produce identical outputs from the same inputs, a tampered binary is detectable. The compiler chain already enforces this for itself (stage 2 == stage 3, 1 thread == 12 threads); extend it to every published package and JetOS generation, and record build attestations in an append-only transparency log anchored at the trust root (#2199), so silent re-publishing is visible.",
+      "kind": "idea",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #5457: its 1 open criteria now live there, each tagged (was #5460 cN). Board cleanup, one card per stream."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Two independent builds of each published package from the same inputs are bit-identical, checked by the release gate, and each build attestation is appended to a transparency log anchored at the trust root, so a silently re-published package is detected.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #5457 c4 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:46:08.001Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "packages",
+            "filter": "reproducibility/republish_detected"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c00tizy7",
+      "needsAcceptance": false,
+      "created": "2026-10-23T08:10:38.249Z",
+      "updated": "2026-11-15T22:46:10.280Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:46:10.280Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.015Z"
+    },
+    {
+      "id": "c0he880u",
+      "num": 5462,
+      "title": "Declarative system audit trail: imperative changes write back, drift detection, read-only root, attested generations",
+      "body": "The planned imperative mode writes every change back into the declaration. That gives an audit trail of what changed and who changed it, drift detection against the last good state, and one-command recovery. Add a read-only system root and boot-time attestation that the running generation matches its declaration hash, so a persistent compromise must defeat the OS on every boot.",
+      "kind": "idea",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #5457: its 1 open criteria now live there, each tagged (was #5462 cN). Board cleanup, one card per stream."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "An imperative change to a package writes back into its declaration, and drift from the last good state is reported (system-root and boot attestation wait while JetOS is frozen).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #5457 c5 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:46:13.097Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "packages",
+            "filter": "audit_trail/imperative_change_written_back"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c00tizy7",
+      "needsAcceptance": false,
+      "created": "2026-10-23T08:10:41.556Z",
+      "updated": "2026-11-15T22:46:15.121Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:46:15.121Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.015Z"
+    },
+    {
+      "id": "c0x2wq8a",
+      "num": 6505,
+      "title": "FFI v3 gallery: C libraries (libm, zlib, libpng)",
+      "body": "Three complete programs that call C through `use c.<lib>`. None contains `#Unsafe`, a pointer or a binding file.\nThe `cbind` package (root `c`) reads each header with pinned clang, derives facts with evidence, and writes a Jet\nmodule. Outputs are design targets, not observed runs. Design: `ffi-v3.md` in the FFIDesign v3 lane, sections 4\nand 5; ballots D-FFI-LANG1, D-FFI-PRIMS2, D-FFI-FACTS1.\n\n## Simple: libm\n\nWhat it shows: a system library, scalar rows, zero overhead. Each call lowers to the same `call` C emits.\n\n```jet\nuse m: c.math\n\nrun: fn() {\n    print(m.cos(0.0))\n    print(m.hypot(3.0, 4.0))\n    print(m.fma(2.0, 3.0, 1.0))\n}\n```\n\n```text\n1.0\n5.0\n7.0\n```\n\nWhat the binder wrote (`jet inspect bind math --row hypot --expand`):\n\n```jet\n#ffi.Facts(Effects([]))                       // link evidence: libm imports nothing with effects\nhypot: fn(x: F64, y: F64) -> F64 {\n    ffi.cross(\"hypot\")\n    ffi.extern<fn(F64, F64) -> F64>(\"hypot\", EV_MATH_H_168).call(x, y)\n}\n```\n\n## Medium: zlib file compression\n\nWhat it shows: lists passed as pointer and length from `counted_by` facts; a C status turned into a Jet error by\nthe reviewed zlib pack; owned output; text copied from a static C string.\n\n```jet\npackage: {\n    name: \"squeeze\"\n    deps: { z: c@nixpkgs:zlib }\n}\n\nuse z: c.zlib\nuse fs: core.files\n\nsqueeze: fn(path: String) -> Int !z.ZError {\n    data: fs.read_bytes(path)\n    packed: z.compress(data, level: 9)          // pack: compressBound + compress2, status -> ZError\n    fs.write_bytes(\"{path}.z\", packed)\n    restored: z.uncompress(packed, size: data.len())\n    assert(restored == data)\n    packed.len()\n}\n\nrun: fn() {\n    print(\"zlib {z.version()}\")                   // const char*, static: copied once\n    size: squeeze(\"notes.txt\")\n    print(\"compressed to {size} bytes\")\n}\n```\n\n```text\nzlib 1.3.1\ncompressed to 1184 bytes\n```\n\nIf the zlib pack were absent, `z.compress` would still exist in its raw-but-safe shape:\n`compress2(dest: &[U8], dest_len: &U64, source: [U8], level: I32) -> I32`, because zlib's header documents\nlengths for both buffers through its `uLongf *destLen` and `uLong sourceLen` pairs and the binder's pairing rule\nmatches them. Only the error mapping and `compressBound` sizing come from the pack.\n\n## Complex: libpng thumbnailer\n\nWhat it shows: a reviewed pack giving handles with `Close`, `setjmp` error handling turned into Jet errors, a\nrefused row with its fix, a project overlay supplying a missing fact, and the audit.\n\n```jet\npackage: {\n    name: \"thumbs\"\n    deps: { png: c@nixpkgs:libpng }        // c-png-pack is found by header hash\n}\n\nuse png: c.png\nuse fs: core.files\n\n#Import module c.png {\n    // The project states the length fact for one row; Jet checks it at the call.\n    #ffi.Facts(Count(row_pointers, num_rows))\n    png_read_rows: fn(r: &Reader, row_pointers: &[[U8]], display: ?&[[U8]], num_rows: U32)\n}\n\nthumbnail: fn(path: String, out: String, scale: Int) !png.PngError {\n    img: png.Image.read(path)               // pack: png_create_read_struct + png_destroy_read_struct as Close\n    small := png.Image.blank(img.width / scale, img.height / scale, img.format)\n    loop y in 0..<small.height {\n        loop x in 0..<small.width {\n            small.set(x, y, img.pixel(x * scale, y * scale))\n        }\n    }\n    small.write(out)                          // longjmp inside libpng becomes PngError via the pack's error hook\n}\n\nstream_rows: fn(path: String) !png.PngError {\n    reader: png.Reader.open(path)\n    rows := [[U8]]{}\n    loop i in 0..<reader.height -> rows.push([U8].zeroed(reader.row_bytes))\n    png.png_read_rows(reader, rows, .None, reader.height)    // checked: rows.len() >= height\n    print(\"read {rows.len()} rows\")\n}\n\nrun: fn() {\n    loop f in fs.list_dir(\"photos\") {\n        if !f.ends_with(\".png\") -> next\n        thumbnail(\"photos/{f}\", \"thumbs/{f}\", 4) ?? print(\"skipped {f}\")\n    }\n    stream_rows(\"photos/cat.png\")\n}\n```\n\n```text\nread 480 rows\n```\n\nWithout the overlay, the `png_read_rows` call would stop the build:\n\n```text\nError [E3241]: `png_read_rows` takes pointer `row_pointers` with no known length.\n  --> thumbs.jet:31:5\n Why: Jet cannot tell how many elements C will read or write through it.\n Fix: Use `reader.read_rows()` from the libpng pack, or state the length with\n      #ffi.Facts(Count(row_pointers, num_rows)) in #Import module c.png.\n```\n\nThe audit of this program (`jet audit foreign thumbs.jet`) lists `png_read_rows` with\n`Count(row_pointers, num_rows)  source overlay thumbs.jet:8`, and every pack row with its reviewers and the header\nhash it was checked against.\n\n### Best competitor equivalent\n\n```zig\n// Zig: one line to import, then raw C everywhere; setjmp errors need a C shim.\nconst c = @cImport(@cInclude(\"png.h\"));\nvar png_ptr = c.png_create_read_struct(c.PNG_LIBPNG_VER_STRING, null, null, null) orelse return error.Png;\ndefer c.png_destroy_read_struct(&png_ptr, &info_ptr, null);\nc.png_read_rows(png_ptr, rows.ptr, null, height);      // no length check\n```\n",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6505 cN). Board cleanup, one card per stream."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The three C-library gallery programs (libm, zlib, libpng) call C through `use c.<lib>` with no `#Unsafe`, pointer or binding file and print the card's outputs. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/CLibraries` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #6504 c3 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:03.207Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ffi",
+        "ffi-v3",
+        "gallery"
+      ],
+      "parentId": "c0rkebo4",
+      "needsAcceptance": false,
+      "created": "2026-11-01T00:50:26.144Z",
+      "updated": "2026-11-15T22:45:06.744Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:06.743Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.015Z"
+    },
+    {
+      "id": "c03t8ic0",
+      "num": 6506,
+      "title": "FFI v3 gallery: callbacks (qsort, an event loop, foreign-thread delivery)",
+      "body": "Three complete programs that hand Jet closures to C (D-FFI-CONCUR1). Each callback parameter carries a retention\nfact: `.CallScoped` (used only during the call), `.UntilClose` (kept until a release call) or `.Forever`. The\nretention decides what a closure may capture. A retained callback returns a `Close` registration that unregisters\nat scope end. Callback types are infallible, and a panic never unwinds through C. Outputs are design targets.\n\n## Simple: qsort with a capturing comparator\n\n```jet\nuse libc: c.stdlib\n\nPerson: struct {\n    name: String\n    age: Int\n}\n\nrun: fn() {\n    people := [Person{name: \"Ann\", age: 41}, Person{name: \"Bo\", age: 29}, Person{name: \"Cy\", age: 35}]\n    oldest_first := true                                    // a local the comparator reads\n    libc.qsort(people, (a, b) -> {                         // qsort: noescape -> call-scoped\n        if oldest_first -> I32.from_int(b.age - a.age) else -> I32.from_int(a.age - b.age)\n    })\n    loop p in people -> print(p.name)\n}\n```\n\n```text\nAnn\nCy\nBo\n```\n\nThe `cbind` row for `qsort` is `fn qsort<T>(base: &[T], compar: fn(T, T) -> I32)`: the `base`, `nmemb` and `size`\nparameters collapse into one write window because the libc pack states their relation. The comparator becomes a\ngenerated trampoline with a context pointer, one indirect call per comparison, as in C.\n\n## Medium: an event loop (libuv timers and signals)\n\n```jet\npackage: {\n    name: \"ticker\"\n    deps: { uv: c@nixpkgs:libuv }\n}\n\nuse uv: c.uv\n\nrun: fn() {\n    lp: uv.Loop.new()                                     // uv_loop_init / uv_loop_close as Close\n    ticks := 0\n    timer: lp.timer()                                     // uv_timer_t handle, Close via uv_close\n    _t: timer.start(100ms, repeat: 100ms, (t) -> {        // .UntilClose; runs on the loop's thread (this one)\n        ticks += 1                                          // allowed: thread .Caller, the loop runs on this task\n        print(\"tick {ticks}\")\n        if ticks == 3 -> t.stop()\n    })\n    _s: lp.signal(.Int, (s) -> {\n        print(\"interrupted\")\n        lp.stop()\n    })\n    lp.run(.Default)                                        // a blocking row on this task\n    print(\"done after {ticks} ticks\")\n}                                                           // _s, _t, timer, lp close in reverse order\n```\n\n```text\ntick 1\ntick 2\ntick 3\ndone after 3 ticks\n```\n\nWhy `ticks += 1` is allowed in a retained callback: the pack states that libuv calls the timer callback only from\n`uv_run` on the loop's own thread (`thread .Caller`), and the registration closes before `ticks` goes out of scope.\nSo the capture is a borrow that provably outlives every call. Without the thread fact, the capture would be\nrefused with E3233 and the fix \"make it `shared`\".\n\n## Complex: callbacks from a foreign thread\n\nWhat it shows: an audio library that calls back from its real-time thread; one closure delivered on the owning\ntask, one running directly on the foreign thread with only sendable captures; a panic that stops without\nunwinding through C.\n\n```jet\npackage: {\n    name: \"meter\"\n    deps: { audio: c@nixpkgs:miniaudio }\n}\n\nuse ma: c.miniaudio\n\nLevel: struct {\n    peak: F32\n    frames: Int\n}\n\nrun: fn() {\n    device: ma.Device.open_capture(channels: 1, sample_rate: 48000)\n    level: shared Level{peak: 0.0, frames: 0}\n\n    // 1. Runs on the audio thread: must be fast, captures only sendable values.\n    _fast: device.on_data((input) -> {                    // .UntilClose, thread .Foreign\n        p: input.samples().map((s) -> s.abs()).max() ?? 0.0\n        level.peak = p\n        level.frames += input.frame_count()\n    })\n\n    // 2. Delivered on this task: may touch task-local state, may wait.\n    history := [F32]{}\n    _slow: device.on_notification((n) -> {\n        history.push(level.peak)\n        print(\"device {n.kind}: peak so far {level.peak}\")\n    }, deliver: .Owner)\n\n    device.start()\n    loop i in 0..<10 {\n        sleep(100ms)\n        print(\"{i}: peak {level.peak} after {level.frames} frames\")\n    }\n    device.stop()\n    print(\"history: {history.len()} notifications\")\n}\n```\n\n```text\n0: peak 0.21 after 4800 frames\n...\n9: peak 0.37 after 48000 frames\nhistory: 2 notifications\n```\n\nIf closure 1 tried to append to `history`, the build would stop:\n\n```text\nError [E3233]: `on_data` calls this callback on a foreign thread, so it cannot use `history`, a task-local list.\n Fix: Use `deliver: .Owner` to run the callback on this task, or make the value `shared`.\n```\n\nIf closure 1 panicked, the stop report would show the Jet frame, the miniaudio frame and the crossing, and the\nprogram would stop without unwinding through miniaudio's thread.\n\n### Best competitor equivalent\n\n```rust\n// Rust: retained closures need Box<dyn FnMut + Send + 'static>, a trampoline, and manual unregistration.\nextern \"C\" fn trampoline(dev: *mut ma_device, out: *mut c_void, inp: *const c_void, n: u32) {\n    let cb = unsafe { &mut *((*dev).pUserData as *mut Box<dyn FnMut(&[f32]) + Send>) };\n    cb(unsafe { std::slice::from_raw_parts(inp as *const f32, n as usize) });\n}\n// Panics must be caught with catch_unwind in every trampoline, or the process aborts.\n```\n",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6506 cN). Board cleanup, one card per stream."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The three callback programs (qsort with a capturing comparator, an event loop, foreign-thread delivery) honor each retention fact and print the card's outputs, and a capture the retention forbids is a registered error. Proof: `jet test Compiler --profile golden --filter FFI/Gallery/Callbacks` on O0, O1 and O2, and `jet test Compiler --profile ui --filter ffi_callback_retention_refused`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #6504 c4 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:10.715Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ffi",
+        "ffi-v3",
+        "gallery"
+      ],
+      "parentId": "c0rkebo4",
+      "needsAcceptance": false,
+      "created": "2026-11-01T00:50:28.728Z",
+      "updated": "2026-11-15T22:45:14.379Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:14.379Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.015Z"
+    },
+    {
+      "id": "c0xf8qpl",
+      "num": 6507,
+      "title": "FFI v3 gallery: C++ (a class, templates and exceptions, a physics engine)",
+      "body": "Three complete programs that call C++ through `use cpp.<lib>`. The `cppbind` package (root `cpp`) reads headers\nwith pinned clang's JSON AST, writes a small C shim per used member, and emits Jet types. Constructors and\ndestructors become construction and `Close`; exceptions become Jet errors; templates are instantiated for the types\nthe program uses. Outputs are design targets. Design: `ffi-v3.md` sections 4 and 8.2; ballots D-FFI-LANG1,\nD-FFI-FACTS1, D-FFI-CONCUR1.\n\n## Simple: a C++ class\n\n```cpp\n// inventory.hpp, part of the project\n#pragma once\n#include <string>\n#include <vector>\nclass Inventory {\npublic:\n    explicit Inventory(std::string owner);\n    void add(const std::string& item, int count);\n    int count(const std::string& item) const;\n    std::vector<std::string> items() const;\n};\n```\n\n```jet\npackage: {\n    name: \"shop\"\n    deps: { inv: cpp@\"src/inventory.hpp\" }\n}\n\nuse inv: cpp.inventory\n\nrun: fn() {\n    store := inv.Inventory.new(\"Ada\")          // constructor; the destructor runs at scope end\n    store.add(\"apple\", 3)                     // non-const member: writes; the call stays plain\n    store.add(\"pear\", 2)\n    print(store.count(\"apple\"))                // const member: plain read\n    print(store.items())                       // std::vector<std::string> copied to [String]\n}\n```\n\n```text\n3\n[\"apple\", \"pear\"]\n```\n\n## Medium: templates and exceptions\n\nWhat it shows: a template instantiated for the types the program uses; `noexcept(false)` members whose exception\ntypes become a Jet error enum; `std::string_view` returned as a view tied to its owner.\n\n```cpp\n// matrix.hpp\ntemplate <typename T> class Matrix {\npublic:\n    Matrix(size_t rows, size_t cols);\n    T& at(size_t r, size_t c);                          // throws std::out_of_range\n    Matrix<T> multiply(const Matrix<T>& other) const;   // throws std::invalid_argument\n    std::string_view name() const noexcept;\n};\n```\n\n```jet\npackage: {\n    name: \"linalg\"\n    deps: { mx: cpp@\"src/matrix.hpp\" }\n}\n\nuse mx: cpp.matrix\n\nproduct: fn() -> mx.Matrix<F64> !mx.CppError {\n    a := mx.Matrix<F64>.new(2, 3)                       // instantiates Matrix<double>\n    b := mx.Matrix<F64>.new(3, 2)\n    loop r in 0..<2 {\n        loop c in 0..<3 {\n            a.set_at(r, c, Float.from_int(r + c))         // T& at() becomes get_at/set_at\n            b.set_at(c, r, 1.0)\n        }\n    }\n    a.multiply(b)                                       // std::invalid_argument -> CppError.InvalidArgument\n}\n\nrun: fn() {\n    p: product()\n    print(p.get_at(1, 1))\n    print(p.name())                                     // a view, valid while p lives\n    bad: mx.Matrix<F64>.new(2, 2).get_at(5, 5)        // std::out_of_range -> CppError.OutOfRange\n    print(bad)\n}\n```\n\n```text\n6.0\nmatrix\nError [CppError.OutOfRange]: Matrix::at: index (5, 5) outside 2x2\n  in C++  matrix.hpp:14   Matrix<double>::at(size_t, size_t)\n  -- crossing: cpp.matrix Matrix<F64>.get_at  (binder cppbind 2.1.0, rule emit_method) --\n  in Jet  linalg.jet:24:12  run()\n```\n\n## Complex: a physics engine with callbacks\n\nWhat it shows: a C++ engine that owns objects, calls back into Jet during `step`, and uses virtual methods; the\ncallback captures local state because its retention fact is call-scoped; a Jet type implements a C++ interface.\n\n```cpp\n// physics.hpp (a third-party library, binary plus header)\nclass ContactListener { public: virtual void on_contact(int a, int b, float impulse) = 0; virtual ~ContactListener(); };\nclass World {\npublic:\n    World(float gravity);\n    int add_box(float x, float y, float w, float h);\n    void step(float dt, ContactListener& listener);     // calls listener during step only\n    struct Pos { float x, y; };\n    Pos position(int body) const;\n};\n```\n\n```jet\npackage: {\n    name: \"sim\"\n    deps: { phys: cpp@\"vendor/physics\" }   // a local directory: library plus header\n}\n\nuse phys: cpp.physics\nuse cpp.physics.[ContactListener]\n\nHit: struct {\n    a: I32\n    b: I32\n}\n\nRecorder: struct {\n    hits: [Hit]\n    strongest: F32\n}\n\n// A Jet struct implements a C++ abstract class; cppbind writes the vtable shim.\nimpl Recorder.ContactListener {\n    on_contact: fn(&self, a: I32, b: I32, impulse: F32) {\n        self.hits.push(Hit{a: a, b: b})\n        if impulse > self.strongest -> self.strongest = impulse\n    }\n}\n\nrun: fn() {\n    world := phys.World.new(-9.8)\n    _ground: world.add_box(0.0, 0.0, 100.0, 1.0)\n    crate: world.add_box(0.0, 10.0, 1.0, 1.0)\n    rec := Recorder{hits: [], strongest: 0.0}\n    loop frame in 0..<120 {\n        world.step(1.0 / 60.0, rec)                  // listener is call-scoped: no retention, no Send needed\n    }\n    print(\"contacts: {rec.hits.len()}\")\n    print(\"strongest: {rec.strongest}\")\n    print(\"crate at y = {world.position(crate).y}\")\n}\n```\n\n```text\ncontacts: 94\nstrongest: 6.53\ncrate at y = 1.0\n```\n\nIf `on_contact` panicked, the stop would show Jet and C++ frames in one list and would not unwind through\n`World::step`. The binary is in-process, so `jet audit foreign` lists it as trusted code. The callback type is infallible, so a Jet listener that could fail must handle its failure inside.\n\n### Best competitor equivalent\n\n```rust\n// Rust + cxx: a bridge module listing every type and method; virtual callbacks need a hand-written C++ subclass.\n#[cxx::bridge]\nmod ffi {\n    unsafe extern \"C++\" {\n        include!(\"physics.hpp\");\n        type World;\n        fn new_world(gravity: f32) -> UniquePtr<World>;\n        fn add_box(self: Pin<&mut World>, x: f32, y: f32, w: f32, h: f32) -> i32;\n    }\n}\n// Swift 5.9 C++ interop imports classes directly, but virtual methods cannot be overridden from Swift.\n```\n",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6507 cN). Board cleanup, one card per stream."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take); I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 1 criteria from archived #2901: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A prototype binds one C++ class (constructor, method, destructor) and prints identical output on O0, O1 and O2, or a note records exactly which tier blocked it and why.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #6504 c5 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:18.545Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "golden",
+            "filter": "FFI/Gallery/CppClass"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ffi",
+        "ffi-v3",
+        "gallery"
+      ],
+      "parentId": "c0rkebo4",
+      "needsAcceptance": false,
+      "created": "2026-11-01T00:50:30.519Z",
+      "updated": "2026-11-15T22:45:21.706Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-15T22:45:21.706Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.015Z"
+    },
+    {
+      "id": "c03yyxl3",
+      "num": 6508,
+      "title": "FFI v3 gallery: exporting Jet to C, Python and JavaScript",
+      "body": "Three complete Jet libraries and the host code that calls them. `#Export(hosts…)` feeds one export table; each\nhost's `Language` package (`cbind`, `pybind`, `jsbind`) writes that host's files through `Language.export`\n(D-FFI-EXPORT3). Today `#Export(c)` already exports primitives and `Text` with a generated header and\n`jet_text_free`; everything beyond that is PROPOSED. Outputs are design targets.\n\n## Simple: scalars to C\n\n```jet\n// mathx.jet\n#Export(c)\nclamp: fn(x: F64, lo: F64, hi: F64) -> F64 {\n    if x < lo -> lo else if x > hi -> hi else -> x\n}\n\n#Export(c)\ngreet: fn(name: Text) -> Text { \"hello, {name}\" }\n```\n\n```sh\n$ jet build --lib --host c mathx.jet\n  out/c/libmathx.a  out/c/mathx.h\n```\n\n```c\n// main.c\n#include \"mathx.h\"\n#include <stdio.h>\nint main(void) {\n    printf(\"%f\\n\", mathx_clamp(12.0, 0.0, 10.0));\n    jet_text t = mathx_greet(jet_text_from(\"Ada\"));\n    printf(\"%.*s\\n\", (int)t.len, t.ptr);\n    jet_text_free(t);\n}\n```\n\n```text\n10.000000\nhello, Ada\n```\n\n## Medium: records and errors to C and Python\n\n```jet\n// geo.jet\n#Export(c, py)\nPoint: struct {\n    lat: F64\n    lon: F64\n}\n\n#Export(c, py)\n#Error enum GeoError { OutOfRange(F64), Empty }\n\n#Export(c, py)\ncentroid: fn(points: [Point]) -> Point !GeoError {\n    if points.len() == 0 -> return Err(.Empty)\n    loop p in points {\n        if p.lat < -90.0 || p.lat > 90.0 -> return Err(.OutOfRange(p.lat))\n    }\n    n: Float.from_int(points.len())\n    Point{lat: points.map((p) -> p.lat).sum() / n, lon: points.map((p) -> p.lon).sum() / n}\n}\n```\n\n```c\n// generated geo.h (excerpt)\ntypedef struct { double lat; double lon; } geo_Point;\ntypedef struct { int32_t kind; double out_of_range; } geo_GeoError;   // kind: GEO_GEOERROR_OUT_OF_RANGE, GEO_GEOERROR_EMPTY\nint32_t geo_centroid(const geo_Point *points, size_t count, geo_Point *out, geo_GeoError *err);   // 0 = ok\n```\n\n```python\n# app.py, using the generated wheel\nimport geo\nprint(geo.centroid([geo.Point(lat=48.8, lon=2.3), geo.Point(lat=52.5, lon=13.4)]))\ntry:\n    geo.centroid([])\nexcept geo.GeoError.Empty:\n    print(\"no points\")\n```\n\n```text\nPoint(lat=50.65, lon=7.85)\nno points\n```\n\n## Complex: callbacks and async to C, Python and JavaScript\n\n```jet\n// crawler.jet\nuse http: core.http.client\nuse net: core.net\n\n#Export(c, py, js)\nPage: struct {\n    url: String\n    status: Int\n    bytes: Int\n}\n\n// A call-scoped callback: hosts may pass any function or closure.\n#Export(c, py, js)\ncrawl: fn(start: String, limit: Int, on_page: fn(Page)) -> Int !net.HTTPError {\n    seen := 0\n    queue := [start]\n    loop {\n        if seen >= limit || queue.len() == 0 -> break\n        url: queue.pop_front() ?? break\n        resp: http.get(url)\n        on_page(Page{url: url, status: resp.status, bytes: resp.body.len()})\n        loop link in resp.links() -> queue.push(link)\n        seen += 1\n    }\n    seen\n}\n\n// A waiting function: completion callback plus cancel handle in C, async def in Python, Promise in JS.\n#Export(c, py, js)\nfetch_title: fn(url: String) -> String !net.HTTPError {\n    http.get(url).html().title() ?? \"(untitled)\"\n}\n```\n\n```c\n// C host: the completion-callback idiom C programmers know from libuv and libcurl.\nstatic void on_page(void *ctx, const crawler_Page *p) { printf(\"%d %s\\n\", (int)p->status, p->url.ptr); }\nstatic void on_title(void *ctx, jet_text title, const crawler_HTTPError *err) {\n    if (err) { fprintf(stderr, \"failed: %d\\n\", err->kind); return; }\n    printf(\"title: %.*s\\n\", (int)title.len, title.ptr);\n    jet_text_free(title);\n}\nint main(void) {\n    crawler_HTTPError err;\n    int64_t n;\n    crawler_crawl(jet_text_from(\"https://jet-lang.dev\"), 5, on_page, NULL, &n, &err);\n    crawler_cancel c = crawler_fetch_title(jet_text_from(\"https://jet-lang.dev\"), on_title, NULL);\n    crawler_run_until_idle();          // or integrate crawler_poll_fd() into the host's event loop\n}\n```\n\n```python\n# Python host\nimport asyncio, crawler\ncrawler.crawl(\"https://jet-lang.dev\", 5, lambda p: print(p.status, p.url))\nprint(asyncio.run(crawler.fetch_title(\"https://jet-lang.dev\")))\n```\n\n```js\n// JavaScript host\nimport { crawl, fetchTitle } from \"./crawler.js\";\ncrawl(\"https://jet-lang.dev\", 5, (p) => console.log(p.status, p.url));\nconsole.log(await fetchTitle(\"https://jet-lang.dev\"));\n```\n\n```text\n200 https://jet-lang.dev\n200 https://jet-lang.dev/docs\n...\ntitle: Jet\n```\n\n### Best competitor equivalent\n\n```rust\n// Rust: three tools. cbindgen for C (no async), PyO3 + pyo3-asyncio for Python, wasm-bindgen for JS.\n#[no_mangle] pub extern \"C\" fn crawler_crawl(start: *const c_char, limit: i64,\n    cb: extern \"C\" fn(*mut c_void, *const Page), ctx: *mut c_void) -> i64 { ... }\n#[pyfunction] fn crawl(py: Python<'_>, start: String, limit: i64, on_page: PyObject) -> PyResult<i64> { ... }\n#[wasm_bindgen] pub async fn fetch_title(url: String) -> Result<String, JsValue> { ... }\n```\n",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 3 open criteria now live there, each tagged (was #6508 cN). Board cleanup, one card per stream."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`#Export(c, python, js)` libraries build with `jet build --lib --host <host>`, and the card's host programs in C, Python and JavaScript call them with the shown output.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #6504 c6 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:25.485Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "ffi_export/host_programs_"
+          }
+        },
+        {
+          "n": 2,
+          "text": "The eight Examples/Interop/FFI/Projections/*/guest.jet exports with a declared failure carrier (document_open, document_bytes, view_at, document_replace, document_close: `-> T? ProjectionError!`) project their errors into C, C++, Go, JavaScript, Python, Rust and Zig. Sema's E3203 refusal of a carrier on `#Export(c)` (from #5454 c98) is lifted only together with the built projection, so sema and codegen agree, and build.sh uses the PascalCase directories. Proof: `jet test Compiler --profile golden --filter Interop/FFI/Projections` on every applicable tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #6504 c7 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:28.874Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 3,
+          "text": "The R, Perl, PHP, Ruby, PowerShell and Octave binding generators emit one typed decode_response helper per binding; every generated operation delegates through it, raw extern access stays available, and generated error domains are valid. Proof: `jet test Compiler --profile cases --filter binding_generators/decode_response_` plus an Octave round-trip case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #6504 c8 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:32.068Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ffi",
+        "ffi-v3",
+        "gallery"
+      ],
+      "parentId": "c0rkebo4",
+      "needsAcceptance": false,
+      "created": "2026-11-01T00:50:33.092Z",
+      "updated": "2026-11-15T22:45:34.715Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-15T22:45:34.715Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.015Z"
+    },
+    {
+      "id": "c05aa8kj",
+      "num": 6509,
+      "title": "FFI v3 gallery: isolation (wasm, process, hardened profile)",
+      "body": "Three complete programs that move foreign libraries out of the program's memory with one `isolate:` line and no\ncall-site change (D-FFI-PLACE1). `.Wasm` compiles a source library to wasm and runs it inside the process with its\nown linear memory. `.Process` runs a closed binary in a supervised child and batches calls through a shared-memory\nring. Jet already has the pieces: the wasm plugin host (`PluginHost.jet`) and the worker supervisor\n(`WorkerSupervisor.jet`). Costs are inferences from published sandbox reports, marked as such. Outputs are design\ntargets.\n\n## Simple: a C image decoder in wasm\n\n```jet\npackage: {\n    name: \"avatars\"\n    deps: { stb: c@nixpkgs:stb_image }\n    isolate: { stb: .Wasm }\n}\n\nuse img: c.stb_image\n\nrun: fn() {\n    pic: img.load(\"upload.png\")                     // same call as in-process\n    print(\"{pic.width}x{pic.height}\")\n    evil: img.load(\"crafted.png\")                   // a heap overflow inside stb traps in its sandbox\n    print(evil.width)\n}\n```\n\n```text\n640x480\nError [IsolateError.Trapped]: stb_image trapped: out-of-bounds memory access\n  in wasm  stb_image.h:4877   stbi__parse_png_file   [placement .Wasm]\n  -- crossing: c.stb_image load  (binder cbind 3.0.1, rule emit_plain) --\n  in Jet   avatars.jet:10:13  run()\n```\n\nJet memory is untouched; the sandbox is discarded and recreated on the next call. Cost: about 1.1 to 1.5 times\nthe native decode time inside the library [INFERENCE from RLBox reports], nothing at the call.\n\n## Medium: a closed codec in a child process\n\n```jet\npackage: {\n    name: \"transcode\"\n    deps: { codec: c@\"vendor/oldcodec\" }   // a local directory: library plus header\n    isolate: { codec: .Process }\n}\n\nuse codec: c.oldcodec\nuse fs: core.files\n\ntranscode: fn(path: String) -> Int !(IsolateError | codec.CodecError) {\n    dec: codec.Decoder.open(path)                   // a handle living in the child; Close sends the release\n    out: fs.create(\"{path}.raw\")                 // a Close file handle\n    frames := 0\n    loop {\n        frame: dec.next_frame() ?? break            // Bytes cross through the shared ring, no copy per frame\n        out.write(frame)\n        frames += 1\n    }\n    frames\n}\n\nrun: fn() {\n    print(transcode(\"clip.old\"))\n    // If the child crashes, the call fails with IsolateError.Crashed, the supervisor restarts it,\n    // and handles from the dead child fail with IsolateError.Stale instead of touching freed memory.\n}\n```\n\n```text\n2400\n```\n\nEffects are enforced: the child runs with only the grants the codec's link evidence needs (`FS.Read` on the input\ndirectory). A codec update that adds a `connect` import shows up as a lock diff before it can run.\n\n## Complex: hardened profile and audit\n\n```jet\npackage: {\n    name: \"upload_service\"\n    deps: {\n        stb: c@nixpkgs:stb_image                  // source\n        zlib: c@nixpkgs:zlib                      // source via nixpkgs\n        codec: c@\"vendor/oldcodec\"\n        exif: py@\"exifread==3.0\"                    // pure Python\n        pillow: py@\"pillow==11.0\"                   // native extension\n    }\n    isolate: { stb: .Wasm, codec: .Process }\n    profile: { release: { foreign: .Hardened } }\n}\n\nuse img: c.stb_image\nuse z: c.zlib\nuse codec: c.oldcodec\nuse exif: py.exifread\nuse pil: py.PIL.Image\nuse fs: core.files\n\nhandle: fn(upload: Bytes) -> Bytes !(IsolateError | codec.CodecError | z.ZError) {\n    tags: exif.process_bytes(upload)                       // in-process: pure Python\n    pic: img.load_memory(upload)                           // .Wasm\n    thumb: pil.from_rgba(pic.width, pic.height, pic.pixels).resize([128, 128])   // .Process under .Hardened\n    z.compress(thumb.png_bytes(), level: 6)                  // in-process, hardened clang build\n}\n\nrun: fn() {\n    out: handle(fs.read_bytes(\"upload.jpg\"))\n    print(out.len())\n}\n```\n\n```sh\n$ jet audit foreign upload_service.jet --placement\n  stb       .Wasm        source jetpack:stb_image@2.30      effects enforced: []\n  zlib      in-process   source, hardened build             effects proven:   []  (link evidence)\n  codec     .Process     closed binary sha256:44c1…         effects enforced: [FS.Read]\n  exifread  in-process   pure Python                        effects proven:   []\n  pillow    .Process     native extension, hardened profile effects enforced: [FS.Read]\n  trusted in-process native code: zlib (hardened: -fbounds-safety, _FORTIFY_SOURCE=3, auto-var-init=zero, CFI)\n$ jet build --profile release\n  ok\n```\n\nRemoving `codec: .Process` under the hardened profile fails the release build:\n\n```text\nError [E3243]: `codec` is a closed native binary running in-process under the hardened profile.\n Fix: Add `codec: .Process` to isolate:, or grant trust with a reason, a trust_grant gate:\n      trust: { codec: \"vendor-audited build, ticket SEC-114\" }   (D-FFI-PLACE1)\n```\n\n### Best competitor equivalent\n\n```cpp\n// Firefox RLBox: each call and each returned value is rewritten and verified by hand.\nrlbox_sandbox<rlbox_wasm2c_sandbox> sandbox;\nsandbox.create_sandbox();\nauto tainted_w = sandbox.invoke_sandbox_function(stbi_load_from_memory, buf, len, w, h, n, 4);\nint width = w.copy_and_verify([](int v) { return v > 0 && v < 65536 ? v : 0; });\n// Chrome: decoders run in a utility process behind a .mojom interface and generated bindings.\n```\n",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6509 cN). Board cleanup, one card per stream."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The three isolation programs (a C decoder under `.Wasm`, a closed binary under `.Process`, the hardened profile) run with one `isolate:` line and no call-site change and print the card's outputs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #6504 c9 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:37.883Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "ffi_isolation/gallery_"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ffi",
+        "ffi-v3",
+        "gallery"
+      ],
+      "parentId": "c0rkebo4",
+      "needsAcceptance": false,
+      "created": "2026-11-01T00:50:35.348Z",
+      "updated": "2026-11-15T22:45:40.238Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:40.238Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.015Z"
+    },
+    {
+      "id": "c03kbmfy",
+      "num": 6510,
+      "title": "FFI v3 gallery: Python (statistics, numpy, pandas with matplotlib)",
+      "body": "Three complete programs that call Python through `use py.<package>`. The `pybind` package (root `py`) runs the\npinned CPython with its `jetpy.describe` module to read type hints, stubs (`.pyi`), classes and exceptions, and\nemits Jet types. Typed functions get Jet signatures; untyped ones get `Dyn` values that decode on use. Placement is\ndecided by facts (D-FFI-PLACE1): pure Python runs embedded in-process; native extensions run in-process by default\nand in a child process under the hardened profile. Outputs are design targets.\n\n## Simple: the standard library's statistics module\n\n```jet\nuse stats: py.statistics                     // ships with the pinned CPython; no dependency line needed\n\nrun: fn() {\n    xs: [2.0, 4.0, 4.0, 4.0, 5.0, 5.0, 7.0, 9.0]\n    print(stats.mean(xs))                       // list[float] hint -> [F64]\n    print(stats.pstdev(xs))\n    print(stats.median(xs))\n    print(stats.mean([]))                       // StatisticsError -> stats.StatisticsError\n}\n```\n\n```text\n5.0\n2.0\n4.5\nError [stats.StatisticsError]: mean requires at least one data point\n  in Python  statistics.py:430   mean()\n  -- crossing: py.statistics mean  (binder pybind 1.0.3, rule emit_call) --\n  in Jet     main.jet:8:11  run()\n```\n\n## Medium: numpy arrays shared, not copied\n\nWhat it shows: PEP 3118 buffers over Jet list memory, so numpy reads and writes Jet data in place; dtype and shape\nfacts from numpy's stubs; in-place operations take a writable input in the binding's signature, so the call stays plain.\n\n```jet\npackage: {\n    name: \"signal\"\n    deps: { numpy: py@\"numpy==2.1\" }\n}\n\nuse np: py.numpy\n\nrun: fn() {\n    wave: loop i in 0..<1024 -> (Float.from_int(i) * 0.05).sin()\n    samples := wave.copy()\n    spectrum: np.fft.rfft(samples)                  // reads samples in place; returns an np.Array<Complex128> handle\n    peak: np.argmax(np.abs(spectrum))\n    print(\"peak bin {peak}\")\n\n    np.multiply(samples, 0.5, out: samples)          // writes into Jet memory through the buffer\n    print(samples[20])\n\n    m: np.Array<F64>.from(samples).reshape(32, 32)   // an owned ndarray handle\n    print(m.shape)                                      // [32, 32]\n    print(np.linalg.det(m.slice(0..<3, 0..<3)))\n}\n```\n\n```text\npeak bin 8\n0.4207354924039483\n[32, 32]\n-0.0\n```\n\n## Complex: pandas report with matplotlib, async I/O and a placement choice\n\nWhat it shows: a DataFrame as an opaque handle with typed column access; Python exceptions as Jet errors;\nan `async def` turned into a wait point; a Jet callback passed to `DataFrame.apply`; the hardened profile moving\nnative extensions to a child process with no call-site change.\n\n```jet\npackage: {\n    name: \"sales_report\"\n    deps: {\n        pandas: py@\"pandas==2.2\"\n        mpl: py@\"matplotlib==3.9\"\n        aiohttp: py@\"aiohttp==3.10\"\n    }\n    profile: { release: { foreign: .Hardened } }       // pandas, numpy and matplotlib run in a child process\n}\n\nuse pd: py.pandas\nuse plt: py.matplotlib.pyplot\nuse http: py.aiohttp\n\n#Codable\nRate: struct {\n    currency: String\n    to_usd: F64\n}\n\nfetch_rates: fn() -> [Rate] !http.ClientError {\n    session: http.ClientSession.new()                 // async with -> Close at scope end\n    resp: session.get(\"https://rates.example/today\")  // coroutine -> wait point\n    resp.json<[Rate]>()                                 // coroutine -> wait point; decoded into Jet records\n}\n\nrun: fn() {\n    rates: fetch_rates()\n    df: pd.read_csv(\"sales.csv\", parse_dates: [\"day\"])\n    df.assign_column(\"usd\", df.apply((row) -> {          // call-scoped Jet callback\n        currency: row.get_text(\"currency\")\n        rate: rates.find((r) -> r.currency == currency)?.to_usd ?? 1.0\n        row.get_f64(\"amount\") * rate\n    }, axis: 1))\n    monthly: df.groupby(pd.Grouper(key: \"day\", freq: \"ME\")).sum_column(\"usd\")\n\n    fig: plt.figure(figsize: [8.0, 4.0])\n    ax: fig.add_subplot()\n    ax.bar(monthly.index_text(), monthly.values_f64())\n    ax.set_title(\"Revenue (USD)\")\n    fig.savefig(\"revenue.png\", dpi: 150)\n    print(\"months: {monthly.len()}, best: {monthly.idxmax()}\")\n\n    bad: pd.read_csv(\"missing.csv\")                    // FileNotFoundError -> pd.FileNotFoundError\n    print(bad.len())\n}\n```\n\n```text\nmonths: 12, best: 2026-07\nError [pd.FileNotFoundError]: [Errno 2] No such file or directory: 'missing.csv'\n  in Python  pandas/io/parsers/readers.py:1026   read_csv()\n  -- crossing: py.pandas read_csv  (binder pybind 1.0.3, rule emit_call, placement .Process) --\n  in Jet     report.jet:46:12  run()\n```\n\n`jet audit foreign report.jet --placement` shows pandas, numpy and matplotlib in `.Process` (native extensions,\nhardened profile) and aiohttp's pure-Python parts in-process.\n\n### Best competitor equivalent\n\n```mojo\n# Mojo: Python interop through PythonObject; every value is dynamically typed, errors are raised Python exceptions.\nfrom python import Python\ndef main():\n    pd = Python.import_module(\"pandas\")\n    df = pd.read_csv(\"sales.csv\")\n    print(df.groupby(\"month\")[\"usd\"].sum())\n# Julia PythonCall.jl is similar: pyimport, Py values, conversion with pyconvert.\n```\n",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6510 cN). Board cleanup, one card per stream."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The three Python programs (statistics, numpy, pandas with matplotlib) run through `use py.<package>` and print the card's outputs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #6504 c10 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:43.203Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "ffi_python/gallery_"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ffi",
+        "ffi-v3",
+        "gallery"
+      ],
+      "parentId": "c0rkebo4",
+      "needsAcceptance": false,
+      "created": "2026-11-01T00:50:37.420Z",
+      "updated": "2026-11-15T22:45:45.492Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:45.492Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.015Z"
+    },
+    {
+      "id": "c00n89mp",
+      "num": 6511,
+      "title": "FFI v3 gallery: Rust crates (regex, serde_json, a crate with its own threads)",
+      "body": "Three complete programs that call Rust through `use rust.<crate>`. The `rustbind` package (root `rust`) reads the\ncrate's public API from rustdoc JSON with a pinned toolchain, writes a `#[no_mangle]` shim crate for the items the\nprogram uses, and emits Jet types. Rust's own types are facts with the strongest evidence: `&T` is non-null and\nborrowed, `String` and `Box` are owned, `Result` is an error, `Send` and `Sync` are thread facts, `Drop` is\n`Close`. Public crates arrive prebuilt from the store (D-FFI-TOOLS1). Outputs are design targets.\n\n## Simple: regex\n\n```jet\npackage: {\n    name: \"emails\"\n    deps: { regex: rust@\"regex@1.11\" }\n}\n\nuse re: rust.regex\n\nrun: fn() {\n    pattern: re.Regex.new(\"^[a-z.]+@[a-z]+\\\\.[a-z]{2,}$\")      // Result<Regex, regex::Error> -> Regex !re.Error\n    loop s in [\"ann@example.com\", \"not an email\", \"bo.li@jet.dev\"] {\n        print(\"{s}: {pattern.is_match(s)}\")                        // &str borrows the Jet text: zero copy\n    }\n}\n```\n\n```text\nann@example.com: true\nnot an email: false\nbo.li@jet.dev: true\n```\n\n## Medium: serde_json records\n\nWhat it shows: a Rust generic function instantiated for a Jet `#Codable` struct by deriving the matching serde\nimpls in the shim; Rust errors as Jet errors; an iterator as a Jet loop source.\n\n```jet\npackage: {\n    name: \"orders\"\n    deps: { serde_json: rust@\"serde_json@1.0\" }\n}\n\nuse sj: rust.serde_json\nuse fs: core.files\n\n#Codable\nLine: struct {\n    sku: String\n    qty: Int\n}\n\n#Codable\nOrder: struct {\n    id: String\n    lines: [Line]\n}\n\nrun: fn() {\n    text: fs.read(\"orders.json\")\n    orders: sj.from_str<[Order]>(text)              // the shim derives Deserialize for Order's layout\n    loop o in orders {\n        total: o.lines.map((l) -> l.qty).sum()\n        print(\"{o.id}: {total} items\")\n    }\n    print(sj.to_string_pretty(orders[0]))\n    broken: sj.from_str<Order>(\"{\\\"id\\\": 5}\")         // serde_json::Error -> sj.Error, with line and column\n    print(broken.id)\n}\n```\n\n```text\nA-100: 7 items\nB-200: 2 items\n{\n  \"id\": \"A-100\",\n  ...\n}\nError [sj.Error]: invalid type: integer `5`, expected a string at line 1 column 9\n  in Rust  serde_json-1.0.133/src/de.rs   serde_json::from_str::<Order>\n  -- crossing: rust.serde_json from_str  (binder rustbind 1.2.0, rule emit_generic) --\n  in Jet   orders.jet:28:15  run()\n```\n\n## Complex: a crate that runs its own threads (tokio-backed)\n\nWhat it shows: an async Rust API whose futures become Jet wait points; a `Send + 'static` callback that the crate\ncalls from its own worker threads, delivered on the owning task; `Drop` as `Close`.\n\n```jet\npackage: {\n    name: \"feeds\"\n    deps: { feedkit: rust@\"feedkit@0.4\" }       // a tokio-based RSS client\n}\n\nuse fk: rust.feedkit\n\nCounter: struct {\n    seen: Int\n}\n\nrun: fn() {\n    client: fk.Client.builder().timeout(5s).build()         // owns a tokio runtime; Drop -> Close at scope end\n    feeds: [\"https://blog.rust-lang.org/feed.xml\", \"https://jet-lang.dev/feed.xml\"]\n\n    // async fn fetch(&self, url: &str) -> Result<Feed, fk::Error> becomes a wait point.\n    tasks: feeds.map((u) -> task client.fetch(u))\n    loop t in tasks {\n        feed: t.join()\n        print(\"{feed.title}: {feed.items.len()} items\")\n    }\n\n    // fn watch(&self, url: &str, f: impl Fn(Item) + Send + 'static) -> WatchHandle\n    // Retention: 'static (until the handle drops). Thread: the crate's workers. Delivery: this task.\n    seen: shared Counter{seen: 0}\n    _watch: client.watch(feeds[1], (item) -> {\n        print(\"new: {item.title}\")\n        seen.seen += 1                                         // Shared<Counter>: safe from any thread\n    }, deliver: .Owner)\n    sleep(200ms)\n    print(\"seen {seen.seen}\")\n}                                                              // the watch closes first, then client\n```\n\n```text\nRust Blog: 10 items\nJet: 4 items\nnew: FFI v3 lands\nseen 1\n```\n\n`watch` retains the closure, so its captures must be owned or sendable. A plain mutable local would be refused:\n\n```text\nError [E3233]: `watch` keeps this callback after the call returns, so it cannot borrow `counter`.\n Fix: Make it shared: `counter: shared Counter{seen: 0}`.\n```\n\n### Best competitor equivalent\n\n```rust\n// The closest cross-language equivalent: exposing the same async crate to Python with PyO3, by hand.\n#[pyfunction]\nfn fetch(py: Python<'_>, url: String) -> PyResult<Bound<'_, PyAny>> {\n    pyo3_asyncio::tokio::future_into_py(py, async move { Ok(client().fetch(&url).await?.title) })\n}\n// The binding author writes this per function; Jet's rustbind writes it from rustdoc JSON.\n```\n",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6511 cN). Board cleanup, one card per stream."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The three Rust-crate programs (regex, serde_json, a crate with its own threads) run through `use rust.<crate>` and print the card's outputs.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #6504 c11 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:48.605Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "ffi_rust/gallery_"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ffi",
+        "ffi-v3",
+        "gallery"
+      ],
+      "parentId": "c0rkebo4",
+      "needsAcceptance": false,
+      "created": "2026-11-01T00:50:39.421Z",
+      "updated": "2026-11-15T22:45:50.630Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:50.630Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.015Z"
+    },
+    {
+      "id": "c015lbud",
+      "num": 6512,
+      "title": "FFI v3 gallery: JavaScript on the web target (date-fns, chart.js, a web component)",
+      "body": "Three complete programs for the `wasm32-web` target that call JavaScript through `use js.<package>`. The `jsbind`\npackage (root `js`) reads the package's `.d.ts` with a pinned TypeScript compiler, emits Jet types and writes the\nJS glue the page loads. TypeScript types are the facts: `string | null` is `?String`, `Promise<T>` is a wait\npoint, a thrown `Error` is a Jet error when the `.d.ts` or a pack declares it. Browser effects follow the spec's\nbrowser rules. Outputs are design targets.\n\n## Simple: date-fns\n\n```jet\npackage: {\n    name: \"dates\"\n    deps: { date_fns: js@\"date-fns@4.1\" }\n    targets: [wasm32-web]\n}\n\nuse dates: js.date_fns\n\nrun: fn() {\n    now: dates.Date.now()\n    print(dates.format(now, \"yyyy-MM-dd\"))\n    print(dates.format_distance(dates.sub_days(now, 3), now))     // camelCase becomes snake_case\n    print(dates.is_weekend(now))\n}\n```\n\n```text\n2026-10-31\n3 days\ntrue\n```\n\n## Medium: chart.js with fetch\n\nWhat it shows: a canvas element from the page, a JS class constructed from Jet, a Jet record passed as a JS object\nliteral by the `.d.ts` interface, and `fetch` as a wait point.\n\n```jet\npackage: {\n    name: \"dashboard\"\n    deps: { chart: js@\"chart.js@4.4\" }\n    targets: [wasm32-web]\n}\n\nuse chart: js.chart_js\nuse web: core.web\n\n#Codable\nPoint: struct {\n    day: String\n    visits: Int\n}\n\nrun: fn() !web.FetchError {\n    points: web.fetch(\"/api/visits\").json<[Point]>()        // Promise -> wait point\n    canvas: web.document.query<web.Canvas>(\"#visits\")\n    _c: chart.Chart.new(canvas, chart.ChartConfiguration{\n        type_: .Line,                                           // the .d.ts field `type`, renamed by jsbind\n        data: chart.ChartData{\n            labels: points.map((p) -> p.day),\n            datasets: [chart.Dataset{label: \"Visits\", data: points.map((p) -> p.visits)}],\n        },\n    })                                                          // destroy() at scope end via Close\n    web.wait_for_unload()\n}\n```\n\nThe page shows a line chart of visits per day.\n\n## Complex: a web component written in Jet, used from JS, using JS\n\nWhat it shows: exporting a Jet type as a custom element (D-FFI-EXPORT3, host `js`), JS events delivered to Jet\ncallbacks, a JS library (`marked`) called from Jet, and a JS caller awaiting a Jet waiting function.\n\n```jet\npackage: {\n    name: \"md_editor\"\n    deps: {\n        marked: js@\"marked@14.1\"\n        purify: js@\"dompurify@3.2\"\n    }\n    targets: [wasm32-web]\n}\n\nuse md: js.marked\nuse purify: js.dompurify\nuse web: core.web\n\n#Export(js)\nMarkdownEditor: struct {\n    area: web.TextArea\n    preview: web.Element\n}\n\nrender_into: fn(preview: web.Element, text: String) {\n    html: md.parse(text, md.Options{gfm: true})                     // marked returns a string\n    preview.set_inner_html(purify.sanitize(html))                     // never insert unsanitized HTML\n}\n\n#Export(js)\nimpl MarkdownEditor {\n    mount: fn(root: web.Element) -> MarkdownEditor {\n        area: web.document.create<web.TextArea>(\"textarea\")\n        preview: web.document.create<web.Element>(\"div\")\n        root.append(area)\n        root.append(preview)\n        area.on_input((e) -> render_into(preview, e.target.value))     // retained; captures a JS handle, which is sendable\n        MarkdownEditor{area: area, preview: preview}\n    }\n\n    render: fn(self, text: String) {\n        self.area.set_value(text)                                       // a method on the JS handle\n        render_into(self.preview, text)\n    }\n\n    // A waiting Jet function becomes a Promise for JS callers.\n    save: fn(self, url: String) -> Int !web.FetchError {\n        web.fetch(url, method: .Post, body: self.area.value).status\n    }\n}\n```\n\n```js\n// index.js, written by hand in the web app\nimport { MarkdownEditor } from \"./md_editor.js\";       // glue written by jsbind's export\nconst ed = MarkdownEditor.mount(document.querySelector(\"#editor\"));\ned.render(\"# Hello\\n\\nFrom **Jet**\");\nconst status = await ed.save(\"/api/doc\");              // Promise<number>; FetchError arrives as a thrown Error\n```\n\n```ts\n// md_editor.d.ts, written by jsbind\nexport class MarkdownEditor {\n    static mount(root: Element): MarkdownEditor;\n    render(text: string): void;\n    save(url: string): Promise<number>;\n    free(): void;                                        // also released by FinalizationRegistry\n}\n```\n\nA closed native binary in `deps` would be refused for this target with E3238, naming the library and offering the\nserver-side form.\n\n### Best competitor equivalent\n\n```rust\n// Rust + wasm-bindgen: attributes on every item, JsValue at untyped edges, closures leaked or stored by hand.\n#[wasm_bindgen]\npub struct MarkdownEditor { source: String, preview: web_sys::Element }\n#[wasm_bindgen]\nimpl MarkdownEditor {\n    pub fn mount(root: &web_sys::Element) -> MarkdownEditor { ... }\n    pub async fn save(&self, url: String) -> Result<u16, JsValue> { ... }\n}\nlet cb = Closure::<dyn FnMut(web_sys::InputEvent)>::new(move |e| { ... });\narea.set_oninput(Some(cb.as_ref().unchecked_ref()));\ncb.forget();                                             // leaked on purpose\n```\n",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [
+        "c0m58g8t"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6504: its 1 open criteria now live there, each tagged (was #6512 cN). Board cleanup, one card per stream."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). Blocked by #5201: the three programs need the JetIR web backend (use js.<package> lowers through it)."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match D-DECL-COLON1=A (`name: value`, no `::`); D-CALLSITE-MARK2=A and D-MOVE-SIGIL1=A (no call-site marks; `&&` marks a take)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The three web programs (date-fns, chart.js, a web component) build for wasm32-web through `use js.<package>` and produce the card's outputs in the browser test host, as cases. Proof: `jet test Compiler --profile cases --filter ffi/js_gallery` in the browser test host.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #6504 c12 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:45:53.376Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "ffi",
+        "ffi-v3",
+        "gallery"
+      ],
+      "parentId": "c0rkebo4",
+      "needsAcceptance": false,
+      "created": "2026-11-01T00:50:41.628Z",
+      "updated": "2026-11-15T22:45:55.490Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T22:45:55.490Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.015Z"
+    },
+    {
+      "id": "c0pxauid",
+      "num": 6724,
+      "title": "I1: branch lowerings carry a move from one path onto the other, so values leak (same class as the ?? fallback leak)",
+      "body": "ReplMem's audit after fixing ir_or_fallback (ReplMem-1): these lowerings in Compiler/JetIR lower user code inside a branch without saving and joining binding ownership, so a .move() on one path disowns the binding on the other path too and the value is never dropped. ir_short_circuit (&&/|| right side), ir_condition .And, ir_optional_call (x?.f(y.move())), ir_range_switch and ir_mixed_switch (arm fall-through), the require/require_eq message branches and the contract message (BuildContracts.jet), and contract post clauses under present. Fix them all through the shared save/restore plus ir_meet_paths join, as for the valued if and ??. Separate residual: about 12 MB per REPL turn inside jet_eval_native_load (the per-compile native session's image and stub buffers).",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e5",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P0",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Merged into #6727: its 1 open criterion now lives there, tagged (was #6724 c3). Board cleanup, one card per stream."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Each listed lowering saves ownership before its branch and joins the paths after it, through the shared join, with one regression case per shape (an ordinary program whose lock or descriptor count proves the drop), at O0, O1 and O2 and in an AOT build, failing on the base compiler.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "ReplMem-2 landed on dev 0e3254d092; batch post42a census rc=0; rerun with the batch compiler: cases trait/closure/union/generic/memory_semantics/repl filters all FAIL 0 (integ/post42a/rerun); five *_keep_the_* cases fail on s12 per the author",
+          "at": "2026-11-09T17:10:01.313Z"
+        },
+        {
+          "n": 2,
+          "text": "The jet_eval_native_load residual is found and fixed: the REPL peak grows by less than 1 MB per turn over 30 turns, measured.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6727 c4: the same REPL per-turn growth bound; #6727 owns the residual's cause (trait values have no drop glue)",
+          "at": "2026-11-15T04:46:21.849Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 3,
+          "text": "A census confirms that no other lowering in Compiler/JetIR lowers user code inside a branch without saving and joining binding ownership. Proof: `jet test tests/guards --filter ir_branch_ownership_join`, which fails on a branch lowering that skips the shared save/restore and ir_meet_paths join.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Merged into #6727 c5 (board cleanup: one card per stream).",
+          "at": "2026-11-15T22:44:47.798Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 4,
+          "text": "I1 use-after-free in safe Jet, found by G1Lead4 on seed-t21, 2026-11-11 ($JET_SCRATCH_ROOT/lanes/G1Lead-4/out/miscompile-push-break.jet). Inside `loop item in items { path: \"dir/{item}\"; loop _ in 0..<2 { out.push(path); break } }`, `out` ends up holding freed text (it prints `got  ,got  ,got  ` instead of `dir/c,dir/b,dir/a`): the break path frees `path` after push has moved or shared it into `out`. Same class as c-branch moves, a move on one control path carried onto another. The fix is in the shared lowering of moves and drops across break and continue edges, not in this loop shape. The repro becomes a case printing the right list on O0/O1/O2, plus variants with continue, a labeled outer break, `?? return` and a `match` arm exit, all under the leak and sanitizer checks.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "G3Ctx-15 a32aeb5757: a break edge carries its own ownership to the loop's exit, so the push-then-break pattern no longer frees a held value. Landed in train t23 (dev 9755703c76, 2026-11-11 09:07): the train census and every named row are green on the t23 compiler, and the rows skipped there were rerun green.",
+          "at": "2026-11-11T14:09:59.324Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-09T14:13:43.430Z",
+      "updated": "2026-11-15T22:44:49.962Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 4,
+      "completedAt": "2026-11-15T22:44:49.962Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T23:12:10.015Z"
     }
   ]
 }
