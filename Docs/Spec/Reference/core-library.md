@@ -8387,6 +8387,15 @@ startup value selects the database; otherwise `.jet/state/jobs.db` is used.
 Logical environment overlays do not redirect this provider. Set an isolated
 database path before launching examples or conformance programs.
 
+The database records its format version in a `jet_job_queue_format` table, so a
+queue can share a database with other tables. Version 2 stores a canceled job's
+state, and its event's, as `canceled`. A version 1 database (queue tables and no
+format table) is refused when the queue opens, with `ServiceError.Unavailable`
+naming the version; the offline converter `jet run
+Compiler/Migrations/Migrate.jet -- american-tokens1 --write <database>`
+moves it to version 2 in one migration, and `--against DIR` checks every row
+against the old copy.
+
 The queue binds to the package endpoint, so durable jobs need no service setup
 (D-DX-QUEUE1=A). Its authority is a private secret in `<database>.authority`.
 The first run creates it with a no-replace publish of an exclusive 0600 file.

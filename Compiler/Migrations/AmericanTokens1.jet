@@ -46,6 +46,13 @@
 //   caller and never stored, and the file dialog's canceled answer
 //   (`canceled`, Core UI/Host.jet) is a provider's live reply: neither has a
 //   file to convert.
+// - A job queue database (SQLite, format version 1 to 2): a canceled job's
+//   and event's `state` is `canceled`, and the database records version 2
+//   in its `jet_job_queue_format` table. Written and read by the queue (Core
+//   Jobs/Jobs.jet), which refuses version 1 by its number when it opens. The
+//   converter changes the file in place, in one `db.migrate` transaction.
+//   The queue's status and event notices (`canceled` count, `failure`) are
+//   published live and never stored, so they have nothing to convert.
 //
 // Only the members the format names are rewritten: an observation, a
 // reason or any other text keeps its words, and a file in no known format
@@ -54,7 +61,10 @@ use {
     jet_foundation.[ComparisonStatus, TEST_COMPARISON_SCHEMA_VERSION, canonical_json_parse, comparison_parse_status, comparison_record_from_json, comparison_status_as_str]
     jet_pkg_model.[FOREIGN_ADAPTER_CONTRACT_VERSION, pkg_binder_descriptor, pkg_foreign_binders]
     tokens_crypto: core.crypto
+    tokens_db: core.db
+    core.db.[DBError, DBScope, DBValue, SQL]
     tokens_encoding: core.encoding
+    tokens_files: core.files
 }
 
 // One word of an old comparison status vocabulary and the status it named.
@@ -705,6 +715,161 @@ american_tokens1_space: fn(bytes: [U8], from: Int) -[]> Int {
 
 american_tokens1_blank: fn(byte: U8) -[]> Bool {
     byte == 32 || byte == 10 || byte == 13 || byte == 9
+}
+
+// The first bytes of an SQLite file, which this plan reads as a job queue
+// database.
+AMERICAN_TOKENS1_SQLITE: "SQLite format 3"
+
+// Version 1's canceled job state.
+AMERICAN_TOKENS1_JOB_CANCELED_V1: "cancelled"
+
+// Version 2's.
+AMERICAN_TOKENS1_JOB_CANCELED: "canceled"
+
+// The job queue format version this plan converts to, and the table that
+// records it (Core Jobs/Jobs.jet's QUEUE_FORMAT and QUEUE_CREATE_FORMAT).
+AMERICAN_TOKENS1_QUEUE_FORMAT: 2
+
+AMERICAN_TOKENS1_QUEUE_FORMAT_TABLE: "CREATE TABLE jet_job_queue_format (version INTEGER NOT NULL)"
+
+// Whether `path` is an SQLite file.
+american_tokens1_database_file: fn(path: String) -[FS]> Bool {
+    head: tokens_files.read_at(path, 0, 15) ?? return false
+    text: String.from_bytes(head) ?? return false
+    text == AMERICAN_TOKENS1_SQLITE
+}
+
+// Converts a version 1 job queue database in place when `write` is set: in
+// one migration, each canceled job's and event's state takes the new
+// spelling and the database records format version 2. A database with no
+// job queue, or one whose queue tables do not read, is reported and left
+// alone.
+american_tokens1_database: fn(path: String, write: Bool) -[DB, Time.Wait]> MigrationOutcome {
+    store: tokens_db.open(path)
+    outcome: american_tokens1_database_scope(path, store.all_rows(), write)
+    _: store.close()
+    outcome
+}
+
+american_tokens1_database_scope: fn(path: String, scope: DBScope, write: Bool) -[DB, Time.Wait]> MigrationOutcome {
+    version: american_tokens1_queue_version(scope) ?? {
+        return american_tokens1_database_skip("{path}: an SQLite database whose job queue does not read ({err}); not converted")
+    }
+    if version == 0 {
+        return american_tokens1_database_skip("{path}: an SQLite database with no job queue; not converted")
+    }
+    if version == AMERICAN_TOKENS1_QUEUE_FORMAT {
+        return MigrationOutcome{text: "", rewritten: 0, skipped: [String]{}}
+    }
+    if version != 1 {
+        return american_tokens1_database_skip("{path}: a job queue database of format version {version}; not converted")
+    }
+    jobs: american_tokens1_queue_count(scope, SQL{"SELECT COUNT(*) AS count FROM jet_job_queue_jobs WHERE state = {AMERICAN_TOKENS1_JOB_CANCELED_V1}"}) ?? {
+        return american_tokens1_database_skip("{path}: a job queue whose jobs do not read ({err}); not converted")
+    }
+    events: american_tokens1_queue_count(scope, SQL{"SELECT COUNT(*) AS count FROM jet_job_queue_events WHERE state = {AMERICAN_TOKENS1_JOB_CANCELED_V1}"}) ?? {
+        return american_tokens1_database_skip("{path}: a job queue whose events do not read ({err}); not converted")
+    }
+    if write {
+        steps: [SQL]{
+            SQL.raw(AMERICAN_TOKENS1_QUEUE_FORMAT_TABLE),
+            SQL{"INSERT INTO jet_job_queue_format (version) VALUES ({AMERICAN_TOKENS1_QUEUE_FORMAT})"},
+            SQL{"UPDATE jet_job_queue_jobs SET state = {AMERICAN_TOKENS1_JOB_CANCELED} WHERE state = {AMERICAN_TOKENS1_JOB_CANCELED_V1}"},
+            SQL{"UPDATE jet_job_queue_events SET state = {AMERICAN_TOKENS1_JOB_CANCELED} WHERE state = {AMERICAN_TOKENS1_JOB_CANCELED_V1}"},
+        }
+        _: tokens_db.migrate(scope, "american-tokens1", steps) ?? {
+            return american_tokens1_database_skip("{path}: the job queue's migration failed ({err}); not converted")
+        }
+    }
+    MigrationOutcome{text: "", rewritten: jobs + events + 1, skipped: [String]{}}
+}
+
+american_tokens1_database_skip: fn(why: String) -[]> MigrationOutcome {
+    MigrationOutcome{text: "", rewritten: 0, skipped: [String]{why}}
+}
+
+// The format version of the job queue `scope` holds, read as Core's queue
+// reads it: its format table's, 1 for queue tables without one, or 0 when
+// it holds no queue.
+american_tokens1_queue_version: fn(scope: DBScope) -[DB]> Int DBError! {
+    tables: scope.query(SQL.raw("SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('jet_job_queue_format', 'jet_job_queue_jobs')")) ?? return Err(err)
+    names := [String]{}
+    loop row in tables {
+        if row.get("name") == .Val(.Text(name)) -> names.push("{name}")
+    }
+    if !names.contains("jet_job_queue_format") {
+        if names.contains("jet_job_queue_jobs") -> return Ok(1)
+        return Ok(0)
+    }
+    rows: scope.query(SQL.raw("SELECT version FROM jet_job_queue_format")) ?? return Err(err)
+    if rows.len() != 1 {
+        return Err(DBError.Failed("the format table holds {rows.len()} rows, not one"))
+    }
+    if rows[0].get("version") == .Val(.Int(version)) -> return Ok(version)
+    Err(DBError.Failed("the format table's version is not a number"))
+}
+
+// The `count` column of the one row `sql` reads.
+american_tokens1_queue_count: fn(scope: DBScope, sql: SQL) -[DB]> Int DBError! {
+    rows: scope.query(sql) ?? return Err(err)
+    if rows.len() == 1 {
+        if rows[0].get("count") == .Val(.Int(count)) -> return Ok(count)
+    }
+    Err(DBError.Failed("a count read no number"))
+}
+
+// Why the converted job queue database `after` does not mean what the
+// version 1 database `before` meant, or None when it does: it is a version
+// 2 queue, and its metadata, jobs and events are the source's, row for row
+// and column for column, but for a canceled state's spelling.
+american_tokens1_database_same_meaning: fn(before: String, after: String) -[DB]> String? {
+    old_store: tokens_db.open(before)
+    new_store: tokens_db.open(after)
+    why: american_tokens1_database_compare(old_store.all_rows(), new_store.all_rows())
+    _: old_store.close()
+    _: new_store.close()
+    why
+}
+
+american_tokens1_database_compare: fn(old: DBScope, new: DBScope) -[DB]> String? {
+    old_version: american_tokens1_queue_version(old) ?? return Val("the old job queue does not read: {err}")
+    if old_version != 1 -> return Val("the old database is not a version 1 job queue")
+    new_version: american_tokens1_queue_version(new) ?? return Val("the rewrite's job queue does not read: {err}")
+    if new_version != AMERICAN_TOKENS1_QUEUE_FORMAT {
+        return Val("the rewrite is not a version 2 job queue")
+    }
+    if american_tokens1_table_compare(old, new, "jet_job_queue_meta") == .Val(why) {
+        return Val(why)
+    }
+    if american_tokens1_table_compare(old, new, "jet_job_queue_jobs") == .Val(why) {
+        return Val(why)
+    }
+    american_tokens1_table_compare(old, new, "jet_job_queue_events")
+}
+
+// Why `table`'s rows in `new` are not `old`'s, with version 1's canceled
+// state read as version 2's, or None when they are.
+american_tokens1_table_compare: fn(old: DBScope, new: DBScope, table: String) -[DB]> String? {
+    old_rows: old.query(SQL.raw("SELECT * FROM {table} ORDER BY rowid")) ?? return Val("the old `{table}` does not read: {err}")
+    new_rows: new.query(SQL.raw("SELECT * FROM {table} ORDER BY rowid")) ?? return Val("the rewrite's `{table}` does not read: {err}")
+    if old_rows.len() != new_rows.len() {
+        return Val("`{table}` has {new_rows.len()} rows, not {old_rows.len()}")
+    }
+    loop (index, row) in old_rows {
+        found: new_rows[index]
+        if found.len() != row.len() {
+            return Val("`{table}` row {index} has {found.len()} columns, not {row.len()}")
+        }
+        loop (column, value) in row {
+            now: found.get(column) ?? return Val("`{table}` row {index} has no `{column}`")
+            expected: if column == "state" && "{value}" == AMERICAN_TOKENS1_JOB_CANCELED_V1 -> DBValue.Text(AMERICAN_TOKENS1_JOB_CANCELED) else -> value
+            if now != expected {
+                return Val("`{table}` row {index}'s `{column}` is `{now}`, not `{expected}`")
+            }
+        }
+    }
+    None
 }
 
 #Test("a version 1 comparison record becomes version 2 and keeps its reason's words") {
