@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112017,
+    "rev": 112021,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -65133,6 +65133,11 @@
         {
           "at": "2026-11-18",
           "by": "Main",
+          "text": "c2 cutover: re-resolving a typed endpoint after a handoff needs a public shape that no decision gives (27 cases do handoff_generation, directory_resolve, send, receive). Ballot D-SERVICE-CURRENT1 is being drafted: (A) tree.current(endpoint) at the current generation, (B) typed endpoints carry no generation, (C) shapes that add no new name. Meanwhile c2-4a (the tree ops take Endpoint) and the other case migrations go ahead; the 27 cases and the String-form deletion (c2-4e) wait for the ballot."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
           "text": "Main decision (c2, durable half; within D-SERVICE-WORKER1=A, which removes tree.receive, and D-SERVICE-DELIVERY1=D): durable receipts reach a typed worker by push. send_durable needs a message type that is Encode + Decode, and the authority log stores its JSON. The tree pushes the decoded pending receipts into the worker's mailbox at start(), on each send_durable and on retry. A handler that succeeds marks the receipt Delivered; one that fails leaves it Accepted for retry. The existing retry entry point keeps its current name and spelling, and only its effect changes (push instead of re-queue for receive), so no new public name is added. The ServicesRuntime fixtures are rewritten to observe through handlers."
         },
         {
@@ -65223,7 +65228,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-10-28T18:07:08.035Z",
-      "updated": "2026-11-18T00:37:53.949Z",
+      "updated": "2026-11-18T00:59:33.194Z",
       "updatedBy": "Main",
       "criteriaLastN": 7
     },
@@ -72573,98 +72578,6 @@
       "updatedBy": "Main"
     },
     {
-      "id": "c0r2eell",
-      "num": 6325,
-      "title": "Implicit type inference: where Jet infers types, where it must not, and one consistent rule",
-      "body": "Owner question (2026-10-30): implicit type inference in some cases. Where and when is it supported today, and where should it not be allowed? Design only until the owner asks for implementation.",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "c3: the cases exact_number_tiers/ give PASS 11 on dev 8e0521995a with seed-b14 (built from 0970c3af1f, which contains 6a312aff59). The ui row number_name_module_constant still FAILs: it reports E0108 at :9 take8(LIMIT) and :10 take8(BIG) where one E1003 at :10 with the BIG: 300 note is expected. A module-level number constant still takes Int instead of the type of its use. Sent to G6Meta-4 as a defect."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "t12c landed G6LeadC-2's partial c4 (D-INFER-LEVEL1 next-line type in E0501/E0308). The D-LAMBDA-STORED1 part stays blocked on D-LAMBDA-SHAPE1."
-        },
-        {
-          "at": "2026-11-10",
-          "by": "Main",
-          "text": "c4 dependency (G6LeadC, probe i13 on dev 76955986d0): the D-LAMBDA-STORED1=A half applies the declaration rule to lambdas written as `fn(n: Int) -> Int { … }`. That form is D-LAMBDA-SHAPE1=C, #6251 c1, still open, and dev rejects it with E0003. Applying the rule to arrow lambdas, which cannot state a result type, would turn every stored value lambda into E0433 with nothing to migrate to. So that half waits on #6251 c1. The E0501/E0308 next-use text and the S78 `[]: [T]` text of c4 are built in G6LeadC SUB 2."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "Owner 2026-11-09: hold lifted; build c3 and c4 under ratified D-INFER-RULE1."
-        },
-        {
-          "at": "2026-11-09",
-          "by": "Main",
-          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-INFER-RULE1 is ratified (2026-10-31), but the body holds implementation until the owner asks; c3 and c4 wait for that word."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "A dated Docs/research note answers the owner's question with evidence: every place Jet infers a type today (bindings, literals, enum dot-cases, lambdas, generic arguments, return types, struct literals, collections) and every place it requires one, compared with Rust, Swift, Zig, Odin, Go and Kotlin; which inferences hurt readability or error quality. Each Jet claim is probed on o0, o1 and o2 or cited to code; ratified versus implemented is stated per item.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Docs/research/2026-10-30-type-inference.md, landed on dev in 40edf0a5d3: every inferred site and every site that needs a written type, probed.",
-          "at": "2026-11-15T01:02:03.312Z"
-        },
-        {
-          "n": 2,
-          "text": "Every owner choice the research raises is a ballot-ready Tower decision (same-program alternatives, exact syntax and behavior, beginner and expert paths, edge cases), with recommendation.losses = [] and Tower's readiness check passing.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "D-INFER-RULE1 ratified A on 2026-10-31: one rule, a type is fixed where the value is made.",
-          "at": "2026-11-15T01:02:04.344Z",
-          "closure": "decision"
-        },
-        {
-          "n": 3,
-          "text": "After ratification the inference rule is enforced with registered diagnostics and UI snapshots, and every in-repo site is migrated in one cutover.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile ui --filter number_name: 4 PASS; --filter int_narrowing: 16 PASS; --filter empty_start_names_next_use: 1 PASS; --profile cases --filter exact_number_tiers: 13 PASS on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev be3614fae2",
-          "at": "2026-11-14T23:05:26.255Z"
-        },
-        {
-          "n": 4,
-          "text": "Ratified but unbuilt inference surfaces are implemented or their stale text is cut: the D-INFER-LEVEL1 next-line type in E0501, D-LAMBDA-STORED1 (probe i13 runs today), and the S78 []: [T] text.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "On dev: the E0501 next-use type in cf1a596597, D-LAMBDA-STORED1 in 6031087804, and the S78 `[]: [T]` text gone. Lander5 ran on the gate-p60 jet: ui empty_start_names_next_use 1/0; ui function_type_take_param 1/0; golden ClosureCaptureModes 3/0, ClosureCaptureWrites 3/0 and Closures 153/0 at o0, o1 and o2; `git grep -F \"[]: [T]\" -- Docs/spec` on dev gives 0 lines.",
-          "at": "2026-11-14T07:46:15.521Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-30T15:51:02.713Z",
-      "updated": "2026-11-15T01:02:06.203Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-15T01:02:06.203Z"
-    },
-    {
       "id": "c06he0ee",
       "num": 6326,
       "title": "Excellent built-in support for state machines",
@@ -77988,74 +77901,6 @@
       "updated": "2026-11-17T19:11:15.157Z",
       "updatedBy": "Main",
       "completedAt": "2026-11-17T19:11:15.157Z"
-    },
-    {
-      "id": "c0tl2yuc",
-      "num": 6424,
-      "title": "The old core.font path retires: every caller moves to the font package in one cutover",
-      "body": "Move card for #6149 (D-RAYLIB-FONT-HOME1=A, ratified 2026-10-31: \"Moves under A, one card each\").\n\n- `use core.game.raylib` and `use core.font` are removed. Every in-repo caller imports the\n  `raylib` / `font` package in the same cutover. The old paths get no teaching error, snapshot\n  or `jet fix` rewrite (owner order 2026-11-06; migration support is set during v1 release\n  preparation, #6068).",
-      "kind": "task",
-      "track": "epoch",
-      "epoch": "e4",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-08",
-          "by": "Main",
-          "text": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. The raylib half of this card is superseded by #6701; the font half stays."
-        },
-        {
-          "at": "2026-11-06",
-          "by": "Main",
-          "text": "Deconfliction 2026-11-06 (owner ruling): no teaching errors, snapshots or jet fix rewrites for retired spellings, API or library paths until v1 release preparation (#6068)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "Every in-repo caller of core.font imports the font package, and its goldens pass on O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "cases core_font_foundations/ and inline_package_battery_dependency_resolves_from_any_entry_name PASS; golden Surface 30 PASS across O0/O1/O2; git grep core.font over Compiler Core Jetpack Examples tests Docs/spec finds no caller outside the font package (only a comment in tests/guards/comptime_core_one_home.jet) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 291197b25e",
-          "at": "2026-11-14T23:34:28.752Z"
-        },
-        {
-          "n": 2,
-          "text": "core.font no longer exists in Core; `use core.font` fails as an ordinary unknown module, with no teaching error, snapshot or jet fix rule (owner 2026-11-06).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Core/Font is absent on dev; jet check of 'use core.font' gives E0611 UseUnknownItem '`font` is not defined in module `core`', the same shape as any unknown module; git grep core.font over Compiler Core Jetpack Examples tests Docs/spec finds only a comment in tests/guards/comptime_core_one_home.jet (no teaching error, snapshot or fix rule) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 8739e05202",
-          "at": "2026-11-14T23:25:15.258Z"
-        },
-        {
-          "n": 3,
-          "text": "Examples/Apps/UI/Surface.jet, which names the font battery as a version dependency (`font: \"0.1.0\"`), resolves it and runs. On the gate-p62 jet, golden Examples/Apps/UI/Surface fails at O0, O1 and O2 with UseTargetNotFound: \"version dependency `font` (0.1.0) has no matching first-party battery\" (found by G3Core-2, 2026-11-14, while proving #3288 c6). Proof: `jet test Compiler --profile golden --filter Surface` passes at O0, O1 and O2.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile golden --filter Surface: 30 PASS, 0 FAIL (Examples/Apps/UI/Surface resolves its font 0.1.0 battery and runs on O0, O1 and O2) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 291197b25e",
-          "at": "2026-11-14T23:34:29.684Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-10-31T05:09:44.729Z",
-      "updated": "2026-11-15T01:01:38.322Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 3,
-      "completedAt": "2026-11-15T01:01:38.322Z"
     },
     {
       "id": "c01oyhqk",
@@ -93742,70 +93587,6 @@
       "criteriaLastN": 17
     },
     {
-      "id": "c0ba2y7a",
-      "num": 6753,
-      "title": "A package's authority.allow takes a scoped grant with the same meaning as jet run --allow",
-      "body": "`jet run --allow='FS.Read(\"<path>\")'` confines reads to that path (spec.md, reference/cli.md, tests/cases/authority/run_allow_read_path_confines_reads_to_the_granted_paths.case). The package model refuses the same scoped grant in a manifest's `authority.allow` and accepts a scope only in `deny` or on FFI. Its message also wrongly calls the grant \"a parameterized memory denial\" (Jetpack Blocks/Authority.jet:315). Examples/Modules/Packages/PluginFailure/package.jet and tests/run/Foundations/Capabilities put `FS.Read(\"<dir>\")` in allow, so their manifests fail to parse. One meaning per form (I8): a scoped grant in allow means what the flag means. Found by G6Meta-73's manifest round trip.",
-      "kind": "bug",
-      "track": "epoch",
-      "epoch": "e14",
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P1",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "c2 is partly proved (G5DevX-2, gate-p29, dev 72fc3a5f3c): golden PluginFailure 1/0. The Capabilities manifest parses: jet check tests/run/Foundations/Capabilities/run.jet reports only E1257 plugin-interface errors, and its golden row is KNOWN-FAILING for #4599 (no guest build). A refused scope has a registered E1221 message with ui snapshot authority_scope_names_its_argument_as_a_string, and \"parameterized memory denial\" now applies only to Mem. Still open: the Capabilities run case, which cannot pass until #4599."
-        },
-        {
-          "at": "2026-11-13",
-          "by": "Main",
-          "text": "G5DevX-2 (2026-11-13): c2 holds except tests/run/Foundations/Capabilities, known-failing under #4599 (no sandbox build target for capability_guest.wasm). c2 is blocked on #4599."
-        },
-        {
-          "at": "2026-11-12",
-          "by": "Main",
-          "text": "Decision by Main within the card's approved scope (2026-11-11): a scoped path in a manifest's authority.allow is resolved against the directory that holds the manifest, while a scoped path in --allow is resolved against the working directory where it is typed. The grant's meaning (kernel confinement, no escape by .. or symbolic link) is identical. Reason: an author's grant must not change with where the user runs the program; working-directory resolution would turn FS.Read(\".\") into a grant of the user's current directory. G6Meta-76 implements it, with a two-directory case."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "The package model accepts a scoped FS.Read/FS.Write grant in authority.allow, and a run of that package is confined exactly as `--allow` confines it (same E1803 refusal and wording). Proof: a tests/cases/authority case running a package whose manifest grants FS.Read(\"<dir>\") in allow, with a read inside and a read outside the grant.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "Holds on dev a17e4f4491 (Lander holdsweep on seed-b14, 2026-11-12 23:06, $JET_SCRATCH_ROOT/lanes/Lander/holds/18-6753-c1.out): cases package_allow_read_path_confines_reads_to_the_granted_paths PASS 1 and package_read_path_is_relative_to_its_manifest PASS 1; jet test Jetpack/PackageModel/Tests/AuthorityManifestIntegration.jet passes, rc 0/0/0.",
-          "at": "2026-11-13T09:23:28.625Z"
-        },
-        {
-          "n": 2,
-          "text": "The two example manifests parse and their goldens pass. A scope the model still refuses gets a correct, registered message with a UI snapshot. Proof: jet test Compiler --profile golden --filter PluginFailure, jet test Compiler --profile ui --filter authority_ (the refused-scope snapshots), and jet check tests/run/Foundations/Capabilities/run.jet reports no manifest parse error (the run case's guest wasm is #4268's).",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "jet test Compiler --profile golden --filter PluginFailure: 1 PASS; --profile ui --filter authority_: 13 PASS; jet check tests/run/Foundations/Capabilities/run.jet reports no manifest parse error, only E1257 SandboxInterfaceChanged (plugin export greet has no Component interface: the guest-wasm gap #4268 owns) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 529aba0d26",
-          "at": "2026-11-14T23:17:25.353Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-12T01:17:40.458Z",
-      "updated": "2026-11-15T01:01:39.867Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 2,
-      "completedAt": "2026-11-15T01:01:39.867Z"
-    },
-    {
       "id": "c0mf9ybj",
       "num": 6755,
       "title": "Effects-on-types follow-ups: write charging, lambda rows, comptime input effects, host-read inventory, explain effects",
@@ -94892,51 +94673,6 @@
       "updatedBy": "Main",
       "criteriaLastN": 2,
       "completedAt": "2026-11-17T01:33:42.729Z"
-    },
-    {
-      "id": "c0604fz5",
-      "num": 6778,
-      "title": "Fifteen registered diagnostics have no report site: E0909 and E1278–E1291",
-      "body": "Found by G9Web-1-2 while building the #6066 c6 sealed-floor audit on dev 8e0521995a. E0909 is named only in JetTestKit/Ui.jet. E1278–E1291 (the jetos rows) are named by no source. A registered code that nothing reports is either a missing check or a dead row.",
-      "kind": "bug",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-14",
-          "by": "Main",
-          "text": "Proof rows (Lander5, light51, gate-p62 jet, dev 26afb1a0e6): ui E0909_expanding_generic_instance 1/0; cases unused_expanding_generic_body_does_not_expand_the_instantiation_worklist 1/0 after G6Meta-kfexpanding dropped its known-failing row. DiagnosticRows --check is rc 1 only from generated-copy drift (Docs/site/dist/e/E-WEB-UNSUPPORTED), not E0909; batch 52's post-gate DiagnosticRows --write regenerates it, and c1 is met then."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "E0909 gets the check that reports it, at a sema site with its UI snapshot (jet check today accepts the polymorphic-recursion fixture that the dev_parts case expects to fail with E0909). E1278–E1291, the rows for jet os verbs that are refused by name until their engine lands, stay registered and are listed by code in an explicit allowlist in the checker. DiagnosticRows --check then refuses any registered code that has no report site and is not on that allowlist, and it refuses any growth of the allowlist.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "jet run Tools/agent/DiagnosticRows.jet -- --check passes (every active row but the 14 allowlisted E1278-E1291 has a report site; the allowlist only shrinks, its guard test passes); jet test Compiler --profile ui --filter E0909_expanding_generic_instance: 1 PASS; --profile cases --filter dev_parts_routine/unused_expanding_generic: 1 PASS on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 529aba0d26",
-          "at": "2026-11-14T23:17:26.275Z"
-        }
-      ],
-      "refs": [],
-      "tags": [],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-13T08:52:50.895Z",
-      "updated": "2026-11-15T01:01:41.437Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 1,
-      "completedAt": "2026-11-15T01:01:41.437Z"
     },
     {
       "id": "c08zzpo5",
@@ -104251,7 +103987,7 @@
       "track": "epoch",
       "epoch": "e21",
       "milestoneId": null,
-      "phase": "planning",
+      "phase": "done",
       "priority": "P2",
       "plan": null,
       "checkSteps": null,
@@ -104259,7 +103995,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-18",
+          "by": "Main",
+          "text": "c1 decided (D-MAP-SLOT1=A); c2 met on p285 (1b22b95a71, 3821e2b8dc)."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -104274,11 +104016,11 @@
         {
           "n": 2,
           "text": "D-MAP-SLOT1=A is built: m[k, or: default] is a writable slot that does one hash lookup (compound assignment and &slot.method calls insert the default once), runs on O0, O1 and O2 from one Core body, has cases under Tests/Cases/CoreLib/ and a teaching example of the counter idiom (counts[w, or: 0] += 1), and core-library.md documents it; no second upsert spelling exists. Probe today: counts[w, or: 0] += 1 fails to parse with E0003 (gate-p277).",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-17T21:54:33.208Z",
+          "evidence": "Landed in 1b22b95a71 (p282) and 3821e2b8dc (fallout, p285). On the p285 batch compiler cbd03bce07: `jet test Compiler --profile cases --filter CoreLib/map_upsert` passes 1/1 (map_upsert_slot_looks_up_once_and_starts_lazily), golden Collections/Map passes 15/15 (MapSlot on O0, O1 and O2), and the ui case compound_index_target passed on p282. m[k, or: d] is a writable slot with one hash lookup; setdefault is retired.",
+          "at": "2026-11-18T01:03:23.283Z",
           "proof": {
             "profile": "cases",
             "filter": "CoreLib/map_upsert"
@@ -104293,8 +104035,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T03:03:07.715Z",
-      "updated": "2026-11-17T21:54:33.208Z",
-      "updatedBy": "Main"
+      "updated": "2026-11-18T01:03:36.563Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-18T01:03:36.563Z"
     },
     {
       "id": "c0blttm0",
@@ -116832,6 +116575,11 @@
         {
           "at": "2026-11-18",
           "by": "Main",
+          "text": "c4 root (DeclTypes): not a shield breach and not caused by 443a0e13e5. task.race cancels its losers when its polling selector next runs, which under load can be more than 20 ms after the winner returns, after the loser's 20 ms shield has ended. A cancel requested inside a shield held 30000/30000 times. The old capsule also fails at O0 (129/1500, against 16/1500 at O2). Fix in progress: the capsule waits inside the shield for the cancel, deterministically, instead of relying on timing."
+        },
+        {
+          "at": "2026-11-18",
+          "by": "Main",
           "text": "Reopened for c4: the ConformanceCapsule O2 shield breach first appeared with 443a0e13e5 and recurred in p284."
         },
         {
@@ -116896,7 +116644,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:29:07.249Z",
-      "updated": "2026-11-18T00:37:25.530Z",
+      "updated": "2026-11-18T00:52:29.917Z",
       "updatedBy": "Main",
       "criteriaLastN": 4
     },
@@ -170881,207 +170629,6 @@
       "ratifiedAt": "2026-10-30"
     },
     {
-      "id": "D-INFER-RULE1",
-      "cardId": "c0r2eell",
-      "group": "language",
-      "title": "Numbers take their type from where they are used; only a conflicting use needs a conversion",
-      "situation": "You asked whether numbers should take their type from their uses in the common cases, with a conversion only where uses conflict. This revision recommends that. A named number such as `rate :: 0.5` acts as if `0.5` were written at each use, as Go's constants do. A variable started from a number, such as `total := 0.0`, takes the type of its first use. Only a conflicting use needs a conversion. A computed value still never shrinks on its own.",
-      "gist": "Should a number take its type from where it is used, with a conversion only where uses conflict?",
-      "lesson": "A number you type, like 200, means the same thing as a byte, a whole number or a decimal. Picking its type where it is used converts nothing and loses nothing. A value the program computed is different: it may not fit a smaller type, so making it smaller stays a conversion you write.",
-      "explainer": "",
-      "story": "Ana writes `rate :: 0.5` and `total := 0.0`, adds a list of `Float` prices into `total`, and scales it by `rate`. Today both names are errors until she writes `Float{0.5}` and `Float{0.0}`. Under A the program runs as she wrote it. Later she passes `count := 0` to a function that takes a `U8`, then stores a computed length in `count`. That `Int` conflicts with the `U8` that `count` took, so the error names both lines and offers `U8{line.len()}`.",
-      "inWild": "// Go: a named constant fits wherever it is used\nconst rate = 0.5\nhalf32(rate)            // ok: rate is float32 here\ntotal := 0.0            // a variable takes the default, float64\n// Rust: a variable takes its type from its uses\nlet mut total = 0.0;\ntotal += price_f32;     // ok: total is f32",
-      "detail": "What changes under A. Probes p01 to p14 ran on o0, o1 and o2 with the dev compiler; every tier printed the same thing. `d :: 2.5; half(d)` is E0108 today (p01) and runs under A. `total := 0.0; total += x` with a `Float` x is E0109 today (p04) and runs under A.\n\n`big :: 300; take8(big)` stops at run time today (p03) and becomes a compile error under A. An `Int` the program computed passes into a `U8` parameter today and stops at run time when it does not fit (p07). Under A that is E0108 with the fix `U8{n}`.\n\nThe rule for a named number. A `::` name bound to a number literal, or to arithmetic on such names, means that literal at each use. Each use takes the type expected there, exactly as if the literal were written there. With nothing expected, as in `print(rate)`, it takes today's default, `Int` or `Decimal`. A use where the number does not fit, such as 300 as a `U8` or 2.5 as an `Int`, is a compile error. Module constants follow the same rule.\n\nThe rule for a variable. A `:=` variable started from a number literal takes one type: the type its first use needs, in source order. A use needs a type when it meets a typed parameter, a typed value, a field or a return. A use with nothing expected, such as `print(total)`, gives it the default.\n\nA later use that needs a different type is a conflict. Its error names the line that set the type, and the fix is a conversion or a head on the first line.\n\nWhat stays. Values the program computes keep their type, and widening stays implicit (D-INTLIT-WIDTH1=F, D-NUMWIDEN-CROSS1=E). Shrinking a computed value is always written, as `U8{n}` or `U8.from(n, overflow: .Saturate)` (D-CONVERT-TRAIT1). A head such as `U8{200}` stays legal and fixes the type, so every name written with a head keeps its meaning. Empty lists, maps and None still start with their type (D-INFER-LEVEL1=A): they hold no value a use could fit. Checking stays one pass in source order (D-INFER-LINEAR1=A).\n\nClutter census, Examples and Core without Vendor (1,676 files; probes/infer/census.mjs). Named literals written with a head: 109 `::` names and 231 `:=` variables; 161 of them are `Float{…}`, such as `total := Float{0.0}`. Under A each head becomes optional; under B only the 109 `::` heads do; under C none do.\n\nBare named literals: 373 `::` names and 1,289 `:=` variables. Under C each one used as a narrower or other kind of number needs a head added, and under B each such variable does. A adds none. Computed values passed through today's implicit narrowing need `U8{n}` under every option. The census cannot see those without the type checker, so the cutover build lists them.\n\nOther languages. Go, Zig and Odin keep a named constant flexible and give a variable its default; Zig even refuses `var total = 0.0` without a type. Swift and Kotlin fix the type where the name is made. Rust lets the uses of a variable decide its type across the whole function. A takes Go's rule for named numbers and a simpler form of Rust's for variables: the first use decides, read top to bottom.\n\nEdge cases. Generic calls with nothing else to go on take the default: `same(limit)` gives `T = Int`. A variable used first inside a loop or a branch takes the type of that use, read in source order. A lambda that captures the variable counts as a use where the lambda is written. Arithmetic on named numbers is exact at compile time, so `KB :: 1024; MB :: KB * KB` is one flexible number. A module-level `:=` variable keeps its start type, since its uses span functions.\n\nReview. Author: Claude (MemDesign-3 lane), revising the SurfaceDesign draft after owner question qcjfku67. No fresh adversarial pass has run on this revision.",
-      "options": [
-        {
-          "key": "A",
-          "name": "Numbers take their type from their uses",
-          "detail": "A named number means its literal at each use, so `rate :: 0.5` works as a `Float`, a `Decimal` or an `F32`. A variable started from a number takes the type of its first use, so `total := 0.0` followed by `total += price` is a `Float`. A conflicting use, or a number that does not fit, needs a written conversion.\n\nBehavior changes: `d :: 2.5; half(d)` and the `Float` total now compile. `big :: 300; take8(big)` and a computed `Int` passed to a `U8` move from a run-time stop to a compile error. A counter first used as a `U8` does `U8` arithmetic, so it stops at 255 instead of at the call.",
-          "technical": "Sema gives a `::` binding of a literal, or of exact arithmetic on such bindings, a literal type. Each use resolves it against the expected type with the existing literal-fit check, and hover shows `number 0.5`. A `:=` binding of a literal gets an open number type. The first use in source order that needs a type closes it, recording that span for later errors.\n\nUses with no expected type close it to `Int` or `Decimal`. The implicit narrowing at call arguments and returns is removed, so those become E0108 as fields and list items already are. Checking stays one pass.",
-          "code": "fn take8(b: U8) -> U8 { b }\nfn half(f: Float) -> Float { f / 2.0 }\n\nfn run() {\n    rate :: 0.5\n    print(half(rate))\n    limit :: 200\n    print(take8(limit))\n    prices :: [Float]{1.5, 2.5}\n    total := 0.0\n    loop p in prices -> total += p\n    print(total * rate)\n    n :: \"300\".to_int() ?? 0\n    print(take8(n))\n}\n// A: rate is 0.5 written at each use, so half(rate) gets a Float.\n//    limit fits U8, so take8(limit) prints 200; a 300 there is a compile error.\n//    total takes Float from its first use, total += p.\n//    take8(n): n is an Int the program computed, so this is the one written conversion:\n// error[E0108]: This needs U8, but `n` is an Int computed on line 13\n// Fix: take8(U8{n})      // stops here if n does not fit 0..255\n\n// A conflicting use of a variable needs the conversion too:\ncount := 0\nprint(take8(count))       // count takes U8 here\ncount = line.len()        // error[E0108]: `count` is U8 (line 2); this is an Int\n// Fix: count = U8{line.len()}"
-        },
-        {
-          "key": "B",
-          "name": "Named numbers only, as Go does",
-          "detail": "A named number means its literal at each use, as in A. A variable takes the default type where it is made, so `total := 0.0` is a `Decimal` and adding a `Float` to it needs `total := Float{0.0}`.\n\nThis is Go's, Zig's and Odin's rule.",
-          "technical": "A's literal type for `::` bindings only. A `:=` binding takes `Int` or `Decimal` at once. The implicit narrowing at calls and returns is removed as in A.",
-          "code": "fn take8(b: U8) -> U8 { b }\nfn half(f: Float) -> Float { f / 2.0 }\n\nfn run() {\n    rate :: 0.5\n    print(half(rate))\n    limit :: 200\n    print(take8(limit))\n    prices :: [Float]{1.5, 2.5}\n    total := 0.0\n    loop p in prices -> total += p\n    print(total * rate)\n    n :: \"300\".to_int() ?? 0\n    print(take8(n))\n}\n// B: rate and limit work as in A.\n//    total := 0.0 is a Decimal where it is made, so total += p is\n// error[E0109]: `+` can't combine Decimal and Float\n// Fix: total := Float{0.0}\n//    take8(n) is E0108 with the fix take8(U8{n}), as in A."
-        },
-        {
-          "key": "C",
-          "name": "Fixed where it is made",
-          "detail": "Every name keeps the type it got where it was made: `Int` or `Decimal` for a bare number. Using it as anything else needs a head on that line, which `jet fix` writes.\n\nThis was the first draft's recommendation, and Swift and Kotlin work this way.",
-          "technical": "No literal types on bindings. E0108 names the binding's line and carries a safe edit that writes the head. The implicit narrowing at calls and returns is removed as in A.",
-          "code": "fn take8(b: U8) -> U8 { b }\nfn half(f: Float) -> Float { f / 2.0 }\n\nfn run() {\n    rate :: 0.5\n    print(half(rate))\n    limit :: 200\n    print(take8(limit))\n    prices :: [Float]{1.5, 2.5}\n    total := 0.0\n    loop p in prices -> total += p\n    print(total * rate)\n    n :: \"300\".to_int() ?? 0\n    print(take8(n))\n}\n// C: every name keeps the type it got where it was made.\n// error[E0108]: This needs Float, but `rate` is Decimal (line 5)\n// Fix: rate :: Float{0.5}\n// error[E0108]: This needs U8, but `limit` is Int (line 7)\n// Fix: limit :: U8{200}\n// error[E0109]: total += p    Fix: total := Float{0.0}\n// take8(n) is E0108 with the fix take8(U8{n}), as in A."
-        }
-      ],
-      "comparisons": [
-        {
-          "lang": "Go",
-          "note": "An untyped `const` fits any numeric type; a variable made with `:=` takes `int` or `float64`. Source: go.dev/ref/spec#Constants.",
-          "code": "const rate = 0.5\nhalf32(rate)          // ok\nx := 200\ntakeByte(x)           // error: x is int"
-        },
-        {
-          "lang": "Odin",
-          "note": "A `::` constant is untyped and fits any width; `x := 0.0` is `f64`. Source: odin-lang.org/docs/overview/#constants.",
-          "code": "RATE :: 0.5\nhalf32(RATE)          // ok\ntotal := 0.0          // f64"
-        },
-        {
-          "lang": "Zig",
-          "note": "A `const` number is `comptime_float` or `comptime_int` and fits any type; a `var` needs a written type. Source: ziglang.org/documentation/master/#comptime.",
-          "code": "const rate = 0.5;\nhalf32(rate);         // ok\nvar total = 0.0;      // error: must be const or comptime"
-        },
-        {
-          "lang": "Swift",
-          "note": "The name takes the literal's default type at once, as in C. Source: docs.swift.org, The Basics, Type Inference.",
-          "code": "let rate = 0.5        // Double\nhalf32(rate)          // error: Double is not Float"
-        },
-        {
-          "lang": "Rust",
-          "note": "A variable's type comes from its uses anywhere in the function; conflicting uses are E0308. Source: doc.rust-lang.org/reference/expressions/literal-expr.html.",
-          "code": "let mut total = 0.0;\ntotal += price_f32;   // total is f32\nlet y: f64 = total;   // error[E0308]"
-        }
-      ],
-      "rec": "A",
-      "recommendation": {
-        "why": "A is your direction: numbers take their type from their uses, and only a real conflict needs a conversion. A named number is just its literal; a variable takes its first use's type. Computed values never shrink silently.",
-        "gains": [
-          "The common cases need no head: `rate :: 0.5`, `total := 0.0`.",
-          "Up to 340 written heads in Examples and Core become optional.",
-          "Only a conflict or a misfit number needs a conversion."
-        ],
-        "losses": [],
-        "whyNot": [
-          {
-            "key": "B",
-            "reason": "B keeps the most common head, `total := Float{0.0}`, and adds one wherever a variable is used as a smaller number."
-          },
-          {
-            "key": "C",
-            "reason": "C adds a head wherever a named number is used as another kind of number, which is the clutter you asked to avoid."
-          }
-        ],
-        "tradeoff": "A variable started from a bare number takes its type from its first use; a head on its first line still fixes it."
-      },
-      "hybrid": null,
-      "ballotMode": "short",
-      "shortAuthorizedBy": null,
-      "ballotProcessVersion": 5,
-      "reviewPasses": null,
-      "checkInstructions": "Use $JET_SCRATCH_ROOT/discovery/base/latest/jet with JET_TOOLCHAIN_ROOT=$JET_SCRATCH_ROOT/lanes/MemDesign-3/export, a git archive of dev 70b441a147. From $JET_SCRATCH_ROOT/lanes/MemDesign-3/probes, run `./tiers.sh infer/p`. On none, basic and full alike, p01 and p08 give E0108, p04 gives E0109 and p10 gives E0131. p02, p05 and p09 print through the narrowing gap, and p03 and p07 stop with E3010. `node infer/census.mjs` prints the head counts.",
-      "surface": {
-        "gist": "Should a number take its type from where it is used, with a conversion only where uses conflict?",
-        "lesson": "A number you type, like 200, means the same thing as a byte, a whole number or a decimal. Picking its type where it is used converts nothing and loses nothing. A value the program computed is different: it may not fit a smaller type, so making it smaller stays a conversion you write.",
-        "trio": {
-          "current": {
-            "note": "Today a named decimal cannot reach a `Float`, and a computed `Int` slips into a `U8` until it stops at run time.",
-            "code": "fn take8(b: U8) -> U8 { b }\nfn half(f: Float) -> Float { f / 2.0 }\n\nfn run() {\n    rate :: 0.5\n    print(half(rate))\n    limit :: 200\n    print(take8(limit))\n    prices :: [Float]{1.5, 2.5}\n    total := 0.0\n    loop p in prices -> total += p\n    print(total * rate)\n    n :: \"300\".to_int() ?? 0\n    print(take8(n))\n}\n// Today (probes p01, p02, p04, p07 on o0, o1 and o2):\n//   half(rate)       error[E0108]: This needs Float, but the value is Decimal\n//   take8(limit)     prints 200: an Int slips into U8 at the call\n//   total += p       error[E0109]: `+` can't combine Decimal and Float\n//   take8(n)         compiles, then stops at run time: E3010 Value doesn't fit"
-          },
-          "wild": {
-            "lang": "Go",
-            "note": "A named constant fits wherever it is used; only a variable is fixed to its default type.",
-            "code": "const rate = 0.5\nhalf32(rate)      // ok: float32 here\nx := 200\ntakeByte(x)       // error: x is int"
-          }
-        },
-        "options": [
-          {
-            "key": "A",
-            "name": "Numbers take their type from their uses",
-            "gist": "A named number fits each use; a variable takes its first use's type; conflicts need a conversion.",
-            "gains": [
-              "No head for the common cases: `rate :: 0.5`, `total := 0.0`.",
-              "Up to 340 written heads in Examples and Core become optional.",
-              "A misfit number is a compile error, not a run-time stop."
-            ],
-            "losses": [],
-            "proposed": {
-              "code": "rate :: 0.5\nprint(half(rate))        // Float here\ntotal := 0.0\nloop p in prices -> total += p   // total is Float\nprint(take8(U8{n}))      // a computed Int needs the conversion"
-            }
-          },
-          {
-            "key": "B",
-            "name": "Named numbers only, as Go does",
-            "gist": "A named number fits each use; a variable keeps its default type.",
-            "gains": [
-              "109 `::` heads become optional.",
-              "A variable's type is always on its first line."
-            ],
-            "losses": [
-              "Keeps 231 variable heads; a variable used as a `U8` needs one."
-            ],
-            "proposed": {
-              "code": "rate :: 0.5\nprint(half(rate))        // ok\ntotal := 0.0             // Decimal\nloop p in prices -> total += p   // error: write total := Float{0.0}"
-            }
-          },
-          {
-            "key": "C",
-            "name": "Fixed where it is made",
-            "gist": "A name's type is fixed on its line; a different use needs a head.",
-            "gains": [
-              "Every name's type is on its line."
-            ],
-            "losses": [
-              "Adds a head wherever a named number is used as another kind of number.",
-              "No head becomes optional."
-            ],
-            "proposed": {
-              "code": "rate :: 0.5\nprint(half(rate))        // error: write rate :: Float{0.5}"
-            }
-          }
-        ],
-        "recommendation": {
-          "rec": "A",
-          "why": "A is your direction: numbers take their type from their uses, and only a real conflict needs a conversion. A named number is just its literal; a variable takes its first use's type. Computed values never shrink silently.",
-          "gains": [
-            "The common cases need no head: `rate :: 0.5`, `total := 0.0`.",
-            "Up to 340 written heads in Examples and Core become optional.",
-            "Only a conflict or a misfit number needs a conversion."
-          ],
-          "losses": [],
-          "whyNot": [
-            {
-              "key": "B",
-              "reason": "B keeps the most common head, `total := Float{0.0}`, and adds one wherever a variable is used as a smaller number."
-            },
-            {
-              "key": "C",
-              "reason": "C adds a head wherever a named number is used as another kind of number, which is the clutter you asked to avoid."
-            }
-          ],
-          "tradeoff": "A variable started from a bare number takes its type from its first use; a head on its first line still fixes it."
-        }
-      },
-      "designAway": [
-        {
-          "loss": "A variable's type can come from the line after it is made.",
-          "attempts": [
-            "Let any later use decide, as Rust does: rejected, an error could then blame an earlier line for a later one.",
-            "Keep the default for variables, as B does: rejected, it keeps 231 heads and adds more."
-          ],
-          "result": "Only the first use decides, read top to bottom, and checking stays one pass. Hover shows the type and the line that set it. A conflict error names both lines, and a head on the first line always fixes the type."
-        },
-        {
-          "loss": "Code that passes a computed `Int` into a `U8` today stops compiling.",
-          "attempts": [
-            "Keep the narrowing at calls: rejected, it breaks the ratified rule that Jet never shrinks a value on its own, and it stops programs at run time."
-          ],
-          "result": "Each site gets E0108 with the fix `U8{n}`, which `jet fix` writes. It stops on a misfit at that line, as today's hidden narrowing did, so the meaning is unchanged and now visible."
-        },
-        {
-          "loss": "A counter first used as a `U8` now stops at 255 where it is incremented, not where it is passed.",
-          "attempts": [
-            "Keep counters `Int` until a call shrinks them: rejected, that is the hidden narrowing again."
-          ],
-          "result": "The counter stops with Jet's overflow report at the line that overflowed, so no value is lost either way. Writing `count := Int{0}`, or `U8{count}` at the call, keeps the stop at the call."
-        }
-      ],
-      "draft": false,
-      "status": "ratified",
-      "created": "2026-10-30T16:25:55.018Z",
-      "outcome": "A",
-      "ratifiedAt": "2026-10-31"
-    },
-    {
       "id": "D-MACHINE1",
       "cardId": "c06he0ee",
       "group": "language",
@@ -212748,19 +212295,6 @@
       "answeredBy": "Main"
     },
     {
-      "id": "qcjfku67",
-      "cardId": "c0r2eell",
-      "decisionId": "D-INFER-RULE1",
-      "by": "owner",
-      "kind": "question",
-      "text": "this seems like it has substantial ramifications and would add a lot of clutter in places that dont need it. I want simplicity and pragmatism tempered with ability to reason about code. should numbers in general cases/pareto cases be implicilty typed, then if there are conflicting usages, you would need the \"literal cast/conversion\" we ratified as a trait for casting/converting?",
-      "status": "answered",
-      "answer": "Yes, and the revised ballot now recommends exactly that. A named number like rate :: 0.5 acts as if its literal were written at each use, and a variable like total := 0.0 takes the type of its first use. Only a conflicting use, or a number that does not fit, needs the ratified conversion such as U8{n}. Across Examples and Core this makes up to 340 written type heads optional and adds none, while computed values still never shrink silently. Go, Odin and Zig do the first half; Rust does a broader form of the second.",
-      "created": "2026-10-30T18:09:48.444Z",
-      "answeredAt": "2026-10-30",
-      "answeredBy": "Main"
-    },
-    {
       "id": "qf5shlvt",
       "cardId": "c08r6ogl",
       "decisionId": "D-RT-DEFECT-REPORT1",
@@ -214826,6 +214360,34 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-18T01:03:36.563Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0w8b7vb",
+      "note": "phase,logEntry"
+    },
+    {
+      "at": "2026-11-18T01:03:23.283Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c0w8b7vb",
+      "note": "#2"
+    },
+    {
+      "at": "2026-11-18T00:59:33.194Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0mhdm27",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-18T00:52:29.918Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0ywczn1",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-18T00:38:11.274Z",
       "by": "Main",

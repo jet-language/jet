@@ -108440,6 +108440,297 @@
         }
       ],
       "retiredAt": "2026-11-17T23:19:52.616Z"
+    },
+    {
+      "id": "c0r2eell",
+      "num": 6325,
+      "title": "Implicit type inference: where Jet infers types, where it must not, and one consistent rule",
+      "body": "Owner question (2026-10-30): implicit type inference in some cases. Where and when is it supported today, and where should it not be allowed? Design only until the owner asks for implementation.",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "c3: the cases exact_number_tiers/ give PASS 11 on dev 8e0521995a with seed-b14 (built from 0970c3af1f, which contains 6a312aff59). The ui row number_name_module_constant still FAILs: it reports E0108 at :9 take8(LIMIT) and :10 take8(BIG) where one E1003 at :10 with the BIG: 300 note is expected. A module-level number constant still takes Int instead of the type of its use. Sent to G6Meta-4 as a defect."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "t12c landed G6LeadC-2's partial c4 (D-INFER-LEVEL1 next-line type in E0501/E0308). The D-LAMBDA-STORED1 part stays blocked on D-LAMBDA-SHAPE1."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "c4 dependency (G6LeadC, probe i13 on dev 76955986d0): the D-LAMBDA-STORED1=A half applies the declaration rule to lambdas written as `fn(n: Int) -> Int { … }`. That form is D-LAMBDA-SHAPE1=C, #6251 c1, still open, and dev rejects it with E0003. Applying the rule to arrow lambdas, which cannot state a result type, would turn every stored value lambda into E0433 with nothing to migrate to. So that half waits on #6251 c1. The E0501/E0308 next-use text and the S78 `[]: [T]` text of c4 are built in G6LeadC SUB 2."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "Owner 2026-11-09: hold lifted; build c3 and c4 under ratified D-INFER-RULE1."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-INFER-RULE1 is ratified (2026-10-31), but the body holds implementation until the owner asks; c3 and c4 wait for that word."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "A dated Docs/research note answers the owner's question with evidence: every place Jet infers a type today (bindings, literals, enum dot-cases, lambdas, generic arguments, return types, struct literals, collections) and every place it requires one, compared with Rust, Swift, Zig, Odin, Go and Kotlin; which inferences hurt readability or error quality. Each Jet claim is probed on o0, o1 and o2 or cited to code; ratified versus implemented is stated per item.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Docs/research/2026-10-30-type-inference.md, landed on dev in 40edf0a5d3: every inferred site and every site that needs a written type, probed.",
+          "at": "2026-11-15T01:02:03.312Z"
+        },
+        {
+          "n": 2,
+          "text": "Every owner choice the research raises is a ballot-ready Tower decision (same-program alternatives, exact syntax and behavior, beginner and expert paths, edge cases), with recommendation.losses = [] and Tower's readiness check passing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "D-INFER-RULE1 ratified A on 2026-10-31: one rule, a type is fixed where the value is made.",
+          "at": "2026-11-15T01:02:04.344Z",
+          "closure": "decision"
+        },
+        {
+          "n": 3,
+          "text": "After ratification the inference rule is enforced with registered diagnostics and UI snapshots, and every in-repo site is migrated in one cutover.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile ui --filter number_name: 4 PASS; --filter int_narrowing: 16 PASS; --filter empty_start_names_next_use: 1 PASS; --profile cases --filter exact_number_tiers: 13 PASS on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev be3614fae2",
+          "at": "2026-11-14T23:05:26.255Z"
+        },
+        {
+          "n": 4,
+          "text": "Ratified but unbuilt inference surfaces are implemented or their stale text is cut: the D-INFER-LEVEL1 next-line type in E0501, D-LAMBDA-STORED1 (probe i13 runs today), and the S78 []: [T] text.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "On dev: the E0501 next-use type in cf1a596597, D-LAMBDA-STORED1 in 6031087804, and the S78 `[]: [T]` text gone. Lander5 ran on the gate-p60 jet: ui empty_start_names_next_use 1/0; ui function_type_take_param 1/0; golden ClosureCaptureModes 3/0, ClosureCaptureWrites 3/0 and Closures 153/0 at o0, o1 and o2; `git grep -F \"[]: [T]\" -- Docs/spec` on dev gives 0 lines.",
+          "at": "2026-11-14T07:46:15.521Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-30T15:51:02.713Z",
+      "updated": "2026-11-15T01:02:06.203Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-15T01:02:06.203Z",
+      "questions": [
+        {
+          "id": "qcjfku67",
+          "cardId": "c0r2eell",
+          "decisionId": "D-INFER-RULE1",
+          "by": "owner",
+          "kind": "question",
+          "text": "this seems like it has substantial ramifications and would add a lot of clutter in places that dont need it. I want simplicity and pragmatism tempered with ability to reason about code. should numbers in general cases/pareto cases be implicilty typed, then if there are conflicting usages, you would need the \"literal cast/conversion\" we ratified as a trait for casting/converting?",
+          "status": "answered",
+          "answer": "Yes, and the revised ballot now recommends exactly that. A named number like rate :: 0.5 acts as if its literal were written at each use, and a variable like total := 0.0 takes the type of its first use. Only a conflicting use, or a number that does not fit, needs the ratified conversion such as U8{n}. Across Examples and Core this makes up to 340 written type heads optional and adds none, while computed values still never shrink silently. Go, Odin and Zig do the first half; Rust does a broader form of the second.",
+          "created": "2026-10-30T18:09:48.444Z",
+          "answeredAt": "2026-10-30",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-18T01:03:23.565Z"
+    },
+    {
+      "id": "c0tl2yuc",
+      "num": 6424,
+      "title": "The old core.font path retires: every caller moves to the font package in one cutover",
+      "body": "Move card for #6149 (D-RAYLIB-FONT-HOME1=A, ratified 2026-10-31: \"Moves under A, one card each\").\n\n- `use core.game.raylib` and `use core.font` are removed. Every in-repo caller imports the\n  `raylib` / `font` package in the same cutover. The old paths get no teaching error, snapshot\n  or `jet fix` rewrite (owner order 2026-11-06; migration support is set during v1 release\n  preparation, #6068).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-08",
+          "by": "Main",
+          "text": "Owner 2026-11-08: \"i do not want any reference to raylib, just ui and app modules.\" (after: \"i do not want a module or subsystem called ray ... it should just be called ui\"). Graphics, windows, frames, drawing and input are `ui`; building apps is `app`. No raylib package, module, API naming, symbol or example remains; D-RAY-API1 (raylib names) and the raylib-package plan are superseded. The cutover is owned by #6701. The raylib half of this card is superseded by #6701; the font half stays."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06 (owner ruling): no teaching errors, snapshots or jet fix rewrites for retired spellings, API or library paths until v1 release preparation (#6068)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Every in-repo caller of core.font imports the font package, and its goldens pass on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "cases core_font_foundations/ and inline_package_battery_dependency_resolves_from_any_entry_name PASS; golden Surface 30 PASS across O0/O1/O2; git grep core.font over Compiler Core Jetpack Examples tests Docs/spec finds no caller outside the font package (only a comment in tests/guards/comptime_core_one_home.jet) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 291197b25e",
+          "at": "2026-11-14T23:34:28.752Z"
+        },
+        {
+          "n": 2,
+          "text": "core.font no longer exists in Core; `use core.font` fails as an ordinary unknown module, with no teaching error, snapshot or jet fix rule (owner 2026-11-06).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Core/Font is absent on dev; jet check of 'use core.font' gives E0611 UseUnknownItem '`font` is not defined in module `core`', the same shape as any unknown module; git grep core.font over Compiler Core Jetpack Examples tests Docs/spec finds only a comment in tests/guards/comptime_core_one_home.jet (no teaching error, snapshot or fix rule) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 8739e05202",
+          "at": "2026-11-14T23:25:15.258Z"
+        },
+        {
+          "n": 3,
+          "text": "Examples/Apps/UI/Surface.jet, which names the font battery as a version dependency (`font: \"0.1.0\"`), resolves it and runs. On the gate-p62 jet, golden Examples/Apps/UI/Surface fails at O0, O1 and O2 with UseTargetNotFound: \"version dependency `font` (0.1.0) has no matching first-party battery\" (found by G3Core-2, 2026-11-14, while proving #3288 c6). Proof: `jet test Compiler --profile golden --filter Surface` passes at O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile golden --filter Surface: 30 PASS, 0 FAIL (Examples/Apps/UI/Surface resolves its font 0.1.0 battery and runs on O0, O1 and O2) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 291197b25e",
+          "at": "2026-11-14T23:34:29.684Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-10-31T05:09:44.729Z",
+      "updated": "2026-11-15T01:01:38.322Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 3,
+      "completedAt": "2026-11-15T01:01:38.322Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T01:03:23.566Z"
+    },
+    {
+      "id": "c0ba2y7a",
+      "num": 6753,
+      "title": "A package's authority.allow takes a scoped grant with the same meaning as jet run --allow",
+      "body": "`jet run --allow='FS.Read(\"<path>\")'` confines reads to that path (spec.md, reference/cli.md, tests/cases/authority/run_allow_read_path_confines_reads_to_the_granted_paths.case). The package model refuses the same scoped grant in a manifest's `authority.allow` and accepts a scope only in `deny` or on FFI. Its message also wrongly calls the grant \"a parameterized memory denial\" (Jetpack Blocks/Authority.jet:315). Examples/Modules/Packages/PluginFailure/package.jet and tests/run/Foundations/Capabilities put `FS.Read(\"<dir>\")` in allow, so their manifests fail to parse. One meaning per form (I8): a scoped grant in allow means what the flag means. Found by G6Meta-73's manifest round trip.",
+      "kind": "bug",
+      "track": "epoch",
+      "epoch": "e14",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "c2 is partly proved (G5DevX-2, gate-p29, dev 72fc3a5f3c): golden PluginFailure 1/0. The Capabilities manifest parses: jet check tests/run/Foundations/Capabilities/run.jet reports only E1257 plugin-interface errors, and its golden row is KNOWN-FAILING for #4599 (no guest build). A refused scope has a registered E1221 message with ui snapshot authority_scope_names_its_argument_as_a_string, and \"parameterized memory denial\" now applies only to Mem. Still open: the Capabilities run case, which cannot pass until #4599."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "G5DevX-2 (2026-11-13): c2 holds except tests/run/Foundations/Capabilities, known-failing under #4599 (no sandbox build target for capability_guest.wasm). c2 is blocked on #4599."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Decision by Main within the card's approved scope (2026-11-11): a scoped path in a manifest's authority.allow is resolved against the directory that holds the manifest, while a scoped path in --allow is resolved against the working directory where it is typed. The grant's meaning (kernel confinement, no escape by .. or symbolic link) is identical. Reason: an author's grant must not change with where the user runs the program; working-directory resolution would turn FS.Read(\".\") into a grant of the user's current directory. G6Meta-76 implements it, with a two-directory case."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "The package model accepts a scoped FS.Read/FS.Write grant in authority.allow, and a run of that package is confined exactly as `--allow` confines it (same E1803 refusal and wording). Proof: a tests/cases/authority case running a package whose manifest grants FS.Read(\"<dir>\") in allow, with a read inside and a read outside the grant.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev a17e4f4491 (Lander holdsweep on seed-b14, 2026-11-12 23:06, $JET_SCRATCH_ROOT/lanes/Lander/holds/18-6753-c1.out): cases package_allow_read_path_confines_reads_to_the_granted_paths PASS 1 and package_read_path_is_relative_to_its_manifest PASS 1; jet test Jetpack/PackageModel/Tests/AuthorityManifestIntegration.jet passes, rc 0/0/0.",
+          "at": "2026-11-13T09:23:28.625Z"
+        },
+        {
+          "n": 2,
+          "text": "The two example manifests parse and their goldens pass. A scope the model still refuses gets a correct, registered message with a UI snapshot. Proof: jet test Compiler --profile golden --filter PluginFailure, jet test Compiler --profile ui --filter authority_ (the refused-scope snapshots), and jet check tests/run/Foundations/Capabilities/run.jet reports no manifest parse error (the run case's guest wasm is #4268's).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile golden --filter PluginFailure: 1 PASS; --profile ui --filter authority_: 13 PASS; jet check tests/run/Foundations/Capabilities/run.jet reports no manifest parse error, only E1257 SandboxInterfaceChanged (plugin export greet has no Component interface: the guest-wasm gap #4268 owns) on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 529aba0d26",
+          "at": "2026-11-14T23:17:25.353Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-12T01:17:40.458Z",
+      "updated": "2026-11-15T01:01:39.867Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 2,
+      "completedAt": "2026-11-15T01:01:39.867Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T01:03:23.566Z"
+    },
+    {
+      "id": "c0604fz5",
+      "num": 6778,
+      "title": "Fifteen registered diagnostics have no report site: E0909 and E1278–E1291",
+      "body": "Found by G9Web-1-2 while building the #6066 c6 sealed-floor audit on dev 8e0521995a. E0909 is named only in JetTestKit/Ui.jet. E1278–E1291 (the jetos rows) are named by no source. A registered code that nothing reports is either a missing check or a dead row.",
+      "kind": "bug",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-14",
+          "by": "Main",
+          "text": "Proof rows (Lander5, light51, gate-p62 jet, dev 26afb1a0e6): ui E0909_expanding_generic_instance 1/0; cases unused_expanding_generic_body_does_not_expand_the_instantiation_worklist 1/0 after G6Meta-kfexpanding dropped its known-failing row. DiagnosticRows --check is rc 1 only from generated-copy drift (Docs/site/dist/e/E-WEB-UNSUPPORTED), not E0909; batch 52's post-gate DiagnosticRows --write regenerates it, and c1 is met then."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "E0909 gets the check that reports it, at a sema site with its UI snapshot (jet check today accepts the polymorphic-recursion fixture that the dev_parts case expects to fail with E0909). E1278–E1291, the rows for jet os verbs that are refused by name until their engine lands, stay registered and are listed by code in an explicit allowlist in the checker. DiagnosticRows --check then refuses any registered code that has no report site and is not on that allowlist, and it refuses any growth of the allowlist.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet run Tools/agent/DiagnosticRows.jet -- --check passes (every active row but the 14 allowlisted E1278-E1291 has a report site; the allowlist only shrinks, its guard test passes); jet test Compiler --profile ui --filter E0909_expanding_generic_instance: 1 PASS; --profile cases --filter dev_parts_routine/unused_expanding_generic: 1 PASS on batch compiler gate-p131 (dev 8d83659ef3), verified by Main on dev 529aba0d26",
+          "at": "2026-11-14T23:17:26.275Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-13T08:52:50.895Z",
+      "updated": "2026-11-15T01:01:41.437Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 1,
+      "completedAt": "2026-11-15T01:01:41.437Z",
+      "questions": [],
+      "retiredAt": "2026-11-18T01:03:23.566Z"
     }
   ]
 }
