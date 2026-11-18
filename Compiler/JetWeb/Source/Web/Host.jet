@@ -905,11 +905,72 @@ function checkBinding(binding, manifest) {
 
 // The program module's location table, its `jet.lines` custom section
 // (Module.jet web_location_table), by function index: each function's name,
-// file and line rows, [code offset, line] in offset order.
+// file, declaration line and line rows, [code offset, line] in offset order.
 function locationTable(module) {
   const table = new Map();
   const [section] = module ? WebAssembly.Module.customSections(module, "jet.lines") : [];
   if (!section) return table;
+  const { leb, text } = sectionReader(section);
+  const files = [];
+  for (let count = leb(false); count > 0; count -= 1) files.push(text());
+  for (let count = leb(false); count > 0; count -= 1) {
+    const index = leb(false);
+    const name = text();
+    const file = files[leb(false)];
+    const declared = leb(false);
+    const rows = [];
+    let offset = 0;
+    let line = 0;
+    for (let left = leb(false); left > 0; left -= 1) {
+      offset += leb(false);
+      line += leb(true);
+      rows.push([offset, line]);
+    }
+    table.set(index, { name, file, declared, rows });
+  }
+  return table;
+}
+
+// The line of code offset `offset` in a function with line rows `rows`: the
+// last row at or before it, 0 before the first, as the native walk reads
+// its table (JetRuntime Fault.jet trace_line).
+function lineAt(rows, offset) {
+  let line = 0;
+  for (const [at, row] of rows) {
+    if (at > offset) break;
+    line = row;
+  }
+  return line;
+}
+
+// The Jet frames of the stack trace `stack`, innermost first: each frame of
+// the program module (named `app`) that the location table `locations`
+// holds, with the line of its code offset.
+function* jetFrames(stack, locations) {
+  for (const frame of stack.matchAll(/(?:wasm:\/\/wasm\/app-[0-9a-f]+|\/app\.wasm):wasm-function\[(\d+)\]:0x([0-9a-f]+)/g)) {
+    const location = locations.get(Number(frame[1]));
+    if (location) yield { location, line: lineAt(location.rows, parseInt(frame[2], 16)) };
+  }
+}
+
+// Whether `error` is the engine's refusal of a call when the call stack has
+// run out: V8's and JavaScriptCore's RangeError, SpiderMonkey's
+// InternalError.
+function stackOverflow(error) {
+  if (error instanceof RangeError) return /call stack/i.test(error.message);
+  return error?.name === "InternalError" && /too much recursion/i.test(error.message);
+}
+
+// The source map file the program module `module` names in its
+// `sourceMappingURL` custom section (JetWeb Build.jet web_program), or null.
+function sourceMapName(module) {
+  const [section] = WebAssembly.Module.customSections(module, "sourceMappingURL");
+  return section ? sectionReader(section).text() : null;
+}
+
+// A reader of custom section `section`'s LEB128 numbers (`leb`, signed or
+// not) and length-prefixed UTF-8 names (`text`), from its start on.
+function sectionReader(section) {
   const bytes = new Uint8Array(section);
   let at = 0;
   const leb = (signed) => {
@@ -929,35 +990,7 @@ function locationTable(module) {
     at += length;
     return value;
   };
-  const files = [];
-  for (let count = leb(false); count > 0; count -= 1) files.push(text());
-  for (let count = leb(false); count > 0; count -= 1) {
-    const index = leb(false);
-    const name = text();
-    const file = files[leb(false)];
-    const rows = [];
-    let offset = 0;
-    let line = 0;
-    for (let left = leb(false); left > 0; left -= 1) {
-      offset += leb(false);
-      line += leb(true);
-      rows.push([offset, line]);
-    }
-    table.set(index, { name, file, rows });
-  }
-  return table;
-}
-
-// The line of code offset `offset` in a function with line rows `rows`: the
-// last row at or before it, 0 before the first, as the native walk reads
-// its table (JetRuntime Fault.jet trace_line).
-function lineAt(rows, offset) {
-  let line = 0;
-  for (const [at, row] of rows) {
-    if (at > offset) break;
-    line = row;
-  }
-  return line;
+  return { leb, text };
 }
 
 class Host {
@@ -968,7 +1001,10 @@ class Host {
     this.stackTop = alignUp(this.program.data_end, PAGE) + STACK;
     this.memory = new WebAssembly.Memory({ initial: this.stackTop / PAGE });
     this.table = new WebAssembly.Table({ element: "anyfunc", initial: this.program.table_base + this.program.slots });
-    this.sp = new WebAssembly.Global({ value: "i64", mutable: true }, BigInt(this.stackTop));
+    // Where every entry starts on the stack: its top, then below the
+    // arguments and the environment (place).
+    this.base = BigInt(this.stackTop);
+    this.sp = new WebAssembly.Global({ value: "i64", mutable: true }, this.base);
     this.tls = new WebAssembly.Global({ value: "i64", mutable: true }, 0n);
     this.edx = new WebAssembly.Global({ value: "i32", mutable: true }, 0);
     this.unmapped = [];
@@ -1026,6 +1062,7 @@ class Host {
     const app = await host.instantiate(url, { rt: host.rt }, binding?.artifactIdentity);
     host.app = app.instance.exports;
     host.appModule = app.module;
+    host.appUrl = url;
     host.enter(() => host.rt.jet_web_init());
     // A page (or a DOM harness) shows the core.ui scene the program paints.
     if (globalThis.document?.createElement && globalThis.document.body) {
@@ -1079,10 +1116,7 @@ class Host {
     Error.stackTraceLimit = limit;
     this.locations ??= locationTable(this.appModule);
     let text = "";
-    for (const frame of stack.matchAll(/(?:wasm:\/\/wasm\/app-[0-9a-f]+|\/app\.wasm):wasm-function\[(\d+)\]:0x([0-9a-f]+)/g)) {
-      const location = this.locations.get(Number(frame[1]));
-      if (location) text += location.name + "\t" + location.file + "\t" + lineAt(location.rows, parseInt(frame[2], 16)) + "\n";
-    }
+    for (const { location, line } of jetFrames(stack, this.locations)) text += location.name + "\t" + location.file + "\t" + line + "\n";
     return text;
   }
 
@@ -1115,10 +1149,12 @@ class Host {
     }
   }
 
-  // An entry's failure: an exit records its status; anything else is a
-  // trap, recorded and thrown on as JetHostWasmError. A trap or a nonzero
-  // exit ends the program's threads with it (end).
+  // An entry's failure: an exit records its status; a stack overflow is the
+  // runtime's E3012 stop (overflowStop), whose exit it records; anything
+  // else is a trap, recorded and thrown on as JetHostWasmError. A trap or a
+  // nonzero exit ends the program's threads with it (end).
   fail(error) {
+    if (stackOverflow(error)) error = this.overflowStop(error) ?? error;
     this.flushLines();
     if (error instanceof JetHostExit) {
       this.outcome = error.status;
@@ -1129,6 +1165,59 @@ class Host {
     this.end();
     this.error = new JetHostWasmError("the program trapped: " + error.message, { cause: error });
     throw this.error;
+  }
+
+  // The runtime's E3012 stop (JetRuntime Trap.jet jet_rt_stack_overflow_stop)
+  // for stack overflow `error`, as the native fault report gives it: the
+  // innermost Jet function on the overflowing stack, at its declaration
+  // line, with that line's source when the build's source map holds it
+  // (readSources). The engine has unwound the overflowing calls; the stop
+  // runs from where every entry starts on the stack (`base`), with its
+  // strings just below. What the stop ended with (the process exit), or
+  // null when no frame of the program is on the stack.
+  overflowStop(error) {
+    this.locations ??= locationTable(this.appModule);
+    const frame = jetFrames(error.stack ?? "", this.locations).next().value;
+    if (!frame) return null;
+    const { name, file, declared } = frame.location;
+    const source = this.sources?.get(file)?.split("\n")[declared - 1] ?? "";
+    this.sp.value = this.base;
+    const [named, path, text] = [name, file, source].map((item) => {
+      const bytes = encoder.encode(item);
+      const at = Math.floor((Number(this.sp.value) - bytes.length) / 16) * 16;
+      this.u8().set(bytes, at);
+      this.sp.value = BigInt(at);
+      return [BigInt(at), BigInt(bytes.length)];
+    });
+    try {
+      this.rt.jet_rt_stack_overflow_stop(...named, ...path, BigInt(declared), ...text);
+    } catch (exit) {
+      return exit;
+    }
+    return null;
+  }
+
+  // The program's source files by the names its location table gives them,
+  // from the sources and their contents in the source map the program module
+  // names (sourceMapName), read once. A build or a page without the map
+  // leaves them unknown, and a stack overflow's report quotes no source line
+  // (overflowStop), as the native report quotes none when it can't read the
+  // file.
+  async readSources() {
+    if (this.sources) return;
+    this.sources = new Map();
+    const name = sourceMapName(this.appModule);
+    if (name === null) return;
+    let map;
+    try {
+      map = JSON.parse(decoder.decode(await load(new URL(name, this.appUrl))));
+    } catch {
+      return;
+    }
+    (map.sources ?? []).forEach((source, index) => {
+      const content = map.sourcesContent?.[index];
+      if (typeof content === "string") this.sources.set(source, content);
+    });
   }
 
   // A program that trapped or exited nonzero is over: no thread of it runs
@@ -1151,11 +1240,16 @@ class Host {
   // Runs the async `body`, one of the program's entries, once every entry
   // before it finished, so only one is ever under way: a promise of what
   // it answers. A failure goes to `fail`; the next entry runs regardless.
+  // A stack overflow ends the program before its report reads the sources.
   turn(body) {
     const result = turns.then(async () => {
       try {
         return await body();
       } catch (error) {
+        if (stackOverflow(error)) {
+          this.end();
+          await this.readSources();
+        }
         this.fail(error);
       }
     });
@@ -1690,7 +1784,8 @@ class Host {
     put(0);
     put(0);
     put(0);
-    this.sp.value = BigInt(argv);
+    this.base = BigInt(argv);
+    this.sp.value = this.base;
     return [args.length, argv, envp];
   }
 
