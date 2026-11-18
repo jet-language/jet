@@ -1131,7 +1131,7 @@ c_driver: fn(name: String, repo: String) -> String? Never! {
         return Val("{head}#include <pthread.h>\nextern void jet_rt_thread_attach(void),jet_rt_thread_detach(void);\nextern int64_t jet_rt_terminal_color_fixture(void);\nstatic void *worker(void *unused) {{ (void)unused; jet_rt_thread_attach(); int64_t code=jet_rt_terminal_color_fixture(); jet_rt_thread_detach(); return (void *)(intptr_t)code; }}\nint main(void) {{ if(jet_rt_terminal_color_fixture()) return 1; pthread_t thread; void *result; if(pthread_create(&thread,NULL,worker,NULL)||pthread_join(thread,&result)) return 2; return result!=NULL; }}\n")
     }
     if name == "TrapReport" {
-        return Val("#define main registry_cabi_main\n#include \"{repo}/{RT}CAbiDriver.c\"\n#undef main\n#include <stdlib.h>\nextern int64_t jet_rt_trap_report_fixture(int64_t,int64_t,_Bool);\nextern void jet_rt_panic_message(const void *,int64_t);\nstatic int64_t callback(int64_t kind) {{ if(kind==0) jet_rt_panic_message(\"registry boom\",13); else if(kind==1) numeric_stop(); else if(kind==2) require(); else if(kind==3) require_eq(); else panic_case(); return 0; }}\nint main(int argc,char **argv) {{ if(argc!=3) return 2; return (int)jet_rt_trap_report_fixture((intptr_t)callback,strtol(argv[1],NULL,10),!strcmp(argv[2],\"captured\")); }}\n")
+        return Val("#define main registry_cabi_main\n#include \"{repo}/{RT}CABIDriver.c\"\n#undef main\n#include <stdlib.h>\nextern int64_t jet_rt_trap_report_fixture(int64_t,int64_t,_Bool);\nextern void jet_rt_panic_message(const void *,int64_t);\nstatic int64_t callback(int64_t kind) {{ if(kind==0) jet_rt_panic_message(\"registry boom\",13); else if(kind==1) numeric_stop(); else if(kind==2) require(); else if(kind==3) require_eq(); else panic_case(); return 0; }}\nint main(int argc,char **argv) {{ if(argc!=3) return 2; return (int)jet_rt_trap_report_fixture((intptr_t)callback,strtol(argv[1],NULL,10),!strcmp(argv[2],\"captured\")); }}\n")
     }
     None
 }
@@ -2445,7 +2445,9 @@ run_entry: fn(result: &[String:Dyn], entry: Dyn, manifest: Dyn, repo: String, je
         tests: field(report, "tests")
         listed: if tests == .Array(items) -> Val(items.copy()) else -> None
         items: listed ?? return Err(problem("test report lists no tests"))
-        names: sorted_texts(array_field(entry, "testNames").map(fn(name) { if name == .Text(text) -> text.copy() else -> "" }))
+        // A census name is the #Test literal's source text; the run reports its
+        // value, where `{{` and `}}` spell one brace.
+        names: sorted_texts(array_field(entry, "testNames").map(fn(name) { if name == .Text(text) -> text.replace("{{{{", "{{").replace("}}}}", "}}") else -> "" }))
         if by_tests {
             own: items.filter(fn(test) { names.contains(text_field(test, "name")) })
             ran_names: sorted_texts(own.map(fn(test) { text_field(test, "name") }))
