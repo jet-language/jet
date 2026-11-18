@@ -94,11 +94,11 @@ jet_cli_perf_capture_observations: fn(capture: &JetCLIPerfCapture, observations:
         capture.tasks[index].parent = stable_parent
         capture.task_ids[observed_id] = stable_id
         if observations.len() > 1 {
-            capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: Val(first_seen[observed_id]), end_ns: Val(last_seen[observed_id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", spawn_line: None, status: "captured", symbol: symbol, task_id: Val(stable_id), wait_line: None, waker: "", waker_line: None, waker_task_id: None})
+            capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: Val(first_seen[observed_id]), end_ns: Val(last_seen[observed_id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", spawn_line: None, status: "captured", symbol: symbol, task_id: Val(stable_id), wait_stack: [TraceWaitFrame]{}, waker: "", waker_line: None, waker_task_id: None})
         }
     }
     if capture.spans.len() == 0 {
-        capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", spawn_line: None, status: "unavailable", symbol: symbol, task_id: None, wait_line: None, waker: "", waker_line: None, waker_task_id: None})
+        capture.spans.push(TraceSpan{awaited_task_id: None, channel_id: None, clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", spawn_line: None, status: "unavailable", symbol: symbol, task_id: None, wait_stack: [TraceWaitFrame]{}, waker: "", waker_line: None, waker_task_id: None})
     }
     // `IOTimeline`: a real I/O wait is a span from the first observation that
     // shows its task blocked on it to the first that no longer does; one still

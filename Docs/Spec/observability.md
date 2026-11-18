@@ -62,7 +62,7 @@ the trace's captured spans and browser rows, then an
 `code.file.path`, `code.line.number` and `code.function.name`. Its trace id
 is the first 32 hex digits of the trace's id. A task span's parent is its
 parent task's span, and each span's kind and task, and a wait's awaited task,
-spawn line, channel, line and waker, are `jet.*` attributes. Span times count
+spawn line, channel, stack and waker, are `jet.*` attributes. Span times count
 from the session's start, since a trace records no wall-clock origin.
 `--out <path>` writes any export to a file instead of stdout.
 
@@ -201,8 +201,9 @@ a recorded wait is blocked on some lock, so an uncontended lock costs
 nothing more. Each wait becomes a `task_wait` row of the trace's `spans`.
 Its `task_id` is the waiting task, by the id its `tasks` row carries, its
 symbol's name the wait's name (`task join`, `channel receive`, `time sleep`,
-`shared lock`, ...) and its `wait_line` the innermost line of the checked
-source on its stack. A join's `awaited_task_id` is the awaited task and its
+`shared lock`, ...) and its `wait_stack` the functions and lines of the
+checked source on its stack, innermost first, so the first is the line it
+waited at. A join's `awaited_task_id` is the awaited task and its
 `spawn_line` the line that spawned it; a channel wait's `channel_id` is the
 channel's. Its `waker` is `task` when a task's wake ended it, with that
 task's `waker_task_id` and the line it woke it from as `waker_line`,
@@ -219,6 +220,15 @@ main.jet:4, woken by task 2`. Its timeline shows up to 8 waits as
 `[start..end] task 1 in channel receive at main.jet:11 for channel 1, woken
 by task 2 at main.jet:28`, beside the task spans.
 Tests/Cases/Perf/every_wait_names_its_waker.case is the worked example.
+
+The same waits give off-CPU time by stack, as an off-CPU flame graph does.
+`jet perf view` sums the waits' time by stack, outermost frame first, ending
+with the wait the stack blocked in, and lists the 16 longest under `off-cpu
+by stack`: `150212345ns waits=1 · run main.jet:5 > pause main.jet:12 > nap
+main.jet:10 > time sleep`. A stack holds the checked source's frames only,
+as the CPU-time profile's lines do; a wait whose stack holds none counts
+under its name alone. Tests/Cases/Perf/off_cpu_time_by_stack.case is the
+worked example.
 
 A `core.game` run under `jet run --observe` relays its frames through its live
 snapshots: each frame callback records the frame's index, its start and wall

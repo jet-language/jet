@@ -1,0 +1,18 @@
+# `jet perf view` lists off-CPU time by stack: the tasks' waits summed by the
+# stack each blocked on, outermost frame first, ending with the wait, the
+# longest first. Three 30ms naps called from run's loop share one stack; the
+# 150ms nap called through pause is another, and the longer.
+requires: os-name:linux
+fixture: OffCPUTimeByStack.fixture
+env: NO_COLOR=1
+step: jet perf run main.jet --out {work}/naps.jettrace
+exit: 0
+stdout: = "napped\n"
+step: jet perf view {work}/naps.jettrace
+exit: 0
+stdout: ~ "off-cpu by stack: " # the section, under its heading
+stdout: ~ "run main.jet:5 > pause main.jet:12 > nap main.jet:10 > time sleep" # the one nap through pause, by every frame
+stdout: ~ "run main.jet:4 > nap main.jet:10 > time sleep" # the loop's naps, as one stack
+stdout: ~ "ns waits=1 · " # the nap through pause waited once
+stdout: ~ "ns waits=3 · " # the loop's three naps sum to one row
+stdout: before "run main.jet:5 > pause" "run main.jet:4 > nap" # the longest stack first

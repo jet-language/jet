@@ -212,6 +212,7 @@ jet_cli_perf_view_text: fn(trace: CanonicalJSON, frames: String, flame: [String]
     }
     loop line in jet_cli_perf_counter_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_memory_lines(trace) -> out = "{out}{line}\n"
+    loop line in jet_cli_perf_off_cpu_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_game_lines(trace) -> out = "{out}{line}\n"
     loop line in jet_cli_perf_receipt_lines(trace) -> out = "{out}{line}\n"
     if frames == "all" {
@@ -829,9 +830,8 @@ jet_cli_perf_wait_summary: fn(trace: CanonicalJSON) -> String? Never! {
 jet_cli_perf_wait_text: fn(item: CanonicalJSON) -> String Never! {
     path: jet_cli_perf_member_symbol_text(item, "path") ?? "?"
     text := "task {jet_cli_perf_member_integer(item, "task_id") ?? "?"} in {jet_cli_perf_member_symbol_text(item, "name") ?? "wait"}"
-    if jet_cli_perf_member_integer(item, "wait_line") == .Val(line) {
-        text = "{text} at {path}:{line}"
-    }
+    stack: jet_cli_perf_wait_stack(item)
+    if stack.len() > 0 -> text = "{text} at {path}:{stack[0].line}"
     if jet_cli_perf_member_integer(item, "awaited_task_id") == .Val(awaited) {
         text = "{text} for task {awaited}"
         if jet_cli_perf_member_integer(item, "spawn_line") == .Val(line) {
@@ -849,6 +849,71 @@ jet_cli_perf_wait_text: fn(item: CanonicalJSON) -> String Never! {
         text = "{text} at {path}:{line}"
     }
     text
+}
+
+// A frame of a wait row's stack (`wait_stack`): its function and line.
+JetCLIPerfWaitFrame: struct {
+    name: String,
+    line: String,
+}
+
+// The frames of a wait row `item`'s stack, innermost first.
+jet_cli_perf_wait_stack: fn(item: CanonicalJSON) -> [JetCLIPerfWaitFrame] Never! {
+    fields: jettrace_object_view(item, "jettrace row") ?? return [JetCLIPerfWaitFrame]{}
+    at: jet_cli_perf_key(fields, "wait_stack") ?? return [JetCLIPerfWaitFrame]{}
+    frames: jettrace_array(fields[at].value, "wait_stack") ?? return [JetCLIPerfWaitFrame]{}
+    loop frame in frames -> JetCLIPerfWaitFrame{name: jet_cli_perf_member_text(frame, "name") ?? "?", line: jet_cli_perf_member_integer(frame, "line") ?? "?"}
+}
+
+// A wait row `item`'s stack in words, outermost frame first: `run
+// main.jet:5 > nap main.jet:10`; empty for none.
+jet_cli_perf_wait_stack_text: fn(item: CanonicalJSON) -> String Never! {
+    path: jet_cli_perf_member_symbol_text(item, "path") ?? "?"
+    frames: jet_cli_perf_wait_stack(item)
+    parts: loop index in 0..<frames.len() -> "{frames[frames.len() - 1 - index].name} {path}:{frames[frames.len() - 1 - index].line}"
+    parts.join(" > ")
+}
+
+// One stack's off-CPU time: its text, the time its waits took and how many
+// there were.
+JetCLIPerfOffCPU: struct {
+    stack: String,
+    ns: Int,
+    waits: Int,
+}
+
+// Off-CPU time by stack: the tasks' waits (`task_wait` rows) summed by
+// their stack, outermost frame first, and the wait it blocked in: `run
+// main.jet:5 > pause main.jet:12 > nap main.jet:10 > time sleep`. The
+// longest first; at most 16 stacks.
+jet_cli_perf_off_cpu_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    items: jet_cli_perf_rows(trace, "spans") ?? return [String]{}
+    found := [JetCLIPerfOffCPU]{}
+    places := [String:Int]{}
+    loop item in items {
+        if (jet_cli_perf_member_text(item, "kind") ?? "") != "task_wait" -> next
+        start: jet_cli_perf_member_number(item, "start_ns") ?? next
+        end: jet_cli_perf_member_number(item, "end_ns") ?? next
+        held: jet_cli_perf_wait_stack_text(item)
+        name: jet_cli_perf_member_symbol_text(item, "name") ?? "wait"
+        stack: if held.len() == 0 -> name else -> "{held} > {name}"
+        if !places.has_key(stack) {
+            places[stack] = found.len()
+            // copy: the map keys the stack; its row owns its own.
+            found.push(JetCLIPerfOffCPU{stack: stack.copy(), ns: 0, waits: 0})
+        }
+        found[places[stack]].ns += end - start
+        found[places[stack]].waits += 1
+    }
+    if found.len() == 0 -> return [String]{}
+    found.sort_by(fn(left: JetCLIPerfOffCPU, right: JetCLIPerfOffCPU) { (right.ns <=> left.ns).then(left.stack <=> right.stack) })
+    lines := [String]{"off-cpu by stack: the time tasks spent waiting, by the stack each wait blocked on, the longest first"}
+    shown: if found.len() > 16 -> 16 else -> found.len()
+    loop index in 0..<shown {
+        row: found[index]
+        lines.push("  {row.ns}ns waits={row.waits} · {row.stack}")
+    }
+    lines
 }
 
 // The text `key` of a row `item`'s symbol: its `path` or `name`.
