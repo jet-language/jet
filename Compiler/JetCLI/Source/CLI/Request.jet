@@ -2095,7 +2095,7 @@ JetCLIOverlay: struct {
 // `build`, `run`, `check`, `test`, `doc` and `emit` (the `--trace` control).
 // `settings` are the command line's `--set` writers and `profile` the
 // `--profile` it selects ("" keeps the request's default; `jet check`);
-// `target_machine` is the machine without an OS it checks for ("" for the
+// `target_machine` is the declared machine it checks for ("" for the
 // host; `jet check --target`); `hold_check_state` and `capture_cost_report`
 // as in jet_cli_compile_prepared.
 jet_cli_compile_entry: fn(file: String, color: Bool, threads: Int?, mode: JetDriverCompileMode, entry_source: String?, trace_sink: JetCLITraceSink?, settings: [BuildSettingOverride]{[BuildSettingOverride]{}}, profile: String{""}, target_machine: String{""}, hold_check_state: Bool{false}, capture_cost_report: Bool{false}) -> JetCLICompiled {
@@ -2227,7 +2227,7 @@ jet_cli_prepared_file_count: fn(prepared: JetCLIPrepared) -> Int Never! {
 // Compiler/Prelude source (`jet check --prelude`); `every_core_body` checks
 // every Core body, called or not, and `core_layers` is Core's layer table
 // whose upward names it reports (`jet check Core`); a non-empty
-// `target_machine` is the machine without an OS the program is checked for.
+// `target_machine` is the declared machine the program is checked for.
 // `hold_check_state`: the caller ends the process with the result still held
 // (Host.jet jet_cli_finish), so a check's compile state moves into the
 // result and is never dropped (JetDriverCompileRequest.hold_check_state).
