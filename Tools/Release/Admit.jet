@@ -1526,13 +1526,15 @@ reuse_file: fn(given: String) -[Env, FS]> String Never! {
 }
 
 // The candidate rows --reuse supplies: the commit `prior` they ran on, its
-// rows, and the changed files each rerun row must cover. `error` stops every
-// suite.
+// rows, the changed files each rerun row must cover, and the rows `ledger`
+// reruns because a known-failing line for them was added or removed. `error`
+// stops every suite.
 ReusePlan: struct {
     active: Bool,
     prior: String,
     rows: [SuiteRow],
     paths: [String],
+    ledger: [String],
     error: String,
 }
 
@@ -1592,7 +1594,7 @@ row_file_problems: fn(file: RowFile, path: String, source: String, suites: [Stri
 }
 
 reuse_plan: fn(ctx: &Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
-    plan := ReusePlan{active: false, prior: "", rows: [SuiteRow]{}, paths: [String]{}, error: ""}
+    plan := ReusePlan{active: false, prior: "", rows: [SuiteRow]{}, paths: [String]{}, ledger: [String]{}, error: ""}
     if ctx.options.reuse == "" -> return plan
     plan.active = true
     path: reuse_file(ctx.options.reuse)
@@ -1621,6 +1623,9 @@ reuse_plan: fn(ctx: &Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
         return plan
     }
     changed: git_in(ctx.root, [String]{"diff", "--name-status", "--no-renames", plan.prior, ctx.sha})
+    // A changed known-failing ledger reruns the rows whose lines it added or
+    // removed, so each row's tracked status is the current ledger's.
+    ledger: ledger_changes(git_in(ctx.root, [String]{"show", "{plan.prior}:{KNOWN_LEDGER}"}).out, git_in(ctx.root, [String]{"show", "{ctx.sha}:{KNOWN_LEDGER}"}).out)
     if changed.rc != 0 {
         problems.push("git diff {short(plan.prior, 10)} {short(ctx.sha, 10)} failed: {changed.err}")
     }
@@ -1630,6 +1635,11 @@ reuse_plan: fn(ctx: &Ctx) -[Env, Exec, FS, Time.Wait]> ReusePlan Never! {
         status: cells[0]
         changed_path: cells[1]
         if {
+            changed_path == KNOWN_LEDGER && status == "M" -> {
+                loop item in file.rows {
+                    if ledger_owns(ledger, item.id) && !plan.ledger.contains(item.id) -> plan.ledger.push(item.id.copy())
+                }
+            }
             has_prefix(changed_path, REUSE_QUIET) -> {}
             !has_prefix(changed_path, REUSE_ROWS) -> {
                 problems.push("{changed_path} changed outside tests/ and Examples/")
@@ -1993,7 +2003,10 @@ reused_suites: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     candidate := SuiteRun{rows: [SuiteRow]{}, error: ""}
     loop suite in kit_suites(ctx.native) {
         after: suite_part(SuiteRun{rows: plan.rows.copy(), error: ""}, suite).rows
-        changed: rerun_ids(after, plan.paths)
+        changed := rerun_ids(after, plan.paths)
+        loop item in after {
+            if plan.ledger.contains(item.id) && !changed.contains(item.id) -> changed.push(item.id.copy())
+        }
         // copy: the rows a change reaches stay apart from the failures run again.
         ids := changed.copy()
         loop item in after {
