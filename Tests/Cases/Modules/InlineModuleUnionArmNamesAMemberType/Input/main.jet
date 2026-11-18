@@ -1,0 +1,24 @@
+geo: module {
+    Point: struct {
+        x: Int,
+        y: Int,
+    }
+}
+
+inspect: fn(item: Int | geo.Point) -> String {
+    if item == {
+        .Int(n) -> "int {n}"
+        .geo.Point(p) -> "point {p.x} {p.y}"
+    }
+}
+
+only: fn(item: Int | geo.Point) {
+    if item == .geo.Point(q) -> print("only {q.x}")
+}
+
+run: fn() {
+    print(inspect(14))
+    print(inspect(geo.Point{x: 1, y: 2}))
+    only(5)
+    only(geo.Point{x: 3, y: 4})
+}

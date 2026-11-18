@@ -73,12 +73,16 @@ use {
         NamedType,
         OrFallback,
         Param,
+        PatSlot,
+        Pattern,
+        PatternTypeHead,
         PipeStep,
         Program,
         Span,
         Stmt,
         StrPart,
         StructDef,
+        StructPatField,
         SwitchArm,
         SymbolKind,
         TaskGroupArgs,
@@ -1226,8 +1230,8 @@ sema_inline_rewrite_expr: fn(rewrite: &SemaInlineRewrite, expression: Expr) -> E
         // copy: `tainted_tag` is a payload of read parameter `expression`, which keeps the original; field `tag` of the new Expr.Tainted owns this one
         .Tainted(value, tainted_tag, span, node) -> return Expr.Tainted{value: sema_inline_rewrite_expr(rewrite, value), tag: tainted_tag.copy(), span: span, id: node}
         .Present(value, span, node) -> return Expr.Present{value: sema_inline_rewrite_expr(rewrite, value), span: span, id: node}
-        // copy: `pattern` is a payload of read parameter `expression`, which keeps the original; field `pattern` of the new Expr.PatternTest owns this one
-        .PatternTest(subject, pattern, span, node) -> return Expr.PatternTest{subject: sema_inline_rewrite_expr(rewrite, subject), pattern: pattern.copy(), span: span, id: node}
+        // The arm's type names are renamed as type position renames them.
+        .PatternTest(subject, pattern, span, node) -> return Expr.PatternTest{subject: sema_inline_rewrite_expr(rewrite, subject), pattern: sema_inline_rewrite_pattern(rewrite, pattern), span: span, id: node}
         .Ok(value, span, node) -> return Expr.Ok{value: sema_inline_rewrite_expr(rewrite, value), span: span, id: node}
         .Err(value, span, node) -> return Expr.Err{value: sema_inline_rewrite_expr(rewrite, value), span: span, id: node}
         // copy: `conversion` is a payload of read parameter `expression`, which keeps the original; field `conversion` of the new Expr.Try owns this one
@@ -1303,7 +1307,7 @@ sema_inline_rewrite_binding: fn(rewrite: &SemaInlineRewrite, binding: Binding) -
     if binding.pattern == .Val(pattern) {
         updated.pattern = Val(if pattern == {
             .Struct(type_name, type_span, fields, rest, span) -> BindPattern.Struct{type_name: sema_inline_mapped_name(rewrite, type_name), type_span: type_span, fields: fields, rest: rest, span: span}
-            .Refutable(inner, fallback, names, span) -> BindPattern.Refutable{pattern: inner, fallback: sema_inline_rewrite_or_fallback(rewrite, fallback), names: names, span: span}
+            .Refutable(inner, fallback, names, span) -> BindPattern.Refutable{pattern: sema_inline_rewrite_pattern(rewrite, inner), fallback: sema_inline_rewrite_or_fallback(rewrite, fallback), names: names, span: span}
             // copy: the binding pattern is a payload view of the borrowed binding (Jet has no
             // consuming match), so it is copied into the rebuilt program, while the caller's
             // program keeps the original.
@@ -1311,6 +1315,65 @@ sema_inline_rewrite_binding: fn(rewrite: &SemaInlineRewrite, binding: Binding) -
         })
     }
     updated
+}
+
+// `pattern` with each type name it spells renamed as type position renames
+// it: a dotted arm (`.geo.Point(p)`, the member of a union holding
+// `geo.Point`) and a struct pattern's head (`geo.Point{x, y}`). A bare arm
+// (`.Point`) stays as written, since it may name an enum case.
+sema_inline_rewrite_pattern: fn(rewrite: SemaInlineRewrite, pattern: Pattern) -[]> Pattern {
+    if pattern == {
+        .Variant(variant, bindings, leading_dot, span) -> {
+            name: if variant.contains(".") -> sema_inline_mapped_name(rewrite, variant) else -> variant
+            Pattern.Variant{variant: name, bindings: sema_inline_rewrite_pattern_slots(rewrite, bindings), leading_dot: leading_dot, span: span}
+        }
+        .Present(binding, binding_span, inner, span) -> Pattern.Present{binding: binding, binding_span: binding_span, inner: sema_inline_rewrite_optional_pattern(rewrite, inner), span: span}
+        .Ok(binding, binding_span, inner, span) -> Pattern.Ok{binding: binding, binding_span: binding_span, inner: sema_inline_rewrite_optional_pattern(rewrite, inner), span: span}
+        .Err(binding, binding_span, inner, span) -> Pattern.Err{binding: binding, binding_span: binding_span, inner: sema_inline_rewrite_optional_pattern(rewrite, inner), span: span}
+        .Or(alternatives, span) -> Pattern.Or{alternatives: loop alternative in alternatives -> sema_inline_rewrite_pattern(rewrite, alternative), span: span}
+        .Struct(fields, rest, span, type_name) -> {
+            head := PatternTypeHead?{None}
+            if type_name == .Val(written) {
+                head = Val(PatternTypeHead{name: sema_inline_mapped_name(rewrite, written.name), span: written.span})
+            }
+            Pattern.Struct{fields: loop field in fields -> sema_inline_rewrite_struct_pattern_field(rewrite, field), rest: rest, span: span, type_name: head}
+        }
+        .List(items, rest, span) -> Pattern.List{items: sema_inline_rewrite_pattern_slots(rewrite, items), rest: rest, span: span}
+        .Map(entries, rest, span) -> Pattern.Map{entries: entries, rest: rest, span: span}
+        .StrMatch(parts, span) -> Pattern.StrMatch{parts: parts, span: span}
+        .BinMatch(parts, span) -> Pattern.BinMatch{parts: parts, span: span}
+        .Range(lo, hi, span) -> Pattern.Range{lo: lo, hi: hi, span: span}
+        .Absent(span) -> Pattern.Absent{span: span}
+    }
+}
+
+sema_inline_rewrite_optional_pattern: fn(rewrite: SemaInlineRewrite, pattern: Pattern?) -[]> Pattern? {
+    if pattern == .Val(inner) -> return Val(sema_inline_rewrite_pattern(rewrite, inner))
+    None
+}
+
+sema_inline_rewrite_pattern_slots: fn(rewrite: SemaInlineRewrite, slots: [PatSlot]) -[]> [PatSlot] {
+    loop slot in slots -> sema_inline_rewrite_pattern_slot(rewrite, slot)
+}
+
+sema_inline_rewrite_pattern_slot: fn(rewrite: SemaInlineRewrite, slot: PatSlot) -[]> PatSlot {
+    if slot == {
+        .Nested(pattern) -> PatSlot.Nested{pattern: sema_inline_rewrite_pattern(rewrite, pattern)}
+        .Named(field, field_span, inner) -> PatSlot.Named{field: field, field_span: field_span, slot: sema_inline_rewrite_pattern_slot(rewrite, inner)}
+        .Bind(name, span) -> PatSlot.Bind{name: name, span: span}
+        .Range(lo, hi) -> PatSlot.Range{lo: lo, hi: hi}
+        .Rest(span) -> PatSlot.Rest{span: span}
+        .Value(value) -> PatSlot.Value{value: value}
+        .Wildcard -> PatSlot.Wildcard
+    }
+}
+
+sema_inline_rewrite_struct_pattern_field: fn(rewrite: SemaInlineRewrite, field: StructPatField) -[]> StructPatField {
+    if field == {
+        .Nested(name, name_span, pattern) -> StructPatField.Nested{field: name, field_span: name_span, pattern: sema_inline_rewrite_pattern(rewrite, pattern)}
+        .Bind(name, name_span, local, local_span) -> StructPatField.Bind{field: name, field_span: name_span, local: local, local_span: local_span}
+        .Value(name, name_span, value) -> StructPatField.Value{field: name, field_span: name_span, value: value}
+    }
 }
 
 sema_inline_rewrite_arms: fn(rewrite: &SemaInlineRewrite, arms: [SwitchArm]) -> [SwitchArm] Never! {
@@ -2754,4 +2817,20 @@ sema_inline_test_run_call: fn(source: String) -[]> {callee: String, codes: [Stri
             assert(sema_inline_module_lowered(definition), definition.name)
         }
     }
+}
+
+#Test("a dotted arm and a struct pattern head name an inline module type as type position does") {
+    rewrite := sema_inline_rewrite_empty()
+    rewrite.types["geo.Point"] = Type.Named{name: "M3GeoPoint"}
+    rewrite.types["Point"] = Type.Named{name: "M3GeoPoint"}
+    span: Span{start: 0, end: 1}
+    dotted: sema_inline_rewrite_pattern(rewrite, Pattern.Variant{variant: "geo.Point", bindings: [PatSlot]{PatSlot.Bind{name: "p", span: span}}, leading_dot: true, span: span})
+    assert(dotted == .Variant("M3GeoPoint", _, true, _))
+    // A bare arm may name an enum case, so it stays as written.
+    bare: sema_inline_rewrite_pattern(rewrite, Pattern.Variant{variant: "Point", bindings: [PatSlot]{}, leading_dot: true, span: span})
+    assert(bare == .Variant("Point", _, _, _))
+    nested: sema_inline_rewrite_pattern(rewrite, Pattern.Present{binding: "_", binding_span: span, inner: Val(Pattern.Struct{fields: [StructPatField]{}, rest: Val(span), span: span, type_name: Val(PatternTypeHead{name: "Point", span: span})}), span: span})
+    if nested == .Present(_, _, inner, _) && inner == .Val(.Struct(_, _, _, head)) {
+        assert((head?.name ?? "") == "M3GeoPoint")
+    } else { panic("the struct pattern lost its head") }
 }
