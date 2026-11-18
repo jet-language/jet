@@ -226,9 +226,10 @@ ir_reactive_rooted: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, executable: Bo
 }
 
 // `ui.button(label, shortcut:, accessible_label:, () -> { on_click })` and
-// `ui.text_input(state, ime, on_drop: (item) -> { … })`: the runtime registry
-// `export` names keeps the handler with the invoke helper `role` builds; its
-// slot Int names the button's click or the input's drop.
+// `ui.text_input(state, ime, on_drop: (item) -> { … }, on_change: (text) ->
+// { … })`: the runtime registry `export` names keeps the handler with the
+// invoke helper `role` builds; its slot Int names the button's click, the
+// input's drop, or its change (a click slot whose handler takes the text).
 ir_ui_slot: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, executable: BodyLambda, export: String, role: String, span: Span) -> Int Never! {
     body: ir_reactive_body(m, p, b, executable, role, span)
     if body.len() != 3 -> return -1

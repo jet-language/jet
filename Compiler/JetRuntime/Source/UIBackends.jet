@@ -1,6 +1,7 @@
 // The Rect/Size/InputEvent records core.ui's backends cross the runtime
-// with, a web build's scene, and the click slots of buttons. The backends
-// themselves are Jet (Core/UI/UI.jet).
+// with, a web build's scene, and the click slots of buttons and the drop and
+// change slots of text inputs. The backends themselves are Jet
+// (Core/UI/UI.jet).
 UI_RECT_BYTES: I64{32}
 
 UI_SIZE_BYTES: I64{16}
@@ -112,7 +113,8 @@ ui_web_scene_fresh := I64{0}
 // process, as the reference's registry does. A button or text input may be
 // built on any task, so registration runs under the host lock. Each registry
 // is one word vector (len0 cap8 data16, Events.jet event_words_*): the click
-// slots of buttons and the drop slots of text inputs.
+// slots, which keep any callback closure (a button's click handler, a text
+// input's change handler), and the drop slots of text inputs.
 ui_click_slots := I64{0}
 
 ui_drop_slots := I64{0}
@@ -134,8 +136,9 @@ ui_slots_push: fn(base: I64, env: I64, invoke: I64, release: I64) -> I64 {
     ui_carrier_word(base) / I64{3}
 }
 
-// `ui.button(…, () -> { on_click })`: the click slot keeping the handler closure,
-// which it takes over, as the Int core.ui's `__button_click` stores.
+// `ui.button(…, () -> { on_click })` and `ui.text_input(…, on_change: (text)
+// -> { … })`: the click slot keeping the handler closure, which it takes
+// over, as the Int core.ui's `__button_click` and `text_input_change` store.
 #Export(c) jet_ui_click_slot: fn(env: I64, invoke: I64, release: I64) -> I64 {
     host_lock()
     if (ui_click_slots == I64{0}) {
@@ -178,36 +181,46 @@ ui_slots_push: fn(base: I64, env: I64, invoke: I64, release: I64) -> I64 {
     _ := coll_call2(invoke, env, I64{0})
 }
 
-// The UTF-8 text of the item a web host is dropping: the host writes it into
-// the bytes jet_ui_web_drop_buffer returns, then jet_ui_web_drop takes them.
-ui_web_drop_bytes := I64{0}
+// The UTF-8 text a web host hands over, the item it is dropping or what a
+// text input now holds: the host writes it into the bytes
+// jet_ui_web_text_buffer returns, then jet_ui_web_drop or
+// jet_ui_web_change takes them.
+ui_web_text_bytes := I64{0}
 
-ui_web_drop_length := I64{0}
+ui_web_text_length := I64{0}
 
-#Export(c) jet_ui_web_drop_buffer: fn(length: I64) -> I64 {
+#Export(c) jet_ui_web_text_buffer: fn(length: I64) -> I64 {
     bytes: jet_rt_alloc(wrapping(length + I64{1}), I64{1})
     #Unsafe("a web page's module runs on one thread") {
-        ui_web_drop_bytes = bytes
-        ui_web_drop_length = length
+        ui_web_text_bytes = bytes
+        ui_web_text_length = length
     }
     bytes
 }
 
-// A web host's drop of one item on a scene element: the drop of a Text
-// (kind 0) or URI (kind 1) item over the text in jet_ui_web_drop_buffer's
-// bytes on drop slot `id` (ui_drop_run).
-#Export(c) jet_ui_web_drop: fn(id: I64, kind: I64) {
-    bytes: ui_web_drop_bytes
-    length: ui_web_drop_length
-    if (bytes == I64{0}) {
-        return
-    }
+// The String of the text in jet_ui_web_text_buffer's bytes, which it frees;
+// 0 when the host wrote none.
+ui_web_text_take: fn() -> I64 {
+    bytes: ui_web_text_bytes
+    length: ui_web_text_length
+    if (bytes == I64{0}) { return I64{0} }
     #Unsafe("a web page's module runs on one thread") {
-        ui_web_drop_bytes = I64{0}
-        ui_web_drop_length = I64{0}
+        ui_web_text_bytes = I64{0}
+        ui_web_text_length = I64{0}
     }
     text: rt_text_copy(bytes, length)
     jet_rt_free(bytes, wrapping(length + I64{1}), I64{1})
+    text
+}
+
+// A web host's drop of one item on a scene element: the drop of a Text
+// (kind 0) or URI (kind 1) item over the text in jet_ui_web_text_buffer's
+// bytes on drop slot `id` (ui_drop_run).
+#Export(c) jet_ui_web_drop: fn(id: I64, kind: I64) {
+    text: ui_web_text_take()
+    if (text == I64{0}) {
+        return
+    }
     ui_drop_run(id, kind, text)
 }
 
@@ -235,4 +248,41 @@ ui_drop_run: fn(id: I64, kind: I64, text: I64) {
         return
     }
     _ := coll_call3(invoke, env, kind, text)
+}
+
+// A web host's input in a text input: what the input holds now, the text in
+// jet_ui_web_text_buffer's bytes, on its change handler's click slot `id`
+// (ui_change_run).
+#Export(c) jet_ui_web_change: fn(id: I64) {
+    text: ui_web_text_take()
+    if (text == I64{0}) {
+        return
+    }
+    ui_change_run(id, text)
+}
+
+// core.ui.__change: a native window's typing in a text input, as
+// jet_ui_web_change, over a copy of the borrowed text.
+#Export(c) jet_ui_change: fn(id: I64, text: I64) { ui_change_run(id, jet_rt_string_clone(text)) }
+
+// Runs the change handler click slot `id` keeps on `text`, which it takes
+// over, through the slot's lazy.callback adapter (invoke(env, the address
+// of a word holding the text, out), which borrows the text), then drops the
+// text. The slot is read under the host lock, as jet_ui_click's is. An
+// unknown id drops the text and does nothing.
+ui_change_run: fn(id: I64, text: I64) {
+    host_lock()
+    base: ui_click_slots
+    known: base != I64{0} && id >= I64{1} && id * I64{3} <= ui_carrier_word(base)
+    first: (id - I64{1}) * I64{3}
+    invoke: if (known) -> event_words_get(base, first + I64{1}) else -> I64{0}
+    env: if (known) -> event_words_get(base, first) else -> I64{0}
+    host_unlock()
+    if (known) {
+        lent: jet_rt_alloc(I64{8}, I64{8})
+        ui_carrier_store(lent, text)
+        _ := coll_call3(invoke, env, lent, I64{0})
+        jet_rt_free(lent, I64{8}, I64{8})
+    }
+    jet_rt_string_drop(text)
 }
