@@ -3,7 +3,9 @@
 # new version. A version 1 comparison record becomes version 2 with status
 # `canceled`, and its reason keeps the words it was written with. A recorded
 # corpus's status becomes `canceled`, while the observations it carries keep
-# theirs. A generated binding's descriptor stamp with a version 1 adapter
+# theirs. A version 1 jettrace becomes version 2: its task row's canceled key
+# takes the new name and its trace_id is its new content's hash. A generated
+# binding's descriptor stamp with a version 1 adapter
 # contract takes the stamp its binder writes now: the marshaled models are
 # `AdapterMarshaled` and the contract is version 2, while the binding's code
 # is untouched. A version 1 service authority log, written by the version 1
@@ -23,32 +25,34 @@
 # its format version. (An authority log names its store's absolute path in
 # each delivery's identity, so only the directory it was written in can
 # replay it; the runtime replaying a converted one is shown where it was
-# written, not here.) The current `jet test-compare` reads the converted
-# corpus and refuses the old one's status word.
+# written, not here.) The current `jet test-compare` and `jet perf view` read
+# the converted corpus and trace and refuse the old ones.
 fixture: AmericanTokens1MovesBritishTokensToNewVersions/Input
 env: NO_COLOR=1
 env: JET_STORE_DIR={work}/cache
 step: chmod 600 jobs.db.authority Old/jobs.db.authority
 exit: 0
-step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json plotly.jet canceled.log workflow.log.workflows jobs.db notes.txt
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json trace.jettrace plotly.jet canceled.log workflow.log.workflows jobs.db notes.txt
 exit: 0
-stdout: = "EDIT record.json 2\nEDIT corpus.json 1\nEDIT plotly.jet 4\nEDIT canceled.log 1\nEDIT workflow.log.workflows 2\nEDIT jobs.db 3\nSKIP notes.txt: in no format this plan converts\nTOTAL 13 sites in 6 files\n"
+stdout: = "EDIT record.json 2\nEDIT corpus.json 1\nEDIT trace.jettrace 2\nEDIT plotly.jet 4\nEDIT canceled.log 1\nEDIT workflow.log.workflows 2\nEDIT jobs.db 3\nSKIP notes.txt: in no format this plan converts\nTOTAL 15 sites in 7 files\n"
 file: record.json = AmericanTokens1MovesBritishTokensToNewVersions/record.out
 file: corpus.json = AmericanTokens1MovesBritishTokensToNewVersions/corpus.out
+file: trace.jettrace = AmericanTokens1MovesBritishTokensToNewVersions/trace.out
 file: plotly.jet = AmericanTokens1MovesBritishTokensToNewVersions/plotly.out
 file: canceled.log = AmericanTokens1MovesBritishTokensToNewVersions/canceled.out
 file: workflow.log.workflows = AmericanTokens1MovesBritishTokensToNewVersions/workflow.out
-step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json plotly.jet canceled.log workflow.log.workflows jobs.db notes.txt
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --write record.json corpus.json trace.jettrace plotly.jet canceled.log workflow.log.workflows jobs.db notes.txt
 exit: 0
 stdout: = "SKIP notes.txt: in no format this plan converts\nTOTAL 0 sites in 0 files\n"
 file: record.json = AmericanTokens1MovesBritishTokensToNewVersions/record.out
 file: corpus.json = AmericanTokens1MovesBritishTokensToNewVersions/corpus.out
+file: trace.jettrace = AmericanTokens1MovesBritishTokensToNewVersions/trace.out
 file: plotly.jet = AmericanTokens1MovesBritishTokensToNewVersions/plotly.out
 file: canceled.log = AmericanTokens1MovesBritishTokensToNewVersions/canceled.out
 file: workflow.log.workflows = AmericanTokens1MovesBritishTokensToNewVersions/workflow.out
-step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --against Old record.json corpus.json plotly.jet canceled.log workflow.log.workflows jobs.db
+step: jet run {root}/Compiler/Migrations/Migrate.jet -- american-tokens1 --against Old record.json corpus.json trace.jettrace plotly.jet canceled.log workflow.log.workflows jobs.db
 exit: 0
-stdout: = "SAME 6 of 6 files\n"
+stdout: = "SAME 7 of 7 files\n"
 step: jet run Reader/main.jet
 env: JET_STORE_UNDER=.
 exit: 0
@@ -75,3 +79,10 @@ step: jet test-compare Old/corpus.json
 exit: 1
 stdout: = ""
 stderr: = "invalid comparison corpus `Old/corpus.json`: recorded `status` `cancelled` is not a comparison status\n"
+step: jet perf view trace.jettrace
+exit: 0
+stdout: ~ "schema jet.trace v2\ntrace 25e3e76ebea3382078ba79f7e1b14de2e5ceaf6bf88cc7d08bf28e6f063c0c91\n" # the header names the new version and the new content hash; the profile rows below it are the fixture's
+stdout: ~ "tasks count=1 children=0" # the converted task row is read
+step: jet perf view Old/trace.jettrace
+exit: 2
+stderr: ~ "jettrace version 1 is an older format this reader no longer reads" # the refusal also names the trace's path

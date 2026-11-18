@@ -366,8 +366,8 @@ jet_live_decode: fn(bytes: [U8]) -> JetLiveSnapshot JetLiveSnapshotError! {
     if channels.len() > 4096 -> channels = channels[0..<4096].copy()
     effects["compute"] = tasks.len() - (effects.get("waiting") ?? 0)
     resources["running"] = running
-    resources["cancelled"] = canceled
-    Ok(JetLiveSnapshot{protocol: "jet.live.v1", session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: "", captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: JetLiveRuntime{elapsed_ns: elapsed_ns, cpu_ns: None, exit: exit}, event_records: events, events: None, boot_ns: boot_ns, start_ticks: start_ticks, clock_hz: clock_hz})
+    resources["canceled"] = canceled
+    Ok(JetLiveSnapshot{protocol: "jet.live.v2", session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: "", captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: JetLiveRuntime{elapsed_ns: elapsed_ns, cpu_ns: None, exit: exit}, event_records: events, events: None, boot_ns: boot_ns, start_ticks: start_ticks, clock_hz: clock_hz})
 }
 
 // A /proc/<pid>/stat tick count: decimal digits that fit U64.

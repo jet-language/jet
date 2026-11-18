@@ -15,7 +15,7 @@ jettrace_validate_tasks: fn(value: CanonicalJSON, limit: Int) -> [U64:JetTraceTa
     ids := [U64]{}
     loop index in 0..<items.len() {
         label: "content.tasks[{index}]"
-        fields: jettrace_object_keys(items[index], label, [String]{"cancelled", "id", "parent", "state", "symbol", "wait"})
+        fields: jettrace_object_keys(items[index], label, [String]{"canceled", "id", "parent", "state", "symbol", "wait"})
         id: jettrace_unsigned(fields[jettrace_get(fields, "id")].value, "{label}.id")
         if id == (U64{0}) -> return Err(jettrace_error("{label}.id must be greater than zero"))
         parent: jettrace_unsigned(fields[jettrace_get(fields, "parent")].value, "{label}.parent")
@@ -25,7 +25,7 @@ jettrace_validate_tasks: fn(value: CanonicalJSON, limit: Int) -> [U64:JetTraceTa
             return Err(jettrace_error("{label}.state must be a live observe task state"))
         }
         wait: jettrace_text(fields[jettrace_get(fields, "wait")].value, "{label}.wait")
-        _: jettrace_bool(fields[jettrace_get(fields, "cancelled")].value, "{label}.cancelled")
+        _: jettrace_bool(fields[jettrace_get(fields, "canceled")].value, "{label}.canceled")
         symbol: fields[jettrace_get(fields, "symbol")].value
         jettrace_validate_symbol(symbol, "{label}.symbol")
         if tasks.has_key(id) -> return Err(jettrace_error("{label}.id duplicates task {id}"))

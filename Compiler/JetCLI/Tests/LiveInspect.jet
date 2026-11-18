@@ -139,7 +139,7 @@ live_inspect_fixture: fn() -> JetLiveSnapshot Never! {
     resources["workers"] = 1
     resources["queued"] = 0
     JetLiveSnapshot{
-        protocol: "jet.live.v1",
+        protocol: "jet.live.v2",
         session_id: "session",
         source_id: "app.jet",
         build_id: "build-1",
@@ -192,7 +192,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     assert(snapshot.values[0].rendered_value == Val("7"))
     assert(snapshot.runtime == JetLiveRuntime{elapsed_ns: 7, cpu_ns: None, exit: false})
     assert((jet_cli_live_event_render(snapshot.event_records) ?? panic(err.message)) == "sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None")
-    expected: "jet inspect live · pid 42\nprotocol=jet.live.v1 session=session source=app.jet build=build-1 revision=rev-1 world=world-1\n\nTask Tree\n  Task 2     parent 1     blocked  wait=channel send deadline=480 canceled=false label=transform open_spans=2 arena_allocations=5\n\nChannels\n  Channel 1     depth 4/4 blocked send=1 recv=0 closed=false\n\nEffects: compute=0 waiting=1 channel=1 time=0 io=0\nResources: workers=1 running=0 queued=0 canceled=0 arenas=1 arena_allocations=2 arena_bytes=64\n\nValues\n  static:app.counter type=Int kept value=7\n\nEvents\n  sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None\n"
+    expected: "jet inspect live · pid 42\nprotocol=jet.live.v2 session=session source=app.jet build=build-1 revision=rev-1 world=world-1\n\nTask Tree\n  Task 2     parent 1     blocked  wait=channel send deadline=480 canceled=false label=transform open_spans=2 arena_allocations=5\n\nChannels\n  Channel 1     depth 4/4 blocked send=1 recv=0 closed=false\n\nEffects: compute=0 waiting=1 channel=1 time=0 io=0\nResources: workers=1 running=0 queued=0 canceled=0 arenas=1 arena_allocations=2 arena_bytes=64\n\nValues\n  static:app.counter type=Int kept value=7\n\nEvents\n  sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None\n"
     assert(jet_cli_live_text(snapshot) == expected)
     loop plane in
         ([String]{"types", "rights", "claims", "shapes", "structure", "build", "gates", "live"}) {
@@ -226,7 +226,7 @@ live_inspect_stat: fn(start: String, user: String, system: String) -> String Nev
     assert(view.tasks[0].open_spans == 1 && view.tasks[0].arena_allocations == 3 && view.tasks[1].open_spans == 0)
     assert(view.channels[0].id == 2 && view.channels[1].capacity == None)
     assert(view.effects.get("compute") == Val(2) && view.effects.get("waiting") == Val(3) && view.effects.get("channel") == Val(0) && view.effects.get("time") == Val(1) && view.effects.get("io") == Val(2))
-    assert(view.resources.get("running") == Val(1) && view.resources.get("cancelled") == Val(1))
+    assert(view.resources.get("running") == Val(1) && view.resources.get("canceled") == Val(1))
     assert(jet_cli_live_text(view).contains("Channel 7     depth 0/∞ blocked send=0 recv=0 closed=true"))
     many_channels := live_inspect_fixture()
     many_channels.channels = loop index in 0..<4097 -> JetLiveChannel{id: 4097 - index, depth: 0, capacity: None, send_waiters: 0, recv_waiters: 0, closed: false}

@@ -17,6 +17,12 @@
 //   `status` is a word of the record's vocabulary, so it follows the
 //   record's version; JetCLI TestCompare.jet reads it and refuses any other
 //   word, the old spelling included.
+// - A jettrace (`jet.trace`, `version` 1 to 2): a task row's `cancelled`
+//   key is `canceled`. Written by jettrace_artifact (JetFoundation
+//   Trace/JetTrace.jet, its rows by Trace/Carriers.jet) and read by
+//   verify_jettrace (Trace/ValidateTasks.jet checks the rows) and by `jet
+//   perf` (JetCLI Perf/Export.jet names the key). Its `trace_id` is the hash
+//   of its content, so a converted trace with task rows has a new one.
 // - A generated binding's descriptor stamp (`// jet-ffi-descriptor=`, its
 //   first line): an adapter contract's marshaled models are spelled
 //   `AdapterMarshaled` and the contract is version 2. Written by
@@ -58,7 +64,22 @@
 // reason or any other text keeps its words, and a file in no known format
 // is left alone and reported.
 use {
-    jet_foundation.[ComparisonStatus, TEST_COMPARISON_SCHEMA_VERSION, canonical_json_parse, comparison_parse_status, comparison_record_from_json, comparison_status_as_str]
+    jet_foundation.[
+        CanonicalJSON,
+        CanonicalJSONField,
+        ComparisonStatus,
+        TEST_COMPARISON_SCHEMA_VERSION,
+        TRACE_SCHEMA,
+        TRACE_VERSION,
+        canonical_json_bytes,
+        canonical_json_object,
+        canonical_json_parse,
+        canonical_json_sha256,
+        comparison_parse_status,
+        comparison_record_from_json,
+        comparison_status_as_str,
+        verify_jettrace,
+    ]
     jet_pkg_model.[FOREIGN_ADAPTER_CONTRACT_VERSION, pkg_binder_descriptor, pkg_foreign_binders]
     tokens_crypto: core.crypto
     tokens_db: core.db
@@ -85,6 +106,12 @@ AMERICAN_TOKENS1_COMPARISON_STATUS_V1: [AmericanTokensStatus]{
     {token: "invalid_oracle", status: ComparisonStatus.InvalidOracle},
     {token: "contaminated", status: ComparisonStatus.Contaminated},
 }
+
+// Version 1's key of a jettrace task row's canceled flag.
+AMERICAN_TOKENS1_TRACE_CANCELED_V1: "cancelled"
+
+// Version 2's key of it.
+AMERICAN_TOKENS1_TRACE_CANCELED: "canceled"
 
 // Version 1's spelling of an adapter contract's marshaled models.
 AMERICAN_TOKENS1_MARSHALED_V1: "AdapterMarshalled"
@@ -169,6 +196,7 @@ american_tokens1_file: fn(path: String, text: String) -[]> MigrationOutcome {
     if log.len() > 0 -> return american_tokens1_log(path, text, log)
     bytes: text.bytes()
     members: american_tokens1_members(bytes) ?? return american_tokens1_unknown(path, text)
+    if american_tokens1_is_trace(bytes, members) -> return american_tokens1_trace(path, text)
     edits := [AmericanTokensEdit]{}
     if american_tokens1_is_record(members) {
         if american_tokens1_value(bytes, members, "schema_version") != Val("1") {
@@ -200,8 +228,8 @@ american_tokens1_file: fn(path: String, text: String) -[]> MigrationOutcome {
 // Why `after`, the plan's rewrite of `before`, does not mean what `before`
 // meant, or None when it does. Every member but the rewritten ones keeps
 // its text, the old status word names the status the current reader reads
-// from the new one, and a record, a store or a log is one the current
-// reader accepts.
+// from the new one, and a record, a trace, a store or a log is one the
+// current reader accepts.
 american_tokens1_same_meaning: fn(path: String, before: String, after: String) -[]> String? {
     if before == after -> return None
     if before.starts_with(AMERICAN_TOKENS1_DESCRIPTOR_LINE) {
@@ -215,6 +243,9 @@ american_tokens1_same_meaning: fn(path: String, before: String, after: String) -
     old_bytes: before.bytes()
     new_bytes: after.bytes()
     old: american_tokens1_members(old_bytes) ?? return Val("{path} was in no format this plan converts")
+    if american_tokens1_is_trace(old_bytes, old) {
+        return american_tokens1_trace_same_meaning(old_bytes, new_bytes)
+    }
     new: american_tokens1_members(new_bytes) ?? return Val("the rewrite is not a JSON object")
     if old.len() != new.len() -> return Val("the rewrite has {new.len()} members, not {old.len()}")
     loop (index, member) in old {
@@ -247,6 +278,117 @@ american_tokens1_same_meaning: fn(path: String, before: String, after: String) -
 
 american_tokens1_unknown: fn(path: String, text: String) -[]> MigrationOutcome {
     MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: in no format this plan converts"}}
+}
+
+// A jettrace: its top-level `schema` names the trace format.
+american_tokens1_is_trace: fn(bytes: [U8], members: [AmericanTokensMember]) -[]> Bool {
+    american_tokens1_value(bytes, members, "schema") == Val("\"{TRACE_SCHEMA}\"")
+}
+
+// Converts a version 1 jettrace: each task row's canceled key takes its new
+// name, `version` is the current one and `trace_id` the new content's hash.
+american_tokens1_trace: fn(path: String, text: String) -[]> MigrationOutcome {
+    wrapper: canonical_json_parse(text.bytes()) ?? {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{"{path}: a jettrace that is not canonical JSON ({err.message})"}}
+    }
+    fields: american_tokens1_object(wrapper) ?? return american_tokens1_unknown(path, text)
+    if american_tokens1_field(fields, "version") != Val(CanonicalJSON.Integer("1")) {
+        return MigrationOutcome{text: text, rewritten: 0, skipped: [String]{}}
+    }
+    content: american_tokens1_field(fields, "content") ?? return american_tokens1_unknown(path, text)
+    renamed := 0
+    moved: american_tokens1_trace_tasks(content, AMERICAN_TOKENS1_TRACE_CANCELED_V1, AMERICAN_TOKENS1_TRACE_CANCELED, renamed)
+    id: canonical_json_sha256(moved)
+    out := [CanonicalJSONField]{}
+    loop field in fields {
+        value: if field.key == {
+            "content" -> moved
+            "trace_id" -> CanonicalJSON.String(id)
+            "version" -> CanonicalJSON.Integer("{TRACE_VERSION}")
+            else -> field.value
+        }
+        out.push(CanonicalJSONField{key: field.key, value: value})
+    }
+    converted: String.from_bytes(canonical_json_bytes(CanonicalJSON.Object(out))) ?? return american_tokens1_unknown(path, text)
+    MigrationOutcome{text: converted, rewritten: renamed + 1, skipped: [String]{}}
+}
+
+// Whether a converted trace means what its version 1 source meant: the
+// source's `trace_id` is its content's hash, the current reader accepts the
+// rewrite, and the rewrite's content with the old task key restored is the
+// source's content.
+american_tokens1_trace_same_meaning: fn(old_bytes: [U8], new_bytes: [U8]) -[]> String? {
+    old: canonical_json_parse(old_bytes) ?? return Val("the old trace is not canonical JSON: {err.message}")
+    old_fields: american_tokens1_object(old) ?? return Val("the old trace is not a JSON object")
+    if american_tokens1_field(old_fields, "version") != Val(CanonicalJSON.Integer("1")) {
+        return Val("the old trace is not version 1")
+    }
+    old_content: american_tokens1_field(old_fields, "content") ?? return Val("the old trace has no content")
+    if american_tokens1_field(old_fields, "trace_id") != Val(CanonicalJSON.String(canonical_json_sha256(old_content))) {
+        return Val("the old trace's trace_id is not its content's hash")
+    }
+    new: verify_jettrace(new_bytes) ?? return Val("the current reader refuses the rewrite: {err.message}")
+    new_fields: american_tokens1_object(new) ?? return Val("the rewrite is not a JSON object")
+    new_content: american_tokens1_field(new_fields, "content") ?? return Val("the rewrite has no content")
+    restored := 0
+    if american_tokens1_trace_tasks(new_content, AMERICAN_TOKENS1_TRACE_CANCELED, AMERICAN_TOKENS1_TRACE_CANCELED_V1, restored) != old_content {
+        return Val("the trace content changed beyond its task rows' canceled key")
+    }
+    None
+}
+
+// `content` with the `from` key of each row of its `tasks` named `to`,
+// counting the renamed keys in `renamed`.
+american_tokens1_trace_tasks: fn(content: CanonicalJSON, from: String, to: String, renamed: &Int) -[]> CanonicalJSON {
+    fields: american_tokens1_object(content) ?? return content
+    out := [CanonicalJSONField]{}
+    loop field in fields {
+        rows: american_tokens1_array(field.value) ?? [CanonicalJSON]{}
+        if field.key != "tasks" || rows.len() == 0 {
+            out.push(field)
+            next
+        }
+        moved := [CanonicalJSON]{}
+        loop row in rows -> moved.push(american_tokens1_rename(row, from, to, renamed))
+        out.push(CanonicalJSONField{key: field.key, value: CanonicalJSON.Array(moved)})
+    }
+    CanonicalJSON.Object(out)
+}
+
+// `row` with its `from` key named `to`, its keys in canonical order.
+american_tokens1_rename: fn(row: CanonicalJSON, from: String, to: String, renamed: &Int) -[]> CanonicalJSON {
+    fields: american_tokens1_object(row) ?? return row
+    out := [CanonicalJSONField]{}
+    loop field in fields {
+        if field.key != from {
+            out.push(field)
+            next
+        }
+        renamed += 1
+        out.push(CanonicalJSONField{key: to, value: field.value})
+    }
+    canonical_json_object(out) ?? row
+}
+
+american_tokens1_object: fn(value: CanonicalJSON) -[]> [CanonicalJSONField]? {
+    if value == {
+        .Object(fields) -> Val(fields)
+        .Null | .Bool(_) | .Integer(_) | .String(_) | .Array(_) -> None
+    }
+}
+
+american_tokens1_array: fn(value: CanonicalJSON) -[]> [CanonicalJSON]? {
+    if value == {
+        .Array(items) -> Val(items)
+        .Null | .Bool(_) | .Integer(_) | .String(_) | .Object(_) -> None
+    }
+}
+
+american_tokens1_field: fn(fields: [CanonicalJSONField], key: String) -[]> CanonicalJSON? {
+    loop field in fields {
+        if field.key == key -> return Val(field.value)
+    }
+    None
 }
 
 // Converts a binding whose descriptor stamp carries a version 1 adapter

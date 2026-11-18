@@ -44,7 +44,7 @@ jet debug run.jet
 ```
 
 `jet test --coverage` reports function and branch coverage for the checked Jet
-surface. `jet perf` writes the versioned `jet.trace` v1 envelope and retains Jet
+surface. `jet perf` writes the versioned `jet.trace` v2 envelope and retains Jet
 source identity. `jet debug` uses the Jet source debugger for pure Jet code. A
 program with a foreign call is routed to the native debugger backend; the
 source map stops at the Jet/native boundary. The tools retain the Jet location

@@ -131,7 +131,7 @@ jettrace_test_array_item: fn(value: CanonicalJSON, index: Int) -> CanonicalJSON 
 
 #Test("trace_version_has_one_typed_home") {
     version: TRACE_VERSION
-    assert_eq(version, U32{1})
+    assert_eq(version, U32{2})
     assert_eq(TRACE_SCHEMA, "jet.trace")
     wrapper: jettrace_test_valid(jettrace_sample_skeleton())
     assert_eq(jettrace_test_wrapper_lookup(wrapper, "version") ?? panic(err.message), CanonicalJSON.Integer("{version}"))
@@ -372,8 +372,15 @@ jettrace_test_window: fn(status: &&String, wall: U64?, cpu: U64?) -> Bool Never!
 #Test("newer_major_version_names_required_toolchain") {
     content: trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)
     wrapper := jettrace_artifact(content) ?? panic(err.message)
-    jettrace_test_set(wrapper, "version", .Integer("2"))
+    jettrace_test_set(wrapper, "version", .Integer("3"))
     assert(jettrace_test_error_bytes(canonical_json_bytes(wrapper)).contains("newer jet toolchain"))
+}
+
+#Test("an older version is refused and named as one the migration converts") {
+    content: trace_skeleton_content_json(jettrace_sample_skeleton()) ?? panic(err.message)
+    wrapper := jettrace_artifact(content) ?? panic(err.message)
+    jettrace_test_set(wrapper, "version", .Integer("1"))
+    assert(jettrace_test_error_bytes(canonical_json_bytes(wrapper)).contains("older format this reader no longer reads"))
 }
 
 #Test("embedded_source_maps_hash_and_sort_for_offline_truth") {
