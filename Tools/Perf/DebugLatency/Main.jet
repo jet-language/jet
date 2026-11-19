@@ -43,10 +43,11 @@
 // L is `inner`'s first call: the stop is two calls deep in a function of a
 // source that is not the entry (latency_nested_lib), where `total` is
 // `inner`'s own local. A debugger run whose output does not report the
-// breakpoint stop fails the measurement; a failed LLDB session leaves its
-// column `-` with the reason. It prints the image's SHA-256, both tools'
-// versions and the exact commands as `#` lines, then one tab-separated row
-// per measure in milliseconds, then each bar's verdict (latency_verdicts).
+// breakpoint stop fails the measurement, and so does a failed LLDB session
+// when LLDB is timed: no bar against LLDB goes unjudged. It prints the
+// image's SHA-256, both tools' versions and the exact commands as `#`
+// lines, then one tab-separated row per measure in milliseconds, then each
+// bar's verdict (latency_verdicts).
 // With `--bar MS` it fails, after the rows, when `jet debug`'s first stop
 // took more than MS milliseconds.
 use {
@@ -113,8 +114,6 @@ LatencyRuns: struct {
     rows: [LatencyRow]{[LatencyRow]{}},
     jet_target: LatencyTarget?{None},
     lldb_target: LatencyTarget?{None},
-    // Why LLDB's sessions have no samples, when they failed.
-    lldb_note: String{""},
 }
 
 // What ends a debugger's answer: `marker` seen `count` times since the
@@ -527,9 +526,12 @@ latency_lldb_drive: fn(child: ProcessChild, steps: Int, file: String, line: Int,
     // Each `expr` answers `(type) $N = value`.
     value: ") $"
     _: latency_lldb_ask(child, "breakpoint set --file {file} --line {line}\n", "Breakpoint 1: ", 1) ?? return Err(err)
-    // The program reads /dev/null: on LLDB's stdin it would take the bytes
-    // of the commands sent while it runs.
-    _: latency_lldb_ask(child, "process launch -i /dev/null\n", "stop reason = breakpoint", 1) ?? return Err(err)
+    // The program runs with its stdio on /dev/null and no terminal of its
+    // own (`--no-stdio`). Given one, LLDB forwards its own stdin to the
+    // program while the program runs, a byte at a time, and under load it
+    // was still reading when the next command came: it took that
+    // command's first bytes (`(lldb) ext` for `next`) or all of it.
+    _: latency_lldb_ask(child, "process launch --no-stdio\n", "stop reason = breakpoint", 1) ?? return Err(err)
     place: latency_lldb_ask(child, "frame variable total\n", "total = ", 1) ?? return Err(err)
     samples.push(LatencySample{measure: "print_place", us: place.us})
     first: latency_lldb_ask(child, "expr -- {LATENCY_LLDB_CALL}\n", value, 1) ?? return Err(err)
@@ -620,7 +622,6 @@ latency_measure: fn(options: LatencyOptions, work: String) -[Exec, FS, Time, Tim
     lldb := LatencyLldb?{None}
     lldb_samples := [LatencySample]{}
     lldb_target := LatencyTarget?{None}
-    lldb_note := ""
     if options.lldb == .Val(tool) {
         timed: LatencyLldb{
             version: latency_version(tool) ?? return Err(err),
@@ -628,12 +629,7 @@ latency_measure: fn(options: LatencyOptions, work: String) -[Exec, FS, Time, Tim
         }
         lldb = Val(timed)
         loop _ in 0..<options.runs {
-            session: latency_lldb_session(tool, options, work, tally) ?? {
-                lldb_note = "{err.message}"
-                lldb_samples = [LatencySample]{}
-                lldb_target = None
-                break
-            }
+            session: latency_lldb_session(tool, options, work, tally) ?? return Err("an lldb session: {err.message}")
             lldb_samples.extend(session.samples)
             lldb_target = session.target
         }
@@ -648,7 +644,6 @@ latency_measure: fn(options: LatencyOptions, work: String) -[Exec, FS, Time, Tim
             rows: latency_medians(jet_samples, lldb_samples),
             jet_target: jet_target,
             lldb_target: lldb_target,
-            lldb_note: lldb_note,
         },
     )
 }
@@ -695,9 +690,6 @@ latency_rows: fn(options: LatencyOptions, runs: LatencyRuns) -> [String] Never! 
     }
     if runs.jet_target == .Val(target) -> rows.push(latency_target_text("jet_debug", target))
     if runs.lldb_target == .Val(target) -> rows.push(latency_target_text("lldb", target))
-    if runs.lldb_note != "" {
-        rows.push("# lldb sessions not timed: {runs.lldb_note.split("\n").to_list()[0]}")
-    }
     loop verdict in latency_verdicts(runs) -> rows.push(verdict)
     if options.bar == .Val(bar) {
         verdict: if latency_bar_missed(options, runs) -> "missed" else -> "met"
@@ -715,27 +707,27 @@ latency_verdicts: fn(runs: LatencyRuns) -> [String] Never! {
     verdicts := [String]{}
     loop row in runs.rows {
         if row.measure == "print_first" {
-            verdicts.push("# bar: jet_debug print_first at most 250 ms: {latency_verdict(row.jet <= 250000)}")
+            verdicts.push("# bar: jet_debug print_first at most 250 ms: {latency_verdict(met: row.jet <= 250000)}")
         }
         if row.measure == "second_eval" {
-            verdicts.push("# bar: jet_debug second_eval at most 100 ms: {latency_verdict(row.jet <= 100000)}")
+            verdicts.push("# bar: jet_debug second_eval at most 100 ms: {latency_verdict(met: row.jet <= 100000)}")
         }
         if row.lldb == .Val(lldb_us) {
             if row.measure == "per_step" {
-                verdicts.push("# bar: jet_debug per_step at most lldb's + 1 ms: {latency_verdict(row.jet <= lldb_us + 1000)}")
+                verdicts.push("# bar: jet_debug per_step at most lldb's + 1 ms: {latency_verdict(met: row.jet <= lldb_us + 1000)}")
             }
             if row.measure == "print_place" {
-                verdicts.push("# bar: jet_debug print_place at most lldb's + 10 ms: {latency_verdict(row.jet <= lldb_us + 10000)}")
+                verdicts.push("# bar: jet_debug print_place at most lldb's + 10 ms: {latency_verdict(met: row.jet <= lldb_us + 10000)}")
             }
             if row.measure == "print_again" || row.measure == "watch_per_stop" {
-                verdicts.push("# bar: jet_debug {row.measure} at most twice lldb's: {latency_verdict(row.jet <= 2 * lldb_us)}")
+                verdicts.push("# bar: jet_debug {row.measure} at most twice lldb's: {latency_verdict(met: row.jet <= 2 * lldb_us)}")
             }
         }
     }
     verdicts
 }
 
-latency_verdict: fn(met: Bool) -> String Never! { if met -> "met" else -> "missed" }
+latency_verdict: fn(met: Bool{false}) -> String Never! { if met -> "met" else -> "missed" }
 
 // Whether `jet debug`'s first stop took longer than the bar, if there is one.
 latency_bar_missed: fn(options: LatencyOptions, runs: LatencyRuns) -> Bool Never! {
