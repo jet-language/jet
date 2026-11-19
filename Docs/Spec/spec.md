@@ -6138,7 +6138,11 @@ generates, and a foreign call's callback, `#Close` or `undo` function; a
 function passed as a value is reached through the body that names it. `keep`
 also builds every non-generic function of the package's own modules, so the
 image carries them (a generic function is still built only for the instances
-a call reaches). A dependency package's function is lowered only when a
+a call reaches), and links every runtime export the program never calls,
+for code compiled later against the image (`jet debug`'s `fix` and its
+evaluations). The runtime starts as the program's own code decides: a kept
+export turns on no part of it (the checked heap stays off without
+`--checked-alloc`). A dependency package's function is lowered only when a
 lowered body reaches it, under either setting and in every command but
 `jet test`, as a Core function is: an unreached one costs the build nothing
 past its check.

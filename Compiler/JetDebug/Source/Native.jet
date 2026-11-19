@@ -846,8 +846,9 @@ NativeSession: struct {
             captures.push(read.move())
         }
         if permit.value.plan == None || permit.value.planned != self.fixed.len() {
-            plan: native_fix_plan(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return Err(native_eval_refused(err.detail))
-            refusal: native_eval_refusal(permit.value, plan, facts.value, self.fixed)
+            diff: native_fix_diff(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return Err(native_eval_refused(err.detail))
+            plan: native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry) ?? return Err(native_eval_refused(err.detail))
+            refusal: native_eval_refusal(permit.value, diff, plan)
             if refusal != "" -> return Err(native_eval_refused(refusal))
             permit.value.plan = Val(plan)
             permit.value.planned = self.fixed.len()
@@ -1028,10 +1029,10 @@ NativeSession: struct {
         size := 0
         loop compiled in calls {
             permit: compiled.guard_read()
-            edit_plan: native_fix_plan(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return err.detail
-            stale: native_eval_refusal(permit.value, edit_plan, facts.value, self.fixed)
+            diff: native_fix_diff(self.image, permit.value.edit, facts.value.symbols, facts.value.code.bytes, facts.value.code.address, self.fixed) ?? return err.detail
+            plan: native_fix_place_all(permit.value.edit, facts.value.symbols, diff, permit.value.entry) ?? return err.detail
+            stale: native_eval_refusal(permit.value, diff, plan)
             if stale != "" -> return stale
-            plan: native_fix_place_all(permit.value.edit, facts.value.symbols, edit_plan, permit.value.entry) ?? return err.detail
             entries.push(native_eval_entry(permit.value, plan) ?? return "the compiled condition has no entry")
             offsets.push(size)
             size = (size + plan.size + NATIVE_FIX_ALIGN - 1).div_euclid(NATIVE_FIX_ALIGN) * NATIVE_FIX_ALIGN
@@ -1946,13 +1947,12 @@ NativeSession: struct {
         entries := [Int]{}
         sizes := [Int]{}
         loop row in plan.changed {
-            running: native_fix_running(edit.functions[row].name, symbols, code.bytes, code.address, self.fixed)
-            at: if running == .Val(found) -> found.address else -> -1
+            at: plan.running[row]
             if at >= 0 && pc > at && pc < at + 5 {
                 return Ok("Fix refused: the program is stopped in the first instruction of `{native_fix_shown(edit, row)}`; step once, then fix again\n")
             }
             entries.push(at)
-            sizes.push(if running == .Val(found) -> found.code.len() else -> 0)
+            sizes.push(plan.lengths[row])
         }
         syscall := -1
         changed: self.originals()
@@ -2039,7 +2039,7 @@ NativeSession: struct {
                 native_fix_lines(self.image.lines, low, function.code.len(), edit.debug[row], name, file, dir, decl)
                 self.openings.push(native_opening(self.image, self.image.lines.functions.len() - 1, NativeCode{address: base, bytes: region}))
             }
-            self.fixed.push(NativeFixed{name: function.name, address: low, code: region[piece.offset..<piece.offset + function.code.len()]})
+            self.fixed.push(NativeFixed{name: function.name, address: low, code: region[piece.offset..<piece.offset + function.code.len()], was: at})
             shown.push("`{name}`")
         }
         self.breakpoints = moved

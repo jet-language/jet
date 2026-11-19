@@ -76,7 +76,7 @@ NativeEvalValue: struct {
 // The image's code facts an evaluation places code against, read once:
 // its sized symbols and its `.text`.
 NativeEvalImage: struct {
-    symbols: [String:NativeFixSymbol],
+    symbols: NativeFixSymbols,
     code: NativeCode,
 }
 
@@ -101,12 +101,17 @@ native_eval_is_name: fn(text: String) -> Bool Never! {
     true
 }
 
-// Why the plan of `code` can't place it: a function the compile changed
-// that the program runs too means the source is no longer the program's.
-// "" when it can be placed.
-native_eval_refusal: fn(code: NativeEval, plan: NativeFixPlan, facts: NativeEvalImage, fixed: [NativeFixed]) -> String Never! {
+// Why the code `plan` (native_fix_place_all) places for `code` isn't the
+// program's: a function it places that the program runs too, compiled
+// differently (`diff`, native_fix_diff), means the source is no longer the
+// program's. Code the expression doesn't reach is not asked: the
+// compile's whole-program choices may differ from the image's there. ""
+// when it can be placed.
+native_eval_refusal: fn(code: NativeEval, diff: NativeFixPlan, plan: NativeFixPlan) -> String Never! {
+    changed := [Int:Bool]{}
+    loop row in diff.changed -> changed[row] = true
     loop row in plan.changed {
-        if native_fix_running(code.edit.functions[row].name, facts.symbols, facts.code.bytes, facts.code.address, fixed) != None {
+        if diff.running[row] >= 0 && changed.has_key(row) {
             return "`{native_fix_shown(code.edit, row)}` in the source is not the code the program runs; rebuild the program, or `fix` it first"
         }
     }

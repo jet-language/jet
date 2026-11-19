@@ -775,8 +775,13 @@ chain that start together share a row. The program is compiled again at
 the optimization level of its build, which the image's debug information
 names (`Jet native backend (O2)`), so the code around the expression is the
 code the program runs, with that function, which runs in a fork of the
-stopped program, placed as `fix` places code, with the locals' bytes read
-from the frame; the program itself neither runs nor changes. `fix` compiles
+stopped program, with the locals' bytes read from the frame; the program
+itself neither runs nor changes. The fork holds a fresh copy of the
+function and of every function it calls, which reach the program's own
+data and runtime where its unchanged code does, so the compile's choices
+for the whole program (its `main`, its register use) need not be the
+image's; a function the expression calls whose code differs from the
+program's is refused, the source no longer the program's. `fix` compiles
 at that level too. An inlined frame is evaluated in as `bt` shows it: the
 expression is checked in the inlined function at its line, the frame it was
 inlined into at the call, and the locals are the frame's own; code inlined

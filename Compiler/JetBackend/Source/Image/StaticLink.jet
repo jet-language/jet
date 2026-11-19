@@ -1686,9 +1686,13 @@ link_mark_piece: fn(c: &LinkContext, work: &[Int], piece: Int, skip_pc: Bool) Ne
 // Mark everything reachable from the sections `entries`, the init/fini
 // arrays and retained sections, and the personality routines, and each
 // conditional init/fini array once the section it links to is live, to a
-// fixpoint; then keep exactly the FDEs of live sections. Each live section's
-// relocations are scanned once, for marking and for link_scan_reloc.
-link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String]) Never! {
+// fixpoint; then what the sections `kept` reach (`dead_code: keep`'s
+// runtime exports), which runs no conditional hook more: a hook runs when
+// the program's own code links its guard, so a kept export changes no
+// runtime behavior (the checked heap stays off). Then keep exactly the
+// FDEs of live sections. Each live section's relocations are scanned once,
+// for marking and for link_scan_reloc.
+link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: [Int]) Never! {
     // Whether each name id is one of `linker_names` (link_scan_reloc).
     linker := [Bool]{}
     loop _ in 0..<name_count(c.names) -> linker.push(false)
@@ -1725,6 +1729,8 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String]) Never!
     }
     reported := [Int:Bool]{}
     head := 0
+    // 0 while the program's own reach grows, 1 once `kept` is marked.
+    phase := 0
     loop {
         loop head < work.len() {
             s: work[head].copy()
@@ -1755,9 +1761,15 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String]) Never!
                 fde = c.ep_next[fde]
             }
         }
-        loop index in 0..<c.cond_roots.len() {
-            root: c.cond_roots[index].copy()
-            if link_live_row(c, c.cond_guards[index]) >= 0 -> link_mark(c, work, root)
+        if phase == 0 {
+            loop index in 0..<c.cond_roots.len() {
+                root: c.cond_roots[index].copy()
+                if link_live_row(c, c.cond_guards[index]) >= 0 -> link_mark(c, work, root)
+            }
+            if head == work.len() {
+                phase = 1
+                loop section in kept -> link_mark(c, work, section)
+            }
         }
         if head == work.len() -> break
     }
@@ -3531,7 +3543,7 @@ x64_link_live_undefined: fn(names: [String], bufs: &&[[U8]]) -> X64LiveUndefined
     if c.errors.len() == 0 {
         entry_g: link_resolve_program(c)
         entry_section: link_entry_section(c, entry_g)
-        if entry_section >= 0 -> link_collect(c, [Int]{entry_section}, link_linker_names())
+        if entry_section >= 0 -> link_collect(c, [Int]{entry_section}, link_linker_names(), [Int]{})
     }
     inputs := c.bufs.move()
     loop inputs.len() > names.len() -> _: inputs.pop()
@@ -3570,7 +3582,7 @@ x64_link_executable_split: fn(names: [String], bufs: &&[[U8]], base: Int, thread
 // A split link (`debug_link` the side file's name, x64_link_executable_split)
 // writes the debug tail to a side file, and the image's fault report gives
 // addresses under the build id that names it. `roots` (x64_link_executable)
-// are collection entries beside the program's entry.
+// stay with what they reach, as link_collect's `kept`.
 link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &&X64ResidentLinkRequest?, threads: CompilerThreads, debug_info: Bool, debug_link: String?, roots: [String]) -> X64ResidentLinkResult Never! {
     split: debug_link != None
     c := link_context(bufs, base)
@@ -3631,15 +3643,16 @@ link_executable_image: fn(names: [String], bufs: &&[[U8]], base: Int, request: &
             entries.push(section)
         }
     }
+    kept := [Int]{}
     loop symbol in roots {
         global: link_global_named(c, symbol)
         if global < 0 -> next
         final: link_final(c, global)
         if c.g_kind[final] == LINK_G_FILE && c.g_section[final] >= 0 {
-            entries.push(c.g_section[final])
+            kept.push(c.g_section[final])
         }
     }
-    link_collect(c, entries, link_linker_names())
+    link_collect(c, entries, link_linker_names(), kept)
     if c.errors.len() > 0 {
         failed := link_resident_failure(c.errors.move())
         failed.image.undefined = c.undefined.move()
