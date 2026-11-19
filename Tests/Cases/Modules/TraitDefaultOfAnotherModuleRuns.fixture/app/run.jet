@@ -1,0 +1,21 @@
+use retain_lib.[Retain, count_evictable]
+use local.[Hold]
+
+local: module
+
+Rec: struct {
+    keep: Bool,
+
+    impl Retain {
+        saved: fn(self) -> Bool { self.keep }
+    }
+}
+
+run: fn() {
+    items: [Rec]{Rec{keep: true}, Rec{keep: false}, Rec{keep: false}}
+    print(count_evictable(items))
+    print(items[0].evictable())
+    held: [Hold]{Hold{count: 0}, Hold{count: 1}}
+    print(count_evictable(held))
+    print(held[0].evictable())
+}
