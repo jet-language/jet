@@ -6860,6 +6860,7 @@ jet_driver_load_reach: fn(request: JetDriverCompileRequest, use_driven: Bool) ->
     if failed_stage == None && !jet_driver_expand_imported_marker_groups(modules, resolved_imports, source_units, provenance.files, diagnostics, request.trace_sink) {
         failed_stage = jet_driver_set_failed_stage(failed_stage, JetDriverStage.Parse)
     }
+    jet_driver_replaced_import_uses(request, modules, source_units)
     complete: failed_stage == None && !jet_driver_has_errors(diagnostics)
     run_member_paths: jet_driver_run_member_paths(modules, source_units, catalog.entry_package_identity)
     JetDriverLoadResult{
@@ -6951,6 +6952,46 @@ jet_driver_entry_run_module: fn(request: JetDriverCompileRequest, modules: [JetD
         }
     }
     None
+}
+
+// A file whose function a `meta.rewrite_body` module replaced reads the
+// imports that function reads. The module holds the function under the
+// file's own imports (BuildQueries.jet jet_driver_build_generated_row), and
+// the loader blanked it in the file (jet_driver_withdraw_replaced), so the
+// names the module reads count as read in the file: L0103 doesn't call an
+// import unused that only the replaced function, its markers included,
+// read.
+jet_driver_replaced_import_uses: fn(request: JetDriverCompileRequest, modules: &[JetDriverLoadedModule], source_units: [JetDriverSourceUnit]) Never! {
+    loop generated in request.generated_modules {
+        replaced: generated.replaces ?? next
+        names := [String]{}
+        file := -1
+        loop (index, loaded) in modules {
+            if loaded.source_unit_index < 0 || loaded.source_unit_index >= source_units.len() {
+                next
+            }
+            unit: source_units[loaded.source_unit_index]
+            if unit.source_origin == SemaSourceOrigin.CompilerGenerated {
+                if unit.package_identity == generated.package_identity && unit.relative_path == generated.relative_path {
+                    loop name in loaded.program.used_import_names -> names.push("{name}")
+                }
+                next
+            }
+            if unit.root_index < 0 || unit.root_index >= request.authorized_sources.roots.len() {
+                next
+            }
+            files: request.authorized_sources.roots[unit.root_index].files
+            if unit.file_index >= 0 && unit.file_index < files.len() && files[unit.file_index].path == replaced.path {
+                file = index
+            }
+        }
+        if file < 0 -> next
+        loop name in names {
+            if !modules[file].program.used_import_names.contains(name) {
+                modules[file].program.used_import_names.push(name)
+            }
+        }
+    }
 }
 
 // The member files of the entry package (a `package.jet` namespace) that
