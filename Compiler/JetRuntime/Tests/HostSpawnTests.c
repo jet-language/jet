@@ -57,6 +57,8 @@ extern void *jet_process_path_canonicalize_raw(char *,W *,W *,Error *);
 extern Text *jet_host_os_error_text_raw(W,W);
 extern FD *jet_fd_adopt_unbuffered_raw(W,Text *);
 extern void jet_fd_drop_raw(FD *);
+extern void jet_rt_thread_attach(void);
+extern void jet_rt_thread_detach(void);
 static Text text(char *s) { return (Text){(unsigned char *)s,(W)strlen(s),0}; }
 static void good(Error *e) { assert(e->domain==0 && e->stage==0 && e->code==0 && !e->kind && !e->pad && !e->message); }
 static void posix(Error *e,int stage,int code) { assert(e->domain==1 && e->stage==(unsigned)stage && e->code==code && !e->kind && !e->message); }
@@ -78,7 +80,9 @@ static Child *spawn(W *spec,char *exe,char **argv,char **env) { Error e; Child *
 static void write_fixture(char *path,const char *bytes,int mode) { int fd=open(path,O_CREAT|O_TRUNC|O_WRONLY,mode);assert(fd>=0&&write(fd,bytes,strlen(bytes))==(ssize_t)strlen(bytes));assert(!close(fd)); }
 static int copy_fixture(char *source,char *target) { int in=open(source,O_RDONLY),out=open(target,O_CREAT|O_TRUNC|O_WRONLY,0700);assert(in>=0&&out>=0);char chunk[16384];ssize_t count;while((count=read(in,chunk,sizeof chunk))>0){ssize_t at=0;while(at<count){ssize_t written=write(out,chunk+at,(size_t)(count-at));assert(written>0);at+=written;}}assert(count==0&&!close(in)&&!close(out));return 0; }
 static void wait_code(Child *c,int code) { Error e; W status; assert(jet_process_wait_raw(c,false,&status,&e)==jet_process_id_raw(c)); good(&e); assert(WIFEXITED((int)status)&&WEXITSTATUS((int)status)==code); assert(c->peak_kib>0&&c->user_ns>=0&&c->system_ns>=0); assert(jet_process_wait_raw(c,true,&status,&e)==jet_process_id_raw(c)); good(&e); jet_process_kill_raw(c,SIGKILL,false,&e); good(&e); }
-static void *wait_thread(void *pointer) { Child *c=pointer; Error e; W status; assert(jet_process_wait_raw(c,false,&status,&e)==jet_process_id_raw(c)); good(&e); assert(WEXITSTATUS((int)status)==9); jet_process_drop_raw(c); return NULL; }
+// A waiter is a thread the runtime must know: until a second thread attaches,
+// the runtime runs as the process's sole thread and skips its futex wakes.
+static void *wait_thread(void *pointer) { jet_rt_thread_attach(); Child *c=pointer; Error e; W status; assert(jet_process_wait_raw(c,false,&status,&e)==jet_process_id_raw(c)); good(&e); assert(WEXITSTATUS((int)status)==9); jet_process_drop_raw(c); jet_rt_thread_detach(); return NULL; }
 int main(int argc,char **argv) {
     if(argc>1) return helper(argc,argv);
     jet_rt_host_program_start();
@@ -126,9 +130,9 @@ int main(int argc,char **argv) {
     // memory.peak, kills the grandchild still in it and removes the scope.
     // It needs a writable cgroup v2 parent next to this process's own cgroup.
     char rows[4096],scope[4096],leaf[4096],procs[4096],needle[4096]; int rows_fd=open("/proc/self/cgroup",O_RDONLY); assert(rows_fd>=0); ssize_t rows_n=read(rows_fd,rows,sizeof rows-1); assert(rows_n>0&&!close(rows_fd)); rows[rows_n]=0;
-    char *own=strstr(rows,"0::/"); if(own) { own+=3; char *end=strchr(own,'\n'); if(end) *end=0; *strrchr(own,'/')=0; snprintf(scope,sizeof scope,"/sys/fs/cgroup%s/jet-spawn-%d",own,(int)getpid()); }
+    char *own=strstr(rows,"0::/"); if(own) { own+=3; char *end=strchr(own,'\n'); if(end) *end=0; *strrchr(own,'/')=0; assert(snprintf(scope,sizeof scope,"/sys/fs/cgroup%s/jet-spawn-%d",own,(int)getpid())<(int)sizeof scope); }
     if(own && !mkdir(scope,0755)) {
-        snprintf(leaf,sizeof leaf,"%s/main",scope); assert(!mkdir(leaf,0755)); snprintf(procs,sizeof procs,"%s/cgroup.procs",leaf); int procs_fd=open(procs,O_WRONLY|O_CLOEXEC); assert(procs_fd>=0);
+        assert(snprintf(leaf,sizeof leaf,"%s/main",scope)<(int)sizeof leaf); assert(!mkdir(leaf,0755)); assert(snprintf(procs,sizeof procs,"%s/cgroup.procs",leaf)<(int)sizeof procs); int procs_fd=open(procs,O_WRONLY|O_CLOEXEC); assert(procs_fd>=0);
         snprintf(needle,sizeof needle,"/jet-spawn-%d/main\n",(int)getpid()); char *scoped[]={executable,"scoped",needle,NULL};
         spec[30]=1;spec[31]=procs_fd;c=spawn(spec, executable, scoped, env);spec[30]=spec[31]=0;assert(!close(procs_fd));
         read_exact(c,1,bytes,10);assert(!memcmp(bytes,"scoped",6));int32_t sleeper;memcpy(&sleeper,bytes+6,4);

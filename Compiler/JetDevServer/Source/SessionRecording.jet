@@ -61,7 +61,7 @@ SessionEvent: struct {
             if value == {
                 .Null -> {}
                 .Object(_) -> payload = Val(recording_canonical_json(value))
-                else -> return Err(RecordingError.InvalidEvent{message: "event payload must be an object or null"})
+                .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(RecordingError.InvalidEvent{message: "event payload must be an object or null"})
             }
         }
         event: SessionEvent{sequence: sequence, timestamp_ms: timestamp_ms, source: source, kind: kind, entity: entity, fields_json: fields, payload_json: payload}
@@ -148,7 +148,7 @@ ReplayCursor: struct {
     seek: fn(&self, recording: SessionRecording, sequence: Int) -> ReplayProjection RecordingError! {
         self.check(recording)
         index := -1
-        loop (position, event) in recording.events.enumerate() {
+        loop (position, event) in recording.events {
             if event.sequence == sequence {
                 index = position
                 break
@@ -169,7 +169,7 @@ ReplayCursor: struct {
             }
         }
         position := 0
-        loop (index, event) in recording.events.enumerate() {
+        loop (index, event) in recording.events {
             if event.timestamp_ms <= timestamp_ms -> position = index + 1
         }
         self.position = position
@@ -302,12 +302,13 @@ SessionRecording: struct {
         }
     }
 
-    append_event: fn(&self, event: SessionEvent) -> Int RecordingError! {
+    append_event: fn(&self, event: &&SessionEvent) -> Int RecordingError! {
+        sequence: event.sequence
         events := [SessionEvent]{}
-        events.push(event)
+        events.push(event.move())
         self.preflight(events)
-        self.append_event_unchecked(event)
-        event.sequence
+        loop recorded in events.move() -> self.append_event_unchecked(recorded)
+        sequence
     }
 
     record_envelope: fn(&self, bytes: [U8]) -> Int RecordingError! {
@@ -316,8 +317,9 @@ SessionRecording: struct {
         }
         events: recording_parse_envelope(bytes, self.identity)
         self.preflight(events)
-        loop event in events -> self.append_event_unchecked(event)
-        events.len()
+        count: events.len()
+        loop event in events.move() -> self.append_event_unchecked(event)
+        count
     }
 
     replay: fn(self) -> ReplayCursor {
@@ -414,11 +416,11 @@ SessionRecording: struct {
         }
     }
 
-    append_event_unchecked: fn(&self, event: SessionEvent) {
+    append_event_unchecked: fn(&self, event: &&SessionEvent) {
         self.last_sequence = Val(event.sequence)
         self.last_timestamp_ms = Val(event.timestamp_ms)
-        self.events.push(event)
         self.retained_bytes += event.wire_len()
+        self.events.push(event.move())
         // Evict oldest events until both limits hold again.
         evicted := 0
         loop self.events.len() - evicted > self.limits.max_events || self.retained_bytes > self.limits.max_bytes {
@@ -462,7 +464,7 @@ recording_parse_envelope: fn(bytes: [U8], expected_identity: SessionRecordingIde
             loop item in items -> events.push(recording_parse_event(item))
             events
         }
-        else -> Err(RecordingError.InvalidEnvelope{message: "envelope `events` must be an array"})
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> Err(RecordingError.InvalidEnvelope{message: "envelope `events` must be an array"})
     }
 }
 
@@ -482,7 +484,7 @@ recording_parse_event: fn(value: Dyn) -> SessionEvent RecordingError! {
         if payload == {
             .Null -> {}
             .Object(_) -> payload_json = Val(recording_canonical_json(payload))
-            else -> return Err(RecordingError.InvalidEvent{message: "event payload must be an object or null"})
+            .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> return Err(RecordingError.InvalidEvent{message: "event payload must be an object or null"})
         }
     }
     SessionEvent.new(sequence, timestamp_ms, source, kind, entity, recording_canonical_json(event_fields), payload_json)
@@ -511,7 +513,7 @@ recording_canonical_object: fn(text: String, label: String) -> String RecordingE
 recording_object_fields: fn(value: Dyn) -> [{key: String, value: Dyn}]? {
     if value == {
         .Object(fields) -> Val(fields)
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> None
     }
 }
 
@@ -527,7 +529,7 @@ recording_lookup: fn(fields: [{key: String, value: Dyn}], key: String) -> Dyn? {
 recording_text: fn(value: Dyn) -> String? {
     if value == {
         .Text(text) -> Val(text)
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> None
     }
 }
 
@@ -605,6 +607,6 @@ recording_canonical_json: fn(value: Dyn) -> String {
             "{{{parts.join(",")}}}"
         }
         // The JSON parser produces no other variant.
-        else -> "null"
+        .Bytes(_) | .DateTime(_) -> "null"
     }
 }

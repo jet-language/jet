@@ -1,0 +1,25 @@
+use time: core.time
+
+drain: fn(receiver: Receiver<Int>) -> Int {
+    got: receiver.receive() ?? 0
+    got + 1
+}
+
+count: fn(n: Int) -> Int {
+    total := 0
+    loop k in 0..<n {
+        step: k * 2
+        total += step
+    }
+    total
+}
+
+run: fn() {
+    {sender, receiver}: channel<Int>(capacity: 1)
+    waiter: task drain(receiver)
+    time.sleep(50ms)
+    counter: task count(4)
+    print("count {counter.join() ?? 0}")
+    sender.send(1)
+    print("drain {waiter.join() ?? 0}")
+}

@@ -9,7 +9,7 @@
 //       [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]
 //       [--budget COLUMN] [--runs N]
 //   JET=PATH jet Tools/Perf/CompileThroughput/Throughput.jet --against SEED
-//       [--perf PATH] [--modes LIST] [--runs N] [--tree DIR] [--cpus LIST]
+//       [--perf PATH] [--modes LIST] [--runs N] [--warmups N] [--tree DIR] [--cpus LIST]
 //       [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR]
 //       [--out FILE] [--tool PATH]
 //   jet Tools/Perf/CompileThroughput/Throughput.jet --batch PREVIOUS
@@ -72,7 +72,8 @@
 // compiler JET against the jet SEED it was built with, each compiling the
 // same corpus in each mode, --runs rounds (default 3). A round compiles
 // with SEED then JET, the next with JET then SEED, so both see the same
-// machine; every compile runs under `perf stat -e instructions:u,cycles:u` (--perf,
+// machine, after --warmups unmeasured compiles of each per mode (default
+// 1), so no round pays alone for a cold cache; every compile runs under `perf stat -e instructions:u,cycles:u` (--perf,
 // default `perf` on PATH), in <work>/{seed,new}-<mode>.<n>. The gate judges
 // only what load cannot move much: per mode, CPU (user + system), user-mode
 // instructions, and each top-level phase's process CPU at or above 0.5 s in
@@ -332,7 +333,7 @@ usage: fn(message: String) -> Never {
     term.eprint("Throughput.jet: {message}")
     term.eprint("usage: JET=PATH jet Tools/Perf/CompileThroughput/Throughput.jet [--tree DIR] [--modes check,O0,release] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH] [--budget COLUMN] [--runs N]")
     term.eprint("       JET=PATH jet Tools/Perf/CompileThroughput/Throughput.jet --lane quick|full [--programs LIST] [--arms default,single] [--samples N] [--warmups N] [--receipt FILE] [--baseline FILE] [--write-baseline FILE] [--profile TEXT] [--tree DIR] [--cpus LIST] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--tool PATH]")
-    term.eprint("       JET=PATH jet Tools/Perf/CompileThroughput/Throughput.jet --against SEED [--perf PATH] [--modes LIST] [--runs N] [--tree DIR] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]")
+    term.eprint("       JET=PATH jet Tools/Perf/CompileThroughput/Throughput.jet --against SEED [--perf PATH] [--modes LIST] [--runs N] [--warmups N] [--tree DIR] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE] [--tool PATH]")
     term.eprint("       jet Tools/Perf/CompileThroughput/Throughput.jet --batch PREVIOUS --current CURRENT [--runs N] [--modes LIST] [--perf PATH] [--cpus LIST] [--threads N] [--memory SIZE] [--timeout SECONDS] [--work DIR] [--out FILE]")
     process.exit(64)
 }
@@ -1101,6 +1102,20 @@ run_gate: fn(options: Options, jet: String, identity: String) -> Int {
     commit: first_line([String]{"git", "rev-parse", "HEAD"}, options.tree)
     runs := [Run]{}
     seed_first := true
+    // Unmeasured compiles first, --warmups of each compiler per mode: the
+    // first compile after a quiet spell pays for a cold page cache and slow
+    // clocks, which no later round does, and would skew its round alone.
+    loop mode in options.modes {
+        loop _ in 0..<options.warmups {
+            loop compiler in ([String]{"seed", "new"}) {
+                compiler_jet: if compiler == "seed" -> seed else -> jet
+                compiler_identity: if compiler == "seed" -> seed_identity else -> identity
+                warm: measure(options, inputs, lines, compiler_jet, compiler_identity, compiler, mode, 0)
+                if warm.rc != 0 -> term.eprint("throughput: {compiler} {mode} warmup exited {warm.rc}")
+                files.remove_all(slot_dir(options, compiler, mode, 0)) ?? ()
+            }
+        }
+    }
     loop mode in options.modes {
         loop repeat in 1..<(options.runs + 1) {
             order: if seed_first -> [String]{"seed", "new"} else -> [String]{"new", "seed"}

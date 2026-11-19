@@ -1,0 +1,31 @@
+# The `(Jet)` console's breakpoints: `break` takes a line, a file:line or a
+# function, with `if <expr>`; `log` prints its message with its `{expr}`
+# parts filled in and runs on; `breaks` lists them by number and `delete`
+# removes one. The run starts at `run`, whose entry breakpoint was number 1,
+# so the three set here are 2, 3 and 4. The breakpoint in the loop stops
+# only when `i == 3`, and setting it says the debugger checks the condition
+# at each hit; the deleted one on `total_of` never stops.
+# `frame`, `up` and `down` select a frame as `bt` numbers them.
+# The fixture must stay in jet fmt form: line 4 is the loop body's first
+# statement and line 7 the `total` after the loop.
+fixture: ConsoleBreakpointsTakeConditionsAndLogs.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: console_breakpoints_take_conditions_and_logs.stdin
+exit: 0
+stdout: ~ "Breakpoint set  prog.jet:4 if i == 3\nThe condition can't run in the program: the debugger checks it at each hit, which stops the program each time\n" # setting it says where the condition runs
+stdout: ~ "Logpoint set  prog.jet:7 "
+stdout: ~ "Breakpoint set  total_of\n"
+stdout: ~ "  2 break prog.jet:4 if i == 3\n  3 log prog.jet:7 " # `breaks` lists each by number
+stdout: ~ "  4 break total_of\n"
+stdout: ~ "Deleted breakpoint 4\n"
+stdout: !~ "Breakpoint hit  prog.jet:2" # the deleted breakpoint does not stop
+stdout: !~ "i = 0" # the condition skips the turns before i == 3
+stdout: ~ "Breakpoint hit  prog.jet:4  in total_of()\n"
+stdout: ~ "print i\ni = 3\n" # `print i` at the stop (a piped command is echoed)
+stdout: ~ "#1  run()  at prog.jet:10\n10 | run: fn()"
+stdout: ~ "No frame above #1\n"
+stdout: ~ "#0  total_of()  at prog.jet:4\n4 |         step: i\n"
+stdout: ~ "Frame needs a frame number `bt` shows, 0 to 1, as `frame 1`\n"
+stdout: ~ "total is 10\n" # the logpoint logs and runs on
+stdout: ~ "Program finished\n"

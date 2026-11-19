@@ -337,6 +337,11 @@ SemaGraphModuleResult: struct {
     // module whose body checked, in declaration order; the checked synthetic
     // function is in `functions` and its key in `injected_function_keys`.
     tests: [TTestFact]{[TTestFact]{}},
+    // Outside test mode (`jet check`, a build's root tests): the fields this
+    // module's checked `#Test` bodies read and the cases they build. The
+    // bodies are dropped, so liveness reads a test's member uses from here
+    // (sema_liveness_member_uses).
+    test_member_uses: SemaLivenessMemberUses{SemaLivenessMemberUses.empty()},
     // Under a per-function trace: each Core body a demand wave checked into
     // this module, as its position in `functions`, and the task CPU time
     // (ns) its check took at the same position of `core_check_ns`
@@ -1782,6 +1787,9 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     context.runtime_policy = sema_function_runtime_policy(func.markers)
     context.compiler_generated = func.compiler_generated && !sema_test_synthetic_function(func) && !sema_policy_wrapper_function(func) && !sema_computed_field_getter_function(func)
     context.return_view_declared = func.declared_return_view_provenance != None
+    if !context.compiler_generated && stand_in == None {
+        context.eval_walk = sema_eval_walk_open(program, module_identity, func.span, owner_key)
+    }
     if !complete {
         sema_check_unsupported(context, "the generic parameters of `{func.name}` could not be resolved against the registration graph")
     }
@@ -2017,7 +2025,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     body := [TStmt]{}
     if stand_in == None {
         // With no written return type the function returns
-        // nothing, so a value on its last line is lost (E0433). With a value
+        // nothing, so a value on its last line is lost (L0508). With a value
         // return (not a generator; written, or projected by the bundle failure
         // solve) the last line is the value handed back, and a table on the last
         // line hands back the value its arms end in. A `Never` function hands
@@ -2047,6 +2055,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
             sema_stmt_value_block_tail_lints(func.body, !func.compiler_generated && !module_is_core(updated.module_identity), updated, program, context.fallback_tables, diagnostics)
         }
         statements := sema_check_statements(func.body, Val(effective_return), updated, program, scopes, state, tail_store, context, diagnostics, 0)
+        if context.eval_walk == .Val(walk) -> sema_eval_walk_publish(walk)
         // The caller's group joins every task this body spawned into a `Group`
         // parameter, so those handles owe no `join` here.
         sema_taskgroup_mark_spawns_owned(context, SemaTaskGroupOrigin.Parameter, scopes, state, diagnostics)
@@ -2750,7 +2759,7 @@ sema_keep_going_stub: fn(func: Func, owner_id: SymbolID, function_kind: TFuncKin
 }
 
 // This rule reads a function with no written return type as losing the value
-// of its last line (E0433). A trap's `todo` is a stop, never a value handed
+// of its last line (L0508). A trap's `todo` is a stop, never a value handed
 // to nobody, so the trap's placeholder return position counts as written.
 sema_keep_going_trap_return_span: fn(func: Func) -> Span? Never! {
     if func.return_type_span == None -> Val(func.span) else -> func.return_type_span
@@ -3902,6 +3911,9 @@ sema_check_registration_module_test: fn(environment: SemaScopeEnvironment, progr
                     module_result.diagnostics.push(diagnostic)
                 }
                 if !graph.test_mode {
+                    if checked_test.function == .Val(function) {
+                        sema_liveness_member_body_uses(function, module_result.test_member_uses)
+                    }
                     return
                 }
                 loop fact in checked_test.call_facts -> module_result.call_facts.push(fact)
@@ -5949,7 +5961,9 @@ sema_check_soft_public_uses: fn(program: SemaProgramTables, module_index: Int, g
             // (symbol_key_text); a builtin, which no module registers, has
             // none.
             path: callee_key.split_once(":") ?? next
-            if path.after.starts_with("{module_identity}.") || sema_registration_callable_row(graph, callee_key) == None -> next
+            if path.after.starts_with("{module_identity}.") || sema_registration_callable_row(graph, callee_key) == None {
+                next
+            }
             sema_soft_public_warn(leaf, seen, module_result.diagnostics)
         }
         sema_check_soft_public_signatures(graph.modules[module_index], raw, seen, module_result.diagnostics)
@@ -11807,7 +11821,7 @@ sema_failure_recheck_modules: fn(graph: SemaRegistrationGraph, modules: [SemaGra
 // `is_result_carrier`, `plain_named_fn_value`). A module checked before the solve
 // projected `projected` takes it here: each projected function's checked signature
 // names the `T Never!` carrier, and a dropped call to one is a discarded result
-// (E0433). Its call sites keep the carrier they were checked against; lowering hands
+// (L0508). Its call sites keep the carrier they were checked against; lowering hands
 // a plain-return callee's value to any `Result` carrier a call site names.
 sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], projected: [String], symbols: SymbolTable) Never! {
     if projected.len() == 0 {
@@ -11876,6 +11890,7 @@ sema_stage_declaration_modules: fn(modules: &&[SemaGraphModuleResult]) -> [SemaG
         kept[index].diagnostics = [Diagnostic]{}
         kept[index].failure_facts = [SemaFunctionFailureFacts]{}
         kept[index].tests = [TTestFact]{}
+        kept[index].test_member_uses = SemaLivenessMemberUses.empty()
     }
     kept
 }
@@ -12487,7 +12502,7 @@ sema_finalize_program: fn(owned: &&SemaRegistrationGraph, trail: &SemaGraphTrail
     final_graph.symbols = SymbolTable{ranges: [SymbolKeys]{}}
     task.group sema_finalize_effect_walks {
         walking: task sema_finalize_walk_all(final_graph, walk_inputs)
-        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, effect_threads, closed, organization_denials, organization_source, final_graph.core_seal, stage.package_policies, expert_modules, final_graph.package_identity, heap_free: heap_free, entries: heap_entries)
+        effects = sema_effects_check_modules(modules, effect_inputs, effect_prepared, package_denials, denial_modules, file_caps, trait_caps, final_graph.decls, effects.symbols, final_graph.module_table, prep_functions, effect_threads, closed, organization_denials, organization_source, final_graph.core_seal, stage.package_policies, expert_modules, final_graph.package_identity, heap_free: heap_free, entries: heap_entries, eval_probes: final_graph.eval_probes)
         if trace_sink == .Val(sink) -> sink.end("sema.effects", effect_inputs.len())
         walked = walking.join() ?? panic(compiler_threads_failure_text(err))
     }

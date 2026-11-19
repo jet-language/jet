@@ -411,11 +411,13 @@
   }
 
   function setViewMode(mode) {
-    viewMode = mode === "code" || mode === "split" || mode === "review" ? mode : "graph";
-    if (viewMode === "graph" || viewMode === "review") setSourceEditMode(false);
+    viewMode = ["code", "split", "review", "debug", "profile"].includes(mode) ? mode : "graph";
+    if (viewMode !== "code" && viewMode !== "split") setSourceEditMode(false);
     stage.classList.toggle("is-code", viewMode === "code");
     stage.classList.toggle("is-split", viewMode === "split");
     stage.classList.toggle("is-review", viewMode === "review");
+    stage.classList.toggle("is-debug", viewMode === "debug");
+    stage.classList.toggle("is-profile", viewMode === "profile");
     viewToggle.textContent = viewMode === "graph" ? "Code" : "Graph";
     viewToggle.classList.toggle("is-active", viewMode !== "graph");
     for (const button of lensButtons) {
@@ -428,6 +430,8 @@
     }
     window.__jetCanvasLensMode = viewMode;
     if (viewMode === "review") loadReview();
+    else if (viewMode === "debug") renderDebugView();
+    else if (viewMode === "profile") renderProfileView();
     else if (viewMode !== "code" && latestDoc) drawGraph(latestDoc);
   }
 

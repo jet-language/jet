@@ -1,0 +1,48 @@
+use time: core.time
+
+// Two tasks each edit one account and then the other, in opposite orders,
+// so each holds the account the other waits for. When the second blocks,
+// both stop with one deadlock that names the two tasks, their waits and
+// their lines, while a third task outside the cycle finishes its count.
+
+Account: struct {
+    balance: Int,
+}
+
+// Moves one unit from `from` to `to`, holding `from` while it waits for `to`.
+transfer: fn(from: Shared<Account>, to: Shared<Account>) -[Time.Wait]> Int {
+    held: from.guard_edit()
+    time.sleep(100ms)
+    to.balance += 1
+    held.value.balance -= 1
+    held.value.balance
+}
+
+// Counts to three, a tick every 100ms.
+ticker: fn() -[Time.Wait]> Int {
+    count := 0
+    loop _ in 0..<3 {
+        time.sleep(100ms)
+        count += 1
+    }
+    count
+}
+
+run: fn() {
+    savings: Shared{Account{balance: 10}}
+    checking: Shared{Account{balance: 20}}
+    worker: task ticker()
+    left: task transfer(savings, checking)
+    right: task transfer(checking, savings)
+    if left.join() == {
+        .Ok(_) -> print("left: finished")
+        .Err(.Panicked(reason)) -> print("left: {reason}")
+        .Err(_) -> print("left: stopped")
+    }
+    if right.join() == {
+        .Ok(_) -> print("right: finished")
+        .Err(.Panicked(reason)) -> print("right: {reason}")
+        .Err(_) -> print("right: stopped")
+    }
+    print("ticker: {worker.join() ?? 0}")
+}

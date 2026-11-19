@@ -6,7 +6,7 @@ use {
 SnapshotFile: struct {
     relative: String,
     file: FileReader?,
-    id: FileID,
+    _id: FileID,
 }
 
 open_all: fn(dir: String) -> [SnapshotFile] IOError! {
@@ -15,7 +15,7 @@ open_all: fn(dir: String) -> [SnapshotFile] IOError! {
         file: files.open(entry.path)
         info: file.stat()
         if !info.is_file -> next
-        out.push(SnapshotFile{relative: entry.name, file: Val(file), id: info.id})
+        out.push(SnapshotFile{relative: entry.name, file: Val(file), _id: info.id})
     }
     Ok(out)
 }

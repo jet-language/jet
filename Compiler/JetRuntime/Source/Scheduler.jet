@@ -1,9 +1,10 @@
 // L8a scheduler: an OS worker runs each task to completion. A wait returns a
 // delivered stop word; no Jet frame unwinds. Linux synchronization is Sync.jet.
-// Control160: refs0 paused8 canceled16 attention24 status32 stop40 pending48
+// Control192: refs0 paused8 canceled16 attention24 status32 stop40 pending48
 // observe56 park64 mutex72 waiters80 callbacks88 inline96 scopeFlags104
 // requestedRootCode112 capture120 openGroups128 joinedReason136
-// joinedSite144 site152. StopCleanup's opaque token
+// joinedSite144 site152 waitKind160 waitTarget168 waitArmed176 waitCycle184
+// (WaitCycle.jet's deadlock stops). StopCleanup's opaque token
 // owns old flags. openGroups heads the task groups the task has open
 // (TaskGroup.jet task_group_open), linked through each group and read under
 // mutex72. joinedReason and joinedSite are the reason and site of the last
@@ -200,8 +201,8 @@ scheduler_control_new: fn() -> I64 {
             trap_root_rail_code = rt_trap_root_address()
         }
     }
-    control: jet_rt_alloc(I64{160}, I64{8})
-    thread_zero(control, I64{160})
+    control: jet_rt_alloc(SCHEDULER_CONTROL_BYTES, I64{8})
+    thread_zero(control, SCHEDULER_CONTROL_BYTES)
     sync_store(control, I64{1})
     sync_store(wrapping(control + I64{64}), sync_park_new())
     control
@@ -277,7 +278,7 @@ scheduler_control_drop: fn(control: I64) {
     jet_rt_string_drop(sync_load(wrapping(control + I64{136})))
     jet_rt_string_drop(sync_load(wrapping(control + I64{144})))
     jet_rt_string_drop(sync_load(wrapping(control + I64{152})))
-    jet_rt_free(control, I64{160}, I64{8})
+    jet_rt_free(control, SCHEDULER_CONTROL_BYTES, I64{8})
 }
 
 // A task stop's site travels with its failure. The stop writes its report
@@ -1128,12 +1129,21 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
         if (wait < I64{0} || wait > cap) { wait = cap }
     }
     sync_store(wrapping(thread_base() + I64{72}), slot)
+    // An unbounded wait that noted what it waits on may close a wait cycle.
+    armed: wait < I64{0} && !shielded && !virtual_wait && wait_cycle_arm(control, slot)
     recorded: control != I64{0} && timeout_ns != I64{0} && perf_samples_fd >= I64{0}
     began: if recorded -> time_host_monotonic_i64() else -> I64{0}
     sync_park(slot, wait)
     if recorded -> perf_samples_wait(slot, wait_kind, object, began)
     sync_store(wrapping(thread_base() + I64{72}), I64{0})
     scheduler_cancel_waiter_remove(control, waiter)
+    if armed {
+        wait_cycle_disarm(control)
+        if wait_cycle_delivered(control) {
+            wait_cycle_stop(control)
+            return jet_scheduler_native_status()
+        }
+    }
     if (deadline && !virtual_wait && !shielded && jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0}) {
         scheduler_deliver_deadline(wait_kind)
         return jet_scheduler_native_status()
@@ -1148,12 +1158,14 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
     jet_scheduler_native_propagate()
 }
 
-// Scheduler264: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
+// Scheduler272: lock0 FIFOhead8/tail16 workSeq24 watch32 live40 parked48
 // fibers56 pooled64 pool72 completionLo80/Hi88 nextTask96 timerRoot104
 // poolSize112 idle120 carriers128 fiberTimers136 stop144 started152
 // woken160 readyHead168 readyTail176 stackBytes184 gsMode192 fiberSpace200
 // blocked208 monitorArmed216 monitor224 sizedPools232 liveLock240
-// liveTasks248 queued256.
+// liveTasks248 queued256 waitLock264.
+// waitLock is the mutex under which tasks arm and disarm waits and deliver
+// deadlocks (WaitCycle.jet).
 // liveTasks heads the list of every task state not yet freed, under its own
 // mutex liveLock (Task.jet task_live_link), not the thread lock.
 // lock is a thread lock (Sync.jet sync_thread_lock): a fiber's wake takes it.
@@ -1200,7 +1212,9 @@ scheduler_yield_policy: fn(wait_kind: I64, slot: I64, timeout_ns: I64, deadline:
 // starting, -2: its start was refused, and the pool goes on without it).
 scheduler_root := I64{0}
 
-SCHEDULER_ROOT_BYTES: I64{264}
+SCHEDULER_ROOT_BYTES: I64{272}
+
+SCHEDULER_CONTROL_BYTES: I64{192}
 
 SCHEDULER_CARRIER_BYTES: I64{72}
 

@@ -1,0 +1,20 @@
+// Keeps 100 rows of 64 Ints from between two heap marks to the end: the
+// second mark and the exit snapshot find each row live where line 14
+// allocated it, which the first mark finds none of.
+use core.perf
+
+run: fn() {
+    perf.heap_mark("start")
+    kept := [[Int]]{}
+    loop index in 0..<100 {
+        row := [Int]{}
+        loop k in 0..<64 {
+            // Each push past the row's capacity moves it to a larger block,
+            // allocated here.
+            row.push(index + k)
+        }
+        kept.push(row.move())
+    }
+    perf.heap_mark("filled")
+    print("rows={kept.len()}")
+}

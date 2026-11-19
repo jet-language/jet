@@ -12,7 +12,7 @@ package: {
 use files: core.files
 
 Context: struct {
-    id: Int,
+    _id: Int,
 }
 
 Sink: trait {
@@ -21,7 +21,7 @@ Sink: trait {
 }
 
 Worker: struct {
-    context: Shared<Context>,
+    _context: Shared<Context>,
     n: Int,
 
     impl Sink {
@@ -35,7 +35,7 @@ Holder: struct {
     sink: Sink,
 }
 
-make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{context: s.copy(), n: n} }
+make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{_context: s.copy(), n: n} }
 
 // Grows more than this (kB) over the measured rounds: a leak.
 GROWTH_KB: 8192
@@ -79,7 +79,7 @@ popped: fn(s: Shared<Context>) {
 }
 
 run: fn() {
-    s := Shared{Context{id: 1}}
+    s := Shared{Context{_id: 1}}
     consumed(s)
     print("consumed dropped {s.strong_count()}")
     popped(s)

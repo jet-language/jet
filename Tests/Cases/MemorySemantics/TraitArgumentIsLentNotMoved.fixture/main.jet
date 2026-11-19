@@ -14,7 +14,7 @@ Named: trait {
 }
 
 Folder: struct {
-    directory: Directory,
+    _directory: Directory,
 
     impl Named {
         label: fn(self) -[]> String { "folder" }
@@ -35,7 +35,7 @@ own_number: fn(name: String) -[FS.Read]> Int {
 
 // The folder, and the directory it holds, drop when this returns.
 lend_twice: fn(held_path: String) -[FS, IO]> Int {
-    folder: Folder{directory: files.open_directory(held_path)}
+    folder: Folder{_directory: files.open_directory(held_path)}
     open_at: own_number("held")
     print("first: {describe(folder)}, second: {describe(folder)}")
     print("directory open after both calls: {open_at >= 0 && own_number("held") == open_at}")

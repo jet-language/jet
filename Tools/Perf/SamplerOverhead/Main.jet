@@ -1,0 +1,295 @@
+#!/usr/bin/env jet
+// Sampler overhead: what `jet perf run` costs a program, measured against
+// matched unprofiled runs of the same build.
+// Usage (from the repository root):
+//   jet run Tools/Perf/SamplerOverhead/Main.jet -- [--jet PATH] [--tasks T] [--cpu-ms MS] [--runs R] [--bar BP]
+// Defaults: the `jet` on PATH, 4 tasks, 2000 ms, 5 runs, no bar.
+//
+// It writes a program to a temporary directory whose T tasks call fib(25)
+// at once until the process has used MS milliseconds of CPU time, then
+// print the sum of the results (`work=N`). The CPU time is fixed, so
+// everything the sampler costs the program (its handlers, each signal's
+// kernel delivery, the caches and TLB it disturbs) shows as less work in
+// it. It runs, R times each and alternating, after one warm-up run of each:
+//   - unprofiled: `jet run --observe -O2 prog.jet`, the build and
+//     observation start `jet perf run` uses, with no samples file;
+//   - profiled: `jet perf run -O2 prog.jet --out run.jettrace`.
+// Both run with JET_OBSERVE, JET_PERF_SAMPLES and JET_PERF_LENSES removed
+// from their environment. The matched overhead is the median unprofiled
+// work less the median profiled work, in basis points of the unprofiled.
+// The receipt's overhead is the median of the profiled runs' measured
+// `overhead_ns`, in basis points of MS. It prints the jet version and the
+// exact commands as `#` lines, then one tab-separated row per measure. With
+// `--bar BP` it fails, after the rows, when the matched overhead is over BP
+// basis points or a profiled run's receipt does not say `measured`.
+use {
+    files: core.files
+    json: core.encoding.json
+    process: core.process
+    term: core.term
+}
+
+OverheadOptions: struct {
+    jet: String,
+    tasks: Int,
+    cpu_ms: Int,
+    runs: Int,
+    bar: Int?,
+}
+
+// One profiled run: its work and its receipt's overhead.
+OverheadProfiled: struct {
+    work: Int,
+    status: String,
+    overhead_ns: Int?,
+}
+
+OverheadRuns: struct {
+    jet_version: String,
+    unprofiled: [Int],
+    profiled: [OverheadProfiled],
+}
+
+usage: fn() -[IO]> Int Never! {
+    term.eprint("usage: jet run Tools/Perf/SamplerOverhead/Main.jet -- [--jet PATH] [--tasks T] [--cpu-ms MS] [--runs R] [--bar BP]")
+    2
+}
+
+// The trace each profiled run writes, relative to the work directory.
+OVERHEAD_TRACE: "run.jettrace"
+
+// The environment both runs drop, so neither inherits a caller's sampling.
+OVERHEAD_UNSET: [String]{"JET_OBSERVE", "JET_PERF_SAMPLES", "JET_PERF_LENSES"}
+
+// The program: `tasks` tasks burn `cpu_ms` of the process's CPU time.
+overhead_program: fn(tasks: Int, cpu_ms: Int) -> String Never! {
+    lines := [String]{
+        "// {tasks} tasks call fib(25) at once until the process has used {cpu_ms} ms",
+        "// of CPU time; the sum of the results is the work done in it.",
+        "use os: core.sys",
+        "",
+        "fib: fn(n: Int) -> Int {{",
+        "    if n < 2 -> return n",
+        "    fib(n - 1) + fib(n - 2)",
+        "}}",
+        "",
+        "spent: fn() -> Int {{ (os.cpu_time() ?? panic(\"cpu_time\")).in(.Nanoseconds) }}",
+        "",
+        "burn: fn(until: Int) -> Int {{",
+        "    work := 0",
+        "    loop spent() < until -> work += fib(25)",
+        "    work",
+        "}}",
+        "",
+        "run: fn() {{",
+        "    until: spent() + {cpu_ms * 1000000}",
+    }
+    loop index in 0..<tasks -> lines.push("    t_{index}: task burn(until)")
+    joins: loop index in 0..<tasks -> "(t_{index}.join() ?? 0)"
+    lines.push("    work: {joins.join(" + ")}")
+    lines.push("    print(\"work={{work}}\")")
+    lines.push("}}")
+    lines.push("")
+    lines.join("\n")
+}
+
+// The work a run printed, or None when it printed no `work=` line.
+overhead_work: fn(output: String) -> Int? Never! {
+    loop line in output.split("\n") {
+        if line.starts_with("work=") {
+            return Val(Int.parse(line.removeprefix("work=")) ?? return None)
+        }
+    }
+    None
+}
+
+// The middle of `values` in order.
+overhead_median: fn(values: [Int]) -> Int Never! {
+    if values.len() == 0 -> return 0
+    sorted := values.copy()
+    sorted.sort()
+    sorted[sorted.len() /% 2]
+}
+
+// `part` in basis points of `whole`; 0 when `whole` is 0.
+overhead_basis_points: fn(part: Int, whole: Int) -> Int Never! {
+    if whole == 0 -> return 0
+    part * 10000 /% whole
+}
+
+overhead_unprofiled_argv: fn(jet: String) -> [String] Never! {
+    [String]{jet, "run", "--observe", "-O2", "prog.jet"}
+}
+
+overhead_profiled_argv: fn(jet: String) -> [String] Never! {
+    [String]{jet, "perf", "run", "-O2", "prog.jet", "--out", OVERHEAD_TRACE}
+}
+
+// The work `argv` did, run in `work_dir` without OVERHEAD_UNSET, or the
+// reason it failed.
+overhead_run: fn(argv: [String], work_dir: String) -[Exec, Time.Wait]> Int Err! {
+    spec := process.cmd(argv).cwd(work_dir).stdout(.Capture).stderr(.Capture)
+    loop name in OVERHEAD_UNSET -> spec = spec.env_remove(name)
+    receipt: spec.run() ?? return Err("{argv[0]} did not run: {err}")
+    if !receipt.success {
+        return Err("`{argv.join(" ")}` failed with {receipt.code}: {receipt.errors}")
+    }
+    work: overhead_work(receipt.output) ?? return Err("`{argv.join(" ")}` printed no `work=` line: {receipt.output}")
+    Ok(work)
+}
+
+// A profiled run: its work, then its receipt's overhead status and, when
+// measured, its overhead in nanoseconds.
+overhead_profiled: fn(jet: String, work_dir: String) -[Exec, FS, Time.Wait]> OverheadProfiled Err! {
+    work: overhead_run(overhead_profiled_argv(jet), work_dir) ?? return Err(err)
+    trace_path: files.join(work_dir, OVERHEAD_TRACE)
+    text: files.read(trace_path) ?? return Err("couldn't read {trace_path}: {err}")
+    trace: json.parse(text) ?? return Err("{trace_path} is not JSON: {err}")
+    status: json.at<String>(trace, "content/profile/overhead_status") ?? return Err("{trace_path} has no content/profile/overhead_status text")
+    overhead_ns := Int?{None}
+    if status == "measured" {
+        overhead_ns = Val(json.at<Int>(trace, "content/profile/overhead_ns") ?? return Err("{trace_path} says measured but has no content/profile/overhead_ns integer"))
+    }
+    Ok(OverheadProfiled{work: work, status: status, overhead_ns: overhead_ns})
+}
+
+// The first line `jet --version` prints, or the reason it printed none.
+overhead_version: fn(jet: String) -[Exec, Time.Wait]> String Err! {
+    receipt: process.cmd([String]{jet, "--version"}).stdout(.Capture).stderr(.Capture).run() ?? return Err("{jet} did not start: {err}")
+    if !receipt.success {
+        return Err("`{jet} --version` failed with {receipt.code}: {receipt.errors}")
+    }
+    Ok(receipt.output.trim().split("\n").to_list()[0])
+}
+
+overhead_measure: fn(options: OverheadOptions, work_dir: String) -[Exec, FS, Time.Wait]> OverheadRuns Err! {
+    files.write(files.join(work_dir, "prog.jet"), overhead_program(options.tasks, options.cpu_ms)) ?? return Err("couldn't write the program: {err}")
+    // The warm-up runs build the image and fill the build cache, so no
+    // timed run pays for a build.
+    _: overhead_run(overhead_unprofiled_argv(options.jet), work_dir) ?? return Err(err)
+    _: overhead_profiled(options.jet, work_dir) ?? return Err(err)
+    unprofiled := [Int]{}
+    profiled := [OverheadProfiled]{}
+    loop _ in 0..<options.runs {
+        unprofiled.push(overhead_run(overhead_unprofiled_argv(options.jet), work_dir) ?? return Err(err))
+        profiled.push(overhead_profiled(options.jet, work_dir) ?? return Err(err))
+    }
+    Ok(OverheadRuns{jet_version: overhead_version(options.jet) ?? return Err(err), unprofiled: unprofiled, profiled: profiled})
+}
+
+// The matched overhead in basis points: the median unprofiled work less the
+// median profiled work, over the median unprofiled work.
+overhead_matched_bp: fn(runs: OverheadRuns) -> Int Never! {
+    unprofiled: overhead_median(runs.unprofiled)
+    profiled: overhead_median(loop run in runs.profiled -> run.work)
+    overhead_basis_points(unprofiled - profiled, unprofiled)
+}
+
+// The profiled runs whose receipt does not say `measured`.
+overhead_unmeasured: fn(runs: OverheadRuns) -> Int Never! {
+    count := 0
+    loop run in runs.profiled {
+        if run.status != "measured" -> count += 1
+    }
+    count
+}
+
+// Whether the matched overhead is over the bar or a receipt is unmeasured,
+// when there is a bar.
+overhead_bar_missed: fn(options: OverheadOptions, runs: OverheadRuns) -> Bool Never! {
+    if options.bar == .Val(bar) {
+        return overhead_matched_bp(runs) > bar || overhead_unmeasured(runs) > 0
+    }
+    false
+}
+
+// The report: the tool, the commands, the rows, then the bar's verdict when
+// there is one. The receipt's row is `-` when no receipt was measured.
+overhead_rows: fn(options: OverheadOptions, runs: OverheadRuns) -> [String] Never! {
+    measured := [Int]{}
+    loop run in runs.profiled {
+        if run.overhead_ns == .Val(ns) -> measured.push(ns)
+    }
+    receipt: if measured.len() == 0 -> "-" else -> "{overhead_basis_points(overhead_median(measured), options.cpu_ms * 1000000)}"
+    rows := [String]{
+        "# {runs.jet_version}",
+        "# program: {options.tasks} tasks call fib(25) until the process has used {options.cpu_ms} ms of CPU time",
+        "# unprofiled: {overhead_unprofiled_argv(options.jet).join(" ")}",
+        "# profiled: {overhead_profiled_argv(options.jet).join(" ")}",
+        "# median of {options.runs} alternating runs each, after a warm-up run of each",
+        "measure\tvalue",
+        "work_unprofiled\t{overhead_median(runs.unprofiled)}",
+        "work_profiled\t{overhead_median(loop run in runs.profiled -> run.work)}",
+        "matched_overhead_bp\t{overhead_matched_bp(runs)}",
+        "receipt_overhead_bp\t{receipt}",
+        "receipts_unmeasured\t{overhead_unmeasured(runs)}",
+    }
+    if options.bar == .Val(bar) {
+        verdict: if overhead_bar_missed(options, runs) -> "missed" else -> "met"
+        rows.push("# bar: matched overhead at most {bar} bp and every receipt measured: {verdict}")
+    }
+    rows
+}
+
+sampler_overhead: fn() -[Env, Exec, FS, IO, Time.Wait]> Int Never! {
+    args: process.args()
+    options := OverheadOptions{jet: process.which("jet") ?? "jet", tasks: 4, cpu_ms: 2000, runs: 5, bar: None}
+    at := 0
+    loop at < args.len() {
+        if at + 1 >= args.len() -> return usage()
+        value: args[at + 1]
+        if args[at] == {
+            "--jet" -> options.jet = value.copy()
+            "--tasks" -> options.tasks = Int.parse(value) ?? return usage()
+            "--cpu-ms" -> options.cpu_ms = Int.parse(value) ?? return usage()
+            "--runs" -> options.runs = Int.parse(value) ?? return usage()
+            "--bar" -> options.bar = Val(Int.parse(value) ?? return usage())
+            else -> return usage()
+        }
+        at += 2
+    }
+    if options.tasks < 1 || options.cpu_ms < 1 || options.runs < 1 -> return usage()
+    work_dir: files.temp_dir("jet-sampler-overhead") ?? {
+        term.eprint("sampler overhead: couldn't make a work directory: {err}")
+        return 1
+    }
+    runs: overhead_measure(options, work_dir.path) ?? {
+        term.eprint("sampler overhead: {err.message} (the program is in {work_dir.path})")
+        return 1
+    }
+    files.remove_all(work_dir.path).drop("a work directory left behind is only disk")
+    loop row in overhead_rows(options, runs) -> print(row)
+    if overhead_bar_missed(options, runs) -> return 1
+    0
+}
+
+run: fn() {
+    code: sampler_overhead()
+    if code != 0 -> process.exit(code)
+}
+
+#Test("the program starts and joins every task") {
+    lines: overhead_program(3, 500).split("\n").to_list()
+    assert(lines.contains("    until: spent() + 500000000"))
+    assert(lines.contains("    t_2: task burn(until)"))
+    assert(lines.contains("    work: (t_0.join() ?? 0) + (t_1.join() ?? 0) + (t_2.join() ?? 0)"))
+    assert(lines.contains("    print(\"work={{work}}\")"))
+}
+
+#Test("a run's work is its work= line") {
+    assert(overhead_work("hello\nwork=1234\n") == Val(1234))
+    assert(overhead_work("no work here\n") == None)
+}
+
+#Test("the matched overhead is the drop in median work") {
+    profiled: [OverheadProfiled]{
+        OverheadProfiled{work: 9800, status: "measured", overhead_ns: Val(10)},
+        OverheadProfiled{work: 9900, status: "measured", overhead_ns: Val(20)},
+        OverheadProfiled{work: 9700, status: "not_measured", overhead_ns: None},
+    }
+    runs: OverheadRuns{jet_version: "jet test", unprofiled: [Int]{10000, 9000, 11000}, profiled: profiled}
+    assert_eq(overhead_matched_bp(runs), 200)
+    assert_eq(overhead_unmeasured(runs), 1)
+    bar: OverheadOptions{jet: "jet", tasks: 4, cpu_ms: 2000, runs: 3, bar: Val(250)}
+    assert(overhead_bar_missed(bar, runs))
+}

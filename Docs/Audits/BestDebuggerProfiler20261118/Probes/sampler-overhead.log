@@ -1,0 +1,16 @@
+== R2(d): the default rate on fib, against matched unprofiled runs
+
+$ jet run <repo>/Tools/Perf/SamplerOverhead/Main.jet -- --jet jet --bar 200
+# jet jet a0.0.45-dev
+# program: 4 tasks call fib(25) until the process has used 2000 ms of CPU time
+# unprofiled: jet run --observe -O2 prog.jet
+# profiled: jet perf run -O2 prog.jet --out run.jettrace
+# median of 5 alternating runs each, after a warm-up run of each
+measure	value
+work_unprofiled	188087675
+work_profiled	186662200
+matched_overhead_bp	75
+receipt_overhead_bp	62
+receipts_unmeasured	0
+# bar: matched overhead at most 200 bp and every receipt measured: met
+note: <repo>/Tools/Perf/SamplerOverhead/Main.jet reads environment variables and reads and writes files; it starts other programs, which this list does not limit (-A hides this)

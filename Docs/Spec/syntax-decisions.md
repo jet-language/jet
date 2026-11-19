@@ -1625,7 +1625,7 @@ are arranged. An untyped list takes its order from its first entry. Comparing
 two records whose members are in different orders is refused (E0109) until one
 side names its target type. Synthesized Core signatures keep the order they
 declare. To order by another member first, use `sort_by` (example:
-collections/tuple_order).
+`Examples/Collections/NamedTupleOrder.jet`).
 
 **D-RECORD-BRACE1=A — a record is written in braces** *(ratified 2026-11-06,
 card #6251)*: braces after a signature, a control head or a block marker hold

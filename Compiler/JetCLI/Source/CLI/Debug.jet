@@ -11,7 +11,8 @@
 // same flags does. A path that isn't a `.jet` file
 // is an image already built: it is debugged as it is, against the source its
 // line table names. An image the debugger can't read or run stops the
-// session with E2203.
+// session with E2203. A `.jetdump` path is a typed crash dump, read behind
+// the same console without running anything (DebugDump.jet).
 use {
     cli_files: core.files
     cli_process: core.process
@@ -22,7 +23,7 @@ use {
     jet_foundation.[DeepChecks, deep_checks_malformed, deep_checks_read, diagnostic_registry_row, foundation_byte_text]
 }
 
-jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, color: Bool) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
     dap := false
     breaks := [NativeBreak]{}
     loop (index, flag) in jet_argv {
@@ -52,8 +53,9 @@ jet_cli_debug: fn(jet_argv: [String], args: [String], passthrough: [String]?, co
         .Read(request) -> deep_checks = request.copy()
     }
     entry: args[1]
+    if entry.ends_with(".jetdump") -> return jet_cli_debug_dump(entry, color)
     scratch: cli_files.temp_dir("jet-debug") ?? return jet_cli_fail("E2105", "couldn't create the debug build directory: {err}", jet_cli_why("E2105"), "check that the temporary directory is writable, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
-    plan: if entry.ends_with(".jet") -> jet_cli_debug_build(entry, scratch.path, deep_checks, breaks, program_args, dap, color) else -> jet_cli_debug_session(entry, "", [String]{}, scratch.path, breaks, program_args, dap, color)
+    plan: if entry.ends_with(".jet") -> jet_cli_debug_build(entry, scratch.path, deep_checks, breaks, program_args, dap, color) else -> jet_cli_debug_session(entry, "", [String]{}, scratch.path, breaks, program_args, deep_checks, dap, color)
     if cli_files.remove_all(scratch.path) == {
         .Err(_) -> {}
         .Ok(_) -> {}
@@ -76,20 +78,20 @@ jet_cli_debug_break: fn(spec: String) -> NativeBreak? Never! {
 // Build `entry` at O0 into `scratch`, then debug the image with the program
 // arguments `program_args`. Under `--dap` the build's report goes to stderr:
 // stdout is the protocol's.
-jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], dap: Bool, color: Bool) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug_build: fn(entry: String, scratch: String, deep_checks: DeepChecks, breaks: [NativeBreak], program_args: [String], dap: Bool, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
     source: cli_files.read(entry) ?? return jet_cli_fail("E2105", "couldn't read `{entry}`: {err}", jet_cli_why("E2105"), "check the path, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     out_dir: cli_files.join(scratch, "out")
     built: cli_process.cmd(native_debug_build_argv(cli_sys.executable(), entry, out_dir, deep_checks)).stdout(.Capture).stderr(.Capture).run() ?? return jet_cli_fail("E2105", "couldn't run the debug build: {err}", jet_cli_why("E2105"), "check that this `jet` can run, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
     code: if built.code == 0 -> JET_DRIVER_EXIT_USER_ERROR else -> built.code
     if !built.success && dap -> return jet_cli_done("", "{built.output}{built.errors}", code)
     if !built.success -> return jet_cli_done(built.output, built.errors, code)
-    jet_cli_debug_session(native_debug_image(entry, out_dir), entry, source.split("\n").to_list(), scratch, breaks, program_args, dap, color)
+    jet_cli_debug_session(native_debug_image(entry, out_dir), entry, source.split("\n").to_list(), scratch, breaks, program_args, deep_checks, dap, color)
 }
 
 // Debug the built `image`, whose `run` is in the source file `entry` with
 // the text `lines`, run with `program_args`. An `entry` of "" is the source
 // the image's line table names, read if it is there.
-jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch: String, breaks: [NativeBreak], program_args: [String], dap: Bool, color: Bool) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
+jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch: String, breaks: [NativeBreak], program_args: [String], deep_checks: DeepChecks, dap: Bool, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
     session := NativeSession.start(image, cli_files.join(scratch, "output.txt")) ?? return jet_cli_debug_unavailable(err, color)
     source_file: if entry == "" -> session.run_source() else -> entry
     source_lines: if entry == "" -> (cli_files.read(source_file) ?? "").split("\n").to_list() else -> lines
@@ -98,7 +100,7 @@ jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch
         session.close()
         return jet_cli_done("", "", JET_DRIVER_EXIT_OK)
     }
-    plan: jet_cli_debug_console(session, cli_files.basename(source_file), source_lines, breaks, program_args, color)
+    plan: jet_cli_debug_console(session, cli_files.basename(source_file), source_lines, breaks, program_args, entry, deep_checks, color)
     session.close()
     plan
 }
@@ -111,8 +113,10 @@ jet_cli_debug_unavailable: fn(error: NativeDebugError, color: Bool) -> JetCLIPla
 // Read commands until the program, run with `program_args`, ends. A piped
 // stdin's commands are echoed after the prompt, so the transcript reads as
 // the session went. With `breaks` the first stop is the first of them the
-// program reaches.
-jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String], breaks: [NativeBreak], program_args: [String], color: Bool) -[FS, Env, Exec, IO, Time.Wait, FFI.Asm]> JetCLIPlan Never! {
+// program reaches. `fix` compiles `entry` again, built with `deep_checks`,
+// and swaps the functions it changed into the program (DebugFix.jet); the
+// listing then shows the edited text.
+jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String], breaks: [NativeBreak], program_args: [String], entry: String, deep_checks: DeepChecks, color: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> JetCLIPlan Never! {
     echo: !cli_term.stdin().is_tty()
     opened := NativeDebugStep?{None}
     if breaks.len() > 0 {
@@ -132,6 +136,8 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
     jet_cli_debug_write(first.text)
     stop := first.stop
     input := cli_term.stdin()
+    // The source's text once `fix` has read it again.
+    edited := [String]{}
     loop stop.kind == NativeStopKind.Paused {
         jet_cli_debug_write(NATIVE_DEBUG_PROMPT)
         // The end of stdin runs the program to its end.
@@ -146,7 +152,12 @@ jet_cli_debug_console: fn(session: &NativeSession, file: String, lines: [String]
             row: diagnostic_registry_row("E2204") ?? panic("E2204 is not registered")
             return jet_cli_fail("E2204", row.what, row.why, row.fix, color, JET_DRIVER_EXIT_USER_ERROR)
         }
-        step: session.command(command, stop, file, lines) ?? return jet_cli_debug_unavailable(err, color)
+        if command == "fix" {
+            jet_cli_debug_write(jet_cli_debug_fix(session, entry, deep_checks, color))
+            edited = (cli_files.read(entry) ?? "").split("\n").to_list()
+            next
+        }
+        step: session.command(command, stop, file, if edited.len() > 0 -> edited else -> lines) ?? return jet_cli_debug_unavailable(err, color)
         jet_cli_debug_write(step.text)
         stop = step.stop
     }

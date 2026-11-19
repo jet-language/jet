@@ -41,7 +41,6 @@ Labeled: struct {
 
 // A function field has no wire form: `Hook` is simply not Codable.
 Hook: struct {
-    name: String,
     apply: fn(Int) -> Int,
 }
 
@@ -55,6 +54,6 @@ run: fn() [FieldError]! {
     print(packed.note ?? "(none)")
     print(packed.level == Level.Low)
     print(json.to_string(Labeled{label: Tag{label: "red"}, id: 4}) ?? panic("JSON encode"))
-    hook: Hook{name: "double", apply: fn(n) { n * 2 }}
+    hook: Hook{apply: fn(n) { n * 2 }}
     print(hook.apply(21))
 }

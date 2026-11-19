@@ -4,8 +4,8 @@
 // lowers without the payload types' own coverage. The last table binds a
 // payload and still names every case of it.
 Exit: struct {
-    code: Int,
-    note: String,
+    _code: Int,
+    _note: String,
 }
 
 Signal: enum {
@@ -52,10 +52,11 @@ run: fn() {
     sessions: [Session]{
         .Idle,
         .Running(["serve", "--port", "80"]),
-        .Exited(Exit{code: 3, note: "done"}),
+        .Exited(Exit{_code: 3, _note: "done"}),
         .Failed("no such file"),
         .Load(0.5),
         .Stopped(.Kill),
+        .Stopped(.Term),
     }
     loop session in sessions { print("{state(session)} busy={busy(session)} {stop(session)}") }
 }

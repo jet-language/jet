@@ -4,8 +4,12 @@
 // workers48/queued56/exit-reported64/writer72/event-sequence80/events88/
 // event-tail96/event-count104/values112/value-count120/task-table128/
 // game-sequence136/games144/game-tail152/game-count160 (Game.jet's relay).
-// Task112: next0/id8/parent16/site24/label32/state40/wait48/deadline-present56/
-// deadline64/canceled72/control80/previous88/open-spans96/arena-allocations104.
+// Task120: next0/id8/parent16/site24/label32/state40/wait48/deadline-present56/
+// deadline64/canceled72/control80/previous88/open-spans96/arena-allocations104/
+// fiber112. `jet debug` reads the registry from the stopped program, through
+// observe_root's data symbol (JetIR BuildLibrary.jet ir_build_library), and a
+// parked task's stack from its fiber's saved one (JetDebug Native.jet
+// native_task_registers).
 // Channel64: next0/id8/depth16/bounded24/capacity32/send40/recv48/closed56.
 observe_root := I64{0}
 
@@ -40,7 +44,7 @@ observe_current_task: fn() -> I64 {
 // observed (its id is 0).
 OBSERVE_TASK_CAP: I64{4096}
 
-OBSERVE_TASK_BYTES: I64{112}
+OBSERVE_TASK_BYTES: I64{120}
 
 // The log spans the task has open (RouteALog.jet jet_ring_log_enter and
 // jet_ring_log_close) and the arena allocations it has made (MemStorage.jet
@@ -261,7 +265,11 @@ observe_task_linked := I64{0}
     jet_rt_tls_set(observe_task_key, id)
     sync_mutex_lock(observe_root)
     node: observe_task_find(id)
-    if (node != I64{0}) { sync_store(wrapping(node + I64{40}), I64{1}) }
+    // The fiber the task entered on (0: none), which runs it to its end.
+    if (node != I64{0}) {
+        sync_store(wrapping(node + I64{40}), I64{1})
+        sync_store(wrapping(node + I64{112}), fiber_current())
+    }
     sync_mutex_unlock(observe_root)
 }
 
@@ -402,9 +410,17 @@ observe_cancel_live_tasks: fn() {
 
 // Publishes the writer's exit snapshot, once per process run, after
 // writing the record of the CPU time `jet perf run` sampled (PerfSamples.jet
-// perf_samples_exit).
-#Export(c) jet_rt_observe_exit: fn(_unused: I64) -> I64 {
+// perf_samples_exit) and ending the flight recorder's publication
+// (perf_flight_end). `stop` 1 is a stop that ends the process, while its
+// stack is whole (Trap.jet trap_root_prepare): the flight recorder's typed
+// dump (perf_flight_dump), and nothing else, as the exit still follows.
+#Export(c) jet_rt_observe_exit: fn(stop: I64) -> I64 {
+    if (stop == I64{1}) {
+        perf_flight_dump()
+        return I64{0}
+    }
     perf_samples_exit()
+    perf_flight_end()
     if observe_root == (I64{0}) -> return I64{0}
     if sync_swap(wrapping(observe_root + I64{64}), I64{1}) != (I64{0}) -> return I64{0}
     observe_publish_exit()

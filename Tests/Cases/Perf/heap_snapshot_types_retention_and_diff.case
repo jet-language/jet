@@ -1,0 +1,60 @@
+# Under `--lens=alloc` a heap snapshot names each live block's type and the
+# line that allocated it, `jet perf compare` sets two snapshots against each
+# other by type and line, and `jet perf view --retained-by <type>` shows the
+# shortest path from a root that keeps the blocks of a type alive. chat.jet's
+# 200 message bodies, `[Int]` blocks line 22 allocates between its two
+# marks, are live at `after-chat`, each retained through its room's
+# history: the path names the `history` and `body` fields, and at -O0 it
+# starts at the `rooms` variable. A type no snapshot keeps is refused with
+# the types they keep. It holds at -O0, -O1 and -O2.
+requires: os-name:linux
+requires: arch:x86_64
+fixture: HeapSnapshotRetention.fixture
+env: NO_COLOR=1
+step o0: jet perf run -O0 --lens=alloc chat.jet --out {work}/o0.jettrace
+exit: 0
+stdout: = "messages=200\n"
+json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[1].name = "after-chat"
+json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[1].sites[?line=22][?type="[Int]"][?blocks=200] #= 1 # every body, by its type and line
+json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[0].sites[?line=22] #= 0 # none before the chat
+json: file o0.jettrace doc $.content.receipt_sections[0].value.snapshots[1].retained[0].type = "[Int]" # what retains the bodies, types in order
+step o0view: jet perf view {work}/o0.jettrace
+exit: 0
+stdout: ~ "live at after-chat  " # the snapshot's heading
+stdout: ~ "  [Int]  chat.jet:22 run  200 blocks  " # the bodies, by type and line
+step o0compare: jet perf compare {work}/o0.jettrace --heap start..after-chat
+exit: 0
+stdout: ~ "Heap start -> after-chat: blocks "
+stdout: ~ "  [Int]  chat.jet:22 run  +200 blocks  +" # what grew, by type and line
+step o0bodies: jet perf view {work}/o0.jettrace --retained-by [Int]
+exit: 0
+stdout: ~ "retained [Int] at after-chat  200 blocks  "
+stdout: ~ "  rooms[" # from the variable
+stdout: ~ "].history[" # through the room's history
+stdout: ~ "].body  200 blocks  " # to each message's body, one path shape
+step o0history: jet perf view {work}/o0.jettrace --retained-by=[Message]
+exit: 0
+stdout: ~ "retained [Message] at after-chat  4 blocks  "
+stdout: ~ "].history  4 blocks  " # each room's history buffer
+step o0none: jet perf view {work}/o0.jettrace --retained-by Ring
+exit: 2
+stderr: ~ "keeps a live `Ring`; they keep " # the types it can name
+step o1: jet perf run -O1 --lens=alloc chat.jet --out {work}/o1.jettrace
+exit: 0
+stdout: = "messages=200\n"
+step o1bodies: jet perf view {work}/o1.jettrace --retained-by [Int]
+exit: 0
+stdout: ~ "retained [Int] at after-chat  200 blocks  "
+stdout: ~ "].history[" # through the room's history
+stdout: ~ "].body  " # to each message's body
+step o2: jet perf run -O2 --lens=alloc chat.jet --out {work}/o2.jettrace
+exit: 0
+stdout: = "messages=200\n"
+step o2bodies: jet perf view {work}/o2.jettrace --retained-by [Int]
+exit: 0
+stdout: ~ "retained [Int] at after-chat  200 blocks  "
+stdout: ~ "].history[" # through the room's history
+stdout: ~ "].body  " # to each message's body
+step o2compare: jet perf compare {work}/o2.jettrace --heap start..after-chat
+exit: 0
+stdout: ~ "  [Int]  chat.jet:22 run  +200 blocks  +"

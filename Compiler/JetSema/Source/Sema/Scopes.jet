@@ -194,7 +194,7 @@ SemaCallSiteFact: struct {
     callee: SymbolID?,
     facts: SemaCallFacts,
     // The statement drops this call's result. The solved effect phase reports
-    // it when the callee's row is empty (E0433).
+    // it when the callee's row is empty (L0508).
     discarded: Bool,
     // The statement drops this call's result, but the callee's checked
     // carrier can still fail. The bundle failure solve sets `discarded` when
@@ -921,7 +921,7 @@ SemaCheckContext: struct {
     // they need no `else` arm (E0003).
     fallback_tables: [Int],
     // The last statement of a named function with no written
-    // return type; a non-Unit value there is thrown away (E0433).
+    // return type; a non-Unit value there is thrown away (L0508).
     lost_tail_span: Span?,
     // #3886: the last statement of a named function with a
     // written value return; it is checked as the value the function hands back.
@@ -991,6 +991,11 @@ SemaCheckContext: struct {
     // The host callbacks this check may call (SemaHostHookAccess); every
     // context derived from it reaches the same ones.
     host_hooks: SemaHostHookAccess?{None},
+    // The debugger's position probes inside the function being checked
+    // (EvalProbe.jet). A lambda body checked inside it reaches the same walk.
+    // The handle stays the same through a check, so a probe's mark and
+    // rollback leave it as it is.
+    eval_walk: Shared<SemaEvalWalk>?{None},
     // (Rust `arithmetic_policy_stack`): the active lexical
     // fixed-width arithmetic mode of the function being checked, from its
     // `#Overflow(mode)` marker. Closures checked inside the body keep it.
@@ -1637,6 +1642,7 @@ sema_check_context_snapshot: fn(source: SemaCheckContext) -> SemaCheckContext Ne
         implicit_loop_subject_depth: source.implicit_loop_subject_depth,
         subject_shorthand_depth: source.subject_shorthand_depth,
         host_hooks: source.host_hooks,
+        eval_walk: source.eval_walk,
         arithmetic_policy: source.arithmetic_policy,
         runtime_policy: source.runtime_policy,
         compiler_generated: source.compiler_generated,

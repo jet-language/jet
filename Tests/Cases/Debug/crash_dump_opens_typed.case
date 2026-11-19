@@ -1,0 +1,43 @@
+# An observed program that stops writes a typed dump: `.jet/dumps/
+# <program>-<time>.jetdump`, owner-only, the newest three kept. `jet debug`
+# opens it as the program was when it stopped: the stopping line, its
+# backtrace, its typed locals, every task's stack (the three sleeping ones
+# too), and the flight ring's last events. A Secret is never in the dump:
+# its bytes are zeroed before the write, and the console shows it redacted.
+requires: os-name:linux
+fixture: CrashDumpOpensTyped.fixture
+env: NO_COLOR=1
+step: jet run --observe crash.jet
+exit: nonzero
+stderr: ~ "count too high: 21" # the panic's own report
+stderr: ~ "dump written: " # and where its dump went
+entries: .jet/dumps ext = "jetdump" = 1 # one stop, one dump
+capture: dump = sole-entry .jet/dumps ext = "jetdump"
+capture: mode = permissions file {cap:dump}
+cap:mode: = "600" # owner-only
+file: {cap:dump} !~ "hunter2" # the secret's bytes never reach the disk
+step: jet debug {cap:dump}
+stdin: crash_dump_opens_typed.stdin
+exit: 0
+stdout: ~ "Dump of process " # a dump, not a live process
+stdout: ~ "Stopped  crash.jet:9  in check()" # the stopping line
+stdout: ~ "#0  check()  at crash.jet:9" # its backtrace
+stdout: ~ "#1  run()  at crash.jet:21" # and its caller
+stdout: ~ "count = 3" # typed locals, read from the dump's memory
+stdout: ~ "total = 21" # a local of the stopping frame
+stdout: ~ "key = <redacted>" # a Secret is shown redacted
+stdout: !~ "hunter2" # nor its text
+stdout: ~ "spawn   task " # the flight ring's events: the three spawns
+stdout: ~ "* task 1  stopped  in check() at crash.jet:9" # `tasks`: the stopping task, selected
+stdout: ~ "() at crash.jet:13" # and each sleeping task, at its own line (a spawn event reads `at run crash.jet:13`)
+stdout: ~ "() at crash.jet:14" # the second
+stdout: ~ "() at crash.jet:15" # the third
+stdout: ~ "A dump doesn't run" # run verbs answer what a dump is
+stdout: ~ "Stopped  crash.jet:21  in run()" # frame 1 is run's call
+step: jet run --observe crash.jet
+exit: nonzero
+step: jet run --observe crash.jet
+exit: nonzero
+step: jet run --observe crash.jet
+exit: nonzero
+entries: .jet/dumps ext = "jetdump" = 3 # the newest three stay

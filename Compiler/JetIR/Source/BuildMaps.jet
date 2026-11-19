@@ -677,7 +677,8 @@ ir_map_order_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapSha
     width: ir_word_const(m, a, shape.stride)
     bytes: ir_word_op(m, a, IROp.Mul, length, width)
     eight: ir_word_const(m, a, 8)
-    view: ir_runtime(m, a, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
+    entries_row: ir_alloc_row_of(m, word_row, map_row)
+    view: ir_runtime(m, a, "jet_rt_alloc", [Int]{bytes, eight}, entries_row)
     _: ir_map_call(m, p, a, map_row, "map.merge", [Int]{map, view}, -1)
     ir_emit(a.f, IROp.Return, -1, view, -1, -1, a.line)
 }
@@ -724,7 +725,8 @@ ir_map_rebuild_body: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, shape: IRMapS
     ir_end(a.f, a.line)
     mask: ir_word_op(m, a, IROp.Sub, slots, one)
     bytes: ir_map_block_bytes(m, a, shape, capacity, mask)
-    fresh: ir_runtime(m, a, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
+    block_row: ir_alloc_row_of(m, word_row, map_row)
+    fresh: ir_runtime(m, a, "jet_rt_alloc", [Int]{bytes, eight}, block_row)
     sorted := length
     if merge -> _: ir_map_call(m, p, a, map_row, "map.merge", [Int]{map, fresh}, -1) else {
         sorted = ir_map_sorted(m, a, shape, map)
@@ -1004,8 +1006,8 @@ ir_list_reserve: fn(m: &IRModule, b: &IRBuilder, list: Int, row: Int) -> Int Nev
     ir_end(b.f, b.line)
     align: ir_word_const(m, b, 8)
     bytes: ir_word_op(m, b, IROp.Mul, grown, width)
-    word_row: ir_word_row(m)
-    data: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, align}, word_row)
+    buffer_row: ir_list_alloc_row(m, row)
+    data: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, align}, buffer_row)
     old_data: ir_load_word(m, b, list, 16)
     used: ir_word_op(m, b, IROp.Mul, length, width)
     _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{data, old_data, used}, -1)

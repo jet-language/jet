@@ -8,7 +8,10 @@ LambdaPoint: struct {
     x: Int,
 }
 
-finish: fn(n: Int) -[]> Int LambdaError! { Ok(n) }
+finish: fn(n: Int) -[]> Int LambdaError! {
+    if n < 0 -> return Err(LambdaError.Invalid)
+    Ok(n)
+}
 
 apply: fn(f: fn(Int) -[]> Int LambdaError!, n: Int) -> Int LambdaError! { f(n) }
 

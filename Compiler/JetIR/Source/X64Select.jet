@@ -309,6 +309,13 @@ IRX64Emitter: struct {
     // ir_x64_checked_fixed), for the stop point right after it
     // (ir_x64_stop_point); -1 for none.
     routed: Int,
+    // A `--checked-alloc` module's allocating call being selected: the row
+    // naming what its block holds (ir_x64_alloc_type), -1 for none; and per
+    // such call, its call's relocation and that row, for
+    // X64FunctionDebug.allocs once the code is laid out.
+    alloc_row: Int,
+    alloc_relocs: [Int],
+    alloc_rows: [Int],
 }
 
 // One compiled function, the debug variables its ranges refer to, and its
@@ -580,6 +587,10 @@ ir_x64_call_out: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Alloc
     } else {
         at: x64_call_rel32(e.code)
         e.relocs.push(X64Reloc{at: at, target: target})
+        if e.alloc_row >= 0 {
+            e.alloc_relocs.push(e.relocs.len() - 1)
+            e.alloc_rows.push(e.alloc_row)
+        }
     }
     if !keeps {
         ir_x64_keep_xmms(e, f, al, false)
@@ -1661,6 +1672,20 @@ ir_x64_alloc_entry: fn(f: IRFunction, al: IRX64Allocation, at: Int, symbol: Stri
         if al.consts[align] && al.values[align] == 8 -> return "jet_rt_free_8"
     }
     ""
+}
+
+// The row naming what the block of runtime call `symbol` into `dst` holds,
+// in a `--checked-alloc` module (IRModule.alloc_types): an allocation word's
+// (IR.jet IR_ALLOC_TYPE) or a box row (BuildOwn.jet ir_box_row) a
+// jet_rt_alloc* call returns; -1 for any other call or row.
+ir_x64_alloc_type: fn(m: IRModule, f: IRFunction, dst: Int, symbol: String) -> Int Never! {
+    if !m.alloc_types || dst < 0 || !symbol.starts_with("jet_rt_alloc") -> return -1
+    row: f.slot_type[dst]
+    if ir_box_row(m, row) -> return row
+    if m.types[row].ty == .Apply(name, _) {
+        if name == IR_ALLOC_TYPE -> return row
+    }
+    -1
 }
 
 // The runtime's process-ending flag (JetRuntime Main.jet main_process_ending)
@@ -3579,6 +3604,7 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
             // One-argument runtime leaves with a result inline on their fast path.
             leaf: f.c[at] == 1 && dst >= 0
             entry: ir_x64_alloc_entry(f, al, at, symbol)
+            e.alloc_row = ir_x64_alloc_type(m, f, dst, symbol)
             atomic: ir_x64_inline_atomic(m, f, at)
             if {
                 atomic != "" -> ir_x64_atomic(e, m, f, al, at, atomic)
@@ -3610,6 +3636,7 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
                     ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: symbol}, -1, f.args, f.b[at], f.c[at], dst, al.stack[at])
                 }
             }
+            e.alloc_row = -1
         }
         .CallIndirect -> {
             ir_x64_call(e, m, f, al, X64RelocTarget.Runtime{symbol: ""}, f.a[at], f.args, f.b[at], f.c[at], dst, al.stack[at])
@@ -4941,7 +4968,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     al: ir_x64_allocate(m, f)
     checked: ir_timing_marked(f)
     logged: tables.logged
-    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore), below: 0, dynamic: false, routed: -1}
+    e := IRX64Emitter{code: x64_code_logged(checked || logged), relocs: [X64Reloc]{}, open: [Int]{}, heads: [Int]{}, falses: [Int]{}, end_sites: [Int]{}, end_targets: [Int]{}, returns: [Int]{}, tails: [Int]{}, branches: [Int]{}, loops: [Int]{}, loop_ends: [Int]{}, colds: [IRX64Cold]{}, errors: [String]{}, fused: -1, fused_cond: X64Cond.NE, end_of: [Int]{}, pad_label: [Int]{}, pads: [IRX64Pad]{}, at: -1, absorbed: [Bool]{}, picks: [Int]{}, select: -1, tests: [Int]{}, rotated: [Bool]{}, exits: [Int]{}, marked: 0, streams: f.op.contains(IROp.StreamStore), below: 0, dynamic: false, routed: -1, alloc_row: -1, alloc_relocs: [Int]{}, alloc_rows: [Int]{}}
     loop _ in 0..<f.op.len() {
         e.end_of.push(-1)
         e.pad_label.push(-1)
@@ -4982,7 +5009,17 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
                 ir_x64_select_at(e, m, f, fast, tables, at)
             }
         }
-        ir_x64_debug_line(lines, e.code.bytes.len(), f.line)
+        // A row where the frame opens, past the prefix, even on the prefix's
+        // own line: a debugger finds the frame there (JetDebug Native.jet
+        // native_openings).
+        if f.line > 0 {
+            opens: e.code.bytes.len()
+            opening: X64LineRow{at: opens, line: f.line}
+            if {
+                lines[lines.len() - 1].at == opens -> lines[lines.len() - 1] = opening
+                else -> lines.push(opening)
+            }
+        }
     }
 
     // The frame: `push rbp; mov rbp, rsp`, the saved registers, then the
@@ -5149,6 +5186,8 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     loop k in 0..<e.relocs.len() {
         e.relocs[k].at = ir_x64_relaxed_next(relax, walk, e.relocs[k].at)
     }
+    // An allocating call returns to the end of its rel32 field.
+    allocs: loop (k, reloc) in e.alloc_relocs -> X64AllocSite{at: e.relocs[reloc].at + 4, ty: e.alloc_rows[k]}
     walk = ir_x64_relax_walk()
     loop k in 0..<lines.len() -> lines[k].at = ir_x64_relaxed_next(relax, walk, lines[k].at)
     walk = ir_x64_relax_walk()
@@ -5239,7 +5278,7 @@ ir_x64_compile_body: fn(m: IRModule, f: IRFunction, tables: IRX64FunctionTables,
     if checked -> ir_timing_x64_check(m, f, e.code.log, e.errors)
     IRX64FunctionResult{
         function: X64CompiledFunction{id: X64FunctionID{value: row}, name: name, code: e.code.bytes.move(), relocs: e.relocs.move(), align: relax.align},
-        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: stack, dynamic: e.dynamic, inlines: ir_x64_inline_ranges(f, positions)},
+        debug: X64FunctionDebug{lines: lines.move(), body: body_at, cfi: cfi.move(), ranges: ranges.move(), stack: stack, dynamic: e.dynamic, inlines: ir_x64_inline_ranges(f, positions), allocs: allocs},
         variables: variables.move(),
         errors: e.errors.move(),
         log: log,
@@ -6541,5 +6580,39 @@ ir_x64_test_jcc_target: fn(code: [U8], at: Int) -> Int Never! {
         first: pads[0]
         second: pads[1]
         assert(ir_x64_share_safe(f, al, first, first.at + 1, second) == (shape < 2))
+    }
+}
+
+// A checked-alloc module's allocating call is an alloc site at the call's
+// return address, naming its allocation word; a plain module's is none.
+#Test("an allocating call of a checked-alloc module records its return address and type") {
+    loop checked in ([Bool]{false, true}) {
+        m := ir_module_new()
+        m.alloc_types = checked
+        word: ir_word_row(m)
+        typed: ir_list_alloc_row(m, word)
+        f := ir_function_new("grab", "test:alloc.jet.grab", "", "alloc.jet", 1)
+        n: ir_slot(f, word, IRSlotKind.Param, ir_intern_name(m, "n"), 1)
+        f.result = word
+        block: ir_slot(f, typed, IRSlotKind.Temp, -1, 0)
+        sized: ir_args(f, [Int]{n, n})
+        _ := ir_emit(f, IROp.CallRuntime, block, ir_intern_name(m, "jet_rt_alloc"), sized, 2, 2)
+        _ := ir_emit(f, IROp.Return, -1, block, -1, -1, 3)
+        m.functions.push(f)
+        compiled: ir_x64_compile_function(m, ir_x64_tables(m), 0)
+        assert_eq(compiled.errors.len(), 0)
+        if !checked {
+            assert_eq(compiled.debug.allocs.len(), 0)
+            next
+        }
+        assert_eq(compiled.debug.allocs.len(), 1)
+        site: compiled.debug.allocs[0]
+        assert_eq(site.ty, typed)
+        // The call's rel32 field ends at the return address.
+        called := false
+        loop reloc in compiled.function.relocs {
+            if reloc.at + 4 == site.at && reloc.target == .Runtime(symbol) -> called = symbol == "jet_rt_alloc"
+        }
+        assert(called && compiled.function.code[site.at - 5] == 0xe8)
     }
 }

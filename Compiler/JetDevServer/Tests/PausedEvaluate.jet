@@ -10,7 +10,6 @@ use jet_devserver.[
     EvaluateRequest,
     EvaluationBudget,
     EvaluationUsage,
-    EvaluatorResult,
     INSPECT_AUTHORITY,
     InspectRequest,
     LexicalScope,
@@ -78,7 +77,7 @@ test_usage: fn(depth: Int, nodes: Int, bytes: Int, steps: Int) -> EvaluationUsag
 test_rejection: fn(request: InspectRequest, session: PausedSession) -> RejectReason Never! {
     if inspect(session, request) == {
         .Err(failure) -> failure.reason
-        else -> panic("inspection was accepted")
+        .Ok(_) -> panic("inspection was accepted")
     }
 }
 
@@ -123,8 +122,8 @@ test_rejection: fn(request: InspectRequest, session: PausedSession) -> RejectRea
     denied := mutation.copy()
     denied.authority.push(AuthorityRequirement.new("fs.read", "scope-1") ?? panic("requirement"))
     if evaluate(paused, denied, evaluator_completed(test_identity(), "scope-1", None, test_usage(1, 0, 0, 1))) == {
-        .Err(failure) -> assert(failure.reason == RejectReason.InsufficientAuthority)
-        else -> panic("denied mutation was accepted")
+        .Err(failure) -> { assert(failure.reason == RejectReason.InsufficientAuthority) }
+        .Ok(_) -> panic("denied mutation was accepted")
     }
 }
 
@@ -144,8 +143,8 @@ test_rejection: fn(request: InspectRequest, session: PausedSession) -> RejectRea
     budget: EvaluationBudget.new(4, 16, 4096, 1) ?? panic("budget")
     request: test_evaluate_request("request-budget", "count", budget)
     if evaluate(paused, request, evaluator_completed(test_identity(), "scope-1", None, test_usage(1, 1, 1, 2))) == {
-        .Err(failure) -> assert(failure.reason == RejectReason.BudgetExceeded)
-        else -> panic("over-budget evaluation was accepted")
+        .Err(failure) -> { assert(failure.reason == RejectReason.BudgetExceeded) }
+        .Ok(_) -> panic("over-budget evaluation was accepted")
     }
     absent: value_projection_absent("eval-hidden", "secret", "String", test_source())
     response: evaluate(paused, request, evaluator_completed(test_identity(), "scope-1", Val(absent), test_usage(1, 1, 1, 1))) ?? panic("absent")

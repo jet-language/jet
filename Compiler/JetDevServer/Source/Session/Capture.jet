@@ -308,7 +308,7 @@ plan_eviction_inner: fn<I: RecordIndexRetention>(budget: CaptureBudget, records:
         if seen.has_key(id) -> return Err(CaptureBudgetError.DuplicateArtifactID{id: id.move()})
         seen[id] = true
         if record.evictable() {
-            retained_bytes = retained_bytes.checked_add(record.size_bytes()) ?? return Err(CaptureBudgetError.ArithmeticOverflow)
+            retained_bytes = capture_checked_add(retained_bytes, record.size_bytes()) ?? return Err(CaptureBudgetError.ArithmeticOverflow)
         }
     }
     if incoming == .Val(record) {
@@ -321,7 +321,7 @@ plan_eviction_inner: fn<I: RecordIndexRetention>(budget: CaptureBudget, records:
             if size_bytes > budget.max_bytes {
                 return Err(CaptureBudgetError.IncomingArtifactTooLarge{bytes: size_bytes, limit: budget.max_bytes})
             }
-            retained_bytes = retained_bytes.checked_add(size_bytes) ?? return Err(CaptureBudgetError.ArithmeticOverflow)
+            retained_bytes = capture_checked_add(retained_bytes, size_bytes) ?? return Err(CaptureBudgetError.ArithmeticOverflow)
         }
     }
     order := [Int]{}
@@ -346,13 +346,20 @@ plan_eviction_inner: fn<I: RecordIndexRetention>(budget: CaptureBudget, records:
     loop index in order {
         if retained_bytes <= budget.max_bytes -> break
         size: records[index].size_bytes()
-        retained_bytes = retained_bytes.checked_sub(size) ?? return Err(CaptureBudgetError.ArithmeticOverflow)
+        if size > retained_bytes -> return Err(CaptureBudgetError.ArithmeticOverflow)
+        retained_bytes -= size
         evicted.push(CaptureEviction{artifact_id: records[index].artifact_id(), recorded_sequence: records[index].recorded_sequence(), size_bytes: size})
     }
     if retained_bytes > budget.max_bytes {
         return Err(CaptureBudgetError.NoEvictableRecords{retained_bytes, budget})
     }
     Ok(CaptureEvictionPlan{budget, evicted: evicted.move(), retained_bytes})
+}
+
+// Rust u64.checked_add: no wrapping intermediate.
+capture_checked_add: fn(left: U64, right: U64) -> U64? Never! {
+    if right > (U64{18446744073709551615}) - left -> return None
+    Val(left + right)
 }
 
 // One pass of the same stable bottom-up index mergesort. Both caller-owned

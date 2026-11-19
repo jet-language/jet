@@ -3,12 +3,12 @@
 // clean, the value closes exactly once, and its Shared context is released
 // once: the count is back to the caller's own after the join.
 Context: struct {
-    id: Int,
+    _id: Int,
 }
 
 Res: struct {
     name: String,
-    context: Shared<Context>,
+    _context: Shared<Context>,
 
     impl Close {
         close: fn(&&self) { print("close {self.name}") }
@@ -18,8 +18,8 @@ Res: struct {
 consume: fn(res: &&Res) -> Int { res.name.len() }
 
 run: fn() {
-    s := Shared{Context{id: 1}}
-    owned := Res{name: "task", context: s.copy()}
+    s := Shared{Context{_id: 1}}
+    owned := Res{name: "task", _context: s.copy()}
     child: task &&owned {
         consume(owned)
     }

@@ -101,7 +101,7 @@ cost_projection_held: fn(source: String) -> JetDriverHeldState {
     sites: loop site in report.sites -> "{site.function} {site.path}:{site.line} depth {site.loop_depth}"
     assert_eq(sites, [String]{"helper main.jet:1 depth 0", "measure main.jet:10 depth 0", "measure main.jet:6 depth 1"})
     lints := [String]{}
-    loop row in compiled.diagnostics {
+    loop row in compiled.advice {
         if row.code == "L2510" -> lints.push(row.what)
     }
     assert_eq(lints, [String]{"An exact Int operation may spill to bigint inside a loop"})
@@ -139,7 +139,7 @@ cost_projection_copy_source: fn() -> String {
     }
     assert_eq(copies, [String]{"hold [Int] SemanticRemainder main.jet:5 depth 1"})
     lints := [String]{}
-    loop row in compiled.diagnostics {
+    loop row in compiled.advice {
         if row.code == "L2510" -> lints.push(row.what)
     }
     assert(lints.contains("Implicitly copying a `[Int]` inside a loop"), "the copy is linted: {lints}")
@@ -198,7 +198,7 @@ cost_projection_lines_source: fn() -> String {
     sites: loop site in report.sites -> "{site.kind:Debug} `{site.view}` {site.state:Debug} {site.path}:{site.line} depth {site.loop_depth}"
     assert_eq(sites, [String]{"OutcomeConstruction `` OptimizerRemoved main.jet:4 depth 1", "ViewMaterialization `String` SemanticRemainder main.jet:4 depth 1"})
     lints := [String]{}
-    loop row in compiled.diagnostics {
+    loop row in compiled.advice {
         if row.code == "L2510" -> lints.push(row.what)
     }
     assert_eq(lints, [String]{"This copy of `String` view into an owned slot inside a loop"})

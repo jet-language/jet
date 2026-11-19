@@ -1,0 +1,28 @@
+# `jet perf view` shows each hot line's typed cost facts, as `jet explain
+# --cost` reports them, beside the line's measured share. Here the hot line
+# is the spin loop's: it holds nearly every sample, and its two exact Int
+# spills repeat every loop turn. A fact must describe the code that ran, so
+# once the source changes after the capture the view says so and shows no
+# facts.
+requires: os-name:linux
+fixture: PerfView.fixture
+env: NO_COLOR=1
+step: jet perf run main.jet --out {work}/spin.jettrace
+exit: 0
+stdout: ~ "spun=" # the program ran to its end
+step text: jet perf view {work}/spin.jettrace
+exit: 0
+stdout: ~ "\nper-line\n" # the per-line table
+stdout: !~ "cost facts: none" # the source is the one that ran
+capture: row = text stdout.after_first("  main.jet:11 spin_hot_loop samples=").split("\n", 0)
+cap:row: ~ " share=" # the line's share of every line's samples
+cap:row: ~ "% · cost: exact Int spill ×2 — semantic remainder (loop depth 1, repeats every loop turn)" # its facts, right after its share
+step html: jet perf view {work}/spin.jettrace --html
+exit: 0
+stdout: ~ " · cost: exact Int spill ×2 — semantic remainder (loop depth 1, repeats every loop turn)" # the page's table has the facts too
+write: main.jet = "// edited after the capture"
+step changed: jet perf view {work}/spin.jettrace
+exit: 0
+stdout: ~ "cost facts: none, `main.jet` changed since this capture\n" # a changed source lends no facts
+stdout: ~ "  main.jet:11 spin_hot_loop samples=" # the measured lines stay
+stdout: !~ " · cost: " # and no line has a fact

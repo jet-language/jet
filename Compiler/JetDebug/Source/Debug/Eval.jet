@@ -1,0 +1,253 @@
+// The expressions a `jet debug` session evaluates at a stop: a breakpoint's
+// condition, the `{…}` parts of a logpoint's message, and an `evaluate`
+// request. debug_parse_expression (the compiler's parser) reads each as one
+// Jet expression, and it is evaluated over the paused frame's locals as the
+// console shows them. The evaluator reads a local by its name, Int, Float,
+// Bool and String literals, `!` and unary `-`, `+ - *` on Ints and on
+// Floats, comparisons (chained too), and `&&` and `||`. Nothing runs in the
+// program.
+use jet_foundation.[ASTTables, BinOp, ExprNode, ast_expr]
+
+// A value an expression has is a debugger value row, as a local is: its Jet
+// type and its text as the Locals view shows it (a String quoted), with no
+// name. The evaluator computes with Int, Float, Bool and String rows; any
+// other (a struct, a list, a Decimal) it only shows.
+debug_eval_row: fn(type_name: String, text: String) -> NativeLocal Never! {
+    NativeLocal{name: "", type_name: type_name, value: text}
+}
+
+debug_eval_of_int: fn(number: Int) -> NativeLocal Never! { debug_eval_row("Int", "{number}") }
+
+debug_eval_of_float: fn(number: Float) -> NativeLocal Never! { debug_eval_row("Float", "{number}") }
+
+debug_eval_of_bool: fn(flag: Bool) -> NativeLocal Never! { debug_eval_row("Bool", "{flag}") }
+
+debug_eval_of_string: fn(text: String) -> NativeLocal Never! {
+    debug_eval_row("String", native_debug_text_literal(text))
+}
+
+// The type the evaluator computes a row of `type_name` as: "Int", "Float",
+// "Bool" or "String", else "" (shown only).
+debug_eval_kind: fn(type_name: String) -> String Never! {
+    if type_name == {
+        "Int" | "I64" | "U64" | "I32" | "U32" | "I16" | "U16" | "I8" | "U8" -> "Int"
+        "Float" | "F32" -> "Float"
+        "Bool" -> "Bool"
+        "String" -> "String"
+        else -> ""
+    }
+}
+
+debug_eval_as_int: fn(value: NativeLocal) -> Int? Never! {
+    if debug_eval_kind(value.type_name) != "Int" -> return None
+    Val(Int.parse(value.value) ?? return None)
+}
+
+debug_eval_as_float: fn(value: NativeLocal) -> Float? Never! {
+    if debug_eval_kind(value.type_name) != "Float" -> return None
+    Val(Float.parse(value.value) ?? return None)
+}
+
+debug_eval_as_bool: fn(value: NativeLocal) -> Bool? Never! {
+    if debug_eval_kind(value.type_name) != "Bool" -> return None
+    if value.value == {
+        "true" -> Val(true)
+        "false" -> Val(false)
+        else -> None
+    }
+}
+
+debug_eval_as_string: fn(value: NativeLocal) -> String? Never! {
+    if debug_eval_kind(value.type_name) != "String" -> return None
+    Val(debug_unquote_text(value.value))
+}
+
+// A breakpoint condition's truth over `locals`.
+debug_eval_condition: fn(condition: DebugExpression, locals: [NativeLocal]) -> Bool DebugEvaluationError! {
+    value: debug_eval(condition.tables, condition.root, locals) ?? return Err(err)
+    if debug_eval_as_bool(value) == .Val(flag) -> return Ok(flag)
+    Err(debug_evaluation_error("the condition is a {value.type_name}, not a Bool"))
+}
+
+// The value of `expr`, a node of `tables`, over `locals`.
+debug_eval: fn(tables: ASTTables, expr: ExprNode, locals: [NativeLocal]) -> NativeLocal DebugEvaluationError! {
+    if ast_expr(tables, expr) == {
+        .Ident(name, _, _) -> {
+            loop local in locals {
+                if local.name == name -> return debug_eval_local(local)
+            }
+            Err(debug_evaluation_error("`{name}` is not a local here"))
+        }
+        .Int(value, _, _, _, _) -> Ok(debug_eval_of_int(value))
+        .Float(value, _, _, _, _) -> Ok(debug_eval_of_float(value))
+        .Bool(value, _, _) -> Ok(debug_eval_of_bool(value))
+        .Str(parts, _, _) -> {
+            text := ""
+            loop part in parts {
+                if part == {
+                    .Lit(literal) -> text = "{text}{literal}"
+                    .Interp(inner, _) -> {
+                        value: debug_eval(tables, inner, locals) ?? return Err(err)
+                        text = "{text}{debug_eval_text(value)}"
+                    }
+                    .Byte(_) -> return Err(debug_evaluation_error("a byte escape is not evaluated"))
+                }
+            }
+            Ok(debug_eval_of_string(text))
+        }
+        .Paren(inner, _, _) -> debug_eval(tables, inner, locals)
+        .Unary(op, operand, _, _) -> {
+            value: debug_eval(tables, operand, locals) ?? return Err(err)
+            if op == {
+                .Not -> if debug_eval_as_bool(value) == .Val(flag) -> Ok(debug_eval_of_bool(!flag)) else -> Err(debug_evaluation_error("`!` needs a Bool"))
+                .Neg -> {
+                    if debug_eval_as_int(value) == .Val(number) {
+                        return Ok(debug_eval_of_int(-number))
+                    }
+                    if debug_eval_as_float(value) == .Val(number) {
+                        return Ok(debug_eval_of_float(-number))
+                    }
+                    Err(debug_evaluation_error("`-` needs an Int or a Float"))
+                }
+                .Complement -> if debug_eval_as_int(value) == .Val(number) -> Ok(debug_eval_of_int(-number - 1)) else -> Err(debug_evaluation_error("`~` needs an Int"))
+            }
+        }
+        .Binary(op, left, right, _, _) -> {
+            first: debug_eval(tables, left, locals) ?? return Err(err)
+            if op == .And || op == .Or {
+                flag: debug_eval_as_bool(first) ?? return Err(debug_evaluation_error("`&&` and `||` need Bools"))
+                if flag == (op == .Or) -> return Ok(debug_eval_of_bool(flag))
+                second: debug_eval(tables, right, locals) ?? return Err(err)
+                if debug_eval_as_bool(second) == .Val(found) -> return Ok(debug_eval_of_bool(found))
+                return Err(debug_evaluation_error("`&&` and `||` need Bools"))
+            }
+            second: debug_eval(tables, right, locals) ?? return Err(err)
+            debug_eval_binary(op, first, second)
+        }
+        .CompareChain(operands, ops, _, _, _) -> {
+            if operands.len() != ops.len() + 1 {
+                return Err(debug_evaluation_error("a comparison chain is malformed"))
+            }
+            previous := debug_eval(tables, operands[0], locals) ?? return Err(err)
+            loop (k, op) in ops {
+                next_value: debug_eval(tables, operands[k + 1], locals) ?? return Err(err)
+                held: debug_eval_binary(op, previous, next_value) ?? return Err(err)
+                if debug_eval_as_bool(held) == .Val(flag) && !flag -> return Ok(held)
+                previous = next_value
+            }
+            Ok(debug_eval_of_bool(true))
+        }
+        .StrMatchLit(_, _, _) | .BinMatchLit(_, _, _) | .Unit(_, _) | .Char(_, _, _) | .ListLit(_, _, _) | .MemberSpread(_, _, _, _) | .Spread(_, _, _) | .MapLit(_, _, _) | .Index(_, _, _, _, _) | .Slice(_, _, _, _, _, _) | .Range(_, _, _, _, _) | .Call(_, _) | .UnitLit(_, _, _, _, _, _, _) | .Deref(_, _, _) | .RawOf(_, _, _) | .Copy(_, _, _) | .Place(_, _, _, _) | .Field(_, _, _, _) | .OptField(_, _, _, _, _, _) | .MethodCall(_, _, _, _, _, _, _) | .OptMethodCall(_, _, _, _, _, _, _) | .StructLit(_, _, _, _, _, _, _, _) | .TypedLit(_, _, _, _) | .EnumLit(_, _, _, _, _, _, _) | .Tainted(_, _, _, _) | .Present(_, _, _) | .Absent(_, _) | .Todo(_, _, _) | .NoElse(_, _) | .PatternTest(_, _, _, _) | .Ok(_, _, _) | .Err(_, _, _) | .Try(_, _, _, _, _) | .OrFallback(_, _, _, _, _) | .If(_, _, _, _, _, _, _) | .TupleLit(_, _, _, _) | .Lambda(_, _) | .CallValue(_, _, _, _) | .PtrFromAddr(_, _, _, _, _, _) | .ComptimeName(_, _, _, _) | .TypeValue(_, _, _) | .Pipe(_, _, _, _) -> Err(debug_evaluation_error("the debugger evaluates locals, literals, `! -`, `+ - *`, comparisons, `&&` and `||`"))
+    }
+}
+
+// `first op second` for an arithmetic or comparison operator.
+debug_eval_binary: fn(op: BinOp, first: NativeLocal, second: NativeLocal) -> NativeLocal DebugEvaluationError! {
+    if debug_eval_as_int(first) == .Val(a) && debug_eval_as_int(second) == .Val(b) {
+        return if op == {
+            .Add -> Ok(debug_eval_of_int(a + b))
+            .Sub -> Ok(debug_eval_of_int(a - b))
+            .Mul -> Ok(debug_eval_of_int(a * b))
+            .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare | .And | .Or | .Eq | .Ne | .Lt | .Gt | .Le | .Ge -> debug_eval_order(op, a <=> b)
+        }
+    }
+    if debug_eval_as_float(first) == .Val(a) && debug_eval_as_float(second) == .Val(b) {
+        return if op == {
+            .Add -> Ok(debug_eval_of_float(a + b))
+            .Sub -> Ok(debug_eval_of_float(a - b))
+            .Mul -> Ok(debug_eval_of_float(a * b))
+            .Eq -> Ok(debug_eval_of_bool(a <= b && a >= b))
+            .Ne -> Ok(debug_eval_of_bool(!(a <= b && a >= b)))
+            .Lt -> Ok(debug_eval_of_bool(a < b))
+            .Gt -> Ok(debug_eval_of_bool(a > b))
+            .Le -> Ok(debug_eval_of_bool(a <= b))
+            .Ge -> Ok(debug_eval_of_bool(a >= b))
+            .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare | .And | .Or -> Err(debug_evaluation_error("this operator is not evaluated"))
+        }
+    }
+    if debug_eval_as_string(first) == .Val(a) && debug_eval_as_string(second) == .Val(b) {
+        return debug_eval_order(op, a <=> b)
+    }
+    if debug_eval_as_bool(first) == .Val(a) && debug_eval_as_bool(second) == .Val(b) && (op == .Eq || op == .Ne) {
+        return Ok(debug_eval_of_bool((a == b) == (op == .Eq)))
+    }
+    Err(debug_evaluation_error("the operands are not two Ints, two Floats, two Strings or two Bools"))
+}
+
+// A comparison operator applied to an ordering (`<=>`'s).
+debug_eval_order: fn(op: BinOp, order: Ordering) -> NativeLocal DebugEvaluationError! {
+    if op == {
+        .Eq -> Ok(debug_eval_of_bool(order == Ordering.Equal))
+        .Ne -> Ok(debug_eval_of_bool(order != Ordering.Equal))
+        .Lt -> Ok(debug_eval_of_bool(order == Ordering.Less))
+        .Gt -> Ok(debug_eval_of_bool(order == Ordering.Greater))
+        .Le -> Ok(debug_eval_of_bool(order != Ordering.Greater))
+        .Ge -> Ok(debug_eval_of_bool(order != Ordering.Less))
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .BitAnd | .BitOr | .BitXor | .Shl | .Shr | .Compare | .And | .Or -> Err(debug_evaluation_error("this operator is not evaluated"))
+    }
+}
+
+// A local's value row, checked readable as its Jet type.
+debug_eval_local: fn(local: NativeLocal) -> NativeLocal DebugEvaluationError! {
+    if local.value == NATIVE_DEBUG_UNAVAILABLE {
+        return Err(debug_evaluation_error("`{local.name}` has no readable value here"))
+    }
+    value: debug_eval_row(local.type_name, local.value)
+    readable: if debug_eval_kind(local.type_name) == {
+        "Int" -> debug_eval_as_int(value) != None
+        "Float" -> debug_eval_as_float(value) != None
+        "Bool" -> debug_eval_as_bool(value) != None
+        else -> true
+    }
+    if !readable {
+        return Err(debug_evaluation_error("`{local.name}` reads `{local.value}`, not a {local.type_name}"))
+    }
+    Ok(value)
+}
+
+// A value as string interpolation shows it: a String's own text.
+debug_eval_text: fn(value: NativeLocal) -> String Never! {
+    debug_eval_as_string(value) ?? value.value
+}
+
+debug_eval_test_locals: fn() -> [NativeLocal] Never! {
+    [NativeLocal]{
+        NativeLocal{name: "i", type_name: "Int", value: "3"},
+        NativeLocal{name: "rate", type_name: "Float", value: "0.5"},
+        NativeLocal{name: "name", type_name: "String", value: "\"ab\""},
+        NativeLocal{name: "done", type_name: "Bool", value: "false"},
+        NativeLocal{name: "gone", type_name: "Int", value: NATIVE_DEBUG_UNAVAILABLE},
+    }
+}
+
+// `text`'s value over the test locals as interpolation shows it, or
+// `error: <why>`.
+debug_eval_test: fn(text: String) -> String Never! {
+    expr: debug_parse_expression(text) ?? return "error: {err.message}"
+    value: debug_eval(expr.tables, expr.root, debug_eval_test_locals()) ?? return "error: {err.message}"
+    debug_eval_text(value)
+}
+
+#Test("A debugger condition compares and combines locals") {
+    assert_eq(debug_eval_test("i == 3"), "true")
+    assert_eq(debug_eval_test("i != 3 || !done"), "true")
+    assert_eq(debug_eval_test("0 < i <= 2"), "false")
+    assert_eq(debug_eval_test("name < \"b\" && rate >= 0.5"), "true")
+    assert_eq(debug_eval_test("(i + 1) * -2"), "-8")
+}
+
+#Test("A debugger expression that can't be evaluated says why") {
+    assert(debug_eval_test("i ==").starts_with("error: `i ==` is not a Jet expression"))
+    assert_eq(debug_eval_test("missing > 1"), "error: `missing` is not a local here")
+    assert_eq(debug_eval_test("gone == 1"), "error: `gone` has no readable value here")
+    assert_eq(debug_eval_test("i == rate"), "error: the operands are not two Ints, two Floats, two Strings or two Bools")
+    assert(debug_eval_test("name.len()").starts_with("error: the debugger evaluates locals"))
+    condition: debug_parse_expression("i + 1") ?? panic(err.message)
+    assert(debug_eval_condition(condition, debug_eval_test_locals()) == .Err(_))
+}
+
+#Test("A logpoint message fills in its expressions") {
+    message: debug_parse_message("i is {{i}}, twice {{i * 2}}, \"{{name}}\"") ?? panic(err.message)
+    value: debug_eval(message.tables, message.root, debug_eval_test_locals()) ?? panic(err.message)
+    assert_eq(debug_eval_text(value), "i is 3, twice 6, \"ab\"")
+}

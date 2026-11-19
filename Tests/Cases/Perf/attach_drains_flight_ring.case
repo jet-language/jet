@@ -1,0 +1,25 @@
+# An observed run keeps a flight recorder: its runtime records its samples,
+# its tasks' waits and wakes, their spawns and their transfers into a
+# bounded ring it publishes beside its live snapshot. `jet perf attach`
+# drains that ring, so the trace of a point capture holds the waits the
+# program made before the attach: what each waited for, at which line, and
+# what ended it.
+requires: os-name:linux
+fixture: AttachDrainsFlightRing.fixture
+env: NO_COLOR=1
+session live line: jet run --observe live.jet
+stderr: null
+recv live
+stdout.trim: = ready.out # the program has made its waits
+step: jet perf attach {pid:live} --source live.jet --out ring.jettrace
+exit: 0
+file: ring.jettrace is-file
+step: jet perf view ring.jettrace
+exit: 0
+stdout: ~ "waits count=" # the ring's waits are the trace's
+stdout: ~ "in time sleep at live.jet:13, woken by its timeout" # run's sleep, by its line
+stdout: ~ "in channel receive at live.jet:9 for channel " # the child's receive, by its line and channel
+stdout: ~ "at live.jet:14" # the send that woke it, by its line
+signal live: KILL
+close live
+exit: any # the case's KILL ends the program

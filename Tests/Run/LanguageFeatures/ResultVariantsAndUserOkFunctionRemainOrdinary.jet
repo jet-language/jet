@@ -11,10 +11,12 @@ user_err: fn(value: Int) -> Int { return (value + 20) }
 run: fn() {
     print(Ok(1))
     print(user_err(2))
-    wrapped: Wrapped.Val(7)
-    if wrapped == {
-        .Val(value) -> { print(value) }
-        .Ok(value) -> { print(value) }
-        .Err(value) -> { print(value) }
+    cases: [Wrapped]{Wrapped.Val(7), Wrapped.Ok(8), Wrapped.Err(9)}
+    loop wrapped in cases {
+        if wrapped == {
+            .Val(value) -> { print(value) }
+            .Ok(value) -> { print(value) }
+            .Err(value) -> { print(value) }
+        }
     }
 }

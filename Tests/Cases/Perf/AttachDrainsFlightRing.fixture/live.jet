@@ -1,0 +1,20 @@
+use {
+    time: core.time
+}
+
+run: fn() {
+    { sender: wake, receiver: inbox }: channel<Int>(1)
+    { sender: hold, receiver: blocked }: channel<Int>(1)
+    child: task {
+        inbox.receive() ?? panic("closed")
+        blocked.receive() ?? panic("closed")
+    }
+    child.detach()
+    time.sleep(200ms)
+    wake.send(1)
+    // The ring is published every 100ms: these records are in it by READY.
+    time.sleep(500ms)
+    print("READY")
+    // hold stays live, so the child stays blocked on its second receive.
+    time.sleep(30000ms)
+}

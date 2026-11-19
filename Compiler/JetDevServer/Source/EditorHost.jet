@@ -1,8 +1,12 @@
 // Host-neutral editor transport; never executes commands. Shared Foundation
 // facts/JSON come from their single published owner.
-// DevtoolsProjection/ResidentDevSession and WebHost decoder/render_json calls
-// retain Rust owner names pending Session/WebHost ABI reconciliation.
-use core.encoding.[Dyn]
+// DevtoolsProjection/ResidentDevSession and WebHost decoder calls retain Rust
+// owner names pending Session/WebHost ABI reconciliation.
+use {
+    editor_json: core.encoding.json
+    core.encoding.[Dyn]
+    jet_foundation.[foundation_json_append, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json_with_limit]
+}
 
 EDITOR_PROTOCOL_VERSION: U32{1}
 
@@ -475,11 +479,20 @@ EditorHostTransport: struct {
 
     latest_cursor: fn(self) -> U64? Never! {
         if self.count == 0 -> return None
-        Val(self.event_at(self.count - 1).sequence)
+        Val(self.sequence_at(self.count - 1))
     }
 
-    event_at: fn(self, index: Int) -> @EditorStreamEvent Never! from self {
-        if self.events[(self.head + index) % EDITOR_MAX_EVENTS] == .Val(event) -> return @event
+    sequence_at: fn(self, index: Int) -> U64 Never! {
+        if self.events[(self.head + index) % EDITOR_MAX_EVENTS] == .Val(event) {
+            return event.sequence
+        }
+        panic("occupied editor event ring slot")
+    }
+
+    event_at: fn(self, index: Int) -> EditorStreamEvent Never! {
+        if self.events[(self.head + index) % EDITOR_MAX_EVENTS] == .Val(event) {
+            return event.copy()
+        }
         panic("occupied editor event ring slot")
     }
 
@@ -495,14 +508,14 @@ EditorHostTransport: struct {
             }
         }
         self.next_sequence = editor_saturating_next(event.sequence)
-        self.shared_view.cursor = Val(event.sequence)
+        self.shared_view.cursor = Val(editor_view_cursor(event.sequence))
         self.push_event(event)
     }
 
     stream_after: fn(self, cursor: U64?) -> EditorStreamSnapshot EditorHostError! {
         if cursor == .Val(requested) {
             if self.count != 0 {
-                oldest: self.event_at(0).sequence
+                oldest: self.sequence_at(0)
                 if editor_saturating_next(requested) < oldest {
                     return Err(EditorHostError.CursorExpired{requested: requested, oldest: oldest})
                 }
@@ -510,11 +523,10 @@ EditorHostTransport: struct {
         }
         events := [EditorStreamEvent]{}
         loop index in 0..<self.count {
-            event: self.event_at(index)
             if cursor == .Val(requested) {
-                if event.sequence <= requested -> next
+                if self.sequence_at(index) <= requested -> next
             }
-            events.push(event.copy())
+            events.push(self.event_at(index))
         }
         next_cursor := cursor
         if events.len() != 0 -> next_cursor = Val(events[events.len() - 1].sequence) else if next_cursor == None {
@@ -609,7 +621,7 @@ EditorHostTransport: struct {
     }
 
     snapshot: fn(self, host: EditorHost, stream: &&EditorStreamSnapshot) -> EditorWorkbenchSnapshot Never! {
-        EditorWorkbenchSnapshot{host, protocol: JET_DEVTOOLS_PROTOCOL, protocol_version: EDITOR_PROTOCOL_VERSION, workbench_url: self.workbench.copy(), identity: self.session_identity.copy(), started_at_ms: self.started_at_ms, panels: self.panel_catalog().to_list(), panel_availability: self.panel_availability(), selection: (self.shared_view.selection ?? JetDevtoolsSelection.new("build", None)).copy(), events: stream.events.move(), resumed_from: stream.resumed_from, cursor: stream.next_cursor, time_cursor: self.shared_view.cursor}
+        EditorWorkbenchSnapshot{host, protocol: JET_DEVTOOLS_PROTOCOL, protocol_version: EDITOR_PROTOCOL_VERSION, workbench_url: self.workbench.copy(), identity: self.session_identity.copy(), started_at_ms: self.started_at_ms, panels: self.panel_catalog(), panel_availability: self.panel_availability(), selection: (self.shared_view.selection ?? JetDevtoolsSelection.new("build", None)).copy(), events: stream.events.move(), resumed_from: stream.resumed_from, cursor: stream.next_cursor, time_cursor: editor_wire_cursor(self.shared_view.cursor)}
     }
 
     replace_projection: fn(&self, projection: DevtoolsProjection) EditorHostError! {
@@ -628,8 +640,8 @@ EditorHostTransport: struct {
         self.head = head
         self.count = count
         self.next_sequence = if self.latest_cursor() == .Val(sequence) -> editor_saturating_next(sequence) else -> U64{1}
-        self.started_at_ms = projection.observed_at
-        self.shared_view.cursor = if projection.sequence != (U64{0}) -> Val(projection.sequence) else -> None
+        self.started_at_ms = checked(U64{projection.observed_at}) ?? return Err(EditorHostError.InvalidEnvelope("projection observed_at must be nonnegative"))
+        self.shared_view.cursor = if projection.sequence != 0 -> Val(projection.sequence) else -> None
         self.shared_view.selection = Val(JetDevtoolsSelection.new("build", None))
         if projection.selection == .Val(selection) {
             if editor_canonical_panel_id(selection.panel_id) == .Val(panel) {
@@ -697,7 +709,7 @@ EditorHostTransport: struct {
                 self.head = head
                 self.count = count
                 self.next_sequence = if self.latest_cursor() == .Val(sequence) -> editor_saturating_next(sequence) else -> U64{1}
-                self.started_at_ms = envelope.started_at_ms
+                self.started_at_ms = checked(U64{envelope.started_at_ms}) ?? return Err(EditorHostError.InvalidEnvelope("envelope started_at_ms must be nonnegative"))
                 self.shared_view.cursor = envelope.cursor()
                 self.shared_view.selection = Val(JetDevtoolsSelection.new("build", None))
                 if envelope.selection() == .Val(selection) {
@@ -711,14 +723,15 @@ EditorHostTransport: struct {
 
     handle_lsp_json: fn(&self, payload: String) -> String EditorHostError! {
         root: foundation_parse_protocol_json_with_limit(payload, EDITOR_MAX_TEXT_BYTES) ?? return Err(EditorHostError.InvalidRequest("request is not valid bounded JSON"))
-        if root != .Object(_) {
+        if !editor_is_object(root) {
             return Err(EditorHostError.InvalidRequest("JSON-RPC request must be an object"))
         }
-        if root.field("jsonrpc") != Val(Dyn.Text("2.0")) {
+        version: root.field("jsonrpc") ?? Dyn.Null
+        if version != .Text("2.0") {
             return Err(EditorHostError.InvalidRequest("JSON-RPC version must be `2.0`"))
         }
         id: root.field("id") ?? return Err(EditorHostError.InvalidRequest("JSON-RPC request requires an id"))
-        if id != .Null && id != .Text(_) && id.decode<Float>() == .Err(_) {
+        if !editor_valid_request_id(id) {
             return Err(EditorHostError.InvalidRequest("JSON-RPC id must be null, a string, or a number"))
         }
         method_value: root.field("method") ?? return Err(EditorHostError.InvalidRequest("JSON-RPC request requires a method"))
@@ -726,7 +739,7 @@ EditorHostTransport: struct {
             return Err(EditorHostError.InvalidRequest("JSON-RPC request requires a method"))
         }
         params: root.field("params") ?? return Err(EditorHostError.InvalidRequest("JSON-RPC request requires an object params value"))
-        if params != .Object(_) {
+        if !editor_is_object(params) {
             return Err(EditorHostError.InvalidRequest("JSON-RPC request requires an object params value"))
         }
         // Unsupported methods do not read common fields, matching Rust precedence.
@@ -761,22 +774,12 @@ EditorHostTransport: struct {
             EDITOR_SELECT_METHOD -> EditorHostResponse.Selection(self.select_panel(EditorPanelSelectionRequest{host, session_id: session, source_id: source, source_path: path, revision, panel_id: editor_field_text(params, "panel_id"), item_key: editor_optional_text(params, "item_key")}))
             else -> {
                 command: EditorCommand.parse(editor_field_text(params, "command"))
-                arguments := [String]{}
-                if params.field("arguments") == .Val(value) {
-                    if value == .Array(values) {
-                        loop argument in values {
-                            if argument == .Text(text) -> arguments.push(text.copy()) else {
-                                return Err(EditorHostError.InvalidRequest("editor command arguments must be text"))
-                            }
-                        }
-                    } else {
-                        return Err(EditorHostError.InvalidRequest("editor command arguments must be an array"))
-                    }
-                }
+                arguments: editor_command_arguments(params)
                 EditorHostResponse.Command(self.command(EditorCommandRequest{host, session_id: session, source_id: source, source_path: path, revision, command, arguments}))
             }
         }
-        Ok("{{\"jsonrpc\":\"2.0\",\"id\":{render_json(id)},\"result\":{response.serialize()}}}")
+        id_json: editor_json.dumps(id) ?? return Err(EditorHostError.InvalidRequest("JSON-RPC id cannot be rendered"))
+        Ok("{{\"jsonrpc\":\"2.0\",\"id\":{id_json},\"result\":{response.serialize()}}}")
     }
 }
 
@@ -857,7 +860,8 @@ editor_validate_loopback_url: fn(value: String) EditorHostError! {
     if rest.contains("?") || rest.contains("#") || rest.contains("@") {
         return Err(EditorHostError.LoopbackViolation("workbench URL cannot contain query, fragment, or userinfo"))
     }
-    slash: rest.find("/") ?? rest.len()
+    slash_at: rest.find("/")
+    slash: if slash_at < 0 -> rest.len() else -> slash_at
     authority := rest.slice(0, slash)  // #4303
     host := ""
     port := ""
@@ -924,7 +928,9 @@ editor_event_from_event: fn(event: JetDevtoolsEvent) -> EditorStreamEvent Editor
         values["payload"] = EditorFactValue.text(text.copy())
         payload = Val(values)
     }
-    EditorStreamEvent.new(event.sequence(), event.timestamp_ms, event.source().copy(), event.kind().copy(), event.entity().copy(), fields, payload)
+    sequence: checked(U64{event.sequence()}) ?? return Err(EditorHostError.InvalidEnvelope("devtools event sequence must be nonnegative"))
+    timestamp_ms: checked(U64{event.timestamp_ms}) ?? return Err(EditorHostError.InvalidEnvelope("devtools event timestamp must be nonnegative"))
+    EditorStreamEvent.new(sequence, timestamp_ms, event.source().copy(), event.kind().copy(), event.entity().copy(), fields, payload)
 }
 
 editor_source_url: fn(workbench_url: String, source_id: String, line: U32, column: U32) -> String Never! {
@@ -982,14 +988,13 @@ editor_validate_fact_value: fn(value: EditorFactValue) EditorHostError! {
             loop child in values -> editor_validate_fact_value(child)
         }
         .Object(values) -> editor_validate_fact_object(values, "fact object")
-        else -> {}
+        .Null | .Bool(_) | .Integer(_) -> {}
     }
 }
 
 editor_field_text: fn(params: Dyn, key: String) -> String EditorHostError! {
-    if params.field(key) == .Val(value) {
-        if value == .Text(text) -> return Ok(text.copy())
-    }
+    value: params.field(key) ?? return Err(EditorHostError.InvalidRequest("editor request field `{key}` must be text"))
+    if value == .Text(text) -> return Ok(text.copy())
     Err(EditorHostError.InvalidRequest("editor request field `{key}` must be text"))
 }
 
@@ -998,26 +1003,23 @@ editor_optional_text: fn(params: Dyn, key: String) -> String? EditorHostError! {
     if value == {
         .Null -> Ok(None)
         .Text(text) -> Ok(Val(text.copy()))
-        else -> Err(EditorHostError.InvalidRequest("editor request field `{key}` must be text or null"))
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(EditorHostError.InvalidRequest("editor request field `{key}` must be text or null"))
     }
 }
 
 editor_field_u64: fn(params: Dyn, key: String) -> U64 EditorHostError! {
-    if params.field(key) == .Val(value) {
-        if foundation_json_integer(value) == .Val(number) {
-            if number >= 0 {
-                if checked(U64{number}) == .Val(result) -> return Ok(result)
-            }
-        } else if value.decode<Float>() == .Ok(number) {
-            if number.is_finite() && number >= (Float{0.0}) && number <= (Float{18446744073709551616.0}) {
-                integer: Int{number}
-                if (Float{integer}) == number {
-                    // Rust's float-to-u64 cast saturates at the rounded MAX.
-                    if number >= (Float{18446744073709551616.0}) {
-                        return Ok(U64{18446744073709551615})
-                    }
-                    return Ok(checked(U64{integer}) ?? panic("checked editor unsigned integer"))
-                }
+    value: params.field(key) ?? return Err(EditorHostError.InvalidRequest("editor request field `{key}` must be a nonnegative integer"))
+    if foundation_json_integer(value) == .Val(number) {
+        if number >= 0 {
+            if checked(U64{number}) == .Val(result) -> return Ok(result)
+        }
+    } else if value.decode<Float>() == .Ok(number) {
+        if number.is_finite() && number >= (Float{0.0}) && number <= (Float{18446744073709551616.0}) {
+            integer: Int{number}
+            if (Float{integer}) == number {
+                // Rust's float-to-u64 cast saturates at the rounded MAX.
+                if number >= (Float{18446744073709551616.0}) -> return Ok(U64{18446744073709551615})
+                return Ok(checked(U64{integer}) ?? panic("checked editor unsigned integer"))
             }
         }
     }
@@ -1039,15 +1041,52 @@ editor_finish: fn(out: &&[U8]) -> String Never! {
 }
 
 editor_render_string: fn(value: String, out: &[U8]) Never! {
-    foundation_json_write_quote(out, value)
+    foundation_json_append(out, foundation_json_quote(value))
 }
 
 editor_render_optional_string: fn(value: String?, out: &[U8]) Never! {
     if value == .Val(text) -> editor_render_string(text, out) else -> editor_append(out, "null")
 }
 
+// Missing `arguments` means none; present, it must be an array of text.
+editor_command_arguments: fn(params: Dyn) -> [String] EditorHostError! {
+    value: params.field("arguments") ?? return Ok([String]{})
+    values: if value == .Array(items) -> items else -> {
+        return Err(EditorHostError.InvalidRequest("editor command arguments must be an array"))
+    }
+    arguments := [String]{}
+    loop argument in values {
+        if argument == .Text(text) -> arguments.push(text.copy()) else {
+            return Err(EditorHostError.InvalidRequest("editor command arguments must be text"))
+        }
+    }
+    arguments
+}
+
+// Editor sequences above Int's range saturate in the shared Int view cursor.
+editor_view_cursor: fn(sequence: U64) -> Int Never! {
+    if sequence > (U64{9223372036854775807}) -> return 9223372036854775807
+    Int{sequence}
+}
+
+// The shared view's Int cursor on the editor wire; a negative cursor is none.
+editor_wire_cursor: fn(cursor: Int?) -> U64? Never! {
+    if cursor == .Val(value) -> return checked(U64{value})
+    None
+}
+
 editor_render_optional_u64: fn(value: U64?, out: &[U8]) Never! {
     if value == .Val(number) -> editor_append(out, "{number}") else -> editor_append(out, "null")
+}
+
+editor_is_object: fn(value: Dyn) -> Bool Never! { if value == .Object(_) -> true else -> false }
+
+// JSON-RPC ids are null, a string, or a number.
+editor_valid_request_id: fn(id: Dyn) -> Bool Never! {
+    if id == {
+        .Null | .Text(_) -> true
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> if id.decode<Float>() == .Ok(_) -> true else -> false
+    }
 }
 
 editor_fact_keys: fn(values: [String:EditorFactValue]) -> [String] Never! {

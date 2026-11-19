@@ -1,0 +1,21 @@
+# `fix` swaps the edited source into the stopped native process: the
+# program moves its edit over prog.jet at round 1, and from the next call
+# `score` runs the new code while the program keeps its state. An edit that
+# changes a struct's layout is refused, naming the field, and the program
+# runs on as it was.
+fixture: FixSwapsFunctionInNativeProcess.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet --break prog.jet:17
+stdin: fix_swaps_function_in_native_process.stdin
+exit: 0
+stdout+stderr: ~ "round 0 score 0" # the program as it started
+stdout+stderr: ~ "Fixed `score`" # the edit swaps in
+stdout+stderr: ~ "round 1 score 1010" # the next call runs it
+stdout+stderr: ~ "round 3 score 1030"
+stdout+stderr: ~ "Program finished"
+step: jet debug prog.jet --break prog.jet:17
+stdin: fix_swaps_function_in_native_process.stdin
+exit: 0
+stdout+stderr: ~ "Fix refused: `Score` changed its layout (field `bonus` added)" # values in memory keep the old layout
+stdout+stderr: ~ "round 1 score 1010" # the program runs on as it was
+stdout+stderr: ~ "Program finished"

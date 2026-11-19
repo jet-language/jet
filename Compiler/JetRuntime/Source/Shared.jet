@@ -6,6 +6,10 @@
 // owned descriptor56, payload64, lifetime physical borrows72 (even suspended),
 // monomorphized payload drop function80, weak refs88. The collective weak is
 // retained until both halves of refs0 reach zero; pins alone never upgrade.
+// writer is 0 while no edit permit is held, else the holding task's control,
+// retained until the release (WaitCycle.jet wait_cycle_writer), or 1 for a
+// holder outside any task. A guard never leaves its task (it is thread
+// confined), so the word names the permit's holder for a deadlock walk.
 shared_count_retain: fn(cell: I64, pin: Bool) -> Bool {
     refs := sync_load(cell)
     loop {
@@ -72,7 +76,13 @@ shared_spin: fn(mutex: I64, round: I64) -> Bool {
 }
 
 shared_acquire: fn(shared: I64, editable: Bool) {
-    _ := shared_acquire_until(shared, editable, I64{-1})
+    _ := shared_acquire_until(shared, editable, I64{-1}, false)
+}
+
+// shared_acquire for a callback door or a guard, whose caller gives up on
+// false: the wait closed a wait cycle, which stopped the task (WaitCycle.jet).
+shared_acquire_checked: fn(shared: I64, editable: Bool) -> Bool {
+    shared_acquire_until(shared, editable, I64{-1}, true)
 }
 
 // Takes the permit unless `deadline_ns` (sync_now_ns; -1: none) passes
@@ -80,25 +90,45 @@ shared_acquire: fn(shared: I64, editable: Bool) {
 // its claim and wakes the readers it held back. Under `jet perf run` a
 // task's block on the lock records its wait, and a release or a withdrawal
 // that may end one its wake (PerfSamples.jet perf_samples_lock_block).
-shared_acquire_until: fn(shared: I64, editable: Bool, deadline_ns: I64) -> Bool {
+// When `checked`, a task's unbounded unshielded block arms its wait, and a
+// deadlock delivered to it withdraws the same way, stops the task and
+// answers false.
+shared_acquire_until: fn(shared: I64, editable: Bool, deadline_ns: I64, checked: Bool) -> Bool {
     mutex: wrapping(shared + I64{8})
     sync_mutex_lock(mutex)
     if editable -> _ := sync_add(wrapping(shared + I64{40}), I64{1})
     round := I64{0}
     began := I64{0}
+    cycle := if (checked && deadline_ns < I64{0} && !scheduler_shielded()) -> scheduler_control_current() else -> I64{0}
+    armed := false
     loop {
         available: sync_load(wrapping(shared + I64{32})) == I64{0} && (if editable -> sync_load(wrapping(shared + I64{24})) == I64{0} else -> sync_load(wrapping(shared + I64{40})) == I64{0})
         if available {
             if {
                 editable -> {
                     _ := sync_add(wrapping(shared + I64{40}), I64{-1})
-                    sync_store(wrapping(shared + I64{32}), I64{1})
+                    sync_store(wrapping(shared + I64{32}), wait_cycle_writer())
                 }
                 else -> { _ := sync_add(wrapping(shared + I64{24}), I64{1}) }
             }
             sync_mutex_unlock(mutex)
+            if armed -> wait_cycle_leave(cycle)
             perf_samples_lock_wait(wrapping(shared + I64{16}), began)
             return true
+        }
+        if (armed && wait_cycle_delivered(cycle)) {
+            at := I64{0}
+            if editable {
+                _ := sync_add(wrapping(shared + I64{40}), I64{-1})
+                at = perf_samples_lock_release()
+                sync_cond_notify_all(wrapping(shared + I64{16}))
+            }
+            sync_mutex_unlock(mutex)
+            perf_samples_lock_wait(wrapping(shared + I64{16}), began)
+            if (at != I64{0}) { perf_samples_wake(wrapping(shared + I64{16}), at, I64{-1}) }
+            wait_cycle_leave(cycle)
+            wait_cycle_stop(cycle)
+            return false
         }
         if (deadline_ns >= I64{0} && sync_now_ns() >= deadline_ns) {
             at := I64{0}
@@ -117,6 +147,19 @@ shared_acquire_until: fn(shared: I64, editable: Bool, deadline_ns: I64) -> Bool 
             next
         }
         if (began == I64{0}) { began = perf_samples_lock_block() }
+        // The wait is armed with the value's mutex released: the walk takes
+        // it under the wait lock. The permit may have come free meanwhile.
+        if (cycle != I64{0} && !armed) {
+            wait_cycle_note(cycle, if editable -> WAIT_CYCLE_EDIT else -> WAIT_CYCLE_READ, shared)
+            sync_mutex_unlock(mutex)
+            armed = wait_cycle_arm(cycle, I64{1})
+            sync_mutex_lock(mutex)
+            if !armed {
+                wait_cycle_note(cycle, I64{0}, I64{0})
+                cycle = I64{0}
+            }
+            next
+        }
         wake: sync_deadline(I64{10000000})
         // These callback doors never observe cancellation.
         _ := sync_cond_wait(wrapping(shared + I64{16}), mutex, if (deadline_ns >= I64{0} && deadline_ns < wake) -> deadline_ns else -> wake)
@@ -125,13 +168,15 @@ shared_acquire_until: fn(shared: I64, editable: Bool, deadline_ns: I64) -> Bool 
 
 shared_release: fn(shared: I64, editable: Bool) {
     sync_mutex_lock(wrapping(shared + I64{8}))
+    writer := I64{0}
     if {
-        editable -> sync_store(wrapping(shared + I64{32}), I64{0})
+        editable -> writer = sync_swap(wrapping(shared + I64{32}), I64{0})
         else -> { _ := sync_add(wrapping(shared + I64{24}), I64{-1}) }
     }
     at: perf_samples_lock_release()
     sync_cond_notify_all(wrapping(shared + I64{16}))
     sync_mutex_unlock(wrapping(shared + I64{8}))
+    wait_cycle_writer_drop(writer)
     if (at != I64{0}) { perf_samples_wake(wrapping(shared + I64{16}), at, I64{-1}) }
 }
 
@@ -163,7 +208,10 @@ shared_revision_stop: fn() {
     if !shared_borrow_pin(shared) {
         return
     }
-    shared_acquire(shared, false)
+    if !shared_acquire_checked(shared, false) {
+        shared_borrow_unpin(shared)
+        return
+    }
     _ := coll_call3(invoke, env, sync_load(wrapping(shared + I64{64})), out)
     // No output is inspected here: a stopped callback leaves it uninitialized.
     shared_release(shared, false)
@@ -174,7 +222,10 @@ shared_revision_stop: fn() {
     if !shared_borrow_pin(shared) {
         return
     }
-    shared_acquire(shared, true)
+    if !shared_acquire_checked(shared, true) {
+        shared_borrow_unpin(shared)
+        return
+    }
     revision: sync_load(wrapping(shared + I64{48}))
     if (revision == I64{-1}) {
         shared_release(shared, true)
@@ -197,7 +248,10 @@ shared_revision_stop: fn() {
 // are and the value stays the caller's: 0.
 #Export(c) jet_rt_native_shared_try_replace: fn(shared: I64, owner: I64, revision: I64, slot: I64) -> I64 {
     if !shared_borrow_pin(shared) -> return I64{0}
-    shared_acquire(shared, true)
+    if !shared_acquire_checked(shared, true) {
+        shared_borrow_unpin(shared)
+        return I64{0}
+    }
     current: sync_load(wrapping(shared + I64{48}))
     if (current == I64{-1}) {
         shared_release(shared, true)
@@ -306,16 +360,16 @@ shared_guard_payload: fn(guard: I64) -> I64 {
     token | I64{2}
 }
 
+// A wait that closed a wait cycle stopped the task: the guard comes back
+// unheld, its owner kept until its drop.
 #Export(c) jet_rt_native_shared_guard_read: fn(shared: I64) -> I64 {
     shared_retain(shared)
-    shared_acquire(shared, false)
-    shared
+    if shared_acquire_checked(shared, false) -> shared else -> shared | I64{1}
 }
 
 #Export(c) jet_rt_native_shared_guard_edit: fn(shared: I64) -> I64 {
     shared_retain(shared)
-    shared_acquire(shared, true)
-    shared
+    if shared_acquire_checked(shared, true) -> shared else -> shared | I64{1}
 }
 
 // `try_guard_read()`/`try_guard_edit()` (wait_ns 0) and
@@ -325,7 +379,7 @@ shared_guard_payload: fn(guard: I64) -> I64 {
 #Export(c) jet_rt_native_shared_guard_within: fn(shared: I64, editable: I64, wait_ns: I64, out: I64) -> Bool {
     deadline: sync_deadline(if (wait_ns < I64{0}) -> I64{0} else -> wait_ns)
     shared_retain(shared)
-    if !shared_acquire_until(shared, editable != I64{0}, deadline) {
+    if !shared_acquire_until(shared, editable != I64{0}, deadline, false) {
         jet_rt_native_shared_drop(shared)
         return false
     }
@@ -398,7 +452,7 @@ shared_guard_payload: fn(guard: I64) -> I64 {
 // it; a read permit leaves that word 0 until it is released.
 #Export(c) jet_rt_native_shared_guard_drop: fn(guard: I64) {
     root: shared_guard_root(guard)
-    editing: shared_guard_held(root) && sync_load(wrapping(shared_guard_cell(root) + I64{32})) == (I64{1})
+    editing: shared_guard_held(root) && sync_load(wrapping(shared_guard_cell(root) + I64{32})) != (I64{0})
     if {
         editing -> jet_rt_native_shared_edit_guard_drop(guard)
         else -> jet_rt_native_shared_read_guard_drop(guard)
@@ -606,13 +660,15 @@ shared_alias_next: fn() -> I64 {
 
 // Guard40: cell0, editable8, held16, dirty24, shared projection refs32.
 // Its high-half pin and lifetime borrow survive publish/abort/suspension.
+// A wait that closed a wait cycle stopped the task: the guard comes back
+// unheld.
 #Export(c) jet_rt_shared_guard_acquire: fn(owner: I64, editable: I64) -> I64 {
     if !shared_borrow_pin(owner) -> return I64{0}
     guard: jet_rt_alloc(I64{40}, I64{8})
-    shared_acquire(owner, editable != I64{0})
+    held: shared_acquire_checked(owner, editable != I64{0})
     sync_store(guard, owner)
     sync_store(wrapping(guard + I64{8}), editable)
-    sync_store(wrapping(guard + I64{16}), I64{1})
+    sync_store(wrapping(guard + I64{16}), if held -> I64{1} else -> I64{0})
     sync_store(wrapping(guard + I64{24}), I64{0})
     sync_store(wrapping(guard + I64{32}), I64{1})
     guard
@@ -712,7 +768,7 @@ shared_physical_guard_release: fn(guard: I64, commit: Bool) {
         if available {
             if editable {
                 _ := sync_add(wrapping(cell + I64{40}), I64{-1})
-                sync_store(wrapping(cell + I64{32}), I64{1})
+                sync_store(wrapping(cell + I64{32}), wait_cycle_writer())
             } else { _ := sync_add(wrapping(cell + I64{24}), I64{1}) }
             // Native payloads are already canonical; refreshing means read the live slot after reacquisition.
             sync_store(wrapping(guard + I64{16}), I64{1})

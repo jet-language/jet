@@ -1,0 +1,134 @@
+// The typed cost facts of a trace's lines, which `jet perf
+// view` shows beside each line's measured share. They come from
+// `jet explain --cost --json`, run as a child on each source the trace names
+// whose file still holds the bytes the trace recorded, so every fact
+// describes the code that ran.
+use {
+    perf_files: core.files
+    perf_json: core.encoding.json
+    perf_process: core.process
+    perf_sys: core.sys
+    core.encoding.[Dyn]
+    jet_foundation.[CanonicalJSON, foundation_json_integer, sha256_hex]
+}
+
+// One typed cost site, at `line` of `path` as the trace names the file:
+// `kind` is its kind with the type a copy copies (`view materialization of
+// `String``), and `detail` whether it remains and its loop depth
+// (`semantic remainder (loop depth 1, repeats every loop turn)`).
+JetCLIPerfLineCost: struct {
+    path: String,
+    line: Int,
+    kind: String,
+    detail: String,
+}
+
+// The cost facts of a trace's sources, and a note for each source that
+// has none and why (`cost facts: none, `main.jet` changed since this
+// capture`), which the text view prints before its sections.
+JetCLIPerfLineCosts: struct {
+    costs: [JetCLIPerfLineCost],
+    notes: [String],
+}
+
+jet_cli_perf_line_costs_none: fn() -> JetCLIPerfLineCosts Never! {
+    JetCLIPerfLineCosts{costs: [JetCLIPerfLineCost]{}, notes: [String]{}}
+}
+
+// The cost facts of each `.jet` source in the trace's source identity that
+// is on disk with its recorded digest.
+jet_cli_perf_line_costs: fn(trace: CanonicalJSON) -[FS, Env, Exec, Time]> JetCLIPerfLineCosts Never! {
+    found := jet_cli_perf_line_costs_none()
+    sources: jet_cli_perf_rows(trace, "source_identity") ?? return found
+    exe: perf_sys.executable()
+    if exe == "" -> return found
+    loop source in sources {
+        path: jet_cli_perf_member_text(source, "path") ?? next
+        digest: jet_cli_perf_member_text(source, "sha256") ?? next
+        if !path.ends_with(".jet") -> next
+        text: perf_files.read(path) ?? {
+            found.notes.push("cost facts: none, `{path}` can't be read here")
+            next
+        }
+        if sha256_hex(text) != digest {
+            found.notes.push("cost facts: none, `{path}` changed since this capture")
+            next
+        }
+        ran: perf_process.cmd([String]{"{exe}", "explain", "--cost", "{path}", "--json"}).stdout(.Capture).stderr(.Capture).run() ?? {
+            found.notes.push("cost facts: none, `jet explain --cost {path}` didn't start: {err}")
+            next
+        }
+        if !ran.success {
+            found.notes.push("cost facts: none, `jet explain --cost {path}` failed; run it to see why")
+            next
+        }
+        report: perf_json.parse(ran.output) ?? {
+            found.notes.push("cost facts: none, `jet explain --cost {path} --json` printed no JSON")
+            next
+        }
+        sites: jet_cli_perf_optional(report, "sites") ?? next
+        if sites == .Array(items) {
+            // The child names the entry's own sites by the path it resolved.
+            absolute: perf_files.absolute(path) ?? ""
+            canonical: perf_files.canonicalize(path) ?? ""
+            loop site in items {
+                place: jet_cli_perf_site_text(site, "path") ?? next
+                if place != path && place != absolute && place != canonical -> next
+                at: jet_cli_perf_optional(site, "line") ?? next
+                line: foundation_json_integer(at) ?? next
+                nesting: jet_cli_perf_optional(site, "loop_depth") ?? next
+                depth: foundation_json_integer(nesting) ?? next
+                kind: jet_cli_perf_site_text(site, "kind") ?? next
+                state: jet_cli_perf_site_text(site, "state") ?? next
+                view: jet_cli_perf_site_text(site, "view") ?? ""
+                repeated: jet_cli_perf_optional(site, "repeats") ?? next
+                repeats := false
+                if repeated == .Bool(flag) -> repeats = flag
+                copied: if view == "" -> "" else -> " of `{view}`"
+                turns: if repeats -> ", repeats every loop turn" else -> ""
+                found.costs.push(JetCLIPerfLineCost{path: "{path}", line: line, kind: "{kind}{copied}", detail: "{state} (loop depth {depth}{turns})"})
+            }
+        }
+    }
+    found
+}
+
+// The text of member `key` of an `explain.cost` site; None when it has none.
+jet_cli_perf_site_text: fn(site: Dyn, key: String) -> String? Never! {
+    value: jet_cli_perf_optional(site, key) ?? return None
+    if value == .Text(text) -> return Val(text)
+    None
+}
+
+// The cost facts at `line` of `path`, each distinct one once with how many
+// sites share it (` · cost: exact Int spill ×2 — semantic remainder (loop
+// depth 1, repeats every loop turn)`); empty when the line has none.
+jet_cli_perf_line_cost_text: fn(costs: JetCLIPerfLineCosts, path: String, line: Int) -> String Never! {
+    // Each distinct fact's first cost, and how many costs it stands for.
+    firsts := [Int]{}
+    counts := [Int]{}
+    loop (index, cost) in costs.costs {
+        if cost.line != line || cost.path != path -> next
+        found := -1
+        loop (place, first) in firsts {
+            known: costs.costs[first]
+            if known.kind == cost.kind && known.detail == cost.detail {
+                found = place
+                break
+            }
+        }
+        if found >= 0 {
+            counts[found] = counts[found] + 1
+            next
+        }
+        firsts.push(index)
+        counts.push(1)
+    }
+    text := ""
+    loop (place, first) in firsts {
+        cost: costs.costs[first]
+        times: if counts[place] > 1 -> " ×{counts[place]}" else -> ""
+        text = "{text} · cost: {cost.kind}{times} — {cost.detail}"
+    }
+    text
+}

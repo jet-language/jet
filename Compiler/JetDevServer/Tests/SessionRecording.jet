@@ -56,7 +56,7 @@ recording_test_bytes: fn(text: String) -> [U8] {
     recording: SessionRecording.new(recording_test_identity("src-a", "build-a")) ?? panic("recording")
     mismatched: if recording.replay_for(recording_test_identity("src-b", "build-a")) == {
         .Err(.IdentityMismatch(_, _)) -> true
-        else -> false
+        .Ok(_) | .Err(_) -> false
     }
     assert(mismatched)
     assert_eq(recording_test_event(1, 1).payload_json, None)
@@ -70,7 +70,7 @@ recording_test_bytes: fn(text: String) -> [U8] {
     assert_eq(recording.events[0].payload_json, Val(`{"published":true}`))
     regressed: if recording.append_event(recording_test_event(2, 6)) == {
         .Err(.NonMonotonicTime(_, _)) -> true
-        else -> false
+        .Ok(_) | .Err(_) -> false
     }
     assert(regressed)
 }

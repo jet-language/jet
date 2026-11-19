@@ -14,15 +14,15 @@ held: fn() -[FS]> Int {
 lock: fn(name: String) -[FS, Env]> FileLock { files.lock(name) ?? panic("lock {name}") }
 
 Holder: struct {
-    note: String,
-    lock: FileLock,
+    _note: String,
+    _lock: FileLock,
 
     // Owns self: its lock closes when this returns.
     finish: fn(&&self) -[FS]> Int { held() }
 }
 
 Outer: struct {
-    name: String,
+    _name: String,
     owner: Holder,
     spare: FileLock,
 }
@@ -32,16 +32,16 @@ consume_holder: fn(h: &&Holder) -[FS]> Int { held() }
 consume_lock: fn(l: &&FileLock) -[FS]> Int { held() }
 
 Count: struct {
-    n: Int,
+    _n: Int,
 }
 
 // A Close owner with no clone glue (its FileReader has none) that also shares
 // a cell: moved out of its holder, it still ends its lock and reader at its
 // consumer.
 Guard: struct {
-    lock: FileLock,
-    marker: FileReader,
-    state: Shared<Count>,
+    _lock: FileLock,
+    _marker: FileReader,
+    _state: Shared<Count>,
 
     impl Close {
         close: fn(&&self) {}
@@ -51,35 +51,35 @@ Guard: struct {
 }
 
 Prepared: struct {
-    note: String,
+    _note: String,
     guard: Guard,
 }
 
 prepared: fn(name: String) -[FS, Env]> Prepared {
-    Prepared{note: name, guard: Guard{lock: lock("{name}.lk"), marker: files.open("{name}-marker.lk") ?? panic("open {name}-marker"), state: Shared{Count{n: 1}}}}
+    Prepared{_note: name, guard: Guard{_lock: lock("{name}.lk"), _marker: files.open("{name}-marker.lk") ?? panic("open {name}-marker"), _state: Shared{Count{_n: 1}}}}
 }
 
 // A consumed receiver with no clone glue rebound to a local moves there: the
 // local is its only owner, so clearing its optional Guard ends the lock and
 // the reader at once, not at the receiver's scope end.
 Lease: struct {
-    note: String,
-    live: Guard?,
+    _note: String,
+    _live: Guard?,
 
     release: fn(&&self) -[IO, FS]> {
         lease := self
         before: held()
-        lease.live = None
+        lease._live = None
         print("rebound release {before} {held()}")
     }
 }
 
 outer: fn(name: String) -[FS, Env]> Outer {
-    Outer{name: name, owner: Holder{note: name, lock: lock("{name}-owner.lk")}, spare: lock("{name}-spare.lk")}
+    Outer{_name: name, owner: Holder{_note: name, _lock: lock("{name}-owner.lk")}, spare: lock("{name}-spare.lk")}
 }
 
 receiver: fn() -[IO, FS, Env]> {
-    h: Holder{note: "a", lock: lock("a.lk")}
+    h: Holder{_note: "a", _lock: lock("a.lk")}
     inside: h.finish()
     print("receiver {inside} {held()}")
 }
@@ -133,7 +133,7 @@ guard_receiver: fn() -[IO, FS, Env]> {
 
 rebound_receiver: fn() -[IO, FS, Env]> {
     p: prepared("i")
-    lease: Lease{note: "i", live: Val(p.guard.move())}
+    lease: Lease{_note: "i", _live: Val(p.guard.move())}
     lease.release()
 }
 
@@ -152,7 +152,7 @@ run: fn() -[IO, FS, Env]> {
     print("after {held()}")
     branch(false)
     print("after {held()}")
-    adopt(Holder{note: "f", lock: lock("f.lk")})
+    adopt(Holder{_note: "f", _lock: lock("f.lk")})
     print("after {held()}")
     whole_lock()
     print("after {held()}")

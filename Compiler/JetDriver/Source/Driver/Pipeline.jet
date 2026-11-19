@@ -188,6 +188,7 @@ use {
         decl_table_find_symbol,
         decl_table_key,
         Diagnostic,
+        diagnostic_is_report,
         ModuleID,
         ModuleTable,
         module_count,
@@ -451,8 +452,17 @@ jet_driver_compile_result: fn(
     complete: Bool,
     trace: JetDriverCompileTrace,
 ) -> JetDriverCompileResult Never! {
+    // Advice leaves the diagnostic stream for `jet lint <file>`; a lint the
+    // entry package denies is an E1293 error by now and stays.
+    summarized: jet_driver_summarize_dependency_reports(load, diagnostics)
+    shown := [Diagnostic]{}
+    advice := [Diagnostic]{}
+    loop diagnostic in summarized.move() {
+        if diagnostic_is_report(diagnostic) -> advice.push(diagnostic) else -> shown.push(diagnostic)
+    }
     JetDriverCompileResult{
-        diagnostics: jet_driver_summarize_dependency_reports(load, diagnostics),
+        diagnostics: shown,
+        advice: advice,
         generated_source_files: load.generated_source_files,
         package_identity: load.package_identity,
         entry_module_identity: module_text(load.module_table, load.entry_module_identity),
@@ -6454,6 +6464,9 @@ jet_driver_compile_loaded_stages: fn(request: JetDriverCompileRequest, kg: &JetD
         if !request.capture_cost_report {
             loop lint in jet_driver_cost_copy_lints(load, checked_functions) -> load.diagnostics.push(lint)
         }
+        // Every check lists the L0308 tidy errors of the SELECTs run once
+        // per row of a loop over database rows.
+        loop lint in jet_driver_sql_row_loop_lints(load, checked_functions, registration_graph.symbols) -> load.diagnostics.push(lint)
         jet_driver_trace_step_begin(request.trace_sink, "driver.check.facts")
         result := jet_driver_compile_result(load, load.diagnostics, None, true, trace)
         result.cost_report = cost_report.move()

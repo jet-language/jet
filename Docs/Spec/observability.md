@@ -43,11 +43,21 @@ projection.
 
 `jet perf view` shows every profile with jet alone. In the terminal it prints
 the flame graph, the timeline and, last, the per-line table: each function's
-CPU-time samples at each source line, hottest first, at most 24 lines
-(`  main.jet:11 spin_hot_loop samples=592`). `--html` prints one
-self-contained page of the same three, which a browser opens with no other
-program and nothing to fetch. Tests/Cases/Perf/view_shows_every_profile.case
-is the worked example.
+CPU-time samples at each source line, hottest first, at most 24 lines, each
+with its share of every line's samples and the line's typed cost facts
+(D-COSTLAW1), as `jet explain --cost` reports them
+(`  main.jet:11 spin_hot_loop samples=592 share=99% · cost: exact Int spill ×2
+— semantic remainder (loop depth 1, repeats every loop turn)`). A fact
+describes the code that ran: the view reads them by running
+`jet explain --cost` on each source the trace names whose file still holds
+the digest the trace recorded. A source it can't read, or that changed since
+the capture, gets a `cost facts: none, …` line above the sections instead.
+A pprof or OTLP export carries no source, so its table has no facts. `--html`
+prints one self-contained page of the same three, which a browser opens with
+no other program and nothing to fetch.
+Tests/Cases/Perf/view_shows_every_profile.case and
+Tests/Cases/Perf/view_shows_cost_facts_beside_samples.case are the worked
+examples.
 
 `jet perf export <trace.jettrace> --pprof` writes pprof's gzip-compressed
 `profile.proto` beside the trace (`<stem>.pb.gz`, or `--out <path>`). Each
@@ -63,8 +73,9 @@ the trace's captured spans and browser rows, then an
 `code.file.path`, `code.line.number` and `code.function.name`. Its trace id
 is the first 32 hex digits of the trace's id. A task span's parent is its
 parent task's span, and each span's kind and task, and a wait's awaited task,
-spawn line, channel, stack and waker, are `jet.*` attributes. Span times count
-from the session's start, since a trace records no wall-clock origin.
+spawn line, channel, socket addresses, stack and waker, are `jet.*`
+attributes. Span times count from the session's start, since a trace records
+no wall-clock origin.
 `--out <path>` writes any export to a file instead of stdout.
 
 Both exports are interop for other tools; jet reads them back itself.
@@ -150,9 +161,10 @@ functions that `run` calls; their `inclusive_count` and `allocation_count` are
 null.
 
 `jet perf run` takes `--lens=<lenses>`, comma-separated: `cpu`, the
-program's CPU time and the default, and `memory`, its memory behavior;
-`--lens=cpu,memory` takes both in one run. `jet perf test` takes only `cpu`,
-and any other lens is refused with the two it may name. Under `memory` the
+program's CPU time and the default, `memory`, its memory behavior, and
+`alloc`, its live heap; `--lens=cpu,memory,alloc` takes all three in one
+run. `jet perf test` takes only `cpu`, and a word that names no lens is
+refused with the three it may name. Under `memory` the
 runtime opens four counters of the program's main thread
 with `perf_event_open`, in user mode only: L1D read misses (one sample per
 10007 events), LLC and dTLB read misses (one per 1009) and page faults (one
@@ -189,6 +201,75 @@ left L1D, `llc_misses` were served from RAM, and `page_faults` fell to the
 page cache or disk. A counter the profile did not capture shows
 `unavailable`. Tests/Run/Perf/CacheVisualization is the worked example.
 
+Under `alloc` the session builds the program with `--checked-alloc`, whose
+heap keeps each block's ten allocating call sites in its prefix, and the
+runtime links every block allocated from the start of the run into a live
+list until it is freed. A run without the lens tracks nothing and pays
+nothing. `core.perf.heap_mark(name)` takes a heap snapshot named `name`,
+and the runtime takes one named `exit` as the program exits; in any other
+run `heap_mark` does nothing. A snapshot holds the live list while it
+forks: the copy-on-write child walks the list as it stood, groups the live
+blocks by their call sites, writes the groups to the samples file and
+exits, while the program goes on once the child has the copy and waits for
+it to exit. The trace keeps the snapshots in its `heap` receipt section
+(type `JetPerfHeapSnapshots`): the checked source's `path`, then each
+snapshot in the order the program took them with its `name`, `number`,
+live `blocks` and their `bytes`, and its `sites`, the blocks by the
+`function` and `line` of the checked source innermost on their allocating
+stack and the `type` they were allocated for, the most bytes first, with a
+null `function` and `line` for the blocks no line of it allocated. The
+`--checked-alloc` build records, as a DWARF `DW_TAG_call_site` of its
+function, the type each allocating call allocates for: a list's buffer
+as the list type, a struct's or a box's storage as its type. A block
+takes the type of the innermost such call on its allocating stack, so a
+block the runtime allocates for a typed call is that call's; a block no
+typed call allocated has a null `type`. `jet perf view` prints each
+snapshot after the per-line table, `live at filled  101 blocks  57344
+bytes` and then each site, `  [Int]  leak.jet:14 run  100 blocks  56000
+bytes`, or `  elsewhere  1 blocks  1344 bytes`; a name the run marked
+more than once is shown with its count, `after-cleanup#3`.
+
+`jet perf compare base.jettrace head.jettrace` sets the last heap snapshot
+of each trace against each other when both kept one, and
+`--heap=<base>..<head>` names the two: the base trace's snapshot `<base>`
+and the head trace's `<head>`, both of one trace when it names only one
+(`jet perf compare run.jettrace --heap=start..filled`). A name alone picks
+the last snapshot of that name, and `name#k` its k-th; a name the trace
+never kept is refused with the names it kept. Compare prints `Heap start
+-> filled: blocks 1->101 · bytes 1344->57344` and then each type and place
+whose live blocks or bytes changed, signed, the most bytes gained first,
+`  [Int]  leak.jet:14 run  +100 blocks  +56000 bytes`; its receipt deltas leave
+the `heap` section out.
+
+Each snapshot also records what retains its blocks. The child sorts the
+live blocks by address and writes, for each, every word of it that points
+into another live block, then the roots: the frames of the thread that
+took the snapshot, each as its call site, frame pointer and lowest
+address, the words of those frames that point into a live block, and the
+words of the image's writable data that do (with the live list's own head
+cleared). `jet perf` walks from the roots, breadth first, the variables
+first, then the data objects of the image's symbol table, then any other
+word, so each block takes a shortest path from a root. The path is named
+by the image's DWARF: a frame's word by the variable whose location holds
+it at the frame's call site and the field of it, else `<function> frame`;
+a data word by its object; each block on the way by its type, a list's
+buffer as the element's index and field (`kept[17]`, `rooms[3].history`),
+any other block as ` -> <type>.<field>`. A path names at most 16 holders,
+nearest the block, and starts with `…` past them. The `heap` section keeps
+the snapshot's `retained` blocks, typed blocks only, by `type` and path
+shape (the path with its list indices left out): one example `path`,
+`blocks` and `bytes`, at most four paths a type with the most bytes, the
+rest under the path `…`, and a null `path` for the blocks no root
+reached, which only another thread's frames or a register held.
+`jet perf view run.jettrace --retained-by <type>` prints, for each snapshot
+that keeps live blocks of the type (its whole name, or the part after its
+last `.`), `retained [Int] at filled  100 blocks  56000 bytes` and then each
+path, `  kept[99]  100 blocks  56000 bytes`; a type no snapshot keeps is
+refused with the types they keep.
+Tests/Cases/PerfRun/alloc_lens_heap_snapshots.case and
+Tests/Cases/Perf/heap_snapshot_types_retention_and_diff.case are the
+worked examples.
+
 `jet perf run` records every wait of a task too, and what ended it. When a
 task spawns another, the runtime writes the new task's id with the Jet call
 sites of the spawning stack. When a task parks (a join, a channel's receive
@@ -206,10 +287,22 @@ symbol's name the wait's name (`task join`, `channel receive`, `time sleep`,
 checked source on its stack, innermost first, so the first is the line it
 waited at. A join's `awaited_task_id` is the awaited task and its
 `spawn_line` the line that spawned it; a channel wait's `channel_id` is the
-channel's. Its `waker` is `task` when a task's wake ended it, with that
+channel's. A socket's wait for readiness (an accept, a connect, a read or a
+write) names the socket by its own address, `local_address`, and its peer's,
+`peer_address`, as the kernel's `getsockname` and `getpeername` give them
+(`127.0.0.1:4000`, `[::1]:4000`, a Unix socket's path), either null when the
+socket has none. Its `waker` is `task` when a task's wake ended it, with that
 task's `waker_task_id` and the line it woke it from as `waker_line`,
 `runtime` when the runtime's did, and `timeout` when no wake did: a sleep,
-or a wait that gave up. The wake that ended a wait is the last one on the
+or a wait that gave up. The runtime's I/O poller wakes a socket's wait for
+what happened at the connection's other end, so `jet perf run` names the
+task of the program that acted there: for a connected socket's wait, the
+last transfer of another task on the socket at the other end (whose
+addresses are the wait's, swapped) begun by the wait's end; for a listener's
+accept, the last connect of another task to the listener's address. That
+task is the `task` waker, at the transfer's or the connect's line. With no
+such task the peer is outside the program and `waker` is `peer`, which names
+no task or line. The wake that ended a wait is the last one on the
 same park slot at or before its end, and after the task's previous wait on
 that slot. Its start and end are measured from the session's start, on the
 same clock as the task and log spans, so the wait lines up with them with no
@@ -219,8 +312,11 @@ times writes a million records. `jet perf view` prints `waits count=3 ·
 longest 400212345ns: task 1 in task join at main.jet:5 for task 2 spawned at
 main.jet:4, woken by task 2`. Its timeline shows up to 8 waits as
 `[start..end] task 1 in channel receive at main.jet:11 for channel 1, woken
-by task 2 at main.jet:28`, beside the task spans.
-Tests/Cases/Perf/every_wait_names_its_waker.case is the worked example.
+by task 2 at main.jet:28`, beside the task spans; a socket's as `task 1 in
+tcp read at main.jet:15 on socket 127.0.0.1:4000 with peer 127.0.0.1:51000,
+woken by task 2 at main.jet:25`, or `, woken by its peer`.
+Tests/Cases/Perf/every_wait_names_its_waker.case and
+Tests/Cases/Perf/socket_wait_names_its_peer.case are the worked examples.
 
 The same waits give off-CPU time by stack, as an off-CPU flame graph does.
 `jet perf view` sums the waits' time by stack, outermost frame first, ending
@@ -259,7 +355,7 @@ Unix sockets, UDP, DNS). A buffered file writer's writes are recorded when
 its buffer reaches the kernel, with the flushing stack; a read its buffer
 serves records nothing. SQLite's page reads and writes, file copies and
 directory walks, raw descriptors and the terminal are not recorded. An
-attach records no transfers. Tests/Cases/Perf/io_on_timeline_without_instrumentation.case
+attach records the transfers its flight ring holds (below). Tests/Cases/Perf/io_on_timeline_without_instrumentation.case
 is the worked example.
 
 A `core.game` run under `jet run --observe` relays its frames through its live
@@ -303,6 +399,87 @@ as `receipt perf <canonical JSON>`, and `jet perf compare` lists each field
 that differs between two traces' receipts (`perf.build.options.optimize: "O0"
 -> "O2"`). `jet perf attach` records no `perf` section.
 
+<<<<<<< ours
+## Comparing captures
+
+`jet perf compare <base> <head>` takes each side as one `.jettrace` or a
+folder of them: every `.jettrace` directly in the folder, in name order,
+is one capture of that side (`jet perf run main.jet --out base/1.jettrace`
+creates the folder). An empty folder is refused. Every capture must share
+the first base capture's toolchain digest and hardware fingerprint unless
+`--override-identity`, and each side's captures must have run one source
+(the same path and digest for every source file); either refusal is E2102
+naming the capture. The `Captures:` line lists each side's captures. The
+wall, CPU and allocation deltas and the budget line set the sides' means
+against each other; the receipt and heap deltas set the first capture of
+each side against each other.
+
+Compare then prints a function table and a line table of CPU-time
+samples, the most samples first, each row the base side's mean, the head
+side's and the change: `main.jet:11 spin_hot_loop 59 -> 118 samples
+(+100%) slower (p=0.029)`. A row a capture never sampled counts 0 for it.
+With at least 4 captures a side and at most 62 in all, each row holding
+at least 1% of either side's samples gets a verdict from an exact
+two-sided Mann-Whitney U test over its per-capture samples, its p
+adjusted over the rows judged in its table (Benjamini-Hochberg) and
+rounded up: `slower` or `faster` below 0.05, else `no significant
+change`; a smaller row is `too few samples to judge`. With fewer captures
+the verdict is none, naming why (`verdict: none (one capture each;
+capture each side at least 4 times)`), and the rows show the means
+alone. Compare exits 0 either way: `jet budget check` is the gate.
+`--json` prints the same under `perf`, kind `jet.perf.compare`: each row's
+per-capture `base` and `head` samples, `p_ppm` (the adjusted p in parts
+per million, null when unjudged) and `verdict`.
+
+||||||| base
+=======
+## Flight recorder and crash dumps
+
+D-OBSERVE-FLIGHT1=B ratifies an always-on flight recorder under `jet run
+--observe` (when `JET_PERF_SAMPLES` names no `jet perf run` capture). The
+runtime samples its CPU time every 10ms and records its tasks' waits, wakes,
+spawns and file and network transfers, as `jet perf run` does, into a
+256 KiB ring. Each record is one datagram on a nonblocking socket pair, sent
+whole or, while the socket is full, lost, so no record ever waits. The observe
+writer drains the socket into the ring every 100ms, the oldest records going
+once it fills, and publishes `<temp>/jet-flight-<pid>.samples` beside the live snapshot, and the
+program's image as `.image` once. `jet perf attach <pid> --source app.jet`
+copies both and reads the copies, so its trace holds the waits and transfers
+the program made before the attach: each wait's task, line, object and
+waker, and each transfer's `io` row. A wait of a task the live snapshot no
+longer holds becomes no row. Tests/Cases/Perf/attach_drains_flight_ring.case
+is the worked example.
+
+A stop that ends an observed process (a panic, a trap, a contract failure)
+writes a typed dump while the stopping stack is whole:
+`.jet/dumps/<program>-<UTC time>.jetdump` under the working directory, mode
+0600, `~<n>` after the time when a dump of the same second exists, of which
+the newest three stay. Stderr names it (`dump written: <path>`). The dump
+holds every task's registers, the program's writable memory (every thread's
+and task's stack among it), the flight ring, and the program's image, so it
+opens without the binary. The stopping thread's registers are its own; each
+other thread is interrupted by a real-time signal (62), records its task and
+registers, and waits until the dump is written, so its stack is the one its
+registers name; a parked or queued task's registers are the ones its last
+switch saved. A thread that does not answer within 200ms is left out. Every
+`core.crypto.Secret`'s bytes are zeroed before the write.
+
+`jet debug <file>.jetdump` opens a dump behind the `(Jet)` console: `Dump of
+process <pid>, <n> flight events`, then the innermost Jet frame of the stop
+(`Stopped  main.jet:9  in check()`), its source line and its locals. `bt`,
+`frame N`, `locals` and `print NAME` read the stop as a live session reads
+one, with typed locals; a `Secret` shows as `<redacted>`. `tasks` lists every
+task the dump holds, the selected one marked `*`, as `task <id>  stopped`,
+`running` or `parked`, then its innermost Jet frame and, when that frame is
+outside the program's source, the innermost one inside it (`task 3  parked
+in sleep() at time.jet:41, from run() at main.jet:14`); `task N` selects
+task N for `bt`, `frame`, `locals` and `print`. `events [--last N]` (20 by
+default) lists the ring's records, oldest first, each at the first Jet frame
+of its stack: `sample`, `spawn`, `wake`, `clock`, `wait` and `io`. A
+run-control command answers that a dump doesn't run.
+Tests/Cases/Debug/crash_dump_opens_typed.case is the worked example.
+
+>>>>>>> theirs
 ## Canonical devtools protocol
 
 `jet.devtools.v1` is the single observation envelope for development hosts.
@@ -389,6 +566,64 @@ The shared lifecycle states are `starting`, `building`, `ready`, `error`,
 `unavailable`, and `stopped`. A host shows the state and its diagnostic facts;
 it does not turn an unavailable panel or command into a silent no-op.
 
+## The debugger console
+
+`jet debug <file.jet>` stops at the start of `run` (or at `--break
+<file>:<line>`) and reads one command a line at the `(Jet) ` prompt.
+D-DBG-VERBS1=A names the commands:
+
+- `step` (`s`), `next` (`n`), `continue` (`c`) and `finish` (`f`) run the
+  program.
+- `break <line|file:line|function> [if <expr>]` (`b`) sets a breakpoint.
+  `break 12` is line 12 of the file being debugged. With `if`, the breakpoint
+  stops only when the Jet expression holds over the frame's locals. A
+  condition that is not a Bool, or can't be evaluated, stops and says why.
+  Setting it says where the condition runs: the debugger checks it at each
+  hit, which stops the program each time.
+- `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
+  message with each `{expr}` filled in, then the program runs on.
+- `watch <place>` stops at each write that changes a local of the selected
+  frame, or a field path under one (`watch order.total`). The stop names
+  the line that wrote it and shows `total: 0 -> 2`. A write that leaves the
+  value as it was runs on.
+- `breaks` lists the breakpoints and watches by number, as `  2 break
+  cart.jet:88 if total < 0` and `  3 watch total`; `delete <n>` removes one.
+- `frame <n>` selects a frame as `backtrace` (`bt`) numbers it. `up` moves
+  toward the callers and `down` back. `locals` and `print` (`p`) read the
+  selected frame until the program moves.
+- `tasks` lists every task by id: its label, its state (queued, running,
+  blocked or paused), what it waits on (`channel receive`) and its Jet
+  frames; `*` marks the task the program stopped in. Task 1 is the main
+  thread.
+- `help` (`h`) lists the commands and `quit` (`q`) ends the session.
+
+Every thread of the program is traced. A stop stops them all, so `tasks`
+and `print` see the whole program still. `continue` runs them all again,
+and a step moves only the stopped thread. The task list is the runtime's
+own registry (`Compiler/JetRuntime/Source/Observe.jet`, the one `jet
+inspect live` publishes), read from the stopped program's memory. A parked
+task's frames come from the stack its fiber saved when it parked.
+`jet debug --dap` still shows the program as one thread.
+
+A step that passes a breakpoint which does not stop goes on to where the
+step would have ended. `jet debug --dap` settles every run the same way
+(`Compiler/JetDebug/Source/Native.jet`, NativeSession.settle), and both read
+expressions with the one evaluator, `Compiler/JetDebug/Source/Debug/Eval.jet`.
+
+A watch on a place in memory takes the CPU's debug registers (at most 4,
+each an aligned 1, 2, 4 or 8 bytes), so the program runs at full speed
+until the write. A local the compiler keeps in a register has no address
+to trap: its watch single-steps that frame's own code, comparing the
+register after each instruction, while the calls it makes run at full
+speed (they restore the register before they return). One such watch is
+active at a time. A watch covers the place's own bytes: for a list, its
+length and buffer, not the items. A watch on a frame's local ends when
+that frame returns; the next stop says so. Every thread gets the watch's
+debug registers, so a write from any thread stops; a watch on a register
+local follows the thread whose frame holds it. A Float held in a vector
+register can't be watched. Globals can't be watched yet, because the debug
+information has no global variables.
+
 ## Recorder boundary
 
 D-RUN-RECORD1=A ratifies `--record=<name>` on `run`, `dev`, and `test` as the
@@ -421,3 +656,4 @@ the program through time, or keep a standing per-variable history buffer.
 - Wall-clock session: `Compiler/JetCLI/Source/CLI/Perf/` and `Compiler/JetFoundation/Source/Trace/JetTrace.jet`
 - Browser rows: `Compiler/JetDevServer/Source/BrowserTrace.jet`, merged by `Compiler/JetCLI/Source/CLI/Perf/BrowserCapture.jet`
 - Devtools protocol and panel policy: `Compiler/JetFoundation/Source/Devtools/` and the panel catalog projection in `Compiler/JetDevServer/Source/Session.jet`
+- Flight recorder and dumps: `Compiler/JetRuntime/Source/PerfSamples.jet` (`perf_flight_*`), read by `Compiler/JetDebug/Source/NativeDump.jet` behind `Compiler/JetCLI/Source/CLI/DebugDump.jet`

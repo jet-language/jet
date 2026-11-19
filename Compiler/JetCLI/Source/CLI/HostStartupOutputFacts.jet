@@ -1,24 +1,26 @@
 // One ordinary private Source value for the canonical CLI startup capture.
 // The runtime supplier owns raw Env/TTY facts; this factory owns only typed
 // publication. Native layout and cleanup derive from normal checked Source.
+// The supplier is not activated yet, so only the factory's test reads these
+// fields.
 RawHostStartupOutputFacts: struct {
-    stdout_tty: Bool,
-    stderr_tty: Bool,
-    term: [U8]?,
-    no_color: Bool,
-    force_color: Bool,
-    columns: U64?,
-    unicode: Bool,
+    _stdout_tty: Bool,
+    _stderr_tty: Bool,
+    _term: [U8]?,
+    _no_color: Bool,
+    _force_color: Bool,
+    _columns: U64?,
+    _unicode: Bool,
 }
 
 jet_cli_make_host_startup_output_facts: fn(stdout_tty: Bool, stderr_tty: Bool, term: &&[U8]?, no_color: Bool, force_color: Bool, columns: U64?, unicode: Bool) -> RawHostStartupOutputFacts Never! {
     RawHostStartupOutputFacts{
-        stdout_tty: stdout_tty,
-        stderr_tty: stderr_tty,
-        term: term.move(),
-        no_color: no_color,
-        force_color: force_color,
-        columns: columns,
-        unicode: unicode,
+        _stdout_tty: stdout_tty,
+        _stderr_tty: stderr_tty,
+        _term: term.move(),
+        _no_color: no_color,
+        _force_color: force_color,
+        _columns: columns,
+        _unicode: unicode,
     }
 }

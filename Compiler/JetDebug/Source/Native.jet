@@ -8,7 +8,7 @@
 use {
     native_files: core.files
     native_math: core.math
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_close, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_registers, x64_trace_spawn, x64_trace_wait]
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_close, x64_trace_debug_register, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait]
     jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
 }
 
@@ -81,6 +81,30 @@ NativeBreakpoint: struct {
     addresses: [Int],
 }
 
+// What a breakpoint does when it is hit: stop when its condition holds (or
+// it has none), or log its message and run on; and how the console's
+// `breaks` lists it (`break cart.jet:88 if total < 0`).
+NativeRule: struct {
+    condition: DebugExpression?,
+    log: DebugExpression?,
+    shown: String,
+}
+
+// What a run said before it settled: the program's output (`stdout`), a
+// logpoint's message (`console`), or why a condition stopped it (`stderr`).
+NativeSaid: struct {
+    category: String,
+    text: String,
+}
+
+// Where a run settled: its stop, the breakpoint the stop reports (None for
+// the end of a step, a pause or the program), and what it said on the way.
+NativeSettled: struct {
+    stop: NativeStop,
+    hit: Int?,
+    said: [NativeSaid],
+}
+
 // A trap byte written into the program's code: its address and the byte it
 // replaced.
 NativeSite: struct {
@@ -88,12 +112,53 @@ NativeSite: struct {
     byte: Int,
 }
 
-// What resuming the program ended in: a SIGTRAP stop (Paused: a trap byte or
-// a finished single step), its exit with `code`, or its death by the signal
+// A watch (`watch total`): its number, the place as the console named it,
+// the address and type of the place's bytes, the debug-register spans that
+// trap a write to them, the thread and canonical frame address of the frame
+// whose local it is, and its bytes when it last changed. A local held in a
+// register has no address or spans: `register` is its index among the
+// trace's registers (else -1), and `ranges` the code where it is there.
+NativeWatch: struct {
+    number: Int,
+    shown: String,
+    address: Int,
+    ty: Int,
+    spans: [NativeWatchSpan],
+    thread: Int,
+    cfa: Int,
+    bytes: [U8],
+    register: Int,
+    ranges: [NativeRange],
+}
+
+// One debug register a watch holds: DR0 to DR3 (`slot`), trapping a write
+// to the `size` bytes (1, 2, 4 or 8, aligned to their size) at `address`.
+NativeWatchSpan: struct {
+    slot: Int,
+    address: Int,
+    size: Int,
+}
+
+// A thread of the traced program: its id, whether it runs, whether a
+// SIGSTOP the debugger sent it (halt) is still to arrive, and the signal it
+// stopped with, which goes to it when it next runs (0: none).
+NativeThread: struct {
+    id: Int,
+    running: Bool,
+    halting: Bool,
+    signal: Int,
+}
+
+// What resuming the program ended in: a SIGTRAP stop (Paused: a trap byte,
+// a finished single step, or with `code` the number of the watch whose
+// bytes a write changed), its exit with `code`, or its death by the signal
 // `code`.
 NativeEvent: struct {
     kind: NativeStopKind,
     code: Int,
+
+    // Whether the event ends a run: anything but a plain SIGTRAP stop.
+    ends_run: fn(self) -> Bool Never! { self.kind != NativeStopKind.Paused || self.code > 0 }
 }
 
 // What running to a return address ended in: the return, or another stop.
@@ -140,12 +205,39 @@ NativeSession: struct {
     output_path: String,
     output_read: Int,
     // Whether the program has been launched; while it runs, its trace has a
-    // pid.
+    // pid, and the trace's thread is the one the last stop is in.
     started: Bool,
+    // Every thread of the running program; all are stopped between runs.
+    threads: [NativeThread],
+    // The address of the runtime's task registry root (0: the program has
+    // none, as it starts no task).
+    observe_root: Int,
     breakpoints: [NativeBreakpoint],
+    // What each breakpoint with a condition, a log message or a console
+    // listing does when hit, by number; one without stops.
+    rules: [Int:NativeRule],
     numbered: Int,
     sites: [NativeSite],
     selected: Int,
+    // The watches, which number with the breakpoints; the change the last
+    // watch stop saw (`total: 0 -> 2`); and what the next report says first
+    // (a watch dropped when its frame returned).
+    watches: [NativeWatch],
+    watched: String,
+    notes: String,
+    // Where each function of the image's line table opens its frame, read
+    // from the image's code (native_openings).
+    openings: [NativeOpening],
+    // The functions `fix` placed, latest last, and the address the next fix
+    // maps its code at (0: none mapped yet).
+    fixed: [NativeFixed]{[NativeFixed]{}},
+    fix_next: Int{0},
+    // A typed dump's tasks and memory (NativeDump.jet), in place of a
+    // traced program's; None for a live session.
+    dump: NativeDump?,
+    // The index among the dump's tasks of the one `bt`, `frame`, `locals`
+    // and `print` read: 0, the stop's, until `task N` selects another.
+    task: Int,
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -154,13 +246,23 @@ NativeSession: struct {
         elf: native_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{binary}`: {err}"})
         image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
-        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, breakpoints: [NativeBreakpoint]{}, numbered: 0, sites: [NativeSite]{}, selected: 0})
+        observe_root: native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
+        openings: native_openings(image, native_elf_code(elf))
+        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [NativeSite]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: None, task: 0})
     }
 
     // A breakpoint on `line` of the Jet source `file` (its base name, as the
     // line table names it): its number, or None when no code is on that line.
+    // A function's start moves past its prologue (entry).
     break_at: fn(&self, file: String, line: Int) -> Int? NativeDebugError! {
-        self.place(native_line_addresses(self.image, file, line))
+        addresses := native_line_addresses(self.image, file, line)
+        loop k in 0..<addresses.len() {
+            index: x64_jetline_find(self.image.lines, addresses[k])
+            if index >= 0 && addresses[k] == self.image.lines.functions[index].low {
+                addresses[k] = self.entry(index)
+            }
+        }
+        self.place(addresses)
     }
 
     // A breakpoint at the start of the Jet function `function`, past its
@@ -168,9 +270,21 @@ NativeSession: struct {
     break_in: fn(&self, function: String) -> Int? NativeDebugError! {
         addresses := [Int]{}
         loop (index, found) in self.image.lines.functions {
-            if found.name == function -> addresses.push(native_body_start(self.image, index))
+            if found.name == function -> addresses.push(self.entry(index))
         }
         self.place(addresses)
+    }
+
+    // Where a breakpoint on the start of function `index` traps: past the
+    // prologue that opens its frame there (native_body_start), or the start
+    // itself when its code runs before any frame: a frame-free prefix
+    // returns without reaching the frame.
+    entry: fn(self, index: Int) -> Int Never! {
+        low: self.image.lines.functions[index].low
+        if self.openings[index].at == low && native_frame_open(self.openings[index].prologue) >= 0 {
+            return native_body_start(self.image, index)
+        }
+        low
     }
 
     // A new breakpoint on `addresses`, trapped at once in a running program;
@@ -189,21 +303,70 @@ NativeSession: struct {
         Ok(Val(self.numbered))
     }
 
+    // Remove breakpoint or watch `number`.
     delete_breakpoint: fn(&self, number: Int) NativeDebugError! {
         kept := [NativeBreakpoint]{}
         loop breakpoint in self.breakpoints {
             if breakpoint.number != number -> kept.push(breakpoint.copy())
         }
         self.breakpoints = kept
+        self.rules.remove(number).drop("a breakpoint placed without a rule has none")
         self.lift_unwanted()
+        self.unwatch(number) ?? return Err(err)
+        Ok()
+    }
+
+    // Drop watch `number`, if there is one, and free its debug registers.
+    unwatch: fn(&self, number: Int) NativeDebugError! {
+        found: loop (index, watch) in self.watches {
+            if watch.number == number {
+                break index
+            }
+        } ?? return Ok()
+        _ := self.watches.remove(found, .Slot)
+        if self.alive() && !self.set_debug_register(7, native_watch_control(self.watches)) {
+            return Err(NativeDebugError{detail: "couldn't clear a debug register of the program"})
+        }
         Ok()
     }
 
     // Remove every breakpoint.
     clear_breakpoints: fn(&self) NativeDebugError! {
         self.breakpoints = [NativeBreakpoint]{}
+        self.rules = [Int:NativeRule]{}
         self.lift_unwanted()
         Ok()
+    }
+
+    // Give breakpoint `number` its condition, log message and listing.
+    set_rule: fn(&self, number: Int, rule: NativeRule) Never! { self.rules[number] = rule }
+
+    // Whether breakpoint or watch `number` is placed.
+    has_breakpoint: fn(self, number: Int) -> Bool Never! {
+        loop breakpoint in self.breakpoints {
+            if breakpoint.number == number -> return true
+        }
+        loop watch in self.watches {
+            if watch.number == number -> return true
+        }
+        false
+    }
+
+    // The console's `breaks`: each breakpoint and watch by number, a
+    // breakpoint as its rule lists it, else by where it traps.
+    breaks_text: fn(self) -> String Never! {
+        if self.breakpoints.len() == 0 && self.watches.len() == 0 -> return "No breakpoints\n"
+        rows := [{number: Int, text: String}]{}
+        loop breakpoint in self.breakpoints {
+            frame: native_frame_at(self.image, breakpoint.addresses[0])
+            shown: if self.rules.get(breakpoint.number) == .Val(rule) -> "{rule.shown}" else -> "break {frame.file}:{frame.line}"
+            rows.push({number: breakpoint.number, text: shown})
+        }
+        loop watch in self.watches -> rows.push({number: watch.number, text: "watch {watch.shown}"})
+        rows.sort_by(fn(left: {number: Int, text: String}, right: {number: Int, text: String}) { left.number <=> right.number })
+        text := ""
+        loop row in rows -> text = "{text}  {row.number} {row.text}\n"
+        text
     }
 
     // Run the program from its start, with `args`.
@@ -213,12 +376,15 @@ NativeSession: struct {
         loop arg in args -> argv.push(arg.copy())
         self.started = true
         self.sites = [NativeSite]{}
+        // A watch names a frame of the run that ended.
+        self.watches = [NativeWatch]{}
         self.trace = x64_trace_spawn(self.binary, argv, self.output_path)
         if self.trace.pid < 0 {
             failure: self.trace.failure.copy()
             x64_trace_close(self.trace)
             return Err(NativeDebugError{detail: "couldn't start the program: {failure}"})
         }
+        self.threads = [NativeThread]{NativeThread{id: self.trace.pid, running: false, halting: false, signal: 0}}
         loop breakpoint in self.breakpoints {
             loop address in breakpoint.addresses {
                 if !self.plant(address) {
@@ -256,7 +422,14 @@ NativeSession: struct {
     // The selected thread's frames, innermost first, each inlined run its
     // own frame above the frame it is inlined into.
     backtrace: fn(&self) -> [NativeFrame] NativeDebugError! {
-        frames: self.unwind() ?? return Err(err)
+        registers: self.registers() ?? return Err(err)
+        self.backtrace_from(registers)
+    }
+
+    // The frames of a stack whose innermost registers are `registers`, as
+    // backtrace shows them.
+    backtrace_from: fn(self, registers: [Int]) -> [NativeFrame] NativeDebugError! {
+        frames: self.unwind_from(registers) ?? return Err(err)
         shown := [NativeFrame]{}
         loop (index, frame) in frames {
             loop found in native_frames_at(self.image, native_lookup(index, frame.pc)) {
@@ -264,6 +437,73 @@ NativeSession: struct {
             }
         }
         Ok(shown)
+    }
+
+    // `tasks`: every task of the program by id, with its state, what it
+    // waits on and its Jet frames; `*` marks the task this stop is in. The
+    // facts are the runtime's task registry (JetRuntime Observe.jet), the
+    // one `jet inspect live` publishes, read from the stopped program. A
+    // task on a thread shows that thread's stack, a parked task the stack
+    // its fiber saved when it parked (native_task_registers). Task 1 is the
+    // program's main thread.
+    tasks_text: fn(&self) -> String NativeDebugError! {
+        self.ready() ?? return Err(err)
+        memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
+        current: self.trace.thread
+        threads := [NativeTaskThread]{}
+        loop thread in self.threads {
+            self.trace.thread = thread.id
+            found: x64_trace_registers(self.trace)
+            self.trace.thread = current
+            registers: found ?? next
+            // GS:0 holds the thread's TCB (0: not attached).
+            base: registers[X64_TRACE_GS_BASE]
+            tcb: if base == 0 -> 0 else -> native_debug_word(self.trace, base) ?? 0
+            fiber: if tcb == 0 -> 0 else -> native_debug_word(self.trace, tcb + NATIVE_DEBUG_TCB_FIBER) ?? 0
+            control: if tcb == 0 -> 0 else -> native_debug_word(self.trace, tcb + NATIVE_DEBUG_TCB_CONTROL) ?? 0
+            task: if control == 0 -> 0 else -> native_debug_word(self.trace, control + NATIVE_DEBUG_CONTROL_TASK) ?? 0
+            // The main thread's own control names no task: it runs task 1.
+            threads.push(NativeTaskThread{id: thread.id, registers: registers, fiber: fiber, task: if task == 0 && thread.id == self.trace.pid -> 1 else -> task})
+        }
+        tasks := native_tasks(memory, self.observe_root)
+        rooted := false
+        loop task in tasks {
+            if task.id == 1 -> rooted = true
+        }
+        if !rooted {
+            tasks.push(NativeTask{id: 1, label: "root", state: -1, wait: "", canceled: false, fiber: 0})
+        }
+        tasks.sort_by(fn(left: NativeTask, right: NativeTask) { left.id <=> right.id })
+        text := ""
+        loop task in tasks {
+            on: native_task_thread(threads, task)
+            registers := [Int]?{None}
+            if {
+                on >= 0 -> registers = Val(threads[on].registers)
+                task.fiber != 0 && threads.len() > 0 -> {
+                    saved: native_debug_word(self.trace, task.fiber + NATIVE_DEBUG_FIBER_SAVED) ?? 0
+                    if saved != 0 {
+                        registers = native_task_registers(threads[0].registers, memory, saved)
+                    }
+                }
+            }
+            state: if {
+                task.state >= 0 -> native_task_state(task.state)
+                on >= 0 && threads[on].registers[X64_TRACE_ORIG_RAX] >= 0 -> "blocked"
+                else -> "running"
+            }
+            mark: if on >= 0 && threads[on].id == current -> "*" else -> " "
+            wait: if task.wait != "" && task.state != NATIVE_DEBUG_TASK_RUNNING -> "  {task.wait}" else -> ""
+            canceled: if task.canceled -> "  canceled" else -> ""
+            text = "{text}{mark} {task.id}  {task.label}  {state}{wait}{canceled}\n"
+            if registers == .Val(found) {
+                frames: self.backtrace_from(found) ?? return Err(err)
+                loop line in native_debug_backtrace(frames).split("\n").to_list() {
+                    if line != "" -> text = "{text}    {line}\n"
+                }
+            }
+        }
+        Ok(text)
     }
 
     // The selected frame's parameters and locals, rendered as Jet values; a
@@ -276,6 +516,10 @@ NativeSession: struct {
         index: level.frame
         memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
         lookup: native_lookup(index, frames[index].pc)
+        // A dump runs no view: nothing runs it.
+        if self.dump == .Val(dumped) {
+            return Ok(native_frame_locals(self.image, dumped.memory, frames[index], lookup, level.site))
+        }
         shown := native_frame_locals(self.image, memory, frames[index], lookup, level.site)
         function: native_function_at(self.image, lookup) ?? return Ok(shown)
         // The variables native_frame_locals shows, in its order.
@@ -304,57 +548,24 @@ NativeSession: struct {
     }
 
     // The value whose bytes are `value`, of struct type `ty`, as its
-    // DebugView shows it: the stopped program runs the view at address
-    // `view` on a copy of the value, below the stack it holds, then its
-    // registers are put back. None when the view does not return (a trap,
-    // a breakpoint or the program's end stops it first) or its items can't
-    // be read.
+    // DebugView shows it: the view at address `view` runs on a copy of the
+    // value in a fork of the stopped program (NativeFork.jet), never in the
+    // program, which neither runs nor changes. None when the fork can't be
+    // made or the view doesn't return there (a refused system call, a
+    // fault, a trap or the budget's end), or its items can't be read: the
+    // value then shows by its fields.
     view: fn(&self, view: Int, ty: Int, value: [U8]) -> String? NativeDebugError! {
-        saved: self.registers() ?? return Err(err)
-        back: saved[X64_TRACE_RIP]
-        // Past the red zone: the [DebugItem] header the view returns through
-        // its hidden result pointer, the value it borrows as `self`, then the
-        // return address, the stack 16-byte aligned at the call.
-        below: saved[X64_TRACE_RSP] - NATIVE_DEBUG_RED_ZONE - 32
-        result: below - below % 16
-        copied: result - value.len() - (result - value.len()) % 16
-        entry: copied - 16 - 8
-        if !self.poke_bytes(copied, value) || !self.poke_bytes(entry, native_word_bytes(back)) {
+        // The image's code holds the runtime's `syscall` instructions.
+        elf: native_files.read_bytes(self.binary) ?? return Ok(None)
+        code: native_elf_code(elf)
+        syscall: native_fork_syscall_at(self.trace, code.address, code.address + code.bytes.len()) ?? return Ok(None)
+        fork: native_fork_make(self.trace, syscall) ?? return Ok(None)
+        viewed: native_fork_view(fork, self.image, self.trace.pid, self.sites, view, ty, value) ?? {
+            native_fork_end(fork)
             return Ok(None)
         }
-        temporary: !self.has_site(back)
-        if temporary && !self.plant(back) -> return Ok(None)
-        registers := self.registers() ?? return Err(err)
-        registers[X64_TRACE_RIP] = view
-        registers[X64_TRACE_RSP] = entry
-        registers[X64_TRACE_RDI] = result
-        registers[X64_TRACE_RSI] = copied
-        if !x64_trace_set_registers(self.trace, registers) {
-            return Err(NativeDebugError{detail: "couldn't set the program's registers"})
-        }
-        event: self.resume(X64TraceResume.Run) ?? return Err(err)
-        if event.kind != NativeStopKind.Paused -> return Ok(None)
-        after: self.registers() ?? return Err(err)
-        shown := String?{None}
-        if after[X64_TRACE_RIP] - 1 == back && after[X64_TRACE_RSP] == entry + 8 {
-            shown = native_debug_view_shown(self.image, NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}, ty, result)
-        }
-        if !x64_trace_set_registers(self.trace, saved) {
-            return Err(NativeDebugError{detail: "couldn't set the program's registers"})
-        }
-        if temporary -> self.lift(back)
-        Ok(shown)
-    }
-
-    // Write `bytes` at `address` of the stopped program a word at a time,
-    // the last word padded with zeros; false when it can't be written.
-    poke_bytes: fn(self, address: Int, bytes: [U8]) -> Bool Never! {
-        loop word in 0..<((bytes.len() + 7) >> 3) {
-            if !x64_trace_poke(self.trace, address + 8 * word, I64{native_number(bytes, 8 * word, 8, X64DebugEncoding.Signed)}) {
-                return false
-            }
-        }
-        true
+        native_fork_end(fork)
+        Ok(Val(viewed))
     }
 
     // Select frame `index` of the current thread's backtrace (0 is innermost).
@@ -435,24 +646,36 @@ NativeSession: struct {
         text := ""
         if word == {
             "s" | "step" | "n" | "next" | "c" | "continue" | "f" | "finish" -> {
-                moved: self.advance(word) ?? return Err(err)
-                text = self.report(moved, file, lines) ?? return Err(err)
-                return Ok(NativeDebugStep{text: text, stop: moved})
+                short: if word == {
+                    "s" | "step" -> "s"
+                    "n" | "next" -> "n"
+                    "f" | "finish" -> "f"
+                    else -> "c"
+                }
+                settled: self.run(short) ?? return Err(err)
+                loop said in settled.said -> text = "{text}{said.text}"
+                shown: self.report(settled.stop, file, lines) ?? return Err(err)
+                return Ok(NativeDebugStep{text: "{text}{shown}", stop: settled.stop})
             }
-            "b" | "break" -> {
-                at: Int.parse(operand) ?? -1
-                placed := -1
-                if at >= 1 {
-                    if self.break_at(file, at) == {
-                        .Ok(found) -> placed = found ?? -1
-                        .Err(failure) -> return Err(failure)
+            "b" | "break" -> text = self.break_command(operand, file) ?? return Err(err)
+            "log" -> text = self.log_command(operand, file) ?? return Err(err)
+            "breaks" -> text = self.breaks_text()
+            "delete" -> {
+                number: Int.parse(operand) ?? -1
+                if !self.has_breakpoint(number) {
+                    return Ok(NativeDebugStep{text: "No breakpoint `{operand}`; `breaks` lists them\n", stop: stop})
+                }
+                watch: loop watch in self.watches {
+                    if watch.number == number {
+                        break true
                     }
-                }
-                text = if {
-                    at < 1 -> "Break needs a line number of {file}, as `break 12`\n"
-                    placed < 0 -> "No code on {file}:{at}\n"
-                    else -> "Breakpoint set  {file}:{at}\n"
-                }
+                } ?? false
+                self.delete_breakpoint(number) ?? return Err(err)
+                text = if watch -> "Deleted watch {number}\n" else -> "Deleted breakpoint {number}\n"
+            }
+            "watch" -> text = self.watch_command(operand) ?? return Err(err)
+            "frame" | "up" | "down" -> {
+                text = self.frame_command(word, operand, file, lines) ?? return Err(err)
             }
             "locals" -> {
                 locals := self.locals() ?? return Err(err)
@@ -467,11 +690,180 @@ NativeSession: struct {
                 frames: self.backtrace() ?? return Err(err)
                 text = native_debug_backtrace(frames)
             }
+            "tasks" -> text = self.tasks_text() ?? return Err(err)
             "h" | "help" -> text = "{NATIVE_DEBUG_HELP}\n"
             "" -> {}
             else -> text = "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n"
         }
         Ok(NativeDebugStep{text: text, stop: stop})
+    }
+
+    // Write `bytes` at `address` of the stopped program, a word at a time,
+    // the last word padded with zeros; false when it can't be written.
+    poke_bytes: fn(self, address: Int, bytes: [U8]) -> Bool Never! {
+        loop word in 0..<((bytes.len() + 7) >> 3) {
+            if !x64_trace_poke(self.trace, address + 8 * word, I64{native_number(bytes, 8 * word, 8, X64DebugEncoding.Signed)}) {
+                return false
+            }
+        }
+        true
+    }
+
+    // Swap `edit`, the program compiled again, into the stopped program
+    // (NativeFix.jet): what the console shows of it. Nothing changes when
+    // the fix is refused.
+    fix: fn(&self, edit: NativeFixEdit) -> String NativeDebugError! {
+        self.ready() ?? return Err(err)
+        elf: native_files.read_bytes(self.binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{self.binary}`: {err}"})
+        symbols: native_fix_symbols(elf)
+        code: native_elf_code(elf)
+        plan: native_fix_plan(self.image, edit, symbols, code.bytes, code.address, self.fixed) ?? return Ok("Fix refused: {err.detail}; restart the program to run the edit\n")
+        if plan.changed.len() == 0 -> return Ok("Nothing to fix: the program already runs this code\n")
+        pc: (self.registers() ?? return Err(err))[X64_TRACE_RIP]
+        // Each changed function's running entry, -1 for a new function.
+        entries := [Int]{}
+        sizes := [Int]{}
+        loop row in plan.changed {
+            running: native_fix_running(edit.functions[row].name, symbols, code.bytes, code.address, self.fixed)
+            at: if running == .Val(found) -> found.address else -> -1
+            if at >= 0 && pc > at && pc < at + 5 {
+                return Ok("Fix refused: the program is stopped in the first instruction of `{native_fix_shown(edit, row)}`; step once, then fix again\n")
+            }
+            entries.push(at)
+            sizes.push(if running == .Val(found) -> found.code.len() else -> 0)
+        }
+        syscall := -1
+        loop k in 0..<code.bytes.len() - 1 {
+            if native_fix_is_syscall(code.bytes, k) && !self.has_site(code.address + k) {
+                syscall = code.address + k
+                break
+            }
+        }
+        if syscall < 0 {
+            return Ok("Fix refused: the program's code holds no system call to map the edit with; restart the program to run the edit\n")
+        }
+        base: self.map_code(plan.size, code.address + code.bytes.len(), syscall) ?? return Err(err)
+        region: native_fix_region(plan, edit, symbols, base)
+        if !self.poke_bytes(base, region) {
+            return Err(NativeDebugError{detail: "couldn't write the fixed code at {native_debug_hex(base)}"})
+        }
+        // Breakpoints in the old code move to the same lines of the new.
+        moved := [NativeBreakpoint]{}
+        loop breakpoint in self.breakpoints {
+            addresses := [Int]{}
+            loop address in breakpoint.addresses {
+                target := address
+                loop (k, row) in plan.changed {
+                    at: entries[k]
+                    if at < 0 || address < at || address >= at + sizes[k] -> next
+                    target = -1
+                    index: x64_jetline_find(self.image.lines, address)
+                    line: if index >= 0 -> x64_jetline_line(self.image.lines, self.image.lines.functions[index], address) ?? 0 else -> 0
+                    loop piece in plan.pieces {
+                        if piece.function != row -> next
+                        if native_fix_line_address(edit.debug[row], base + piece.offset, line) == .Val(found) {
+                            target = found
+                        }
+                    }
+                }
+                if target >= 0 -> addresses.push(target)
+            }
+            moved.push(NativeBreakpoint{number: breakpoint.number, addresses: addresses})
+        }
+        loop (k, at) in entries {
+            if at < 0 -> next
+            loop site in self.sites {
+                if site.address >= at && site.address < at + sizes[k] -> self.lift(site.address)
+            }
+        }
+        shown := [String]{}
+        loop piece in plan.pieces {
+            if piece.function < 0 -> next
+            row: piece.function
+            function: edit.functions[row]
+            low: base + piece.offset
+            at: entries[plan.changed.index_of(row) ?? 0]
+            if at >= 0 {
+                word: x64_trace_read(self.trace, at, 8) ?? return Err(NativeDebugError{detail: "couldn't read the code of `{function.name}`"})
+                patched := word
+                loop (k, byte) in native_fix_jump(at, low) -> patched[k] = byte
+                if !self.poke_bytes(at, patched) {
+                    return Err(NativeDebugError{detail: "couldn't redirect `{function.name}` to its fixed code"})
+                }
+            }
+            id: function.id.value
+            source: if id >= 0 && id < edit.object.functions.len() -> Val(edit.object.functions[id]) else -> None
+            like: if at >= 0 -> x64_jetline_find(self.image.lines, at) else -> -1
+            name := native_fix_shown(edit, row)
+            file := ""
+            dir := edit.object.debug.directory
+            decl := 0
+            if source == .Val(facts) {
+                if facts.file >= 0 && facts.file < edit.object.debug.files.len() {
+                    file = edit.object.debug.files[facts.file]
+                }
+                decl = facts.line
+            }
+            if like >= 0 {
+                was: self.image.lines.functions[like]
+                name = was.name
+                file = was.file
+                dir = was.dir
+            }
+            if file != "" {
+                native_fix_lines(self.image.lines, low, function.code.len(), edit.debug[row], name, file, dir, decl)
+                self.openings.push(native_opening(self.image, self.image.lines.functions.len() - 1, NativeCode{address: base, bytes: region}))
+            }
+            self.fixed.push(NativeFixed{name: function.name, address: low, code: region[piece.offset..<piece.offset + function.code.len()]})
+            shown.push("`{name}`")
+        }
+        self.breakpoints = moved
+        loop breakpoint in self.breakpoints {
+            loop address in breakpoint.addresses {
+                if !self.plant(address) {
+                    return Err(NativeDebugError{detail: "couldn't write a breakpoint at {native_debug_hex(address)}"})
+                }
+            }
+        }
+        Ok("Fixed {shown.join(", ")}: the edit runs from the next call\n")
+    }
+
+    // Map `size` bytes of code for a fix in the stopped program, within
+    // reach of a rel32 from the image's code, which ends at `after`: the
+    // program runs one `mmap` at the system call `syscall` of its code, then
+    // its registers are put back.
+    map_code: fn(&self, size: Int, after: Int, syscall: Int) -> Int NativeDebugError! {
+        hint := if self.fix_next > 0 -> self.fix_next else -> (after + NATIVE_FIX_GAP).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
+        loop _ in 0..<NATIVE_FIX_TRIES {
+            saved: self.registers() ?? return Err(err)
+            registers := self.registers() ?? return Err(err)
+            registers[NATIVE_FIX_RAX] = NATIVE_FIX_MMAP
+            registers[X64_TRACE_RDI] = hint
+            registers[X64_TRACE_RSI] = size
+            registers[NATIVE_FIX_RDX] = NATIVE_FIX_PROTECTION
+            registers[NATIVE_FIX_R10] = NATIVE_FIX_FLAGS
+            registers[NATIVE_FIX_R8] = -1
+            registers[NATIVE_FIX_R9] = 0
+            registers[NATIVE_FIX_ORIG_RAX] = -1
+            registers[X64_TRACE_RIP] = syscall
+            if !x64_trace_set_registers(self.trace, registers) {
+                return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+            }
+            event: self.resume(X64TraceResume.Step) ?? return Err(err)
+            if event.kind != NativeStopKind.Paused {
+                return Err(NativeDebugError{detail: "the program ended while `fix` mapped its code"})
+            }
+            mapped: (self.registers() ?? return Err(err))[NATIVE_FIX_RAX]
+            if !x64_trace_set_registers(self.trace, saved) {
+                return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+            }
+            if mapped == hint {
+                self.fix_next = hint + size
+                return Ok(hint)
+            }
+            hint += NATIVE_FIX_GAP
+        }
+        Err(NativeDebugError{detail: "couldn't map the fixed code into the program"})
     }
 
     // Run one run-control command. A step that lands in code without Jet line
@@ -484,6 +876,9 @@ NativeSession: struct {
             "f" | "finish" -> self.step_out() ?? return Err(err)
             else -> self.continue_run() ?? return Err(err)
         }
+        // A write a watch saw in code without Jet lines (the runtime) stops
+        // in the Jet caller, still reported as the watch's stop.
+        watch: if stop.reason.starts_with("watchpoint") -> "{stop.reason}" else -> ""
         depth := 0
         loop stop.kind == NativeStopKind.Paused && !native_debug_stop_in_jet(stop.frame) {
             frames: self.backtrace() ?? return Err(err)
@@ -494,12 +889,402 @@ NativeSession: struct {
             depth += 1
             stop = if caller && depth <= NATIVE_DEBUG_RUNTIME_DEPTH -> self.step_out() ?? return Err(err) else -> self.continue_run() ?? return Err(err)
         }
+        if watch != "" && stop.kind == NativeStopKind.Paused && stop.reason == "step out" {
+            stop.reason = watch
+        }
         Ok(stop)
+    }
+
+    // Run `word` (`c`, `n`, `s` or `f`) and settle where it stops.
+    run: fn(&self, word: String) -> NativeSettled NativeDebugError! {
+        depth: if word == "c" -> 0 else -> self.jet_depth() ?? return Err(err)
+        first: self.advance(word) ?? return Err(err)
+        self.settle(first, word, depth)
+    }
+
+    // The stop to report after `word` (begun `depth` Jet frames deep) first
+    // stopped at `first`. A breakpoint hit that does not stop
+    // (native_debug_holds) runs on: a continue continues, and a step goes on
+    // to where it would have stopped. A step whose skipped hit was in a call
+    // it steps over returns from the call and steps again; a step out
+    // returns until it is out.
+    settle: fn(&self, first: NativeStop, word: String, depth: Int) -> NativeSettled NativeDebugError! {
+        said := [NativeSaid]{}
+        stop := first
+        returning := false
+        loop stop.kind == NativeStopKind.Paused {
+            hit: native_debug_hit_breakpoint(stop)
+            skipped := false
+            if hit == .Val(number) {
+                ruled: if self.rules.get(number) == .Val(rule) -> rule.condition == .Val(_) || rule.log == .Val(_) else -> false
+                stops := true
+                if ruled {
+                    locals: self.locals() ?? return Err(err)
+                    verdict: if self.rules.get(number) == .Val(rule) -> native_debug_holds(rule, locals) else -> {stops: true, category: "", text: ""}
+                    if verdict.category != "" {
+                        output: self.take_output()
+                        if output != "" -> said.push(NativeSaid{category: "stdout", text: output})
+                        said.push(NativeSaid{category: verdict.category, text: verdict.text})
+                    }
+                    stops = verdict.stops
+                }
+                if stops -> return Ok(NativeSettled{stop: stop, hit: hit, said: said})
+                skipped = true
+            }
+            if !skipped && !returning -> return Ok(NativeSettled{stop: stop, hit: None, said: said})
+            next_word := "c"
+            if word != "c" {
+                here: self.jet_depth() ?? return Err(err)
+                if word == "s" || (word == "n" && here <= depth && !returning) || (word == "f" && here < depth) {
+                    // The step ends here, not the breakpoint that ran on.
+                    stop.reason = "step"
+                    return Ok(NativeSettled{stop: stop, hit: None, said: said})
+                }
+                returning = !(word == "n" && here <= depth)
+                next_word = if returning -> "f" else -> "n"
+            }
+            stop = self.advance(next_word) ?? return Err(err)
+        }
+        Ok(NativeSettled{stop: stop, hit: None, said: said})
+    }
+
+    // The Jet frames on the stack.
+    jet_depth: fn(&self) -> Int NativeDebugError! {
+        frames: self.backtrace() ?? return Err(err)
+        count := 0
+        loop frame in frames {
+            if native_debug_jet_frame(frame) -> count += 1
+        }
+        Ok(count)
+    }
+
+    // A breakpoint on `spec`: `12` (a line of `file`), `cart.jet:88`, or a
+    // function's name. Its number and where it is, or -1 and why it can't
+    // be placed.
+    place_spec: fn(&self, spec: String, file: String) -> {number: Int, shown: String} NativeDebugError! {
+        line := Int.parse(spec) ?? -1
+        in_file := "{file}"
+        if line == -1 && spec.contains(":") {
+            in_file = "{spec.before(":")}"
+            line = Int.parse(spec.after(":")) ?? 0
+        }
+        if line == -1 {
+            entry := -1
+            if self.break_in(spec) == {
+                .Ok(found) -> entry = found ?? -1
+                .Err(failure) -> return Err(failure)
+            }
+            if entry == -1 -> return Ok({number: -1, shown: "No function `{spec}`\n"})
+            return Ok({number: entry, shown: "{spec}"})
+        }
+        if line < 1 {
+            return Ok({number: -1, shown: "`{spec}` is not a line, a file:line or a function\n"})
+        }
+        placed := -1
+        if self.break_at(in_file, line) == {
+            .Ok(found) -> placed = found ?? -1
+            .Err(failure) -> return Err(failure)
+        }
+        if placed == -1 -> return Ok({number: -1, shown: "No code on {in_file}:{line}\n"})
+        Ok({number: placed, shown: "{in_file}:{line}"})
+    }
+
+    // `break <line|file:line|function> [if <expr>]`: a breakpoint that stops
+    // when its condition holds.
+    break_command: fn(&self, operand: String, file: String) -> String NativeDebugError! {
+        spec: operand.before(" if ").trim()
+        condition: if operand.contains(" if ") -> operand.after(" if ").trim() else -> ""
+        if spec == "" -> return Ok("Break needs a line, a file:line or a function, as `break 12`\n")
+        rule := native_debug_rule(condition, "", "") ?? return Ok("Can't use the condition: {err.message}\n")
+        placed: self.place_spec(spec, file) ?? return Err(err)
+        if placed.number < 0 -> return Ok(placed.shown)
+        suffix: if condition == "" -> "" else -> " if {condition}"
+        rule.shown = "break {placed.shown}{suffix}"
+        self.set_rule(placed.number, rule)
+        Ok("Breakpoint set  {placed.shown}{suffix}\n{native_debug_condition_place(condition)}")
+    }
+
+    // `log <file:line> "<text with {expr}>"`: a logpoint, which prints its
+    // message, its `{expr}` parts filled in, and runs on.
+    log_command: fn(&self, operand: String, file: String) -> String NativeDebugError! {
+        quoted: if operand.contains(" ") -> operand.after(" ").trim() else -> ""
+        bytes: quoted.bytes()
+        if bytes.len() < 2 || !quoted.starts_with("\"") || !quoted.ends_with("\"") {
+            return Ok("Log needs a line and a quoted message, as `log cart.jet:90 \"total={{total}}\"`\n")
+        }
+        message: String.from_bytes(bytes[1..<bytes.len() - 1]) ?? ""
+        rule := native_debug_rule("", message, "") ?? return Ok("Can't use the message: {err.message}\n")
+        placed: self.place_spec(operand.before(" "), file) ?? return Err(err)
+        if placed.number < 0 -> return Ok(placed.shown)
+        rule.shown = "log {placed.shown} {quoted}"
+        self.set_rule(placed.number, rule)
+        Ok("Logpoint set  {placed.shown} {quoted}\n")
+    }
+
+    // `watch <place>`: stop at each write that changes `place`, a local of
+    // the selected frame or a field path under it (`order.total`), and show
+    // its old and new values. The CPU's debug registers trap the write, so
+    // the program runs at full speed until then, and a write that leaves
+    // the value as it was runs on. A local held in a register is followed
+    // by stepping its frame's own code instead (watch_steps).
+    watch_command: fn(&self, operand: String) -> String NativeDebugError! {
+        if operand == "" -> return Ok("Watch needs a local or a field path, as `watch total`\n")
+        self.ready() ?? return Err(err)
+        frames: self.unwind() ?? return Err(err)
+        if frames.len() == 0 -> return Ok("No frame to watch in\n")
+        levels: native_levels(self.image, frames)
+        level: if self.selected < levels.len() -> levels[self.selected] else -> levels[0]
+        frame: frames[level.frame]
+        memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
+        place: native_watch_place(self.image, memory, frame, native_lookup(level.frame, frame.pc), level.site, operand)
+        if place.refusal != "" -> return Ok("{place.refusal}\n")
+        size: native_type_size(self.image, place.ty)
+        if size <= 0 -> return Ok("`{operand}` has no bytes to watch\n")
+        if place.register >= 0 {
+            loop watch in self.watches {
+                if watch.register >= 0 {
+                    return Ok("`{operand}` is held in a register, which a watch follows by stepping its frame, and watch {watch.number} already does; `delete` it first\n")
+                }
+            }
+            held: native_low_bytes(frame.registers[place.register], if size < 8 -> size else -> 8)
+            shown: native_render(self.image, memory, place.ty, held, 0, 0) ?? NATIVE_DEBUG_UNAVAILABLE
+            self.numbered += 1
+            self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: 0, ty: place.ty, spans: [NativeWatchSpan]{}, thread: self.trace.thread, cfa: frame.cfa, bytes: held, register: place.register, ranges: place.ranges})
+            return Ok("Watchpoint {self.numbered}  {operand} = {shown}\n")
+        }
+        bytes: native_debug_bytes(memory, place.address, size) ?? return Ok("`{operand}` can't be read here\n")
+        spans := native_watch_spans(place.address, size)
+        free := [Int]{}
+        loop slot in 0..<NATIVE_DEBUG_WATCH_SLOTS {
+            held := false
+            loop watch in self.watches {
+                loop span in watch.spans {
+                    if span.slot == slot -> held = true
+                }
+            }
+            if !held -> free.push(slot)
+        }
+        if spans.len() > free.len() {
+            return Ok("`{operand}` needs {spans.len()} of the CPU's {NATIVE_DEBUG_WATCH_SLOTS} debug registers and {free.len()} are free; `delete` a watch first\n")
+        }
+        loop k in 0..<spans.len() {
+            spans[k].slot = free[k]
+            if !self.set_debug_register(free[k], spans[k].address) {
+                return Err(NativeDebugError{detail: "couldn't set a debug register of the program"})
+            }
+        }
+        shown: native_render(self.image, memory, place.ty, bytes, 0, 0) ?? NATIVE_DEBUG_UNAVAILABLE
+        self.numbered += 1
+        self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: place.address, ty: place.ty, spans: spans, thread: self.trace.thread, cfa: frame.cfa, bytes: bytes, register: -1, ranges: [NativeRange]{}})
+        if !self.set_debug_register(7, native_watch_control(self.watches)) {
+            return Err(NativeDebugError{detail: "couldn't set the program's debug control register"})
+        }
+        Ok("Watchpoint {self.numbered}  {operand} = {shown}\n")
+    }
+
+    // After a SIGTRAP: whether a watch's debug register trapped a write, and
+    // the number of the watch whose bytes the write changed (0: none did).
+    // The status register is cleared for the next trap. A watch whose frame
+    // has returned is dropped, with a note for the next report.
+    watch_fired: fn(&self) -> {fired: Bool, number: Int} NativeDebugError! {
+        status: x64_trace_debug_register(self.trace, 6) ?? return Err(NativeDebugError{detail: "couldn't read the program's debug status register"})
+        if status & NATIVE_DEBUG_WATCH_HITS == 0 -> return Ok({fired: false, number: 0})
+        if !x64_trace_set_debug_register(self.trace, 6, 0) {
+            return Err(NativeDebugError{detail: "couldn't clear the program's debug status register"})
+        }
+        memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
+        loop index in 0..<self.watches.len() {
+            hit := false
+            loop span in self.watches[index].spans {
+                if status & (1 << span.slot) != 0 -> hit = true
+            }
+            if !hit -> next
+            bytes: native_debug_bytes(memory, self.watches[index].address, self.watches[index].bytes.len()) ?? next
+            if bytes == self.watches[index].bytes -> next
+            live: self.frame_live(self.watches[index].thread, self.watches[index].cfa) ?? return Err(err)
+            if !live {
+                self.end_watch(index) ?? return Err(err)
+                return Ok({fired: true, number: 0})
+            }
+            return Ok({fired: true, number: self.watch_changed(index, bytes)})
+        }
+        Ok({fired: true, number: 0})
+    }
+
+    // Watch `index` now holds `bytes`: the change for the report, and the
+    // watch's number.
+    watch_changed: fn(&self, index: Int, bytes: [U8]) -> Int Never! {
+        memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
+        old: native_render(self.image, memory, self.watches[index].ty, self.watches[index].bytes, 0, 0) ?? NATIVE_DEBUG_UNAVAILABLE
+        new: native_render(self.image, memory, self.watches[index].ty, bytes, 0, 0) ?? NATIVE_DEBUG_UNAVAILABLE
+        self.watched = "{self.watches[index].shown}: {old} -> {new}"
+        self.watches[index].bytes = bytes
+        self.watches[index].number
+    }
+
+    // Drop watch `index`, whose frame has returned, with a note for the
+    // next report.
+    end_watch: fn(&self, index: Int) NativeDebugError! {
+        number: self.watches[index].number
+        self.notes = "{self.notes}Watch {number} on `{self.watches[index].shown}` ended: its frame returned\n"
+        self.unwatch(number)
+    }
+
+    // Run on as resume does with watch `index` on a local held in a
+    // register: its frame's own code runs one instruction at a time, its
+    // register compared after each where the local is in it; a call runs
+    // at full speed back to its return, since the callee restores the
+    // callee-saved register the local is held in. Ends as resume ends: an
+    // executed trap byte (its pc past it), a watch's change (`code`), or
+    // the program's end; when the frame returns, the watch ends and the
+    // program runs on as resume runs it.
+    watch_steps: fn(&self, index: Int) -> NativeEvent NativeDebugError! {
+        cfa: self.watches[index].cfa
+        frames: self.unwind() ?? return Err(err)
+        at: loop (level, frame) in frames {
+            if frame.cfa == cfa {
+                break level
+            }
+        } ?? -1
+        if at < 0 {
+            self.end_watch(index) ?? return Err(err)
+            return self.go_free(X64TraceResume.Run)
+        }
+        if at > 0 {
+            back := NativeEvent?{None}
+            if self.run_free_to(frames[at].pc, frames[at - 1].cfa) == {
+                .Ok(found) -> back = found
+                .Err(failure) -> return Err(failure)
+            }
+            if back == .Val(event) -> return Ok(event)
+        }
+        registers := self.registers() ?? return Err(err)
+        loop {
+            before: registers
+            event: self.go_free(X64TraceResume.Step) ?? return Err(err)
+            if event.ends_run() -> return Ok(event)
+            registers = self.registers() ?? return Err(err)
+            pc := registers[X64_TRACE_RIP]
+            if registers[X64_TRACE_RSP] == before[X64_TRACE_RSP] - 8 {
+                pushed: native_debug_word(self.trace, registers[X64_TRACE_RSP]) ?? 0
+                from: before[X64_TRACE_RIP]
+                if pushed > from && pushed <= from + NATIVE_DEBUG_LONGEST_CALL && pc != pushed {
+                    back := NativeEvent?{None}
+                    if self.run_free_to(pushed, registers[X64_TRACE_RSP] + 8) == {
+                        .Ok(found) -> back = found
+                        .Err(failure) -> return Err(failure)
+                    }
+                    if back == .Val(called) -> return Ok(called)
+                    registers = self.registers() ?? return Err(err)
+                    pc = registers[X64_TRACE_RIP]
+                }
+            }
+            if registers[X64_TRACE_RSP] >= cfa {
+                self.end_watch(index) ?? return Err(err)
+                if self.has_site(pc) -> return self.resume(X64TraceResume.Step)
+                return self.go_free(X64TraceResume.Run)
+            }
+            covered := false
+            loop range in self.watches[index].ranges {
+                if pc >= range.start && pc < range.end -> covered = true
+            }
+            if covered {
+                held: native_low_bytes(registers[self.watches[index].register], self.watches[index].bytes.len())
+                if held != self.watches[index].bytes {
+                    return Ok(NativeEvent{kind: NativeStopKind.Paused, code: self.watch_changed(index, held)})
+                }
+            }
+            // A trap byte the step reached runs, so the stop is a trap's.
+            if self.has_site(pc) -> return self.resume(X64TraceResume.Step)
+        }
+    }
+
+    // Run at full speed until the frame whose canonical frame address is
+    // `cfa` returns to `address`, through a temporary trap there: None when
+    // it has, the pc back on `address`; else the event that ended the run
+    // first, as resume gives it.
+    run_free_to: fn(&self, address: Int, cfa: Int) -> NativeEvent? NativeDebugError! {
+        temporary: !self.has_site(address)
+        if temporary && !self.plant(address) {
+            return Err(NativeDebugError{detail: "couldn't write a breakpoint at {native_debug_hex(address)}"})
+        }
+        loop {
+            event: self.go_free(X64TraceResume.Run) ?? return Err(err)
+            if event.ends_run() {
+                if temporary && self.alive() -> self.lift(address)
+                return Ok(Val(event))
+            }
+            registers := self.registers() ?? return Err(err)
+            at: registers[X64_TRACE_RIP] - 1
+            if at != address || !temporary {
+                if temporary -> self.lift(address)
+                return Ok(Val(event))
+            }
+            // The temporary trap: rewound, it is the return, or a deeper
+            // call of the same code passing it.
+            registers[X64_TRACE_RIP] = at
+            if !x64_trace_set_registers(self.trace, registers) {
+                return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+            }
+            if registers[X64_TRACE_RSP] == cfa {
+                self.lift(address)
+                return Ok(None)
+            }
+        }
+    }
+
+    // Whether the frame of thread `thread` whose canonical frame address is
+    // `cfa` is still on its stack.
+    frame_live: fn(&self, thread: Int, cfa: Int) -> Bool NativeDebugError! {
+        if self.thread_row(thread) < 0 -> return Ok(false)
+        current: self.trace.thread
+        self.trace.thread = thread
+        found: x64_trace_registers(self.trace)
+        self.trace.thread = current
+        registers: found ?? return Err(NativeDebugError{detail: "couldn't read the program's registers"})
+        frames: self.unwind_from(registers) ?? return Err(err)
+        loop frame in frames {
+            if frame.cfa == cfa -> return Ok(true)
+        }
+        Ok(false)
+    }
+
+    // `frame <n>`, `up` and `down`: select a Jet frame as `bt` numbers them
+    // (#0 innermost, `up` toward the callers), and show it; `locals` and
+    // `print` read the selected frame until the program moves.
+    frame_command: fn(&self, word: String, operand: String, file: String, lines: [String]) -> String NativeDebugError! {
+        frames: self.backtrace() ?? return Err(err)
+        current := 0
+        loop (level, frame) in frames {
+            if level >= self.selected -> break
+            if native_debug_jet_frame(frame) -> current += 1
+        }
+        wanted: if word == {
+            "up" -> current + 1
+            "down" -> current - 1
+            else -> Int.parse(operand) ?? -1
+        }
+        seen := 0
+        loop (level, frame) in frames {
+            if !native_debug_jet_frame(frame) -> next
+            if seen == wanted {
+                _: self.select_frame(level) ?? return Err(err)
+                source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
+                locals: self.locals() ?? return Err(err)
+                return Ok("#{wanted}  {frame.function}()  at {frame.file}:{frame.line}\n{frame.line} | {source}\n{native_debug_locals_line(locals)}\n")
+            }
+            seen += 1
+        }
+        if word == "frame" {
+            return Ok("Frame needs a frame number `bt` shows, 0 to {seen - 1}, as `frame 1`\n")
+        }
+        Ok("No frame {if word == "up" -> "above" else -> "below"} #{current}\n")
     }
 
     // The program's new output, then where `stop` left it.
     report: fn(&self, stop: NativeStop, file: String, lines: [String]) -> String NativeDebugError! {
-        text := self.take_output()
+        text := "{self.take_output()}{self.notes}"
+        self.notes = ""
         if stop.kind == {
             .Exited -> {
                 text = "{text}{if stop.code == 0 -> "Program finished" else -> "Program finished with exit status {stop.code}"}\n"
@@ -509,6 +1294,9 @@ NativeSession: struct {
                 frame: stop.frame ?? NativeFrame{function: "?", file: "", line: 0, inlined: false}
                 if stop.reason.starts_with("breakpoint") {
                     text = "{text}{NATIVE_DEBUG_BREAKPOINT_HIT}  {frame.file}:{frame.line}  in {frame.function}()\n"
+                }
+                if stop.reason.starts_with("watchpoint ") {
+                    text = "{text}Watchpoint {stop.reason.after("watchpoint ")} hit  {frame.file}:{frame.line}  in {frame.function}()\n{self.watched}\n"
                 }
                 source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
                 locals: self.locals() ?? return Err(err)
@@ -552,10 +1340,20 @@ NativeSession: struct {
         }
     }
 
-    // The stopped program's registers.
+    // The stopped program's registers, or the dump's selected task's.
     registers: fn(self) -> [Int] NativeDebugError! {
+        if self.dump == .Val(dumped) -> return Ok(native_dump_registers(dumped, self.task))
         registers: x64_trace_registers(self.trace) ?? return Err(NativeDebugError{detail: "couldn't read the program's registers"})
         Ok(registers)
+    }
+
+    // The word of the stopped program, or of the dump, at `address`.
+    word: fn(self, address: Int) -> Int? Never! {
+        if self.dump == .Val(dumped) {
+            read: native_debug_read(dumped.memory, address, 8, 1) ?? return None
+            return Val(read[0])
+        }
+        native_debug_word(self.trace, address)
     }
 
     // Write a trap byte at `address`, unless one is there; false when the
@@ -618,8 +1416,11 @@ NativeSession: struct {
     }
 
     // `count` bytes of the program's code from `address`, as the image has
-    // them: the bytes under trap bytes put back.
+    // them: the bytes under trap bytes put back. A dump's are its image's.
     code: fn(self, address: Int, count: Int) -> [U8] Never! {
+        if self.dump == .Val(dumped) {
+            return native_debug_bytes(dumped.memory, address, count) ?? [U8]{}
+        }
         bytes := x64_trace_read(self.trace, address, count) ?? [U8]{}
         loop site in self.sites {
             at: site.address - address
@@ -628,9 +1429,34 @@ NativeSession: struct {
         bytes
     }
 
+    // Let the program go on as `how` says; a run with a watch on a local
+    // held in a register follows it (watch_steps), on the local's thread:
+    // this thread is stepped off a trap byte at its pc first.
+    go: fn(&self, how: X64TraceResume) -> NativeEvent NativeDebugError! {
+        if how == X64TraceResume.Run {
+            loop (index, watch) in self.watches {
+                if watch.register < 0 -> next
+                if watch.thread != self.trace.thread {
+                    if self.thread_row(watch.thread) < 0 {
+                        self.end_watch(index) ?? return Err(err)
+                        break
+                    }
+                    registers: self.registers() ?? return Err(err)
+                    if self.has_site(registers[X64_TRACE_RIP]) {
+                        stepped: self.go_free(X64TraceResume.Step) ?? return Err(err)
+                        if stepped.ends_run() -> return Ok(stepped)
+                    }
+                    self.trace.thread = watch.thread
+                }
+                return self.watch_steps(index)
+            }
+        }
+        self.go_free(how)
+    }
+
     // Let the program go on as `how` says, off a trap byte at its pc first:
     // the byte is put back for one instruction, then trapped again.
-    go: fn(&self, how: X64TraceResume) -> NativeEvent NativeDebugError! {
+    go_free: fn(&self, how: X64TraceResume) -> NativeEvent NativeDebugError! {
         self.selected = 0
         registers: self.registers() ?? return Err(err)
         pc: registers[X64_TRACE_RIP]
@@ -647,55 +1473,261 @@ NativeSession: struct {
             if x64_trace_peek(self.trace, pc) == .Val(word) {
                 _ := x64_trace_poke(self.trace, pc, word & I64{-256} | I64{NATIVE_DEBUG_TRAP})
             }
-            if how == X64TraceResume.Step -> return Ok(stepped)
+            if how == X64TraceResume.Step || stepped.code > 0 -> return Ok(stepped)
         }
         self.resume(how)
     }
 
-    // Resume the program as `how` says until it traps or ends; any other
-    // signal goes on to the program, as it would untraced.
+    // Resume the program as `how` says: the stopped thread, and on a run
+    // every other thread too; a step moves the stopped thread alone.
     resume: fn(&self, how: X64TraceResume) -> NativeEvent NativeDebugError! {
-        signal := 0
+        self.resume_threads(how, every: how == X64TraceResume.Run)
+    }
+
+    // Resume the current thread as `how` says, and with `every` the
+    // program's other threads too, until a thread traps or the program
+    // ends. The trapping thread becomes the current one and every other
+    // stops again (halt): all-stop, so a stop sees the whole program still.
+    // Any other signal goes on to its thread, as it would untraced; a
+    // thread the program starts runs when `every` does. A watch's trap on a
+    // write that left its bytes as they were runs on.
+    resume_threads: fn(&self, how: X64TraceResume, every: Bool{true}) -> NativeEvent NativeDebugError! {
+        going := every
+        row: self.thread_row(self.trace.thread)
+        if row < 0 || !self.let_go(row, how) {
+            return Err(NativeDebugError{detail: "the program can't be resumed"})
+        }
+        if going -> self.let_all_go()
         loop {
-            if !x64_trace_resume(self.trace, how, signal) {
-                return Err(NativeDebugError{detail: "the program can't be resumed"})
+            stop: x64_trace_wait(self.trace)
+            if stop.thread < 0 {
+                return Err(NativeDebugError{detail: "waiting for the program failed (errno {-stop.thread})"})
             }
-            status: x64_trace_wait(self.trace)
-            if status < 0 {
-                return Err(NativeDebugError{detail: "waiting for the program failed (errno {-status})"})
-            }
-            if status & 0x7f == 0 {
-                self.ended()
-                return Ok(NativeEvent{kind: NativeStopKind.Exited, code: (status >> 8) & 0xff})
-            }
+            status: stop.status
+            at: self.thread_row(stop.thread)
             if status & 0xff != 0x7f {
-                self.ended()
-                return Ok(NativeEvent{kind: NativeStopKind.Signaled, code: status & 0x7f})
+                if stop.thread == self.trace.pid -> return Ok(self.finished(status))
+                if at >= 0 -> _ := self.threads.remove(at, .Slot)
+                // A stepped thread that ended leaves the others to run.
+                if stop.thread == self.trace.thread {
+                    self.trace.thread = self.trace.pid
+                    if !going {
+                        going = true
+                        self.let_all_go()
+                    }
+                }
+                next
             }
-            stopped: (status >> 8) & 0xff
-            if stopped == NATIVE_DEBUG_SIGTRAP {
-                return Ok(NativeEvent{kind: NativeStopKind.Paused, code: 0})
+            signal: (status >> 8) & 0xff
+            if at < 0 {
+                // A thread the program started, stopped before its first
+                // instruction.
+                self.threads.push(NativeThread{id: stop.thread, running: false, halting: false, signal: if signal == NATIVE_DEBUG_SIGSTOP -> 0 else -> signal})
+                self.arm(self.threads.len() - 1) ?? return Err(err)
+                if going -> _ := self.let_go(self.threads.len() - 1, X64TraceResume.Run)
+                next
+            }
+            self.threads[at].running = false
+            mine: stop.thread == self.trace.thread
+            mode: if mine -> how else -> X64TraceResume.Run
+            // A clone event (the thread it started reports itself), or the
+            // SIGSTOP of an earlier halt arriving.
+            cloned: (status >> 16) == X64_TRACE_EVENT_CLONE
+            halted: signal == NATIVE_DEBUG_SIGSTOP && self.threads[at].halting
+            if cloned || halted {
+                if halted -> self.threads[at].halting = false
+                if mine || going -> _ := self.let_go(at, mode)
+                next
+            }
+            if signal == NATIVE_DEBUG_SIGTRAP {
+                stepping: self.trace.thread
+                self.trace.thread = stop.thread
+                code := 0
+                if self.watches.len() > 0 {
+                    fired: self.watch_fired() ?? return Err(err)
+                    if fired.number == 0 && fired.fired && !(mine && how == X64TraceResume.Step) {
+                        self.trace.thread = stepping
+                        _ := self.let_go(at, mode)
+                        next
+                    }
+                    code = fired.number
+                }
+                if self.halt() == {
+                    .Ok(ended) -> {
+                        if ended == .Val(event) -> return Ok(event)
+                    }
+                    .Err(failure) -> return Err(failure)
+                }
+                return Ok(NativeEvent{kind: NativeStopKind.Paused, code: code})
             }
             // A stop signal stops the program for its tracer alone.
-            signal = if stopped == NATIVE_DEBUG_SIGSTOP -> 0 else -> stopped
+            self.threads[at].signal = if signal == NATIVE_DEBUG_SIGSTOP -> 0 else -> signal
+            if mine || going -> _ := self.let_go(at, mode)
         }
     }
 
-    // The program is gone: its pid is reaped.
+    // The row of thread `id` in `threads`; -1 when it is not traced.
+    thread_row: fn(self, id: Int) -> Int Never! {
+        loop (row, thread) in self.threads {
+            if thread.id == id -> return row
+        }
+        -1
+    }
+
+    // Let thread `row` go on as `how` says, with the signal it holds; false
+    // when the kernel refused (it has ended, as its next wait says).
+    let_go: fn(&self, row: Int, how: X64TraceResume) -> Bool Never! {
+        current: self.trace.thread
+        self.trace.thread = self.threads[row].id
+        going: x64_trace_resume(self.trace, how, self.threads[row].signal)
+        self.trace.thread = current
+        self.threads[row].signal = 0
+        self.threads[row].running = going
+        going
+    }
+
+    // Let every stopped thread run.
+    let_all_go: fn(&self) Never! {
+        loop row in 0..<self.threads.len() {
+            if !self.threads[row].running -> _ := self.let_go(row, X64TraceResume.Run)
+        }
+    }
+
+    // Stop every running thread for the current thread's stop: each gets a
+    // SIGSTOP and is waited for. A thread that trapped meanwhile on a trap
+    // byte is rewound onto it, to trap again when it next runs; any other
+    // signal waits for its next run. The program's end when it ended
+    // meanwhile.
+    halt: fn(&self) -> NativeEvent? NativeDebugError! {
+        loop row in 0..<self.threads.len() {
+            if self.threads[row].running && !self.threads[row].halting {
+                self.threads[row].halting = x64_trace_stop(self.trace, self.threads[row].id)
+            }
+        }
+        loop {
+            waiting := false
+            loop thread in self.threads {
+                if thread.running -> waiting = true
+            }
+            if !waiting -> return Ok(None)
+            stop: x64_trace_wait(self.trace)
+            if stop.thread < 0 {
+                return Err(NativeDebugError{detail: "waiting for the program failed (errno {-stop.thread})"})
+            }
+            status: stop.status
+            at: self.thread_row(stop.thread)
+            if status & 0xff != 0x7f {
+                if stop.thread == self.trace.pid -> return Ok(Val(self.finished(status)))
+                if at >= 0 -> _ := self.threads.remove(at, .Slot)
+                next
+            }
+            signal: (status >> 8) & 0xff
+            if at < 0 {
+                self.threads.push(NativeThread{id: stop.thread, running: false, halting: false, signal: if signal == NATIVE_DEBUG_SIGSTOP -> 0 else -> signal})
+                self.arm(self.threads.len() - 1) ?? return Err(err)
+                next
+            }
+            self.threads[at].running = false
+            // A clone event leaves the SIGSTOP still to come.
+            if (status >> 16) == X64_TRACE_EVENT_CLONE -> next
+            if signal == NATIVE_DEBUG_SIGSTOP {
+                self.threads[at].halting = false
+                next
+            }
+            if signal == NATIVE_DEBUG_SIGTRAP {
+                self.rewind(stop.thread) ?? return Err(err)
+                next
+            }
+            self.threads[at].signal = signal
+        }
+    }
+
+    // Thread `id`, stopped by a trap byte it ran, back on that byte.
+    rewind: fn(&self, id: Int) NativeDebugError! {
+        current: self.trace.thread
+        self.trace.thread = id
+        registers := x64_trace_registers(self.trace) ?? [Int]{}
+        pc: if registers.len() > 0 -> registers[X64_TRACE_RIP] - 1 else -> 0
+        if registers.len() > 0 && self.has_site(pc) {
+            registers[X64_TRACE_RIP] = pc
+            if !x64_trace_set_registers(self.trace, registers) {
+                self.trace.thread = current
+                return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+            }
+        }
+        self.trace.thread = current
+        Ok()
+    }
+
+    // Give thread `row`, new to the program, the watches' debug registers,
+    // as every thread has them.
+    arm: fn(&self, row: Int) NativeDebugError! {
+        if self.watches.len() == 0 -> return Ok()
+        current: self.trace.thread
+        self.trace.thread = self.threads[row].id
+        armed := true
+        loop watch in self.watches {
+            loop span in watch.spans {
+                if !x64_trace_set_debug_register(self.trace, span.slot, span.address) {
+                    armed = false
+                }
+            }
+        }
+        if !x64_trace_set_debug_register(self.trace, 7, native_watch_control(self.watches)) {
+            armed = false
+        }
+        self.trace.thread = current
+        if !armed {
+            return Err(NativeDebugError{detail: "couldn't set a debug register of a new thread"})
+        }
+        Ok()
+    }
+
+    // Set debug register `index` of every thread to `value`; false when the
+    // kernel refused one.
+    set_debug_register: fn(&self, index: Int, value: Int) -> Bool Never! {
+        current: self.trace.thread
+        set := true
+        loop thread in self.threads {
+            self.trace.thread = thread.id
+            if !x64_trace_set_debug_register(self.trace, index, value) -> set = false
+        }
+        self.trace.thread = current
+        set
+    }
+
+    // The program's end, reaped (its wait status `status`): its exit
+    // status, or the signal that killed it.
+    finished: fn(&self, status: Int) -> NativeEvent Never! {
+        self.ended()
+        if status & 0x7f == 0 {
+            return NativeEvent{kind: NativeStopKind.Exited, code: (status >> 8) & 0xff}
+        }
+        NativeEvent{kind: NativeStopKind.Signaled, code: status & 0x7f}
+    }
+
+    // The program is gone: its pid is reaped, and its threads, traps and
+    // watches go with it.
     ended: fn(&self) Never! {
         self.trace.pid = -1
         x64_trace_close(self.trace)
+        self.threads = [NativeThread]{}
         self.sites = [NativeSite]{}
+        self.watches = [NativeWatch]{}
     }
 
-    // The stop `event` is: a trap byte's breakpoint, rewinding the pc onto
-    // it, a trap the program made itself, or its end.
+    // The stop `event` is: a write a watch saw, a trap byte's breakpoint,
+    // rewinding the pc onto it, a trap the program made itself, or its end.
     stopped: fn(&self, event: NativeEvent) -> NativeStop NativeDebugError! {
         if event.kind == {
             .Exited -> Ok(NativeStop{kind: NativeStopKind.Exited, reason: "exited", code: event.code, frame: None})
             .Signaled -> Ok(NativeStop{kind: NativeStopKind.Signaled, reason: native_debug_signal_name(event.code), code: -1, frame: None})
             .Paused -> {
                 registers := self.registers() ?? return Err(err)
+                // The trap comes after the write: its line holds pc - 1.
+                if event.code > 0 {
+                    return Ok(NativeStop{kind: NativeStopKind.Paused, reason: "watchpoint {event.code}", code: 0, frame: Val(native_frames_at(self.image, registers[X64_TRACE_RIP] - 1)[0])})
+                }
                 at: registers[X64_TRACE_RIP] - 1
                 if !self.has_site(at) -> return self.paused("signal SIGTRAP")
                 registers[X64_TRACE_RIP] = at
@@ -725,7 +1757,8 @@ NativeSession: struct {
         }
         loop {
             event: self.go(X64TraceResume.Run) ?? return Err(err)
-            if event.kind != NativeStopKind.Paused {
+            if event.ends_run() {
+                if temporary && self.alive() -> self.lift(address)
                 return Ok(NativeReturn.Stopped{stop: self.stopped(event) ?? return Err(err)})
             }
             registers := self.registers() ?? return Err(err)
@@ -768,13 +1801,12 @@ NativeSession: struct {
         function: x64_jetline_find(self.image.lines, start)
         if function < 0 -> return self.step_out()
         line: x64_jetline_line(self.image.lines, self.image.lines.functions[function], start) ?? 0
-        low_start: self.image.lines.functions[function].low
-        base: native_frame_base(self.code(low_start, NATIVE_DEBUG_PROLOGUE), low_start, registers, start, self.code(start, 1))
+        base: native_frame_base(self.openings, function, registers, start, self.code(start, 1))
         if calls == NativeStepCalls.Over -> return self.line_over(function, line, base, reason)
         loop _ in 0..<NATIVE_DEBUG_MOST_STEPS {
             before: registers
             event: self.go(X64TraceResume.Step) ?? return Err(err)
-            if event.kind != NativeStopKind.Paused -> return self.stopped(event)
+            if event.ends_run() -> return self.stopped(event)
             registers = self.registers() ?? return Err(err)
             pc := registers[X64_TRACE_RIP]
             if registers[X64_TRACE_RSP] == before[X64_TRACE_RSP] - 8 {
@@ -795,10 +1827,9 @@ NativeSession: struct {
                 if registers[X64_TRACE_RSP] >= base -> return self.paused(reason)
                 next
             }
-            low: self.image.lines.functions[here].low
-            frame: native_frame_base(self.code(low, NATIVE_DEBUG_PROLOGUE), low, registers, pc, self.code(pc, 1))
+            frame: native_frame_base(self.openings, here, registers, pc, self.code(pc, 1))
             if frame > base -> return self.paused(reason)
-            if pc == low || !native_row_start(self.image, here, pc) -> next
+            if pc == self.openings[here].at || !native_row_start(self.image, here, pc) -> next
             if frame < base -> return self.paused(reason)
             if (x64_jetline_line(self.image.lines, self.image.lines.functions[here], pc) ?? 0) != line {
                 return self.paused(reason)
@@ -855,16 +1886,17 @@ NativeSession: struct {
     // return reached with the frame gone, or a row of this frame on another
     // line. A trap in a deeper call of the same function (recursion) lifts
     // the traps and runs that call out to this frame, so a recursive call
-    // costs two stops, not one per row it runs. A breakpoint, a trap the
-    // program made itself or its end stops the run first.
+    // costs two stops, not one per row it runs; another thread's trap on
+    // them runs on. A breakpoint, a trap the program made itself or its end
+    // stops the run first.
     line_over_run: fn(&self, index: Int, line: Int, base: Int, returned: Int, owned: [Int], reason: String) -> NativeStop NativeDebugError! {
         low: self.image.lines.functions[index].low
         high: self.image.lines.functions[index].high
-        prologue: self.code(low, NATIVE_DEBUG_PROLOGUE)
+        stepping: self.trace.thread
         self.plant_owned(owned) ?? return Err(err)
         loop {
             event: self.go(X64TraceResume.Run) ?? return Err(err)
-            if event.kind != NativeStopKind.Paused -> return self.stopped(event)
+            if event.ends_run() -> return self.stopped(event)
             registers := self.registers() ?? return Err(err)
             at: registers[X64_TRACE_RIP] - 1
             if !self.has_site(at) -> return self.paused("signal SIGTRAP")
@@ -873,9 +1905,10 @@ NativeSession: struct {
                 return Err(NativeDebugError{detail: "couldn't set the program's registers"})
             }
             if self.breakpoint_at(at) == .Val(number) -> return self.paused("breakpoint {number}.1")
+            if self.trace.thread != stepping -> next
             if at == returned && registers[X64_TRACE_RSP] >= base -> return self.paused(reason)
             if at < low || at >= high -> next
-            frame: native_frame_base(prologue, low, registers, at, self.code(at, 1))
+            frame: native_frame_base(self.openings, index, registers, at, self.code(at, 1))
             if frame > base -> return self.paused(reason)
             if frame < base {
                 self.lift_owned(owned)
@@ -907,30 +1940,38 @@ NativeSession: struct {
         Ok(NativeReturn.Returned)
     }
 
-    // The stack's frames, innermost first, unwound through the prologue each
-    // Jet function opens with (`push rbp; mov rbp, rsp`, then a push of each
-    // callee-saved register it uses) and the frame-pointer chain elsewhere.
+    // The current thread's frames, innermost first (unwind_from).
     unwind: fn(self) -> [NativeUnwound] NativeDebugError! {
-        registers := self.registers() ?? return Err(err)
+        registers: self.registers() ?? return Err(err)
+        self.unwind_from(registers)
+    }
+
+    // The frames of a stack whose innermost registers are `start`,
+    // innermost first, unwound through the prologue each Jet function opens
+    // with (`push rbp; mov rbp, rsp`, then a push of each callee-saved
+    // register it uses) and the frame-pointer chain elsewhere.
+    unwind_from: fn(self, start: [Int]) -> [NativeUnwound] NativeDebugError! {
+        registers := loop value in start -> value
         known := loop _ in 0..<registers.len() -> true
         frames := [NativeUnwound]{}
         loop frames.len() < NATIVE_DEBUG_MOST_FRAMES {
             pc: registers[X64_TRACE_RIP]
             lookup: if frames.len() == 0 -> pc else -> pc - 1
             function: x64_jetline_find(self.image.lines, lookup)
-            low: if function >= 0 -> self.image.lines.functions[function].low else -> -1
-            prologue: if low >= 0 -> self.code(low, NATIVE_DEBUG_PROLOGUE) else -> [U8]{}
-            cfa: native_frame_base(prologue, low, registers, pc, self.code(pc, 1))
+            here: self.code(pc, 1)
+            cfa: native_frame_base(self.openings, function, registers, pc, here)
             frames.push(NativeUnwound{pc: pc, cfa: cfa, registers: registers.copy(), known: known.copy()})
             if cfa <= registers[X64_TRACE_RSP] -> break
-            returned: native_debug_word(self.trace, cfa - 8) ?? break
+            returned: self.word(cfa - 8) ?? break
             if returned <= 0 -> break
-            caller_rbp: native_caller_rbp(prologue, low, registers, self.trace, pc, self.code(pc, 1)) ?? break
+            rsp_word: self.word(registers[X64_TRACE_RSP])
+            rbp_word: if registers[X64_TRACE_RBP] > 0 -> self.word(registers[X64_TRACE_RBP]) else -> Int?{None}
+            caller_rbp: native_caller_rbp(self.openings, function, registers, pc, here, rsp_word, rbp_word) ?? break
             next_known := loop _ in 0..<registers.len() -> false
             loop index in NATIVE_DEBUG_CALLEE_SAVED -> next_known[index] = known[index]
-            loop save in native_prologue_saves(prologue, low) {
-                if pc >= save.after && registers[X64_TRACE_RBP] > 0 && low >= 0 && pc != low && pc != low + 1 {
-                    if native_debug_word(self.trace, registers[X64_TRACE_RBP] - 8 * (save.slot + 1)) == .Val(saved) {
+            loop save in native_prologue_saves(self.openings, function) {
+                if pc >= save.after && registers[X64_TRACE_RBP] > 0 {
+                    if self.word(registers[X64_TRACE_RBP] - 8 * (save.slot + 1)) == .Val(saved) {
                         registers[save.register] = saved
                         next_known[save.register] = true
                     }
@@ -956,6 +1997,13 @@ NativeSession: struct {
 NATIVE_DEBUG_TRAP: 0xcc
 
 NATIVE_DEBUG_SIGTRAP: 5
+
+// The CPU's debug address registers (DR0 to DR3) a watch's spans take.
+NATIVE_DEBUG_WATCH_SLOTS: 4
+
+// The bits of the debug status register (DR6) that say which of DR0 to DR3
+// trapped.
+NATIVE_DEBUG_WATCH_HITS: 15
 
 NATIVE_DEBUG_SIGSTOP: 19
 
@@ -1024,9 +2072,14 @@ native_bytes_at: fn(bytes: [U8], at: Int, want: [U8]) -> Bool Never! {
     true
 }
 
-// The callee-saved registers the prologue pushes after it opens the frame.
-native_prologue_saves: fn(prologue: [U8], low: Int) -> [NativeSave] Never! {
+// The callee-saved registers the prologue of function `function` pushes
+// after it opens the frame (none for code without Jet line information,
+// `function` -1).
+native_prologue_saves: fn(openings: [NativeOpening], function: Int) -> [NativeSave] Never! {
     saves := [NativeSave]{}
+    if function < 0 -> return saves
+    prologue: openings[function].prologue
+    low: openings[function].at
     open: native_frame_open(prologue)
     if open < 0 -> return saves
     at := open + 4
@@ -1050,15 +2103,19 @@ native_prologue_saves: fn(prologue: [U8], low: Int) -> [NativeSave] Never! {
     saves
 }
 
-// The canonical frame address of the frame at `pc` whose function starts at
-// `low` with `prologue` (low -1: code without Jet line information, where
-// the frame pointer chain is trusted); `here` is the code byte at `pc`.
-native_frame_base: fn(prologue: [U8], low: Int, registers: [Int], pc: Int, here: [U8]) -> Int Never! {
+// The canonical frame address of the frame at `pc` in Jet function
+// `function` (-1: code without Jet line information, where the frame
+// pointer chain is trusted); `here` is the code byte at `pc`. Up to where
+// the function opens its frame, a frame-free prefix included, the return
+// address is on top of the stack.
+native_frame_base: fn(openings: [NativeOpening], function: Int, registers: [Int], pc: Int, here: [U8]) -> Int Never! {
     rsp: registers[X64_TRACE_RSP]
     rbp: registers[X64_TRACE_RBP]
-    open: if low >= 0 -> native_frame_open(prologue) else -> -1
+    if function < 0 -> return rbp + 16
+    low: openings[function].at
+    open: native_frame_open(openings[function].prologue)
     if open >= 0 {
-        if pc >= low && pc <= low + open -> return rsp + 8
+        if pc <= low + open -> return rsp + 8
         if pc == low + open + 1 -> return rsp + 16
         if here.len() == 1 && here[0] == (U8{0xc3}) -> return rsp + 8
     }
@@ -1066,18 +2123,66 @@ native_frame_base: fn(prologue: [U8], low: Int, registers: [Int], pc: Int, here:
 }
 
 // The caller's frame pointer, for the frame native_frame_base measured;
-// `here` is the code byte at `pc`.
-native_caller_rbp: fn(prologue: [U8], low: Int, registers: [Int], trace: X64Trace, pc: Int, here: [U8]) -> Int? Never! {
-    rsp: registers[X64_TRACE_RSP]
+// `here` is the code byte at `pc`, `rsp_word` and `rbp_word` the words the
+// stack and frame pointers point at.
+native_caller_rbp: fn(openings: [NativeOpening], function: Int, registers: [Int], pc: Int, here: [U8], rsp_word: Int?, rbp_word: Int?) -> Int? Never! {
     rbp: registers[X64_TRACE_RBP]
-    open: if low >= 0 -> native_frame_open(prologue) else -> -1
+    open: if function >= 0 -> native_frame_open(openings[function].prologue) else -> -1
     if open >= 0 {
-        if pc >= low && pc <= low + open -> return Val(rbp)
-        if pc == low + open + 1 -> return native_debug_word(trace, rsp)
+        low: openings[function].at
+        if pc <= low + open -> return Val(rbp)
+        if pc == low + open + 1 -> return Val(rsp_word ?? return None)
         if here.len() == 1 && here[0] == (U8{0xc3}) -> return Val(rbp)
     }
     if rbp <= 0 -> return None
-    native_debug_word(trace, rbp)
+    Val(rbp_word ?? return None)
+}
+
+// Where a Jet function opens its frame: at `at`, whose code bytes are
+// `prologue`. That is the function's start, or, for a body that starts
+// with a frame-free prefix (JetIR X64Select.jet ir_x64_wrap), the row past
+// the prefix whose code opens the frame; before `at` the function has no
+// frame of its own. A start that opens none and has no such row keeps `at`
+// at the start.
+NativeOpening: struct {
+    at: Int,
+    prologue: [U8],
+}
+
+// The opening of each function of `image`'s line table, read from `code`.
+native_openings: fn(image: NativeImage, code: NativeCode) -> [NativeOpening] Never! {
+    openings := [NativeOpening]{}
+    loop index in 0..<image.lines.functions.len() {
+        openings.push(native_opening(image, index, code))
+    }
+    openings
+}
+
+native_opening: fn(image: NativeImage, index: Int, code: NativeCode) -> NativeOpening Never! {
+    function: image.lines.functions[index]
+    start: native_code_at(code, function.low)
+    if native_frame_open(start) >= 0 -> return NativeOpening{at: function.low, prologue: start}
+    at := function.rows
+    address := function.low
+    loop at < function.rows_end {
+        address += link_debug_uleb(image.lines.table, at)
+        _ := x64_jetline_sleb(image.lines.table, at)
+        if address == function.low -> next
+        bytes: native_code_at(code, address)
+        if native_bytes_at(bytes, 0, [U8]{0x55, 0x48, 0x89, 0xe5}) {
+            return NativeOpening{at: address, prologue: bytes}
+        }
+    }
+    NativeOpening{at: function.low, prologue: start}
+}
+
+// The NATIVE_DEBUG_PROLOGUE bytes of `code` from `address` (fewer at its
+// end, none outside it).
+native_code_at: fn(code: NativeCode, address: Int) -> [U8] Never! {
+    at: address - code.address
+    if at < 0 || at >= code.bytes.len() -> return [U8]{}
+    end: if at + NATIVE_DEBUG_PROLOGUE < code.bytes.len() -> at + NATIVE_DEBUG_PROLOGUE else -> code.bytes.len()
+    code.bytes[at..<end]
 }
 
 // The word of the stopped program at `address`.
@@ -1087,18 +2192,20 @@ native_debug_word: fn(trace: X64Trace, address: Int) -> Int? Never! {
 }
 
 // The addresses of `line` in the Jet source `file` (by base name): in each
-// function with code on it, the first row of the line, else of the nearest
-// later line the function has code on; a row at the function's start moves
-// past its prologue.
+// function, the first row of the line in its own code and in each inlined
+// copy it holds (two instances of a generic module's member inlined into one
+// caller are two copies). A function with no row of the line, but rows on or
+// before it, gives its first row of the nearest later line instead.
 native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] Never! {
     wanted: native_files.basename(file)
     addresses := [Int]{}
-    loop (index, function) in image.lines.functions {
+    loop function in image.lines.functions {
         if native_files.basename(function.file) != wanted -> next
-        exact := -1
+        described: native_function_at(image, function.low)
+        sites := [NativeLineSite]{}
+        covers := false
         nearest := -1
         nearest_line := 0
-        covers := false
         at := function.rows
         address := function.low
         current := 1
@@ -1106,21 +2213,37 @@ native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] 
             address += link_debug_uleb(image.lines.table, at)
             current += x64_jetline_sleb(image.lines.table, at)
             if current <= line -> covers = true
-            if current == line && exact < 0 -> exact = address
             if current > line && (nearest < 0 || current < nearest_line) {
                 nearest = address
                 nearest_line = current
             }
+            if current != line -> next
+            site: native_line_site(described, address)
+            seen := false
+            loop found in sites {
+                if found.site == site -> seen = true
+            }
+            if !seen -> sites.push(NativeLineSite{site: site, address: address})
         }
-        found: if {
-            exact >= 0 -> exact
-            covers -> nearest
-            else -> -1
-        }
-        if found < 0 -> next
-        addresses.push(if found == function.low -> native_body_start(image, index) else -> found)
+        loop found in sites -> addresses.push(found.address)
+        if sites.len() == 0 && covers && nearest >= 0 -> addresses.push(nearest)
     }
     addresses
+}
+
+// The first row of the searched line in one run of code: the function's own
+// code (`site` -1) or one inlined copy (the run's index).
+NativeLineSite: struct {
+    site: Int,
+    address: Int,
+}
+
+// The innermost inlined run of `function` holding `address`; -1 for the
+// function's own code, or without its DWARF facts.
+native_line_site: fn(function: NativeFunction?, address: Int) -> Int Never! {
+    described: function ?? return -1
+    chain: native_inline_chain(described, address)
+    if chain.len() == 0 -> -1 else -> chain[0]
 }
 
 // The first address past function `index`'s prologue: its second row, or
@@ -1287,7 +2410,7 @@ native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
-NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), break N (b N), locals, print NAME (p NAME), backtrace (bt), help (h), quit (q)"
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), tasks, fix, help (h), quit (q)"
 
 // The console's prompt.
 NATIVE_DEBUG_PROMPT: "(Jet) "
@@ -1378,6 +2501,113 @@ native_debug_backtrace: fn(frames: [NativeFrame]) -> String Never! {
     text
 }
 
+// A task the runtime's registry lists (JetRuntime Observe.jet): its id, its
+// label, its state (NATIVE_DEBUG_TASK_RUNNING and the rest; -1 for the main
+// thread's task when the registry has none), what it waits on, whether it
+// is canceled, and the fiber it runs on (0: none).
+NativeTask: struct {
+    id: Int,
+    label: String,
+    state: Int,
+    wait: String,
+    canceled: Bool,
+    fiber: Int,
+}
+
+// A thread of the stopped program as `tasks` matches it to a task: its id,
+// its registers, the fiber it runs (0: none) and the task its current
+// control names (1 for the main thread's control, which names none).
+NativeTaskThread: struct {
+    id: Int,
+    registers: [Int],
+    fiber: Int,
+    task: Int,
+}
+
+// The tasks the runtime's registry lists, newest first, from the address of
+// its root's storage (`root`; 0: the program has none). At most
+// NATIVE_DEBUG_MOST_TASKS, so a list a stopped thread was changing ends.
+native_tasks: fn(memory: NativeMemory, root: Int) -> [NativeTask] Never! {
+    tasks := [NativeTask]{}
+    if root == 0 -> return tasks
+    registry: native_debug_read(memory, root, 8, 1) ?? return tasks
+    if registry[0] == 0 -> return tasks
+    head: native_debug_read(memory, registry[0] + NATIVE_DEBUG_REGISTRY_TASKS, 8, 1) ?? return tasks
+    node := head[0]
+    loop node != 0 && tasks.len() < NATIVE_DEBUG_MOST_TASKS {
+        words: native_debug_read(memory, node, 8, NATIVE_DEBUG_TASK_WORDS) ?? break
+        label: if words[4] == 0 -> "" else -> native_debug_text(words[4], memory, false) ?? ""
+        wait: if words[6] == 0 -> "" else -> native_debug_text(words[6], memory, false) ?? ""
+        tasks.push(NativeTask{id: words[1], label: label, state: words[5], wait: wait, canceled: words[9] != 0, fiber: words[14]})
+        node = words[0]
+    }
+    tasks
+}
+
+// The row in `threads` of the thread task `task` is on: the one running
+// its fiber, or for a task on no fiber the one whose current control names
+// it; -1 for none (a parked or queued task).
+native_task_thread: fn(threads: [NativeTaskThread], task: NativeTask) -> Int Never! {
+    loop (row, thread) in threads {
+        if task.fiber != 0 && thread.fiber == task.fiber -> return row
+        if task.fiber == 0 && thread.fiber == 0 && thread.task == task.id -> return row
+    }
+    -1
+}
+
+// The registers a parked fiber resumes with, from the stack its switch
+// saved at `saved` (JetBackend X64/InlineAsm.jet X64_FIBER_SWITCH): the
+// resume address, then r15, r14, r13, r12, rbx and rbp. The pc is past the
+// switch's pops and the stack above them; `template` gives the rest.
+native_task_registers: fn(template: [Int], memory: NativeMemory, saved: Int) -> [Int]? Never! {
+    words: native_debug_read(memory, saved, 8, NATIVE_DEBUG_FIBER_SAVES.len() + 1) ?? return None
+    registers := loop value in template -> value
+    loop (k, register) in NATIVE_DEBUG_FIBER_SAVES -> registers[register] = words[k + 1]
+    registers[X64_TRACE_RIP] = words[0] + NATIVE_DEBUG_FIBER_POPS
+    registers[X64_TRACE_RSP] = saved + 8 * words.len()
+    Val(registers)
+}
+
+// A task's state as the registry keeps it (JetFoundation LiveSnapshot.jet).
+native_task_state: fn(state: Int) -> String Never! {
+    if state == {
+        0 -> "queued"
+        1 -> "running"
+        2 -> "blocked"
+        3 -> "paused"
+        else -> "state {state}"
+    }
+}
+
+NATIVE_DEBUG_TASK_RUNNING: 1
+
+// The registry's task list head (JetRuntime Observe.jet Root168 tasks24),
+// the words of a task node (Task120) and the most tasks `tasks` reads (the
+// registry's own cap, OBSERVE_TASK_CAP).
+NATIVE_DEBUG_REGISTRY_TASKS: 24
+
+NATIVE_DEBUG_TASK_WORDS: 15
+
+NATIVE_DEBUG_MOST_TASKS: 4096
+
+// A thread's TCB (JetRuntime Thread.jet): its current control at 16, its
+// fiber at 56; a control's task id (Scheduler.jet Control160 observe56).
+NATIVE_DEBUG_TCB_CONTROL: 16
+
+NATIVE_DEBUG_TCB_FIBER: 56
+
+NATIVE_DEBUG_CONTROL_TASK: 56
+
+// A fiber's saved stack pointer (JetRuntime Fiber.jet savedStack8); the
+// registers its switch pushes above the resume address, nearest first, as
+// indices among the trace's registers (r15, r14, r13, r12, rbx, rbp); and
+// the bytes of the switch's pops.
+NATIVE_DEBUG_FIBER_SAVED: 8
+
+NATIVE_DEBUG_FIBER_SAVES: [Int]{0, 1, 2, 3, 5, 4}
+
+NATIVE_DEBUG_FIBER_POPS: 10
+
 // The breakpoint a `breakpoint N.M` stop reason names.
 native_debug_hit_breakpoint: fn(stop: NativeStop) -> Int? Never! {
     if !stop.reason.starts_with("breakpoint ") -> return None
@@ -1385,17 +2615,63 @@ native_debug_hit_breakpoint: fn(stop: NativeStop) -> Int? Never! {
     Val(number)
 }
 
+// A breakpoint's rule: `condition` and the logpoint message `log`, each read
+// by the compiler's parser ("" for none), and its `breaks` listing.
+native_debug_rule: fn(condition: String, log: String, shown: String) -> NativeRule DebugEvaluationError! {
+    parsed_condition: if condition.trim() == "" -> DebugExpression?{None} else -> Val(debug_parse_expression(condition) ?? return Err(err))
+    parsed_log: if log == "" -> DebugExpression?{None} else -> Val(debug_parse_message(log) ?? return Err(err))
+    Ok(NativeRule{condition: parsed_condition, log: parsed_log, shown: shown})
+}
+
+// What setting a breakpoint with `condition` says about where the condition
+// runs ("" for none): the debugger checks it at each hit, so a hit whose
+// condition is false still stops the program for that check.
+native_debug_condition_place: fn(condition: String) -> String Never! {
+    if condition.trim() == "" -> return ""
+    "The condition can't run in the program: the debugger checks it at each hit, which stops the program each time\n"
+}
+
+// Whether a hit of the breakpoint with `rule`, at a stop whose locals are
+// `locals`, stops: its condition holds (or it has none) and it is not a
+// logpoint; and what the hit says (`category` "" for nothing). A logpoint
+// whose condition holds logs its message instead. A condition that can't be
+// evaluated, or is not a Bool, stops, and says why.
+native_debug_holds: fn(rule: NativeRule, locals: [NativeLocal]) -> {stops: Bool, category: String, text: String} Never! {
+    if rule.condition == .Val(condition) {
+        if debug_eval_condition(condition, locals) == {
+            .Ok(flag) -> {
+                if !flag -> return {stops: false, category: "", text: ""}
+            }
+            .Err(failure) -> return {stops: true, category: "stderr", text: "The breakpoint's condition failed: {failure.message}\n"}
+        }
+    }
+    if rule.log == .Val(message) {
+        text: if debug_eval(message.tables, message.root, locals) == {
+            .Ok(value) -> debug_eval_text(value)
+            .Err(failure) -> "<{failure.message}>"
+        }
+        return {stops: false, category: "console", text: "{text}\n"}
+    }
+    {stops: true, category: "", text: ""}
+}
+
 // Bytes a readout may read: the stopped program's memory, when there is a
 // program, and `blocks` (each its bytes from its address) before it.
+// `backing` holds the bytes of the blocks that name a span of it (a dump's
+// sections), so they share one buffer.
 NativeMemory: struct {
     trace: X64Trace?,
     blocks: [NativeBlock],
+    backing: [U8]{[U8]{}},
 }
 
-// Known bytes from `address`.
+// Known bytes from `address`: `bytes`, or with `from` 0 or more the `size`
+// bytes of the memory's backing from `from`.
 NativeBlock: struct {
     address: Int,
     bytes: [U8],
+    from: Int{-1},
+    size: Int{0},
 }
 
 // The parameters and locals live at `lookup` in `frame` that belong to the
@@ -1436,18 +2712,45 @@ native_variable_value: fn(image: NativeImage, memory: NativeMemory, frame: Nativ
 }
 
 // The `size` bytes the DWARF expression `bytes[from..<to]` locates in
-// `frame`: a register's (DW_OP_reg*, DW_OP_regx), or those at an address
-// from a register or the frame base, rbp (DW_OP_breg*, DW_OP_bregx,
-// DW_OP_fbreg), then DW_OP_deref, or that address itself
+// `frame`: a register's (DW_OP_reg*, DW_OP_regx), those at the address
+// native_place_base and native_place_through find, or that address itself
 // (DW_OP_stack_value).
 native_place_bytes: fn(memory: NativeMemory, frame: NativeUnwound, bytes: [U8], from: Int, to: Int, size: Int) -> [U8]? Never! {
     if from >= to || to > bytes.len() -> return None
+    register: native_location_register(bytes, from, to)
+    if register >= 0 -> return native_register_bytes(frame, register)
+    base: native_place_base(frame, bytes, from) ?? return None
+    if base.next < to {
+        then: Int{bytes[base.next]}
+        if then == 0x9f -> return Val(native_word_bytes(base.address))
+    }
+    address: native_place_through(memory, bytes, base, to) ?? return None
+    native_debug_bytes(memory, address, size)
+}
+
+// The memory address the DWARF expression `bytes[from..<to]` locates in
+// `frame`; None for a value held in a register or computed, or out of reach.
+native_place_address: fn(memory: NativeMemory, frame: NativeUnwound, bytes: [U8], from: Int, to: Int) -> Int? Never! {
+    if from >= to || to > bytes.len() -> return None
+    base: native_place_base(frame, bytes, from) ?? return None
+    native_place_through(memory, bytes, base, to)
+}
+
+// An address a location expression computes, and where its next operation
+// starts.
+NativePlaceBase: struct {
+    address: Int,
+    next: Int,
+}
+
+// The address the operation at `bytes[from]` computes in `frame`: a
+// register's or the frame base's (rbp) plus an offset (DW_OP_breg*,
+// DW_OP_bregx, DW_OP_fbreg). None for any other operation.
+native_place_base: fn(frame: NativeUnwound, bytes: [U8], from: Int) -> NativePlaceBase? Never! {
     op: Int{bytes[from]}
     at := from + 1
     address := 0
     if {
-        op >= 0x50 && op <= 0x6f -> return native_register_bytes(frame, op - 0x50)
-        op == 0x90 -> return native_register_bytes(frame, link_debug_uleb(bytes, at))
         op >= 0x70 && op <= 0x8f -> {
             base: native_register_value(frame, op - 0x70) ?? return None
             address = base + x64_jetline_sleb(bytes, at)
@@ -1463,16 +2766,172 @@ native_place_bytes: fn(memory: NativeMemory, frame: NativeUnwound, bytes: [U8], 
         }
         else -> return None
     }
-    if at >= to -> return native_debug_bytes(memory, address, size)
-    then: Int{bytes[at]}
-    if then == {
-        0x06 -> {
-            words: native_debug_bytes(memory, address, 8) ?? return None
-            native_debug_bytes(memory, native_number(words, 0, 8, X64DebugEncoding.Signed), size)
+    Val(NativePlaceBase{address: address, next: at})
+}
+
+// The address `base` computes, or the one stored there when DW_OP_deref
+// follows it; None when another operation follows.
+native_place_through: fn(memory: NativeMemory, bytes: [U8], base: NativePlaceBase, to: Int) -> Int? Never! {
+    if base.next >= to -> return Val(base.address)
+    then: Int{bytes[base.next]}
+    if then != 0x06 -> return None
+    words: native_debug_bytes(memory, base.address, 8) ?? return None
+    Val(native_number(words, 0, 8, X64DebugEncoding.Signed))
+}
+
+// Where a watched place's bytes are: their address and type, or, for a
+// local held in a register, that register's index among the trace's
+// registers (else -1) and the code ranges where the local is in it; or why
+// the place can't be watched (`refusal`, empty when it can).
+NativeWatchPlace: struct {
+    address: Int,
+    ty: Int,
+    register: Int,
+    ranges: [NativeRange],
+    refusal: String,
+}
+
+// Where the place `path` (`total`, `order.total`) lives in `frame` at
+// `lookup`, among the variables of the inlined run `site`. A field path goes
+// through typedefs and pointers to the struct whose field it names.
+native_watch_place: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, lookup: Int, site: Int, path: String) -> NativeWatchPlace Never! {
+    names: path.split(".").to_list()
+    function: native_function_at(image, lookup) ?? return native_watch_refusal("No Jet function is running here")
+    found: loop (index, variable) in function.variables {
+        if variable.site == site && variable.name == names[0] {
+            break index
         }
-        0x9f -> Val(native_word_bytes(address))
-        else -> None
+    } ?? return native_watch_refusal("`{names[0]}` is not a local of this frame; a watch takes a local or a field path under one")
+    variable: function.variables[found]
+    unplaced: "`{names[0]}` has no value here"
+    if variable.list < 0 -> return native_watch_refusal(unplaced)
+    located: native_variable_covering(image, variable, lookup) ?? return native_watch_refusal(unplaced)
+    dwarf: native_location_register(image.loclists, located.from, located.to)
+    // A register's value, standing for the pointer bytes at `address`.
+    held := Int?{None}
+    address := 0
+    if {
+        dwarf >= NATIVE_DEBUG_DWARF_REGISTERS.len() -> return native_watch_refusal("`{names[0]}` is held in a vector register, which a watch can't follow")
+        dwarf >= 0 -> {
+            value: native_register_value(frame, dwarf) ?? return native_watch_refusal("`{names[0]}`'s register is not known in this frame")
+            if names.len() == 1 {
+                ranges := [NativeRange]{}
+                loop range in native_ranges(image, variable.list, variable.base) {
+                    if native_location_register(image.loclists, range.from, range.to) == dwarf {
+                        ranges.push(NativeRange{start: range.start, end: range.end, from: range.from, to: range.to})
+                    }
+                }
+                return NativeWatchPlace{address: 0, ty: variable.ty, register: NATIVE_DEBUG_DWARF_REGISTERS[dwarf], ranges: ranges, refusal: ""}
+            }
+            held = Val(value)
+        }
+        else -> address = native_place_address(memory, frame, image.loclists, located.from, located.to) ?? return native_watch_refusal("`{names[0]}` is computed here, with no place to watch")
     }
+    ty := variable.ty
+    // The path up to the field the loop turn looks up.
+    owner := "{names[0]}"
+    loop k in 1..<names.len() {
+        loop {
+            through: image.types.get(ty) ?? break
+            if through.tag == NATIVE_TAG_TYPEDEF {
+                ty = through.target
+                next
+            }
+            if through.tag != NATIVE_TAG_POINTER -> break
+            if held == .Val(value) -> address = value else {
+                words: native_debug_bytes(memory, address, 8) ?? return native_watch_refusal("`{owner}` can't be read here")
+                address = native_number(words, 0, 8, X64DebugEncoding.Signed)
+            }
+            held = None
+            ty = through.target
+        }
+        group := -1
+        if image.types.get(ty) == .Val(kind) {
+            if kind.tag == NATIVE_TAG_STRUCT && kind.variants < 0 && !kind.name.starts_with("[") {
+                group = kind.group
+            }
+        }
+        if group < 0 || held != None {
+            return native_watch_refusal("`{owner}` has no fields to watch")
+        }
+        field: loop (index, member) in image.members[group] {
+            if member.name == names[k] {
+                break index
+            }
+        } ?? return native_watch_refusal("`{owner}` has no field `{names[k]}`")
+        address += image.members[group][field].offset
+        ty = image.members[group][field].ty
+        owner = "{owner}.{names[k]}"
+    }
+    NativeWatchPlace{address: address, ty: ty, register: -1, ranges: [NativeRange]{}, refusal: ""}
+}
+
+// A place that can't be watched, and why.
+native_watch_refusal: fn(refusal: String) -> NativeWatchPlace Never! {
+    NativeWatchPlace{address: 0, ty: -1, register: -1, ranges: [NativeRange]{}, refusal: refusal}
+}
+
+// The DWARF register the location expression `bytes[from..<to]` names
+// (DW_OP_reg*, DW_OP_regx), else -1.
+native_location_register: fn(bytes: [U8], from: Int, to: Int) -> Int Never! {
+    if from >= to || to > bytes.len() -> return -1
+    op: Int{bytes[from]}
+    if op >= 0x50 && op <= 0x6f -> return op - 0x50
+    if op != 0x90 -> return -1
+    at := from + 1
+    link_debug_uleb(bytes, at)
+}
+
+// The debug-register spans that cover the `size` bytes at `address`: each
+// 8, 4, 2 or 1 bytes aligned to its size, as x86-64 debug registers trap.
+// Their slots are set when the watch takes registers.
+native_watch_spans: fn(address: Int, size: Int) -> [NativeWatchSpan] Never! {
+    spans := [NativeWatchSpan]{}
+    at := address
+    end: address + size
+    loop at < end {
+        width := 8
+        loop width > 1 && (at %% width != 0 || at + width > end) -> width = width /% 2
+        spans.push(NativeWatchSpan{slot: -1, address: at, size: width})
+        at += width
+    }
+    spans
+}
+
+// The debug control register (DR7) value that arms every span of
+// `watches`: for slot i, its local enable bit (2i), a trap on writes (RW
+// 01 at bit 16 + 4i) and its length (LEN at bit 18 + 4i: 1 byte 00, 2
+// bytes 01, 8 bytes 10, 4 bytes 11).
+native_watch_control: fn(watches: [NativeWatch]) -> Int Never! {
+    control := 0
+    loop watch in watches {
+        loop span in watch.spans {
+            length: if span.size == {
+                1 -> 0
+                2 -> 1
+                8 -> 2
+                else -> 3
+            }
+            control = control | (1 << (2 * span.slot)) | (1 << (16 + 4 * span.slot)) | (length << (18 + 4 * span.slot))
+        }
+    }
+    control
+}
+
+#Test("a watch takes aligned debug-register spans and arms them for writes") {
+    spans := native_watch_spans(0x1006, 12)
+    assert_eq(spans.len(), 3)
+    assert_eq(spans[0].address, 0x1006)
+    assert_eq(spans[0].size, 2)
+    assert_eq(spans[1].address, 0x1008)
+    assert_eq(spans[1].size, 8)
+    assert_eq(spans[2].address, 0x1010)
+    assert_eq(spans[2].size, 2)
+    assert_eq(native_watch_spans(0x2000, 8).len(), 1)
+    loop k in 0..<spans.len() -> spans[k].slot = k
+    watches: [NativeWatch]{NativeWatch{number: 2, shown: "total", address: 0x1006, ty: -1, spans: spans, thread: 1, cfa: 0, bytes: [U8]{}, register: -1, ranges: [NativeRange]{}}}
+    // Slot 0: 2 bytes; slot 1: 8 bytes; slot 2: 2 bytes; each on writes.
+    assert_eq(native_watch_control(watches), 0x15 | (1 << 16) | (1 << 18) | (1 << 20) | (2 << 22) | (1 << 24) | (1 << 26))
 }
 
 // The 8 bytes of DWARF register `register` in `frame`, when known.
@@ -1489,8 +2948,11 @@ native_register_value: fn(frame: NativeUnwound, register: Int) -> Int? Never! {
 }
 
 // The 8 little-endian bytes of `word`.
-native_word_bytes: fn(word: Int) -> [U8] Never! {
-    loop k in 0..<8 -> U8{(word >> (8 * k)) & 255}
+native_word_bytes: fn(word: Int) -> [U8] Never! { native_low_bytes(word, 8) }
+
+// The low `count` little-endian bytes of `word`.
+native_low_bytes: fn(word: Int, count: Int) -> [U8] Never! {
+    loop k in 0..<count -> U8{(word >> (8 * k)) & 255}
 }
 
 // The number of `size` little-endian bytes of `bytes` from `at`, signed as
@@ -1513,13 +2975,18 @@ native_debug_bytes: fn(memory: NativeMemory, address: Int, count: Int) -> [U8]? 
     if address <= 0 || count < 0 -> return None
     held: loop index in 0..<memory.blocks.len() {
         block: memory.blocks[index]
-        if address >= block.address && address + count <= block.address + block.bytes.len() {
+        length: if block.from >= 0 -> block.size else -> block.bytes.len()
+        if address >= block.address && address + count <= block.address + length {
             break index
         }
     } ?? -1
     if held >= 0 {
-        from: address - memory.blocks[held].address
-        return Val(memory.blocks[held].bytes[from..<from + count])
+        block: memory.blocks[held]
+        from: address - block.address
+        if block.from >= 0 {
+            return Val(memory.backing[block.from + from..<block.from + from + count])
+        }
+        return Val(block.bytes[from..<from + count])
     }
     trace: memory.trace ?? return None
     if trace.pid <= 0 -> return None
@@ -1703,7 +3170,7 @@ native_debug_variant: fn(image: NativeImage, memory: NativeMemory, part: NativeV
         return native_render(image, memory, chosen.ty, bytes, at + chosen.offset, depth)
     }
     payload: image.types.get(chosen.ty) ?? return None
-    shown: native_jet_spelling(chosen.name)
+    shown: native_variant_spelling(chosen.name)
     if payload.group < 0 || image.members[payload.group].len() == 0 -> return Val(shown)
     fields: native_debug_fields(image, memory, image.members[payload.group], bytes, at + chosen.offset, depth + 1) ?? return None
     positional: loop member in image.members[payload.group] {
@@ -1713,6 +3180,21 @@ native_debug_variant: fn(image: NativeImage, memory: NativeMemory, part: NativeV
     } ?? true
     if positional -> return Val("{shown}({fields.join(", ")})")
     Val("{shown}{{{fields.join(", ")}}}")
+}
+
+// Variant `name` as Jet spells it: its type's name without module paths
+// (native_jet_spelling), `.` and the variant's own name (`Shape.Rect`); a
+// name with no type, such as `Ok` or `None`, alone.
+native_variant_spelling: fn(name: String) -> String Never! {
+    cut: name.rpartition(".")
+    if cut.sep == "" -> return native_jet_spelling(name)
+    "{native_jet_spelling(cut.head)}.{cut.tail}"
+}
+
+#Test("a variant keeps its type's name and drops the module path") {
+    assert_eq(native_variant_spelling("Shape.Rect"), "Shape.Rect")
+    assert_eq(native_variant_spelling("module:3:app:src/prog.jet.Shape.Rect"), "Shape.Rect")
+    assert_eq(native_variant_spelling("Ok"), "Ok")
 }
 
 // A List whose inline header [len, cap, data] starts at `at` in `bytes`: its

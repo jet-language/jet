@@ -1,0 +1,8 @@
+Error [jet.SqlQueryInRowLoop]: This query runs once for every row of the loop around it
+  --> Tests/UI/sql_query_in_row_loop.jet:18:23
+    |
+ 18 |         names: scoped.query(SQL{"SELECT name FROM customers WHERE id = {customer}"}) ?? panic("names")
+    |                       ^^^^^
+ Why: Each pass of the loop makes one more round trip to the database, so N rows cost N + 1 queries, and the loop slows down as the table grows
+ Fix: Read what the loop needs in one query before it: `WHERE key IN (…)` over the keys the rows hold, or a JOIN with the query that produced the rows
+More: jet-lang.dev/e/L0308

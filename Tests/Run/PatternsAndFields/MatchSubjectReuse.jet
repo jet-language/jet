@@ -8,8 +8,8 @@ Blob: struct {
 
 Node: enum {
     Leaf(blob: Blob),
-    Other(blob: Blob),
-    Empty,
+    _Other(blob: Blob),
+    _Empty,
 }
 
 run: fn() {
@@ -18,15 +18,15 @@ run: fn() {
     loop _ in 0..<4 {
         if node == {
             .Leaf(blob) -> total += blob.data.len()
-            .Other(_) | .Empty -> total += 100
+            ._Other(_) | ._Empty -> total += 100
         }
         if node == {
-            .Other(blob) -> total += blob.data.len() * 1000
-            .Leaf(_) | .Empty -> total += 1
+            ._Other(blob) -> total += blob.data.len() * 1000
+            .Leaf(_) | ._Empty -> total += 1
         }
     }
     if node == {
         .Leaf(blob) -> print("after {blob.text} {total}")
-        .Other(_) | .Empty -> print("empty {total}")
+        ._Other(_) | ._Empty -> print("empty {total}")
     }
 }

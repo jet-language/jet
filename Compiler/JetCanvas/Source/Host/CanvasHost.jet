@@ -7,7 +7,7 @@
 // canvas_host_publish_graph, canvas_host_publish_failure and
 // canvas_host_publish_project, applies each source transaction a handler
 // hands it (Host/CanvasEdit.jet), and answers each debug request (JetCLI
-// CanvasDebug.jet).
+// CanvasDebug.jet) and profile request (JetCLI CanvasProfile.jet).
 use {
     host_http: core.http
     host_random: core.crypto.random
@@ -91,6 +91,7 @@ CanvasHostRoute: enum {
     Source,
     Transaction,
     Debug,
+    Profile,
     Status,
     Version,
     Unbuilt,
@@ -214,7 +215,7 @@ canvas_host_answer: fn(state: Shared<CanvasHostState>, request: HTTPRequest, edi
     authorized: canvas_host_authorized(state, request, route, path, query)
     status: if route == {
         .Status -> true
-        .Page(_) | .PanelPage | .App | .Session | .Project | .Graph | .Source | .Transaction | .Debug | .Version | .Unbuilt | .Unknown -> false
+        .Page(_) | .PanelPage | .App | .Session | .Project | .Graph | .Source | .Transaction | .Debug | .Profile | .Version | .Unbuilt | .Unknown -> false
     }
     if !status && !authorized {
         return canvas_host_response(401, CANVAS_HOST_TEXT, "devserver session, host, or origin rejected")
@@ -229,7 +230,7 @@ canvas_host_answer: fn(state: Shared<CanvasHostState>, request: HTTPRequest, edi
         .Unbuilt -> return canvas_host_response(501, CANVAS_HOST_TEXT, "`{path}` is not served by this jet's Canvas yet")
         .Unknown -> return canvas_host_response(404, CANVAS_HOST_TEXT, "404 Not Found")
         .Page(_) | .PanelPage | .App | .Session | .Project | .Graph | .Source | .Status | .Version -> {}
-        .Transaction | .Debug -> {
+        .Transaction | .Debug | .Profile -> {
             if edits == .Val(sender) && request.method == "POST" {
                 return canvas_host_transaction(state, request, sender, route)
             }
@@ -256,7 +257,7 @@ canvas_host_answer: fn(state: Shared<CanvasHostState>, request: HTTPRequest, edi
             canvas_host_response(200, CANVAS_HOST_JSON, canvas_host_status_json(state))
         }
         .Version -> canvas_host_response(200, CANVAS_HOST_TEXT, "{canvas_host_version(state)}")
-        .Transaction | .Debug | .Unbuilt | .Unknown -> canvas_host_response(404, CANVAS_HOST_TEXT, "404 Not Found")
+        .Transaction | .Debug | .Profile | .Unbuilt | .Unknown -> canvas_host_response(404, CANVAS_HOST_TEXT, "404 Not Found")
     }
 }
 
@@ -285,6 +286,7 @@ canvas_host_route: fn(path: String, query: String) -> CanvasHostRoute Never! {
         "/source" -> .Source
         "/transaction" -> .Transaction
         "/debug" -> .Debug
+        "/profile" -> .Profile
         "/live" | "/source-control" | "/core-catalog" | "/proof" | "/command" | "/project/transaction" | "/query" | "/devtools" -> .Unbuilt
         else -> .Unknown
     }
@@ -331,7 +333,7 @@ canvas_host_authorized: fn(state: Shared<CanvasHostState>, request: HTTPRequest,
     if !canvas_host_single_security_headers(request) -> return false
     if route == {
         .Unknown -> return false
-        .Page(_) | .PanelPage | .App | .Session | .Project | .Graph | .Source | .Transaction | .Debug | .Status | .Version | .Unbuilt -> {}
+        .Page(_) | .PanelPage | .App | .Session | .Project | .Graph | .Source | .Transaction | .Debug | .Profile | .Status | .Version | .Unbuilt -> {}
     }
     host_header: request.header("host") ?? return false
     permit: state.guard_read()

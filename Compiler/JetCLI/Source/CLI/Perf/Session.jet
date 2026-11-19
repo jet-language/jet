@@ -2,8 +2,8 @@
 // runtime's live observation on, read the runtime-published snapshots while it
 // runs and once after it exits, and write one verified `.jettrace`; a run's
 // profile rows are its program's CPU-time samples under the `cpu` lens, the
-// default, and its memory counters' under `memory`. The child keeps this
-// process's terminal.
+// default, and its memory counters' under `memory`; under `alloc` it keeps
+// the program's heap snapshots. The child keeps this process's terminal.
 use {
     perf_files: core.files
     perf_process: core.process
@@ -37,7 +37,8 @@ JET_CLI_PERF_TRACE_LIMIT: 268435456
 
 // `SessionArgs`: the perf-only flags, and the base intent's argv after its
 // action name with those flags removed. `lenses` are what `--lens` names,
-// in the order `cpu`, `memory`; the default is `cpu`, CPU time alone.
+// in the order `cpu`, `memory`, `alloc`; the default is `cpu`, CPU time
+// alone.
 JetCLIPerfSessionArgs: struct {
     out: String?,
     source: String?,
@@ -91,7 +92,7 @@ jet_cli_perf_session_args: fn(args: [String]) -> JetCLIPerfSessionArgs JetCLIRea
         }
         if arg == "--lens" {
             if index + 1 >= args.len() {
-                return Err(jet_cli_read_error("`--lens` needs `cpu`, `memory` or both, comma-separated"))
+                return Err(jet_cli_read_error("`--lens` needs one or more of `cpu`, `memory` and `alloc`, comma-separated"))
             }
             parsed.lenses = jet_cli_perf_session_lenses(args[index + 1])
             skip = true
@@ -108,23 +109,24 @@ jet_cli_perf_session_args: fn(args: [String]) -> JetCLIPerfSessionArgs JetCLIRea
 }
 
 // `--lens` list `raw`: the lenses the run takes, comma-separated, each `cpu`
-// (its CPU time) or `memory` (its memory counters), in that order and without
-// repeats.
+// (its CPU time), `memory` (its memory counters) or `alloc` (its heap
+// snapshots), in that order and without repeats.
 jet_cli_perf_session_lenses: fn(raw: String) -> [String] JetCLIReadError! {
     asked := [String]{}
     loop part in raw.split(",") {
         item: part.trim()
         if item == "" -> next
-        if item != "cpu" && item != "memory" {
-            return Err(jet_cli_read_error("`--lens` item `{item}` is not a lens; lenses: cpu, memory"))
+        if item != "cpu" && item != "memory" && item != "alloc" {
+            return Err(jet_cli_read_error("`--lens` item `{item}` is not a lens; lenses: cpu, memory, alloc"))
         }
         if !asked.contains(item.copy()) -> asked.push(item.copy())
     }
     lenses := [String]{}
     if asked.contains("cpu") -> lenses.push("cpu")
     if asked.contains("memory") -> lenses.push("memory")
+    if asked.contains("alloc") -> lenses.push("alloc")
     if lenses.len() == 0 {
-        return Err(jet_cli_read_error("`--lens` needs `cpu`, `memory` or both, comma-separated"))
+        return Err(jet_cli_read_error("`--lens` needs one or more of `cpu`, `memory` and `alloc`, comma-separated"))
     }
     Ok(lenses)
 }
@@ -151,10 +153,14 @@ jet_cli_perf_capture_allowlist: fn(raw: String) -> [String] JetCLIReadError! {
 // `run_session`. The exit code is the child's.
 jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Bool) -[FS, Env, Exec, Time]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
-    parsed := jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet> [--lens=cpu,memory] [--out <path{extension}>]`", color)
+    parsed := jet_cli_perf_session_args(args) ?? return jet_cli_perf_error(err.message, "run `jet perf {action} <file.jet> [--lens=cpu,memory,alloc] [--out <path{extension}>]`", color)
     memory: parsed.lenses.contains("memory")
     if memory && action != "run" {
         return jet_cli_perf_error("the `memory` lens samples a program's counters, which only `jet perf run` samples", "run `jet perf run <file.jet> --lens=memory`", color)
+    }
+    alloc: parsed.lenses.contains("alloc")
+    if alloc && action != "run" {
+        return jet_cli_perf_error("the `alloc` lens snapshots a program's heap, which only `jet perf run` snapshots", "run `jet perf run <file.jet> --lens=alloc`", color)
     }
     exe: perf_sys.executable()
     if exe == "" {
@@ -164,10 +170,13 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     // the program's observation, and only the program's: jet itself runs
     // unobserved, so the program runs in jet's place, under the session's
     // pid. `jet test` has no `--observe`, so the session's own environment
-    // observes a test run (jet_cli_observe_env).
+    // observes a test run (jet_cli_observe_env). The alloc lens builds the
+    // program with the checked heap, whose blocks keep the call sites that
+    // allocated them.
     argv := [String]{exe, action}
     observed_run: action == "run"
     if observed_run -> argv.push("--observe")
+    if alloc -> argv.push("--checked-alloc")
     loop arg in parsed.child_args {
         // copy: the parsed argv keeps its words; the spawn owns its own.
         argv.push(arg.copy())
@@ -252,11 +261,15 @@ jet_cli_perf_session: fn(action: String, args: [String], quiet: Bool, color: Boo
     if samples == .Val(file) && parsed.source == .Val(source) {
         jet_cli_perf_log_spans_read(capture, "{file}.spans", source, started.start_ns)
     }
-    if parsed.source == .Val(source) {
+    if parsed.source.move() == .Val(source) {
         if sampled.move() == .Val(found) {
-            // The I/O rows take the transfers and the task_wait rows the waits.
+            // The task_wait rows take the waits, which the transfers may
+            // have ended, then the I/O rows take the transfers.
+            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, source, started.start_ns)
             jet_cli_perf_io_read(capture, found.transfers.move(), source, started.start_ns)
-            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, source, started.start_ns)
+            if jet_cli_perf_session_heaps(source.move(), found.heaps.move()) == .Val(section) {
+                capture.receipts.push(section)
+            }
         }
     }
     full := [String]{action}
@@ -368,7 +381,24 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
             return jet_cli_perf_error(message, "start the program with `jet run --observe`, then attach", color)
         }
         text: perf_files.read(path) ?? return jet_cli_perf_error("cannot read source {path}: {jet_cli_io_error_text(err)}", JET_CLI_PERF_FIX, color)
-        capture = jet_cli_perf_capture_source(path, text, observations, None, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        // The flight ring the program publishes: its recent samples, waits,
+        // wakes, spawns and transfers, read as a run's are.
+        flight: jet_cli_perf_attach_flight(target_pid, path)
+        capture = jet_cli_perf_capture_source(path, text, observations, flight, target, None) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
+        if flight.move() == .Val(found) {
+            // The ring's rows are timed from its earliest wait or transfer,
+            // on the program's monotonic clock: attach has no start of its
+            // own on it.
+            origin := 0
+            loop wait in found.waits {
+                if origin == 0 || wait.start_ns < origin -> origin = wait.start_ns
+            }
+            loop transfer in found.transfers {
+                if origin == 0 || transfer.start_ns < origin -> origin = transfer.start_ns
+            }
+            jet_cli_perf_waits_read(capture, found.waits.move(), found.wakes, found.spawns, found.transfers, path, origin)
+            jet_cli_perf_io_read(capture, found.transfers.move(), path, origin)
+        }
     } else if live_error == None {
         return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "live observe snapshot found, but `--source` is required", "domain capture must attribute facts to a Jet symbol identity", "run `jet perf attach {target_pid} --source <file.jet>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
     }
@@ -385,6 +415,22 @@ jet_cli_perf_attach: fn(args: [String], quiet: Bool, color: Bool) -[FS, Env, Tim
     capture.policy.allowlist = allowlist
     path: jet_cli_perf_session_write(capture, "attach", argv, out) ?? return jet_cli_perf_error(err.message, JET_CLI_PERF_FIX, color)
     JetDriverVerbOutput{stdout: "", stderr: if quiet -> "" else -> "Trace: {path}\n", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// The flight ring the observed program `pid` publishes in the temporary
+// directory (JetRuntime PerfSamples.jet perf_flight_publish) and the image
+// beside it, copied out of its way, then read as a run's samples are; the
+// program keeps publishing its own. Lines in `source` are its own. None when
+// it publishes no ring.
+jet_cli_perf_attach_flight: fn(pid: Int, source: String) -[FS, Env, Time]> JetCLIPerfSamples? Never! {
+    published: perf_files.join(perf_sys.temp_dir(), "jet-flight-{pid}.samples")
+    taken: perf_files.join(perf_sys.temp_dir(), "jet-perf-attach-{pid}-{perf_time.unix_ns()}.samples")
+    perf_files.copy(published, taken) ?? return None
+    if perf_files.copy("{published}.image", "{taken}.image") == .Err(_) {
+        perf_files.remove(taken).drop("the attach reads the ring it copied once")
+        return None
+    }
+    jet_cli_perf_samples_read(taken, source, [TraceCounter]{})
 }
 
 // `read_browser_capture`: the devserver's browser relay for `pid`, or None
@@ -510,11 +556,12 @@ jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?
     sampling := CanonicalJSON.Null
     if sampled {
         cpu: lenses.contains("cpu")
-        // The lenses are cpu and memory, in that order
+        // The lenses are cpu, memory and alloc, in that order
         // (jet_cli_perf_session_lenses), so each row is written from its name.
         named := [CanonicalJSON]{}
         if cpu -> named.push(CanonicalJSON.String("cpu"))
         if lenses.contains("memory") -> named.push(CanonicalJSON.String("memory"))
+        if lenses.contains("alloc") -> named.push(CanonicalJSON.String("alloc"))
         sampling = CanonicalJSON.Object(
             [CanonicalJSONField]{
                 {key: "allocations", value: CanonicalJSON.String("call-sites")},
@@ -529,6 +576,67 @@ jet_cli_perf_session_receipt: fn(action: String, argv: [String], source: String?
     value: CanonicalJSON.Object([CanonicalJSONField]{{key: "build", value: build}, {key: "capture", value: capture}})
     digest: canonical_json_sha256(value)
     Ok(TraceReceiptSection{name: "perf", type_name: "JetPerfReceipt", value: value, digest: digest})
+}
+
+// The trace's `heap` receipt section: each heap snapshot the alloc lens took
+// of a run of `source`, in the order it took them (JetCLIPerfHeap), with
+// its name, its number, its live blocks and their bytes, and those blocks
+// by the function and line of `source` that allocated them and the type
+// they were allocated for, the most bytes first: a null function and line
+// for the blocks no line of it allocated, a null type for those no typed
+// allocating call allocated; then what retains its typed blocks
+// (`retained`, JetCLIPerfRetained), by type and path, a null path for the
+// blocks no root reached. None when it took none.
+jet_cli_perf_session_heaps: fn(source: &&String, heaps: &&[JetCLIPerfHeap]) -> TraceReceiptSection? Never! {
+    if heaps.len() == 0 -> return None
+    snapshots := [CanonicalJSON]{}
+    loop heap in heaps.move() {
+        sites := [CanonicalJSON]{}
+        loop site in heap.sites.move() {
+            placed: site.line > (U64{0})
+            typed: site.type_name != ""
+            sites.push(
+                CanonicalJSON.Object(
+                    [CanonicalJSONField]{
+                        {key: "blocks", value: CanonicalJSON.Integer("{site.blocks}")},
+                        {key: "bytes", value: CanonicalJSON.Integer("{site.bytes}")},
+                        {key: "function", value: if placed -> CanonicalJSON.String(site.name.move()) else -> CanonicalJSON.Null},
+                        {key: "line", value: if placed -> CanonicalJSON.Integer("{site.line}") else -> CanonicalJSON.Null},
+                        {key: "type", value: if typed -> CanonicalJSON.String(site.type_name.move()) else -> CanonicalJSON.Null},
+                    },
+                ),
+            )
+        }
+        retained := [CanonicalJSON]{}
+        loop entry in heap.retained.move() {
+            rooted: entry.path != ""
+            retained.push(
+                CanonicalJSON.Object(
+                    [CanonicalJSONField]{
+                        {key: "blocks", value: CanonicalJSON.Integer("{entry.blocks}")},
+                        {key: "bytes", value: CanonicalJSON.Integer("{entry.bytes}")},
+                        {key: "path", value: if rooted -> CanonicalJSON.String(entry.path.move()) else -> CanonicalJSON.Null},
+                        {key: "type", value: CanonicalJSON.String(entry.type_name.move())},
+                    },
+                ),
+            )
+        }
+        snapshots.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "blocks", value: CanonicalJSON.Integer("{heap.blocks}")},
+                    {key: "bytes", value: CanonicalJSON.Integer("{heap.bytes}")},
+                    {key: "name", value: CanonicalJSON.String(heap.name.move())},
+                    {key: "number", value: CanonicalJSON.Integer("{heap.number}")},
+                    {key: "retained", value: CanonicalJSON.Array(retained.move())},
+                    {key: "sites", value: CanonicalJSON.Array(sites.move())},
+                },
+            ),
+        )
+    }
+    value: CanonicalJSON.Object([CanonicalJSONField]{{key: "path", value: CanonicalJSON.String(source.move())}, {key: "snapshots", value: CanonicalJSON.Array(snapshots.move())}})
+    digest: canonical_json_sha256(value)
+    Val(TraceReceiptSection{name: "heap", type_name: "JetPerfHeapSnapshots", value: value, digest: digest})
 }
 
 // `write_session_trace`: the trace goes to `out`, else to

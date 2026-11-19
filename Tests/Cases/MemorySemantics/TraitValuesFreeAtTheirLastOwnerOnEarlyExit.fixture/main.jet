@@ -13,7 +13,7 @@ Reject: enum {
 }
 
 Context: struct {
-    id: Int,
+    _id: Int,
 }
 
 Sink: trait {
@@ -22,7 +22,7 @@ Sink: trait {
 }
 
 Worker: struct {
-    context: Shared<Context>,
+    _context: Shared<Context>,
     n: Int,
 
     impl Sink {
@@ -32,7 +32,7 @@ Worker: struct {
     }
 }
 
-make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{context: s.copy(), n: n} }
+make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{_context: s.copy(), n: n} }
 
 maybe: fn(s: Shared<Context>, n: Int) -> Sink? {
     if n % 2 == 0 -> return Val(make(s, n))
@@ -65,7 +65,7 @@ checked: fn(s: Shared<Context>, n: Int) -> Int Reject! {
 }
 
 run: fn() {
-    s := Shared{Context{id: 1}}
+    s := Shared{Context{_id: 1}}
     print("looped {looped(s, 3)} {looped(s, 20)}")
     print("looped dropped {s.strong_count()}")
     print("fallback {fallback(s, 1)} {fallback(s, 2)}")

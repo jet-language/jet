@@ -1,0 +1,307 @@
+// A typed dump: what an observed run's flight recorder writes when a stop
+// ends the process (JetRuntime PerfSamples.jet perf_flight_dump), opened as
+// a session that never runs. Its words: NATIVE_DUMP_MAGIC, the version, the
+// pid, the Unix time, the load bias, the stopped thread's rip, rsp and rbp
+// as its caller resumes, its tid and the image's byte count; the image
+// itself, padded to a word; then sections of [kind, address, bytes] each
+// padded to a word: the flight ring's records, every task's registers, a
+// writable memory segment (every thread's and task's stack among them),
+// and the end. The image's loaded segments stand for the code and
+// read-only data the dump does not copy, so `bt`, `locals` and `print` read
+// the stop, or the task `task N` selects, as they read a live one, `tasks`
+// lists every task, and `events` lists the ring.
+use {
+    native_dump_files: core.files
+    jet_backend.[X64DebugEncoding, X64Trace, X64_TRACE_RBP, X64_TRACE_RIP, X64_TRACE_RSP]
+}
+
+// "JETDUMP1", the dump's first word.
+NATIVE_DUMP_MAGIC: 3553425134609253706
+
+NATIVE_DUMP_VERSION: 1
+
+// The words before the image.
+NATIVE_DUMP_HEADER: 10
+
+// The kernel's register count, as x64_trace_registers reads it.
+NATIVE_DUMP_REGISTERS: 27
+
+NATIVE_DUMP_SECTION_END: 0
+
+NATIVE_DUMP_SECTION_MEMORY: 1
+
+NATIVE_DUMP_SECTION_RING: 2
+
+NATIVE_DUMP_SECTION_TASKS: 3
+
+// A task row's words: its task's id, how its registers were had, its rip,
+// rsp and rbp, and its thread's tid (0 for a parked task's).
+NATIVE_DUMP_TASK_WORDS: 6
+
+// How a task's registers were had: the stopping thread's own, a running
+// thread's the stop interrupted, or a parked or queued task's that its
+// last switch saved.
+NATIVE_DUMP_TASK_STOPPED: 0
+
+NATIVE_DUMP_TASK_RUNNING: 1
+
+NATIVE_DUMP_TASK_PARKED: 2
+
+// The flight ring's record kinds (PerfSamples.jet).
+NATIVE_DUMP_SAMPLE: 0
+
+NATIVE_DUMP_IO: 11
+
+NATIVE_DUMP_WAKE: 12
+
+NATIVE_DUMP_CLOCK: 13
+
+NATIVE_DUMP_WAIT: 14
+
+NATIVE_DUMP_SPAWN: 15
+
+// What a #Secret value shows as.
+NATIVE_DUMP_REDACTED: "<redacted>"
+
+NATIVE_DUMP_HELP: "Commands: backtrace (bt), frame N, locals, print NAME (p NAME), tasks, task N, events [--last N], help (h), quit (q)"
+
+// A dump's tasks, the stopped one first, and its memory, with the image's.
+NativeDump: struct {
+    tasks: [NativeDumpTask],
+    memory: NativeMemory,
+}
+
+// One task of a dump: its id (0: a thread outside every task, the stop's
+// own alone), how its registers were had (NATIVE_DUMP_TASK_STOPPED and
+// on), its rip, rsp and rbp, and its thread's tid, 0 for a parked task.
+NativeDumpTask: struct {
+    id: Int,
+    how: Int,
+    pc: Int,
+    stack: Int,
+    frame: Int,
+    tid: Int,
+}
+
+// An opened dump: its session, the flight ring's records, and the pid and
+// Unix time of its stop.
+NativeDumpOpened: struct {
+    session: NativeSession,
+    ring: [U8],
+    pid: Int,
+    seconds: Int,
+}
+
+// Open the dump at `path`.
+native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError! {
+    bytes: native_dump_files.read_bytes(path) ?? return Err(NativeDebugError{detail: "couldn't read the dump `{path}`: {err}"})
+    header: 8 * NATIVE_DUMP_HEADER
+    if bytes.len() < header || native_dump_word(bytes, 0) != NATIVE_DUMP_MAGIC {
+        return Err(NativeDebugError{detail: "`{path}` is not a Jet dump"})
+    }
+    version: native_dump_word(bytes, 8)
+    if version != NATIVE_DUMP_VERSION {
+        return Err(NativeDebugError{detail: "`{path}` is a version {version} dump; this jet reads version {NATIVE_DUMP_VERSION}"})
+    }
+    bias: native_dump_word(bytes, 32)
+    length: native_dump_word(bytes, 72)
+    if length <= 0 || header + length > bytes.len() {
+        return Err(NativeDebugError{detail: "`{path}` holds no program image"})
+    }
+    elf: bytes[header..<header + length]
+    image: native_image_read(elf) ?? return Err(NativeDebugError{detail: "the program of `{path}` has no Jet debug information"})
+    // A dump's frames open as the image's code opens them.
+    openings: native_openings(image, native_elf_code(elf))
+    // Each memory section is a span of the dump's bytes, which back them.
+    blocks := [NativeBlock]{}
+    ring_at := 0
+    ring_size := 0
+    tasks := [NativeDumpTask]{}
+    at := header + native_dump_pad(length)
+    loop at + 24 <= bytes.len() {
+        kind: native_dump_word(bytes, at)
+        address: native_dump_word(bytes, at + 8)
+        size: native_dump_word(bytes, at + 16)
+        at += 24
+        if kind == NATIVE_DUMP_SECTION_END || size < 0 || at + size > bytes.len() -> break
+        if kind == NATIVE_DUMP_SECTION_MEMORY {
+            blocks.push(NativeBlock{address: address, bytes: [U8]{}, from: at, size: size})
+        }
+        if kind == NATIVE_DUMP_SECTION_RING {
+            ring_at = at
+            ring_size = size
+        }
+        if kind == NATIVE_DUMP_SECTION_TASKS -> native_dump_tasks(tasks, bytes, at, size)
+        at += native_dump_pad(size)
+    }
+    // The dump's own segments come first, so a writable one's bytes are
+    // the stop's, not the image's.
+    native_dump_loaded(blocks, bytes, header, length, bias)
+    // A dump whose tasks were not captured still has its stop.
+    if tasks.len() == 0 {
+        tasks.push(NativeDumpTask{id: 0, how: NATIVE_DUMP_TASK_STOPPED, pc: native_dump_word(bytes, 40), stack: native_dump_word(bytes, 48), frame: native_dump_word(bytes, 56), tid: native_dump_word(bytes, 64)})
+    }
+    tasks.sort_by(fn(left: NativeDumpTask, right: NativeDumpTask) { ((if left.how == NATIVE_DUMP_TASK_STOPPED -> 0 else -> 1) <=> (if right.how == NATIVE_DUMP_TASK_STOPPED -> 0 else -> 1)).then(left.id <=> right.id) })
+    ring: loop k in ring_at..<ring_at + ring_size -> bytes[k]
+    pid: native_dump_word(bytes, 16)
+    seconds: native_dump_word(bytes, 24)
+    dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: bytes.move()}}
+    session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [NativeSite]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0}
+    Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds})
+}
+
+// The little-endian word at `at`.
+native_dump_word: fn(bytes: [U8], at: Int) -> Int Never! {
+    native_number(bytes, at, 8, X64DebugEncoding.Signed)
+}
+
+// `size` rounded up to a word.
+native_dump_pad: fn(size: Int) -> Int Never! { (size + 7) & -8 }
+
+// The task rows of the section of `size` bytes at `at`: the stop's, and
+// each task's; a thread outside every task, or a row its thread never
+// wrote, has id 0.
+native_dump_tasks: fn(tasks: &[NativeDumpTask], bytes: [U8], at: Int, size: Int) Never! {
+    row := at
+    loop row + 8 * NATIVE_DUMP_TASK_WORDS <= at + size {
+        id: native_dump_word(bytes, row)
+        how: native_dump_word(bytes, row + 8)
+        if how == NATIVE_DUMP_TASK_STOPPED || id != 0 {
+            tasks.push(NativeDumpTask{id: id, how: how, pc: native_dump_word(bytes, row + 16), stack: native_dump_word(bytes, row + 24), frame: native_dump_word(bytes, row + 32), tid: native_dump_word(bytes, row + 40)})
+        }
+        row += 8 * NATIVE_DUMP_TASK_WORDS
+    }
+}
+
+// The registers of the dump's task `index`, as x64_trace_registers reads a
+// stopped thread's: its rip, rsp and rbp, the rest zero.
+native_dump_registers: fn(dump: NativeDump, index: Int) -> [Int] Never! {
+    registers := loop _ in 0..<NATIVE_DUMP_REGISTERS -> 0
+    if index < 0 || index >= dump.tasks.len() -> return registers
+    registers[X64_TRACE_RIP] = dump.tasks[index].pc
+    registers[X64_TRACE_RSP] = dump.tasks[index].stack
+    registers[X64_TRACE_RBP] = dump.tasks[index].frame
+    registers
+}
+
+// How a task's registers were had, as `tasks` shows it.
+native_dump_task_state: fn(task: NativeDumpTask) -> String Never! {
+    if task.how == {
+        NATIVE_DUMP_TASK_STOPPED -> "stopped"
+        NATIVE_DUMP_TASK_RUNNING -> "running"
+        else -> "parked"
+    }
+}
+
+// Each loaded segment (PT_LOAD) of the ELF image of `length` bytes at
+// `image` in `bytes`, as a span of `bytes` at its address plus `bias`.
+native_dump_loaded: fn(blocks: &[NativeBlock], bytes: [U8], image: Int, length: Int, bias: Int) Never! {
+    if length < 64 {
+        return
+    }
+    table: native_dump_word(bytes, image + 32)
+    entry: native_number(bytes, image + 54, 2, X64DebugEncoding.Unsigned)
+    count: native_number(bytes, image + 56, 2, X64DebugEncoding.Unsigned)
+    loop index in 0..<count {
+        at: image + table + index * entry
+        if table < 0 || at + 56 > image + length -> break
+        if native_number(bytes, at, 4, X64DebugEncoding.Unsigned) != 1 -> next
+        offset: native_dump_word(bytes, at + 8)
+        address: native_dump_word(bytes, at + 16)
+        size: native_dump_word(bytes, at + 32)
+        if offset < 0 || size <= 0 || offset + size > length -> next
+        blocks.push(NativeBlock{address: address + bias, bytes: [U8]{}, from: image + offset, size: size})
+    }
+}
+
+// The index among `frames` of Jet frame `jet`, as native_debug_backtrace
+// numbers them (0 is the innermost Jet frame); None past the last.
+native_dump_jet_frame: fn(frames: [NativeFrame], jet: Int) -> Int? Never! {
+    seen := 0
+    loop (index, frame) in frames {
+        if !native_debug_jet_frame(frame) -> next
+        if seen == jet -> return Val(index)
+        seen += 1
+    }
+    None
+}
+
+// `locals` with each #Secret value shown as NATIVE_DUMP_REDACTED. The stop
+// scrubbed every live Secret before the dump was written, so its bytes are
+// zeros; the readout says what they were.
+native_dump_redact: fn(locals: &[NativeLocal]) Never! {
+    loop index in 0..<locals.len() {
+        if locals[index].type_name == "Secret" || locals[index].type_name.ends_with(".Secret") {
+            locals[index].value = NATIVE_DUMP_REDACTED
+        }
+    }
+}
+
+// The flight ring's records, one line each, oldest first.
+native_dump_events: fn(image: NativeImage, ring: [U8]) -> [String] Never! {
+    shown := [String]{}
+    at := 0
+    loop at + 8 <= ring.len() {
+        head: native_dump_word(ring, at)
+        words: (head >> 48) & 2047
+        if words == 0 || at + 8 * words > ring.len() -> break
+        shown.push(native_dump_event(image, ring, at, words))
+        at += 8 * words
+    }
+    shown
+}
+
+// One record of `words` words at `at` of the ring, as a line: its kind, its
+// task, what it holds, and the innermost Jet frame of its stack.
+native_dump_event: fn(image: NativeImage, ring: [U8], at: Int, words: Int) -> String Never! {
+    head: native_dump_word(ring, at)
+    kind: (head >> 59) & 15
+    id: head & 281474976710655
+    if kind == NATIVE_DUMP_SAMPLE {
+        return "sample  {native_dump_where(image, ring, at, id, 1, words)}"
+    }
+    if kind == NATIVE_DUMP_SPAWN {
+        return "spawn   task {id}{native_dump_where(image, ring, at, 0, 1, words)}"
+    }
+    if kind == NATIVE_DUMP_WAKE {
+        return "wake    task {id}{native_dump_where(image, ring, at, 0, 3, words)}"
+    }
+    if kind == NATIVE_DUMP_CLOCK {
+        return "clock   {native_dump_word(ring, at + 8) / 1000000}ms of CPU time"
+    }
+    from: at + 48
+    if kind == NATIVE_DUMP_WAIT {
+        lens: native_dump_word(ring, at + 40)
+        name: lens & 65535
+        text: (name + ((lens >> 16) & 65535) + ((lens >> 32) & 65535) + 7) >> 3
+        label: if name > 0 && from + name <= ring.len() -> String.from_bytes_lossy(ring[from..<from + name]) else -> "wait"
+        took: native_dump_word(ring, at + 24) - native_dump_word(ring, at + 16)
+        return "wait    task {id} {label} {took / 1000}us{native_dump_where(image, ring, at, 0, 6 + text, words)}"
+    }
+    if kind == NATIVE_DUMP_IO {
+        how: native_dump_word(ring, at + 8)
+        operation: if (how & 255) == 1 -> "write" else -> "read"
+        kept: native_dump_word(ring, at + 40)
+        // A path's bytes; a descriptor or a socket address shows none.
+        target: if ((how >> 8) & 255) == 1 && kept > 0 && from + kept <= ring.len() -> " {String.from_bytes_lossy(ring[from..<from + kept])}" else -> ""
+        return "io      task {id} {operation}{target} {native_dump_word(ring, at + 32)}{native_dump_where(image, ring, at, 0, 6 + ((kept + 7) >> 3), words)}"
+    }
+    "counter {kind}{native_dump_where(image, ring, at, id, 1, words)}"
+}
+
+// `  at <function> <file>:<line>` for the innermost Jet frame of `pc` (a
+// sample's own address, 0 for none) then the call sites in words `first`
+// up to `words` of the record at `at`; "" when none is Jet code.
+native_dump_where: fn(image: NativeImage, ring: [U8], at: Int, pc: Int, first: Int, words: Int) -> String Never! {
+    if pc > 0 {
+        frame: native_frame_at(image, pc)
+        if native_debug_jet_frame(frame) -> return "  at {frame.function} {frame.file}:{frame.line}"
+    }
+    loop index in first..<words {
+        site: native_dump_word(ring, at + 8 * index)
+        if site <= 0 -> next
+        frame: native_frame_at(image, site - 1)
+        if native_debug_jet_frame(frame) -> return "  at {frame.function} {frame.file}:{frame.line}"
+    }
+    ""
+}

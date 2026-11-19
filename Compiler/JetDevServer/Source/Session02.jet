@@ -24,7 +24,7 @@ impl ResidentDevSession {
         if self.recording == .Val(current) {
             state := current
             recorded: SessionEvent.new(sequence, event.timestamp_ms, event.source(), event.kind(), event.entity(), event.fields_json(), event.payload_json()) ?? return Err("{err}")
-            _: state.recording.append_event(recorded) ?? return Err("{err}")
+            _: state.recording.append_event(recorded.move()) ?? return Err("{err}")
             state.cursor = ReplayCursor{identity: state.recording.identity, generation: state.recording.generation, position: state.recording.events.len(), sequence: state.recording.last_retained_sequence()}
             state.checkpoints = [String:SessionCheckpoint]{}
             self.recording = Val(state)

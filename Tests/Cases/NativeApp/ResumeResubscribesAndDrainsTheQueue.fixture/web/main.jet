@@ -48,12 +48,12 @@ board: fn() -> String Never! {
 }
 
 Listening: struct {
-    scope: EventScope?,
+    _scope: EventScope?,
 }
 
 // The listener's scope, kept past the run: the page goes on after it, and
 // a scope's listeners stop with it.
-LISTENING: Shared{Listening{scope: None}}
+LISTENING: Shared{Listening{_scope: None}}
 
 run: fn() {
     graph: app.new("Crewboard").offline(.Queue)
@@ -67,6 +67,6 @@ run: fn() {
         if heard.reason == .Closing -> print("queued {app.pending()}, board: {board()}")
     })
     held := LISTENING.guard_edit()
-    held.value.scope = Val(listening)
+    held.value._scope = Val(listening)
     print(if graph.launch() -> "launched" else -> "not launched")
 }

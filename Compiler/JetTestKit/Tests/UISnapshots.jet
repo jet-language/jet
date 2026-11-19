@@ -371,6 +371,13 @@ kit_ui_test_run: fn(code: Int, stderr: String) -> KitRun {
     assert_eq(cost.argv, ["lint", "--cost", "Tests/UILint/cost.jet"])
     assert_eq(cost.exit, "nonzero")
     assert_eq(cost.streams, "rendered")
+    // A lint fixture's `@report_cli` lists its advice through `jet lint`,
+    // which exits 0, so it keeps the lint stream and its acceptance.
+    report: kit_ui_invocation("// @report_cli\n", "Tests/UILint/report.jet", true)
+    assert_eq(report.argv, ["lint", "Tests/UILint/report.jet"])
+    assert_eq(report.exit, "any")
+    assert_eq(report.streams, "lint")
+    assert_eq(kit_ui_rendered_only("Warning [jet.HiddenAllocContext]: advice\n\n1 report found\nRun `jet explain L0506` to learn more\n"), "Warning [jet.HiddenAllocContext]: advice\n")
     files.remove_all(root) ?? panic("remove public CLI scratch: {err}")
 }
 

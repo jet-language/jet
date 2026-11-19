@@ -1,0 +1,26 @@
+// A library's public members stay open to readers outside it, so they are
+// never judged; its private members are judged like an application's.
+Shape: struct {
+    width: Int,
+    priv tag: String,
+}
+
+Tone: enum {
+    Light,
+    Dark,
+}
+
+priv Mode: enum {
+    On,
+    Off,
+}
+
+make: fn(width: Int) -> Shape { Shape{width: width, tag: "made"} }
+
+describe: fn(level: Int) -> String {
+    mode: if level > 0 -> Mode.On else -> Mode.On
+    if mode == {
+        .On -> "on"
+        .Off -> "off"
+    }
+}

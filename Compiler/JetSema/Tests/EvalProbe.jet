@@ -1,0 +1,273 @@
+// The debugger's position probe: an expression asked at a stop position is
+// checked as a lambda in the walk's own scope and ownership state there,
+// judged against `fn() -[]>` and the deny-only `Unsafe`, and the program's
+// facts are the same with and without probes.
+use {
+    jet_sema.[
+        SemaBuildFacts,
+        SemaComptimeFunctionResult,
+        SemaComptimeItemValue,
+        SemaEvalProbe,
+        SemaEvalProbeAnswer,
+        SemaForeignProviderInput,
+        SemaRegistrationForeignHandleFacts,
+        SemaRegistrationHostHooks,
+        SemaRegistrationImportEdge,
+        SemaRegistrationModuleInput,
+        SemaRegistrationPackagePolicy,
+        SemaSourceOrigin,
+        SemaSourceSegment,
+        sema_collect_comptime_declarations,
+        sema_eval_probe_answers,
+        sema_eval_probe_parse,
+        sema_eval_probes,
+        sema_finalize_registration_graph,
+        sema_registration_prepare_graph,
+    ]
+    jet_parser.[parse_source]
+    jet_driver.[jet_driver_canonical_effect_module]
+    jet_foundation.[Expr, Span, Type, compiler_threads_single, effect_vocabulary_module, expr_span, jet_target_machine_hosted, module_intern, module_table]
+}
+
+// The expressions asked at `offset`.
+EvalProbeAsk: struct {
+    offset: Int,
+    texts: [String],
+}
+
+// The answers of a checked fixture, and its checked modules and diagnostics
+// as text.
+EvalProbeRun: struct {
+    answers: [SemaEvalProbeAnswer],
+    facts: String,
+}
+
+eval_probe_run: fn(source: String, asks: [EvalProbeAsk], failures: &[String]) -> EvalProbeRun {
+    run := EvalProbeRun{answers: [SemaEvalProbeAnswer]{}, facts: ""}
+    parsed := parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 {
+        failures.push("the fixture did not parse: {parsed.diagnostics:Debug}")
+        return run
+    }
+    table := module_table()
+    main_id: module_intern(table, "eval-probe::main")
+    canonical: jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? {
+        failures.push("canonical effect module declares no effects")
+        return run
+    }
+    canonical_id: canonical.module_identity
+    probes := [SemaEvalProbe]{}
+    loop ask in asks {
+        expressions := [Expr]{}
+        loop text in ask.texts {
+            parse: sema_eval_probe_parse(text, ask.offset)
+            if {
+                parse.expression == .Val(value) -> expressions.push(value)
+                else -> {
+                    failures.push("`{text}` did not parse as a probe: {parse.diagnostics:Debug}")
+                }
+            }
+        }
+        probes.push(SemaEvalProbe{module_identity: main_id, offset: ask.offset, expressions: expressions})
+    }
+    handle: sema_eval_probes(probes)
+    facts: SemaBuildFacts{package_name: "eval-probe", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    segment: SemaSourceSegment{generated: Span{start: 0, end: source.len()}, source_file: "main.jet", source_start: 0, line_starts: [Int]{0}, origin: SemaSourceOrigin.Snapshot}
+    input: SemaRegistrationModuleInput{package_identity: "eval-probe", module_identity: main_id, module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{segment}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
+    threads: compiler_threads_single()
+    graph := sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "eval-probe", main_id, canonical_id, table, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false, threads) ?? {
+        failures.push("registration failed: {err}")
+        return run
+    }
+    hooks: Shared{SemaRegistrationHostHooks{numeric_unit_conversion_exact: None}}
+    // Declaration checking loans the graph to its stage, which returns it.
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, threads, None)
+    declared := stage.graph.move()
+    stage.graph = None
+    graph = declared.move() ?? {
+        failures.push("the declaration pass lost its registration graph")
+        return run
+    }
+    if asks.len() > 0 -> graph.eval_probes = Val(handle)
+    checked := sema_finalize_registration_graph(graph, None, stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, threads, None)
+    run.facts = "{checked.modules:Debug}\n{checked.diagnostics:Debug}"
+    run.answers = sema_eval_probe_answers(handle)
+    run
+}
+
+// The first line where `left` and `right` differ.
+eval_probe_first_difference: fn(left: String, right: String) -> String {
+    left_lines: left.split("\n").to_list()
+    right_lines: right.split("\n").to_list()
+    loop (index, line) in left_lines {
+        if index >= right_lines.len() -> return "line {index}: `{line}` against the end"
+        if right_lines[index] != line {
+            return "line {index}: `{line}` against `{right_lines[index]}`"
+        }
+    }
+    "line {left_lines.len()}: the end against `{right_lines[left_lines.len()]}`"
+}
+
+eval_probe_answer: fn(run: EvalProbeRun, probe: Int, expression: Int, failures: &[String]) -> SemaEvalProbeAnswer? {
+    loop answer in run.answers {
+        if answer.probe == probe && answer.expression == expression -> return Val(answer)
+    }
+    failures.push("probe {probe} expression {expression} has no answer; the answers are {run.answers:Debug}")
+    None
+}
+
+eval_probe_codes: fn(answer: SemaEvalProbeAnswer) -> String {
+    codes: loop refusal in answer.refusals -> refusal.code
+    codes.join(",")
+}
+
+eval_probe_expect_value: fn(run: EvalProbeRun, probe: Int, expression: Int, ty: Type, exact: Bool, failures: &[String]) {
+    answer: eval_probe_answer(run, probe, expression, failures) ?? return
+    if !answer.complete || answer.refusals.len() > 0 {
+        failures.push("probe {probe} expression {expression} was refused: {answer.refusals:Debug}")
+        return
+    }
+    if answer.value_type != Val(ty) {
+        failures.push("probe {probe} expression {expression} has the type {answer.value_type:Debug}, not {ty:Debug}")
+    }
+    if answer.exact != exact {
+        failures.push("probe {probe} expression {expression} answered with exact {answer.exact}, not {exact}")
+    }
+}
+
+eval_probe_expect_refusal: fn(run: EvalProbeRun, probe: Int, expression: Int, code: String, names: String, failures: &[String]) {
+    answer: eval_probe_answer(run, probe, expression, failures) ?? return
+    loop refusal in answer.refusals {
+        if refusal.code == code && refusal.what.contains(names) {
+            return
+        }
+    }
+    failures.push("probe {probe} expression {expression} has no {code} refusal naming {names}: {answer.refusals:Debug}")
+}
+
+eval_probe_report: fn(failures: [String]) {
+    if failures.len() > 0 {
+        panic("EvalProbe collected {failures.len()} failures:\n{failures.join("\n")}")
+    }
+}
+
+#Test("eval_probe_answers") {
+    failures := [String]{}
+    source: `helper: fn(value: Int) -> Int Never! {
+    print("helper ran")
+    value + 1
+}
+
+Box: struct { items: [Int] }
+
+run: fn() {
+    xs := [Int]{1, 2, 3}
+    total: xs.len()
+    box := Box{items: xs}
+    print("{total} {box.items.len()}")
+}
+`
+    // A binding statement's node starts at its `:` or `:=`.
+    before_box: source.find(":= Box")
+    at_print: source.find(`print("{total}`)
+    in_total: source.find(": xs.len()") + 1
+    moved_at: source.find("xs}}")
+    asks: [EvalProbeAsk]{
+        EvalProbeAsk{offset: before_box, texts: [String]{"total + 1", "xs.len() > 2", "helper(total)", "print(\"x\")"}},
+        EvalProbeAsk{offset: at_print, texts: [String]{"xs.len()", "total"}},
+        EvalProbeAsk{offset: in_total, texts: [String]{"xs.len() + 1"}},
+    }
+    probed: eval_probe_run(source, asks, failures)
+    plain: eval_probe_run(source, [EvalProbeAsk]{}, failures)
+    if probed.facts != plain.facts {
+        failures.push("the probes changed the program's facts at {eval_probe_first_difference(probed.facts, plain.facts)}")
+    }
+    eval_probe_expect_value(probed, 0, 0, Type.Int, true, failures)
+    if eval_probe_answer(probed, 0, 0, failures) == .Val(answer) {
+        captured: loop capture in answer.captures -> capture.source
+        if captured.len() != 1 || captured[0] != "total" {
+            failures.push("`total + 1` captures {captured:Debug}, not `total`")
+        }
+    }
+    eval_probe_expect_value(probed, 0, 1, Type.Bool, true, failures)
+    eval_probe_expect_refusal(probed, 0, 2, "E0747", "helper`", failures)
+    eval_probe_expect_refusal(probed, 0, 3, "E0747", "IO", failures)
+    // `xs` moved into `box` on the line before: the read is refused at its
+    // use, with the move's site as a label.
+    if eval_probe_answer(probed, 1, 0, failures) == .Val(answer) {
+        labeled := false
+        loop refusal in answer.refusals {
+            if refusal.code != "E0121" -> next
+            loop label in refusal.labels {
+                if label.span.start == moved_at -> labeled = true
+            }
+        }
+        if !labeled {
+            failures.push("the read of the moved `xs` has no E0121 labeled at the move ({moved_at}): {answer.refusals:Debug}")
+        }
+    }
+    eval_probe_expect_value(probed, 1, 1, Type.Int, true, failures)
+    // No node starts in `total: xs.len()` just past the colon: its statement
+    // answers, before `total` is bound.
+    eval_probe_expect_value(probed, 2, 0, Type.Int, false, failures)
+    eval_probe_report(failures)
+}
+
+#Test("eval_probe_final_walk") {
+    failures := [String]{}
+    // The first check pass finds `xs` moved into `box`; the later use makes
+    // that a share, and the pass after it is the one the program keeps.
+    source: `Box: struct { items: [Int] }
+
+run: fn() {
+    xs := [Int]{1, 2}
+    box := Box{items: xs}
+    print("{box.items.len()}")
+    xs.push(3)
+    print("{xs.len()}")
+}
+`
+    asks: [EvalProbeAsk]{EvalProbeAsk{offset: source.find(`print("{box`), texts: [String]{"xs.len()"}}}
+    probed: eval_probe_run(source, asks, failures)
+    eval_probe_expect_value(probed, 0, 0, Type.Int, true, failures)
+    eval_probe_report(failures)
+}
+
+#Test("eval_probe_unsafe") {
+    failures := [String]{}
+    source: `poke: fn() -> Int Never! {
+    #Unsafe("eval probe fixture") { 7 }
+}
+
+run: fn() {
+    total: poke()
+    print("{total}")
+}
+`
+    asks: [EvalProbeAsk]{EvalProbeAsk{offset: source.find(`print("{total}`), texts: [String]{"poke()", "total * 2"}}}
+    probed: eval_probe_run(source, asks, failures)
+    eval_probe_expect_refusal(probed, 0, 0, "E0747", "`#Unsafe`", failures)
+    eval_probe_expect_value(probed, 0, 1, Type.Int, true, failures)
+    eval_probe_report(failures)
+}
+
+#Test("eval_probe_parse") {
+    failures := [String]{}
+    sum: sema_eval_probe_parse("total + 1", 40)
+    if {
+        sum.expression == .Val(value) -> {
+            if expr_span(value).start != 40 {
+                failures.push("`total + 1` starts at {expr_span(value).start}, not 40")
+            }
+        }
+        else -> failures.push("`total + 1` did not parse: {sum.diagnostics:Debug}")
+    }
+    refused_texts: [String]{"x := 1", "a\nb", "(1 +"}
+    loop text in refused_texts {
+        refused: sema_eval_probe_parse(text, 40)
+        if refused.expression != None || refused.diagnostics.len() == 0 {
+            failures.push("`{text}` parsed as one expression")
+        }
+    }
+    eval_probe_report(failures)
+}

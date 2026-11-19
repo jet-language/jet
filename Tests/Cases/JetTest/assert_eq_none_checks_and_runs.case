@@ -1,0 +1,10 @@
+# `assert_eq(x, None)` on an Optional checks with no
+# report and runs; no generated body raises L0528.
+fixture: AssertEqNoneChecksAndRuns.fixture
+env: NO_COLOR=1
+step: jet check run.jet --json
+exit: 0
+json: stdout doc $.reports #= 0
+step: jet run run.jet
+exit: 0
+stdout: = "ok\n"

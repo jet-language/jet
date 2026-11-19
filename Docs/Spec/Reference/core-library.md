@@ -866,8 +866,9 @@ A Float or F32 key to `sort_by`, `sort_by_desc`, their `try_` forms, `min_by`
 or `max_by` orders by IEEE 754 totalOrder, as `<=>` does: a negative NaN
 first, then `-inf`, `-0.0` before `+0.0`, `+inf`, and a positive NaN last.
 `sort`, `sort_desc`, `min` and `max` on named tuples compare members in written
-order (S73, D-RECORD-ORDER1=A). So `(key, index)` sorts by `key`, then `index`;
-use `sort_by` to put another member first.
+order (S73, D-RECORD-ORDER1=A). So `{key, index}` sorts by `key`, then `index`;
+use `sort_by` to put another member first (example:
+`Examples/Collections/NamedTupleOrder.jet`).
 `binary_search` returns a matching index, not an insertion position or a
 promise to return the first equal item. `counts()` returns a map of element
 counts; `top_n(n)` orders by descending count and ascending key for ties.
@@ -3903,6 +3904,7 @@ run: fn() {
 `core.perf` maps a fidelity value to bounded work scaling. `fidelity()` reads
 the environment-selected value; `default_fidelity()` is the pure value `1.0`.
 `override_fidelity` and `reset_fidelity` modify the environment-scoped value.
+`heap_mark` names a heap snapshot for `jet perf run --lens=alloc`.
 
 | Function or type | Returns | Description |
 | --- | --- | --- |
@@ -3913,6 +3915,7 @@ the environment-selected value; `default_fidelity()` is the pure value `1.0`.
 | `perf.of(value)` | `Perf` | Construct a bounded fidelity value; NaN becomes `1`. |
 | `perf.is_full(value)` / `perf.is_low(value)` | `Bool` | Test full fidelity or fidelity below `0.25`. |
 | `perf.scale(value, work)` | `Int` | Scale nonnegative work by fidelity. |
+| `perf.heap_mark(name)` | `-[Env]> Never!` | Under `jet perf run --lens=alloc`, keep a heap snapshot named `name`: the live blocks by the line that allocated them (observability.md). Any other run keeps nothing. |
 | `Perf` | type | A bounded fidelity value consumed by scaling operations. |
 | `PerfError` | `#Error` enum | D-PERF-ERR1=A. `OutOfRange(Float)` holds the rejected value. |
 
@@ -5201,9 +5204,11 @@ Ring: struct {
 
 `print` and `locals` then show a `Ring` as `Ring{0: 3, 1: 4, 2: 5}`. A build
 with debug information keeps every implementation on a non-generic struct,
-called or not, and the debugger runs it in the stopped program on a copy of
-the value; a view that does not return (a breakpoint or a trap inside it)
-leaves the value shown by its fields.
+called or not. The debugger runs it on a copy of the value in a fork of the
+stopped program, never in the program itself, which neither runs nor changes.
+The fork may compute and allocate. A system call other than memory
+management is refused, as is a fault, a trap or running past the 2-second
+budget. A view that doesn't return leaves the value shown by its fields.
 
 ### `core.testing` — deterministic test helpers
 
@@ -7813,6 +7818,16 @@ store to end.
 `query_one`, `execute`, `begin`), which a generic bound names bare:
 `count: fn<T: Driver>(conn: T)` takes a connection or any scope and calls its
 methods.
+
+A Query-class statement (D-SQL-CLASS1=A: one that starts with `SELECT` or
+`WITH`) run through a driver's `query`, `query_one` or `live` inside a
+`loop` over database rows, the `[String: DBValue]` rows a query returns or a
+table's `Query<T>`, is the tidy error L0308 (`sql_query_in_row_loop`) at
+the inner query: each row costs one more round trip, so N rows cost N + 1
+queries. The fix names the batched form, one query before the loop through a
+`WHERE key IN (…)` list over the rows' keys, or a JOIN with the query that
+produced them. A query outside any loop, a write per row, and a statement the
+loop builds into a binding first report nothing.
 
 A typed table stores `T` rows by key. `store.table("tasks", key: fn(task:
 Task) { task.id })` names the table and the key function; `K` is `Encode`,

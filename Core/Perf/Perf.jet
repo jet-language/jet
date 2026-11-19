@@ -44,6 +44,15 @@ override_fidelity: fn(value: Float) -[Env]> PerfError! {
 
 reset_fidelity: fn() -[Env]> Never! { core.perf.__write_bits(0) }
 
+/// Under `jet perf run --lens=alloc`, keeps a heap snapshot named `name`:
+/// the program's live blocks by the line that allocated them, which
+/// `jet perf view` lists. Any other run keeps nothing.
+heap_mark: fn(name: String) -[Env]> Never! {
+    // Until the census seed knows core.perf.__heap_mark, a mark keeps no snapshot.
+    _ := core.perf.__read_bits()
+    _ := name.len()
+}
+
 of: fn(fidelity: Float) -> Perf Never! {
     v := fidelity
     if core.math.is_nan(v) -> v = 1.0

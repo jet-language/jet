@@ -576,9 +576,14 @@ Ranges are values. `a..b` is inclusive and `a..<b` is half-open; both are
 `Range` values over `Int` that can be stored, passed, returned, looped, or used
 as slice bounds. A range exposes `.start`, `.end`, and `.contains(value)`.
 Literal range loops can lower directly to jumps without allocation. Bounds and
-stride expressions evaluate once from left to right. A stride is a positive
-`Int` and is checked before the first pull (S22, D-RANGE-VALUE1=A,
-D-RANGE-EXCL1=C).
+stride expressions evaluate once from left to right. A stride is a nonzero
+`Int`, checked before the first pull; a zero stride is E0123. A minus stride
+counts down: `a..b, -k` visits `a`, `a - k`, … while the value stays `>= b`,
+so `10..0, -3` visits 10, 7, 4, 1. A loop whose ends are both written numbers
+and whose step moves away from its end could never run; it is E0170, whose
+fix adds the minus step (`10..1` becomes `10..1, -1`) or turns the step
+around. Computed ends are never an error: `0..n - 1` with `n == 0` runs zero
+times (S22, D-RANGE-VALUE1=A, D-RANGE-EXCL1=C, D-RANGE-BACKWARD1=A).
 
 ## Branching, results, and loops
 
@@ -1574,7 +1579,7 @@ expected type fixes. With no expected type, omitted parameter annotations
 report **E0801** (S46).
 A lambda stored where no type is expected writes its result as a named
 function does (D-LAMBDA-STORED1=A). With no written result it returns nothing,
-so a value its body ends in is thrown away (**E0433**).
+so a value its body ends in is thrown away (tidy error **L0508**).
 A stored lambda keeps the failure contract proved by its own body, whether or
 not it writes a result. A body with no failure has a `Never` failure rail. A
 same-named file function cannot supply the local binding's call or failure
@@ -1938,17 +1943,22 @@ or bind it. The sole intentional-discard spelling is
 `.drop("reason")`; the reason is part of the source-level audit trail.
 (D-IGNORERET2, D-MARK-DISCARD1)
 
-Two other lost values are errors (E0433, D-DISCARD1=A). A statement that
-calls a pure function and ignores a non-Unit result does nothing: the call is
-pure when its solved effect row is empty, it cannot fail, and it passes
-nothing with `&`. Calls with effects or `&` arguments may still drop their
-result. The last line of a named function with no written return type is
-the other case: the function returns nothing, so a non-Unit value there is
-lost, and the fix is the missing `-> T` or `.drop("reason")`. Lambdas are
-unaffected, because their result type comes from the body. When a return type
-is written and the last line does not match it, E0113 reports the value's
-type or shape and names the conversion or wrap; the declared return type is
-the contract and is never the suggested fix.
+Two other lost values are tidy errors (L0508 `discarded_pure_result`,
+D-DISCARD1=A, D-NO-WARNINGS1=A): `jet check` and `jet build` list them and
+fail, and `jet run` and `jet dev` neither stop on them nor print them. A
+statement that calls a pure function and ignores a non-Unit result does
+nothing: the call is pure when its solved effect row is empty, it cannot
+fail, and it passes nothing with `&`. Calls with effects or `&` arguments may
+still drop their result, and an arrow loop body that is a Unit statement
+(`loop n in xs -> sum += n`) loses nothing. The last line of a named function
+with no written return type is the other case: the function returns nothing,
+so a non-Unit value there is lost, and the fix is the missing `-> T` or
+`.drop("reason")`. Lambdas passed where a function type is expected are
+unaffected, because their result type comes from that type or the body. A
+stored lambda follows the named-function rule (D-LAMBDA-STORED1=A). When a
+return type is written and the last line does not match it, E0113 reports
+the value's type or shape and names the conversion or wrap; the declared
+return type is the contract and is never the suggested fix.
 
 An infallible unit call written with no return arrow and `Never!` also has
 no result to lose: its checked `Result<Unit, Never>` carrier is classified by
@@ -4670,13 +4680,27 @@ value uses the same ordered commit engine, so it does not nest locks in an
 arbitrary order.
 
 Jet does not guarantee deadlock freedom for arbitrary structured-concurrency
-programs and does not detect arbitrary deadlocks at runtime. Tasks, groups,
-join duties, and channels specify ownership, lifetime, and wait behavior; they
-do not prove progress. Tasks can wait for one another through bounded channels,
-or a task can wait for a result that no task sends. The scheduler wakes tasks
-when a source, cancellation, or deadline changes but does not construct a
-global wait-for graph. A deadline or cancellation can bound a wait; neither
-makes a deadlock successful.
+programs. Tasks, groups, join duties, and channels specify ownership,
+lifetime, and wait behavior; they do not prove progress. A deadline or
+cancellation can bound a wait; neither makes a deadlock successful.
+
+The runtime stops the wait cycles it can see (D-DBG-DEADLOCK1=A). A task
+that blocks with no deadline outside a shield records what it waits for: a
+joined task, or the task holding the edit permit of a `Shared<T>` it reads or
+edits. When the last task of a cycle of such waits blocks, every task in the
+cycle fails as a panicking task fails: its join returns `.Panicked` with one
+report, and its scope unwinds. Tasks outside the cycle run on; if the main
+task is in the cycle, the program stops (exit 70). The report names each
+task, its wait and its line:
+
+```text
+deadlock: tasks wait on each other
+  task 1 (main)  waits to join task 2  main.jet:18
+  task 2  waits to edit a Shared value task 1 holds  main.jet:10
+```
+
+Waits on channels, on read permits, on writers queued ahead, and on a
+`Condition` are not yet part of a cycle, so a cycle through one still hangs.
 
 See [channel buffering](#bounded-buffering-law) and
 [concurrency boundary safety](architecture.md#concurrency-boundary-safety).

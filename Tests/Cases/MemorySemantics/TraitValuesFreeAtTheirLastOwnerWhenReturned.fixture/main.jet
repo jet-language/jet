@@ -9,7 +9,7 @@ package: {
 }
 
 Context: struct {
-    id: Int,
+    _id: Int,
 }
 
 Sink: trait {
@@ -18,7 +18,7 @@ Sink: trait {
 }
 
 Worker: struct {
-    context: Shared<Context>,
+    _context: Shared<Context>,
     n: Int,
 
     impl Sink {
@@ -28,7 +28,7 @@ Worker: struct {
     }
 }
 
-make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{context: s.copy(), n: n} }
+make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{_context: s.copy(), n: n} }
 
 handed_back: fn(k: &&Sink) -> Sink { k }
 
@@ -60,7 +60,7 @@ discarded: fn(s: Shared<Context>) {
 }
 
 run: fn() {
-    s := Shared{Context{id: 1}}
+    s := Shared{Context{_id: 1}}
     returned(s)
     print("returned dropped {s.strong_count()}")
     discarded(s)

@@ -1,15 +1,15 @@
 #Error
 SourceErr: struct {
-    message: String,
+    _message: String,
 }
 
 #Error
 TargetErr: struct {
-    message: String,
+    _message: String,
 
     impl From(SourceErr) {
         from: fn(error: SourceErr) -> TargetErr {
-            return TargetErr{message: "converted from source"}
+            return TargetErr{_message: "converted from source"}
         }
     }
 }
@@ -18,7 +18,7 @@ impl Err.From(TargetErr) {
     from: fn(error: TargetErr) -> Err { return Err("converted from target") }
 }
 
-read: fn() -> Int SourceErr! { return Err(SourceErr{message: "source failure"}) }
+read: fn() -> Int SourceErr! { return Err(SourceErr{_message: "source failure"}) }
 
 middle: fn() -> Int TargetErr! {
     value: read()

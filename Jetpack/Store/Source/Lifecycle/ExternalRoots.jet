@@ -4,14 +4,16 @@
 // to its complete closure under the Hangar lock.
 
 // One manually retained closure as the external-root CLI and consumers see
-// it.
+// it. Its fields are public: the CLI reads them, and the Engine area's check
+// holds no CLI; only the Store tests read `closure_size` and `prepared`, and
+// the check of an area built on Engine holds no Store tests.
 ExternalRootView: struct {
-    priv label: String,
-    priv reference: String,
-    priv etag: String,
-    priv closure_size: Int,
-    priv prepared: Bool,
-    priv expires_at: Int?,
+    label: String,
+    reference: String,
+    etag: String,
+    closure_size: Int,
+    prepared: Bool,
+    expires_at: Int?,
 }
 
 #Error

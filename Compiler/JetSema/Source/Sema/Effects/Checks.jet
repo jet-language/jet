@@ -6152,7 +6152,7 @@ sema_effect_row_has_no_outcome: fn(node: SemaEffectNode, solved: [String]) -> Bo
 // The callee as written stands in for the call text (the Rust reference's
 // span covers the callee name, so its call text is that name).
 sema_effect_discarded_result_diagnostic: fn(node: SemaEffectNode, span: Span) -> Diagnostic {
-    diagnostic: sema_error("E0433", span, "the result of `{node.name}` is thrown away", "`{node.name}` is pure (it has no effects and changes nothing through `&`), so this line does nothing", "use the result, bind it with `result: {node.name}`, or write `.drop(\"reason\")` if dropping it is intended")
+    diagnostic: sema_lint("L0508", span, "the result of `{node.name}` is thrown away", "`{node.name}` is pure (it has no effects and changes nothing through `&`), so this line does nothing", "use the result, bind it with `result: {node.name}`, or write `.drop(\"reason\")` if dropping it is intended")
     diagnostic_with_source_derived_suggestion(diagnostic, Span{start: span.start, end: span.start}, "result: ")
 }
 
@@ -6313,7 +6313,7 @@ sema_effect_region_add_scoped: fn(inferred: &[String], scoped_calls: [SemaEffect
 // selected machine when it has no heap ("" when it has one), and `entries`
 // are the keys of the functions the program starts at, from which nothing
 // may allocate (sema_effect_check_heap_free).
-sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}, package_policies: [SemaRegistrationPackagePolicy]{[SemaRegistrationPackagePolicy]{}}, expert_modules: [Int]{[Int]{}}, main_package: String{""}, heap_free: String{""}, entries: [String]{[String]{}}) -> SemaEffectGraphResult {
+sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaEffectModuleInput], prepared: &&SemaEffectPrepared, package_denials: [String], denial_modules: [Bool], file_caps: [[SemaEffectModuleCap]], trait_caps: [U32:SemaEffectTypeCap], decls: DeclTable, symbols: &&SymbolTable, table: ModuleTable, prep_functions: [String:Bool], threads: CompilerThreads, closed: Bool, organization_denials: [String]{[String]{}}, organization_source: String{""}, seal: Bool{false}, package_policies: [SemaRegistrationPackagePolicy]{[SemaRegistrationPackagePolicy]{}}, expert_modules: [Int]{[Int]{}}, main_package: String{""}, heap_free: String{""}, entries: [String]{[String]{}}, eval_probes: SemaEvalProbes?{None}) -> SemaEffectGraphResult {
     owned_prepared := prepared.move()
     diagnostics := owned_prepared.diagnostics.move()
     nodes := owned_prepared.nodes.move()
@@ -6455,6 +6455,10 @@ sema_effects_check_modules: fn(modules: &[SemaGraphModuleResult], inputs: [SemaE
         callback_diagnostics := [Diagnostic]{}
         sema_effect_check_callback_bounds(nodes, calls.node_by_key, solved, node_index, callback_diagnostics)
         sema_effect_publish_diagnostics(diagnostics, inputs[nodes[node_index].module_index].source_segments, callback_diagnostics)
+    }
+    // The debugger's probe answers take their verdicts from the solved rows.
+    if eval_probes == .Val(probes) {
+        sema_eval_probe_judge_effects(probes, nodes, calls.node_by_key, solved)
     }
     sema_effect_check_compiler_hooks(table, modules, inputs, nodes, calls.node_by_key, solved, diagnostics)
     // A pure function may not write module state, itself or through any
@@ -7084,7 +7088,7 @@ sema_effect_check_module_regions: fn(functions: [FnBody], module_row: SemaEffect
     sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, region_diagnostics)
 }
 
-// A discarded call result of a function whose row has no outcome (E0433).
+// A discarded call result of a function whose row has no outcome (L0508).
 sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: NameRows, symbols: SymbolTable, solved: [[String]], diagnostics: &[Diagnostic]) {
     discarded := [Diagnostic]{}
     loop fact in call_facts {

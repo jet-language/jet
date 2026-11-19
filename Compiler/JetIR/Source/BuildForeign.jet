@@ -617,7 +617,8 @@ ir_foreign_list_result: fn(m: &IRModule, b: &IRBuilder, row: Int, element: Int, 
     stride_slot: ir_word_const(m, b, stride)
     bytes: ir_word_op(m, b, IROp.Mul, count, stride_slot)
     eight: ir_word_const(m, b, 8)
-    data: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, eight}, word_row)
+    buffer_row: ir_list_alloc_row(m, element)
+    data: ir_runtime(m, b, "jet_rt_alloc", [Int]{bytes, eight}, buffer_row)
     if width == stride -> _: ir_runtime(m, b, "jet_rt_mem_move", [Int]{data, raw, bytes}, -1) else {
         ir_foreign_restride(m, b, data, stride, raw, width, count, width)
     }

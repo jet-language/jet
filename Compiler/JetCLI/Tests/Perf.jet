@@ -1,13 +1,27 @@
 // Pure provider witnesses. Transport permission/pid/race checks need the composed
 // CLI + Core native FS provider; these tests make no hosted parity claim.
 use {
-    jet_backend.[X64ImageFunction, X64Jetline, X64JetlineFunction]
+    jet_backend.[X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction]
     jet_cli.[
+        JetCLIPerfHeap,
+        JetCLIPerfHeapBlock,
+        JetCLIPerfHeapFrame,
+        JetCLIPerfHeapObject,
+        JetCLIPerfHeapPlace,
+        JetCLIPerfHeapRef,
+        JetCLIPerfHeapRetention,
+        JetCLIPerfHeapRoot,
+        JetCLIPerfHeapSite,
+        JetCLIPerfHeapSnapshot,
         JetCLIPerfInlines,
         JetCLIPerfObservation,
+        JetCLIPerfRetained,
         jet_cli_perf_browser_decode,
         jet_cli_perf_capture_bytes,
         jet_cli_perf_capture_source,
+        jet_cli_perf_heap_retain,
+        jet_cli_perf_heap_retention_lines,
+        jet_cli_perf_heap_types,
         jet_cli_perf_live_from,
         jet_cli_perf_samples_count,
         jet_cli_perf_samples_profile,
@@ -15,7 +29,21 @@ use {
         jet_cli_perf_source_position,
         jet_cli_perf_source_profile,
     ]
-    jet_debug.[NativeAbstract, NativeFunction, NativeInlined, NativeVariable]
+    jet_debug.[
+        NATIVE_TAG_POINTER,
+        NATIVE_TAG_STRUCT,
+        NATIVE_TAG_TYPEDEF,
+        NativeAbstract,
+        NativeEnumerator,
+        NativeFunction,
+        NativeImage,
+        NativeInlined,
+        NativeMember,
+        NativeType,
+        NativeVariable,
+        NativeVariableRole,
+        NativeVariants,
+    ]
     jet_foundation.[
         JetLiveChannel,
         JetLiveEvent,
@@ -107,13 +135,15 @@ jet_cli_perf_test_snapshot: fn(task_id: Int) -> JetLiveSnapshot Never! {
     assert_eq(bounded.rows[1].sample_weight, U64{4096})
 }
 
-#Test("perf capture keeps observed IO spans, locks and allocations causal") {
+#Test("perf capture keeps observed spans, locks and allocations causal, and no I/O from a wait") {
     live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(17))
     observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: live}, JetCLIPerfObservation{at_ns: U64{20}, live: live}}
     capture: jet_cli_perf_capture_source("app.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", Val(U64{30})) ?? panic(err.message)
-    assert_eq(capture.io.len(), 1)
-    assert_eq(capture.io[0].start_ns, U64{10})
-    assert_eq(capture.io[0].end_ns, U64{20})
+    // A task blocked on `tcp receive` is a wait, not a transfer: the I/O rows
+    // are the runtime's records of the bytes a read or write moved, and these
+    // observations come with none.
+    assert_eq(capture.io.len(), 0)
+    assert_eq(capture.tasks[0].wait, "tcp receive")
     assert_eq(capture.locks.len(), 1)
     assert_eq(capture.allocations[0].bytes, U64{64})
     assert_eq(capture.tasks[0].id, U64{1})
@@ -202,7 +232,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             1000,
         },
     )
-    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, words)
+    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words)
     assert_eq(sampled.total, U64{3})
     assert_eq(sampled.outside, U64{1})
     assert_eq(sampled.helpers, U64{1})
@@ -222,6 +252,114 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(profile.overhead_status, "measured")
     assert_eq(profile.overhead_ns, Val(U64{9000}))
     assert_eq(profile.overhead_reason, "the sampler took 9 microseconds, 0.22% of the 4000 microseconds of CPU time sampled: 6 in its handlers and 3 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started")
+}
+
+#Test("a heap snapshot's blocks count by their line and by the type their innermost typed allocating call names") {
+    table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    words: jet_cli_perf_test_words(
+        [Int]{
+            // Snapshot 1, `exit`: 3 blocks, 112 bytes, its 4-byte name.
+            1 | (5 << 48) | (10 << 59),
+            3,
+            112,
+            4,
+            0x74697865,
+            // 2 blocks of 96 bytes the runtime allocated for fib's typed call
+            // returning to 12300, which fib's line 5 made.
+            1 | (5 << 48) | (9 << 59),
+            2,
+            96,
+            12300,
+            4160,
+            // 1 block of 16 bytes an untyped call at the same line allocated.
+            1 | (4 << 48) | (9 << 59),
+            1,
+            16,
+            4170,
+        },
+    )
+    allocs: [Int:Int]{12300: 77}
+    names: [Int:String]{77: "[I64]"}
+    sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, allocs, names, words)
+    assert_eq(sampled.heaps.len(), 1)
+    heap: sampled.heaps[0]
+    assert_eq(heap.name, "exit")
+    assert_eq(heap.sites.len(), 2)
+    assert_eq(heap.sites[0].type_name, "[I64]")
+    assert_eq(heap.sites[0].line, U64{5})
+    assert_eq(heap.sites[0].bytes, U64{96})
+    assert_eq(heap.sites[1].type_name, "")
+    assert_eq(heap.sites[1].line, U64{5})
+    assert_eq(heap.sites[1].blocks, U64{1})
+}
+
+#Test("a heap snapshot's typed blocks are retained along the shortest path from a root, named by its variable and its types' fields") {
+    word: NativeType{name: "Int", size: 8, tag: 0x24, encoding: X64DebugEncoding.Signed, target: -1, group: -1}
+    types: [Int:NativeType]{
+        100: word,
+        // struct Room {id: Int, history: [Message]}, and the lists.
+        10: NativeType{name: "Room", size: 32, tag: NATIVE_TAG_STRUCT, encoding: X64DebugEncoding.Unsigned, target: -1, group: 0},
+        20: NativeType{name: "[Message]", size: 24, tag: NATIVE_TAG_STRUCT, encoding: X64DebugEncoding.Unsigned, target: -1, group: -1},
+        40: NativeType{name: "[Room]", size: 24, tag: NATIVE_TAG_STRUCT, encoding: X64DebugEncoding.Unsigned, target: -1, group: -1},
+        80: NativeType{name: "Message", size: 16, tag: NATIVE_TAG_STRUCT, encoding: X64DebugEncoding.Unsigned, target: -1, group: 1},
+        // What the typed allocating calls allocate for: a list's buffer of
+        // rooms, one of messages.
+        50: NativeType{name: "[Room]", size: 0, tag: NATIVE_TAG_TYPEDEF, encoding: X64DebugEncoding.Unsigned, target: 51, group: -1},
+        51: NativeType{name: "", size: 8, tag: NATIVE_TAG_POINTER, encoding: X64DebugEncoding.Unsigned, target: 10, group: -1},
+        70: NativeType{name: "[Message]", size: 0, tag: NATIVE_TAG_TYPEDEF, encoding: X64DebugEncoding.Unsigned, target: 71, group: -1},
+        71: NativeType{name: "", size: 8, tag: NATIVE_TAG_POINTER, encoding: X64DebugEncoding.Unsigned, target: 80, group: -1},
+    }
+    members: [[NativeMember]]{
+        [NativeMember]{NativeMember{name: "id", offset: 0, ty: 100, die: 0}, NativeMember{name: "history", offset: 8, ty: 20, die: 0}},
+        [NativeMember]{NativeMember{name: "id", offset: 0, ty: 100, die: 0}, NativeMember{name: "body", offset: 8, ty: 100, die: 0}},
+    }
+    // `rooms` lives at rbp-16 over [4096, 4352): DW_LLE_offset_pair 0, 256,
+    // then DW_OP_fbreg -16.
+    rooms: NativeVariable{name: "rooms", line: 3, ty: 40, list: 0, base: 4096, role: NativeVariableRole.Local, site: -1}
+    facts: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{NativeFunction{low: 4096, high: 4352, name: "serve", file: -1, variables: [NativeVariable]{rooms}, inlined: [NativeInlined]{}}}, types: types, members: members, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{0x04, 0x00, 0x80, 0x02, 0x02, 0x91, 0x70, 0x00}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    heap := JetCLIPerfHeap{
+        number: U64{1},
+        name: "exit",
+        blocks: U64{3},
+        bytes: U64{192},
+        sites: [JetCLIPerfHeapSite]{},
+        groups: [Int]{50, 70},
+        live: [JetCLIPerfHeapBlock]{
+            // The rooms' buffer: room 1's history's buffer pointer, at
+            // 32 + 8 + 16.
+            JetCLIPerfHeapBlock{address: 0x10000, size: 96, group: 1, refs: [JetCLIPerfHeapRef]{JetCLIPerfHeapRef{offset: 56, target: 0x20000}}},
+            JetCLIPerfHeapBlock{address: 0x20000, size: 48, group: 2, refs: [JetCLIPerfHeapRef]{}},
+            // Messages no root reaches.
+            JetCLIPerfHeapBlock{address: 0x30000, size: 48, group: 2, refs: [JetCLIPerfHeapRef]{}},
+        },
+        frames: [JetCLIPerfHeapFrame]{JetCLIPerfHeapFrame{pc: 4100, base: 0x7000, low: 0x6f00}},
+        roots: [JetCLIPerfHeapRoot]{JetCLIPerfHeapRoot{address: 0x6ff0, target: 0x10000, data: false}},
+        retained: [JetCLIPerfRetained]{},
+    }
+    jet_cli_perf_heap_retain(facts, [JetCLIPerfHeapObject]{}, [Int:String]{50: "[Room]", 70: "[Message]"}, heap)
+    assert_eq(heap.live.len(), 0)
+    assert_eq(heap.retained.len(), 3)
+    assert_eq(heap.retained[0].type_name, "[Message]")
+    assert_eq(heap.retained[0].path, "rooms[1].history")
+    assert_eq(heap.retained[0].bytes, U64{48})
+    assert_eq(heap.retained[1].type_name, "[Message]")
+    assert_eq(heap.retained[1].path, "")
+    assert_eq(heap.retained[2].type_name, "[Room]")
+    assert_eq(heap.retained[2].path, "rooms")
+    assert_eq(heap.retained[2].blocks, U64{1})
+}
+
+#Test("`--retained-by` names a type by its whole name or its last part, and lists the paths that retain it") {
+    retained: [JetCLIPerfHeapRetention]{
+        JetCLIPerfHeapRetention{type_name: "chat.Message", path: "rooms[1].history", blocks: 2, bytes: 64},
+        JetCLIPerfHeapRetention{type_name: "chat.Message", path: "", blocks: 1, bytes: 32},
+        JetCLIPerfHeapRetention{type_name: "Room", path: "rooms", blocks: 1, bytes: 96},
+    }
+    snapshots: [JetCLIPerfHeapSnapshot]{JetCLIPerfHeapSnapshot{name: "exit", blocks: 4, bytes: 192, places: [JetCLIPerfHeapPlace]{}, retained: retained}}
+    assert_eq(jet_cli_perf_heap_retention_lines(snapshots, "Message"), [String]{"retained chat.Message at exit  3 blocks  96 bytes", "  rooms[1].history  2 blocks  64 bytes", "  no root reached (another thread's stack or a register holds them)  1 blocks  32 bytes"})
+    assert_eq(jet_cli_perf_heap_retention_lines(snapshots, "chat.Message").len(), 3)
+    assert_eq(jet_cli_perf_heap_retention_lines(snapshots, "Ring").len(), 0)
+    assert_eq(jet_cli_perf_heap_types(snapshots), "; they keep Room, chat.Message")
 }
 
 #Test("perf samples in inlined code count at the inlined line and inclusive at the call") {
@@ -249,7 +387,7 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
             4112,
         },
     )
-    sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, inlines, [Bool]{true}, [U64]{}, words)
+    sampled: jet_cli_perf_samples_count(table, [X64ImageFunction]{}, inlines, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words)
     assert_eq(sampled.total, U64{3})
     text := ""
     loop _ in 0..<16 -> text = "{text}line\n"

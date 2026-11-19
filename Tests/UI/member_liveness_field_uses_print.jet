@@ -1,0 +1,25 @@
+// @all_diags
+// Printing a value reads every field it shows, through `print` or an
+// interpolation; a field of a type that is never printed or read is still
+// reported.
+Badge: struct {
+    label: String,
+    color: String,
+}
+
+Note: struct {
+    text: String,
+}
+
+Draft: struct {
+    title: String,
+    owner: String,
+}
+
+run: fn() {
+    print(Badge{label: "new", color: "red"})
+    note: Note{text: "hi"}
+    print("{note:Debug}")
+    draft: Draft{title: "plan", owner: "kim"}
+    print(draft.title)
+}

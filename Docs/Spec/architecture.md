@@ -2613,6 +2613,10 @@ rendered stderr with the accessibility summary line.
 `@cost_cli` uses public `jet lint --cost FILE`, the surface of the hidden
 dynamic cost lint (L2510), requires a nonzero exit, and compares the rendered
 stderr with the hidden-cost summary line.
+`@report_cli` uses public `jet lint FILE`, the only surface of the advice
+(the lints on the report tier), and compares the rendered stderr without its
+"N reports found" count; a lint fixture keeps its lint acceptance, since the
+command exits 0.
 
 Pending user-Rust interoperability acceptance rows use `PRODUCT INTEROP RED:`
 in the existing case-disposition table. They remain in the active testkit corpus

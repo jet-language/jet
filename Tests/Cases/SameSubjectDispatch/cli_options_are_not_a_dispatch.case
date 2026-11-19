@@ -1,0 +1,11 @@
+# The entry a `#CLI` derive writes is no L0514 site; the user's own
+# three-guard dispatch in the same file is the one report.
+fixture: CLIOptionsAreNotADispatch.fixture
+env: NO_COLOR=1
+step: jet check run.jet --json
+exit: 0
+json: stdout doc $.reports[?code="L0514"] #= 1
+json: stdout doc $.reports[?code="L0514"][0].line = 14 # `if word == "one"` in `pick`
+step: jet run run.jet -- --name=jet --count 2 --loud
+exit: 0
+stdout: = "HELLO JET\nHELLO JET\n2\n"

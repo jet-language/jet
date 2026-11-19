@@ -143,9 +143,10 @@ jet_cli_perf_hex16: fn(value: Int) -> String Never! {
 // (jet_cli_perf_otlp_metrics). Its trace id is the first 32 hex digits of
 // the trace's id. A span's id is its row's place among the rows, and a task
 // span's parent is the span of its parent task. The span's kind, task, and
-// a wait's awaited task, spawn line, channel, stack (outermost first, as
-// `jet perf view` prints it) and waker are `jet.*` attributes. Times count
-// from the session's start, since a trace records no wall-clock origin.
+// a wait's awaited task, spawn line, channel, socket addresses, stack
+// (outermost first, as `jet perf view` prints it) and waker are `jet.*`
+// attributes. Times count from the session's start, since a trace records
+// no wall-clock origin.
 jet_cli_perf_otlp: fn(trace: CanonicalJSON) -> String Never! {
     id: trace_id(trace) ?? ""
     trace_hex: if id.count_bytes() >= 32 -> id.slice(0..<32) else -> "00000000000000000000000000000001"
@@ -169,6 +170,12 @@ jet_cli_perf_otlp: fn(trace: CanonicalJSON) -> String Never! {
             loop key in keys {
                 if jet_cli_perf_member_integer(item, key) == .Val(digits) {
                     attributes.push(perf_log.field("jet.{key}", digits))
+                }
+            }
+            addresses: [String]{"local_address", "peer_address"}
+            loop key in addresses {
+                if jet_cli_perf_member_text(item, key) == .Val(address) {
+                    attributes.push(perf_log.field("jet.{key}", address))
                 }
             }
             stack: jet_cli_perf_wait_stack_text(item)

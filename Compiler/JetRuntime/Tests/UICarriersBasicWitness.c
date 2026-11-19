@@ -1,5 +1,5 @@
 /* REAL Jet objects only, with checked-heap alloc/free observers.
- * UiCarriersABI private layouts; never source/IR/Rust allocations.
+ * UICarriersABI private layouts; never source/IR/Rust allocations.
  * width-stop/policy-stop are separate process modes: exit70, empty stdout,
  * stderr must match DataPlotStops-ctor-range.stderr. Execution unclaimed. */
 #include <assert.h>

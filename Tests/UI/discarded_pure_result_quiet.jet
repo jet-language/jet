@@ -1,0 +1,20 @@
+// L0508 stays quiet when nothing is lost: an arrow loop whose body is a Unit
+// statement, a result that is used, a written return type, an impure call and
+// an explicit `.drop`.
+double: fn(n: Int) -> Int { n * 2 }
+
+total: fn(a: Int, b: Int) -> Int { a + b }
+
+logged: fn(n: Int) -> Int {
+    print(n)
+    n
+}
+
+run: fn() {
+    sum := 0
+    loop n in [1, 2, 3] -> sum += double(n)
+    loop n in [4, 5] -> print(total(n, n))
+    logged(7)
+    double(8).drop("only warms the cache")
+    print(sum)
+}

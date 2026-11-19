@@ -1,0 +1,12 @@
+// @all_diags
+// A field read only by derived hashing is read once the type keys a map.
+Square: struct {
+    row: Int,
+    column: Int,
+}
+
+run: fn() {
+    seen := [Square:Int]{}
+    seen[Square{row: 1, column: 2}] = 1
+    print(seen.len())
+}

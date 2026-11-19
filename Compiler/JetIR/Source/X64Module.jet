@@ -252,7 +252,8 @@ ir_x64_debug_pointer: fn(tables: &IRX64Tables, target: Int) -> Int Never! {
 // (IRModule.debug_members); an enum, union, Option or Result its variants
 // (IRModule.debug_variants, ir_x64_debug_variants); a Decimal or Fraction a
 // pointer to its runtime handle's two exact Ints (JetRuntime
-// RoutePrecise.jet). Any other aggregate stays opaque.
+// RoutePrecise.jet); an allocation word a typedef of what its block holds
+// (ir_x64_debug_alloc). Any other aggregate stays opaque.
 ir_x64_debug_types: fn(m: IRModule, tables: &IRX64Tables) Never! {
     loop _ in 0..<m.types.len() {
         tables.debug_types.push(X64DebugType{name: "", size: 0, kind: X64DebugTypeKind.Opaque})
@@ -270,6 +271,7 @@ ir_x64_debug_types: fn(m: IRModule, tables: &IRX64Tables) Never! {
 
 // The DWARF description of IR type row `row`.
 ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows, row: Int, ty: IRType) -> X64DebugType Never! {
+    if ir_alloc_served(m, row) == .Val(served) -> return ir_x64_debug_alloc(tables, served)
     if ir_x64_debug_variants(m, tables, shared, row, ty) == .Val(described) -> return described
     if ty.kind == {
         .Unit -> X64DebugType{name: "Unit", size: 0, kind: X64DebugTypeKind.Opaque}
@@ -323,6 +325,14 @@ ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows
             X64DebugType{name: "Aggregate", size: ty.size, kind: X64DebugTypeKind.Opaque}
         }
     }
+}
+
+// An allocation word's (Build.jet ir_alloc_served): a typedef named as Jet
+// spells the type its block serves, of a pointer to the row its block
+// holds values laid out as (a List's elements, a struct's or tuple's
+// members), else to unknown bytes.
+ir_x64_debug_alloc: fn(tables: &IRX64Tables, served: IRAllocServed) -> X64DebugType Never! {
+    X64DebugType{name: served.name, size: 8, kind: X64DebugTypeKind.Typedef{target: ir_x64_debug_pointer(tables, served.held)}}
 }
 
 // A pointer to a runtime handle of two words named `first` and `second`.
@@ -1016,6 +1026,25 @@ ir_x64_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
     errors := ir_x64_main_rows(owned, functions, debug)
     IRX64Program{
         program: X64ObjectModule{data: compiler_take_rows<X64Data>(owned.tables.data), debug: X64ModuleDebug{directory: "", files: [String]{}, types: [X64DebugType]{}}, functions: [X64FunctionSource]{}},
+        functions: functions.move(),
+        debug: debug.move(),
+        threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available},
+        errors: errors.move(),
+    }
+}
+
+// The program of `compiled` as ir_x64_object writes it with debug info,
+// unwritten: the module with its debug files, types and function sources
+// beside its data, `main` and the functions it reaches with their debug
+// rows. `jet debug`'s `fix` swaps these into a running image (JetDebug
+// NativeFix.jet).
+ir_x64_debug_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
+    owned := compiled.move()
+    functions := [X64CompiledFunction]{}
+    debug := [X64FunctionDebug]{}
+    errors := ir_x64_main_rows(owned, functions, debug)
+    IRX64Program{
+        program: ir_x64_object_module(owned),
         functions: functions.move(),
         debug: debug.move(),
         threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available},

@@ -3677,6 +3677,60 @@ UnreachableExport: struct {
     }
 }
 
+UnreadField: struct {
+    type_name: String,
+    name: String,
+
+    impl Diagnostic {
+        code: "L0106",
+        severity: .Lint,
+        tier: .Tidy,
+        lint_name: "unread_field",
+        meaning: "A struct field that no code reads carries data nothing uses",
+        detail: true,
+        structured_fix: .SuggestedSourceEdit,
+        no_fix: None,
+        fix_safety: .NeedsReview,
+
+        what: fn(self) -> String { "Field `{self.type_name}.{self.name}` is never read." }
+
+        why: fn(self) -> String {
+            "Code may write this field, but nothing reads it, so it carries data no part of the program uses. Printing, encoding, derived equality or ordering, reflection and foreign code count as reads; derived cloning does not."
+        }
+
+        fix: fn(self) -> String {
+            "Remove the field, or rename `{self.name}` to `_{self.name}` when it is intentional."
+        }
+    }
+}
+
+UnbuiltCase: struct {
+    type_name: String,
+    name: String,
+
+    impl Diagnostic {
+        code: "L0107",
+        severity: .Lint,
+        tier: .Tidy,
+        lint_name: "unbuilt_case",
+        meaning: "An enum case that no code creates leaves its handling arms dead",
+        detail: true,
+        structured_fix: .SuggestedSourceEdit,
+        no_fix: None,
+        fix_safety: .NeedsReview,
+
+        what: fn(self) -> String { "Case `{self.type_name}.{self.name}` is never built." }
+
+        why: fn(self) -> String {
+            "Code may match this case, but nothing creates it, so the arms that handle it never run. Decoding and foreign code count as building it; matching does not."
+        }
+
+        fix: fn(self) -> String {
+            "Remove the case, or rename `{self.name}` to `_{self.name}` when it is intentional."
+        }
+    }
+}
+
 DivergentStatePaths: struct {
     value: String,
     one: String,
@@ -4279,6 +4333,7 @@ SharedAutoClone: struct {
         code: "L0202",
         meaning: "A `Shared` handle cloned on every loop pass",
         severity: .Lint,
+        tier: .Report,
         lint_name: "shared_auto_clone",
         no_fix: .Behavior,
         fix_next: "Clone the `Shared` value deliberately before entering the loop, or restructure the loop.",
@@ -4381,6 +4436,7 @@ SharedGuardLongScope: struct {
     impl Diagnostic {
         code: "L0206",
         severity: .Lint,
+        tier: .Report,
         lint_name: "shared_guard_long_scope",
         meaning: "A `SharedGuard` lock spans a long lexical scope",
         detail: true,
@@ -4405,6 +4461,7 @@ SharedBusyWait: struct {
         code: "L0207",
         meaning: "A loop that polls `Shared` state without waiting",
         severity: .Lint,
+        tier: .Report,
         lint_name: "shared_busy_wait",
         detail: true,
         structured_fix: .SourceEdit,
@@ -6478,6 +6535,7 @@ SameEnumGuardTable: struct {
         code: "L0302",
         meaning: "A closed-enum arm table without a named subject",
         severity: .Lint,
+        tier: .Report,
         lint_name: "same_enum_guard_table",
         no_fix: .Behavior,
 
@@ -6532,6 +6590,29 @@ GoneFailureArm: struct {
         }
 
         fix: fn(self) -> String { "Delete the arm." }
+    }
+}
+
+SqlQueryInRowLoop: struct {
+    impl Diagnostic {
+        code: "L0308",
+        meaning: "A SQL query run once for every row of a loop over database rows",
+        severity: .Lint,
+        tier: .Tidy,
+        lint_name: "sql_query_in_row_loop",
+        stage: [.Compile],
+        no_fix: .Behavior,
+        fix_next: "Read the rows the loop needs in one query before it, through an `IN` list or a join.",
+
+        what: fn(self) -> String { "This query runs once for every row of the loop around it" }
+
+        why: fn(self) -> String {
+            "Each pass of the loop makes one more round trip to the database, so N rows cost N + 1 queries, and the loop slows down as the table grows"
+        }
+
+        fix: fn(self) -> String {
+            "Read what the loop needs in one query before it: `WHERE key IN (…)` over the keys the rows hold, or a JOIN with the query that produced the rows"
+        }
     }
 }
 
@@ -7259,26 +7340,19 @@ RetiredErrorTypeName: struct {
     }
 }
 
-ValueThrownAway: struct {
-    call: String,
-
+RetiredValueThrownAway: struct {
     impl Diagnostic {
         code: "E0433",
-        safety_class: .Opinion,
-        safety_reason: "Dropping the result would run safely, and Jet refuses it because a pure call whose result is dropped does nothing.",
-        meaning: "Value is thrown away (lost function tail or pure call result)",
-        detail: true,
-        fix_next: "Use the value, add the missing `-> T`, or write `.drop(\"reason\")` if dropping it is intended.",
+        status: .Retired,
+        no_fix: None,
 
-        what: fn(self) -> String { "The result of `{self.call}` is thrown away" }
+        what: fn(self) -> String { "*Retired* (was: a value thrown away, now the tidy error L0508)" }
 
         why: fn(self) -> String {
-            "A pure call (no effects, nothing passed with `&`) does nothing when its result is dropped; a function with no return type loses the value of its last line"
+            "A thrown-away value runs safely, so it is a tidy error that `jet check` and `jet build` list and `jet run` never stops on"
         }
 
-        fix: fn(self) -> String {
-            "For a pure call, use the result or bind it with `result: {self.call}`; for a last line, write `-> T` after the parameter list if the function should return it; write `.drop(\"reason\")` to discard on purpose"
-        }
+        fix: fn(self) -> String { "Follow the guidance for L0508" }
     }
 }
 
@@ -7731,6 +7805,7 @@ SliceCopyInLoop: struct {
         code: "L0501",
         meaning: "A slice copied on every loop pass",
         severity: .Lint,
+        tier: .Report,
         lint_name: "slice_copy_in_loop",
         no_fix: .Behavior,
 
@@ -7767,6 +7842,7 @@ FloatMoney: struct {
         code: "L0504",
         meaning: "A money-like value held in a `Float`",
         severity: .Lint,
+        tier: .Report,
         lint_name: "float_money",
         no_fix: .Behavior,
 
@@ -7785,6 +7861,7 @@ HeapGrowthInLoop: struct {
         code: "L0505",
         meaning: "Heap growth in a loop where an arena would serve",
         severity: .Lint,
+        tier: .Report,
         lint_name: "heap_growth_in_loop",
         no_fix: .Behavior,
 
@@ -7807,6 +7884,7 @@ HiddenContextAllocation: struct {
         code: "L0506",
         meaning: "An allocation inside `#Context` without an allocator",
         severity: .Lint,
+        tier: .Report,
         lint_name: "hidden_context_allocation",
         no_fix: .Behavior,
 
@@ -7842,22 +7920,27 @@ BranchArmTable: struct {
     }
 }
 
-ArrowLoopValueDrop: struct {
+ValueThrownAway: struct {
+    call: String,
+
     impl Diagnostic {
         code: "L0508",
         severity: .Lint,
-        status: .Retired,
-        no_fix: None,
+        tier: .Tidy,
+        lint_name: "discarded_pure_result",
+        meaning: "Value is thrown away (lost function tail or pure call result)",
+        detail: true,
+        fix_next: "Use the value, add the missing `-> T`, or write `.drop(\"reason\")` if dropping it is intended.",
 
-        what: fn(self) -> String {
-            "*Retired* (was: an arrow loop body computes and drops a non-unit value)"
-        }
+        what: fn(self) -> String { "The result of `{self.call}` is thrown away" }
 
         why: fn(self) -> String {
-            "The parser rejects a loop body value that nothing uses (E0003), so no dropped value reaches the lint"
+            "A pure call (no effects, nothing passed with `&`) does nothing when its result is dropped; a function with no return type loses the value of its last line"
         }
 
-        fix: fn(self) -> String { "Do not use L0508" }
+        fix: fn(self) -> String {
+            "For a pure call, use the result or bind it with `result: {self.call}`; for a last line, write `-> T` after the parameter list if the function should return it; write `.drop(\"reason\")` to discard on purpose"
+        }
     }
 }
 
@@ -8456,6 +8539,7 @@ InlineAutodiff: struct {
         code: "L1141",
         meaning: "An autodiff transform called inline",
         severity: .Lint,
+        tier: .Report,
         lint_name: "inline_autodiff",
         no_fix: .Behavior,
 
@@ -22101,6 +22185,7 @@ HiddenCostInLoop: struct {
         code: "L2510",
         meaning: "A hidden dynamic cost repeated inside a loop",
         severity: .Lint,
+        tier: .Report,
         lint_name: "hidden_cost_in_loop",
         stage: [.Compile],
         detail: true,

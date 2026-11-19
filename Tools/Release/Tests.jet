@@ -1143,18 +1143,30 @@ row_file_verdict: fn(text: String) -> String Never! {
     assert_eq(native_suites_of(""), [String]{})
 }
 
-#Test("the registries suite passes only on a receipt of the commit whose every entry passed") {
+#Test("the registries suite passes only on shard receipts of the commit that list every entry and whose every failing entry has a disposition") {
+    none: [Disposition]{}
     entries: "[{{\"id\":\"a\",\"status\":\"PASS\"}},{{\"id\":\"b\",\"status\":\"PASS\"}}]"
     whole: "{{\"head\":\"{COMMIT}\",\"status\":\"PASS\",\"total\":2,\"passed\":2,\"failed\":0,\"blocked\":0,\"entries\":{entries}}}"
-    passing: registries_verdict(whole, COMMIT)
+    passing: registries_verdict([String]{whole}, COMMIT, none)
     assert_eq("{passing.status}: {passing.detail}", "PASS: 2 registry entries pass")
     failed: "{{\"head\":\"{COMMIT}\",\"status\":\"FAIL\",\"total\":2,\"passed\":1,\"failed\":1,\"blocked\":0,\"entries\":[{{\"id\":\"a\",\"status\":\"PASS\"}},{{\"id\":\"b\",\"status\":\"FAIL\"}}]}}"
-    failing: registries_verdict(failed, COMMIT)
-    assert_eq("{failing.status}: {failing.detail}", "FAIL: 1 of 2 registry entries pass (2 listed, status FAIL); not passing: b FAIL")
+    failing: registries_verdict([String]{failed}, COMMIT, none)
+    assert_eq("{failing.status}: {failing.detail}", "FAIL: 1 of 2 registry entries pass (2 listed); failing with no disposition: b FAIL")
+    owned: [Disposition]{Disposition{suite: "registries", id: "b", tier: "*", card: "#6001", reason: "reads a moved fixture"}}
+    carded: registries_verdict([String]{failed}, COMMIT, owned)
+    assert_eq("{carded.status}: {carded.detail}", "PASS: 1 of 2 registry entries pass, 1 failing with a disposition")
+    elsewhere: [Disposition]{Disposition{suite: "cases", id: "b", tier: "*", card: "#6001", reason: "another suite's row"}}
+    assert_eq(registries_verdict([String]{failed}, COMMIT, elsewhere).status, "FAIL")
     other: "{{\"head\":\"0000000000000000000000000000000000000000\",\"status\":\"PASS\",\"total\":2,\"passed\":2,\"entries\":{entries}}}"
-    assert_eq(registries_verdict(other, COMMIT).detail, "the registry receipt pins 0000000000000000000000000000000000000000, not {COMMIT}")
-    assert_eq(registries_verdict("{{\"head\":\"{COMMIT}\",\"status\":\"PASS\",\"total\":0,\"passed\":0,\"entries\":[]}}", COMMIT).status, "FAIL")
-    assert(registries_verdict("", COMMIT).detail.starts_with("no registry receipt: "))
+    assert_eq(registries_verdict([String]{other}, COMMIT, none).detail, "the registry receipt pins 0000000000000000000000000000000000000000, not {COMMIT}")
+    assert_eq(registries_verdict([String]{"{{\"head\":\"{COMMIT}\",\"status\":\"PASS\",\"total\":0,\"passed\":0,\"entries\":[]}}"}, COMMIT, none).status, "FAIL")
+    assert(registries_verdict([String]{""}, COMMIT, none).detail.starts_with("no registry receipt: "))
+    assert_eq(registries_verdict([String]{}, COMMIT, none).status, "FAIL")
+    shard_a: "{{\"head\":\"{COMMIT}\",\"status\":\"PASS\",\"total\":1,\"passed\":1,\"shard\":\"1/2\",\"fullTotal\":3,\"entries\":[{{\"id\":\"a\",\"status\":\"PASS\"}}]}}"
+    shard_b: "{{\"head\":\"{COMMIT}\",\"status\":\"PASS\",\"total\":2,\"passed\":2,\"shard\":\"2/2\",\"fullTotal\":3,\"entries\":{entries}}}"
+    assert_eq(registries_verdict([String]{shard_a, shard_b}, COMMIT, none).detail, "3 registry entries pass")
+    lost: registries_verdict([String]{shard_a}, COMMIT, none)
+    assert_eq("{lost.status}: {lost.detail}", "FAIL: 1 of 1 registry entries pass (1 listed); the shards list 1 of 3 entries")
 }
 
 #Test("a carried release row goes stale only when a change since its run reaches it or its ledger line changed") {
@@ -1254,8 +1266,8 @@ row_file_verdict: fn(text: String) -> String Never! {
 }
 
 #Test("a disposition names a card and matches a tier or every tier") {
-    parsed: parse_dispositions("# comment\nui\tb.jet\t*\t#6001\tthe fixture tests a removed form\ncases\tx\to0\t6002\tno hash\nregistries\tx\t-\t#6003\tnot a kit suite\n", kit_suites([String]{"golden", "ui", "cases", "registries"}))
-    assert_eq(parsed.rows.len(), 1)
+    parsed: parse_dispositions("# comment\nui\tb.jet\t*\t#6001\tthe fixture tests a removed form\ncases\tx\to0\t6002\tno hash\nbogus\tx\t-\t#6003\tnot a native suite\nregistries\tJetCLI/Tests/Picker\t*\t#6004\treads a moved fixture\n", [String]{"golden", "ui", "cases", "registries"})
+    assert_eq(parsed.rows.len(), 2)
     assert_eq(parsed.errors.len(), 2)
     assert(parsed.errors[0].starts_with("dispositions line 3: "))
     assert(parsed.errors[1].starts_with("dispositions line 4: "))

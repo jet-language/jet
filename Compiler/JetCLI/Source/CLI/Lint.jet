@@ -1,5 +1,5 @@
-// Lint --complexity, the JSON-aware --a11y host and the typed cost views:
-// `lint --cost` and `explain --cost`.
+// Lint's reports (the advice), --complexity, the JSON-aware --a11y host and
+// the typed cost views: `lint --cost` and `explain --cost`.
 use {
     jet_foundation.[JET_BUILD_DEFAULT_PROFILE]
     cli_time: core.time
@@ -11,6 +11,8 @@ use {
         jet_driver_cost_state_label,
         jet_driver_parse_user_source,
         jet_driver_present_diagnostics,
+        jet_driver_problem_report,
+        jet_driver_plural,
         jet_driver_report_problems,
         jet_driver_is_a11y_lint,
         JET_DRIVER_EXIT_OK,
@@ -52,6 +54,37 @@ jet_cli_lint_a11y: fn(file: String, source: String, color: Bool, json: Bool) -> 
     output
 }
 
+// `jet lint <file>`: the advice of the file's checked program, the lints on
+// the report tier (JetDriverCompileResult.advice) that no other command
+// prints. Advice fails nothing: the list exits 0 whether or not it holds
+// any, and only an error in the program exits 1. `jet lint --cost` lists
+// L2510, which needs the typed cost report. The list ends like a check's
+// problems: the count, then the pointer to the first code's explanation.
+jet_cli_lint_reports: fn(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled: jet_cli_compile_entry(file, color, None, JetDriverCompileMode.Check, None, None)
+    if compiled == {
+        .Refused(refusal) -> { output = refusal.move() }
+        .Compiled(result, snapshot) -> {
+            errors: jet_cli_errors(jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files))
+            if errors.len() > 0 {
+                jet_cli_finish(jet_cli_lint_errors(file, source, errors, color, json))
+            }
+            if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
+            reports: jet_driver_present_diagnostics(result.advice, snapshot, result.generated_source_files)
+            if json {
+                jet_cli_finish(JetDriverVerbOutput{stdout: jet_cli_render_all_json(jet_cli_report_base(file), file, source, reports), stderr: "", exit_code: JET_DRIVER_EXIT_OK})
+            }
+            if reports.len() == 0 {
+                jet_cli_finish(JetDriverVerbOutput{stdout: "OK: `{file}` has no reports\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK})
+            }
+            count: reports.len()
+            jet_cli_finish(JetDriverVerbOutput{stdout: "", stderr: jet_driver_problem_report(file, source, reports, "{count} report{jet_driver_plural(count)} found", color), exit_code: JET_DRIVER_EXIT_OK})
+        }
+    }
+    output
+}
+
 // `jet lint --cost <file>`: the L2510 lints of the file's checked program,
 // the hidden dynamic costs its loops repeat; exits 1 when there is one.
 jet_cli_lint_cost: fn(file: String, source: String, color: Bool, json: Bool) -> JetDriverVerbOutput {
@@ -67,7 +100,7 @@ jet_cli_lint_cost: fn(file: String, source: String, color: Bool, json: Bool) -> 
             }
             if result.internal_problem == .Val(problem) -> jet_cli_finish(jet_cli_ice(problem))
             lints := [Diagnostic]{}
-            loop diagnostic in diagnostics {
+            loop diagnostic in jet_driver_present_diagnostics(result.advice, snapshot, result.generated_source_files) {
                 if diagnostic.code == "L2510" -> lints.push(diagnostic)
             }
             if lints.len() == 0 {
@@ -88,7 +121,10 @@ jet_cli_lint_cost: fn(file: String, source: String, color: Bool, json: Bool) -> 
 // turn. A site in another file of the program names that file. Each function
 // the projection covered without a site gets its own line, a generic
 // function's under the name of each specialization the program reaches (the
-// envelope's `functions` names every covered one).
+// envelope's `functions` names every covered one). An envelope site also
+// names its file as the line does (`path`), the type a copy copies (`view`,
+// empty for none) and whether it repeats every loop turn (`repeats`), which
+// `jet perf view` reads (Perf/LineCosts.jet).
 jet_cli_explain_cost: fn(file: String, source: String, color: Bool, json: Bool, threads: Int?) -> JetDriverVerbOutput {
     output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
     compiled: jet_cli_compile_entry(file, color, threads, JetDriverCompileMode.Check, None, None, capture_cost_report: true)
@@ -111,13 +147,14 @@ jet_cli_explain_cost: fn(file: String, source: String, color: Bool, json: Bool, 
             loop site in report.sites {
                 kind: jet_driver_cost_kind_label(site.kind)
                 state: jet_driver_cost_state_label(site.state)
+                place: if site.path == entry -> file else -> site.path
+                repeats: site.loop_depth > 0 && site.state == TCostState.SemanticRemainder
                 if json {
-                    rows.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("function", jet_cli_status_text(site.function)), jet_cli_status_field("line", jet_cli_status_int(site.line)), jet_cli_status_field("kind", jet_cli_status_text(kind)), jet_cli_status_field("state", jet_cli_status_text(state)), jet_cli_status_field("loop_depth", jet_cli_status_int(site.loop_depth)), jet_cli_status_field("tier", jet_cli_status_text(JET_CLI_COST_TIER))}))
+                    rows.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("function", jet_cli_status_text(site.function)), jet_cli_status_field("line", jet_cli_status_int(site.line)), jet_cli_status_field("kind", jet_cli_status_text(kind)), jet_cli_status_field("state", jet_cli_status_text(state)), jet_cli_status_field("loop_depth", jet_cli_status_int(site.loop_depth)), jet_cli_status_field("tier", jet_cli_status_text(JET_CLI_COST_TIER)), jet_cli_status_field("path", jet_cli_status_text(place)), jet_cli_status_field("view", jet_cli_status_text(site.view)), jet_cli_status_field("repeats", jet_cli_status_bool(repeats))}))
                 } else {
-                    place: if site.path == entry -> file else -> site.path
                     copied: if site.view == "" -> "" else -> " of `{site.view}`"
-                    repeats: if site.loop_depth > 0 && site.state == TCostState.SemanticRemainder -> ", repeats every loop turn" else -> ""
-                    stdout = "{stdout}{place}:{site.line} fn {site.function} — {kind}{copied} — {state} (loop depth {site.loop_depth}{repeats}; tier={JET_CLI_COST_TIER})\n"
+                    turns: if repeats -> ", repeats every loop turn" else -> ""
+                    stdout = "{stdout}{place}:{site.line} fn {site.function} — {kind}{copied} — {state} (loop depth {site.loop_depth}{turns}; tier={JET_CLI_COST_TIER})\n"
                 }
                 sited[site.function] = true
             }

@@ -1,0 +1,309 @@
+// `POST /__jet_canvas/profile` (and `/canvas/profile`, `/panel/profile`) of
+// `jet dev <file> --canvas`: the Canvas Profile view
+// (Docs/Spec/Reference/canvas-protocol.md, "Profile"). The listener hands
+// each request to the dev loop (CanvasDev.jet), which answers it here. A
+// request names a `.jettrace` to open, or none, and then the entry is
+// profiled with this `jet` (`jet perf run`). The answer is one bounded
+// jet.canvas.profile document: the trace's spans, task waits, I/O and log
+// zones as timeline lanes over one window, reduced on the server to at most
+// `width` marks a lane, so a large trace never ships whole to the page, and
+// the hot lines of its CPU samples. Zooming asks again with a narrower
+// window of the same trace.
+use {
+    cli_files: core.files
+    cli_process: core.process
+    cli_sys: core.sys
+    core.encoding.[Dyn]
+    jet_canvas.[CanvasHostEdit, CanvasHostReply, canvas_machine_output, read_source_without_symlinks, source_revision]
+    jet_foundation.[CanonicalJSON, artifact_extension, foundation_json_parse, foundation_json_quote, trace_id]
+}
+
+JET_CLI_CANVAS_PROFILE_SCHEMA: 1
+
+// The marks a lane carries when the request names no width, and the most it
+// may name.
+JET_CLI_CANVAS_PROFILE_WIDTH: 800
+
+JET_CLI_CANVAS_PROFILE_MAX_WIDTH: 4096
+
+JET_CLI_CANVAS_PROFILE_MAX_HOT_LINES: 64
+
+JET_CLI_CANVAS_PROFILE_MAX_LABEL_BYTES: 256
+
+JET_CLI_CANVAS_PROFILE_MAX_PATH_BYTES: 4096
+
+JET_CLI_CANVAS_PROFILE_MAX_MESSAGE_BYTES: 16384
+
+// The lanes of the timeline, in the order the view draws them.
+JET_CLI_CANVAS_PROFILE_LANES: [String]{"spans", "zones", "waits", "io"}
+
+// A refused profile request: its jet.canvas.profile error kind and message.
+#Error
+JetCLICanvasProfileError: struct {
+    kind: String,
+    message: String,
+}
+
+// The members of a profile request this view reads; a member of the wrong
+// type reads as absent.
+JetCLICanvasProfileRequest: struct {
+    schema_version: Int,
+    revision: String?,
+    source_id: String?,
+    trace: String?,
+    from_ns: Int?,
+    to_ns: Int?,
+    width: Int?,
+}
+
+// One interval of the trace on its one clock, and the lane it is drawn in.
+JetCLICanvasProfileEvent: struct {
+    lane: Int,
+    start: Int,
+    end: Int,
+    label: String,
+}
+
+// One mark of a lane: the events it covers, the earliest start, the latest
+// end, and the label of its longest event.
+JetCLICanvasProfileMark: struct {
+    start: Int,
+    end: Int,
+    count: Int,
+    longest: Int,
+    label: String,
+}
+
+// The dev loop's profile scratch: the directory of the trace it last
+// recorded, which later requests may zoom into, or "" before the first.
+JetCLICanvasProfiles: struct {
+    dir: String,
+
+    // Remove the last recording, if any.
+    release: fn(&self) {
+        if self.dir != "" -> jet_cli_canvas_debug_remove(self.dir)
+        self.dir = ""
+    }
+}
+
+jet_cli_canvas_profiles: fn() -> JetCLICanvasProfiles Never! { JetCLICanvasProfiles{dir: ""} }
+
+jet_cli_canvas_profile_error: fn(kind: String, message: String) -> JetCLICanvasProfileError Never! {
+    JetCLICanvasProfileError{kind: kind, message: message}
+}
+
+// Answer one profile request the listener handed the dev loop. A refused
+// request is a 409 carrying its jet.canvas.profile error.
+jet_cli_canvas_profile_answer: fn(profiles: &JetCLICanvasProfiles, file: String, source_id: String, taken: CanvasHostEdit) {
+    if jet_cli_canvas_profile_payload(profiles, file, source_id, taken.body) == {
+        .Ok(payload) -> {
+            taken.reply.send(CanvasHostReply{status: 200, body: canvas_machine_output("canvas.profile", true, payload)})
+        }
+        .Err(failure) -> {
+            taken.reply.send(CanvasHostReply{status: 409, body: canvas_machine_output("canvas.profile", false, jet_cli_canvas_profile_error_json(failure.kind, failure.message))})
+        }
+    }
+}
+
+jet_cli_canvas_profile_error_json: fn(kind: String, message: String) -> String Never! {
+    bounded: jet_cli_canvas_debug_bounded(message, JET_CLI_CANVAS_PROFILE_MAX_MESSAGE_BYTES)
+    "{{\"protocol\":\"jet.canvas.profile\",\"schema_version\":{JET_CLI_CANVAS_PROFILE_SCHEMA},\"ok\":false,\"kind\":{foundation_json_quote(kind)},\"message\":{foundation_json_quote(bounded.json)}}}"
+}
+
+// The jet.canvas.profile document answering `body`, a request about the
+// entry `file` (whose source id is `entry_source`).
+jet_cli_canvas_profile_payload: fn(profiles: &JetCLICanvasProfiles, file: String, entry_source: String, body: String) -> String JetCLICanvasProfileError! {
+    parsed: foundation_json_parse(body) ?? return Err(jet_cli_canvas_profile_error("bad_request", "Canvas profile request is not JSON: {err.message}"))
+    request: jet_cli_canvas_profile_request(parsed.move())
+    if request.schema_version != JET_CLI_CANVAS_PROFILE_SCHEMA {
+        return Err(jet_cli_canvas_profile_error("schema", "Canvas profile schema_version must be 1"))
+    }
+    revision: request.revision ?? return Err(jet_cli_canvas_profile_error("bad_request", "missing `revision`"))
+    source_id: request.source_id ?? return Err(jet_cli_canvas_profile_error("bad_request", "missing `source_id`"))
+    if source_id != entry_source {
+        return Err(jet_cli_canvas_profile_error("not_found", "Canvas profile source_id must name the projected entry `{entry_source}`"))
+    }
+    src: read_source_without_symlinks(file) ?? return Err(jet_cli_canvas_profile_error("io", err.message))
+    if revision != source_revision(src) {
+        return Err(jet_cli_canvas_profile_error("conflict", "source changed since this Canvas profile state was drawn"))
+    }
+    width: request.width ?? JET_CLI_CANVAS_PROFILE_WIDTH
+    if width < 1 || width > JET_CLI_CANVAS_PROFILE_MAX_WIDTH {
+        return Err(jet_cli_canvas_profile_error("limit", "Canvas profile width must be from 1 to {JET_CLI_CANVAS_PROFILE_MAX_WIDTH} marks"))
+    }
+    path: if request.trace == {
+        .Val(named) -> jet_cli_canvas_profile_named(file, named) ?? return Err(err)
+        .None -> jet_cli_canvas_profile_run(profiles, file) ?? return Err(err)
+    }
+    trace: jet_cli_perf_read(path) ?? return Err(jet_cli_canvas_profile_error("trace", err.message))
+    Ok(jet_cli_canvas_profile_document(trace, path, source_id, revision, request.from_ns, request.to_ns, width))
+}
+
+// The request `value` is, taken out of it.
+jet_cli_canvas_profile_request: fn(value: &&Dyn) -> JetCLICanvasProfileRequest Never! {
+    request := JetCLICanvasProfileRequest{schema_version: -1, revision: None, source_id: None, trace: None, from_ns: None, to_ns: None, width: None}
+    fields := jet_cli_dap_members(value.move())
+    fields.reverse()
+    loop fields.len() > 0 {
+        field: fields.pop() ?? break
+        if field.key == {
+            "schema_version" -> request.schema_version = jet_cli_dap_number(field.value)
+            "revision" -> request.revision = jet_cli_canvas_debug_text(field.value.move())
+            "source_id" -> request.source_id = jet_cli_canvas_debug_text(field.value.move())
+            "trace" -> request.trace = jet_cli_canvas_debug_text(field.value.move())
+            "from_ns" -> request.from_ns = jet_cli_canvas_profile_int(field.value)
+            "to_ns" -> request.to_ns = jet_cli_canvas_profile_int(field.value)
+            "width" -> request.width = jet_cli_canvas_profile_int(field.value)
+            else -> {}
+        }
+    }
+    request
+}
+
+jet_cli_canvas_profile_int: fn(value: Dyn) -> Int? Never! {
+    if value == .Null -> return None
+    Val(jet_cli_dap_number(value))
+}
+
+// A trace the request names: a `.jettrace` path, taken from the entry's
+// directory when relative.
+jet_cli_canvas_profile_named: fn(file: String, named: String) -> String JetCLICanvasProfileError! {
+    extension: artifact_extension()
+    if named.len() > JET_CLI_CANVAS_PROFILE_MAX_PATH_BYTES || !named.ends_with(extension) {
+        return Err(jet_cli_canvas_profile_error("bad_request", "Canvas profile `trace` must be a path ending with {extension}"))
+    }
+    if named.starts_with("/") -> return Ok(named)
+    Ok(cli_files.join(cli_files.dirname(file), named))
+}
+
+// Profile the entry with this `jet`, as `jet perf run` does, into a scratch
+// trace that replaces the last one. A program that does not build or fails
+// answers its own report.
+jet_cli_canvas_profile_run: fn(profiles: &JetCLICanvasProfiles, file: String) -> String JetCLICanvasProfileError! {
+    profiles.release()
+    dir: cli_files.tmpdir("jet-canvas-profile") ?? return Err(jet_cli_canvas_profile_error("io", "couldn't create the Canvas profile directory: {err}"))
+    profiles.dir = dir
+    path: cli_files.join(dir, "canvas{artifact_extension()}")
+    ran: cli_process.cmd([String]{cli_sys.executable(), "perf", "run", file, "--out", path}).stdout(.Capture).stderr(.Capture).run() ?? {
+        return Err(jet_cli_canvas_profile_error("io", "couldn't run `jet perf run`: {err}"))
+    }
+    if !cli_files.exists(path) {
+        return Err(jet_cli_canvas_profile_error("diagnostic", "{ran.output}{ran.errors}"))
+    }
+    Ok(path)
+}
+
+// The trace's intervals on its one clock: captured task and log spans (log
+// spans are zones), task waits, and file and network transfers.
+jet_cli_canvas_profile_events: fn(trace: CanonicalJSON) -> [JetCLICanvasProfileEvent] Never! {
+    events := [JetCLICanvasProfileEvent]{}
+    if jet_cli_perf_rows(trace, "spans") == .Ok(items) {
+        loop item in items {
+            if (jet_cli_perf_member_text(item, "status") ?? "") != "captured" -> next
+            start: jet_cli_perf_member_number(item, "start_ns") ?? next
+            end: jet_cli_perf_member_number(item, "end_ns") ?? next
+            kind: jet_cli_perf_member_text(item, "kind") ?? ""
+            if kind == "task_wait" {
+                events.push(JetCLICanvasProfileEvent{lane: 2, start: start, end: end, label: jet_cli_perf_wait_text(item)})
+                next
+            }
+            lane: if kind.starts_with("task") -> 0 else -> 1
+            events.push(JetCLICanvasProfileEvent{lane: lane, start: start, end: end, label: jet_cli_perf_member_symbol(item) ?? kind})
+        }
+    }
+    if jet_cli_perf_rows(trace, "io") == .Ok(items) {
+        loop item in items {
+            start: jet_cli_perf_member_number(item, "start_ns") ?? next
+            end: jet_cli_perf_member_number(item, "end_ns") ?? next
+            events.push(JetCLICanvasProfileEvent{lane: 3, start: start, end: end, label: jet_cli_perf_io_text(item)})
+        }
+    }
+    events
+}
+
+// The marks of one lane over the window `from`..`to`: each event that
+// overlaps it, or, past `width` of them, one mark per `width`th of the window
+// covering the events that start in it.
+jet_cli_canvas_profile_marks: fn(events: [JetCLICanvasProfileEvent], lane: Int, from: Int, to: Int, width: Int) -> [JetCLICanvasProfileMark] Never! {
+    // The indices of the lane's events over the window.
+    inside := [Int]{}
+    loop (index, event) in events {
+        if event.lane != lane || event.end < from || event.start > to -> next
+        inside.push(index)
+    }
+    marks := [JetCLICanvasProfileMark]{}
+    if inside.len() <= width {
+        loop index in inside {
+            event: events[index]
+            marks.push(JetCLICanvasProfileMark{start: event.start, end: event.end, count: 1, longest: event.end - event.start, label: event.label})
+        }
+        return marks
+    }
+    span: if to > from -> to - from else -> 1
+    slots := [Int]{}
+    loop _ in 0..<width -> slots.push(-1)
+    loop index in inside {
+        event: events[index]
+        offset: if event.start > from -> event.start - from else -> 0
+        slot := (offset * width).div_euclid(span)
+        if slot >= width -> slot = width - 1
+        length: event.end - event.start
+        if slots[slot] < 0 {
+            slots[slot] = marks.len()
+            marks.push(JetCLICanvasProfileMark{start: event.start, end: event.end, count: 1, longest: length, label: event.label})
+            next
+        }
+        mark := marks[slots[slot]]
+        if event.start < mark.start -> mark.start = event.start
+        if event.end > mark.end -> mark.end = event.end
+        mark.count += 1
+        if length > mark.longest {
+            mark.longest = length
+            mark.label = event.label
+        }
+        marks[slots[slot]] = mark
+    }
+    marks
+}
+
+// The document: the trace, the window shown, each lane's marks and the hot
+// lines of the CPU samples.
+jet_cli_canvas_profile_document: fn(trace: CanonicalJSON, path: String, source_id: String, revision: String, from_ns: Int?, to_ns: Int?, width: Int) -> String Never! {
+    events: jet_cli_canvas_profile_events(trace)
+    first := -1
+    last := 0
+    loop event in events {
+        if first < 0 || event.start < first -> first = event.start
+        if event.end > last -> last = event.end
+    }
+    if first < 0 -> first = 0
+    from: from_ns ?? first
+    to: to_ns ?? last
+    lanes := [String]{}
+    loop (index, name) in JET_CLI_CANVAS_PROFILE_LANES {
+        marks: jet_cli_canvas_profile_marks(events, index, from, to, width)
+        rows := [String]{}
+        reduced := false
+        loop mark in marks {
+            if mark.count > 1 -> reduced = true
+            label: jet_cli_canvas_debug_bounded(mark.label, JET_CLI_CANVAS_PROFILE_MAX_LABEL_BYTES)
+            rows.push("{{\"start_ns\":{mark.start},\"end_ns\":{mark.end},\"count\":{mark.count},\"label\":{foundation_json_quote(label.json)}}}")
+        }
+        lanes.push("{{\"name\":{foundation_json_quote(name)},\"reduced\":{reduced},\"marks\":[{rows.join(",")}]}}")
+    }
+    totals: jet_cli_perf_line_totals(trace)
+    hot := [String]{}
+    hot_truncated := false
+    loop line in jet_cli_perf_line_table(totals, jet_cli_perf_line_costs_none()) {
+        if hot.len() >= JET_CLI_CANVAS_PROFILE_MAX_HOT_LINES {
+            hot_truncated = true
+            break
+        }
+        bounded: jet_cli_canvas_debug_bounded(line, JET_CLI_CANVAS_PROFILE_MAX_LABEL_BYTES)
+        hot.push(foundation_json_quote(bounded.json))
+    }
+    samples := 0
+    loop row in totals.rows -> samples += row.samples
+    window: "{{\"from_ns\":{from},\"to_ns\":{to},\"first_ns\":{first},\"last_ns\":{last},\"width\":{width}}}"
+    "{{\"protocol\":\"jet.canvas.profile\",\"schema_version\":{JET_CLI_CANVAS_PROFILE_SCHEMA},\"ok\":true,\"source_id\":{foundation_json_quote(source_id)},\"revision\":{foundation_json_quote(revision)},\"trace\":{foundation_json_quote(path)},\"trace_id\":{foundation_json_quote(trace_id(trace) ?? "")},\"window\":{window},\"lanes\":[{lanes.join(",")}],\"samples\":{samples},\"hot_lines\":[{hot.join(",")}],\"limits\":{{\"hot_lines_truncated\":{hot_truncated}}}}}"
+}

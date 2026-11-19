@@ -122,7 +122,7 @@ TypedValue: enum {
                     return Err(paused_error("typed bytes must carry a 64-character SHA-256 digest"))
                 }
             }
-            else -> {}
+            .Unit | .Bool(_) | .Int(_) | .FloatBits(_) | .Aggregate(_, _) -> {}
         }
         Ok()
     }
@@ -145,14 +145,14 @@ TypedValue: enum {
             .Bool(_) -> 1
             .Text(text) -> text.len()
             .Bytes(_, _) -> 32
-            else -> 8
+            .Int(_) | .FloatBits(_) | .Aggregate(_, _) -> 8
         }
     }
 
     is_aggregate: fn(self) -> Bool Never! {
         if self == {
             .Aggregate(_, _) -> true
-            else -> false
+            .Unit | .Bool(_) | .Int(_) | .FloatBits(_) | .Text(_) | .Bytes(_, _) -> false
         }
     }
 }
@@ -413,7 +413,7 @@ ValueProjection: struct {
         if self.publication == .Absent -> return None
         value: if self.value == {
             .Val(typed) -> ",\"value\":{typed.json()}"
-            else -> ""
+            .None -> ""
         }
         children := [String]{}
         loop child in self.children {
@@ -483,7 +483,7 @@ measure_projection: fn(value: ValueProjection, depth: Int, usage: &EvaluationUsa
     usage.nodes += 1
     payload: if value.value == {
         .Val(typed) -> typed.bytes()
-        else -> 0
+        .None -> 0
     }
     usage.bytes += value.metadata_bytes() + payload
     loop child in value.children -> measure_projection(child, depth + 1, usage)
@@ -533,7 +533,7 @@ ScopeProjection: struct {
         }
         parent_id: if self.parent_id == {
             .Val(id) -> "\"{foundation_json_escape(id)}\""
-            else -> "null"
+            .None -> "null"
         }
         "{{\"id\":\"{foundation_json_escape(self.id)}\",\"name\":\"{foundation_json_escape(self.name)}\",\"parent_id\":{parent_id},\"source\":{self.source.json()},\"bindings\":{array_json(bindings)}}}"
     }
@@ -560,21 +560,20 @@ ScopeProjectionResult: struct {
 // by name then id, each projected under `budget`.
 project_scope: fn(scope: LexicalScope, identity: SessionIdentity, budget: EvaluationBudget, selected_value: String?) -> ScopeProjectionResult PausedEvaluateError! {
     stats := projection_stats_zero()
-    visible := [ValueProjection]{}
-    loop binding in scope.bindings {
+    // The indexes in `scope.bindings` of the visible bindings.
+    order := [Int]{}
+    loop index in 0..<scope.bindings.len() {
+        binding: scope.bindings[index]
         if binding.publication == .Absent -> next
         if selected_value == .Val(id) {
             if id != binding.id -> next
         }
-        visible.push(binding)
+        order.push(index)
     }
-    order := [Int]{}
-    loop index in 0..<visible.len() -> order.push(index)
-    ordered: visible.copy()
-    order.sort_by(fn(a: Int, b: Int) { if ordered[a].name != ordered[b].name -> ordered[a].name <=> ordered[b].name else -> ordered[a].id <=> ordered[b].id })
+    order.sort_by(fn(a: Int, b: Int) { if scope.bindings[a].name != scope.bindings[b].name -> scope.bindings[a].name <=> scope.bindings[b].name else -> scope.bindings[a].id <=> scope.bindings[b].id })
     projected := [ValueProjection]{}
     loop index in order {
-        binding: visible[index]
+        binding: scope.bindings[index]
         if binding.publication == .Published -> stats.published += 1 else -> stats.redacted += 1
         value: project_root(binding, identity, budget, stats)
         projected.push(value)
@@ -657,7 +656,7 @@ InspectRequest: struct {
     json: fn(self) -> String Never! {
         value_id: if self.value_id == {
             .Val(id) -> "\"{foundation_json_escape(id)}\""
-            else -> "null"
+            .None -> "null"
         }
         "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"kind\":\"paused.inspect\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"value_id\":{value_id},\"budget\":{self.budget.json()},\"authority\":{requirements_json(self.authority)},\"canceled\":{self.cancellation.requested}}}"
     }
@@ -835,11 +834,11 @@ AuditReceipt: struct {
     json: fn(self) -> String Never! {
         reason: if self.reason == {
             .Val(why) -> "\"{why.as_str()}\""
-            else -> "null"
+            .None -> "null"
         }
         observation_id: if self.observation_id == {
             .Val(id) -> "\"{foundation_json_escape(id)}\""
-            else -> "null"
+            .None -> "null"
         }
         "{{\"receipt_id\":\"{foundation_json_escape(self.receipt_id)}\",\"operation\":\"{foundation_json_escape(self.operation)}\",\"request_id\":\"{foundation_json_escape(self.request_id)}\",\"outcome\":\"{self.outcome.as_str()}\",\"reason\":{reason},\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"authority\":{requirements_json(self.authority)},\"usage\":{self.usage.json()},\"truncated\":{self.truncated},\"published_values\":{self.published_values},\"redacted_values\":{self.redacted_values},\"observation_id\":{observation_id}}}"
     }
@@ -853,7 +852,7 @@ audit_receipt: fn(operation: String, request_id: String, identity: SessionIdenti
     loop requirement in canonical_authority -> keys.push(requirement.key())
     reason_text: if reason == {
         .Val(why) -> why.as_str()
-        else -> ""
+        .None -> ""
     }
     observation_text: observation_id ?? ""
     canonical: "paused-audit-v2|{operation}|{request_id}|{identity.session_id}|{identity.source_id}|{identity.source_revision}|{identity.pause_id}|{identity.frame_id}|{scope_id}|{outcome.as_str()}|{reason_text}|{keys.join(",")}|{usage.depth}|{usage.nodes}|{usage.bytes}|{usage.steps}|{truncated}|{published_values}|{redacted_values}|{observation_text}"
@@ -896,7 +895,7 @@ InspectResponse: struct {
     json: fn(self) -> String Never! {
         selected_value_id: if self.selected_value_id == {
             .Val(id) -> "\"{foundation_json_escape(id)}\""
-            else -> "null"
+            .None -> "null"
         }
         "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":true,\"kind\":\"paused.inspect\",\"identity\":{self.identity.json()},\"scope\":{self.scope.json()},\"selected_value_id\":{selected_value_id},\"truncated\":{self.truncated},\"audit\":{self.audit.json()}}}"
     }
@@ -916,11 +915,11 @@ EvaluateResponse: struct {
     json: fn(self) -> String Never! {
         value: if self.value == {
             .Val(projection) -> projection.json() ?? "null"
-            else -> "null"
+            .None -> "null"
         }
         observation: if self.observation == {
             .Val(fact) -> fact.json()
-            else -> "null"
+            .None -> "null"
         }
         "{{\"protocol\":\"{PAUSED_EVALUATE_PROTOCOL}\",\"schema_version\":{PAUSED_EVALUATE_SCHEMA_VERSION},\"ok\":true,\"kind\":\"paused.evaluate\",\"identity\":{self.identity.json()},\"scope_id\":\"{foundation_json_escape(self.scope_id)}\",\"expression_hash\":\"{foundation_json_escape(self.expression_hash)}\",\"mode\":\"{self.mode.as_str()}\",\"value\":{value},\"changed\":{self.changed},\"observation\":{observation},\"truncated\":{self.truncated},\"audit\":{self.audit.json()}}}"
     }
@@ -1030,7 +1029,7 @@ evaluator_error_valid: fn(error: String?) -> Bool Never! {
     if message == "" -> return false
     if valid_text(message, "evaluator error", 4096) == {
         .Err(_) -> false
-        else -> true
+        .Ok(_) -> true
     }
 }
 
@@ -1084,7 +1083,7 @@ PausedEvaluateHost: struct {
     is_paused: fn(self) -> Bool Never! {
         if self.session == {
             .Val(session) -> session.state == .Paused
-            else -> false
+            .None -> false
         }
     }
 
@@ -1231,8 +1230,8 @@ project_node: fn(value: ValueProjection, identity: SessionIdentity, budget: Eval
             else -> {
                 loop child in value.children {
                     if project_node(child, identity, budget, depth + 1, false, stats) == {
-                        .Val(projected_child) -> projected.children.push(projected_child)
-                        else -> {
+                        .Val(projected_child) -> { projected.children.push(projected_child) }
+                        .None -> {
                             stats.truncated = true
                             projected.truncated = true
                         }
@@ -1312,7 +1311,7 @@ dyn_object: fn(value: Dyn) -> [String:Dyn]? Never! {
             loop member in members -> fields[member.key] = member.value
             Val(fields)
         }
-        else -> None
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) -> None
     }
 }
 
@@ -1323,7 +1322,7 @@ paused_required_string: fn(fields: [String:Dyn], key: String) -> String PausedEv
             valid_text(text, key, 256)
             Ok(text)
         }
-        else -> Err(paused_error("paused request requires string `{key}`"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(paused_error("paused request requires string `{key}`"))
     }
 }
 
@@ -1335,7 +1334,7 @@ optional_string: fn(fields: [String:Dyn], key: String) -> String? PausedEvaluate
             valid_text(text, key, 256)
             Ok(Val(text))
         }
-        else -> Err(paused_error("paused request field `{key}` must be a string or null"))
+        .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(paused_error("paused request field `{key}` must be a string or null"))
     }
 }
 
@@ -1352,7 +1351,7 @@ optional_bool: fn(fields: [String:Dyn], key: String) -> Bool PausedEvaluateError
     value: fields.get(key) ?? return Ok(false)
     if value == {
         .Bool(flag) -> Ok(flag)
-        else -> Err(paused_error("paused request field `{key}` must be boolean"))
+        .Null | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> Err(paused_error("paused request field `{key}` must be boolean"))
     }
 }
 
@@ -1393,7 +1392,7 @@ parse_authority: fn(fields: [String:Dyn]) -> [AuthorityRequirement] PausedEvalua
             }
             Ok(authority)
         }
-        else -> Err(paused_error("paused request `authority` must be an array"))
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> Err(paused_error("paused request `authority` must be an array"))
     }
 }
 
@@ -1453,13 +1452,15 @@ parse_evaluate_request: fn(raw: String) -> EvaluateRequest PausedEvaluateError! 
                             valid_id(text, "evaluation effect")
                             effects.push(text)
                         }
-                        else -> {
+                        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Bytes(_) | .DateTime(_) | .Array(_) | .Object(_) -> {
                             return Err(paused_error("paused evaluation effects must be strings"))
                         }
                     }
                 }
             }
-            else -> { return Err(paused_error("paused evaluation `effects` must be an array")) }
+            .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
+                return Err(paused_error("paused evaluation `effects` must be an array"))
+            }
         }
     }
     request: EvaluateRequest{

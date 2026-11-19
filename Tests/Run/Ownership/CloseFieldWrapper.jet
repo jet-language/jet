@@ -10,7 +10,7 @@ Lock: struct {
 }
 
 Session: struct {
-    lock: Lock,
+    _lock: Lock,
     user: String,
 }
 
@@ -24,12 +24,12 @@ forward: fn<T>(x: &&T) {
 }
 
 wrapper_scope: fn() {
-    held: Session{lock: Lock{name: "scope"}, user: "bo"}
+    held: Session{_lock: Lock{name: "scope"}, user: "bo"}
     print("scope {held.user}")
 }
 
 run: fn() {
-    held: Session{lock: Lock{name: "db"}, user: "ada"}
+    held: Session{_lock: Lock{name: "db"}, user: "ada"}
     hand_off(held)
     print("after hand_off")
     wrapper_scope()

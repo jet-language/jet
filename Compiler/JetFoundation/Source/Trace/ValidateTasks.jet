@@ -198,10 +198,12 @@ jettrace_validate_native: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact]
 // state is the only task row, a closed core.log span (`log_span`):
 // captured, timed, and of no task, or a task's wait (`task_wait`):
 // captured, timed, of its waiting task, naming the task it awaits when it
-// is a join, with the line that spawned that task when known, its stack's
-// functions and lines, and what ended it (`waker`): a task, the runtime or
-// its timeout, which has no waker's task or line. Only a wait names an
-// awaited task, a spawn line, a channel, a stack or a waker.
+// is a join, with the line that spawned that task when known, a socket's
+// addresses, its stack's functions and lines, and what ended it (`waker`):
+// a task, the runtime, a socket's peer, which names no task or line and
+// needs a socket, or its timeout, which has no waker's task or line. Only a
+// wait names an awaited task, a spawn line, a channel, a socket, a stack or
+// a waker.
 jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact], limit: Int) JetTraceError! {
     items: jettrace_array(value, "content.spans")
     if items.len() > limit {
@@ -211,7 +213,7 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
     unavailable := 0
     loop index in 0..<items.len() {
         label: "content.spans[{index}]"
-        fields: jettrace_object_keys(items[index], label, [String]{"awaited_task_id", "channel_id", "clock", "end_ns", "kind", "parent_task_id", "reason", "spawn_line", "start_ns", "status", "symbol", "task_id", "wait_stack", "waker", "waker_line", "waker_task_id"})
+        fields: jettrace_object_keys(items[index], label, [String]{"awaited_task_id", "channel_id", "clock", "end_ns", "kind", "local_address", "parent_task_id", "peer_address", "reason", "spawn_line", "start_ns", "status", "symbol", "task_id", "wait_stack", "waker", "waker_line", "waker_task_id"})
         if jettrace_text(fields[jettrace_get(fields, "clock")].value, "{label}.clock") != "monotonic" {
             return Err(jettrace_error("{label}.clock must be monotonic"))
         }
@@ -227,6 +229,10 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
         waker: jettrace_text(fields[jettrace_get(fields, "waker")].value, "{label}.waker")
         waker_line: fields[jettrace_get(fields, "waker_line")].value
         waker_task: fields[jettrace_get(fields, "waker_task_id")].value
+        // Each address is checked, then whether either names one.
+        local_address: jettrace_validate_address(fields[jettrace_get(fields, "local_address")].value, "{label}.local_address")
+        peer_address: jettrace_validate_address(fields[jettrace_get(fields, "peer_address")].value, "{label}.peer_address")
+        addressed: local_address || peer_address
         if kind == "task_wait" {
             if status != "captured" {
                 return Err(jettrace_error("{label}.status must be captured for a wait"))
@@ -273,12 +279,20 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
                         return Err(jettrace_error("{label} the runtime's wake names no task"))
                     }
                 }
+                waker == "peer" -> {
+                    if !addressed {
+                        return Err(jettrace_error("{label} a peer's wake needs a socket"))
+                    }
+                    if waker_task != CanonicalJSON.Null || waker_line != CanonicalJSON.Null {
+                        return Err(jettrace_error("{label} a peer's wake names no task or line"))
+                    }
+                }
                 waker == "timeout" -> {
                     if waker_task != CanonicalJSON.Null || waker_line != CanonicalJSON.Null {
                         return Err(jettrace_error("{label} a timeout names no waker"))
                     }
                 }
-                else -> return Err(jettrace_error("{label}.waker must be task, runtime or timeout"))
+                else -> return Err(jettrace_error("{label}.waker must be task, runtime, peer or timeout"))
             }
             if waker_line != CanonicalJSON.Null && jettrace_unsigned(waker_line, "{label}.waker_line") == (U64{0}) {
                 return Err(jettrace_error("{label}.waker_line must be a line, from 1"))
@@ -291,8 +305,8 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
             }
             next
         }
-        if awaited != CanonicalJSON.Null || spawn_line != CanonicalJSON.Null || channel != CanonicalJSON.Null || stack.len() != 0 || waker_line != CanonicalJSON.Null || waker_task != CanonicalJSON.Null || waker.len() != 0 {
-            return Err(jettrace_error("{label} only a wait names an awaited task, a spawn line, a channel, a stack or a waker"))
+        if awaited != CanonicalJSON.Null || spawn_line != CanonicalJSON.Null || channel != CanonicalJSON.Null || addressed || stack.len() != 0 || waker_line != CanonicalJSON.Null || waker_task != CanonicalJSON.Null || waker.len() != 0 {
+            return Err(jettrace_error("{label} only a wait names an awaited task, a spawn line, a channel, a socket, a stack or a waker"))
         }
         if kind == "log_span" {
             if status != "captured" {
@@ -354,4 +368,16 @@ jettrace_validate_spans: fn(value: CanonicalJSON, tasks: [U64:JetTraceTaskFact],
         return Err(jettrace_error("content.spans unavailable state must be the only task row"))
     }
     return
+}
+
+// A socket wait's address `value` at `label`: null, or the text of a host
+// and port or a Unix socket's path, without control characters. Whether it
+// names one.
+jettrace_validate_address: fn(value: CanonicalJSON, label: String) -> Bool JetTraceError! {
+    if value == CanonicalJSON.Null -> return false
+    text: jettrace_text(value, label)
+    if text.len() == 0 || jettrace_has_control(text) {
+        return Err(jettrace_error("{label} must name an address"))
+    }
+    true
 }

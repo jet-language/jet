@@ -1,7 +1,7 @@
 /* The real jet_rt_char_debug (`{c:Debug}`) against the frozen char Debug
  * goldens, with checked-heap alloc/free observers.
  * argv[1]: char-debug-goldens.bin for all 1,112,064 scalars, rebuilt by
- * UiWitness.jet (char-debug) from the tracked CharDebugPlain.ranges.
+ * UIWitness.jet (char-debug) from the tracked CharDebugPlain.ranges.
  * An invalid scalar renders as U+FFFD does. */
 #include <assert.h>
 #include <stdbool.h>

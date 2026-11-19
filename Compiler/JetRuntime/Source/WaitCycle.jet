@@ -1,0 +1,329 @@
+// Deadlock stops: when the last task of a wait cycle blocks, every task in
+// the cycle fails as a panicking task fails, with one diagnostic naming each
+// task, its wait and its line; tasks outside the cycle run on.
+//
+// A task about to block with no deadline and unshielded notes its wait on
+// its control (Scheduler.jet Control192): waitKind160 (WAIT_CYCLE_JOIN,
+// _EDIT, _READ), waitTarget168 (the joined task's state, the Shared cell)
+// and arms it, waitArmed176: the park slot it sleeps on, or 1 for a lock's
+// condition poll. waitCycle184 is the deadlock record delivered to it, or 0.
+// Armed and delivered change only under the scheduler root's waitLock264,
+// so a task leaves an armed wait only by taking that lock, and every control
+// the walk reaches through an armed wait stays alive while it holds it. The
+// lock comes before any Shared cell's mutex, never after.
+//
+// Each armed wait names its holder: a join the joined task until it
+// finishes, an edit or a read the task holding the Shared value's edit
+// permit (its writer word, Shared.jet). Read permits and writers queued
+// ahead name none, so a cycle through one is not found, nor is one through
+// the runtime's own holds, a transaction's commit or a Condition's
+// reacquisition, which never arm. Arming walks the holders from the arming
+// task; a walk that comes back is a cycle, which the arming task delivers:
+// one record of the cycle's lines and each task's wake. Each task in it
+// then adds its own line's site from its own stack, waits until all have,
+// and stops with the whole cycle.
+
+WAIT_CYCLE_JOIN: I64{1}
+
+WAIT_CYCLE_EDIT: I64{2}
+
+WAIT_CYCLE_READ: I64{3}
+
+// The scheduler root's wait lock (Scheduler.jet Scheduler272).
+WAIT_CYCLE_LOCK: I64{264}
+
+// The longest holder chain a walk follows.
+WAIT_CYCLE_STEPS: I64{4096}
+
+wait_cycle_lock: fn() -> I64 {
+    root: scheduler_root
+    if (root == I64{0}) -> I64{0} else -> wrapping(root + WAIT_CYCLE_LOCK)
+}
+
+// Notes the wait `control` is about to make, which its next unbounded park
+// arms (wait_cycle_arm); kind 0 clears it.
+wait_cycle_note: fn(control: I64, kind: I64, target: I64) {
+    if (control == I64{0}) { return }
+    sync_store(wrapping(control + I64{160}), kind)
+    sync_store(wrapping(control + I64{168}), target)
+}
+
+// Arms `control`'s noted wait before it parks on `slot` (1: a lock's
+// condition poll) and delivers the cycle the wait closes, if any. False,
+// and nothing armed, with no noted wait or no scheduler.
+wait_cycle_arm: fn(control: I64, slot: I64) -> Bool {
+    if (control == I64{0} || sync_load(wrapping(control + I64{160})) == I64{0}) { return false }
+    lock: wait_cycle_lock()
+    if (lock == I64{0}) { return false }
+    sync_mutex_lock(lock)
+    sync_store(wrapping(control + I64{176}), slot)
+    length: wait_cycle_find(control)
+    if (length > I64{0}) { wait_cycle_deliver(control, length) }
+    sync_mutex_unlock(lock)
+    true
+}
+
+// Disarms an armed wait once its park returned.
+wait_cycle_disarm: fn(control: I64) {
+    lock: wait_cycle_lock()
+    sync_mutex_lock(lock)
+    sync_store(wrapping(control + I64{176}), I64{0})
+    sync_mutex_unlock(lock)
+}
+
+wait_cycle_delivered: fn(control: I64) -> Bool {
+    control != I64{0} && sync_load(wrapping(control + I64{184})) != I64{0}
+}
+
+// Leaves a lock's armed wait: disarmed and its note cleared.
+wait_cycle_leave: fn(control: I64) {
+    wait_cycle_disarm(control)
+    wait_cycle_note(control, I64{0}, I64{0})
+}
+
+// The Shared writer word of an edit permit taken now: the taking task's
+// control, retained while it holds the permit, or 1 outside any task.
+wait_cycle_writer: fn() -> I64 {
+    control: scheduler_control_current()
+    if (control == I64{0}) { return I64{1} }
+    scheduler_control_retain(control)
+    control
+}
+
+// Releases a writer word wait_cycle_writer returned. Never under the
+// value's mutex: the last reference frees the control.
+wait_cycle_writer_drop: fn(writer: I64) {
+    if (writer > I64{1}) { scheduler_control_drop(writer) }
+}
+
+// The control of the task that `control`'s armed wait waits on, or 0: the
+// wait is not armed or names no holder now. Under the wait lock.
+wait_cycle_holder: fn(control: I64) -> I64 {
+    if (sync_load(wrapping(control + I64{176})) == I64{0}) { return I64{0} }
+    kind: sync_load(wrapping(control + I64{160}))
+    target: sync_load(wrapping(control + I64{168}))
+    if (kind == WAIT_CYCLE_JOIN) {
+        if (sync_load(wrapping(target + I64{24})) != I64{0}) { return I64{0} }
+        return sync_load(wrapping(target + I64{8}))
+    }
+    mutex: wrapping(target + I64{8})
+    sync_mutex_lock(mutex)
+    writer: sync_load(wrapping(target + I64{32}))
+    if (writer <= I64{1}) {
+        sync_mutex_unlock(mutex)
+        return I64{0}
+    }
+    scheduler_control_retain(writer)
+    sync_mutex_unlock(mutex)
+    // A holder in an armed wait stays alive while the walk holds the wait
+    // lock; one in none ends the walk.
+    armed: sync_load(wrapping(writer + I64{176})) != I64{0}
+    scheduler_control_drop(writer)
+    if armed -> writer else -> I64{0}
+}
+
+// The length of the cycle `control`'s armed wait closes, or 0 when its
+// holders lead elsewhere. Under the wait lock.
+wait_cycle_find: fn(control: I64) -> I64 {
+    current := control
+    steps := I64{0}
+    loop steps < WAIT_CYCLE_STEPS {
+        holder: wait_cycle_holder(current)
+        steps += I64{1}
+        if (holder == control) { return steps }
+        if (holder == I64{0} || holder == current) { return I64{0} }
+        current = holder
+    }
+    I64{0}
+}
+
+// Record: refs0 count8 remaining16, then per task 24B: control0 line8
+// site16. Each task of the cycle holds a reference until it has stopped.
+wait_cycle_record_bytes: fn(length: I64) -> I64 { I64{24} + length * I64{24} }
+
+wait_cycle_entry: fn(record: I64, at: I64) -> I64 { wrapping(record + I64{24} + at * I64{24}) }
+
+// Delivers the cycle of `length` tasks from `control`: its record to each
+// task, then each task's wake. Under the wait lock.
+wait_cycle_deliver: fn(control: I64, length: I64) {
+    bytes: wait_cycle_record_bytes(length)
+    record: jet_rt_alloc(bytes, I64{8})
+    thread_zero(record, bytes)
+    sync_store(record, length)
+    sync_store(wrapping(record + I64{8}), length)
+    sync_store(wrapping(record + I64{16}), length)
+    current := control
+    at := I64{0}
+    loop at < length {
+        holder: wait_cycle_holder(current)
+        entry: wait_cycle_entry(record, at)
+        sync_store(entry, current)
+        sync_store(wrapping(entry + I64{8}), wait_cycle_line(current, holder))
+        current = holder
+        at += I64{1}
+    }
+    at = I64{0}
+    loop at < length {
+        member: sync_load(wait_cycle_entry(record, at))
+        sync_store(wrapping(member + I64{184}), record)
+        wait_cycle_wake(member)
+        at += I64{1}
+    }
+}
+
+// Wakes an armed wait: a join's park, a lock's condition.
+wait_cycle_wake: fn(member: I64) {
+    if (sync_load(wrapping(member + I64{160})) == WAIT_CYCLE_JOIN) {
+        sync_park_wake(sync_load(wrapping(member + I64{176})))
+        return
+    }
+    target: sync_load(wrapping(member + I64{168}))
+    mutex: wrapping(target + I64{8})
+    sync_mutex_lock(mutex)
+    sync_cond_notify_all(wrapping(target + I64{16}))
+    sync_mutex_unlock(mutex)
+}
+
+wait_cycle_push: fn(text: I64, part: I64) { rt_text_append(text, rt_text_data(part), rt_text_len(part)) }
+
+// One task's line: `task 2 (reader)  waits to join task 3`.
+wait_cycle_line: fn(member: I64, holder: I64) -> I64 {
+    text: jet_rt_string_builder_new()
+    wait_cycle_name(text, member, true)
+    kind: sync_load(wrapping(member + I64{160}))
+    wait_cycle_push(text, if {
+        (kind == WAIT_CYCLE_JOIN) -> rt_static_text("  waits to join ")
+        (kind == WAIT_CYCLE_EDIT) -> rt_static_text("  waits to edit a Shared value ")
+        else -> rt_static_text("  waits to read a Shared value ")
+    })
+    wait_cycle_name(text, holder, false)
+    if (kind != WAIT_CYCLE_JOIN) { wait_cycle_push(text, rt_static_text(" holds")) }
+    text
+}
+
+// A task by its observed id, `task 2`, and with `labeled` its label: ` (name)`
+// for a task spawned with one, ` (main)` for the root, which is task 1. A
+// task past the registry's cap has no id: `a task`.
+wait_cycle_name: fn(text: I64, control: I64, labeled: Bool) {
+    id: sync_load(wrapping(control + I64{56}))
+    if (id == I64{0}) {
+        if !scheduler_control_is_root(control) {
+            wait_cycle_push(text, rt_static_text("a task"))
+            return
+        }
+        wait_cycle_push(text, rt_static_text("task 1"))
+        if labeled { wait_cycle_push(text, rt_static_text(" (main)")) }
+        return
+    }
+    wait_cycle_push(text, rt_static_text("task "))
+    rt_text_push_number(text, id)
+    if (!labeled || observe_root == I64{0}) { return }
+    sync_mutex_lock(observe_root)
+    node: observe_task_find(id)
+    label: if (node == I64{0}) -> I64{0} else -> sync_load(wrapping(node + I64{32}))
+    if (label != I64{0} && !wait_cycle_unnamed(label)) {
+        wait_cycle_push(text, rt_static_text(" ("))
+        wait_cycle_push(text, label)
+        wait_cycle_push(text, rt_static_text(")"))
+    }
+    sync_mutex_unlock(observe_root)
+}
+
+// An unnamed task's label is its spawn site, `task@N`
+// (ObserveMessages.jet observe_msg_task_label).
+wait_cycle_unnamed: fn(label: I64) -> Bool {
+    prefix: rt_static_text("task@")
+    length: rt_text_len(prefix)
+    rt_text_len(label) >= length && rt_text_equal_bytes(rt_text_data(label), rt_text_data(prefix), length)
+}
+
+// `main.jet:41`: the innermost frame of the running task's chain whose file
+// is not Core's (Fault.jet trace_text lines, `function\tfile\tline`), or 0.
+wait_cycle_site: fn() -> I64 {
+    trace: trace_text()
+    if (trace == I64{0}) { return I64{0} }
+    data: rt_text_data(trace)
+    length: rt_text_len(trace)
+    site := I64{0}
+    start := I64{0}
+    loop start < length && site == (I64{0}) {
+        end := start
+        loop end < length && rt_text_byte(wrapping(data + end)) != (I64{10}) -> end += I64{1}
+        file := start
+        loop file < end && rt_text_byte(wrapping(data + file)) != (I64{9}) -> file += I64{1}
+        file += I64{1}
+        line := file
+        loop line < end && rt_text_byte(wrapping(data + line)) != (I64{9}) -> line += I64{1}
+        file_len: line - file
+        if (line < end && file_len > I64{0} && !trap_core_site(wrapping(data + file), file_len)) {
+            site = jet_rt_string_builder_new()
+            rt_text_append(site, wrapping(data + file), file_len)
+            wait_cycle_push(site, rt_static_text(":"))
+            rt_text_append(site, wrapping(data + line + I64{1}), end - line - I64{1})
+        }
+        start = end + I64{1}
+    }
+    jet_rt_string_drop(trace)
+    site
+}
+
+// Stops the running task with the deadlock delivered to it: adds its own
+// line's site, waits until every task of the cycle has added its own, then
+// publishes the whole cycle as a panic (a root's ends the process).
+wait_cycle_stop: fn(control: I64) {
+    record: sync_load(wrapping(control + I64{184}))
+    length: sync_load(wrapping(record + I64{8}))
+    at := I64{0}
+    loop at < length {
+        entry: wait_cycle_entry(record, at)
+        if (sync_load(entry) == control) {
+            sync_store(wrapping(entry + I64{16}), wait_cycle_site())
+            at = length
+        }
+        at += I64{1}
+    }
+    remaining: wrapping(record + I64{16})
+    if (sync_add(remaining, I64{-1}) == I64{1}) {
+        sync_wake(remaining, I64{2147483647})
+    } else {
+        left := sync_load(remaining)
+        loop left != (I64{0}) {
+            _ := sync_wait(remaining, left, I64{-1})
+            left = sync_load(remaining)
+        }
+    }
+    message: jet_rt_string_builder_new()
+    wait_cycle_push(message, rt_static_text("deadlock: tasks wait on each other"))
+    at = I64{0}
+    loop at < length {
+        entry: wait_cycle_entry(record, at)
+        wait_cycle_push(message, rt_static_text("\n  "))
+        wait_cycle_push(message, sync_load(wrapping(entry + I64{8})))
+        site: sync_load(wrapping(entry + I64{16}))
+        if (site != I64{0}) {
+            wait_cycle_push(message, rt_static_text("  "))
+            wait_cycle_push(message, site)
+        }
+        at += I64{1}
+    }
+    lock: wait_cycle_lock()
+    sync_mutex_lock(lock)
+    sync_store(wrapping(control + I64{184}), I64{0})
+    sync_mutex_unlock(lock)
+    wait_cycle_release(record)
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    jet_rt_string_drop(message)
+}
+
+wait_cycle_release: fn(record: I64) {
+    if (sync_add(record, I64{-1}) != I64{1}) { return }
+    length: sync_load(wrapping(record + I64{8}))
+    at := I64{0}
+    loop at < length {
+        entry: wait_cycle_entry(record, at)
+        jet_rt_string_drop(sync_load(wrapping(entry + I64{8})))
+        jet_rt_string_drop(sync_load(wrapping(entry + I64{16})))
+        at += I64{1}
+    }
+    jet_rt_free(record, wait_cycle_record_bytes(length), I64{8})
+}

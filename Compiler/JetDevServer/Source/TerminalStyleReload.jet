@@ -234,12 +234,24 @@ TerminalStyleFingerprintFacts: struct {
         None
     }
 
-    dependencies_of: fn(self, kind: TerminalStyleDependencyKind) -> [TerminalStyleDependency] {
-        out := [TerminalStyleDependency]{}
+    // Whether `self` and `other` list the same `kind` dependencies, in order.
+    same_dependencies_of: fn(self, other: TerminalStyleFingerprintFacts, kind: TerminalStyleDependencyKind) -> Bool Never! {
+        theirs := 0
         loop dependency in self.dependencies {
-            if dependency.kind == kind -> out.push(dependency)
+            if dependency.kind != kind -> next
+            loop theirs < other.dependencies.len() && other.dependencies[theirs].kind != kind {
+                theirs += 1
+            }
+            if theirs == other.dependencies.len() || other.dependencies[theirs] != dependency {
+                return false
+            }
+            theirs += 1
         }
-        out
+        loop theirs < other.dependencies.len() {
+            if other.dependencies[theirs].kind == kind -> return false
+            theirs += 1
+        }
+        true
     }
 }
 
@@ -251,29 +263,29 @@ TerminalStyleEdit: struct {
     layout_fingerprint: String,
     type_fingerprint: String,
 
-    new: fn(source_id: String, source: String) -> TerminalStyleEdit {
+    new: fn(source_id: String, source: String) -> TerminalStyleEdit Never! {
         TerminalStyleEdit{source_id: source_id, source: source, dependencies: [TerminalStyleDependency]{}, capabilities: TERMINAL_CAPABILITY_DEFAULT, layout_fingerprint: "", type_fingerprint: ""}
     }
 
-    with_capabilities: fn(self, capabilities: TerminalCapabilityFacts) -> TerminalStyleEdit {
+    with_capabilities: fn(self, capabilities: TerminalCapabilityFacts) -> TerminalStyleEdit Never! {
         edit := self
         edit.capabilities = capabilities
         edit
     }
 
-    with_dependencies: fn(self, dependencies: [TerminalStyleDependency]) -> TerminalStyleEdit {
+    with_dependencies: fn(self, dependencies: [TerminalStyleDependency]) -> TerminalStyleEdit Never! {
         edit := self
         edit.dependencies = dependencies
         edit
     }
 
-    with_layout_fingerprint: fn(self, fingerprint: String) -> TerminalStyleEdit {
+    with_layout_fingerprint: fn(self, fingerprint: String) -> TerminalStyleEdit Never! {
         edit := self
         edit.layout_fingerprint = fingerprint
         edit
     }
 
-    with_type_fingerprint: fn(self, fingerprint: String) -> TerminalStyleEdit {
+    with_type_fingerprint: fn(self, fingerprint: String) -> TerminalStyleEdit Never! {
         edit := self
         edit.type_fingerprint = fingerprint
         edit
@@ -290,7 +302,7 @@ TerminalStyleEdit: struct {
             if next_end > MAX_TERMINAL_STYLE_SOURCE_BYTES -> break
             end = next_end
         }
-        edit.source = String.from_bytes(bytes.slice(0..<end)) ?? ""
+        edit.source = String.from_bytes(bytes.slice(0, end)) ?? ""
         edit
     }
 }
@@ -460,9 +472,9 @@ TerminalStyleSnapshot: struct {
         self.roles.get(role.as_str())
     }
 
-    paint: fn(self, role: TerminalStyleRole, text: String) -> String {
-        value: self.roles.get(role.as_str()) ?? return text
-        if !self.facts.capabilities.color_enabled() -> return text
+    paint: fn(self, role: TerminalStyleRole, text: &&String) -> String {
+        value: self.roles.get(role.as_str()) ?? return text.move()
+        if !self.facts.capabilities.color_enabled() -> return text.move()
         value.paint(text)
     }
 }
@@ -495,18 +507,18 @@ terminal_style_classify_change: fn(previous: TerminalStyleSnapshot?, next: Termi
     if prior.source_id != next.source_id || prior.facts.source_id != next.facts.source_id {
         return .RestartRequired{reason: .SourceIdentityChanged}
     }
-    if prior.facts.layout_fingerprint != next.facts.layout_fingerprint || prior.facts.dependencies_of(.Layout) != next.facts.dependencies_of(.Layout) {
+    if prior.facts.layout_fingerprint != next.facts.layout_fingerprint || !prior.facts.same_dependencies_of(next.facts, .Layout) {
         return .RestartRequired{reason: .LayoutFingerprintChanged}
     }
-    if prior.facts.type_fingerprint != next.facts.type_fingerprint || prior.facts.dependencies_of(.ValueType) != next.facts.dependencies_of(.ValueType) {
+    if prior.facts.type_fingerprint != next.facts.type_fingerprint || !prior.facts.same_dependencies_of(next.facts, .ValueType) {
         return .RestartRequired{reason: .TypeFingerprintChanged}
     }
     if prior.facts.fingerprint == next.facts.fingerprint -> return .Unchanged
     style_inputs_changed: prior.facts.source_fingerprint != next.facts.source_fingerprint || prior.facts.dependencies != next.facts.dependencies
     if !style_inputs_changed && prior.facts.capabilities != next.facts.capabilities {
         return .CapabilityOnly
-            .StyleOnly
     }
+    .StyleOnly
 }
 
 TerminalStyleErrorFact: struct {
@@ -539,14 +551,14 @@ TerminalStyleReloadReceipt: struct {
     applied: fn(self) -> Bool {
         if self.change == {
             .Initial | .StyleOnly | .CapabilityOnly -> true
-            else -> false
+            .Unchanged | .RestartRequired(_) | .Invalid -> false
         }
     }
 
     restart_required: fn(self) -> Bool {
         if self.change == {
             .RestartRequired(_) -> true
-            else -> false
+            .Initial | .Unchanged | .StyleOnly | .CapabilityOnly | .Invalid -> false
         }
     }
 
@@ -642,7 +654,7 @@ TerminalStyleReload: struct {
                 first: mailbox.len() - MAX_TERMINAL_STYLE_NOTIFICATIONS + 1
                 mailbox = loop index in first..<mailbox.len() -> mailbox[index]
             }
-            mailbox.push(notification)
+            mailbox.push(notification.copy())
             self.subscribers[id] = mailbox
         }
     }
@@ -891,7 +903,7 @@ terminal_style_parse_request: fn(body: String, source: TerminalStyleHostSource, 
     entries_value: recording_lookup(fields, "dependencies") ?? return edit
     entries: if entries_value == {
         .Array(items) -> items
-        else -> {
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) | .Text(_) | .Bytes(_) | .DateTime(_) | .Object(_) -> {
             return Err(malformed)
         }
     }
@@ -906,7 +918,7 @@ terminal_style_parse_request: fn(body: String, source: TerminalStyleHostSource, 
         fingerprint_value: recording_lookup(entry_fields, "fingerprint") ?? return Err(malformed)
         fingerprint: recording_text(fingerprint_value) ?? return Err(malformed)
         dependency: TerminalStyleDependency.new(kind, id, fingerprint) ?? return Err(
-            TerminalStyleHostOutcome.Rejected(
+            TerminalStyleHostOutcome.Rejected{
                 rejection: .Invalid{
                     fact: TerminalStyleErrorFact{
                         code: err.code,
@@ -916,7 +928,7 @@ terminal_style_parse_request: fn(body: String, source: TerminalStyleHostSource, 
                         message: err.message,
                     },
                 },
-            ),
+            },
         )
         dependencies.push(dependency)
     }

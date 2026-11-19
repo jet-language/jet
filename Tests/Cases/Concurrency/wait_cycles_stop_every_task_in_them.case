@@ -1,0 +1,24 @@
+# Tasks that wait on each other in a cycle stop together instead of hanging:
+# when the last of them blocks, each fails as a panicking task fails, with
+# one deadlock report naming every task of the cycle, what it waits for and
+# its line. Tasks outside the cycle run on. A cycle through the main task
+# stops the program.
+fixture: WaitCyclesStop.fixture
+env: NO_COLOR=1
+step: jet run tasks.jet
+exit: 0
+stdout: ~ "left: " # the joined task failed rather than finished
+stdout: ~ "deadlock: tasks wait on each other" # each task of the cycle stops with the deadlock
+stdout: ~ "task 3  waits to edit a Shared value task 4 holds  " # one task's wait, named by its holder
+stdout: ~ "task 4  waits to edit a Shared value task 3 holds  " # the other's, closing the cycle
+stdout: ~ "tasks.jet:16" # each wait's line
+stdout: ~ "right: " # the other task failed too
+stdout: ~ "ticker: 3\n" # the task outside the cycle finished its count
+step: jet run main.jet
+exit: 70
+stdout: = ""
+stderr: ~ "deadlock: tasks wait on each other" # the main task in a cycle stops the program
+stderr: ~ "task 1 (main)  waits to join task 2  " # main waits on its helper
+stderr: ~ "main.jet:18" # at its join
+stderr: ~ "task 2  waits to edit a Shared value task 1 holds  " # the helper waits on main's guard
+stderr: ~ "main.jet:10" # at its edit

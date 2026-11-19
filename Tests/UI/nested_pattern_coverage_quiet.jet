@@ -1,0 +1,27 @@
+// E0307 stays quiet when the arms take every pair of a case's nested
+// payload fields: the four `.Step` arms cover each `Side` pair, so
+// the table needs no `else`.
+Side: enum {
+    Left,
+    Right,
+}
+
+Move: enum {
+    Step(from: Side, to: Side),
+    Stay,
+}
+
+describe: fn(m: Move) -> String {
+    if m == {
+        .Step(.Left, .Right) -> "cross"
+        .Step(.Right, .Left) -> "back"
+        .Step(.Left, .Left) -> "hold left"
+        .Step(.Right, .Right) -> "hold right"
+        .Stay -> "stay"
+    }
+}
+
+run: fn() {
+    print(describe(Move.Stay))
+    print(describe(Move.Step{from: Side.Left, to: Side.Right}))
+}

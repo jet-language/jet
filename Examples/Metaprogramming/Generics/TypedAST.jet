@@ -56,23 +56,23 @@ Value: enum {
 
 Expr: struct<T> {
     node: Node,
-    #Codable(.Skip) marker: T?,
+    #Codable(.Skip) _marker: T?,
 }
 
-int_lit: fn(v: Int) -> Expr<Int> { {node: Node.ILit(v), marker: None} }
+int_lit: fn(v: Int) -> Expr<Int> { {node: Node.ILit(v), _marker: None} }
 
-bool_lit: fn(v: Bool) -> Expr<Bool> { {node: Node.BLit(v), marker: None} }
+bool_lit: fn(v: Bool) -> Expr<Bool> { {node: Node.BLit(v), _marker: None} }
 
 add: fn(a: Expr<Int>, b: Expr<Int>) -> Expr<Int> {
-    {node: Node.Add{a: a.node, b: b.node}, marker: None}
+    {node: Node.Add{a: a.node, b: b.node}, _marker: None}
 }
 
 eq: fn(a: Expr<Int>, b: Expr<Int>) -> Expr<Bool> {
-    {node: Node.Eq{a: a.node, b: b.node}, marker: None}
+    {node: Node.Eq{a: a.node, b: b.node}, _marker: None}
 }
 
 cond: fn<T>(c: Expr<Bool>, t: Expr<T>, e: Expr<T>) -> Expr<T> {
-    {node: Node.If{c: c.node, t: t.node, e: e.node}, marker: None}
+    {node: Node.If{c: c.node, t: t.node, e: e.node}, _marker: None}
 }
 
 eval_node: fn(n: Node) -> Value {

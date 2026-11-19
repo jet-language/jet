@@ -1,0 +1,17 @@
+Error [jet.UnreadField]: Field `User.nickname` is never read.
+  --> Tests/UI/member_liveness_probe_f.jet:6:5
+    |
+  6 |     nickname: String,
+    |     ^^^^^^^^
+ Why: Code may write this field, but nothing reads it, so it carries data no part of the program uses. Printing, encoding, derived equality or ordering, reflection and foreign code count as reads; derived cloning does not.
+ Fix: Remove the field, or rename `nickname` to `_nickname` when it is intentional.
+More: jet-lang.dev/e/L0106
+
+Error [jet.UnbuiltCase]: Case `Plan.Legacy` is never built.
+  --> Tests/UI/member_liveness_probe_f.jet:12:5
+    |
+ 12 |     Legacy,
+    |     ^^^^^^
+ Why: Code may match this case, but nothing creates it, so the arms that handle it never run. Decoding and foreign code count as building it; matching does not.
+ Fix: Remove the case, or rename `Legacy` to `_Legacy` when it is intentional.
+More: jet-lang.dev/e/L0107

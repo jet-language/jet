@@ -1481,7 +1481,7 @@ ir_bind_uninit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, local: TLocal, ty:
         ir_emit(b.f, IROp.Store, -1, slot, 0, length, b.line)
         ir_emit(b.f, IROp.Store, -1, slot, 8, length, b.line)
         stride: ir_list_stride(m, element_row)
-        data: if count == 0 -> ir_word_const(m, b, 0) else -> ir_list_buffer_alloc(m, b, count * stride)
+        data: if count == 0 -> ir_word_const(m, b, 0) else -> ir_list_buffer_alloc(m, b, count * stride, element_row)
         ir_emit(b.f, IROp.Store, -1, slot, 16, data, b.line)
     }
     symbol: if local.symbol_id == .Val(id) -> id else -> symbol_none()
@@ -9157,7 +9157,7 @@ ir_comptime_default_err: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type,
                 return ir_fail_slot(b, span, "default Err details constant {ir_comptime_name(details_value)}")
             }
         }
-        holder: ir_list_buffer_alloc(m, b, Int{ERR_DETAILS_BYTES})
+        holder: ir_list_buffer_alloc(m, b, Int{ERR_DETAILS_BYTES}, -1)
         variant: ir_comptime_field(details, "variant") ?? absent_text.move()
         ir_comptime_err_text(m, p, b, holder, Int{ERR_DETAILS_VARIANT}, variant, span)
         detail_fields: ir_comptime_field(details, "fields") ?? TComptimeValue.List{values: []}
@@ -9210,7 +9210,7 @@ ir_comptime_err_rows: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, base: Int, a
         }
     }
     count: rows.len()
-    buffer: if count == 0 -> ir_word_const(m, b, 0) else -> ir_list_buffer_alloc(m, b, count * stride)
+    buffer: if count == 0 -> ir_word_const(m, b, 0) else -> ir_list_buffer_alloc(m, b, count * stride, -1)
     loop (index, item) in rows {
         fields: if item == {
             .Struct(_, values) -> values
@@ -9314,7 +9314,7 @@ ir_comptime_bytes: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, row: 
     count: ir_word_const(m, b, bytes.len())
     ir_emit(b.f, IROp.Store, -1, storage, 0, count, b.line)
     ir_emit(b.f, IROp.Store, -1, storage, 8, count, b.line)
-    data: ir_list_buffer_alloc(m, b, bytes.len())
+    data: ir_list_buffer_alloc(m, b, bytes.len(), element_row)
     pointer_row: ir_pointer_row(m)
     source: ir_temp(m, b, pointer_row)
     ir_emit(b.f, IROp.DataAddress, source, ir_intern_bytes(m, bytes), -1, -1, b.line)

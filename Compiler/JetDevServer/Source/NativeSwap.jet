@@ -19,8 +19,8 @@ NativeSwapSourceIdentity: struct {
     }
 
     new_with_module: fn(source_id: String, module_ref: String) -> NativeSwapSourceIdentity NativeSwapError! {
-        _: native_swap_validate_identity(source_id, "source identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: native_swap_validate_identity(module_ref, "module identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(source_id, "source identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
+        _: native_swap_validate_identity(module_ref, "module identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
         NativeSwapSourceIdentity{source_id: source_id, module_ref: module_ref}
     }
 
@@ -41,7 +41,7 @@ NativeSwapCodeRevision: struct {
     value: String,
 
     new: fn(value: String) -> NativeSwapCodeRevision NativeSwapError! {
-        _: native_swap_validate_revision(value, "code revision") ?? return Err(NativeSwapError.input(value, .InvalidRevision, err))
+        _: native_swap_validate_revision(value, "code revision") ?? return Err(NativeSwapError.input(value, .InvalidRevision, "{err}"))
         NativeSwapCodeRevision{value: value}
     }
 
@@ -56,7 +56,7 @@ NativeSwapDataRevision: struct {
     value: String,
 
     new: fn(value: String) -> NativeSwapDataRevision NativeSwapError! {
-        _: native_swap_validate_revision(value, "data revision") ?? return Err(NativeSwapError.input(value, .InvalidRevision, err))
+        _: native_swap_validate_revision(value, "data revision") ?? return Err(NativeSwapError.input(value, .InvalidRevision, "{err}"))
         NativeSwapDataRevision{value: value}
     }
 
@@ -94,7 +94,7 @@ NativeSwapExecutable: struct {
     generation: U64,
 
     new: fn(source: NativeSwapSourceIdentity, revision: NativeSwapRevision, generation: U64) -> NativeSwapExecutable NativeSwapError! {
-        _: native_swap_validate_source_identity(source, "executable") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        _: native_swap_validate_source_identity(source, "executable") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, "{err}"))
         NativeSwapExecutable{source: source, revision: revision, generation: generation}
     }
 
@@ -204,8 +204,8 @@ NativeSwapLinkFacts: struct {
     candidate_identity: String,
 
     new: fn(strategy: NativeSwapLinkStrategy, resident_identity: String, candidate_identity: String) -> NativeSwapLinkFacts NativeSwapError! {
-        _: native_swap_validate_identity(resident_identity, "resident link identity") ?? return Err(NativeSwapError.input(resident_identity, .InvalidIdentity, err))
-        _: native_swap_validate_identity(candidate_identity, "candidate link identity") ?? return Err(NativeSwapError.input(candidate_identity, .InvalidIdentity, err))
+        _: native_swap_validate_identity(resident_identity, "resident link identity") ?? return Err(NativeSwapError.input(resident_identity, .InvalidIdentity, "{err}"))
+        _: native_swap_validate_identity(candidate_identity, "candidate link identity") ?? return Err(NativeSwapError.input(candidate_identity, .InvalidIdentity, "{err}"))
         NativeSwapLinkFacts{strategy: strategy, resident_identity: resident_identity, candidate_identity: candidate_identity}
     }
 
@@ -278,7 +278,7 @@ impl NativeSwapBlockingFact {
     is_restartable: fn(self) -> Bool {
         if self == {
             .CodeRevisionUnsupported | .DataRevisionUnsupported | .IncompatibleType | .LayoutChanged | .RestartRequired | .RelocationUnsupported | .LinkStrategyUnsupported -> true
-            else -> false
+            .Unblocked | .InvalidIdentity | .InvalidRevision | .SourceIdentityChanged | .ConnectionHandleStale | .UnsafeEdit | .ListenerHandleMissing | .ListenerHandleIncompatible | .ListenerHandleStale | .ConnectionHandleMissing | .ConnectionHandleIncompatible | .ConnectionListenerNotPreserved | .DuplicateIdentity | .FactLimit | .QuiescenceRequired | .StaleReference | .StalePlan | .InvalidPhase | .CompileFailed | .MigrationFailed | .RollbackUnavailable | .CapabilityUnavailable -> false
         }
     }
 }
@@ -307,7 +307,7 @@ NativeSwapExplanation: struct {
     blocking_fact: NativeSwapBlockingFact,
     detail: String,
 
-    new: fn(source_id: String, disposition: NativeSwapDisposition, blocking_fact: NativeSwapBlockingFact, detail: String) -> NativeSwapExplanation {
+    new: fn(source_id: String, disposition: NativeSwapDisposition, blocking_fact: NativeSwapBlockingFact, detail: String) -> NativeSwapExplanation Never! {
         NativeSwapExplanation{source_id: bounded_text(source_id, MAX_NATIVE_SWAP_ID_BYTES), disposition: disposition, blocking_fact: blocking_fact, detail: bounded_text(detail, MAX_NATIVE_SWAP_DETAIL_BYTES)}
     }
 
@@ -328,11 +328,11 @@ NativeSwapExplanation: struct {
 NativeSwapError: struct {
     explanation: NativeSwapExplanation,
 
-    input: fn(source_id: String, blocking_fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError {
+    input: fn(source_id: String, blocking_fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError Never! {
         NativeSwapError{explanation: NativeSwapExplanation.new(source_id, .Rejected, blocking_fact, detail)}
     }
 
-    restart: fn(source_id: String, blocking_fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError {
+    restart: fn(source_id: String, blocking_fact: NativeSwapBlockingFact, detail: String) -> NativeSwapError Never! {
         NativeSwapError{explanation: NativeSwapExplanation.new(source_id, .Restart, blocking_fact, detail)}
     }
 
@@ -368,8 +368,8 @@ NativeSwapListenerHandle: struct {
     compatibility: NativeSwapHandleCompatibility,
 
     new: fn(id: String, source: NativeSwapSourceIdentity, generation: U64, compatibility: NativeSwapHandleCompatibility) -> NativeSwapListenerHandle NativeSwapError! {
-        _: native_swap_validate_identity(id, "listener handle identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
-        _: native_swap_validate_source_identity(source, "listener") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        _: native_swap_validate_identity(id, "listener handle identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, "{err}"))
+        _: native_swap_validate_source_identity(source, "listener") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, "{err}"))
         NativeSwapListenerHandle{id: id, source: source, generation: generation, compatibility: compatibility}
     }
 
@@ -392,9 +392,9 @@ NativeSwapConnectionHandle: struct {
     compatibility: NativeSwapHandleCompatibility,
 
     new: fn(id: String, listener_id: String, source: NativeSwapSourceIdentity, generation: U64, compatibility: NativeSwapHandleCompatibility) -> NativeSwapConnectionHandle NativeSwapError! {
-        _: native_swap_validate_identity(id, "connection handle identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
-        _: native_swap_validate_identity(listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
-        _: native_swap_validate_source_identity(source, "connection") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, err))
+        _: native_swap_validate_identity(id, "connection handle identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, "{err}"))
+        _: native_swap_validate_identity(listener_id, "connection listener identity") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, "{err}"))
+        _: native_swap_validate_source_identity(source, "connection") ?? return Err(NativeSwapError.input(source.canonical(), .InvalidIdentity, "{err}"))
         NativeSwapConnectionHandle{id: id, listener_id: listener_id, source: source, generation: generation, compatibility: compatibility}
     }
 
@@ -433,15 +433,15 @@ NativeSwapCapability: struct {
     }
 
     with_relocation: fn(self, strategy: NativeSwapRelocationStrategy) -> NativeSwapCapability {
-        next := self
-        next.relocation = strategy
-        next
+        updated := self
+        updated.relocation = strategy
+        updated
     }
 
     with_link: fn(self, strategy: NativeSwapLinkStrategy) -> NativeSwapCapability {
-        next := self
-        next.link = strategy
-        next
+        updated := self
+        updated.link = strategy
+        updated
     }
 
     allows_restart: fn(self) -> Bool { self.restart }
@@ -454,7 +454,7 @@ NativeSwapRestartBoundary: struct {
     kept: [String],
     reset: [String],
 
-    in_place: fn() -> NativeSwapRestartBoundary {
+    in_place: fn() -> NativeSwapRestartBoundary Never! {
         NativeSwapRestartBoundary{required: false, reason: None, affected: [String]{}, kept: [String]{}, reset: [String]{}}
     }
 
@@ -514,55 +514,55 @@ NativeSwapPlan: struct {
     }
 
     mark_layout_changed: fn(self, affected: [String]) -> NativeSwapPlan {
-        next := self
-        next.blocking_fact = Val(NativeSwapBlockingFact.LayoutChanged)
-        next.restart_boundary = NativeSwapRestartBoundary.required_by(.LayoutChanged, affected)
-        next
+        updated := self
+        updated.blocking_fact = Val(NativeSwapBlockingFact.LayoutChanged)
+        updated.restart_boundary = NativeSwapRestartBoundary.required_by(.LayoutChanged, affected)
+        updated
     }
 
     with_quiescence: fn(self, quiescence: NativeSwapQuiescence) -> NativeSwapPlan {
-        next := self
-        next.quiescence = quiescence
-        next
+        updated := self
+        updated.quiescence = quiescence
+        updated
     }
 
     with_relocation: fn(self, relocation: NativeSwapRelocationFacts) -> NativeSwapPlan {
-        next := self
-        next.relocation = relocation
-        next
+        updated := self
+        updated.relocation = relocation
+        updated
     }
 
     with_link: fn(self, link: NativeSwapLinkFacts) -> NativeSwapPlan {
-        next := self
-        next.link = link
-        next
+        updated := self
+        updated.link = link
+        updated
     }
 
     // Handles stay ordered by identity so receipts and validation read them deterministically.
-    preserve_listener: fn(self, handle: NativeSwapListenerHandle) -> NativeSwapPlan {
-        next := self
-        at := next.preserve_listeners.len()
-        loop index in 0..<next.preserve_listeners.len() {
-            if handle.id < next.preserve_listeners[index].id {
+    preserve_listener: fn(self, handle: &&NativeSwapListenerHandle) -> NativeSwapPlan {
+        updated := self
+        at := updated.preserve_listeners.len()
+        loop index in 0..<updated.preserve_listeners.len() {
+            if handle.id < updated.preserve_listeners[index].id {
                 at = index
                 break
             }
         }
-        next.preserve_listeners.insert(at, handle)
-        next
+        updated.preserve_listeners.insert(at, handle.move())
+        updated
     }
 
-    preserve_connection: fn(self, handle: NativeSwapConnectionHandle) -> NativeSwapPlan {
-        next := self
-        at := next.preserve_connections.len()
-        loop index in 0..<next.preserve_connections.len() {
-            if handle.id < next.preserve_connections[index].id {
+    preserve_connection: fn(self, handle: &&NativeSwapConnectionHandle) -> NativeSwapPlan {
+        updated := self
+        at := updated.preserve_connections.len()
+        loop index in 0..<updated.preserve_connections.len() {
+            if handle.id < updated.preserve_connections[index].id {
                 at = index
                 break
             }
         }
-        next.preserve_connections.insert(at, handle)
-        next
+        updated.preserve_connections.insert(at, handle.move())
+        updated
     }
 
     code_changed: fn(self) -> Bool { !self.from.revision.code_unchanged(self.to.revision) }
@@ -582,9 +582,9 @@ NativeSwapPlan: struct {
 
     validate_shape: fn(self) NativeSwapError! {
         source_id: self.source.canonical()
-        _: native_swap_validate_source_identity(self.source, "plan") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: native_swap_validate_source_identity(self.from.source, "resident executable") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: native_swap_validate_source_identity(self.to.source, "candidate executable") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_source_identity(self.source, "plan") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
+        _: native_swap_validate_source_identity(self.from.source, "resident executable") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
+        _: native_swap_validate_source_identity(self.to.source, "candidate executable") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
         if !self.from.source.matches(self.source) || !self.to.source.matches(self.source) {
             return Err(NativeSwapError.input(source_id, .SourceIdentityChanged, "plan source does not match both executable identities"))
         }
@@ -598,8 +598,8 @@ NativeSwapPlan: struct {
         validate_fact_list(source_id, self.relocation.data_slots)
         validate_listener_plan_facts(source_id, self.source, self.preserve_listeners)
         validate_connection_plan_facts(source_id, self.source, self.preserve_connections)
-        _: native_swap_validate_identity(self.link.resident_identity, "resident link identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
-        _: native_swap_validate_identity(self.link.candidate_identity, "candidate link identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_identity(self.link.resident_identity, "resident link identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
+        _: native_swap_validate_identity(self.link.candidate_identity, "candidate link identity") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
     }
 }
 
@@ -689,7 +689,7 @@ NativeSwapState: struct {
 
     new: fn(executable: NativeSwapExecutable, listeners: [NativeSwapListenerHandle], connections: [NativeSwapConnectionHandle]) -> NativeSwapState NativeSwapError! {
         source_id: executable.source.canonical()
-        _: native_swap_validate_source_identity(executable.source, "executable") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, err))
+        _: native_swap_validate_source_identity(executable.source, "executable") ?? return Err(NativeSwapError.input(source_id, .InvalidIdentity, "{err}"))
         resident_listeners: listener_map(source_id, executable, listeners)
         resident_connections: connection_map(source_id, executable, connections, resident_listeners)
         NativeSwapState{

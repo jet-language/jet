@@ -1,0 +1,56 @@
+# A breakpoint on a line of a generic module's member stops in each
+# instance's copy of it: at O0 in each instance's own function, at O1 and O2
+# in each copy inlined into `run`. `s` on a call steps into the member. At
+# O0 `peek` runs and returns before it opens a frame, so its breakpoint is
+# its first instruction, and its frame's caller is found from there.
+fixture: BreakpointInGenericModuleInstance.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet --break prog.jet:7
+stdin: breakpoint_in_generic_module_instance.stdin
+exit: 0 # the second `c` runs the program to its end
+stdout+stderr: ~ "Breakpoint hit  prog.jet:7" # the member's line stops
+stdout+stderr: ~ "run()  at prog.jet:20" # in `small`'s copy, called on line 20
+stdout+stderr: ~ "run()  at prog.jet:21" # and in `large`'s, called on line 21
+stdout+stderr: ~ "Program finished"
+step: jet debug prog.jet --break prog.jet:11
+stdin: breakpoint_in_generic_module_instance.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  prog.jet:11" # the one-line member stops
+stdout+stderr: ~ "run()  at prog.jet:22" # in `small`'s copy
+stdout+stderr: ~ "run()  at prog.jet:23" # and in `large`'s
+step: jet debug prog.jet --break prog.jet:22
+stdin: breakpoint_in_generic_module_instance_step.stdin
+exit: 0
+stdout+stderr: ~ "11 |" # `s` steps into `small`'s `peek`
+stdout+stderr: ~ "run()  at prog.jet:22" # whose caller is the call's line
+step: jet debug prog.jet --break prog.jet:20
+stdin: breakpoint_in_generic_module_instance_step.stdin
+exit: 0
+stdout+stderr: ~ "7 |" # `s` steps into `small`'s `bump`
+step: jet build -O1 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:7
+stdin: breakpoint_in_generic_module_instance.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  prog.jet:7" # the inlined copies stop
+stdout+stderr: ~ "run()  at prog.jet:20" # `small`'s
+stdout+stderr: ~ "run()  at prog.jet:21" # and `large`'s
+step: jet debug {work}/.jet/build/prog --break prog.jet:20
+stdin: breakpoint_in_generic_module_instance_step.stdin
+exit: 0
+stdout+stderr: ~ "7 |" # `s` steps into the inlined copy
+step: jet build -O2 prog.jet
+exit: 0
+step: jet debug {work}/.jet/build/prog --break prog.jet:7
+stdin: breakpoint_in_generic_module_instance.stdin
+exit: 0
+stdout+stderr: ~ "Breakpoint hit  prog.jet:7"
+stdout+stderr: ~ "run()  at prog.jet:20"
+stdout+stderr: ~ "run()  at prog.jet:21"
+step: jet debug {work}/.jet/build/prog --break prog.jet:20
+stdin: breakpoint_in_generic_module_instance_step.stdin
+exit: 0
+stdout+stderr: ~ "7 |"
+step: {work}/.jet/build/prog
+exit: 0
+stdout: = "9\n65\n9\n65\n" # the image runs unchanged

@@ -1390,7 +1390,7 @@ ir_record_load_member: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle: Int
         return ir_record_load_value(m, p, a, handle, getter, member.ty, base, member.offset, span)
     }
     size: m.types[member.ty].size
-    wrapper: ir_wrapper_alloc(m, a, if size < 8 -> 8 else -> size, -1)
+    wrapper: ir_wrapper_alloc(m, a, if size < 8 -> 8 else -> size, -1, member.ty)
     ir_record_load_value(m, p, a, handle, getter, member.ty, wrapper, 0, span)
     ir_emit(a.f, IROp.Store, -1, base, member.offset, wrapper, a.line)
 }
@@ -1483,7 +1483,7 @@ ir_record_load_records: fn(m: &IRModule, p: IRProgram, a: &IRBuilder, handle: In
     ir_open_if(a.f, present, a.line)
     width: ir_word_const(m, a, stride)
     bytes: ir_word_op(m, a, IROp.Mul, length, width)
-    data: ir_list_buffer_sized(m, a, bytes)
+    data: ir_list_buffer_sized(m, a, bytes, element)
     ir_emit(a.f, IROp.Store, -1, list, 16, data, a.line)
     ir_emit(a.f, IROp.Store, -1, list, 8, length, a.line)
     ir_emit(a.f, IROp.Store, -1, list, 0, length, a.line)
@@ -3511,7 +3511,8 @@ ir_union_lend: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, payload: Int, membe
     if member.boxed {
         size: m.types[member.ty].size
         wrapper_bytes = ir_align8(if size < 8 -> 8 else -> size)
-        pointer_row: ir_pointer_row(m)
+        plain: ir_pointer_row(m)
+        pointer_row: ir_alloc_row_of(m, plain, member.ty)
         wrapper = ir_box_alloc(m, b, wrapper_bytes, pointer_row)
         b.fresh[wrapper] = false
         ir_emit(b.f, IROp.Store, -1, boxed, member.offset, wrapper, b.line)

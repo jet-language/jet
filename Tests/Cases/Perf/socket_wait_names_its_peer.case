@@ -1,0 +1,17 @@
+# `jet perf run` names a socket's wait by the socket's address and its
+# peer's, and what ended it: the task of the program that acted at the
+# connection's other end, at its line, else the peer outside the program.
+# An accept is ended by a task's connect, a read by a task's write.
+requires: os-name:linux
+fixture: SocketWaitNamesItsPeer.fixture
+env: NO_COLOR=1
+step: jet perf run main.jet --out {work}/sockets.jettrace
+exit: 0
+stdout: = "4 4\n"
+step: jet perf view {work}/sockets.jettrace
+exit: 0
+stdout: ~ "] task 1 in tcp accept at main.jet:14 on socket 127.0.0.1:" # the accept, by the listener's address
+stdout: ~ ", woken by task 2 at main.jet:23" # the connect that ended it, by its task and line
+stdout: ~ "] task 1 in tcp read at main.jet:15 on socket 127.0.0.1:" # the read, by the server socket's address
+stdout: ~ " with peer 127.0.0.1:" # and the client's
+stdout: ~ ", woken by task 2 at main.jet:25" # the write that ended it, by its task and line

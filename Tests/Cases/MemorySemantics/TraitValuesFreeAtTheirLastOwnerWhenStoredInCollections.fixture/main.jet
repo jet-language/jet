@@ -9,7 +9,7 @@ package: {
 }
 
 Context: struct {
-    id: Int,
+    _id: Int,
 }
 
 Sink: trait {
@@ -18,7 +18,7 @@ Sink: trait {
 }
 
 Worker: struct {
-    context: Shared<Context>,
+    _context: Shared<Context>,
     n: Int,
 
     impl Sink {
@@ -30,10 +30,10 @@ Worker: struct {
 
 Rack: struct {
     sinks: [Sink],
-    spare: Sink?,
+    _spare: Sink?,
 }
 
-make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{context: s.copy(), n: n} }
+make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{_context: s.copy(), n: n} }
 
 listed: fn(s: Shared<Context>) {
     list := [Sink]{make(s, 1), make(s, 2)}
@@ -55,15 +55,15 @@ mapped: fn(s: Shared<Context>) {
 }
 
 nested: fn(s: Shared<Context>) {
-    rack := Rack{sinks: [Sink]{make(s, 1)}, spare: Val(make(s, 2))}
+    rack := Rack{sinks: [Sink]{make(s, 1)}, _spare: Val(make(s, 2))}
     rack.sinks.push(make(s, 3))
-    rack.spare = Val(make(s, 4))
-    racks: [Rack]{rack, Rack{sinks: [Sink]{}, spare: None}}
+    rack._spare = Val(make(s, 4))
+    racks: [Rack]{rack, Rack{sinks: [Sink]{}, _spare: None}}
     print("nested {racks[0].sinks.len()} live {s.strong_count()}")
 }
 
 run: fn() {
-    s := Shared{Context{id: 1}}
+    s := Shared{Context{_id: 1}}
     listed(s)
     print("listed dropped {s.strong_count()}")
     mapped(s)

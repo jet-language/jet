@@ -1,0 +1,29 @@
+// Four rooms each keep a history of 50 messages, whose bodies the
+// program allocates between two heap marks: every body is live at the
+// second, retained by its room's history.
+use core.perf
+
+Message: struct {
+    id: Int,
+    body: [Int],
+}
+
+Room: struct {
+    id: Int,
+    history: [Message],
+}
+
+run: fn() {
+    rooms := [Room]{}
+    loop id in 0..<4 -> rooms.push(Room{id: id, history: [Message]{}})
+    perf.heap_mark("start")
+    loop turn in 0..<50 {
+        loop index in 0..<rooms.len() {
+            rooms[index].history.push(Message{id: turn, body: [Int]{turn, index}})
+        }
+    }
+    perf.heap_mark("after-chat")
+    total := 0
+    loop room in rooms -> total += room.history.len()
+    print("messages={total}")
+}

@@ -8,7 +8,7 @@ package: {
 }
 
 Context: struct {
-    id: Int,
+    _id: Int,
 }
 
 Sink: trait {
@@ -17,7 +17,7 @@ Sink: trait {
 }
 
 Worker: struct {
-    context: Shared<Context>,
+    _context: Shared<Context>,
     n: Int,
 
     impl Sink {
@@ -32,7 +32,7 @@ Holder: struct {
     spare: Sink?,
 }
 
-make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{context: s.copy(), n: n} }
+make: fn(s: Shared<Context>, n: Int) -> Sink { Worker{_context: s.copy(), n: n} }
 
 bound: fn(s: Shared<Context>) {
     a: make(s, 1)
@@ -65,7 +65,7 @@ overwritten: fn(s: Shared<Context>) {
 }
 
 run: fn() {
-    s := Shared{Context{id: 1}}
+    s := Shared{Context{_id: 1}}
     bound(s)
     print("bound dropped {s.strong_count()}")
     held(s)

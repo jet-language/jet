@@ -1,0 +1,297 @@
+// What keeps a heap snapshot's live blocks alive (`jet perf view
+// --retained-by <type>`). The runtime writes each live block's words that
+// point into other live blocks, and the roots: the words of the snapshot's
+// thread's frames and of the image's writable data that do
+// (PerfSamples.jet perf_samples_heap_refs). A breadth-first walk from the
+// roots, the variables first, then the data objects, then the frames'
+// other words, reaches each block by a shortest path, which the DWARF
+// layout of the variables and of the types the blocks were allocated for
+// names: `kept[17]`, `rooms[3].history -> Ring<Message>.items[17]`.
+use {
+    jet_backend.[link_debug_addr, link_debug_le, link_debug_uleb, x64_jetline_sleb, x64_jetline_text]
+    jet_debug.[NATIVE_TAG_STRUCT, NATIVE_TAG_TYPEDEF, NativeImage, native_elf_section, native_jet_spelling, native_type_size, native_variable_covering]
+}
+
+// The most holders a retention path names, nearest its block; a longer
+// path starts with `… `.
+JET_CLI_PERF_HEAP_HOPS: 16
+
+// The most paths a snapshot keeps for each type, the most bytes first; the
+// blocks along its other paths share one entry, path `…`.
+JET_CLI_PERF_HEAP_PATHS: 4
+
+// A data object of the image's symbol table: its link-time address, its
+// size and its name as Jet spells it.
+JetCLIPerfHeapObject: struct {
+    address: Int,
+    size: Int,
+    name: String,
+}
+
+// The live blocks of type `type_name` a heap snapshot holds along one path
+// from a root, `path` (one block's, list indices and all), and their bytes;
+// `…` for those along the paths past the JET_CLI_PERF_HEAP_PATHS kept, an
+// empty path for the blocks no root reaches, which only another thread's
+// frames or a register held. The blocks share the path's shape: the same
+// root, fields and holders, any list index.
+JetCLIPerfRetained: struct {
+    type_name: String,
+    path: String,
+    blocks: U64,
+    bytes: U64,
+}
+
+// One step of a retention path: its text, and its shape, the text with
+// each list index left out.
+JetCLIPerfHeapStep: struct {
+    text: String,
+    shape: String,
+}
+
+// A root's name and its rank: 0 for a variable, 1 for a data object, 2 for
+// any other word of a frame or of the data.
+JetCLIPerfHeapRootName: struct {
+    name: String,
+    rank: Int,
+}
+
+// The data objects (STT_OBJECT symbols with a size) of the ELF image `elf`.
+jet_cli_perf_heap_objects: fn(elf: [U8]) -> [JetCLIPerfHeapObject] Never! {
+    objects := [JetCLIPerfHeapObject]{}
+    symbols: native_elf_section(elf, ".symtab") ?? return objects
+    strings: native_elf_section(elf, ".strtab") ?? return objects
+    at := 0
+    loop at + 24 <= symbols.len() {
+        size: link_debug_addr(symbols, at + 16)
+        if link_debug_le(symbols, at + 4, 1) & 15 == 1 && size > 0 {
+            name: x64_jetline_text(strings, link_debug_le(symbols, at, 4))
+            if name != "" {
+                objects.push(JetCLIPerfHeapObject{address: link_debug_addr(symbols, at + 8), size: size, name: native_jet_spelling(name)})
+            }
+        }
+        at += 24
+    }
+    objects
+}
+
+// Read `heap`'s retention records into its `retained` paths, by type and
+// shape, at most JET_CLI_PERF_HEAP_PATHS a type with the most bytes, then
+// the rest, then the unreached, and drop the records. `facts` is the
+// image's DWARF, `objects` its data objects and `names` spells each type
+// DIE a typed allocating call allocates for.
+jet_cli_perf_heap_retain: fn(facts: NativeImage, objects: [JetCLIPerfHeapObject], names: [Int:String], heap: &JetCLIPerfHeap) Never! {
+    count: heap.live.len()
+    if count == 0 {
+        return
+    }
+    index := [Int:Int]{}
+    loop (at, block) in heap.live -> index[block.address] = at
+    // How the walk reached each block: -2 not yet, -1 from a root (`slot`
+    // then its root's name in `labels`), else the holding block (`slot`
+    // the offset of its word).
+    via := loop _ in 0..<count -> -2
+    slot := loop _ in 0..<count -> 0
+    labels := [String]{}
+    ranks := [Int]{}
+    loop root in heap.roots {
+        named: if root.data -> jet_cli_perf_heap_object_name(objects, root.address) else -> jet_cli_perf_heap_frame_name(facts, heap.frames, root.address)
+        labels.push(named.name)
+        ranks.push(named.rank)
+    }
+    queue := [Int]{}
+    loop rank in 0..<3 {
+        loop (at, root) in heap.roots {
+            if ranks[at] != rank -> next
+            reached: index.get(root.target) ?? next
+            if via[reached] != -2 -> next
+            via[reached] = -1
+            slot[reached] = at
+            queue.push(reached)
+        }
+    }
+    head := 0
+    loop head < queue.len() {
+        holder: queue[head]
+        head += 1
+        loop ref in heap.live[holder].refs {
+            reached: index.get(ref.target) ?? next
+            if via[reached] != -2 -> next
+            via[reached] = holder
+            slot[reached] = ref.offset
+            queue.push(reached)
+        }
+    }
+    keys := [String:Int]{}
+    retained := [JetCLIPerfRetained]{}
+    loop (at, block) in heap.live {
+        die: if block.group > 0 && block.group <= heap.groups.len() -> heap.groups[block.group - 1] else -> -1
+        type_name: names.get(die) ?? next
+        size: checked(U64{block.size}) ?? U64{0}
+        path: jet_cli_perf_heap_path(facts, names, heap, via, slot, labels, at)
+        key: "{type_name}\n{path.shape}"
+        if keys.get(key) == .Val(found) {
+            retained[found].blocks += U64{1}
+            retained[found].bytes += size
+            next
+        }
+        keys[key] = retained.len()
+        retained.push(JetCLIPerfRetained{type_name: type_name, path: path.text, blocks: U64{1}, bytes: size})
+    }
+    retained.sort_by(fn(left: JetCLIPerfRetained, right: JetCLIPerfRetained) { (left.type_name <=> right.type_name).then(jet_cli_perf_heap_unreached(left) <=> jet_cli_perf_heap_unreached(right)).then(right.bytes <=> left.bytes).then(right.blocks <=> left.blocks).then(left.path <=> right.path) })
+    kept := 0
+    loop entry in retained.move() {
+        same: kept > 0 && heap.retained[heap.retained.len() - 1].type_name == entry.type_name
+        kept = if same -> kept + 1 else -> 1
+        if kept <= JET_CLI_PERF_HEAP_PATHS || entry.path == "" {
+            heap.retained.push(entry)
+            next
+        }
+        last: heap.retained.len() - 1
+        if heap.retained[last].path == "…" {
+            heap.retained[last].blocks += entry.blocks
+            heap.retained[last].bytes += entry.bytes
+            next
+        }
+        heap.retained.push(JetCLIPerfRetained{type_name: entry.type_name.move(), path: "…", blocks: entry.blocks, bytes: entry.bytes})
+    }
+    heap.live = [JetCLIPerfHeapBlock]{}
+    heap.frames = [JetCLIPerfHeapFrame]{}
+    heap.roots = [JetCLIPerfHeapRoot]{}
+}
+
+// 1 for the blocks no root reached, which sort after the reached; else 0.
+jet_cli_perf_heap_unreached: fn(entry: JetCLIPerfRetained) -> Int Never! {
+    if entry.path == "" -> 1 else -> 0
+}
+
+// The path by which the walk reached block `at` of `heap` (`via`, `slot`
+// and `labels` as jet_cli_perf_heap_retain keeps them): its root's name,
+// then the step each holder adds, nearest the root first; empty when no
+// root reached it.
+jet_cli_perf_heap_path: fn(facts: NativeImage, names: [Int:String], heap: JetCLIPerfHeap, via: [Int], slot: [Int], labels: [String], at: Int) -> JetCLIPerfHeapStep Never! {
+    steps := [JetCLIPerfHeapStep]{}
+    node := at
+    root := ""
+    loop {
+        holder: via[node]
+        if holder == -2 -> return JetCLIPerfHeapStep{text: "", shape: ""}
+        if holder == -1 {
+            root = "{labels[slot[node]]}"
+            break
+        }
+        if steps.len() == JET_CLI_PERF_HEAP_HOPS {
+            root = "…"
+            break
+        }
+        steps.push(jet_cli_perf_heap_step(facts, names, heap, holder, slot[node]))
+        node = holder
+    }
+    text := "{root}"
+    shape := "{root}"
+    loop k in 0..<steps.len() {
+        step: steps[steps.len() - 1 - k]
+        text = "{text}{step.text}"
+        shape = "{shape}{step.shape}"
+    }
+    JetCLIPerfHeapStep{text: text, shape: shape}
+}
+
+// The step a word at `offset` of `heap`'s live block `holder` adds to a
+// path: for a list's buffer (a type spelled `[...]`), the element's index
+// and field, `[17].body`; for any other typed block, ` -> ` its type and
+// field, ` -> Room.history`; ` -> block+<offset>` for an untyped one.
+jet_cli_perf_heap_step: fn(facts: NativeImage, names: [Int:String], heap: JetCLIPerfHeap, holder: Int, offset: Int) -> JetCLIPerfHeapStep Never! {
+    group: heap.live[holder].group
+    die: if group > 0 && group <= heap.groups.len() -> heap.groups[group - 1] else -> -1
+    type_name: names.get(die) ?? return JetCLIPerfHeapStep{text: " -> block+{offset}", shape: " -> block"}
+    // The typedef names a pointer to the layout the block holds.
+    pointer: (facts.types.get(die) ?? return JetCLIPerfHeapStep{text: " -> {type_name}", shape: " -> {type_name}"}).target
+    held: (facts.types.get(pointer) ?? return JetCLIPerfHeapStep{text: " -> {type_name}", shape: " -> {type_name}"}).target
+    if type_name.starts_with("[") && type_name.ends_with("]") && held >= 0 {
+        size: native_type_size(facts, held)
+        stride: if size < 8 -> 8 else -> (size + 7) /% 8 * 8
+        field: jet_cli_perf_heap_field(facts, held, offset % stride)
+        return JetCLIPerfHeapStep{text: "[{offset /% stride}]{field}", shape: "[]{field}"}
+    }
+    field: jet_cli_perf_heap_field(facts, held, offset)
+    JetCLIPerfHeapStep{text: " -> {type_name}{field}", shape: " -> {type_name}{field}"}
+}
+
+// The field of type `ty` that byte `offset` of a value of it lies in,
+// `.history.items`, through its structs' members; empty at a list, a
+// pointer or any other type without members.
+jet_cli_perf_heap_field: fn(facts: NativeImage, ty: Int, offset: Int) -> String Never! {
+    resolved := ty
+    loop _ in 0..<16 {
+        found: facts.types.get(resolved) ?? return ""
+        if found.tag != NATIVE_TAG_TYPEDEF -> break
+        resolved = found.target
+    }
+    found: facts.types.get(resolved) ?? return ""
+    if found.tag != NATIVE_TAG_STRUCT || found.group < 0 || found.name.starts_with("[") -> return ""
+    loop member in facts.members[found.group] {
+        size: native_type_size(facts, member.ty)
+        if offset >= member.offset && offset < member.offset + (if size > 0 -> size else -> 1) {
+            return ".{member.name}{jet_cli_perf_heap_field(facts, member.ty, offset - member.offset)}"
+        }
+    }
+    ""
+}
+
+// The name of the root at stack `address`, in the `frames` of the thread
+// that took the snapshot: the variable whose place holds it in the
+// function of the frame it lies in, with its field, `rooms[3]`'s `rooms`;
+// else `<function> frame`, or `stack` outside every function's frame.
+jet_cli_perf_heap_frame_name: fn(facts: NativeImage, frames: [JetCLIPerfHeapFrame], address: Int) -> JetCLIPerfHeapRootName Never! {
+    frame: loop frame in frames {
+        if address >= frame.low && address < frame.base {
+            break frame
+        }
+    } ?? return JetCLIPerfHeapRootName{name: "stack", rank: 2}
+    loop function in facts.functions {
+        if frame.pc < function.low || frame.pc >= function.high -> next
+        loop variable in function.variables {
+            range: native_variable_covering(facts, variable, frame.pc) ?? next
+            place: jet_cli_perf_heap_place(facts.loclists, range.from, range.to, frame.base, frame.low) ?? next
+            if address >= place && address < place + native_type_size(facts, variable.ty) {
+                return JetCLIPerfHeapRootName{name: "{variable.name}{jet_cli_perf_heap_field(facts, variable.ty, address - place)}", rank: 0}
+            }
+        }
+        return JetCLIPerfHeapRootName{name: "{native_jet_spelling(function.name)} frame", rank: 2}
+    }
+    JetCLIPerfHeapRootName{name: "stack", rank: 2}
+}
+
+// The address of the memory place DWARF location expression bytes
+// [from, to) of `bytes` names in a frame whose frame pointer is `base` and
+// whose stack pointer at its call was `low`: DW_OP_fbreg, or DW_OP_breg or
+// DW_OP_bregx of rbp or rsp, and nothing after it. None for any other.
+jet_cli_perf_heap_place: fn(bytes: [U8], from: Int, to: Int, base: Int, low: Int) -> Int? Never! {
+    if from < 0 || from >= to || to > bytes.len() -> return None
+    op: Int{bytes[from]}
+    at := from + 1
+    register: if {
+        op == 0x91 -> 6
+        op >= 0x70 && op <= 0x8f -> op - 0x70
+        op == 0x92 -> link_debug_uleb(bytes, at)
+        else -> {
+            return None
+        }
+    }
+    offset: x64_jetline_sleb(bytes, at)
+    if at != to -> return None
+    if register == 6 -> return Val(base + offset)
+    if register == 7 -> return Val(low + offset)
+    None
+}
+
+// The name of the root at link-time data `address`: the data object that
+// holds it, `+<offset>` after it inside; `data` outside every object.
+jet_cli_perf_heap_object_name: fn(objects: [JetCLIPerfHeapObject], address: Int) -> JetCLIPerfHeapRootName Never! {
+    loop object in objects {
+        if address < object.address || address >= object.address + object.size -> next
+        inside: address - object.address
+        return JetCLIPerfHeapRootName{name: if inside == 0 -> "{object.name}" else -> "{object.name}+{inside}", rank: 1}
+    }
+    JetCLIPerfHeapRootName{name: "data", rank: 2}
+}

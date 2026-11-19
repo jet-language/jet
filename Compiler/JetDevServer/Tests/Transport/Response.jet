@@ -23,7 +23,7 @@ use jet_devserver.[MAX_RESPONSE_BODY_BYTES, devserver_response_head]
     assert(
         if devserver_response_head("200 OK", "application/octet-stream", MAX_RESPONSE_BODY_BYTES + 1) == {
             .Err(.InvalidData(message)) -> message == "devserver response exceeds the response budget"
-            else -> false
+            .Ok(_) | .Err(_) -> false
         },
     )
 }
