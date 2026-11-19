@@ -1815,8 +1815,9 @@ link_collect: fn(c: &LinkContext, entries: [Int], linker_names: [String], kept: 
 // personality routines, `kept`), with every live row that is not code,
 // through relocations other than those in a skipped span (c.zone_spans),
 // are hot; the other live code rows are cold, and link_order lays them
-// after all other code, so a run that records no zone faults none of their
-// pages in. Nothing is cold when no input has spans.
+// after all other code, in a packed layout a segment of their own
+// (LinkLayout.cold_start), so a run that records no zone maps none of
+// their pages. Nothing is cold when no input has spans.
 link_heat: fn(c: &LinkContext, entries: [Int], kept: [Int]) Never! {
     if c.zone_spans.len() == 0 {
         return
@@ -1913,8 +1914,18 @@ link_in_spans: fn(spans: [Int], offset: Int) -> Bool Never! {
     link_collect(c, [Int]{sections[0]}, [String]{}, [Int]{})
     assert_eq(c.errors, [String]{})
     laid := [Int]{}
-    loop row in link_order(c)[LINK_TEXT] -> laid.push(c.live_secs[row])
+    rows: link_order(c)[LINK_TEXT]
+    loop row in rows -> laid.push(c.live_secs[row])
     assert_eq(laid, [Int]{sections[0], sections[1], sections[3], sections[2]})
+    // Packed, `cold` starts a segment of its own a page past the rest.
+    packed: link_layout(c, false, true)
+    assert_eq(packed.hot_end, c.live_addr[rows[2]] + 1)
+    assert_eq(packed.cold_start, link_align(packed.hot_end, LINK_PAGE) + LINK_PAGE)
+    assert_eq(c.live_addr[rows[3]], packed.cold_start)
+    assert_eq(packed.text_end, packed.cold_start + 1)
+    flat: link_layout(c, false, false)
+    assert_eq(flat.cold_start, 0)
+    assert_eq(packed.phnum, flat.phnum + 1)
 }
 
 // One CIE per distinct record, written only when a kept FDE names it. A kept
@@ -2170,6 +2181,14 @@ LinkLayout: struct {
     // file's end: one page gap in the file instead of two.
     packed: Bool,
     rw_shift: Int,
+    // A packed layout's code that only zone sites reach (link_heat): 0 when
+    // there is none; else its first address, a page past the end of the
+    // other code (`hot_end`), and its own executable segment up to
+    // text_end. The kernel maps a file's cached pages around each page
+    // fault, but only within the faulting mapping, so a run that records
+    // no zone maps none of this code's pages, however near the rest's.
+    hot_end: Int{0},
+    cold_start: Int{0},
     // The build-id note's address, right after the program headers; 0 when
     // the image has none.
     note_at: Int,
@@ -2190,14 +2209,23 @@ link_layout: fn(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! 
     loop class in LINK_TDATA..<LINK_CLASSES {
         if order[class].len() > 0 -> has_rw = true
     }
-    phnum: 3 + (if has_rw -> 1 else -> 0) + (if has_tls -> 1 else -> 0) + (if note -> 1 else -> 0)
+    // Packed, the code only zone sites reach goes in a segment of its own
+    // (LinkLayout.cold_start), after the other code: link_order laid it last.
+    hot := [Int]{}
+    cold := [Int]{}
+    loop row in order[LINK_TEXT] {
+        if packed && row < c.cold.len() && c.cold[row] -> cold.push(row) else -> hot.push(row)
+    }
+    phnum: 3 + (if has_rw -> 1 else -> 0) + (if has_tls -> 1 else -> 0) + (if note -> 1 else -> 0) + (if cold.is_empty() -> 0 else -> 1)
     addr := c.base + LINK_EHDR_SIZE + LINK_PHDR_SIZE * phnum
     note_at: if note -> addr else -> 0
     if note -> addr += LINK_BUILD_ID_NOTE_SIZE
     addr = link_place(c, order[LINK_RODATA], addr)
     r_end: link_place_eh(c, addr)
     text_start: link_align(r_end, LINK_PAGE)
-    text_end: link_place(c, order[LINK_TEXT], text_start)
+    hot_end: link_place(c, hot, text_start)
+    cold_start: if cold.is_empty() -> 0 else -> link_align(hot_end, LINK_PAGE) + LINK_PAGE
+    text_end: if cold.is_empty() -> hot_end else -> link_place(c, cold, cold_start)
     // Packed, the read-write segment's first address shares its page offset
     // with its file offset, the read-only segment's end.
     rw_start: link_align(text_end, LINK_PAGE) + (if packed -> (r_end - c.base) % LINK_PAGE else -> 0)
@@ -2261,6 +2289,8 @@ link_layout: fn(c: &LinkContext, note: Bool, packed: Bool) -> LinkLayout Never! 
         notes: [Int:Int]{},
         packed: packed,
         rw_shift: if packed -> rw_start - r_end else -> 0,
+        hot_end: hot_end,
+        cold_start: cold_start,
     }
 }
 
@@ -2831,8 +2861,13 @@ link_write: fn(c: &LinkContext, l: LinkLayout, entry: Int, pieces: &LinkPieces) 
     elf64_u16(out, 0)
     elf64_u16(out, 0)
     link_phdr(out, 0, 1, 4, c.base, l.r_end - c.base, l.r_end - c.base, LINK_PAGE)
-    // Packed, the code's offset is link_write_code's, once the file before it is.
-    link_phdr(out, if l.packed -> 0 else -> l.text_start - c.base, 1, 5, l.text_start, l.text_end - l.text_start, l.text_end - l.text_start, LINK_PAGE)
+    // Packed, the code's offset is link_write_code's, once the file before
+    // it is, and so is the zone-only code's segment's after it.
+    hot_end: if l.cold_start != 0 -> l.hot_end else -> l.text_end
+    link_phdr(out, if l.packed -> 0 else -> l.text_start - c.base, 1, 5, l.text_start, hot_end - l.text_start, hot_end - l.text_start, LINK_PAGE)
+    if l.cold_start != 0 {
+        link_phdr(out, 0, 1, 5, l.cold_start, l.text_end - l.cold_start, l.text_end - l.cold_start, LINK_PAGE)
+    }
     if l.has_rw {
         link_phdr(out, link_file_offset(c, l, LINK_DATA, l.rw_start), 1, 6, l.rw_start, l.file_end - l.rw_start, l.mem_end - l.rw_start, LINK_PAGE)
     }
@@ -2898,7 +2933,10 @@ link_write_contents: fn(c: &LinkContext, out: &[U8], l: LinkLayout, origin: Int,
 
 // A packed layout's code, appended to the finished rest of the image
 // `image` from the next page, its program and section headers pointed at
-// it; its padding is int3, and nothing follows it.
+// it; its padding is int3, and nothing follows it. The zone-only code's
+// segment (LinkLayout.cold_start) keeps its bytes' offsets from the rest's
+// as in memory, so the one `.text` section still holds all the code and
+// the page between them is int3 in the file.
 link_write_code: fn(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkPieces) Never! {
     if !l.packed {
         return
@@ -2909,8 +2947,12 @@ link_write_code: fn(c: &LinkContext, image: &[U8], l: LinkLayout, pieces: &LinkP
         link_pad_to(image, at + c.live_addr[row] - l.text_start, 0xcc)
         link_place_row(c, image, pieces, row)
     }
-    // p_offset of the second program header, the code's.
+    // p_offset of the second program header, the code's, and of the
+    // third, the zone-only code's when it has a segment.
     link_put64(image, LINK_EHDR_SIZE + LINK_PHDR_SIZE + 8, at)
+    if l.cold_start != 0 {
+        link_put64(image, LINK_EHDR_SIZE + 2 * LINK_PHDR_SIZE + 8, at + l.cold_start - l.text_start)
+    }
     shoff: link_debug_le(image, 40, 8)
     loop k in 1..<link_debug_le(image, 60, 2) {
         header: shoff + 64 * k

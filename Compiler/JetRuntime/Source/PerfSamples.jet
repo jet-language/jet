@@ -1007,12 +1007,36 @@ PERF_ZONE_SITE_ON: I64{169}
     if (perf_zone_table_first == I64{0}) {
         #Unsafe("registrations never overlap (see above)") { perf_zone_table_first = table }
     } else if (!perf_zone_tables_add(table)) {
-        if (perf_zones_on != I64{0}) { perf_zones_refused() }
+        perf_zone_turn(I64{0})
         return
     }
     // The swap of thread-owned TCB scratch is a full fence.
     _ := sync_swap(wrapping(thread_base() + I64{232}), I64{0})
-    if (perf_zones_on != I64{0}) { perf_zone_tables_turn() }
+    perf_zone_turn(I64{1})
+}
+
+// The code of jet_rt_perf_zone_turn, 0 until the first turn of zones
+// (perf_zones_set) stores it, before it stores the zones word. A
+// registration reaches the sites' patches only through it, so an image
+// that no profiler observes links neither the patches nor what they need.
+perf_zone_turn_code := I64{0}
+
+// Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
+rt_perf_zone_turn_address: fn() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// A registration's part while zones are on (jet_perf_zone_table): the
+// sites' turn (`added` 1), or the refusal when the table could not be
+// added (0). The zones word is read before the code word, which turned
+// zones store in the other order.
+perf_zone_turn: fn(added: I64) {
+    if (perf_zones_on != I64{0}) { _ := coll_call1(perf_zone_turn_code, added) }
+}
+
+#Export(c) jet_rt_perf_zone_turn: fn(added: I64) -> I64 {
+    if (added == I64{0}) { perf_zones_refused() } else { perf_zone_tables_turn() }
+    I64{0}
 }
 
 // Adds `table` to perf_zone_tables, its page mapped at the first; false
@@ -1052,6 +1076,9 @@ perf_zone_roots_take: fn() {
 perf_zones_set: fn(on: I64) {
     perf_zone_roots_take()
     if (perf_zone_lock == I64{0}) {
+        #Unsafe("turns run one at a time (see above), and a registration reads the code only after the zones word") {
+            perf_zone_turn_code = rt_perf_zone_turn_address()
+        }
         lock: jet_rt_alloc(I64{8}, I64{8})
         sync_store(lock, I64{0})
         #Unsafe("turns run one at a time (see above), and a registration reads the lock only after the zones word") {

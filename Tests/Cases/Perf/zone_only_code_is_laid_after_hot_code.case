@@ -1,9 +1,11 @@
 # Code that only zone sites reach while zones are on (jet_perf_zone_close,
 # called past each site's skip) is laid after all other code, past the
-# startup's own code, at every tier, so a run that records no zone faults
-# none of its pages in. The site table's registration, which every run
-# makes, stays with the rest. The program prints the same either way, and
-# `jet perf run` still records and names every zone.
+# startup's own code, at every tier, in a load segment of its own: the
+# kernel maps a file's pages around each fault, but only within the
+# fault's mapping, so a run that records no zone maps none of its pages.
+# The site table's registration, which every run makes, stays with the
+# rest. The program prints the same either way, and `jet perf run` still
+# records and names every zone.
 fixture: ZonesStripSettingLeavesNoSite.fixture
 env: NO_COLOR=1
 step: jet build main.jet
@@ -15,6 +17,11 @@ when tool nm
 step: sh -c 'nm -n .jet/build/main | grep -e " jet_perf_zone_table$" -e " __jet_start$" -e " jet_perf_zone_close$" | cut -d" " -f3'
 exit: 0
 stdout: = "jet_perf_zone_table\n__jet_start\njet_perf_zone_close\n" # the zone-only close comes after the startup
+end when
+when tool objdump
+step: sh -c 'objdump -p .jet/build/main | grep -c "flags r-x"'
+exit: 0
+stdout: = "2\n" # the zone-only code is an executable segment apart from the rest
 end when
 step: jet build --release -O2 main.jet
 exit: 0
@@ -32,4 +39,4 @@ stdout: = "total 166\n"
 step: jet perf view keep.jettrace
 exit: 0
 stdout: ~ "zone step count=3 " # the laid-out close still records every zone
-stdout: ~ "zone inner count=60 "
+stdout: ~ "zone inner count=60 " # and every pass of the inner zone
