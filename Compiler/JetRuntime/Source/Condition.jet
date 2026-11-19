@@ -134,7 +134,7 @@ condition_reacquire: fn(cell: I64) -> Bool {
         }
         if sync_load(wrapping(cell + I64{32})) == (I64{0}) && sync_load(wrapping(cell + I64{24})) == (I64{0}) {
             _ := sync_add(wrapping(cell + I64{40}), I64{-1})
-            sync_store(wrapping(cell + I64{32}), I64{1})
+            sync_store(wrapping(cell + I64{32}), wait_cycle_writer())
             sync_mutex_unlock(mutex)
             perf_samples_lock_wait(wrapping(cell + I64{16}), began)
             return true

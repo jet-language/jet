@@ -1,0 +1,20 @@
+// The main task holds a counter's edit while it joins a helper that waits to
+// edit the same counter: neither can go on, so the program stops with the
+// deadlock, naming both.
+
+Counter: struct {
+    count: Int,
+}
+
+bump: fn(counter: Shared<Counter>) -> Int {
+    counter.count += 1
+    1
+}
+
+run: fn() {
+    counter: Shared{Counter{count: 0}}
+    held: counter.guard_edit()
+    helper: task bump(counter)
+    held.value.count += helper.join() ?? 0
+    print("finished")
+}

@@ -459,18 +459,23 @@ task_join_bounded: fn(child: I64) -> Bool {
 // Core Task is move-only (Sema/Ownership/Copy.jet:132-143); Rust's has no Clone
 // and join(self):717 consumes the sole handle. Lexical group cleanup is a
 // separate retained drain, using done@24 wake-all. Under `jet perf run` each
-// wait names the awaited task (PerfSamples.jet perf_samples_wait).
+// wait names the awaited task (PerfSamples.jet perf_samples_wait). Each wait
+// notes the joined task, so a join that closes a wait cycle stops with it
+// (WaitCycle.jet).
 task_join_wait: fn(child: I64) -> I64 {
     kind: scheduler_msg_join()
     typed: sync_load(wrapping(child + I64{184})) != I64{0}
     bounded: task_join_bounded(child)
     if !typed -> _ := scheduler_deadline_check(kind)
     awaited: perf_samples_object(PERF_SAMPLES_OBJECT_TASK, sync_load(wrapping(sync_load(wrapping(child + I64{8})) + I64{56})))
+    control: scheduler_control_current()
+    wait_cycle_note(control, WAIT_CYCLE_JOIN, child)
     loop jet_scheduler_native_propagate() == (I64{0}) {
         if (scheduler_wait_point_cancel_check() != I64{0}) { break }
         if (sync_load(wrapping(child + I64{24})) != I64{0}) { break }
         _ := scheduler_yield_policy(kind, sync_load(wrapping(child + I64{104})), I64{-1}, !bounded, awaited)
     }
+    wait_cycle_note(control, I64{0}, I64{0})
     if !typed -> _ := scheduler_deadline_check(kind)
     jet_rt_string_drop(kind)
     jet_scheduler_native_propagate()

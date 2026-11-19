@@ -4680,13 +4680,27 @@ value uses the same ordered commit engine, so it does not nest locks in an
 arbitrary order.
 
 Jet does not guarantee deadlock freedom for arbitrary structured-concurrency
-programs and does not detect arbitrary deadlocks at runtime. Tasks, groups,
-join duties, and channels specify ownership, lifetime, and wait behavior; they
-do not prove progress. Tasks can wait for one another through bounded channels,
-or a task can wait for a result that no task sends. The scheduler wakes tasks
-when a source, cancellation, or deadline changes but does not construct a
-global wait-for graph. A deadline or cancellation can bound a wait; neither
-makes a deadlock successful.
+programs. Tasks, groups, join duties, and channels specify ownership,
+lifetime, and wait behavior; they do not prove progress. A deadline or
+cancellation can bound a wait; neither makes a deadlock successful.
+
+The runtime stops the wait cycles it can see (D-DBG-DEADLOCK1=A). A task
+that blocks with no deadline outside a shield records what it waits for: a
+joined task, or the task holding the edit permit of a `Shared<T>` it reads or
+edits. When the last task of a cycle of such waits blocks, every task in the
+cycle fails as a panicking task fails: its join returns `.Panicked` with one
+report, and its scope unwinds. Tasks outside the cycle run on; if the main
+task is in the cycle, the program stops (exit 70). The report names each
+task, its wait and its line:
+
+```text
+deadlock: tasks wait on each other
+  task 1 (main)  waits to join task 2  main.jet:18
+  task 2  waits to edit a Shared value task 1 holds  main.jet:10
+```
+
+Waits on channels, on read permits, on writers queued ahead, and on a
+`Condition` are not yet part of a cycle, so a cycle through one still hangs.
 
 See [channel buffering](#bounded-buffering-law) and
 [concurrency boundary safety](architecture.md#concurrency-boundary-safety).
