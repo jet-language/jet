@@ -26,7 +26,9 @@
 //     debuggers: print_place (`print total`), print_first (the first call
 //     expression), print_again (the same call at a later stop),
 //     second_eval (a second new expression at the same stop) and
-//     watch_per_stop (K steps with a watch on `total`, per step).
+//     watch_per_stop (K steps with a watch on `total`, per step; the watch
+//     is deleted after the steps, so the run to the program's end that
+//     follows doesn't stop at its every later write).
 // L is the line of the first call in `run`. A debugger run whose output
 // does not report the breakpoint stop fails the measurement; an LLDB
 // evaluation that fails leaves its column `-` with the reason. It prints the
@@ -105,6 +107,10 @@ latency_probes: fn(steps: Int) -> [LatencyProbe] Never! {
     nexts: "n\n".repeat(steps)
     lldb_nexts: (loop _ in 0..<steps -> "next")
     call: "expr -- {LATENCY_CALL}"
+    // The watch's steps, then the watch deleted (LLDB numbers it 1, jet
+    // debug 2, after the breakpoint).
+    lldb_watched := latency_prepend("watchpoint set variable total", lldb_nexts)
+    lldb_watched.push("watchpoint delete 1")
     [LatencyProbe]{
         LatencyProbe{measure: "print_place", jet_with: "print total\n", jet_base: "", lldb_with: [String]{"frame variable total"}, lldb_base: [String]{}, per: 1},
         LatencyProbe{measure: "print_first", jet_with: "print {LATENCY_CALL}\n", jet_base: "", lldb_with: [String]{call}, lldb_base: [String]{}, per: 1},
@@ -124,7 +130,14 @@ latency_probes: fn(steps: Int) -> [LatencyProbe] Never! {
             lldb_base: [String]{"expr -- total + 1"},
             per: 1,
         },
-        LatencyProbe{measure: "watch_per_stop", jet_with: "watch total\n{nexts}", jet_base: nexts, lldb_with: latency_prepend("watchpoint set variable total", lldb_nexts), lldb_base: lldb_nexts, per: steps},
+        LatencyProbe{
+            measure: "watch_per_stop",
+            jet_with: "watch total\n{nexts}delete 2\n",
+            jet_base: nexts,
+            lldb_with: lldb_watched,
+            lldb_base: lldb_nexts,
+            per: steps,
+        },
     }
 }
 
@@ -489,7 +502,7 @@ run: fn() {
     assert_eq(probes.len(), 5)
     assert_eq(probes[0].jet_with, "print total\n")
     assert_eq(probes[2].jet_base, "print f_1(total)\nn\n")
-    assert_eq(probes[4].jet_with, "watch total\nn\nn\nn\n")
+    assert_eq(probes[4].jet_with, "watch total\nn\nn\nn\ndelete 2\n")
     assert_eq(probes[4].per, 3)
     assert_eq(latency_lldb_session("lldb", 13, [String]{"frame variable total"})[7], "frame variable total")
 }
