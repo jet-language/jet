@@ -924,9 +924,28 @@ jet_cli_debug_eval_answer: fn(entry: String, color: Bool, options: BuildOptions,
 }
 
 // Whether the checked source file `source` is `path`, the line table's: the
-// same path, or one is the other's trailing components.
+// same path, or one is the other's trailing components, either without its
+// leading `./` (an image built where it is debugged records its entry under
+// the compilation directory `.`, and a snapshot's sources are absolute).
 debug_eval_path_same: fn(source: String, path: String) -> Bool Never! {
-    source == path || source.ends_with("/{path}") || path.ends_with("/{source}")
+    plain_source: debug_eval_path_plain(source)
+    plain_path: debug_eval_path_plain(path)
+    plain_source == plain_path || plain_source.ends_with("/{plain_path}") || plain_path.ends_with("/{plain_source}")
+}
+
+// `path` without its leading `./` components.
+debug_eval_path_plain: fn(path: String) -> String Never! {
+    at := 0
+    loop path.slice(at..<path.len()).starts_with("./") -> at += 2
+    path.slice(at..<path.len())
+}
+
+#Test("a line table's path under the compilation directory `.` is the snapshot's absolute source") {
+    assert(debug_eval_path_same("/work/prog.jet", "./prog.jet"))
+    assert(debug_eval_path_same("/work/lib/step.jet", "././lib/step.jet"))
+    assert(debug_eval_path_same("prog.jet", "/work/prog.jet"))
+    assert(!debug_eval_path_same("/work/prog.jet", "./other.jet"))
+    assert(!debug_eval_path_same("/work/myprog.jet", "./prog.jet"))
 }
 
 #Test("an evaluated expression starts at its line's first byte, or at the call's column") {
