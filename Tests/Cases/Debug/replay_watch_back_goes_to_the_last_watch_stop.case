@@ -1,0 +1,23 @@
+# With a watch set, `back` goes to the latest earlier event that stopped
+# at it: from the watch on `total`'s second change, back to its first,
+# showing that write again; from there no earlier event stopped at a watch,
+# so a second `back` is refused with E2237 at the same stop. A jump to the
+# event before the watch was set ends it with a note; a jump forward past
+# where it was set sets it again, at its next change.
+# The fixture must stay in jet fmt form; line 21 adds to `total`.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet run --record=back prog.jet
+exit: 0
+step: jet debug --replay=back prog.jet
+stdin: replay_watch_back_goes_to_the_last_watch_stop.stdin
+exit: 0
+stdout: ~ "Watchpoint 3 hit  prog.jet:21  in run()\ntotal: 2 -> 6\n" # the second change
+stdout: ~ "(Jet) back\nEvent 2\nWatchpoint 3 hit  prog.jet:21  in run()\ntotal: 0 -> 2\n" # back to the first
+stdout: ~ "(Jet) back\nError [jet.DebugRequestRefused]: The debugger can't do this here: the replay holds no stop at a watch before this one.\n" # nothing earlier stopped at a watch
+stdout: ~ "(Jet) jump 1\nEvent 1\nWatch 3 ended: it was set after this point\nBreakpoint hit  prog.jet:21  in run()\n" # before the watch was set
+stdout: ~ "(Jet) jump 3\nEvent 3\nWatchpoint 3 hit  prog.jet:21  in run()\ntotal: 2 -> 6\n" # forward again, the watch set as it was
+stdout: ~ "total 6 tally " # the program runs on to its end
+stdout: ~ "Program finished\n" # the session runs the program to its end
+stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording
+stdout+stderr: !~ "another stop" # each jump comes to the stop its event recorded

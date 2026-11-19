@@ -827,7 +827,8 @@ D-DBG-VERBS1=A names the commands:
   program.
 - `reverse-step` (`rs`), `reverse-next` (`rn`), `reverse-finish` (`rf`)
   and `reverse-continue` (`rc`) go back in a replay (see Replaying a
-  recording).
+  recording); `events`, `jump <n>` and `back [<k>]` move through its
+  history of stops.
 - `why <place>` names, in a replay, the write that gave a local or field
   path its value (see Replaying a recording).
 - `break <line|file:line|function> [if <expr>]` (`b`) sets a breakpoint.
@@ -1054,6 +1055,32 @@ before the fix), they are refused with E2237.
 Tests/Cases/Debug/replay_reverse_*.case are the worked examples.
 Tests/Cases/Debug/replay_refusals_*.case are the worked examples of the
 refusals, at the console and over `--dap`.
+
+A replay's stops are its history: the launch's stop is event 0, and each
+run command's stop the next; a reverse command's stop takes the place of
+the events from the one it goes back into. `events` lists them, `*`
+marking the current one:
+
+```
+  0  prog.jet:16  in run()  breakpoint 1.1
+  1  prog.jet:21  in run()  breakpoint 2.1
+* 2  prog.jet:21  in run()  breakpoint 2.1
+```
+
+`jump <n>` goes to event n, back or forward, by running the commands that
+reached it again as a reverse command does, and says `Event <n>` before
+the stop; a stop other than the one the event recorded gets a note. The
+events after it stay listed for a jump forward until a new run command or
+a reverse command replaces them. `back <k>` goes k events back; `back`
+alone goes to the latest earlier event that stopped at one of the
+session's watches, or one event back with no watches. A watch set after
+the event ends, with a note, and comes back with a jump forward past where
+it was set. Under `--dap` they are requests of Jet's own: `jump`
+(`{"event": n}`) and `back` (`{"count": k}`) answer with the event and
+report its stop, and `events` answers with the history. They are refused
+with E2237 where the reverse commands are.
+Tests/Cases/Debug/replay_jump_*.case and replay_watch_back_*.case are the
+worked examples.
 
 `why <place>` in a replay names the write that gave a local of the
 selected frame, or a field path under one, the value it has here:

@@ -1,0 +1,29 @@
+# In a replay the console's stops are its history: `events` lists them,
+# event 0 the launch's, `*` marking the current one, and `jump N` goes to
+# event N, back or forward, by running the replay again from its start.
+# Each jump to an event shows the same stop with the same locals; `back`
+# with no watches goes one event back, and the events after it stay for a
+# jump forward. The helper task's tally races the loop, so only the main
+# task's locals are asserted.
+# The fixture must stay in jet fmt form; line 20 sets `d` to double `k`,
+# line 21 adds it.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet run --record=back prog.jet
+exit: 0
+step: jet debug --replay=back prog.jet
+stdin: replay_jump_goes_to_an_event_and_back_again.stdin
+exit: 0
+stdout: ~ "(Jet) events\n  0  prog.jet:" # the launch's stop is event 0
+stdout: ~ "  2  prog.jet:21  in run()  breakpoint" # each hit of line 21 an event
+stdout: ~ "* 3  prog.jet:21  in run()  breakpoint" # the current event marked
+stdout: count "(Jet) jump 1\nEvent 1\nBreakpoint hit  prog.jet:21  in run()\n21 |         total += d        <- here\nLocals:  d = 0   " = 2 # the first hit, the same each time
+stdout: count "Event 3\nBreakpoint hit  prog.jet:21  in run()\n21 |         total += d        <- here\nLocals:  d = 4   " = 2 # forward again to the last hit
+stdout: ~ "(Jet) back\nEvent 0\n" # back one event, to the launch's stop
+stdout: ~ "* 0  prog.jet:" # back at the first event
+stdout: ~ "  3  prog.jet:21  in run()  breakpoint" # the later events stay for a jump forward
+stdout: ~ "total 6 tally " # the program runs on to its end
+stdout: ~ "Program finished\n" # the session runs the program to its end
+stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording
+stdout+stderr: !~ "jet.DebugRequestRefused" # each jump finds its event
+stdout+stderr: !~ "another stop" # each jump comes to the stop its event recorded
