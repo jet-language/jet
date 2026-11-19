@@ -5,7 +5,7 @@
 // their location lists and their types. The reader knows exactly the
 // abbreviations and forms that writer emits; a unit using any other form
 // ends the read of that unit.
-use jet_backend.[X64DebugEncoding, X64Jetline, link_debug_abbrevs, link_debug_addr, link_debug_form_end, link_debug_le, link_debug_uleb, x64_jetline_parse, x64_jetline_sleb, x64_jetline_text]
+use jet_backend.[X64DebugEncoding, X64DebugEnumerator, X64DebugMember, X64DebugType, X64DebugTypeKind, X64DebugVariant, X64Jetline, X64JetlineFunction, X64ModuleDebug, link_debug_abbrevs, link_debug_addr, link_debug_form_end, link_debug_le, link_debug_uleb, x64_jetline_parse, x64_jetline_sleb, x64_jetline_text]
 
 // The DW_TAG codes of the DIEs the reader keeps; it skips every other.
 NATIVE_TAG_ENUM: 0x04
@@ -200,6 +200,61 @@ native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
         at = end
     }
     Val(image)
+}
+
+// The types the compiler described for a module it compiled
+// (X64ModuleDebug.types) as an image's facts, each keyed by its row, as
+// native_image_read reads the DWARF the backend writes from them: what shows
+// a value of a type the program's own image has no DWARF for, such as an
+// evaluated expression's Result (NativeEval.jet).
+native_image_of_types: fn(debug: X64ModuleDebug) -> NativeImage Never! {
+    image := NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    loop (row, ty) in debug.types {
+        made := NativeType{name: ty.name, size: ty.size, tag: NATIVE_TAG_STRUCT, encoding: X64DebugEncoding.Unsigned, target: -1, group: -1}
+        if ty.kind == {
+            .Base(encoding) -> {
+                made.tag = NATIVE_TAG_BASE
+                made.encoding = encoding
+            }
+            .Pointer(target) -> {
+                made = NativeType{name: "", size: 8, tag: NATIVE_TAG_POINTER, encoding: X64DebugEncoding.Unsigned, target: target, group: -1}
+            }
+            .Typedef(target) -> {
+                // A typedef of no type is written as an opaque struct.
+                if target >= 0 {
+                    made.tag = NATIVE_TAG_TYPEDEF
+                    made.size = 0
+                    made.target = target
+                }
+            }
+            .Struct(members) -> made.group = native_image_members(image, members)
+            .Union(members) -> {
+                made.tag = NATIVE_TAG_UNION
+                made.group = native_image_members(image, members)
+            }
+            .Enum(enumerators) -> {
+                made.tag = NATIVE_TAG_ENUM
+                made.encoding = X64DebugEncoding.Signed
+                made.group = image.enumerators.len()
+                image.enumerators.push(loop enumerator in enumerators -> NativeEnumerator{name: enumerator.name, value: enumerator.value})
+            }
+            .Variants(discriminant, variants) -> {
+                made.group = native_image_members(image, [X64DebugMember]{discriminant})
+                made.variants = image.variants.len()
+                arms: loop variant in variants -> NativeVariant{value: variant.value, member: NativeMember{name: variant.member.name, offset: variant.member.offset, ty: variant.member.ty, die: -1}}
+                image.variants.push(NativeVariants{discriminant: image.members[made.group][0], arms: arms})
+            }
+            .Opaque -> {}
+        }
+        image.types[row] = made
+    }
+    image
+}
+
+// `members` as a new group of image.members; its index.
+native_image_members: fn(image: &NativeImage, members: [X64DebugMember]) -> Int Never! {
+    image.members.push(loop member in members -> NativeMember{name: member.name, offset: member.offset, ty: member.ty, die: -1})
+    image.members.len() - 1
 }
 
 // The bytes of the section named `name`; None when the image has none.
@@ -591,4 +646,32 @@ native_function_at: fn(image: NativeImage, pc: Int) -> NativeFunction? Never! {
         if pc >= function.low && pc < function.high -> return Val(function)
     }
     None
+}
+
+// A fallible call's carrier as the compiler describes it (JetIR X64Module.jet
+// ir_x64_debug_variants): a typedef of a pointer to a box whose tag selects
+// `Ok` (1) or `Err` (0), each payload at 8.
+#Test("a_result_the_compile_describes_shows_ok_or_err") {
+    int: X64DebugMember{name: "", offset: 8, ty: 1}
+    error: X64DebugMember{name: "", offset: 8, ty: 3}
+    tag: X64DebugMember{name: "tag", offset: 0, ty: 0}
+    arms: [X64DebugVariant]{X64DebugVariant{value: Val(1), member: X64DebugMember{name: "Ok", offset: 0, ty: 2}}, X64DebugVariant{value: Val(0), member: X64DebugMember{name: "Err", offset: 0, ty: 4}}}
+    types: [X64DebugType]{
+        X64DebugType{name: "I64", size: 8, kind: X64DebugTypeKind.Base{encoding: X64DebugEncoding.Signed}},
+        X64DebugType{name: "Int", size: 8, kind: X64DebugTypeKind.Typedef{target: 0}},
+        X64DebugType{name: "Ok", size: 16, kind: X64DebugTypeKind.Struct{members: [X64DebugMember]{int}}},
+        X64DebugType{name: "ParseError", size: 8, kind: X64DebugTypeKind.Enum{enumerators: [X64DebugEnumerator]{X64DebugEnumerator{name: "Empty", value: 0}, X64DebugEnumerator{name: "Bad", value: 1}}}},
+        X64DebugType{name: "Err", size: 16, kind: X64DebugTypeKind.Struct{members: [X64DebugMember]{error}}},
+        X64DebugType{name: "Int ParseError!", size: 16, kind: X64DebugTypeKind.Variants{discriminant: tag, variants: arms}},
+        X64DebugType{name: "", size: 8, kind: X64DebugTypeKind.Pointer{target: 5}},
+        X64DebugType{name: "Int ParseError!", size: 8, kind: X64DebugTypeKind.Typedef{target: 6}},
+    }
+    image: native_image_of_types(X64ModuleDebug{directory: "", files: [String]{}, types: types})
+    ok := native_low_bytes(1, 8)
+    ok.extend(native_low_bytes(3, 8))
+    err := native_low_bytes(0, 8)
+    err.extend(native_low_bytes(1, 8))
+    memory: NativeMemory{trace: None, blocks: [NativeBlock]{NativeBlock{address: 4096, bytes: ok}, NativeBlock{address: 8192, bytes: err}}}
+    assert_eq(native_render(image, memory, 7, native_low_bytes(4096, 8), 0, 0), String?{Val("Ok(3)")})
+    assert_eq(native_render(image, memory, 7, native_low_bytes(8192, 8), 0, 0), String?{Val("Err(ParseError.Bad)")})
 }

@@ -29,12 +29,15 @@ NativeEvaluator: trait {
 
 // A value an evaluation passes or returns: a capture by the name of the
 // local it reads, the result by its Jet type's spelling; its size in bytes,
-// and whether its bytes are the value itself (`inline`, an aggregate),
-// rather than a word.
+// whether its bytes are the value itself (`inline`, an aggregate), rather
+// than a word, and its type's row in the compile's debug types
+// (NativeEval.edit's object.debug.types, -1: none), which shows a value of a
+// type the program's image has no DWARF for.
 NativeEvalPart: struct {
     name: String,
     size: Int,
     inline: Bool,
+    ty: Int{-1},
 }
 
 // A compiled expression: its text, and the program compiled again with it
@@ -180,7 +183,9 @@ native_eval_in_fork: fn(image: NativeImage, fork: NativeFork, pid: Int, sites: [
     memory: NativeMemory{trace: Val(fork.trace), blocks: [NativeBlock]{}}
     held: native_debug_bytes(memory, cell, cell_size) ?? return Err(native_eval_refused("couldn't read the expression's value"))
     ty: native_eval_type(image, typed, code.result.name)
-    value := native_eval_show(image, memory, code.result, ty, held) ?? return Err(native_eval_refused("the image has no debug type to show a `{code.result.name}` with"))
+    // A type the image has no DWARF for (a fallible call's Result) shows as
+    // the compile that made the expression's code describes it.
+    value := native_eval_show(image, memory, code.result, ty, held) ?? native_eval_show_compiled(code, memory, held) ?? return Err(native_eval_refused("the image has no debug type to show a `{code.result.name}` with"))
     // A value whose type has a DebugView shows as `locals` shows it: its
     // view, run in this same copy, or its fields when the view fails.
     if ty == .Val(id) && native_debug_view_at(image, id) == .Val(view) {
@@ -216,6 +221,13 @@ native_eval_show: fn(image: NativeImage, memory: NativeMemory, result: NativeEva
     value: shown ?? return None
     text: if name == "String" -> native_debug_text(word, memory, false) ?? value else -> value
     Val(NativeEvalValue{shown: value, type_name: name, text: text, truth: name == "Bool" && word & 255 != 0})
+}
+
+// The result `held` as the compile that made `code` describes its type
+// (NativeEvalPart.ty); None when it describes none.
+native_eval_show_compiled: fn(code: NativeEval, memory: NativeMemory, held: [U8]) -> NativeEvalValue? Never! {
+    if code.result.ty < 0 || code.result.ty >= code.edit.object.debug.types.len() -> return None
+    native_eval_show(native_image_of_types(code.edit.object.debug), memory, code.result, Val(code.result.ty), held)
 }
 
 // The debug type of a result Jet spells `name`: a capture's of that type

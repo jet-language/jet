@@ -747,11 +747,12 @@ compiled expression is kept per line, column and text, so a condition compiles o
 and runs in a fork at each hit. The fork runs the program's own runtime, so
 a lock another thread held at the stop is never released there (code that
 takes it fails at the 2 s budget), and a function value runs the image's
-code. An expression reads at most 5 locals, one that calls a function that
-can fail is refused as the compiler refuses it, and an inlined frame is not
-evaluated in. A local's own name is no expression: `print total` shows the
-local as `locals` does, in an inlined frame and in a dump, and a dump runs
-no code.
+code. An expression that calls a function that can fail shows its result as
+`locals` shows a fallible result, `parse(s) = Ok(3)` or `Err(ParseError.Empty)`,
+so a condition that can fail is refused, not a Bool. An expression reads at
+most 5 locals, and an inlined frame is not evaluated in. A local's own name
+is no expression: `print total` shows the local as `locals` does, in an
+inlined frame and in a dump, and a dump runs no code.
 
 A watch on a place in memory takes the CPU's debug registers (at most 4,
 each an aligned 1, 2, 4 or 8 bytes), so the program runs at full speed

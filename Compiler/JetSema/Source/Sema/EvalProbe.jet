@@ -34,7 +34,7 @@ use {
         ast_empty_lambda_meta,
         authority_grantable_roots,
         expr_span,
-        result_surface_name,
+        type_marked_name,
         type_name,
         type_unqualified_nominals,
     ]
@@ -118,10 +118,11 @@ SEMA_EVAL_PROBE_SELF: "jet_debug_self"
 // `text`, as `answer` checked it at the stop, for `jet debug` to compile into
 // the program (JetCLI DebugCompile.jet): each capture is a parameter, in
 // capture order, typed by its checked type with every nominal unqualified,
-// and the expression's type is the result, declared `Never!`: a call the
-// failure solve finds can fail is refused there, never shown as a value of
-// the success type. The text's own `self` reads the parameter
-// SEMA_EVAL_PROBE_SELF. None for an expression with no value.
+// and the expression's success type is the result, with no failure
+// declared: the failure solve settles whether the function can fail, as it
+// does for any function that declares none, and one that can returns its
+// carrier, which shows as `Ok(…)` or `Err(…)`. The text's own `self` reads
+// the parameter SEMA_EVAL_PROBE_SELF. None for an expression with no value.
 sema_eval_probe_function: fn(answer: SemaEvalProbeAnswer, text: String, name: String) -> String? {
     value: answer.value_type ?? return None
     params := [String]{}
@@ -129,8 +130,8 @@ sema_eval_probe_function: fn(answer: SemaEvalProbeAnswer, text: String, name: St
         shown: if capture.source == "self" -> SEMA_EVAL_PROBE_SELF else -> capture.source
         params.push("{shown}: {type_name(type_unqualified_nominals(capture.ty))}")
     }
-    result: result_surface_name(type_unqualified_nominals(value), Type.Named{name: "Never"})
-    Val("{name}: fn({params.join(", ")}) -> {result} {{\n    {sema_eval_probe_without_self(text)}\n}}\n")
+    success: if value == .Result(ok, _) -> ok else -> value
+    Val("{name}: fn({params.join(", ")}) -> {type_marked_name(type_unqualified_nominals(success))} {{\n    {sema_eval_probe_without_self(text)}\n}}\n")
 }
 
 // `text` with each `self` that names a value (not a field or part of a
@@ -326,7 +327,7 @@ sema_eval_answer_put: fn(answers: &[SemaEvalProbeAnswer], answer: &&SemaEvalProb
 // use, with the move's site as the report's label. A call of an unannotated
 // function is an obligation of the bundle failure solve, which settles after
 // this walk (sema_failure_defer_obligation), so it refuses nothing here: the
-// compiled function's `Never!` (sema_eval_probe_function) meets the solve.
+// solve settles the compiled function's failure (sema_eval_probe_function).
 sema_eval_probe_check: fn(value: Expr, probe: Int, expression: Int, exact: Bool, function: String, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: SemaOwnershipState, tail_store: &SemaStatementTailStore, context: SemaCheckContext) -> SemaEvalProbeAnswer {
     probe_state := sema_ownership_state_snapshot(state)
     probe_context := sema_check_context_snapshot(context)
