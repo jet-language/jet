@@ -292,7 +292,7 @@ jettrace_test_io: fn(task: U64?) -> TraceIO Never! {
     skeleton.spans[0].status = "captured"
     skeleton.spans[0].kind = "guessed"
     assert(jettrace_test_error(skeleton).contains("kind must be task_observed, log_span, zone, frame_mark, plot or task_wait"))
-    loop kind in [String]{"zone", "frame_mark", "plot"} {
+    loop kind in ([String]{"zone", "frame_mark", "plot"}) {
         skeleton.spans[0].kind = kind
         _: jettrace_test_valid(skeleton)
     }
