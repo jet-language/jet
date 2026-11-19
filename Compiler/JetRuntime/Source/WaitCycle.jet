@@ -21,12 +21,14 @@
 // every Sender. Read permits and writers queued ahead name none, so a cycle
 // through one is not found, nor is one through the runtime's own holds, a
 // transaction's commit, a Condition's reacquisition, a full channel's send
-// or a select, which never arm. Arming walks the holders from the arming
-// task; a walk that reaches only armed tasks whose holders it reached too
-// is a cycle no task outside it can end, which the arming task delivers:
-// one record of every task's line and each task's wake. Each task in it then
-// adds its own line's site from its own stack, waits until all have, and
-// stops with the whole cycle.
+// or a select, which never arm. A canceled task's wait ends at its cancel,
+// so a walk that reaches one ends: a join after a `cancel()` on a task that
+// receives from the joiner's channel is no cycle. Arming walks the holders
+// from the arming task; a walk that reaches only armed tasks whose holders
+// it reached too is a cycle no task outside it can end, which the arming
+// task delivers: one record of every task's line and each task's wake. Each
+// task in it then adds its own line's site from its own stack, waits until
+// all have, and stops with the whole cycle.
 
 WAIT_CYCLE_JOIN: I64{1}
 
@@ -182,11 +184,12 @@ wait_cycle_walk_add: fn(walk: I64, control: I64) -> Bool {
 }
 
 // Adds the holders of `member`'s wait to `walk`. False when `member` is in
-// no armed wait, is already stopping with a cycle, or waits on no holder
+// no armed wait, is already stopping with a cycle, is canceled (its cancel
+// wakes it, Scheduler.jet scheduler_control_cancel), or waits on no holder
 // the walk can follow: a join or a lock waits on another task, a receive
 // may wait on the Sender its own task holds. Under the wait lock.
 wait_cycle_follow: fn(walk: I64, member: I64) -> Bool {
-    if (sync_load(wrapping(member + I64{176})) == I64{0} || sync_load(wrapping(member + I64{184})) != I64{0}) {
+    if (sync_load(wrapping(member + I64{176})) == I64{0} || sync_load(wrapping(member + I64{184})) != I64{0} || sync_load(wrapping(member + I64{16})) != I64{0}) {
         return false
     }
     if (sync_load(wrapping(member + I64{160})) == WAIT_CYCLE_RECEIVE) {

@@ -4716,7 +4716,9 @@ it still hangs, once a `Sender` may have left its task another way: in a sent
 value, in a capture of a closure that outlives the call or of a task that
 borrows it, or in a `Shared<T>` that may hold one. Waits on read permits, on
 writers queued ahead, on a full channel, in a `select` and on a `Condition`
-are not part of a cycle either.
+are not part of a cycle either, nor is the wait of a canceled task, which its
+cancel ends: joining a task after `cancel()` while it receives from a
+channel only the joiner sends on is no cycle.
 
 See [channel buffering](#bounded-buffering-law) and
 [concurrency boundary safety](architecture.md#concurrency-boundary-safety).

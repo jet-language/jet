@@ -279,13 +279,15 @@ jet_cli_perf_samples_read: fn(path: String, source: String, counters: [TraceCoun
     owned: jet_cli_perf_samples_owned(facts.lines, source)
     periods := [U64]{}
     loop counter in counters -> periods.push(counter.period ?? U64{0})
-    // The type DIE each typed allocating call allocates for, by its return
-    // address, and each such type spelled as Jet writes it.
+    // The type DIE each typed allocating call allocates for, by its call
+    // site, the byte before its return address, as a heap site record's
+    // stack names it (PerfSamples.jet perf_samples_heap_key); and each such
+    // type spelled as Jet writes it.
     allocs := [Int:Int]{}
     names := [Int:String]{}
     loop (pc, ty) in facts.allocs {
         if facts.types.get(ty) == .Val(named) && named.name != "" {
-            allocs[pc] = ty
+            allocs[pc - 1] = ty
             if names.get(ty) == None -> names[ty] = native_jet_spelling(named.name)
         }
     }

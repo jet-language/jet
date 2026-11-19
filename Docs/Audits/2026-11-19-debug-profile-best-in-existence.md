@@ -613,9 +613,9 @@ same as in revision 2:
 
 ## Finding dispositions
 
-G1-G20 are this review's gaps. A `card` row names the open #6841 criterion
-that closes it, or "c39 proposal" for a one-line criterion this review
-proposes. Main assigns proposed criteria their numbers.
+G1-G20 are this review's gaps. Each `card` row names the open #6841
+criterion that closes it; the gaps this review proposed criteria for are
+criteria c60 to c67.
 
 <!-- audit-dispositions:v1 -->
 | finding | disposition | target or reason |
@@ -623,20 +623,20 @@ proposes. Main assigns proposed criteria their numbers.
 | G1 per step grows with the image | card | #6841 c59 |
 | G2 record, replay, reverse, why | card | #6841 c43 |
 | G3 a deleted -O2 value from the recording | card | #6841 c43 |
-| G4 a fallible call shows Ok or Err | card | #6841 c39 proposal: `print parse(s)` of a function that can fail shows `Ok(3)` or `Err(…)` as `locals` shows a Result |
-| G5 second-evaluation latency | card | #6841 c39 proposal: a second `print` of a new expression in the same stopped function answers in under 100 ms on JetCLI |
-| G6 evaluation in an inlined frame | card | #6841 c39 proposal: `print n + 1` in an O2 inlined frame answers as at O0 |
+| G4 a fallible call shows Ok or Err | card | #6841 c60 |
+| G5 second-evaluation latency | card | #6841 c66 |
+| G6 evaluation in an inlined frame | card | #6841 c61 |
 | G7 the caller-frame column | card | #6841 c42 |
-| G8 a watch follows reallocation | card | #6841 c39 proposal: `watch xs[3]` keeps stopping after `xs` grows past its capacity |
+| G8 a watch follows reallocation | card | #6841 c62 |
 | G9 reverse watches | card | #6841 c43 |
-| G10 placed logpoints | card | #6841 c39 proposal: a logpoint R7's scan places runs in the program, a million hits under a second |
+| G10 placed logpoints | card | #6841 c63 |
 | G11 fix of an edit calling an absent runtime entry | card | #6841 c54 |
 | G12 deadlock stop | card | #6841 c48 |
 | G13 a dump file keeps no Secret | card | #6841 c51 |
-| G14 DAP attach, pause, restart | card | #6841 c39 proposal: the four #6730 known-failing DAP rows pass on the native tier |
+| G14 DAP attach, pause, restart | card | #6841 c64 |
 | G15 Canvas replay controls, dumps, recordings | card | #6841 c58 |
-| G16 a stable overhead receipt | card | #6841 c39 proposal: `Perf/receipt_reports_measured_overhead` passes on three consecutive gates |
-| G17 precise PC | card | #6841 c39 proposal: with PEBS or IBS and perf_event_paranoid at most 1, samples are charged by the precise PC and the receipt says so |
+| G16 a stable overhead receipt | card | #6841 c67 |
+| G17 precise PC | card | #6841 c65 |
 | G18 a live timeline | card | #6841 c58 |
 | G19 heap snapshots pass on a gate | card | #6841 c52 |
 | G20 attach drains the flight ring | card | #6841 c51 |

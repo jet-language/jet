@@ -4299,9 +4299,11 @@ native_debug_hex: fn(value: Int) -> String Never! {
 
 // The command that builds `entry` as the debuggable native image: this `jet`
 // (`jet`), unoptimized, with its DWARF and the deep checks `deep_checks`
-// selects, into `out_dir`.
+// selects, into `out_dir`. `dead_code: keep` leaves every function of the
+// package and every runtime export in the image, so a `fix` may call one
+// the program never did.
 native_debug_build_argv: fn(jet: String, entry: String, out_dir: String, deep_checks: DeepChecks) -> [String] Never! {
-    argv := [String]{jet, "build", "-O0"}
+    argv := [String]{jet, "build", "-O0", "--dead-code=keep"}
     loop word in deep_checks_flags(deep_checks) -> argv.push(word)
     argv.push("--output-dir={out_dir}")
     argv.push(entry.copy())  // copy: the command owns its words.
