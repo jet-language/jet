@@ -6,7 +6,7 @@ use {
     canvas_files: core.files
     canvas_process: core.process
     canvas_sys: core.sys
-    jet_canvas.[read_source_without_symlinks, source_revision]
+    jet_canvas.[canvas_debug_anchor_text, read_source_without_symlinks, source_revision]
     jet_debug.[DebugSnapshot, NATIVE_DEBUG_BREAKPOINT_HIT, NATIVE_DEBUG_LOCALS_LABEL, NativeDebugError, NativeSession, NativeStop, NativeStopKind, debug_is_local_name, native_debug_build_argv, native_debug_image]
     jet_foundation.[DeepChecks, Diagnostic, Span, diagnostic_render, foundation_json_integer, foundation_json_quote, foundation_parse_protocol_json_with_limit, sha256_bytes, sha256_hex_bytes]
 }
@@ -378,9 +378,10 @@ validate_debug_limits: fn(commands: [String], breakpoints: [Int], watches: [Stri
         }
     }
     loop command in commands -> validate_debug_command(command)
-    // A watch is read by the compiler's parser and names one local.
+    // A watch is read by the compiler's parser and names one local; it may
+    // name the revision it was drawn on (canvas_debug_anchor_current).
     loop watch in watches {
-        if !debug_is_local_name(watch) {
+        if !debug_is_local_name(canvas_debug_anchor_text(watch)) {
             return Err(canvas_debug_error("unsupported", "Canvas debug watches must be one source-level name"))
         }
     }
@@ -541,6 +542,8 @@ DebugOkRequest: struct {
     breakpoint_lines: [Int],
     stale_breakpoints: [String],
     watches: [String],
+    // The watches drawn on another revision of the source.
+    stale_watches: [String]{[String]{}},
 }
 
 debug_bool: fn(value: Bool{false}) -> String Never! { if value -> "true" else -> "false" }
@@ -576,9 +579,18 @@ debug_ok: fn(request: DebugOkRequest) -> String Never! {
         .Val(snapshot) -> snapshot_locals_json(snapshot)
         .None -> locals_json(transcript)
     }
-    watch_values: if request.snapshot == {
+    watch_values := if request.snapshot == {
         .Val(snapshot) -> snapshot_watches_json(snapshot, request.watches)
         .None -> watches_json(transcript, request.watches)
+    }
+    // A watch drawn on another revision shows no value: it is stale.
+    if request.stale_watches.len() > 0 {
+        shown := [String]{}
+        if watch_values.json != "" -> shown.push("{watch_values.json}")
+        loop watch in request.stale_watches {
+            shown.push("{{\"name\":{foundation_json_quote(canvas_debug_anchor_text(watch))},\"anchor\":{foundation_json_quote(watch)},\"state\":\"stale\"}}")
+        }
+        watch_values = DebugJSONList{json: shown.join(","), truncated: watch_values.truncated}
     }
     call_stack: if request.snapshot == {
         .Val(snapshot) -> snapshot_call_stack_json(snapshot, request.source_id)

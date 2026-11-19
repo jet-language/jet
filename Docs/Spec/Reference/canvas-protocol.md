@@ -305,9 +305,9 @@ Requests carry:
 | `recording` | Opens a `native-recorded` session on the recording: the NAME of a `jet run --record=NAME` run of the entry, or a project-relative `.jetproof-replay` path. A recording that can't be replayed answers its own report as a `diagnostic`. |
 | `dump` | Opens a `native-dump` session on a `.jetdump` of the entry, a path taken from the entry's directory when relative. A dump of another program is refused `bad_request`. Its `#Secret` locals read redacted. |
 | `commands` | `step`, `next`, `continue`, `finish`, `reverse-step`, `reverse-next`, `reverse-finish`, `reverse-continue`, `why <name>`, `locals`, `print <name>`, `backtrace`, `frame <n>`, `tasks`, `task <n>` or `events`, with the console's short forms. The reverse commands and `why` answer a refusal outside a replay; a dump answers that it doesn't run to every run command. |
-| `breakpoint_spans` | Local source anchors encoded as `start:end`. |
+| `breakpoint_spans` | Local source anchors encoded as `start:end`, or `start:end@REVISION` to name the source revision the span was drawn on. |
 | `breakpoints` | Optional line breakpoints for clients that already mapped spans. |
-| `watches` | Local names evaluated at the stopped frame. |
+| `watches` | Local names evaluated at the stopped frame, or `name@REVISION` to name the revision the watch was drawn on. |
 | `stop` | Optional boolean that ends a live session without changing source. |
 
 A running response projects one bounded runtime snapshot:
@@ -322,6 +322,13 @@ paused runtime snapshot. Finished values are historical and do not pulse the
 graph. A disconnected or stale session clears its overlay before reporting the
 state. A later request sends `session_id` and commands to continue the same
 session.
+
+An anchor drawn on another revision than the request's is stale, since an edit
+may have moved the code it named. A stale breakpoint stops nowhere and is
+listed with `"line":null`, `"source_span":null`, its `anchor` and
+`"state":"stale"`. A stale watch isn't evaluated and is listed with its `name`,
+its `anchor` and `"state":"stale"`, with no value. A `start:end` anchor that
+names no span of the source is stale too.
 
 Stop requests check source path, revision, and tier before removing the session.
 A mismatched tier or source is refused; a stale request returns `conflict` and

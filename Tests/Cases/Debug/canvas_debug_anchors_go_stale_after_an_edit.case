@@ -1,0 +1,61 @@
+# Canvas debug anchors go stale after an edit moves the code they named.
+# A breakpoint span and a watch drawn on one source revision, sent on a later
+# one, are reported stale with no span and no value instead of being placed
+# on the moved code. The client is the same raw Core.net HTTP client the
+# other production Canvas debug cases use.
+fixture: CanvasDebugStopRequiresMatchingSourceRevisionAndTier.fixture
+env: NO_COLOR=1
+step: jet build client/run.jet
+exit: 0
+copy: client/.jet/build/run canvas-client
+session canvas raw: jet dev jet_debug_canvas_stop_binding.jet --canvas --canvas-port 0
+env: JET_CANVAS_BROWSER=/definitely/missing/canvas-browser
+recv canvas until ~ "Canvas: http" within 60s # jet dev prints the Canvas URL on stdout once it serves
+capture: url = text stdout.after_first("Canvas: ").line(0)
+capture: revision = sha256 file jet_debug_canvas_stop_binding.jet
+write: request.json canvas_debug_anchors_go_stale_after_an_edit.first.json
+step first: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the request on the revision the anchors were drawn on runs
+stdout: ~ "\"active_line\":5," # and stops at the breakpoint span 75:100, the print of the total
+stdout: ~ "\"breakpoints\":[{\"line\":5,\"source_span\":" # the anchor is placed on its line
+stdout: ~ "\"watches\":[{\"name\":\"total\"," # the watch reads its local
+stdout: !~ "\"state\":\"stale\"" # nothing is stale yet
+capture: session = text stdout.after_first("\"id\":\"canvas-debug-").split("\"", 0).prepend("canvas-debug-")
+write: request.json canvas_debug_anchors_go_stale_after_an_edit.stop.json
+step stop: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the first session ends
+stdout: ~ "\"state\":\"stopped\"" # and says so
+write: jet_debug_canvas_stop_binding.jet canvas_debug_anchors_go_stale_after_an_edit.moved.template
+capture: moved = sha256 file jet_debug_canvas_stop_binding.jet
+write: request.json canvas_debug_anchors_go_stale_after_an_edit.moved.json
+step moved: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the edited source runs
+stdout: ~ "\"breakpoints\":[{\"line\":7,\"source_span\":{\"start\":143,\"end\":159},\"state\":\"valid\"}," # the anchor drawn on the edit, 147:159, is placed on the moved print
+stdout: ~ "{\"line\":null,\"source_span\":null,\"anchor\":\"75:100@sha256-{cap:revision}\",\"state\":\"stale\"}" # the anchor drawn before the edit is stale, with no span
+stdout: !~ "{\"line\":3," # it never lands on what moved under its old offsets
+stdout: ~ "\"active_line\":7," # so the run stops only at the moved print
+stdout: ~ "\"watches\":[{\"name\":\"total\",\"type\":\"Int\",\"value\":\"6\",\"state\":\"ok\"},{\"name\":\"total\",\"anchor\":\"total@sha256-{cap:revision}\",\"state\":\"stale\"}]" # the watch drawn on the edit reads its local; the one drawn before it is stale, with no value
+capture: moved_session = text stdout.after_first("\"id\":\"canvas-debug-").split("\"", 0).prepend("canvas-debug-")
+write: request.json canvas_debug_anchors_go_stale_after_an_edit.ended.json
+step ended: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # the edited source's session ends
+stdout: ~ "\"state\":\"stopped\"" # and says so
+signal canvas: INT
+wait: canvas
+exit: any # the case asserts the debug responses, not the dev server's shutdown status
