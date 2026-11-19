@@ -1,0 +1,46 @@
+# The console navigates forward and back, watches Jet paths within the
+# CPU's bound, and fixes the running program, on the replay and live
+# routes. In a replay of a recorded run (`jet debug --replay=nav`), `rc`
+# goes back from the second hit of line 32 to the first, `rn` back to the
+# line before, and a watch on the field path `order.total` set there stops
+# at each write that changes it, and `rc` goes back to the first one. In a
+# live session (`jet debug prog.jet -- edit`), `s` steps from line 32 into
+# `price`, `f` finishes back to the call's line and `n` steps over to line
+# 33; watches on `order.total`, `order.count` and `helper` take three of
+# the four debug registers, so `watch order`, which needs two, is refused
+# with the bound. The watch on `order.total` stops at its first change,
+# where `fix` swaps in the edit the program moved over its source at round
+# 1, and the next change is the new `price`'s.
+# The recording comes first: the live session's edit changes the source a
+# replay must match. The fixture must stay in jet fmt form; line 16 is
+# `price`'s first line and line 32 adds its result to `order.total`.
+fixture: NavigationWatchesFix.fixture
+env: NO_COLOR=1
+step: jet run --record=nav prog.jet
+exit: 0
+stdout: ~ "total 60 count 4 helper 3\n" # the recorded run
+step: jet debug --replay=nav prog.jet
+stdin: navigation_watches_fix_console.replay.stdin
+exit: 0
+stdout: ~ "(Jet) rc\nBreakpoint hit  prog.jet:32  in run()\n32 |         order.total += price(round)        <- here\n" # back from the second hit
+stdout: ~ "order = Order{total: 0, count: 0}   round = 0\n(Jet) rn\n" # to the first, with its locals as they were there
+stdout: ~ "(Jet) rn\n31 |         if editing && round == 1" # back to the line before
+stdout: ~ "(Jet) watch order.total\nWatchpoint 3  order.total = 0\n" # a watch on a field path in the replay
+stdout: ~ "(Jet) c\nWatchpoint 3 hit  prog.jet:32  in run()\norder.total: 10 -> 30\n" # it stops at the next changing write
+stdout: ~ "(Jet) rc\nWatchpoint 3 hit  prog.jet:32  in run()\norder.total: 0 -> 10\n" # and goes back to the one before
+stdout: ~ "total 60 count 4 helper 3\nProgram finished\n" # the replay runs on to its end
+stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording
+step: jet debug prog.jet -- edit
+stdin: navigation_watches_fix_console.live.stdin
+exit: 0
+stdout: ~ "(Jet) c\nBreakpoint hit  prog.jet:32  in run()\n" # the breakpoint stops the live program
+stdout: ~ "(Jet) s\n16 |     cost: round * 10        <- here\nLocals:  round = 0\n" # step into the call
+stdout: ~ "(Jet) f\n32 |         order.total += price(round)        <- here\n" # finish back to the caller's line
+stdout: ~ "(Jet) n\n33 |         order.count += 1        <- here\n" # step over to the next line
+stdout: ~ "Watchpoint 3  order.total = 0\n" # a watch on a field path
+stdout: ~ "Watchpoint 5  helper = task 2" # three watches hold three debug registers
+stdout: ~ "`order` needs 2 of the CPU's 4 debug registers and 1 are free; `delete` a watch first" # a watch past the bound is refused, naming it
+stdout: ~ "Watchpoint 3 hit  prog.jet:32  in run()\norder.total: 0 -> 10\n" # the watch stops at the first change
+stdout: ~ "(Jet) fix\nFixed `price`: the edit runs from the next call\n" # fix swaps the edit in
+stdout: ~ "Watchpoint 3 hit  prog.jet:32  in run()\norder.total: 10 -> 1030\n" # the next change is the fixed price's
+stdout: ~ "total 2060 count 4 helper 3\nProgram finished\n" # the fixed program runs to its end

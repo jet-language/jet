@@ -512,7 +512,9 @@ body_index_constant_graph: fn(sources: [String]) -> SemaRegistrationGraph {
         parsed := parse_source(sources[index].bytes())
         body_index_require(!sema_has_error_since(parsed.diagnostics, 0), "the real constant-index module parses")
         file: "constant_{index}.jet"
-        inputs.push(SemaRegistrationModuleInput{package_identity: "constant-index", module_identity: module_intern(table, "constant.{index}"), module_name: "module_{index}", core_source_alias: "", module_path: file, source_file: file, source_segments: jet_driver_source_segments(file, sources[index]), source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: sources[index]})
+        segments: jet_driver_source_segments(file, sources[index])
+        // The module path is built again from the index; the source file takes `file`.
+        inputs.push(SemaRegistrationModuleInput{package_identity: "constant-index", module_identity: module_intern(table, "constant.{index}"), module_name: "module_{index}", core_source_alias: "", module_path: "constant_{index}.jet", source_file: file.move(), source_segments: segments, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: sources[index]})
     }
     canonical := jet_driver_canonical_effect_module(effect_vocabulary_module("IO: struct {{\n    impl Effect {{}}\n}}\n"), table) ?? panic("the canonical effect module declares no effects")
     canonical_identity: canonical.module_identity.copy()

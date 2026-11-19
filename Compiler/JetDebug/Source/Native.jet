@@ -616,9 +616,12 @@ NativeSession: struct {
             }
         } ?? return Ok()
         _ := self.watches.remove(found, .Slot)
+        if !self.alive() -> return Ok()
+        running: self.stop_running() ?? return Err(err)
         if self.alive() && !self.set_debug_register(7, native_watch_control(self.watches)) {
             return Err(NativeDebugError{detail: "couldn't clear a debug register of the program"})
         }
+        self.run_on(running)
         Ok()
     }
 
@@ -2682,6 +2685,8 @@ NativeSession: struct {
         shift: moved - address
         if shift %% 8 != 0 -> return Ok("its List moved to a buffer aligned unlike the old one")
         end: address + self.watches[index].bytes.len()
+        running: self.stop_running() ?? return Err(err)
+        if !self.alive() -> return Ok("the program ended")
         loop k in 0..<self.watches[index].spans.len() {
             span: self.watches[index].spans[k]
             if span.address < address || span.address >= end -> next
@@ -2690,6 +2695,7 @@ NativeSession: struct {
                 return Err(NativeDebugError{detail: "couldn't set a debug register of the program"})
             }
         }
+        self.run_on(running)
         self.watches[index].address = moved
         Ok("")
     }
@@ -3255,6 +3261,10 @@ NativeSession: struct {
                 code := 0
                 if self.watches.len() > 0 {
                     fired: self.watch_fired() ?? return Err(err)
+                    // A watch dropped mid-run stops the other threads while
+                    // its registers clear (stop_running); the program may
+                    // end meanwhile.
+                    if !self.alive() -> return Ok(self.exit_event())
                     if fired.number == 0 && fired.fired && !(mine && how == X64TraceResume.Step) {
                         self.trace.thread = stepping
                         _ := self.let_go(at, mode)
@@ -3459,7 +3469,7 @@ NativeSession: struct {
     }
 
     // Set debug register `index` of every thread to `value`; false when the
-    // kernel refused one.
+    // kernel refused one. Every thread must be stopped (stop_running).
     set_debug_register: fn(&self, index: Int, value: Int) -> Bool Never! {
         current: self.trace.thread
         set := true
@@ -3471,15 +3481,47 @@ NativeSession: struct {
         set
     }
 
+    // The ids of the threads still running, a watch changing mid-run (its
+    // frame returned, its List moved), each stopped (halt) so the kernel
+    // lets its debug registers change; run_on lets them go again. None
+    // when the program ended meanwhile.
+    stop_running: fn(&self) -> [Int] NativeDebugError! {
+        running := [Int]{}
+        loop thread in self.threads {
+            if thread.running -> running.push(thread.id)
+        }
+        if running.len() == 0 -> return Ok(running)
+        if self.halt() == {
+            .Ok(ended) -> {
+                if ended == .Val(_) -> return Ok([Int]{})
+            }
+            .Err(failure) -> return Err(failure)
+        }
+        Ok(running)
+    }
+
+    // Let the threads `ids` (stop_running's) run on.
+    run_on: fn(&self, ids: [Int]) Never! {
+        loop id in ids {
+            row: self.thread_row(id)
+            if row >= 0 -> _ := self.let_go(row, X64TraceResume.Run)
+        }
+    }
+
     // The program's end, reaped (its wait status `status`): its exit
     // status, or the signal that killed it.
     finished: fn(&self, status: Int) -> NativeEvent Never! {
         self.ended()
         self.status = status
-        if status & 0x7f == 0 {
-            return NativeEvent{kind: NativeStopKind.Exited, code: (status >> 8) & 0xff}
+        self.exit_event()
+    }
+
+    // The ended program's exit status, or the signal that killed it.
+    exit_event: fn(self) -> NativeEvent Never! {
+        if self.status & 0x7f == 0 {
+            return NativeEvent{kind: NativeStopKind.Exited, code: (self.status >> 8) & 0xff}
         }
-        NativeEvent{kind: NativeStopKind.Signaled, code: status & 0x7f}
+        NativeEvent{kind: NativeStopKind.Signaled, code: self.status & 0x7f}
     }
 
     // The program is gone: its pid is reaped, and its threads, traps and

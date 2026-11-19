@@ -624,12 +624,28 @@ classic_switch_source: fn(tables: ASTTables, src: String, arm: SwitchArm, else_b
 }
 
 block_body_source: fn(tables: ASTTables, src: String, stmts: [StmtNode], indent: String) -> String Never! {
+    bytes: src.bytes()
     parts := [String]{}
     loop stmt in stmts {
         span: stmt_text_span(tables, src, stmt)
-        loop line in foundation_byte_text(src.bytes(), span.start, span.end).trim().lines() {
-            parts.push("{indent}{line.trim()}\n")
+        // The statement's lines, each trimmed, less the blank ones before its
+        // first line of text and after its last, cut from `src` by their byte
+        // bounds.
+        first: parts.len()
+        kept := first
+        end: if span.end < bytes.len() -> span.end else -> bytes.len()
+        at := span.start
+        loop at < end {
+            stop := at
+            loop stop < end && bytes[stop] != (U8{10}) -> stop += 1
+            line: foundation_byte_text(bytes, at, stop)
+            at = stop + 1
+            trimmed: line.trim()
+            if trimmed == "" && parts.len() == first -> next
+            parts.push("{indent}{trimmed}\n")
+            if trimmed != "" -> kept = parts.len()
         }
+        loop parts.len() > kept -> _: parts.pop()
     }
     parts.join("")
 }

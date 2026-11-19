@@ -715,10 +715,11 @@ core_imports: fn(src: String) -> [CoreImport] {
                 imports.push(CoreImport{module_ref: module_ref, alias: alias})
             }
         } else {
-            module_ref: row.trim()
+            // The import keeps its own module path; the alias reads it.
+            module_ref: row.trim().copy()
             alias: default_core_alias(module_ref)
             if module_ref.starts_with("core.") && alias != "" {
-                imports.push(CoreImport{module_ref: module_ref.copy(), alias: alias})
+                imports.push(CoreImport{module_ref: module_ref.move(), alias: alias})
             }
         }
     }

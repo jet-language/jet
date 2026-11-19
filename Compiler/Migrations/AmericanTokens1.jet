@@ -298,12 +298,12 @@ american_tokens1_trace: fn(path: String, text: String) -[]> MigrationOutcome {
     content: american_tokens1_field(fields, "content") ?? return american_tokens1_unknown(path, text)
     renamed := 0
     moved: american_tokens1_trace_tasks(content, AMERICAN_TOKENS1_TRACE_CANCELED_V1, AMERICAN_TOKENS1_TRACE_CANCELED, renamed)
-    id: canonical_json_sha256(moved)
     out := [CanonicalJSONField]{}
     loop field in fields {
         value: if field.key == {
             "content" -> moved
-            "trace_id" -> CanonicalJSON.String(id)
+            // The one `trace_id` field takes the new content's hash.
+            "trace_id" -> CanonicalJSON.String(canonical_json_sha256(moved))
             "version" -> CanonicalJSON.Integer("{TRACE_VERSION}")
             else -> field.value
         }

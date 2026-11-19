@@ -1,0 +1,36 @@
+// An order's rounds, with a helper task counting beside them. Run with the
+// argument `edit`, the program moves its edit (a .edit file, no package
+// member until then) over its own source at round 1, so `fix` has one to
+// swap.
+use {
+    files: core.files
+    core.process
+}
+
+Order: struct {
+    total: Int,
+    count: Int,
+}
+
+price: fn(round: Int) -> Int {
+    cost: round * 10 + 1000
+    cost
+}
+
+count_to: fn(n: Int) -> Int {
+    seen := 0
+    loop _ in 0..<n -> seen += 1
+    seen
+}
+
+run: fn() {
+    editing: process.args().contains("edit")
+    helper: task count_to(3)
+    order := Order{total: 0, count: 0}
+    loop round in 0..<4 {
+        if editing && round == 1 -> files.rename("prog.next.edit", "prog.jet") ?? ()
+        order.total += price(round)
+        order.count += 1
+    }
+    print("total {order.total} count {order.count} helper {helper.join() ?? 0}")
+}

@@ -306,7 +306,7 @@ jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch
     jet_cli_debug_eval_held_start(held, source_file, argv, color: color)
     session.evaluate_with(JetCLIDebugEvaluator{entry: source_file, argv: argv, color: color, held: held})
     source_lines: if entry == "" -> (cli_files.read(source_file) ?? "").split("\n").to_list() else -> lines
-    if dap -> jet_cli_debug_dap(session, source_file)
+    if dap -> jet_cli_debug_dap(session, source_file, deep_checks, fixable: entry != "")
     plan: if dap -> jet_cli_done("", "", JET_DRIVER_EXIT_OK) else -> jet_cli_debug_console(session, cli_files.basename(source_file), source_lines, breaks, program_args, entry, scratch, deep_checks, color)
     session.close()
     // A console that refused (`quit` is E2204) has said why nothing was
