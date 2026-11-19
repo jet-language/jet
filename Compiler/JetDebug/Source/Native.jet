@@ -830,7 +830,7 @@ NativeSession: struct {
         suffix: if condition == "" -> "" else -> " if {condition}"
         rule.shown = "break {placed.shown}{suffix}"
         self.set_rule(placed.number, rule)
-        Ok("Breakpoint set  {placed.shown}{suffix}\n")
+        Ok("Breakpoint set  {placed.shown}{suffix}\n{native_debug_condition_place(condition)}")
     }
 
     // `log <file:line> "<text with {expr}>"`: a logpoint, which prints its
@@ -2364,6 +2364,14 @@ native_debug_rule: fn(condition: String, log: String, shown: String) -> NativeRu
     parsed_condition: if condition.trim() == "" -> DebugExpression?{None} else -> Val(debug_parse_expression(condition) ?? return Err(err))
     parsed_log: if log == "" -> DebugExpression?{None} else -> Val(debug_parse_message(log) ?? return Err(err))
     Ok(NativeRule{condition: parsed_condition, log: parsed_log, shown: shown})
+}
+
+// What setting a breakpoint with `condition` says about where the condition
+// runs ("" for none): the debugger checks it at each hit, so a hit whose
+// condition is false still stops the program for that check.
+native_debug_condition_place: fn(condition: String) -> String Never! {
+    if condition.trim() == "" -> return ""
+    "The condition can't run in the program: the debugger checks it at each hit, which stops the program each time\n"
 }
 
 // Whether a hit of the breakpoint with `rule`, at a stop whose locals are

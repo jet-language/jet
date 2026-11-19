@@ -21,7 +21,7 @@ use {
     dap_files: core.files
     dap_json: core.encoding.json
     dap_term: core.term
-    jet_debug.[DebugEvaluationError, NativeDebugError, NativeLocal, NativeSaid, NativeSession, NativeSettled, debug_eval, debug_evaluation_error, debug_parse_expression, native_debug_jet_frame, native_debug_rule]
+    jet_debug.[DebugEvaluationError, NativeDebugError, NativeLocal, NativeSaid, NativeSession, NativeSettled, debug_eval, debug_evaluation_error, debug_parse_expression, native_debug_condition_place, native_debug_jet_frame, native_debug_rule]
     jet_foundation.[ast_expr, foundation_json_integer, foundation_json_quote]
 }
 
@@ -183,7 +183,9 @@ JetCLIDap: struct {
                 numbers.push(placed)
                 if ruled -> session.set_rule(placed, rule.move())
             }
-            rows.push(if placed >= 0 -> "{{\"id\":{placed},\"verified\":true,\"line\":{line}}}" else -> "{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote("No code on {file}:{line}")}}}")
+            place: native_debug_condition_place(spec.condition)
+            note: if place == "" -> "" else -> ",\"message\":{foundation_json_quote(place.trim())}"
+            rows.push(if placed >= 0 -> "{{\"id\":{placed},\"verified\":true,\"line\":{line}{note}}}" else -> "{{\"verified\":false,\"line\":{line},\"message\":{foundation_json_quote("No code on {file}:{line}")}}}")
         }
         self.placed[file.move()] = numbers.move()
         Ok("{{\"breakpoints\":[{rows.join(",")}]}}")

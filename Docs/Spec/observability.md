@@ -469,6 +469,8 @@ D-DBG-VERBS1=A names the commands:
   `break 12` is line 12 of the file being debugged. With `if`, the breakpoint
   stops only when the Jet expression holds over the frame's locals. A
   condition that is not a Bool, or can't be evaluated, stops and says why.
+  Setting it says where the condition runs: the debugger checks it at each
+  hit, which stops the program each time.
 - `log <file:line> "<text with {expr}>"` sets a logpoint. It prints its
   message with each `{expr}` filled in, then the program runs on.
 - `watch <place>` stops at each write that changes a local of the selected
