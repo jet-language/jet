@@ -8,7 +8,7 @@
 use {
     native_files: core.files
     native_math: core.math
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_close, x64_trace_debug_register, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_write]
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_write]
     jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
 }
 
@@ -22,9 +22,31 @@ NativeDebugError: struct {
 
 // E2203 with `detail` as the reason the native debugger could not run.
 native_debug_unavailable: fn(detail: String) -> Diagnostic Never! {
-    row: diagnostic_registry_row("E2203") ?? panic("E2203 is not registered")
-    diagnostic_from_registry("E2203", None, row.what.replace("{{detail}}", detail), row.why, row.fix)
+    native_debug_report("E2203", detail)
 }
+
+// The registered diagnostic `code` with `detail` in its `{detail}` hole.
+native_debug_report: fn(code: String, detail: String) -> Diagnostic Never! {
+    row: diagnostic_registry_row(code) ?? panic("{code} is not registered")
+    diagnostic_from_registry(code, None, row.what.replace("{{detail}}", detail), row.why, row.fix)
+}
+
+// Why `jet debug` did not attach to a process: its target is not one it
+// can take as given (NATIVE_ATTACH_INVALID: no such process, or not the
+// program named), or attaching failed (NATIVE_ATTACH_FAILED: the system
+// refused the trace, or the process runs no Jet debug image). The process
+// is left as it was.
+#Error
+NativeAttachRefused: struct {
+    code: String,
+    detail: String,
+
+    diagnostic: fn(self) -> Diagnostic Never! { native_debug_report(self.code, self.detail) }
+}
+
+NATIVE_ATTACH_INVALID: "E2236"
+
+NATIVE_ATTACH_FAILED: "E2231"
 
 // One frame of a stop: the Jet function and its source position, or a frame
 // without line information (the runtime's start code) with line 0. An
@@ -206,9 +228,12 @@ NativeSession: struct {
     trace: X64Trace,
     output_path: String,
     output_read: Int,
-    // Whether the program has been launched; while it runs, its trace has a
-    // pid, and the trace's thread is the one the last stop is in.
+    // Whether the program has been launched or attached to; while it runs,
+    // its trace has a pid, and the trace's thread is the one the last stop
+    // is in. An `attached` program ran before the session and goes on
+    // after it (detach).
     started: Bool,
+    attached: Bool{false},
     // Every thread of the running program; all are stopped between runs.
     threads: [NativeThread],
     // The address of the runtime's task registry root (0: the program has
@@ -546,6 +571,7 @@ NativeSession: struct {
 
     // Run the program from its start, with `args`.
     launch: fn(&self, args: [String]) -> NativeStop NativeDebugError! {
+        if self.attached -> self.detach()
         if self.trace.pid > 0 || self.trace.scratch != 0 -> x64_trace_close(self.trace)
         argv := [String]{self.binary.copy()}
         loop arg in args -> argv.push(arg.copy())
@@ -560,6 +586,12 @@ NativeSession: struct {
             return Err(NativeDebugError{detail: "couldn't start the program: {failure}"})
         }
         self.threads = [NativeThread]{NativeThread{id: self.trace.pid, running: false, halting: false, signal: 0}}
+        self.plant_breakpoints() ?? return Err(err)
+        self.continue_run()
+    }
+
+    // Trap every breakpoint's addresses in the program.
+    plant_breakpoints: fn(&self) NativeDebugError! {
         loop breakpoint in self.breakpoints {
             loop address in breakpoint.addresses {
                 if !self.plant(address) {
@@ -567,7 +599,118 @@ NativeSession: struct {
                 }
             }
         }
-        self.continue_run()
+        Ok()
+    }
+
+    // Attach to the running program `pid` in place of a launch: the image
+    // its process runs (native_attach_program, which `program`, when not "",
+    // must name) is loaded unless it is this session's, then each of its
+    // threads is seized and stopped where it is, and the breakpoints trap.
+    // The stop is in the first thread's innermost Jet frame, which is
+    // selected; it has no frame when no Jet code is on that thread's stack.
+    attach: fn(&self, pid: Int, program: String) -> NativeStop NativeAttachRefused! {
+        binary: native_attach_program(pid, program) ?? return Err(err)
+        if binary != self.binary {
+            self.load(binary) ?? return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: err.detail})
+        }
+        if self.attached -> self.detach()
+        if self.trace.pid > 0 || self.trace.scratch != 0 -> x64_trace_close(self.trace)
+        self.trace = x64_trace_attach(pid)
+        if self.trace.pid < 0 {
+            failure: "{self.trace.failure}"
+            x64_trace_close(self.trace)
+            return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: "couldn't start the tracer: {failure}"})
+        }
+        self.started = true
+        self.attached = true
+        self.sites = [Int:Int]{}
+        self.watches = [NativeWatch]{}
+        self.threads = [NativeThread]{}
+        // A thread may start while the others are taken: the threads are
+        // listed again until no new one shows.
+        fresh := true
+        loop fresh {
+            fresh = false
+            tasks: native_files.list_dir("/proc/{pid}/task") ?? break
+            loop task in tasks {
+                id: Int.parse(task.name) ?? next
+                if self.thread_row(id) >= 0 -> next
+                status := x64_trace_seize(self.trace, id)
+                // A thread a seized thread started is traced already, and
+                // stops by itself.
+                if status == -NATIVE_DEBUG_EPERM && self.threads.len() > 0 {
+                    status = x64_trace_wait_for(self.trace, id)
+                }
+                if status == -NATIVE_DEBUG_ESRCH -> next
+                if status < 0 {
+                    self.detach()
+                    return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: native_attach_denied(pid, -status)})
+                }
+                fresh = true
+                if status & 0xff == 0x7f {
+                    self.threads.push(NativeThread{id: id, running: false, halting: false, signal: native_trace_signal(status)})
+                }
+            }
+        }
+        if self.thread_row(pid) < 0 {
+            self.detach()
+            return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: "process {pid} exited before the debugger attached"})
+        }
+        if self.plant_breakpoints() == .Err(failure) {
+            self.detach()
+            return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: failure.detail})
+        }
+        frames: self.backtrace() ?? return Ok(NativeStop{kind: NativeStopKind.Paused, reason: "attach", code: 0, frame: None})
+        loop (index, frame) in frames.move() {
+            if native_debug_jet_frame(frame) {
+                self.selected = index
+                return Ok(NativeStop{kind: NativeStopKind.Paused, reason: "attach", code: 0, frame: Val(frame)})
+            }
+        }
+        Ok(NativeStop{kind: NativeStopKind.Paused, reason: "attach", code: 0, frame: None})
+    }
+
+    // The console's report of attaching to process `pid`, stopped at `stop`
+    // (attach's) in the Jet source `file` whose text is `lines`.
+    attach_report: fn(&self, stop: NativeStop, pid: Int, file: String, lines: [String]) -> NativeDebugStep NativeDebugError! {
+        frame: stop.frame ?? return Ok(NativeDebugStep{text: "Attached to process {pid}\n", stop: stop})
+        shown: self.report(stop, file, lines) ?? return Err(err)
+        Ok(NativeDebugStep{text: "Attached to process {pid}  {frame.file}:{frame.line}  in {frame.function}()\n{shown}", stop: stop})
+    }
+
+    // Load the debug facts of `binary` in place of the image's: the
+    // breakpoints, watches and compiled expressions of the old image go.
+    load: fn(&self, binary: String) NativeDebugError! {
+        elf: native_files.read_bytes(binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{binary}`: {err}"})
+        image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
+        self.observe_root = native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
+        self.openings = native_openings(image, native_elf_code(elf))
+        self.image = image
+        self.binary = binary
+        self.breakpoints = [NativeBreakpoint]{}
+        self.rules = [Int:NativeRule]{}
+        self.watches = [NativeWatch]{}
+        self.evals = [String:Shared<NativeEval>]{}
+        self.eval_image = None
+        Ok()
+    }
+
+    // Let the attached program go on untraced, as it ran before `attach`:
+    // its trap bytes are put back, its watches' debug registers cleared, and
+    // each thread goes with the signal it stopped with.
+    detach: fn(&self) Never! {
+        trapped := [Int]{}
+        loop address in self.sites.keys() -> trapped.push(address)
+        loop address in trapped -> self.lift(address)
+        if self.watches.len() > 0 -> _ := self.set_debug_register(7, 0)
+        loop thread in self.threads {
+            self.trace.thread = thread.id
+            _ := x64_trace_detach(self.trace, thread.signal)
+        }
+        self.attached = false
+        // `ended` drops the pid before it closes the trace, so the helper
+        // ends without killing the program.
+        self.ended()
     }
 
     continue_run: fn(&self) -> NativeStop NativeDebugError! {
@@ -761,8 +904,13 @@ NativeSession: struct {
         fresh
     }
 
-    // End the program, if it still runs.
+    // End the program, if it still runs; an attached one is let go instead
+    // (detach).
     close: fn(&self) Never! {
+        if self.attached {
+            self.detach()
+            return
+        }
         x64_trace_close(self.trace)
         self.sites = [Int:Int]{}
     }
@@ -890,7 +1038,9 @@ NativeSession: struct {
         symbols: native_fix_symbols(elf)
         code: native_elf_code(elf)
         plan: native_fix_plan(self.image, edit, symbols, code.bytes, code.address, self.fixed) ?? return Ok("Fix refused: {err.detail}; restart the program to run the edit\n")
-        if plan.changed.len() == 0 -> return Ok("Nothing to fix: the program already runs this code\n")
+        if plan.changed.len() == 0 {
+            return Ok("Nothing to fix: the program already runs this code\n")
+        }
         pc: (self.registers() ?? return Err(err))[X64_TRACE_RIP]
         // Each changed function's running entry, -1 for a new function.
         entries := [Int]{}
@@ -1702,7 +1852,7 @@ NativeSession: struct {
             if at < 0 {
                 // A thread the program started, stopped before its first
                 // instruction.
-                self.threads.push(NativeThread{id: stop.thread, running: false, halting: false, signal: if signal == NATIVE_DEBUG_SIGSTOP -> 0 else -> signal})
+                self.threads.push(NativeThread{id: stop.thread, running: false, halting: false, signal: native_trace_signal(status)})
                 self.arm(self.threads.len() - 1) ?? return Err(err)
                 if going -> _ := self.let_go(self.threads.len() - 1, X64TraceResume.Run)
                 next
@@ -1710,9 +1860,10 @@ NativeSession: struct {
             self.threads[at].running = false
             mine: stop.thread == self.trace.thread
             mode: if mine -> how else -> X64TraceResume.Run
-            // A clone event (the thread it started reports itself), or the
-            // SIGSTOP of an earlier halt arriving.
-            cloned: (status >> 16) == X64_TRACE_EVENT_CLONE
+            // A clone event (the thread it started reports itself), the
+            // SIGSTOP of an earlier halt arriving, or a stop without a signal
+            // (an attached program's).
+            cloned: (status >> 16) == X64_TRACE_EVENT_CLONE || (status >> 16) == X64_TRACE_EVENT_STOP
             halted: signal == NATIVE_DEBUG_SIGSTOP && self.threads[at].halting
             if cloned || halted {
                 if halted -> self.threads[at].halting = false
@@ -1803,13 +1954,16 @@ NativeSession: struct {
             }
             signal: (status >> 8) & 0xff
             if at < 0 {
-                self.threads.push(NativeThread{id: stop.thread, running: false, halting: false, signal: if signal == NATIVE_DEBUG_SIGSTOP -> 0 else -> signal})
+                self.threads.push(NativeThread{id: stop.thread, running: false, halting: false, signal: native_trace_signal(status)})
                 self.arm(self.threads.len() - 1) ?? return Err(err)
                 next
             }
             self.threads[at].running = false
-            // A clone event leaves the SIGSTOP still to come.
-            if (status >> 16) == X64_TRACE_EVENT_CLONE -> next
+            // A clone event leaves the SIGSTOP still to come; so does a stop
+            // without a signal.
+            if (status >> 16) == X64_TRACE_EVENT_CLONE || (status >> 16) == X64_TRACE_EVENT_STOP {
+                next
+            }
             if signal == NATIVE_DEBUG_SIGSTOP {
                 self.threads[at].halting = false
                 next
@@ -2226,6 +2380,12 @@ NATIVE_DEBUG_WATCH_SLOTS: 4
 NATIVE_DEBUG_WATCH_HITS: 15
 
 NATIVE_DEBUG_SIGSTOP: 19
+
+// The errors x64_trace_seize reports: the system refused the trace, and the
+// thread has ended.
+NATIVE_DEBUG_EPERM: 1
+
+NATIVE_DEBUG_ESRCH: 3
 
 // The bytes of a function's start read for its prologue: a stack check, the
 // frame's opening and its saves.
@@ -2680,6 +2840,72 @@ native_debug_stop_in_jet: fn(frame: NativeFrame?) -> Bool Never! {
 
 native_debug_jet_frame: fn(frame: NativeFrame) -> Bool Never! {
     frame.file.ends_with(".jet") && frame.line > 0
+}
+
+// The signal a thread that stopped with wait status `status` takes when it
+// next runs: none for a stop the debugger made (a SIGSTOP, or the stop
+// without a signal of a thread an attached program started).
+native_trace_signal: fn(status: Int) -> Int Never! {
+    signal: (status >> 8) & 0xff
+    if signal == NATIVE_DEBUG_SIGSTOP || (status >> 16) == X64_TRACE_EVENT_STOP -> return 0
+    signal
+}
+
+// The image the process `pid` runs, for `jet debug` to attach to it:
+// refused (NATIVE_ATTACH_INVALID) unless `pid` is a running process that is
+// `program`'s, when that is not "", and refused (NATIVE_ATTACH_FAILED) when
+// it is another user's or another debugger's.
+native_attach_program: fn(pid: Int, program: String) -> String NativeAttachRefused! {
+    if pid <= 0 {
+        return Err(NativeAttachRefused{code: NATIVE_ATTACH_INVALID, detail: "process id {pid} names no process"})
+    }
+    status: native_files.read("/proc/{pid}/status") ?? return Err(NativeAttachRefused{code: NATIVE_ATTACH_INVALID, detail: "no process {pid} is running"})
+    if native_status_field(status, "State").starts_with("Z") {
+        return Err(NativeAttachRefused{code: NATIVE_ATTACH_INVALID, detail: "process {pid} has exited"})
+    }
+    own: native_files.read("/proc/self/status") ?? ""
+    if native_status_uid(status) != native_status_uid(own) {
+        return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: "process {pid} belongs to another user"})
+    }
+    tracer: native_status_field(status, "TracerPid")
+    if tracer != "0" {
+        return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: "process {pid} is already traced by process {tracer}"})
+    }
+    binary: native_files.read_link("/proc/{pid}/exe") ?? return Err(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: "couldn't read which program process {pid} runs: {err}"})
+    if program == "" -> return Ok(binary)
+    wanted: native_files.canonicalize(program) ?? return Err(NativeAttachRefused{code: NATIVE_ATTACH_INVALID, detail: "the program `{program}` can't be found: {err}"})
+    if wanted != binary {
+        return Err(NativeAttachRefused{code: NATIVE_ATTACH_INVALID, detail: "process {pid} runs `{binary}`, not the program `{wanted}`"})
+    }
+    Ok(binary)
+}
+
+// Why the system did not let `jet debug` trace process `pid` (errno
+// `code`).
+native_attach_denied: fn(pid: Int, code: Int) -> String Never! {
+    if code != NATIVE_DEBUG_EPERM -> return "tracing process {pid} failed (errno {code})"
+    scope: (native_files.read("/proc/sys/kernel/yama/ptrace_scope") ?? "").trim()
+    if scope == "1" {
+        return "the system lets a process trace only the processes it started (kernel.yama.ptrace_scope is 1), and process {pid} has not allowed others with prctl(PR_SET_PTRACER)"
+    }
+    if scope != "" && scope != "0" {
+        return "the system lets only an administrator trace a process (kernel.yama.ptrace_scope is {scope})"
+    }
+    "the system refused to let `jet debug` trace process {pid}"
+}
+
+// Field `name` of a /proc status file's `text`; "" when it has none.
+native_status_field: fn(text: String, name: String) -> String Never! {
+    loop line in text.split("\n") {
+        if line.starts_with("{name}:") -> return "{line.after(":").trim()}"
+    }
+    ""
+}
+
+// The effective user id of a /proc status file's `text`.
+native_status_uid: fn(text: String) -> String Never! {
+    ids: native_status_field(text, "Uid").split("\t").to_list()
+    if ids.len() > 1 -> "{ids[1]}" else -> ""
 }
 
 // NATIVE_DEBUG_LOCALS_LABEL and the frame's locals by name.

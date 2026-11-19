@@ -1,0 +1,23 @@
+# `jet debug --attach` of a running program whose image has no Jet debug
+# information (here a C program) stops before the process is traced with
+# E2231, the registered attach failure, which names no external tool. The
+# program runs on untouched. No other debugger is on PATH.
+requires: os-name:linux
+requires: tool:cc
+fixture: AttachToAProgramWithoutJetDebugInfoIsE2231.fixture
+env: NO_COLOR=1
+step: cc sleeper.c -o sleeper
+exit: 0
+spawn target: {work}/sleeper
+await: process {pid:target} executable = {work}/sleeper timeout 5s every 10ms
+step: jet debug --attach {pid:target}
+env: PATH={work}/no-tools
+normalize: replace "{work}" "<work>"
+exit: 1
+stdout: = ""
+stderr: = ../../CLI/debug_attach_without_jet_debug_info_e2231.txt
+process {pid:target}: alive-nonzombie
+await: process {pid:target} state not-in ["T","t"] timeout 2s every 20ms
+signal target: KILL
+wait: target
+exit: any # the target ends by the case's own KILL
