@@ -3,6 +3,7 @@
 use {
     jet_backend.[X64DebugEncoding, X64ImageFunction, X64Jetline, X64JetlineFunction]
     jet_cli.[
+        JET_CLI_PERF_OBJECT_SOCKET,
         JetCLIPerfExperiment,
         JetCLIPerfHeap,
         JetCLIPerfHeapBlock,
@@ -14,10 +15,14 @@ use {
         JetCLIPerfHeapRoot,
         JetCLIPerfHeapSite,
         JetCLIPerfHeapSnapshot,
+        JetCLIPerfIO,
         JetCLIPerfInlines,
         JetCLIPerfObservation,
         JetCLIPerfPlotTotal,
         JetCLIPerfRetained,
+        JetCLIPerfSpawn,
+        JetCLIPerfWait,
+        JetCLIPerfWake,
         JetCLIPerfZoneSampled,
         JetCLIPerfZoneTotal,
         jet_cli_perf_browser_decode,
@@ -66,6 +71,7 @@ use {
         JetLiveTask,
         JetLiveValue,
         TraceHardware,
+        TraceStackFrame,
         TraceToolchain,
         canonical_json_bytes,
         sha256_hex,
@@ -457,6 +463,25 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(join.spawn_line, Val(U64{5}))
     assert_eq(join.waker, "task")
     assert_eq(join.waker_task_id, Val(U64{2}))
+    toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
+    hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
+    _: jet_cli_perf_capture_bytes(capture, "run", [String]{"fib.jet"}, toolchain, hardware) ?? panic(err.message)
+}
+
+// A socket's wait the runtime woke ends by its peer's act, outside the
+// program: the span names its peer and neither a task nor a line, even when
+// the runtime's wake carried a line on its stack.
+#Test("a socket's wait the runtime woke names its peer and no line") {
+    observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))}}
+    capture := jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    waits := [JetCLIPerfWait]{JetCLIPerfWait{task: U64{1}, slot: 64, start_ns: 100, end_ns: 200, class: JET_CLI_PERF_OBJECT_SOCKET, id: U64{3}, local: "127.0.0.1:4000", peer: "127.0.0.1:5000", name: "tcp read", frames: [TraceStackFrame]{}}}
+    wakes: [JetCLIPerfWake]{JetCLIPerfWake{task: U64{0}, slot: 64, at_ns: 150, line: Val(7)}}
+    jet_cli_perf_waits_read(capture, waits, wakes, [JetCLIPerfSpawn]{}, [JetCLIPerfIO]{}, "fib.jet", 0)
+    wait: capture.spans[capture.spans.len() - 1]
+    assert_eq(wait.kind, "task_wait")
+    assert_eq(wait.waker, "peer")
+    assert_eq(wait.waker_task_id, None)
+    assert_eq(wait.waker_line, None)
     toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
     hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
     _: jet_cli_perf_capture_bytes(capture, "run", [String]{"fib.jet"}, toolchain, hardware) ?? panic(err.message)

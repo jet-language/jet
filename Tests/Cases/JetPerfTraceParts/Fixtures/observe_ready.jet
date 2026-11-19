@@ -11,7 +11,10 @@ s6_observe_probe: fn(jet: String, pid: String) -> Bool {
     if receipt.code != 0 -> return false
     rendered: receipt.output.copy()
     // Renderer LiveInspect.rs823/846/857 projects these exact original raw snapshot fields.
-    rendered.contains("arena_allocations=") && !rendered.contains("arena_allocations=0") && rendered.contains("parent 1") && rendered.contains("recv=1") && (rendered.contains("wait=tcp accept deadline=") || rendered.contains("wait=tcp accept readiness deadline="))
+    // The arena count is the Resources line's total; each task line has its
+    // own count, which is 0 for a task that made no arena allocation.
+    totals: rendered.split_once("\nResources: ") ?? return false
+    totals.after.contains(" arena_allocations=") && !totals.after.contains(" arena_allocations=0 ") && rendered.contains("parent 1") && rendered.contains("recv=1") && (rendered.contains("wait=tcp accept deadline=") || rendered.contains("wait=tcp accept readiness deadline="))
 }
 
 s6_observe_readiness: fn() {

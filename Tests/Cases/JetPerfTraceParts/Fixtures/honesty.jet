@@ -145,8 +145,11 @@ s6_honest_capture: fn() {
     assert(!spans.contains("\"status\":\"unavailable\""))
     tasks: s6_array(text, "\"tasks\":[", "],\"toolchain\"")
     task_rows: tasks.split(`},{`).to_list()
-    span_count := 0
-    loop span in spans.split(`},{`).to_list() {
+    // A span row holds its wait stack's frames, so rows split at the key each
+    // row starts with. A task_wait span is one wait of its task; only the
+    // task_observed span carries the task's parent, one per task.
+    observed_count := 0
+    loop span in spans.split(`},{"awaited_task_id":`).to_list() {
         assert(span.contains("\"status\":\"captured\""))
         task_id: s6_required_u64(span, "task_id")
         row: s6_find_task(task_rows, task_id)
@@ -154,13 +157,14 @@ s6_honest_capture: fn() {
         last: s6_required_u64(span, "end_ns")
         assert(s6_decimal_compare(last, first) >= 0)
         assert(s6_decimal_compare(last, wall) <= 0)
+        if !span.contains("\"kind\":\"task_observed\"") -> next
         parent: s6_required_u64(row, "parent")
         if parent == "0" -> assert(span.contains("\"parent_task_id\":null")) else {
             assert(s6_json_u64_after(span, "parent_task_id") == Val((parent)))
         }
-        span_count += 1
+        observed_count += 1
     }
-    assert(span_count == task_rows.len())
+    assert(observed_count == task_rows.len())
 }
 
 #Test("honest wall alloc task contention I/O native and span capture") {
