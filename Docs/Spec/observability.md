@@ -691,6 +691,9 @@ D-DBG-VERBS1=A names the commands:
 
 - `step` (`s`), `next` (`n`), `continue` (`c`) and `finish` (`f`) run the
   program.
+- `reverse-step` (`rs`), `reverse-next` (`rn`), `reverse-finish` (`rf`)
+  and `reverse-continue` (`rc`) go back in a replay (see Replaying a
+  recording).
 - `break <line|file:line|function> [if <expr>]` (`b`) sets a breakpoint.
   `break 12` is line 12 of the file being debugged. With `if`, the breakpoint
   stops only when the Jet expression holds in the stopped frame. A condition
@@ -797,6 +800,25 @@ toward the 10-second stall.
 A NAME that isn't one, a recording that isn't there, a recording with no
 sync-order log (a `jet test --record` one) and an image that links no
 observation start are refused before anything runs.
+
+A replay can go back. `reverse-step` (`rs`) goes to the line that ran
+before this stop, in any frame; `reverse-next` (`rn`) to the line before
+in this frame or a caller, over the calls it made; `reverse-finish` (`rf`)
+to the caller's line that made this call; and `reverse-continue` (`rc`) to
+the breakpoint hit or watch stop before this one (a breakpoint whose
+condition does not hold there is passed). Under `--dap` the adapter
+answers `supportsStepBack`, and `stepBack` and `reverseContinue` are
+`reverse-next` and `reverse-continue`. The session keeps the commands that
+brought the program to its stop. Going back runs them again from the start
+under the same recording, so the program does the same, with one-shot
+trap bytes counting how often each task passes each line's start (or each
+breakpoint); it then runs them once more to the pass the command wants,
+which becomes the stop. The program's output is not shown again.
+Breakpoints stay as they are; a watch set after the point it goes back to
+ends, with a note. With nothing earlier the program comes back to the
+same stop and says so. Outside a replay, and after `fix` (a new run would
+run the code before the fix), the console refuses them.
+Tests/Cases/Debug/replay_reverse_*.case are the worked examples.
 Tests/Cases/Debug/replay_threads_across_tiers_*.case are the worked examples.
 
 ## Sync-order log

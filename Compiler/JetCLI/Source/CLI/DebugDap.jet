@@ -23,6 +23,10 @@
 // condition is false, or a logpoint's hit (which logs its message), does not
 // stop: a continue runs on, and a step goes on to where it would have
 // stopped.
+// In a replay (`jet debug --dap --replay=NAME`) the adapter answers
+// `supportsStepBack`: `stepBack` and `reverseContinue` run the session's
+// `reverse-next` and `reverse-continue`, and report where they stopped as
+// a step does.
 // The end of stdin or `disconnect` ends a launched program and lets an
 // attached one go on, then ends the adapter.
 use {
@@ -66,7 +70,8 @@ JetCLIDap: struct {
         request := input.move()
         if request.command == {
             "initialize" -> {
-                self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true}}")
+                back: if session.env != None -> ",\"supportsStepBack\":true" else -> ""
+                self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true{back}}}")
             }
             "launch" -> {
                 self.stop_on_entry = jet_cli_dap_bool(request.arguments, "stopOnEntry")
@@ -162,6 +167,26 @@ JetCLIDap: struct {
                     .Err(failure) -> self.stopped_by(failure)
                 }
             }
+            "stepBack" | "reverseContinue" -> {
+                if !self.launched || !session.alive() {
+                    return self.fail(request, "the program is not paused")
+                }
+                refusal: session.reverse_refusal()
+                if refusal != "" -> return self.fail(request, refusal)
+                self.respond(request, "{{}}")
+                word: if request.command == "stepBack" -> "n" else -> "c"
+                if session.reverse(word) == {
+                    .Ok(stop) -> {
+                        // Why it stopped where it did, when that says more.
+                        if session.notes != "" {
+                            self.event("output", "{{\"category\":\"console\",\"output\":{foundation_json_quote(session.notes)}}}")
+                            session.notes = ""
+                        }
+                        self.report(session, stop, if word == "c" -> "pause" else -> "step")
+                    }
+                    .Err(failure) -> self.stopped_by(failure)
+                }
+            }
             else -> self.fail(request, "`jet debug --dap` does not answer `{request.command}`")
         }
     }
@@ -230,7 +255,7 @@ JetCLIDap: struct {
     start: fn(&self, session: &NativeSession) -[FS, Exec, IO, Time.Wait, FFI.Asm]> NativeSettled NativeDebugError! {
         if !self.stop_on_entry {
             first: session.launch(self.args) ?? return Err(err)
-            return session.settle(first, "c", 0)
+            return session.settle_launch(first)
         }
         entry := -1
         if session.break_in("run") == {

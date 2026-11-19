@@ -1,0 +1,26 @@
+# In a replay the console goes back: `rn` to the line before in this frame,
+# `rs` to the line before in any frame (the last line of the call on line
+# 20), `rf` to the caller's line that made the call, and `rc` to the
+# breakpoint hit before this one, with the locals as they were there. Each
+# goes back by running the replay again from its start, so the program's
+# output comes once, at its end. The helper task's tally races the loop,
+# so only the main task's total is asserted.
+# The fixture must stay in jet fmt form; line 20 calls `double`, line 21
+# adds its result.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet run --record=back prog.jet
+exit: 0
+stdout: ~ "total 6 tally "
+step: jet debug --replay=back prog.jet
+stdin: replay_reverse_steps_back_by_line_call_and_caller.stdin
+exit: 0
+stdout: ~ "(Jet) c\nBreakpoint hit  prog.jet:21  in run()\n21 |         total += d        <- here\n" # the first pass of line 21
+stdout: ~ "(Jet) rn\n20 |         d: double(k)        <- here\n" # back over the call to the line before
+stdout: ~ "(Jet) rs\n7 |     y        <- here\nLocals:  y = 0\n" # back into the call's last line
+stdout: ~ "(Jet) rf\n20 |         d: double(k)        <- here\n" # back out to the caller's line
+stdout: ~ "(Jet) rc\nBreakpoint hit  prog.jet:21  in run()\n21 |         total += d        <- here\nLocals:  d = 0" # back to the first hit from the second
+stdout: ~ "total 6 tally " # the program runs on to its end
+stdout: ~ "Program finished\n"
+stdout+stderr: !~ "replay diverged"
+stdout+stderr: !~ "No earlier"

@@ -1,0 +1,12 @@
+# Going back needs a recording to run the program again the same way: a
+# session without `--replay` refuses the reverse commands and stays at its
+# stop.
+# The fixture must stay in jet fmt form.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: replay_reverse_refuses_outside_a_replay.stdin
+exit: 0
+stdout: ~ "(Jet) rs\nReverse runs in a replay: start the session with `jet debug --replay=NAME`\n"
+stdout: ~ "(Jet) reverse-continue\nReverse runs in a replay: start the session with `jet debug --replay=NAME`\n"
+stdout: ~ "Program finished\n"
