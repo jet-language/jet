@@ -1,0 +1,33 @@
+# A recording binds the source it was made from: once `prog.jet` changes,
+# `jet debug --replay` refuses it with E3621 (replay semantic identity does
+# not match) before anything runs. Over `--dap` the adapter answers
+# `initialize`, then refuses `launch` with E3621 as its `jetCode` and ends
+# the session.
+# The fixture must stay in jet fmt form; changed.src loops 4 times, not 3.
+fixture: ReplayRefusals.fixture
+env: NO_COLOR=1
+step: jet run --record=back prog.jet
+exit: 0
+stdout: ~ "total 6 tally " # the recorded run
+copy: changed.src prog.jet
+step: jet debug --replay=back prog.jet
+exit: 1
+stderr: ~ "Replay semantic identity does not match" # the recording is of other source
+stderr: ~ "the recorded `source_digest` differs from this source's" # it names what differs
+stderr: ~ "E3621" # the registered code
+stdout: !~ "total " # nothing ran
+session dap content-length: jet debug --dap --replay=back {work}/prog.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv dap until $.request_seq = 1 timeout 30s every 100ms
+json: stdout doc $.success = true
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/prog.jet\",\"stopOnEntry\":false,\"args\":[]}}"
+recv dap until $.request_seq = 2 timeout 30s every 100ms
+json: stdout doc $.success = false
+stdout: ~ "\"jetCode\":\"E3621\"" # the registered refusal's code
+stdout: ~ "eplay semantic identity does not match" # its What names why
+recv dap until $.event = "terminated" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.success = true
+close dap
+exit: 1

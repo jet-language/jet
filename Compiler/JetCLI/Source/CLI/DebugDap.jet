@@ -45,7 +45,16 @@
 // `supportsStepBack`: `stepBack` and `reverseContinue` run the session's
 // `reverse-next` and `reverse-continue`, and report where they stopped as
 // a step does. A replay's runs are made as recorded, so a request waits for
-// them.
+// them. Going back outside a replay, after `fix`, or where the replay holds
+// nothing earlier is refused with E2237 (the last at the same stop, whose
+// frame ids still hold). A replay refused before its session began (a
+// recording of other source, E3621) answers every request with that
+// refusal (jet_cli_dap_refused).
+// `dataBreakpointInfo` and `setDataBreakpoints` are the console's `watch`:
+// a local or a field path of a frame of the stopped task, which stops at
+// each write that changes it, reported as a `data breakpoint` stop whose
+// description is the change (`total: 0 -> 2`). A place no watch can take
+// has no data id; its description is E2237's What.
 // `disconnect` ends a launched program and lets an attached one go on, then
 // ends the adapter, as the end of stdin does at a stop. The end of stdin
 // while a launched program runs on stops no run: the program runs on to its
@@ -55,8 +64,8 @@ use {
     dap_files: core.files
     dap_json: core.encoding.json
     dap_term: core.term
-    jet_debug.[NATIVE_ATTACH_INVALID, NATIVE_DEBUG_TASK_RUNNING, NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, native_debug_hex, native_debug_jet_frame, native_debug_report, native_debug_rule_place, native_function_at, native_lookup]
-    jet_foundation.[foundation_json_integer, foundation_json_quote]
+    jet_debug.[NATIVE_ATTACH_INVALID, NATIVE_DEBUG_REFUSED, NATIVE_DEBUG_TASK_RUNNING, NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, NativeWatched, native_debug_hex, native_debug_jet_frame, native_debug_report, native_debug_rule_place, native_function_at, native_lookup]
+    jet_foundation.[Diagnostic, foundation_json_integer, foundation_json_quote]
 }
 
 // One `setBreakpoints` entry: its line, and its condition and log message
@@ -79,6 +88,13 @@ JetCLIDapRequest: struct {
 JetCLIDapFrame: struct {
     task: Int,
     index: Int,
+}
+
+// A watch `setDataBreakpoints` placed: its data id (dataBreakpointInfo's)
+// and the session's number for it.
+JetCLIDapWatch: struct {
+    id: String,
+    number: Int,
 }
 
 // E2238: a frame, scope or variable reference of an earlier stop.
@@ -128,6 +144,8 @@ JetCLIDap: struct {
     // Whether stdin ended while the program ran: no request stops a run any
     // more, and the session ends at the next stop.
     ended: Bool{false},
+    // The watches `setDataBreakpoints` placed.
+    data: [JetCLIDapWatch]{[JetCLIDapWatch]{}},
 
     handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
         request := input.move()
@@ -136,7 +154,7 @@ JetCLIDap: struct {
         if request.command == {
             "initialize" -> {
                 back: if session.replaying() -> ",\"supportsStepBack\":true" else -> ""
-                self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsRestartRequest\":true{back}}}")
+                self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsRestartRequest\":true,\"supportsDataBreakpoints\":true{back}}}")
             }
             "launch" -> {
                 self.stop_on_entry = jet_cli_dap_bool(request.arguments, "stopOnEntry")
@@ -301,8 +319,7 @@ JetCLIDap: struct {
                     return self.fail(request, "the program is not paused")
                 }
                 refusal: session.reverse_refusal()
-                if refusal != "" -> return self.fail(request, refusal)
-                self.respond(request, "{{}}")
+                if refusal != "" -> return self.refuse(request, NATIVE_DEBUG_REFUSED, refusal)
                 word: if request.command == "stepBack" -> "n" else -> "c"
                 if session.reverse(word) == {
                     .Ok(stop) -> {
@@ -311,9 +328,55 @@ JetCLIDap: struct {
                             self.event("output", "{{\"category\":\"console\",\"output\":{foundation_json_quote(session.notes)}}}")
                             session.notes = ""
                         }
+                        // Nothing earlier: the program is back at this
+                        // stop, whose frame ids still hold.
+                        if session.nowhere != "" {
+                            return self.refuse(request, NATIVE_DEBUG_REFUSED, session.nowhere)
+                        }
+                        self.respond(request, "{{}}")
                         self.report(session, stop, if word == "c" -> "pause" else -> "step")
                     }
-                    .Err(failure) -> self.stopped_by(failure)
+                    .Err(failure) -> {
+                        self.respond(request, "{{}}")
+                        self.stopped_by(failure)
+                    }
+                }
+            }
+            "dataBreakpointInfo" -> {
+                if !self.launched || !session.alive() {
+                    return self.fail(request, "the program is not paused")
+                }
+                // A scope's reference names its frame (`variables`); with
+                // neither it nor a frame id, the stopped task's innermost.
+                reference: jet_cli_dap_int(request.arguments, "variablesReference")
+                id: if reference > 0 -> (reference - 1) >> 1 else -> jet_cli_dap_int(request.arguments, "frameId")
+                index := 0
+                if id >= 0 {
+                    named: if reference > 0 -> reference else -> id
+                    frame: self.frame_of(id) ?? return self.refuse(request, JET_CLI_DAP_STALE, "reference {named} expired when execution resumed")
+                    if frame.task != self.task {
+                        return self.respond(request, jet_cli_dap_no_data("a watch watches a frame of task {self.task}, where the program stopped, not of task {frame.task}"))
+                    }
+                    index = frame.index
+                }
+                if index >= JET_CLI_DAP_RAW {
+                    return self.respond(request, jet_cli_dap_no_data("a raw frame has no Jet locals to watch; choose a Jet frame"))
+                }
+                name: jet_cli_dap_string(request.arguments, "name")
+                if jet_cli_dap_watch(session, name, index, place: false) == {
+                    .Ok(found) -> {
+                        if found.refused != "" {
+                            return self.respond(request, jet_cli_dap_no_data(found.refused))
+                        }
+                        self.respond(request, "{{\"dataId\":{foundation_json_quote("{self.stops}:{index}:{name}")},\"description\":{foundation_json_quote(name)},\"accessTypes\":[\"write\"],\"canPersist\":false}}")
+                    }
+                    .Err(failure) -> self.fail(request, failure.detail)
+                }
+            }
+            "setDataBreakpoints" -> {
+                if self.set_data(session, request) == {
+                    .Ok(body) -> { self.respond(request, body) }
+                    .Err(failure) -> self.fail(request, failure.detail)
                 }
             }
             else -> self.fail(request, "`jet debug --dap` does not answer `{request.command}`")
@@ -376,6 +439,68 @@ JetCLIDap: struct {
             rows.push("{{\"id\":{placed},\"verified\":true,\"line\":{line}{note}}}")
         }
         self.placed[file.move()] = numbers.move()
+        Ok("{{\"breakpoints\":[{rows.join(",")}]}}")
+    }
+
+    // `setDataBreakpoints`: the watches become those the request's data ids
+    // name (dataBreakpointInfo's `<stop>:<frame>:<name>`). A watch placed
+    // for an id before stays as it was set; the others go. A new id is
+    // placed in its frame, which must be of this stop (E2238's What
+    // otherwise); one no watch can take is not verified, with E2237's What.
+    // Each refusal's `jetCode` names its code.
+    set_data: fn(&self, session: &NativeSession, request: JetCLIDapRequest) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
+        ids := [String]{}
+        loop member in request.arguments {
+            if member.key == "breakpoints" && member.value == .Array(items) {
+                loop item in items {
+                    if item == .Object(spec) -> ids.push(jet_cli_dap_string(spec, "dataId"))
+                }
+            }
+        }
+        live: self.launched && session.alive()
+        // Each id's watch placed before, or -1.
+        numbers := [Int]{}
+        loop id in ids {
+            kept := -1
+            loop watch in self.data {
+                if live && watch.id == id && session.has_breakpoint(watch.number) {
+                    kept = watch.number
+                }
+            }
+            numbers.push(kept)
+        }
+        loop watch in self.data {
+            if live && !numbers.contains(watch.number) && session.has_breakpoint(watch.number) {
+                session.delete_breakpoint(watch.number) ?? return Err(err)
+            }
+        }
+        self.data = [JetCLIDapWatch]{}
+        rows := [String]{}
+        ids.reverse()
+        numbers.reverse()
+        loop ids.len() > 0 {
+            id: ids.pop() ?? break
+            number := numbers.pop() ?? -1
+            if number < 0 {
+                if !live {
+                    rows.push("{{\"verified\":false,\"message\":\"the program is not paused\"}}")
+                    next
+                }
+                at: jet_cli_dap_data_place(id)
+                if at.stop != self.stops || at.index < 0 || at.index >= JET_CLI_DAP_RAW {
+                    rows.push(jet_cli_dap_unverified(JET_CLI_DAP_STALE, "data id `{id}` expired when execution resumed"))
+                    next
+                }
+                placed: jet_cli_dap_watch(session, at.name, at.index) ?? return Err(err)
+                if placed.refused != "" {
+                    rows.push(jet_cli_dap_unverified(NATIVE_DEBUG_REFUSED, placed.refused))
+                    next
+                }
+                number = placed.number
+            }
+            rows.push("{{\"id\":{number},\"verified\":true}}")
+            self.data.push(JetCLIDapWatch{id: id, number: number})
+        }
         Ok("{{\"breakpoints\":[{rows.join(",")}]}}")
     }
 
@@ -540,9 +665,10 @@ JetCLIDap: struct {
     }
 
     // Where `settled` left the program: what the run said on the way, then
-    // `stopped` (for `reason` unless a breakpoint stopped it), or its end.
-    // The stop is a new one: the frame ids and variable references of the
-    // last name nothing.
+    // `stopped` (for `reason` unless a breakpoint or a watch stopped it), or
+    // its end. A watch's stop is a `data breakpoint` one, described by the
+    // change it saw. The stop is a new one: the frame ids and variable
+    // references of the last name nothing.
     report: fn(&self, session: &NativeSession, settled: NativeSettled, reason: String) -[FS, IO, Time.Wait, FFI.Asm]> Never! {
         self.tell(session, settled.said)
         self.stops = (self.stops + 1) & (JET_CLI_DAP_STOPS - 1)
@@ -553,9 +679,15 @@ JetCLIDap: struct {
             .Paused -> {
                 self.task = session.stopped_task()
                 hit: settled.hit
-                why: if hit != None -> "breakpoint" else -> reason
+                watch: stop.reason.starts_with("watchpoint ")
+                why: if {
+                    watch -> "data breakpoint"
+                    hit != None -> "breakpoint"
+                    else -> reason
+                }
                 ids: if hit == .Val(number) -> ",\"hitBreakpointIds\":[{number}]" else -> ""
-                self.event("stopped", "{{\"reason\":\"{why}\",\"threadId\":{self.task},\"allThreadsStopped\":true{ids}}}")
+                change: if watch -> ",\"hitBreakpointIds\":[{stop.reason.after("watchpoint ")}],\"description\":{foundation_json_quote(session.watched)}" else -> ""
+                self.event("stopped", "{{\"reason\":\"{why}\",\"threadId\":{self.task},\"allThreadsStopped\":true{ids}{change}}}")
             }
             .Exited -> {
                 self.event("exited", "{{\"exitCode\":{stop.code}}}")
@@ -597,16 +729,21 @@ JetCLIDap: struct {
     }
 
     // `request`, refused with the registered diagnostic `code` and its
-    // `detail`: the DAP error of the code (E2236 jet.invalidArguments, E2238
-    // jet.staleReference, any other jet.unavailable), whose format is the
-    // report's What.
+    // `detail` (refuse_with).
     refuse: fn(&self, request: JetCLIDapRequest, code: String, detail: String) -[IO, Time.Wait]> Never! {
-        report: native_debug_report(code, detail)
+        self.refuse_with(request, native_debug_report(code, detail))
+    }
+
+    // `request`, refused with `report`: the DAP error of its code (E2236
+    // jet.invalidArguments, E2238 jet.staleReference, any other
+    // jet.unavailable), whose format is the report's What and whose
+    // `jetCode` is the code.
+    refuse_with: fn(&self, request: JetCLIDapRequest, report: Diagnostic) -[IO, Time.Wait]> Never! {
         error := {name: "jet.unavailable", id: 22034}
-        if code == NATIVE_ATTACH_INVALID -> error = {name: "jet.invalidArguments", id: 22032}
-        if code == JET_CLI_DAP_STALE -> error = {name: "jet.staleReference", id: 22036}
+        if report.code == NATIVE_ATTACH_INVALID -> error = {name: "jet.invalidArguments", id: 22032}
+        if report.code == JET_CLI_DAP_STALE -> error = {name: "jet.staleReference", id: 22036}
         self.seq += 1
-        jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"response\",\"request_seq\":{request.seq},\"success\":false,\"command\":{foundation_json_quote(request.command)},\"message\":\"{error.name}\",\"body\":{{\"error\":{{\"id\":{error.id},\"format\":{foundation_json_quote(report.what)},\"showUser\":true,\"variables\":{{\"jetCode\":\"{code}\"}}}}}}}}")
+        jet_cli_dap_send("{{\"seq\":{self.seq},\"type\":\"response\",\"request_seq\":{request.seq},\"success\":false,\"command\":{foundation_json_quote(request.command)},\"message\":\"{error.name}\",\"body\":{{\"error\":{{\"id\":{error.id},\"format\":{foundation_json_quote(report.what)},\"showUser\":true,\"variables\":{{\"jetCode\":\"{report.code}\"}}}}}}}}")
     }
 
     event: fn(&self, name: String, body: String) -[IO, Time.Wait]> Never! {
@@ -637,6 +774,37 @@ jet_cli_debug_dap: fn(session: &NativeSession, entry: String) -[FS, Env, Exec, I
             break
         }
         dap.handle(session, request.move(), entry)
+    }
+}
+
+// `jet debug --dap` when its session can't begin (a replay of a recording
+// of other source, E3621, or another recording or replay refused before
+// the program loads): `initialize` is answered, then every other request
+// is refused with `report`, its code the error's `jetCode`, and the first
+// refusal ends the session for the editor (`terminated`); `disconnect`
+// ends the adapter, as the end of stdin does.
+jet_cli_dap_refused: fn(report: Diagnostic) -[IO, Time.Wait]> Never! {
+    dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, launched: false}
+    ended := false
+    loop {
+        text: jet_cli_dap_read() ?? break
+        request: jet_cli_dap_request(text)
+        if request.command == {
+            "initialize" -> {
+                dap.respond(request, "{{\"supportsConfigurationDoneRequest\":true}}")
+            }
+            "disconnect" -> {
+                dap.respond(request, "{{}}")
+                break
+            }
+            else -> {
+                dap.refuse_with(request, report)
+                if !ended {
+                    ended = true
+                    dap.event("terminated", "{{}}")
+                }
+            }
+        }
     }
 }
 
@@ -840,4 +1008,38 @@ jet_cli_dap_evaluate: fn(session: &NativeSession, text: String, frame: Int) -[FS
     if frame > 0 -> _: session.select_frame(0) ?? return Err(NativeEvalRefused{message: err.detail})
     if refusal != "" -> return Err(NativeEvalRefused{message: refusal})
     Ok("{{\"result\":{foundation_json_quote(shown.text)},\"type\":{foundation_json_quote(shown.type_name)},\"variablesReference\":0}}")
+}
+
+// Watch `name` in frame `frame` (an index in the stopped task's backtrace),
+// or, unless `place`, find only whether it can be watched there
+// (NativeSession.watch). The innermost frame stays selected, as stepping
+// needs.
+jet_cli_dap_watch: fn(session: &NativeSession, name: String, frame: Int, place: Bool{true}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeWatched NativeDebugError! {
+    if frame > 0 -> _: session.select_frame(frame) ?? return Err(err)
+    found: session.watch(name, place: place) ?? return Err(err)
+    if frame > 0 -> _: session.select_frame(0) ?? return Err(err)
+    Ok(found)
+}
+
+// The stop, the frame index and the place a data id
+// (`<stop>:<frame>:<name>`, dataBreakpointInfo's) names; -1 for a part it
+// lacks.
+jet_cli_dap_data_place: fn(id: String) -> {stop: Int, index: Int, name: String} Never! {
+    rest: id.after(":")
+    {stop: Int.parse(id.before(":")) ?? -1, index: Int.parse(rest.before(":")) ?? -1, name: rest.after(":")}
+}
+
+// `dataBreakpointInfo` of a place no watch can take: no data id, and
+// E2237's What for `detail`, its `jetCode` naming the code.
+jet_cli_dap_no_data: fn(detail: String) -> String Never! {
+    report: native_debug_report(NATIVE_DEBUG_REFUSED, detail)
+    "{{\"dataId\":null,\"description\":{foundation_json_quote(report.what)},\"jetCode\":\"{NATIVE_DEBUG_REFUSED}\"}}"
+}
+
+// A data breakpoint not placed, refused with the registered diagnostic
+// `code` and its `detail`: its message the report's What, its `jetCode`
+// the code.
+jet_cli_dap_unverified: fn(code: String, detail: String) -> String Never! {
+    report: native_debug_report(code, detail)
+    "{{\"verified\":false,\"message\":{foundation_json_quote(report.what)},\"jetCode\":\"{code}\"}}"
 }

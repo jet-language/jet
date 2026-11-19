@@ -1,0 +1,66 @@
+# A watch on no place the selected frame holds is refused with E2237
+# (jet.DebugRequestRefused), which names why. At the console that is a
+# `watch` with no place and one on a name the frame has no local of. Over
+# `--dap`, `dataBreakpointInfo` of a name the frame has no local of answers
+# no data id, its description E2237's What and its `jetCode` E2237; a
+# local's data id is placed by `setDataBreakpoints` as the watch, which
+# stops as a `data breakpoint` described by the change, while a data id of
+# an earlier stop is not verified, with E2238.
+# The fixture must stay in jet fmt form; line 21 adds to `total`, which
+# changes from 0 to 2 on the loop's second pass.
+fixture: ReplayRefusals.fixture
+env: NO_COLOR=1
+step: jet debug prog.jet
+stdin: replay_refusals_invalid_watch.stdin
+exit: 0
+stdout: ~ "(Jet) watch\nError [jet.DebugRequestRefused]: The debugger can't do this here: a watch needs a local, a field path or a List item, as `watch total`.\n" # a watch with no place
+stdout: ~ "(Jet) watch nothing\nError [jet.DebugRequestRefused]: The debugger can't do this here: `nothing` can't be watched: " # a name with no local
+stdout: ~ "More: jet-lang.dev/e/E2237\n" # the refusal names its page
+stdout: !~ "Watchpoint" # neither is placed
+stdout: ~ "total 6 tally " # the program runs on to its end
+session dap content-length: jet debug --dap {work}/prog.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+recv dap until $.request_seq = 1 timeout 30s every 100ms
+json: stdout doc $.body.supportsDataBreakpoints = true
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/prog.jet\",\"stopOnEntry\":false,\"args\":[]}}"
+recv dap until $.event = "initialized" timeout 30s every 100ms
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[{\"line\":21}]}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.body.breakpoints[0].verified = true
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+json: stdout doc $.body.reason = "breakpoint"
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+capture: frame stdout doc $.body.stackFrames[0].id
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:frame}}}"
+recv dap until $.request_seq = 6 timeout 30s every 100ms
+capture: locals stdout doc $.body.scopes[?name="Locals"][0].variablesReference
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"dataBreakpointInfo\",\"arguments\":{\"variablesReference\":{cap:locals},\"name\":\"nothing\"}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.success = true
+stdout: ~ "\"dataId\":null" # no place to watch
+stdout: ~ "\"jetCode\":\"E2237\"" # the registered refusal's code
+stdout: ~ "The debugger can't do this here: `nothing` is not a local of this frame" # its What names why
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"dataBreakpointInfo\",\"arguments\":{\"variablesReference\":{cap:locals},\"name\":\"total\"}}"
+recv dap until $.request_seq = 8 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.accessTypes[0] = "write"
+capture: data stdout doc $.body.dataId
+send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"setDataBreakpoints\",\"arguments\":{\"breakpoints\":[{\"dataId\":\"{cap:data}\"},{\"dataId\":\"0:0:total\"}]}}"
+recv dap until $.request_seq = 9 timeout 30s every 100ms
+json: stdout doc $.success = true
+json: stdout doc $.body.breakpoints[0].verified = true # the local's watch is placed
+json: stdout doc $.body.breakpoints[1].verified = false # a data id of an earlier stop is not
+stdout: ~ "\"jetCode\":\"E2238\"" # it names the stale reference's code
+send dap: "{\"seq\":10,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/prog.jet\"},\"breakpoints\":[]}}"
+recv dap until $.request_seq = 10 timeout 30s every 100ms
+send dap: "{\"seq\":11,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+recv dap until $.event = "stopped" timeout 30s every 100ms
+json: stdout doc $.body.reason = "data breakpoint" # the watch stopped the program
+json: stdout doc $.body.description = "total: 0 -> 2" # at the change it saw
+send dap: "{\"seq\":12,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 12 timeout 30s every 100ms
+json: stdout doc $.success = true
+close dap
+exit: 0
