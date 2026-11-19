@@ -40,6 +40,8 @@ NATIVE_TAG_VARIABLE: 0x34
 
 NATIVE_TAG_CALL_SITE: 0x48
 
+NATIVE_TAG_CALL_SITE_PARAMETER: 0x49
+
 // One member of a struct or union type: its name, offset and type (a
 // NativeImage.types key), and the offset of its DIE.
 NativeMember: struct {
@@ -147,15 +149,18 @@ NativeAbstract: struct {
     file: Int,
 }
 
-// The facts of one image. `types` is keyed by the type DIE's offset in
+// The facts of one image. `functions` are in address order
+// (native_function_at). `types` is keyed by the type DIE's offset in
 // `.debug_info`; `members`, `enumerators` and `variants` hold each struct's,
 // union's and enumeration's in DIE order, as its group names them;
 // `abstracts` holds each abstract subprogram of inlined code by its offset;
 // `allocs` the type each allocating call of a `--checked-alloc` image
 // allocates for (a `types` key), by the call's return address; `calls` the
 // call-site row of each call that has one (the source node that made it),
-// by the call's return address; `level` the optimization level the program
-// was built at, as its unit's producer names it (native_producer_level).
+// by the call's return address; `arguments` the values each such call
+// passes in its argument registers (DW_TAG_call_site_parameter); `level`
+// the optimization level the program was built at, as its unit's producer
+// names it (native_producer_level); `frames` its call frame information.
 NativeImage: struct {
     lines: X64Jetline,
     functions: [NativeFunction],
@@ -167,7 +172,9 @@ NativeImage: struct {
     abstracts: [Int:NativeAbstract],
     allocs: [Int:Int],
     calls: [Int:NativeCallSite]{[Int:NativeCallSite]{}},
+    arguments: [NativeCallArgument]{[NativeCallArgument]{}},
     level: Int{0},
+    frames: NativeFrames{NativeFrames{sections: [NativeCode]{}, fdes: [NativeFde]{}}},
 }
 
 // The source node a call's lowering came from: its line and character
@@ -175,6 +182,16 @@ NativeImage: struct {
 NativeCallSite: struct {
     line: Int,
     column: Int,
+}
+
+// A value a call passes in argument register `register` (a DWARF register
+// number), as its caller computes it: the DWARF expression `value`
+// (DW_AT_call_value), evaluated in the caller's frame at the call's return
+// address `at`.
+NativeCallArgument: struct {
+    at: Int,
+    register: Int,
+    value: [U8],
 }
 
 // One range of a variable's location list: [start, end), and the DWARF
@@ -190,7 +207,7 @@ NativeRange: struct {
 // The facts of the ELF image `elf`; None without a `.debug_jetline`.
 native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
     table: native_elf_section(elf, ".debug_jetline") ?? return None
-    image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(elf, ".debug_loclists") ?? [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    image := NativeImage{lines: x64_jetline_parse(table), functions: [NativeFunction]{}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: native_elf_section(elf, ".debug_loclists") ?? [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, frames: native_frames_read(elf)}
     info: native_elf_section(elf, ".debug_info") ?? return Val(image)
     abbrev: native_elf_section(elf, ".debug_abbrev") ?? return Val(image)
     at := 0
@@ -201,6 +218,8 @@ native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
         native_image_unit(image, info, abbrev, at, end)
         at = end
     }
+    // Units need not come in address order; native_function_at searches.
+    image.functions.sort_by(fn(left: NativeFunction, right: NativeFunction) { left.low <=> right.low })
     Val(image)
 }
 
@@ -229,7 +248,7 @@ native_image_of_types: fn(debug: X64ModuleDebug) -> NativeImage Never! {
                     made.target = target
                 }
             }
-            .Struct(members) -> made.group = native_image_members(image, members)
+            .Struct(members) -> { made.group = native_image_members(image, members) }
             .Union(members) -> {
                 made.tag = NATIVE_TAG_UNION
                 made.group = native_image_members(image, members)
@@ -271,19 +290,29 @@ native_elf_section: fn(elf: [U8], name: String) -> [U8]? Never! {
 // The offset of the header of the section named `name`; None when the image
 // has none.
 native_elf_header: fn(elf: [U8], name: String) -> Int? Never! {
+    found: native_elf_headers(elf, name)
+    if found.len() == 0 -> return None
+    Val(found[0])
+}
+
+// The offsets of the headers of every section named `name`, in order: a
+// bound image has two `.text` and two `.eh_frame`, the runtime's and the
+// program's.
+native_elf_headers: fn(elf: [U8], name: String) -> [Int] Never! {
+    found := [Int]{}
     headers: link_debug_addr(elf, 40)
     size: link_debug_le(elf, 58, 2)
     count: link_debug_le(elf, 60, 2)
     names_index: link_debug_le(elf, 62, 2)
-    if headers < 0 || size < 64 || names_index < 0 || names_index >= count -> return None
+    if headers < 0 || size < 64 || names_index < 0 || names_index >= count -> return found
     names: link_debug_addr(elf, headers + names_index * size + 24)
-    if names < 0 -> return None
+    if names < 0 -> return found
     loop k in 0..<count {
         header: headers + k * size
         at: link_debug_le(elf, header, 4)
-        if at >= 0 && x64_jetline_text(elf, names + at) == name -> return Val(header)
+        if at >= 0 && x64_jetline_text(elf, names + at) == name -> found.push(header)
     }
-    None
+    found
 }
 
 // The image's code: the bytes of its `.text` and the address they load at
@@ -298,6 +327,362 @@ native_elf_code: fn(elf: [U8]) -> NativeCode Never! {
     found: native_elf_header(elf, ".text") ?? return none
     bytes: native_elf_section(elf, ".text") ?? return none
     NativeCode{address: link_debug_addr(elf, found + 16), bytes: bytes}
+}
+
+// The bytes and load address of each section of the image named `name`
+// (`.text`, `.eh_frame`).
+native_elf_codes: fn(elf: [U8], name: String) -> [NativeCode] Never! {
+    codes := [NativeCode]{}
+    loop header in native_elf_headers(elf, name) {
+        offset: link_debug_addr(elf, header + 24)
+        length: link_debug_addr(elf, header + 32)
+        if offset < 0 || length < 0 || offset + length > elf.len() -> next
+        codes.push(NativeCode{address: link_debug_addr(elf, header + 16), bytes: elf[offset..<offset + length]})
+    }
+    codes
+}
+
+// An image's call frame information: its `.eh_frame` sections and each
+// FDE in them, sorted by start. It unwinds the frames of code without Jet
+// line information, the runtime's (NativeSession.unwind_from).
+NativeFrames: struct {
+    sections: [NativeCode],
+    fdes: [NativeFde],
+}
+
+// One FDE: the code [start, end) it describes, its section and its
+// record's offset there.
+NativeFde: struct {
+    start: Int,
+    end: Int,
+    section: Int,
+    at: Int,
+}
+
+// What an FDE's reading takes from its CIE: the alignments of its code and
+// data, the pointer encoding of its FDEs (DW_EH_PE) and whether they carry
+// augmentation data, and its initial instructions [from, to).
+NativeCie: struct {
+    code_align: Int,
+    data_align: Int,
+    encoding: Int,
+    augmented: Bool,
+    from: Int,
+    to: Int,
+}
+
+// The row of a function's call frame table at one address: the CFA is
+// DWARF register `register` plus `offset`; per DWARF register (rax to r15,
+// then the return address) its rule and, saved, the offset from the CFA it
+// is saved at.
+NativeCfiRow: struct {
+    register: Int,
+    offset: Int,
+    rules: [Int],
+    offsets: [Int],
+}
+
+// The DWARF registers a row has rules for; the last, the return address's
+// column.
+NATIVE_CFI_REGISTERS: 17
+
+NATIVE_CFI_RETURN: 16
+
+// A register's rule: its caller's value (a callee-saved register's unless
+// a rule says otherwise), saved at the CFA plus its offset, or one the
+// frame doesn't keep.
+NATIVE_CFI_SAME: 0
+
+NATIVE_CFI_SAVED: 1
+
+NATIVE_CFI_LOST: 2
+
+// The call frame information of the image `elf`.
+native_frames_read: fn(elf: [U8]) -> NativeFrames Never! {
+    sections: native_elf_codes(elf, ".eh_frame")
+    fdes := [NativeFde]{}
+    loop (section, code) in sections -> native_frames_index(fdes, code, section)
+    fdes.sort_by(fn(left: NativeFde, right: NativeFde) { left.start <=> right.start })
+    NativeFrames{sections: sections, fdes: fdes}
+}
+
+// Each FDE of the `.eh_frame` section `code`, the `section`-th, whose CIE
+// the reader takes.
+native_frames_index: fn(fdes: &[NativeFde], code: NativeCode, section: Int) Never! {
+    at := 0
+    loop at + 8 <= code.bytes.len() {
+        length: link_debug_le(code.bytes, at, 4)
+        // The terminator, or a 64-bit record, which no writer of Jet's makes.
+        if length <= 0 || length == 0xffffffff -> break
+        end: at + 4 + length
+        if end > code.bytes.len() -> break
+        pointer: link_debug_le(code.bytes, at + 4, 4)
+        if pointer != 0 {
+            if native_cie_read(code.bytes, at + 4 - pointer) == .Val(cie) {
+                size: native_eh_size(cie.encoding)
+                if size > 0 && at + 8 + 2 * size <= end {
+                    start: native_eh_pointer(code, at + 8, cie.encoding)
+                    range: native_eh_pointer(code, at + 8 + size, cie.encoding & 0x0f)
+                    if range > 0 {
+                        fdes.push(NativeFde{start: start, end: start + range, section: section, at: at})
+                    }
+                }
+            }
+        }
+        at = end
+    }
+}
+
+// The bytes of a pointer of DW_EH_PE encoding `encoding`: absolute or
+// relative to its own address, of a fixed size; 0 for any other form.
+native_eh_size: fn(encoding: Int) -> Int Never! {
+    if encoding & 0x70 != 0 && encoding & 0x70 != 0x10 -> return 0
+    format: encoding & 0x0f
+    if {
+        format == 0x00 || format == 0x04 || format == 0x0c -> 8
+        format == 0x03 || format == 0x0b -> 4
+        format == 0x02 || format == 0x0a -> 2
+        else -> 0
+    }
+}
+
+// The pointer of DW_EH_PE encoding `encoding` at `at` in `code`.
+native_eh_pointer: fn(code: NativeCode, at: Int, encoding: Int) -> Int Never! {
+    size: native_eh_size(encoding)
+    value := link_debug_le(code.bytes, at, size)
+    if encoding & 0x08 != 0 && value >= 1 << (8 * size - 1) -> value -= 1 << (8 * size)
+    if encoding & 0x70 == 0x10 -> value += code.address + at
+    value
+}
+
+// The CIE at `at` in `bytes`; None for a record that is no CIE or whose
+// augmentation the reader doesn't know.
+native_cie_read: fn(bytes: [U8], at: Int) -> NativeCie? Never! {
+    if at < 0 -> return None
+    length: link_debug_le(bytes, at, 4)
+    if length <= 0 || length == 0xffffffff || at + 4 + length > bytes.len() || link_debug_le(bytes, at + 4, 4) != 0 {
+        return None
+    }
+    end: at + 4 + length
+    version: link_debug_le(bytes, at + 8, 1)
+    cursor := at + 9
+    letters := [Int]{}
+    loop cursor < end && bytes[cursor] != (U8{0}) {
+        letters.push(Int{bytes[cursor]})
+        cursor += 1
+    }
+    cursor += 1
+    code_align: link_debug_uleb(bytes, cursor)
+    data_align: x64_jetline_sleb(bytes, cursor)
+    if {
+        version == 1 -> cursor += 1
+        else -> _ := link_debug_uleb(bytes, cursor)
+    }
+    cie := NativeCie{code_align: code_align, data_align: data_align, encoding: 0, augmented: false, from: 0, to: end}
+    if letters.len() > 0 {
+        // "z", then per letter its data: R the FDEs' pointer encoding, P a
+        // personality routine's encoding and pointer, L the LSDA's
+        // encoding, S none.
+        if letters[0] != 0x7a -> return None
+        cie.augmented = true
+        size: link_debug_uleb(bytes, cursor)
+        data := cursor
+        loop letter in letters[1..<letters.len()] {
+            if letter == {
+                0x52 -> {
+                    cie.encoding = link_debug_le(bytes, data, 1)
+                    data += 1
+                }
+                0x50 -> {
+                    width: native_eh_size(link_debug_le(bytes, data, 1))
+                    if width == 0 -> return None
+                    data += 1 + width
+                }
+                0x4c -> data += 1
+                0x53 -> {}
+                else -> return None
+            }
+        }
+        cursor += size
+    }
+    cie.from = cursor
+    Val(cie)
+}
+
+// The row of `frames`' call frame tables at `pc`; None outside every FDE
+// or past an instruction the reader doesn't take (an expression's).
+native_cfi_row: fn(frames: NativeFrames, pc: Int) -> NativeCfiRow? Never! {
+    low := 0
+    high := frames.fdes.len()
+    loop low < high {
+        middle: (low + high) /% 2
+        if frames.fdes[middle].start <= pc -> low = middle + 1 else -> high = middle
+    }
+    if low == 0 || pc >= frames.fdes[low - 1].end -> return None
+    fde: frames.fdes[low - 1]
+    bytes: frames.sections[fde.section].bytes
+    cie: native_cie_read(bytes, fde.at + 4 - link_debug_le(bytes, fde.at + 4, 4)) ?? return None
+    instructions := fde.at + 8 + 2 * native_eh_size(cie.encoding)
+    if cie.augmented {
+        skip: link_debug_uleb(bytes, instructions)
+        instructions += skip
+    }
+    end: fde.at + 4 + link_debug_le(bytes, fde.at, 4)
+    row := NativeCfiRow{register: 7, offset: 8, rules: loop _ in 0..<NATIVE_CFI_REGISTERS -> NATIVE_CFI_SAME, offsets: loop _ in 0..<NATIVE_CFI_REGISTERS -> 0}
+    // What each change to the row replaced (native_cfi_rule), so that
+    // DW_CFA_restore_state can undo back to its DW_CFA_remember_state and
+    // DW_CFA_restore can find a register's rule as the CIE left it.
+    log := [Int]{}
+    // The log's length where the CIE's instructions end; -1 within them.
+    cie_end := -1
+    location := fde.start
+    loop segment in 0..<2 {
+        at := if segment == 0 -> cie.from else -> instructions
+        to: if segment == 0 -> cie.to else -> end
+        loop at < to {
+            op: Int{bytes[at]}
+            at += 1
+            advance := 0
+            if {
+                op >> 6 == 1 -> advance = (op & 0x3f) * cie.code_align
+                op >> 6 == 2 -> native_cfi_rule(row, log, op & 0x3f, NATIVE_CFI_SAVED, link_debug_uleb(bytes, at) * cie.data_align)
+                op >> 6 == 3 -> native_cfi_restore(row, log, cie_end, op & 0x3f)
+                op == 0x00 -> {}
+                op == 0x02 || op == 0x03 || op == 0x04 -> {
+                    width: if op == {
+                        0x02 -> 1
+                        0x03 -> 2
+                        else -> 4
+                    }
+                    advance = link_debug_le(bytes, at, width) * cie.code_align
+                    at += width
+                }
+                op == 0x05 -> {
+                    register: link_debug_uleb(bytes, at)
+                    native_cfi_rule(row, log, register, NATIVE_CFI_SAVED, link_debug_uleb(bytes, at) * cie.data_align)
+                }
+                op == 0x06 -> native_cfi_restore(row, log, cie_end, link_debug_uleb(bytes, at))
+                op == 0x07 -> native_cfi_rule(row, log, link_debug_uleb(bytes, at), NATIVE_CFI_LOST, 0)
+                op == 0x08 -> native_cfi_rule(row, log, link_debug_uleb(bytes, at), NATIVE_CFI_SAME, 0)
+                op == 0x0a -> native_cfi_log(log, NATIVE_CFI_LOG_MARK, 0, 0)
+                op == 0x0b -> {
+                    if !native_cfi_undo(row, log, if cie_end < 0 -> 0 else -> cie_end) {
+                        return None
+                    }
+                }
+                op == 0x0c -> {
+                    register: link_debug_uleb(bytes, at)
+                    native_cfi_rule(row, log, NATIVE_CFI_LOG_FRAME, register, link_debug_uleb(bytes, at))
+                }
+                op == 0x0d -> {
+                    offset: row.offset
+                    native_cfi_rule(row, log, NATIVE_CFI_LOG_FRAME, link_debug_uleb(bytes, at), offset)
+                }
+                op == 0x0e -> {
+                    register: row.register
+                    native_cfi_rule(row, log, NATIVE_CFI_LOG_FRAME, register, link_debug_uleb(bytes, at))
+                }
+                op == 0x11 -> {
+                    register: link_debug_uleb(bytes, at)
+                    native_cfi_rule(row, log, register, NATIVE_CFI_SAVED, x64_jetline_sleb(bytes, at) * cie.data_align)
+                }
+                op == 0x12 -> {
+                    register: link_debug_uleb(bytes, at)
+                    native_cfi_rule(row, log, NATIVE_CFI_LOG_FRAME, register, x64_jetline_sleb(bytes, at) * cie.data_align)
+                }
+                op == 0x13 -> {
+                    register: row.register
+                    native_cfi_rule(row, log, NATIVE_CFI_LOG_FRAME, register, x64_jetline_sleb(bytes, at) * cie.data_align)
+                }
+                // DW_CFA_GNU_args_size.
+                op == 0x2e -> _ := link_debug_uleb(bytes, at)
+                else -> return None
+            }
+            location += advance
+            if location > pc -> return Val(row)
+        }
+        if segment == 0 -> cie_end = log.len()
+    }
+    Val(row)
+}
+
+// A log entry of native_cfi_row's that changed the canonical frame
+// address rule (its register and offset), not a register's.
+NATIVE_CFI_LOG_FRAME: -1
+
+// A log entry of native_cfi_row's that marks a DW_CFA_remember_state.
+NATIVE_CFI_LOG_MARK: -2
+
+// Give DWARF register `register` of `row` the rule `rule` at `offset`, or
+// with NATIVE_CFI_LOG_FRAME give the canonical frame address register
+// `rule` and offset `offset`; `log` gains what it replaced. A register past
+// the return address's column has no rule.
+native_cfi_rule: fn(row: &NativeCfiRow, log: &[Int], register: Int, rule: Int, offset: Int) Never! {
+    if register == NATIVE_CFI_LOG_FRAME {
+        native_cfi_log(log, NATIVE_CFI_LOG_FRAME, row.register, row.offset)
+        row.register = rule
+        row.offset = offset
+        return
+    }
+    if register < 0 || register >= NATIVE_CFI_REGISTERS {
+        return
+    }
+    native_cfi_log(log, register, row.rules[register], row.offsets[register])
+    row.rules[register] = rule
+    row.offsets[register] = offset
+}
+
+// Add the entry `kind`, `value`, `offset` to native_cfi_row's `log`.
+native_cfi_log: fn(log: &[Int], kind: Int, value: Int, offset: Int) Never! {
+    log.push(kind)
+    log.push(value)
+    log.push(offset)
+}
+
+// Return DWARF register `register` of `row` to its rule where the CIE's
+// instructions end, at `cie_end` in `log`: what the first change after
+// that replaced, else the rule it still has. Within the CIE's
+// instructions (`cie_end` -1) that is the rule every register starts with.
+native_cfi_restore: fn(row: &NativeCfiRow, log: &[Int], cie_end: Int, register: Int) Never! {
+    if register < 0 || register >= NATIVE_CFI_REGISTERS {
+        return
+    }
+    if cie_end < 0 {
+        native_cfi_rule(row, log, register, NATIVE_CFI_SAME, 0)
+        return
+    }
+    at := cie_end
+    loop at + 2 < log.len() {
+        if log[at] == register {
+            rule: log[at + 1]
+            offset: log[at + 2]
+            native_cfi_rule(row, log, register, rule, offset)
+            return
+        }
+        at += 3
+    }
+}
+
+// Undo `row`'s changes in `log` back to its last DW_CFA_remember_state
+// mark at or past `floor`; false when there is none.
+native_cfi_undo: fn(row: &NativeCfiRow, log: &[Int], floor: Int) -> Bool Never! {
+    loop log.len() >= floor + 3 {
+        offset: log.pop() ?? 0
+        value: log.pop() ?? 0
+        kind: log.pop() ?? 0
+        if {
+            kind == NATIVE_CFI_LOG_MARK -> return true
+            kind == NATIVE_CFI_LOG_FRAME -> {
+                row.register = value
+                row.offset = offset
+            }
+            else -> {
+                row.rules[kind] = value
+                row.offsets[kind] = offset
+            }
+        }
+    }
+    false
 }
 
 // The value of the symbol named `name` in the image's symbol table; None
@@ -338,7 +723,9 @@ native_encoding: fn(code: Int) -> X64DebugEncoding Never! {
 // abstract subprogram an inlined run is of and `call_line` and `call_file`
 // its call's line and file (and a call site's line and `call_column`);
 // `file` is a declaration's file, `return_pc` a call site's return
-// address and `producer` a unit's producer.
+// address and `producer` a unit's producer; `expression` is an exprloc
+// DW_AT_location (a call site parameter's register) and `call_value` a
+// call site parameter's DW_AT_call_value.
 NativeDie: struct {
     tag: Int,
     offset: Int,
@@ -362,6 +749,8 @@ NativeDie: struct {
     return_pc: Int,
     call_column: Int{0},
     producer: String{""},
+    expression: [U8]{[U8]{}},
+    call_value: [U8]{[U8]{}},
 }
 
 // The DIEs of the unit at [start, end) of `info`, into `image`.
@@ -409,6 +798,16 @@ native_image_unit: fn(image: &NativeImage, info: [U8], abbrev: [U8], start: Int,
 
 // Record attribute `attribute` of `die`, a `form` value at `at`.
 native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8], at: Int, unit: Int) Never! {
+    if form == 0x18 && (attribute == 0x02 || attribute == 0x7e) {
+        cursor := at
+        length: link_debug_uleb(info, cursor)
+        if length < 0 || cursor + length > info.len() {
+            return
+        }
+        expression: info[cursor..<cursor + length]
+        if attribute == 0x02 -> die.expression = expression else -> die.call_value = expression
+        return
+    }
     value: if form == {
         0x08 -> 0
         0x01 | 0x07 -> link_debug_addr(info, at)
@@ -575,6 +974,20 @@ native_image_die: fn(image: &NativeImage, die: NativeDie, open: [NativeDie], bas
                 image.calls[die.return_pc] = NativeCallSite{line: die.call_line, column: die.call_column}
             }
         }
+        code == NATIVE_TAG_CALL_SITE_PARAMETER -> {
+            if open.len() == 0 {
+                return
+            }
+            site: open[open.len() - 1]
+            if site.tag != NATIVE_TAG_CALL_SITE || site.return_pc < 0 {
+                return
+            }
+            register: native_location_register(die.expression, 0, die.expression.len())
+            if register < 0 || die.call_value.len() == 0 {
+                return
+            }
+            image.arguments.push(NativeCallArgument{at: site.return_pc, register: register, value: die.call_value})
+        }
         code == NATIVE_TAG_PARAMETER || code == NATIVE_TAG_VARIABLE -> {
             if image.functions.len() == 0 || !native_open_in_function(open) {
                 return
@@ -656,12 +1069,21 @@ native_ranges: fn(image: NativeImage, list: Int, base: Int) -> [NativeRange] Nev
     ranges
 }
 
-// The function holding `pc`, else None.
+// The function holding `pc`, else None: the last one starting at or before
+// it, as functions don't overlap.
 native_function_at: fn(image: NativeImage, pc: Int) -> NativeFunction? Never! {
-    loop function in image.functions {
-        if pc >= function.low && pc < function.high -> return Val(function)
+    // The first function starting past `pc`.
+    low := 0
+    high := image.functions.len()
+    loop low < high {
+        middle: (low + high) >> 1
+        if {
+            (image.functions[middle].low <= pc) -> low = middle + 1
+            else -> high = middle
+        }
     }
-    None
+    if low == 0 || pc >= image.functions[low - 1].high -> return None
+    Val(image.functions[low - 1])
 }
 
 // A fallible call's carrier as the compiler describes it (JetIR X64Module.jet

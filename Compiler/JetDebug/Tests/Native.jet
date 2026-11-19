@@ -4,8 +4,8 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NATIVE_DEBUG_CUT_OFF, NativeBlock, NativeBreak, NativeCut, NativeDebugError, NativeFrame, NativeFunction, NativeInlined, NativeLocal, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeVariable, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_inline_chain, native_jet_spelling]
-    jet_backend.[x64_eval_fork_filter, x64_jetline_sleb]
+    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_frame_locals, native_frames_index, native_function_at, native_inline_chain, native_jet_spelling]
+    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, x64_eval_fork_filter, x64_jetline_sleb]
     jet_foundation.[DeepChecks]
 }
 
@@ -108,10 +108,119 @@ native_test_bytes: fn(words: [Int], size: Int) -> [U8] {
     assert_eq(native_debug_string(64, memory), String?{None})
 }
 
+// An `.eh_frame` at 0x2000 whose one FDE covers [0x1000, 0x1010): a
+// "zR" CIE (pc-relative sdata4 pointers, code alignment 1, data alignment
+// -8, the return address in column 16) whose initial rule is CFA = rsp + 8,
+// then `push rbp` at 0x1000 and `mov rbp, rsp` at 0x1001: each row is the
+// one its address holds.
+#Test("call_frame_rows_follow_the_fde_up_to_the_address") {
+    // The CIE's 24 bytes, the FDE's 28, then the terminator.
+    section: [Int]{20, 0, 0, 0, 0, 0, 0, 0, 1, 0x7a, 0x52, 0, 1, 0x78, 0x10, 1, 0x1b, 0x0c, 7, 8, 0x90, 1, 0, 0, 24, 0, 0, 0, 28, 0, 0, 0, 0xe0, 0xef, 0xff, 0xff, 0x10, 0, 0, 0, 0, 0x41, 0x0e, 0x10, 0x86, 0x02, 0x43, 0x0d, 0x06, 0, 0, 0, 0, 0, 0, 0}
+    bytes: loop value in section -> U8{value}
+    code: NativeCode{address: 0x2000, bytes: bytes}
+    fdes := [NativeFde]{}
+    native_frames_index(fdes, code, 0)
+    assert_eq(fdes.len(), 1)
+    assert_eq(fdes[0].start, 0x1000)
+    assert_eq(fdes[0].end, 0x1010)
+    frames: NativeFrames{sections: [NativeCode]{code}, fdes: fdes}
+    entry: native_cfi_row(frames, 0x1000) ?? return assert(false, "no row at the entry")
+    assert_eq(entry.register, 7)
+    assert_eq(entry.offset, 8)
+    assert_eq(entry.rules[NATIVE_CFI_RETURN], NATIVE_CFI_SAVED)
+    assert_eq(entry.offsets[NATIVE_CFI_RETURN], -8)
+    assert_eq(entry.rules[6], NATIVE_CFI_SAME)
+    pushed: native_cfi_row(frames, 0x1003) ?? return assert(false, "no row after the push")
+    assert_eq(pushed.register, 7)
+    assert_eq(pushed.offset, 16)
+    assert_eq(pushed.rules[6], NATIVE_CFI_SAVED)
+    assert_eq(pushed.offsets[6], -16)
+    framed: native_cfi_row(frames, 0x100f) ?? return assert(false, "no row in the body")
+    assert_eq(framed.register, 6)
+    assert_eq(framed.offset, 16)
+    assert_eq(native_cfi_row(frames, 0x1010) == None, true)
+    assert_eq(native_cfi_row(frames, 0xfff) == None, true)
+}
+
+// A frame stopped at `pc` that knows none of its registers.
+native_test_unwound: fn(pc: Int) -> NativeUnwound {
+    registers: loop _ in 0..<27 -> 0
+    known: loop _ in 0..<27 -> false
+    NativeUnwound{pc: pc, cfa: 0, registers: registers, known: known}
+}
+
+// `count` is in rbx over [0x1010, 0x1020), then its entry value (rdi's when
+// `check` was called); `other` is only in rsi over [0x1010, 0x1020). At
+// 0x1050 `count` is the 3 the call returning to 0x2005 passed in rdi (its
+// call site parameter), and `other` is not kept; a caller whose call
+// recorded no value leaves `count` not kept either, never a stale register.
+#Test("a_parameter_past_its_range_reads_the_value_its_caller_passed") {
+    loclists: [U8]{0x04, 0x10, 0x20, 0x01, 0x53, 0x04, 0x20, 0x80, 0x02, 0x04, 0xa3, 0x01, 0x55, 0x9f, 0x00, 0x04, 0x10, 0x20, 0x01, 0x54, 0x00}
+    count: NativeVariable{name: "count", line: 1, ty: 40, list: 0, base: 0x1000, role: NativeVariableRole.Parameter, site: -1}
+    other: NativeVariable{name: "other", line: 1, ty: 40, list: 15, base: 0x1000, role: NativeVariableRole.Parameter, site: -1}
+    function: NativeFunction{low: 0x1000, high: 0x1100, name: "check", file: -1, variables: [NativeVariable]{count, other}, inlined: [NativeInlined]{}}
+    types := [Int:NativeType]{}
+    types[40] = NativeType{name: "I64", size: 8, tag: 0x24, encoding: X64DebugEncoding.Signed, target: -1, group: -1}
+    arguments: [NativeCallArgument]{NativeCallArgument{at: 0x2005, register: 5, value: [U8]{0x11, 0x03}}}
+    image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{function}, types: types, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: loclists, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, arguments: arguments}
+    memory: NativeMemory{trace: None, blocks: [NativeBlock]{}}
+    shown: native_frame_locals(image, memory, native_test_unwound(0x1050), 0x1050, -1, NativeUnwound?{Val(native_test_unwound(0x2005))})
+    assert_eq(shown.len(), 2)
+    assert_eq(shown[0].name, "count")
+    assert_eq(shown[0].value, "3")
+    assert_eq(shown[1].name, "other")
+    assert_eq(shown[1].value, NATIVE_DEBUG_NOT_KEPT)
+    unrecorded: native_frame_locals(image, memory, native_test_unwound(0x1050), 0x1050, -1, NativeUnwound?{Val(native_test_unwound(0x3000))})
+    assert_eq(unrecorded[0].value, NATIVE_DEBUG_NOT_KEPT)
+    alone: native_frame_locals(image, memory, native_test_unwound(0x1050), 0x1050, -1, NativeUnwound?{None})
+    assert_eq(alone[0].value, NATIVE_DEBUG_NOT_KEPT)
+}
+
+// Functions in address order with a gap between them: an address finds the
+// one holding it, and one in the gap, before the first or at the last's end
+// finds none.
+#Test("an_address_finds_the_function_holding_it") {
+    first: NativeFunction{low: 0x1000, high: 0x1010, name: "first", file: -1, variables: [NativeVariable]{}, inlined: [NativeInlined]{}}
+    second: NativeFunction{low: 0x1020, high: 0x1030, name: "second", file: -1, variables: [NativeVariable]{}, inlined: [NativeInlined]{}}
+    image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{first, second}, types: [Int:NativeType]{}, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: [U8]{}, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}}
+    assert_eq((native_function_at(image, 0x1000) ?? return assert(false, "no function at 0x1000")).name, "first")
+    assert_eq((native_function_at(image, 0x100f) ?? return assert(false, "no function at 0x100f")).name, "first")
+    assert_eq((native_function_at(image, 0x1025) ?? return assert(false, "no function at 0x1025")).name, "second")
+    assert_eq(native_function_at(image, 0x1010) == None, true)
+    assert_eq(native_function_at(image, 0xfff) == None, true)
+    assert_eq(native_function_at(image, 0x1030) == None, true)
+}
+
 #Test("an_unavailable_debugger_is_e2203") {
     diagnostic: NativeDebugError{detail: "the program has no Jet debug information"}.diagnostic()
     assert_eq(diagnostic.code, "E2203")
     assert(diagnostic.what.contains("the program has no Jet debug information"))
+}
+
+// The same FDE but for its instructions: `push rbp` at 0x1000, then
+// DW_CFA_remember_state, CFA = rsp + 32 and rbp back to the CIE's rule
+// over [0x1003, 0x1004), and DW_CFA_restore_state at 0x1004.
+#Test("call_frame_rows_restore_a_register_and_a_remembered_state") {
+    section: [Int]{20, 0, 0, 0, 0, 0, 0, 0, 1, 0x7a, 0x52, 0, 1, 0x78, 0x10, 1, 0x1b, 0x0c, 7, 8, 0x90, 1, 0, 0, 28, 0, 0, 0, 28, 0, 0, 0, 0xe0, 0xef, 0xff, 0xff, 0x10, 0, 0, 0, 0, 0x41, 0x0e, 0x10, 0x86, 0x02, 0x0a, 0x42, 0x0e, 0x20, 0xc6, 0x41, 0x0b, 0, 0, 0, 0, 0, 0, 0}
+    bytes: loop value in section -> U8{value}
+    code: NativeCode{address: 0x2000, bytes: bytes}
+    fdes := [NativeFde]{}
+    native_frames_index(fdes, code, 0)
+    frames: NativeFrames{sections: [NativeCode]{code}, fdes: fdes}
+    pushed: native_cfi_row(frames, 0x1001) ?? return assert(false, "no row after the push")
+    assert_eq(pushed.offset, 16)
+    assert_eq(pushed.rules[6], NATIVE_CFI_SAVED)
+    restored: native_cfi_row(frames, 0x1003) ?? return assert(false, "no row after the restore")
+    assert_eq(restored.register, 7)
+    assert_eq(restored.offset, 32)
+    assert_eq(restored.rules[6], NATIVE_CFI_SAME)
+    assert_eq(restored.offsets[6], 0)
+    assert_eq(restored.rules[NATIVE_CFI_RETURN], NATIVE_CFI_SAVED)
+    remembered: native_cfi_row(frames, 0x1004) ?? return assert(false, "no row after the restored state")
+    assert_eq(remembered.register, 7)
+    assert_eq(remembered.offset, 16)
+    assert_eq(remembered.rules[6], NATIVE_CFI_SAVED)
+    assert_eq(remembered.offsets[6], -16)
 }
 
 // The names a debug image gives types are symbol keys
@@ -324,6 +433,118 @@ NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
 
+// An -O2 `run` that starts a task inlines into the entry wrapper.
+NATIVE_TEST_INLINED_RUN: "work: fn(n: Int) -> Int {{\n    n * 2\n}}\n\nrun: fn() {{\n    t: task work(21)\n    print(\"got {{t.join() ?? 0}}\")\n}}\n"
+
+#Test("an_o2_image_whose_run_is_inlined_opens_at_its_entry") {
+    scratch: native_test_files.temp_dir("jet-debug-run-source") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_INLINED_RUN, [String]{"-O2"})
+    named: loop found in session.image.lines.functions {
+        if found.name == "run" {
+            break true
+        }
+    } ?? false
+    assert(!named, "run is inlined into the entry at -O2")
+    assert_eq(native_test_files.basename(session.run_source()), "prog.jet")
+    lines: NATIVE_TEST_INLINED_RUN.split("\n").to_list()
+    first: session.open("prog.jet", lines, [String]{}) ?? panic("the entry wrapper opens the session")
+    rest: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("got 42\nProgram finished\n"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+NATIVE_TEST_REVERSE: "double: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    total := 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n    }}\n    print(\"total {{total}}\")\n}}\n"
+
+// A reverse step made after a seek (`rn`) and a step (`n`) runs the seek
+// and the step again with its probes in: the step's run passes the probes
+// in the call as any run does, so the program comes back to the stop and
+// the step goes back into the call's last line. A session with an
+// environment reverses as a replay does; the program's main task runs the
+// same each time.
+#Test("a_reverse_step_after_a_seek_and_a_step_goes_into_the_call") {
+    scratch: native_test_files.temp_dir("jet-debug-reverse") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_REVERSE, [String]{"-O0"})
+    session.env = Val([String]{"NO_COLOR=1"})
+    lines: NATIVE_TEST_REVERSE.split("\n").to_list()
+    first: session.open("prog.jet", lines, [String]{}) ?? panic("the session opens at run")
+    stop := first.stop
+    shown := ""
+    words: [String]{"break 10", "c", "rn", "n", "rs"}
+    loop word in words {
+        step: session.command(word, stop, "prog.jet", lines) ?? panic("{word}: {err.detail}")
+        shown = step.text
+        stop = step.stop
+    }
+    assert(shown.starts_with("3 |     y        <- here\n"), shown)
+    rest: session.command("c", stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("Breakpoint hit  prog.jet:10"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// An -O0 frame holds its locals in registers: `why` follows `total`'s
+// register through run's own code from the frame's start, so the third
+// pass of line 10 names the write on the loop's second pass (the first
+// added 0, which changed nothing), and the session comes back to its stop.
+#Test("why_follows_a_local_held_in_a_register") {
+    scratch: native_test_files.temp_dir("jet-debug-why-register") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_REVERSE, [String]{"-O0"})
+    session.env = Val([String]{"NO_COLOR=1"})
+    lines: NATIVE_TEST_REVERSE.split("\n").to_list()
+    first: session.open("prog.jet", lines, [String]{}) ?? panic("the session opens at run")
+    stop := first.stop
+    words: [String]{"break 10", "c", "c", "c"}
+    loop word in words {
+        step: session.command(word, stop, "prog.jet", lines) ?? panic("{word}: {err.detail}")
+        stop = step.stop
+    }
+    asked: session.command("why total", stop, "prog.jet", lines) ?? panic("why: {err.detail}")
+    assert(asked.text.starts_with("total = 2, set at prog.jet:10 in run() (task 1)\n  before: 0\n  #0  run()  at prog.jet:10\n"), asked.text)
+    bound: session.command("why k", stop, "prog.jet", lines) ?? panic("why: {err.detail}")
+    assert(bound.text.starts_with("k = 2, set at prog.jet:8 in run() (task 1)\n"), bound.text)
+    // Each pass binds `d` again, from outside its register's range.
+    again: session.command("why d", stop, "prog.jet", lines) ?? panic("why: {err.detail}")
+    assert(again.text.starts_with("d = 4, set at prog.jet:9 in run() (task 1)\n  before: none: this line binds it\n"), again.text)
+    rest: session.command("c", stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("total 6\nProgram finished\n"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// A task keeps the -O2 loop from folding away; `d` has no place in it.
+NATIVE_TEST_RECOVER: "bump: fn(rounds: Int) -> Int {{\n    rounds * 2\n}}\n\ndouble: fn(x: Int) -> Int {{\n    y: x * 2\n    y\n}}\n\nrun: fn() {{\n    helper: task bump(3)\n    total := 0\n    loop k in 0..<3 {{\n        d: double(k)\n        total += d\n    }}\n    print(\"total {{total}} {{helper.join() ?? 0}}\")\n}}\n"
+
+// An -O2 image keeps no place for `d` on line 15: `why` asks for a
+// recovery, and the -O0 image of the same source, run to the same pass of
+// the line, answers there, labeled; the -O2 session stays at its stop.
+#Test("why_recovers_an_optimized_away_local_from_the_o0_image") {
+    scratch: native_test_files.temp_dir("jet-debug-why-recover") ?? panic("scratch: {err}")
+    root: scratch.path
+    other: native_test_files.temp_dir("jet-debug-why-recover-o0") ?? panic("scratch: {err}")
+    unoptimized: other.path
+    built := native_test_session(unoptimized, NATIVE_TEST_RECOVER, [String]{"-O0", "--dead-code=keep"})
+    built.close()
+    session := native_test_session(root, NATIVE_TEST_RECOVER, [String]{"-O2"})
+    session.env = Val([String]{"NO_COLOR=1"})
+    lines: NATIVE_TEST_RECOVER.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 15}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    second: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    asked: session.why("d") ?? panic("why: {err.detail}")
+    assert(asked.recover, asked.text)
+    image: native_test_files.join(native_test_files.join(unoptimized, "out"), "prog")
+    recovered: session.recovered("d", image, native_test_files.join(root, "recovered.txt")) ?? panic("recovered: {err.detail}")
+    assert(recovered.starts_with("d = 2 (recovered from the -O0 replay), set at prog.jet:14 in run() (task 1)\n"), recovered)
+    rest: session.command("c", second.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("Breakpoint hit  prog.jet:15"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+    native_test_files.remove_all(unoptimized) ?? panic("scratch cleanup: {err}")
+}
+
 #Test("a_split_debug_image_is_read_through_its_debug_link") {
     scratch: native_test_files.temp_dir("jet-debug-split") ?? panic("scratch: {err}")
     root: scratch.path
@@ -381,6 +602,31 @@ NATIVE_TEST_SPIN: "use process: core.process\n\nSpin: struct {{\n    count: Int,
     line: (over.stop.frame ?? panic("next frame")).line
     assert(line == 8 || line == 9, "next stops at the loop or the call, not in double: {line}")
     rest: session.command("c", over.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+    assert(rest.text.contains("count 2\nProgram finished\n"), rest.text)
+    session.close()
+    native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+}
+
+// A next over a call stops at a breakpoint in it; a next off a function's
+// last line returns to its caller's line.
+#Test("next_stops_at_a_breakpoint_in_its_call_and_returns_off_the_last_line") {
+    scratch: native_test_files.temp_dir("jet-debug-next-return") ?? panic("scratch: {err}")
+    root: scratch.path
+    session := native_test_session(root, NATIVE_TEST_PROGRAM, [String]{"-O0"})
+    lines: NATIVE_TEST_PROGRAM.split("\n").to_list()
+    first: session.run_to([NativeBreak]{{file: "prog.jet", line: 9}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    if session.break_at("prog.jet", 3) == {
+        .Ok(number) -> { assert_eq(number ?? -1, 2) }
+        .Err(failure) -> panic("break: {failure.detail}")
+    }
+    hit: session.command("n", first.stop, "prog.jet", lines) ?? panic("next: {err.detail}")
+    assert(hit.text.contains("3 |     y        <- here\n"), hit.text)
+    assert(hit.text.contains("Breakpoint"), hit.text)
+    session.clear_breakpoints() ?? panic("clear: {err.detail}")
+    back: session.command("n", hit.stop, "prog.jet", lines) ?? panic("next: {err.detail}")
+    assert(back.text.contains("9 |         count += double(i)        <- here\n"), back.text)
+    rest: session.command("c", back.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
     assert(rest.text.contains("count 2\nProgram finished\n"), rest.text)
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")

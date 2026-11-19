@@ -171,7 +171,7 @@ debug_render_snapshot_locals: fn(values: [ValueSnapshot]) -> String Never! {
 // Rust debug_value: typed safe projection of one published local value.
 debug_value: fn(value: ValueSnapshot) -> DebugValue DebugEvaluationError! {
     raw: value.value.trim()
-    if raw == "<optimized out>" || raw == NATIVE_DEBUG_UNAVAILABLE {
+    if raw == "<optimized out>" || raw == NATIVE_DEBUG_UNAVAILABLE || raw == NATIVE_DEBUG_NOT_KEPT {
         return Err(debug_evaluation_error("local `{value.name}` has no readable value at this stop"))
     }
     type_name: value.type_name.trim()

@@ -157,6 +157,12 @@ jet_cli_debug_replay_env: fn(name: String, entry: String, scratch: String) -[FS,
     Ok(jet_cli_launch_env([JetCLIEnvVar]{JetCLIEnvVar{name: ENV_JET_RECORD, value: ""}, JetCLIEnvVar{name: ENV_JET_REPLAY, value: log}}) ?? [String]{})
 }
 
+// The refusal of a replay of `image`, whose runtime links no observation
+// start, where a replay begins.
+jet_cli_debug_replay_unstarted: fn(image: String) -> JetCLIProveRefusal Never! {
+    JetCLIProveRefusal{code: "E2104", what: "`{image}` can't replay its recording", why: "the program starts no task and makes no channel, live value or event, so its runtime has no observation start, where a replay begins", fix: "replay a program that synchronizes; a program with none runs the same with `jet run`", exit_code: JET_DRIVER_EXIT_USAGE}
+}
+
 // A `--break` value, `<file.jet>:<line>`: the file by its base name, as the
 // image's line table names it.
 jet_cli_debug_break: fn(spec: String) -> NativeBreak? Never! {
@@ -191,7 +197,8 @@ jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch
     session := NativeSession.start(image, cli_files.join(scratch, "output.txt")) ?? return jet_cli_debug_unavailable(err, color)
     if env != None && !session.replay_start {
         session.close()
-        return jet_cli_fail("E2104", "`{image}` can't replay its recording", "the program starts no task and makes no channel, live value or event, so its runtime has no observation start, where a replay begins", "replay a program that synchronizes; a program with none runs the same with `jet run`", color, JET_DRIVER_EXIT_USAGE)
+        refused: jet_cli_debug_replay_unstarted(image)
+        return jet_cli_fail(refused.code, refused.what, refused.why, refused.fix, color, refused.exit_code)
     }
     session.env = env
     source_file: if entry == "" -> session.run_source() else -> entry
@@ -334,7 +341,7 @@ jet_cli_debug_commands: fn(session: &NativeSession, first: NativeDebugStep, file
 jet_cli_debug_why: fn(session: &NativeSession, operand: String, entry: String, scratch: String, deep_checks: DeepChecks, recovery: &String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> String NativeDebugError! {
     asked: session.why(operand) ?? return Err(err)
     if !asked.recover || entry != "" -> return Ok(asked.text)
-    source: session.why_source() ?? return Err(err)
+    source: session.run_source()
     if source == "" || !cli_files.exists(source) -> return Ok(asked.text)
     if recovery == "" {
         out_dir: cli_files.join(scratch, "why")

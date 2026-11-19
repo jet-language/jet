@@ -1,0 +1,14 @@
+# `jet dev <file> --canvas` debugs a recording and a dump in its Debug view: Tools/CanvasTest/Run.jet
+# native-debug-replay records the ReplayReverse fixture with `jet run --record=canvas`, opens a
+# native-recorded session on it that stops at the breakpoint on line 21, answers `why total` with
+# line 21's write, goes back with reverse-continue (d=2) and reverse-next (line 20), and refuses a
+# recording that isn't there and a native-recorded tier without one. Then it runs the
+# CrashDumpOpensTyped fixture under `jet run --observe`, and opens the dump its panic wrote as a
+# native-dump session: the stopping line 9, the locals with the Secret redacted, the call stack, the
+# stopping task, and a `continue` that answers a dump doesn't run.
+requires: os-name:linux
+env: JET_BIN={jet}
+env: TMPDIR={scratch}
+step: jet run --allow=Env,Exec,FS,IO,Net,Time {root}/Tools/CanvasTest/Run.jet -- native-debug-replay --replay-source {root}/Tests/Cases/Debug/ReplayReverse.fixture/prog.jet --dump-source {root}/Tests/Cases/Debug/CrashDumpOpensTyped.fixture/crash.jet
+exit: 0
+stdout: ~ "PASS native jet dev --canvas Debug replay and dump" # the probe's one pass line; the URL, port and secret vary per run

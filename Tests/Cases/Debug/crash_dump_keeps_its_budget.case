@@ -3,26 +3,33 @@
 # PERF_FLIGHT_DUMP_BUDGET). The program stops with three 16 MB lists
 # reachable, so the dump holds the image and its records beside at most
 # 32 MiB of memory, and lists what it reached past the budget as cut off.
-# `jet debug` names the budget and shows a kept list's first items and a
-# list it cut off as `<cut off>`, never as bytes it does not have. Which
-# list is cut off follows the order the walk reaches them, so the case
-# asserts that one is, not which.
+# `jet debug` names the dump's parts, the image the run ran (`jet run
+# --observe`'s, with the precompiled Core), its records and the memory it
+# holds, and the budget; it shows a kept list's first items and a list it
+# cut off as `<cut off>`, never as bytes it does not have. Which list is
+# cut off follows the order the walk reaches them, so the case asserts
+# that one is, not which. The dump's size is bounded by the image it
+# states, so no list can hide in what it calls the image.
 requires: os-name:linux
 fixture: CrashDumpKeepsItsBudget.fixture
 env: NO_COLOR=1
-step: jet build big.jet
-exit: 0
-capture: image = size file .jet/build/big
 step: jet run --observe big.jet
 exit: nonzero
 stderr: ~ "stopped with 3 chunks" # the panic's own report
 stderr: ~ "dump written: " # and where its dump went
 capture: dump = sole-entry .jet/dumps ext = "jetdump"
-file: {cap:dump} size <= {cap:image}+35651584 # the image, 32 MiB of memory and under 2 MiB of records, not the 48 MB of lists
 step: jet debug {cap:dump}
 stdin: crash_dump_keeps_its_budget.stdin
 exit: 0
 stdout: ~ "Dump of process " # a dump, not a live process
+capture: image stdout.split(" bytes, with ", 0) after "Image: " # the image the run ran, as the dump states it
+capture: records stdout.split(" bytes of records", 0) after ", with " # the dump's bytes beside its image and memory
+capture: memory stdout.split(" bytes held", 0) after "Memory: " # the reached memory the dump holds
+capture: budget = text file memory_budget.txt
+capture: bound = text file records_bound.txt
+cap:memory: f64 <= {cap:budget} # at most the 32 MiB budget of memory
+cap:records: f64 < {cap:bound} # under 2 MiB of records
+file: {cap:dump} size <= {cap:image}+35651584 # the image, 32 MiB of memory and under 2 MiB of records, not the 48 MB of lists
 stdout: ~ "within the 33554432-byte budget; " # the budget it kept to
 stdout: !~ "; 0 bytes cut off past it" # and the bytes it cut off past it
 stdout: ~ "Stopped  big.jet:5  in check()" # the stopping line

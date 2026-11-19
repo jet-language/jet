@@ -104,15 +104,20 @@ NativeDumpTask: struct {
 }
 
 // An opened dump: its session, the flight ring's records, the pid and Unix
-// time of its stop, and its memory budget, the bytes of reached memory it
-// holds and the bytes it cut off past the budget.
+// time of its stop, and its parts as its bytes hold them: the image's bytes,
+// the reached memory's (the memory sections'), and the records' (every
+// other byte: its words, the ring, the tasks, the cut ranges and the
+// sections' own words); then its memory budget and the bytes it cut off
+// past it, as the cut section states them.
 NativeDumpOpened: struct {
     session: NativeSession,
     ring: [U8],
     pid: Int,
     seconds: Int,
+    image: Int,
+    memory: Int,
+    records: Int,
     budget: Int,
-    held: Int,
     cut_off: Int,
 }
 
@@ -135,14 +140,14 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     elf: bytes[header..<header + length]
     image: native_image_read(elf) ?? return Err(NativeDebugError{detail: "the program of `{path}` has no Jet debug information"})
     // A dump's frames open as the image's code opens them.
-    openings: native_openings(image, native_elf_code(elf))
+    openings: native_openings(image, native_elf_codes(elf, ".text"))
     // Each memory section is a span of the dump's bytes, which back them.
     blocks := [NativeBlock]{}
     cut := [NativeCut]{}
     ring_at := 0
     ring_size := 0
     budget := 0
-    held := 0
+    memory := 0
     cut_off := 0
     tasks := [NativeDumpTask]{}
     at := header + native_dump_pad(length)
@@ -154,6 +159,7 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
         if kind == NATIVE_DUMP_SECTION_END || size < 0 || at + size > bytes.len() -> break
         if kind == NATIVE_DUMP_SECTION_MEMORY {
             blocks.push(NativeBlock{address: address, bytes: [U8]{}, from: at, size: size})
+            memory += size
         }
         if kind == NATIVE_DUMP_SECTION_RING {
             ring_at = at
@@ -162,7 +168,6 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
         if kind == NATIVE_DUMP_SECTION_TASKS -> native_dump_tasks(tasks, bytes, at, size)
         if kind == NATIVE_DUMP_SECTION_CUT && size >= 32 {
             budget = native_dump_word(bytes, at)
-            held = native_dump_word(bytes, at + 8)
             cut_off = native_dump_word(bytes, at + 16)
             row := at + 32
             loop row + 16 <= at + size {
@@ -186,9 +191,10 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     ring: loop k in ring_at..<ring_at + ring_size -> bytes[k]
     pid: native_dump_word(bytes, 16)
     seconds: native_dump_word(bytes, 24)
+    records: bytes.len() - native_dump_pad(length) - memory
     dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: bytes.move(), cut: cut}}
     session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0}
-    Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds, budget: budget, held: held, cut_off: cut_off})
+    Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds, image: length, memory: memory, records: records, budget: budget, cut_off: cut_off})
 }
 
 // The little-endian word at `at`.

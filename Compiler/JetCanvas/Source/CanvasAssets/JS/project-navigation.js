@@ -1727,7 +1727,7 @@
     debugSessionInfo = {
       id: persisted.session_id,
       state: "running",
-      tier: persisted.tier || "native-recorded",
+      tier: persisted.tier || "native",
       source_id: persisted.source_id || currentCanvasSourceId(),
       revision: persisted.revision || latestDoc.revision
     };
@@ -1795,7 +1795,9 @@
     syncDebugLiveness();
   }
 
-  function runDebug(commands) {
+  // Run `commands` in the session shown, or open a new one: on the tier
+  // `open` names ({ tier, recording } or { tier, dump }), else `native`.
+  function runDebug(commands, open = null) {
     if (!latestDoc || !canvasCapability("runtime_output")) return;
     loadDebugState(latestDoc);
     debugConnectionState = "connecting";
@@ -1815,8 +1817,14 @@
       watches: debugState.watches || []
     };
     if (requestedSourceId) body.source_id = requestedSourceId;
-    if (requestedSession) body.session_id = requestedSession.id;
-    if (debugSessionInfo && debugSessionInfo.tier) body.tier = debugSessionInfo.tier;
+    if (requestedSession) {
+      body.session_id = requestedSession.id;
+      if (requestedSession.tier) body.tier = requestedSession.tier;
+    } else if (open) {
+      body.tier = open.tier;
+      if (open.recording) body.recording = open.recording;
+      if (open.dump) body.dump = open.dump;
+    }
     fetch(debugUrl, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
       .then((r) => r.json().then((j) => ({ ok: r.ok, json: canvasPayload(j) })))
       .then((result) => {
