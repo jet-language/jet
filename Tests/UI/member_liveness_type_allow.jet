@@ -1,0 +1,47 @@
+// @all_diags
+// An `#Allow` on a struct or enum covers the whole type: its unread fields
+// and unbuilt cases are not reported, while its unannotated twin's still are.
+#Allow(jet.UnreadField, "judged by its own package's check")
+Kept: struct {
+    name: String,
+    nickname: String,
+}
+
+Open: struct {
+    name: String,
+    nickname: String,
+}
+
+#Allow(jet.UnbuiltCase, "judged by its own package's check")
+KeptPlan: enum {
+    Free,
+    Legacy,
+}
+
+OpenPlan: enum {
+    Free,
+    Legacy,
+}
+
+kept_label: fn(plan: KeptPlan) -> String {
+    if plan == {
+        .Free -> "free"
+        .Legacy -> "legacy"
+    }
+}
+
+open_label: fn(plan: OpenPlan) -> String {
+    if plan == {
+        .Free -> "free"
+        .Legacy -> "legacy"
+    }
+}
+
+run: fn() {
+    kept: Kept{name: "a", nickname: "b"}
+    open: Open{name: "c", nickname: "d"}
+    print(kept.name)
+    print(open.name)
+    print(kept_label(.Free))
+    print(open_label(.Free))
+}

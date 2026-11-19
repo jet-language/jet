@@ -3480,7 +3480,9 @@ These keys are package/organization settings, not source settings:
 `#Policy(lint_allow)` is E0355. Source writes the concrete gate instead. A
 lint exemption is `#Allow(jet.LintName, "why this lint does not apply")`,
 naming the lint by its diagnostic type path (`jet.UnitScalarRewrap`); its
-reason slot is optional, but omission emits `jet.AllowReason` (L3103).
+reason slot is optional, but omission emits `jet.AllowReason` (L3103). It
+covers its target: a statement, a function or method, a struct field, or a
+whole struct or enum type with its fields and cases.
 `#Allow(jet.AllowReason)` cannot suppress that audit and is E0355. Reviewed
 corpus exemptions keep reasons at these source sites, not in manifest rows.
 `jet fix` rewrites the retired `#allow(lint_name, …)` spelling to `#Allow`.
