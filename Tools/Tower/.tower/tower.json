@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112364,
+    "rev": 112366,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75296,6 +75296,11 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "Correction: D-DEBUG-FOLD1 is added as a draft. It waits for decision review before it reaches the owner. Note for the review: another ballot on this card says an -O0 build keeps every pure call; Comptime/LocalValues.jet folds on every tier, so that text is wrong."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "Ballot D-DEBUG-FOLD1 filed (drafted by Lens, validated): what jet debug does with calls sema works out ahead (Comptime/LocalValues.jet folds a pure call with literal arguments on every tier, so `break count_up` is set and never hits). Options A (jet debug builds keep the calls, the #Runtime(.NoEager) policy; other images refuse with a new diagnostic), B, C; recommendation A. Owner decides; nothing is decided until ratified."
         },
         {
@@ -76127,7 +76132,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T09:40:44.100Z",
+      "updated": "2026-11-19T09:40:55.096Z",
       "updatedBy": "Main",
       "criteriaLastN": 67
     },
@@ -158146,6 +158151,197 @@
       "created": "2026-11-18T21:33:59.486Z",
       "outcome": "A",
       "ratifiedAt": "2026-11-18"
+    },
+    {
+      "id": "D-DEBUG-FOLD1",
+      "cardId": "c0nwrfck",
+      "group": "tooling",
+      "title": "What the debugger does with calls the compiler works out ahead",
+      "situation": "Jet works out some values while it compiles. When a program writes `first: count_up(1000000)` and count_up only computes, the compiler runs count_up during the build and the program just holds the answer. That is fine for `jet run`, but it surprises the debugger. Today `jet debug` accepts `break count_up`, says \"Breakpoint set\", and the program finishes without ever stopping, because count_up never runs. A logpoint inside it is accepted and logs nothing. Beginners feel this most: their first breakpoint on a small test function silently does nothing. You decide what `jet debug` does about calls the build computes ahead. We recommend that the program `jet debug` builds keeps those calls, and that an image built elsewhere refuses such a breakpoint and says why.",
+      "gist": "When the compiler works out a call ahead of time, what should a breakpoint inside that function do?",
+      "lesson": "Jet runs a pure call with fixed arguments while compiling and keeps only its answer. The program then never runs that function. A breakpoint or logpoint in it is set but never fires. The choice is whether debug builds keep those calls, or the debugger explains why it cannot stop there.",
+      "explainer": "Beginner path: write the program, run `jet debug prog.jet`, type `break count_up` and `c`. Under A it stops in count_up with n = 1000000, as the code reads. Under B the break is refused, naming the line that was computed and the fix. Under C the break is set with a note, and the program finishes without stopping.\n\nExpert path: an expert who wants the exact release program builds it with `jet build -O2` and opens the image with `jet debug <image>` or `--attach`. That image computed the call ahead. Under A and B the break is refused with E2239, naming the computed line. Putting `#Runtime(.NoEager)` on a function keeps its calls in every build, today and under every option.",
+      "story": "Sam is learning Jet and writes count_up with a test call, `first: count_up(1000000)`. He wants to watch the loop, so he runs `jet debug prog.jet` and types `break count_up`. Today the debugger answers \"Breakpoint set\", and the program prints its total and ends. Sam decides the debugger is broken.",
+      "inWild": "fn countUp(n: u64) u64 {\n    var total: u64 = 0;\n    var i: u64 = 0;\n    while (i < n) : (i += 1) total += i % 7;\n    return total;\n}\n// A plain call runs when the program runs; a debugger stops in it.\nconst first = countUp(1000000);        // inside main: run time\nconst ahead = comptime countUp(1000);  // only when asked for\n# Zig evaluates a call while compiling only when the code says comptime: https://ziglang.org/documentation/master/#comptime",
+      "detail": "Code read on dev 3e8d443247 and checked with the gate-p310 jet. JetSema computes an immutable local `name: value` whose initializer calls only pure code while compiling, and the program holds the value (Compiler/JetSema/Source/Sema/Comptime/LocalValues.jet). The language promises this never changes what a program prints (Docs/Reference/metaprogramming.md). It is a checked fact, so -O0, -O1 and -O2 compute the same locals. `#Runtime(.NoEager)` on a function, method or block turns it off there.\n\n`jet debug prog.jet` builds with `jet build -O0 --dead-code=keep` (JetDebug Native.jet native_debug_build_argv). So count_up stays in the image with no caller. With the program above, on gate-p310: `break count_up` and `break prog.jet:5` answer \"Breakpoint set\" and never stop. `log prog.jet:5 \"s{step}\"` says it runs in the program and logs nothing. A break after line 11 shows `first = 2999997`, and `watch first` works. The same program with `#Runtime(.NoEager)` on run stops in count_up with n = 1000000.\n\nThe placed-logpoint case met this: its loop never ran until its count came from the program's arguments.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Debug builds keep the calls",
+          "detail": "The program `jet debug` builds computes no local while compiling in the workspace's own packages. It is as if every function there carried `#Runtime(.NoEager)`. So every call the user can read runs, and every breakpoint, logpoint and watch on it works. Constants, `#run`, `@` and Core keep computing while compiling. `jet run` and `jet build` are unchanged.\n\nAn image `jet debug` did not build (`jet debug <image>`, `--attach`, a replay) still computed the call. There a breakpoint on a function the image never calls is refused with B's E2239.",
+          "technical": "`jet debug`'s build passes the policy the `#Runtime(.NoEager)` marker sets to the checker for the workspace's packages, through the build options and the build cache key. It is one mechanism and adds no user syntax or flag.\n\nThe image records each function it keeps but never calls at run time, with the computed line. The debugger reads that record for E2239, and DAP returns the breakpoint unverified with the same message. `why` recovery builds of a built image keep that image's policy, so recovered frames match it. Output is unchanged on every tier, so I9 holds; only when the work runs differs.",
+          "code": "// jet debug prog.jet builds with the call kept:\n(Jet) break count_up\nBreakpoint set  count_up\n(Jet) c\nBreakpoint hit  prog.jet:2  in count_up()\nLocals:  n = 1000000\n// jet run and jet build still compute it ahead."
+        },
+        {
+          "key": "B",
+          "name": "Refuse, and say why",
+          "detail": "Builds stay as they are. A breakpoint, line breakpoint or logpoint in a function the image never runs is refused with a new error, E2239, jet.DebugNeverCalled. It names the computed line and gives the fix: put `#Runtime(.NoEager)` on the calling function and start the debugger again. A function that is also called at run time somewhere is accepted as today. A watch on the computed local works, as it does today.",
+          "technical": "The compiler records in the image each kept function with no run-time call, no taken address and no export, with the line that computed it. The console refuses; DAP returns the breakpoint unverified with the message. The same holds for -O1 and -O2 images.",
+          "code": "(Jet) break count_up\nError E2239: `count_up` never runs in this build.\n  Its only call, `first: count_up(1000000)` at\n  prog.jet:11, was computed while compiling.\n  Fix: put #Runtime(.NoEager) on `run`, then\n  run `jet debug prog.jet` again."
+        },
+        {
+          "key": "C",
+          "name": "Accept, with a note",
+          "detail": "Builds stay as they are. The breakpoint or logpoint is set, and a note says this build never runs the function, names the computed line and gives the same fix. The session goes on, and the program finishes without stopping there.",
+          "technical": "The same image record as B, read as a note, not an error. DAP returns the breakpoint unverified with the note. No new error code; the note is plain text.",
+          "code": "(Jet) break count_up\nBreakpoint set  count_up\nNote: this build never runs `count_up`: its only\n  call (prog.jet:11) was computed while compiling,\n  so this breakpoint will not be hit.\n(Jet) c\ntotal 2999997"
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig",
+          "note": "A call runs while compiling only when code asks with comptime, so a Debug build runs every other call and a debugger stops in it. https://ziglang.org/documentation/master/#comptime",
+          "code": "const ahead = comptime countUp(1000);  // only this is computed ahead"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "The program a beginner debugs runs the code they read, so their first breakpoint stops. Output stays the same, and built images still explain themselves.",
+        "gains": [
+          "Every breakpoint the user can place in their own code stops.",
+          "No new syntax, flag or step for the user.",
+          "Built images refuse with the reason and the fix."
+        ],
+        "losses": [
+          {
+            "loss": "A program that computes a big value ahead starts slower under jet debug.",
+            "mitigation": "Only the workspace's own locals move to run time; Core, constants and #run still compute ahead."
+          },
+          {
+            "loss": "The debugged program differs from jet build -O0 in when work runs.",
+            "mitigation": "Output is the same by the language's promise; a built image is still debuggable as it is."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B explains the problem but makes the user edit the code and restart to see what they asked for."
+          },
+          {
+            "key": "C",
+            "reason": "C accepts a breakpoint it knows will never fire, and the note is easy to miss."
+          }
+        ],
+        "tradeoff": "jet debug builds compute the workspace's locals at run time, so the code the user reads is the code that runs."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Under A: a Debug case uses the placed-logpoint fixture with a literal count. `jet debug prog.jet` with `break count_up` stops with n = 1000000, and a logpoint on the loop logs each hit. The same program built with `jet build -O0` and opened with `jet debug <image>` refuses `break count_up` with E2239, naming prog.jet:11. Under B: both runs refuse with E2239. Under C: both runs set the break with the note and finish. Nothing here is built yet.",
+      "surface": {
+        "gist": "When the compiler works out a call ahead of time, what should a breakpoint inside that function do?",
+        "lesson": "Jet runs a pure call with fixed arguments while compiling and keeps only its answer. The function then never runs, so a breakpoint in it is set but never fires. Debug builds could keep such calls, or the debugger could explain itself.",
+        "trio": {
+          "current": {
+            "note": "count_up was computed while compiling, so the breakpoint is accepted and never fires.",
+            "code": "// jet debug prog.jet, then:\n(Jet) break count_up\nBreakpoint set  count_up\n(Jet) c\ntotal 2999997\nProgram finished      // never stopped"
+          },
+          "wild": {
+            "lang": "Zig",
+            "note": "Zig computes a call ahead only when the code says comptime, so a Debug build runs the rest. Source: https://ziglang.org/documentation/master/#comptime",
+            "code": "const first = countUp(1000000);        // runs, debugger stops\nconst ahead = comptime countUp(1000);  // computed while compiling"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Debug builds keep the calls",
+            "gist": "jet debug builds run the user's calls; images built elsewhere refuse with the reason.",
+            "gains": [
+              "The breakpoint stops where the user expects.",
+              "Nothing new to learn or type."
+            ],
+            "losses": [
+              "Big computed values move to program start under the debugger."
+            ],
+            "proposed": {
+              "code": "// jet debug prog.jet builds with the call kept:\n(Jet) break count_up\nBreakpoint set  count_up\n(Jet) c\nBreakpoint hit  prog.jet:2  in count_up()\nLocals:  n = 1000000\n// jet run and jet build still compute it ahead."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Refuse, and say why",
+            "gist": "Builds stay the same; the break is refused, naming the computed line and the fix.",
+            "gains": [
+              "The debugger never pretends.",
+              "The debugged program is the release program."
+            ],
+            "losses": [
+              "The user must edit code and restart to stop there."
+            ],
+            "proposed": {
+              "code": "(Jet) break count_up\nError E2239: `count_up` never runs in this build.\n  Its only call, `first: count_up(1000000)` at\n  prog.jet:11, was computed while compiling.\n  Fix: put #Runtime(.NoEager) on `run`, then\n  run `jet debug prog.jet` again."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Accept, with a note",
+            "gist": "Builds stay the same; the break is set with a note that it will not fire.",
+            "gains": [
+              "No new error to learn."
+            ],
+            "losses": [
+              "A breakpoint that never fires stays set.",
+              "The note is easy to miss."
+            ],
+            "proposed": {
+              "code": "(Jet) break count_up\nBreakpoint set  count_up\nNote: this build never runs `count_up`: its only\n  call (prog.jet:11) was computed while compiling,\n  so this breakpoint will not be hit.\n(Jet) c\ntotal 2999997"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The code a beginner reads is the code that runs under the debugger, and built images still explain themselves.",
+          "gains": [
+            "Every breakpoint in the user's code stops.",
+            "No new syntax, flag or step."
+          ],
+          "losses": [
+            {
+              "loss": "Big computed values move to program start under jet debug.",
+              "mitigation": "Only the user's own locals move; constants, #run and Core still compute ahead."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Explains, but makes the user edit and restart."
+            },
+            {
+              "key": "C",
+              "reason": "Keeps a breakpoint it knows will never fire."
+            }
+          ],
+          "tradeoff": "Debug builds compute the user's locals at run time, so what they read is what runs."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "A breakpoint the build can never reach.",
+          "attempts": [
+            "Keep the calls in jet debug builds: kept, the user's own code runs.",
+            "Refuse in images jet debug did not build, with the computed line and the fix: kept."
+          ],
+          "result": "Every breakpoint either stops or says at once why it cannot."
+        },
+        {
+          "loss": "Debug builds start slower when they compute big values at run time.",
+          "attempts": [
+            "Limit the change to the workspace's own packages: kept.",
+            "Keep constants, #run and @ computing ahead: kept.",
+            "Add a flag to keep folding under jet debug: rejected, a built image already gives that program."
+          ],
+          "result": "Only locals the user wrote move to run time, and the release shape stays one command away."
+        }
+      ],
+      "draftedBy": "Main",
+      "reviewedBy": null,
+      "draft": true,
+      "status": "open",
+      "created": "2026-11-19T09:40:52.961Z"
     }
   ],
   "questions": [
@@ -160687,6 +160883,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T09:40:55.097Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T09:40:52.962Z",
+      "by": "Main",
+      "action": "decision.add",
+      "ref": "D-DEBUG-FOLD1",
+      "note": "What the debugger does with calls the compiler works out ahead (draft)"
+    },
     {
       "at": "2026-11-19T09:40:44.101Z",
       "by": "Main",
