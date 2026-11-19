@@ -167,10 +167,13 @@ the runtime charges each sample by the instruction it names instead: AMD's
 IBS op sampling (`perf_event_open` on the `ibs_op` PMU, filtered to user mode
 in software, which `perf_event_paranoid` 2 allows), else Intel's PEBS (cycles
 at `precise_ip` 2), each thread's own event sampled at the timer's rate into
-a ring its `SIGPROF` reports; the callers still come from the interrupted
-stack. The main thread arms the first source the kernel accepts, and each
-thread after it arms that source; with neither, every thread keeps its
-timer. The receipt's `capture.sampling.pc` names the source.
+a ring its `SIGPROF` reports. The callers still come from the interrupted
+stack, which the skid can leave in another function: the sample keeps the
+callers of the innermost interrupted frame in its own function, and when no
+frame is (the function returned before the signal came), the interrupted
+frame is its caller. The main thread arms the first source the kernel
+accepts, and each thread after it arms that source; with neither, every
+thread keeps its timer. The receipt's `capture.sampling.pc` names the source.
 Tests/Cases/Perf/precise_pc_names_its_source.case is the worked example.
 
 `jet perf run` takes `--lens=<lenses>`, comma-separated: `cpu`, the
