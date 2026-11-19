@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112369,
+    "rev": 112372,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75296,6 +75296,21 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "c47 audit (Lens, gate-p314): attach_turns_zones_on, profiled_marker_zones_marked_functions, zones_frames_plots_share_the_timeline, log_span_closes_at_scope_exit, zones_strip_setting_leaves_no_site all PASS. Gaps: (1) samples carry no time, so they do not line up with zones on the timeline; (2) no refusal of a non-literal zone name or a zone in a -[]> function (D-PERF-ZONES1 check); (3) sites are a flag test, not patched; (4) #Profiled needs a user build handler; (5) c6 open; (6) perf run checked at the default tier only. Decided under D-PERF-ZONES1: (3) sites become patchable (jmp over the site run while off, runtime text patch on, flag test only as the fallback where mprotect is refused), IfHole; (4) Core ships the #Profiled handler so marking plus jet perf run is enough, Lens. Lens also takes (1), (2), (6)."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "p313 (dev 6d5ff148d8; IfHole c45 entry functions r2, Lens c66 held-eval-calls, IfHole c6 frame codegen r2 and float-carrier step 1). DebugLatency 20000 fns x3: first_stop 125 ms (lldb 215), print_first 54 ms (bar 250 MET; p311 4199), second_eval 32 ms (bar 100 MET), print_again 4 ms vs lldb 1 (bar 2x lldb missed). Suite: second_print_nonentry_under_100ms PASS; new FAILs print_in_an_inlined_frame and second_print_answers_under_100ms (session ends after the first print), sent to Lens; AggregateValues x2 and nonpositive_sleeps (O1) sent to IfHole. c6 pair: -O1 wall 1.021 [0.981,1.054] even, cycles 1.0087 loss, RSS 276/268 loss; -O2 wall 0.991 even, cycles 1.0088 loss, RSS loss. Root left: plot boxes its to_bits Int per frame (pagemap: big-int text pages resident only in Zoned); IfHole sinking guarded-site arguments next."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "c6 on p312 (dev f9caa82960, plot/frame zone sites landed): profile-overhead FAIL. -O1 wall 1.0097 [1.0025,1.0162], cycles 1.0093, RSS 276/268 1.030; -O2 wall 1.0122, cycles 1.0105, RSS 1.030; on: wall 1.015, RSS 1.008 (even). Down from p310 -O1 1.0125, -O2 1.019. Left: perf.plot boxes the to_bits Int on ~998/1000 frames (IfHole: argument sinking into guarded sites; Float carrier two-step), and a constant +8 KB (two pages) peak RSS (Main investigating). Queued p313: IfHole c6-frame-codegen.r2 (inline checked_widen, to_bits, light drop glue)."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "p311 (5f090c020d) DebugLatency 20000 fns x3: first_stop 103 ms (lldb 208), print_first 4199 ms (bar 250: missed), print_again 3 (lldb 2, met), second_eval 30 ms (met). At 2000: print_first 421 missed, second_eval 29. Case Debug/second_print_answers_under_100ms FAILs at 101 ms twice standalone (the new expression f_2+f_3 needs functions the first print did not build). c45 entry fix IfHole c45-eval-entry-functions held on a comment-spelling guard, r2 pending. p312 census failed on that guard; loop restarted from p311 with plot-frame-sites, causal-accounting.r2, c6-frame-codegen, c51-budget-case-order."
         },
         {
@@ -76137,7 +76152,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T09:50:52.491Z",
+      "updated": "2026-11-19T11:21:04.299Z",
       "updatedBy": "Main",
       "criteriaLastN": 67
     },
@@ -160888,6 +160903,27 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T11:21:04.300Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T10:50:31.036Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T10:25:07.117Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-19T09:50:52.491Z",
       "by": "Main",
