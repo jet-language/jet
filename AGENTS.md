@@ -484,7 +484,8 @@ idle while a submission waits (owner order, 2026-11-15):
    builds. Each batch compiler is a bisect point.
 3. **Every batch compiler runs the full suite.** On it, at once: each landed
    submission's proof lines (from its `tests` file) and the whole suite in
-   collect-all mode (the cases profile beside ui, golden and core), compared
+   collect-all mode (the cases profile beside ui, golden and core, and the
+   unit tests of every compiler package and its `Tests` package), compared
    with the previous cycle's run. A new failure can only come from that
    cycle's submissions, so it goes to its worker at once, as one list, and
    becomes that worker's top priority. Passing proof lines meet their criteria

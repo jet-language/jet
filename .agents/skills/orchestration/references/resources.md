@@ -45,6 +45,20 @@ Forward a collected child's complete diagnostic buffer synchronously before
 throwing on failure. An asynchronous pipe write followed by an uncaught exception
 can truncate the last diagnostics; a partial log is not a collect-all census.
 
+The landing cycle's shared state (the devshell path list, the toolchain
+environment, the published `jetpack`, the heavy-job slot helper) lives in one
+named directory under `$JET_SCRATCH_ROOT` that the orchestrator's state notes
+record, never inside a worker's lane. Before deleting a lane or any scratch
+tree, search every live script, service and queued job for its path, and keep
+what they name; a tree that looks dead can still feed the cycle. A script that
+waits for a helper, a lock or a slot fails at once with the missing path when
+that file is gone, never retries forever.
+
+The dev worktree the landing cycle uses is not an editing tree: each census
+checks it out with force, so an uncommitted edit there is lost at the next
+cycle. Edit, check, write the submission's patch and restore the files in one
+step, or edit in your own worktree.
+
 `Tools/Agent/JetEnv.jet` preserves caller-selected Cargo wrappers; it does not
 select sccache. Generator freshness checks use `--check`
 without rewriting their outputs; diagnostic row generation follows this same
