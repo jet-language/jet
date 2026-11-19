@@ -40,3 +40,24 @@ stdout: ~ "\"id\":99" # original predicate; other response fields vary
 stdout: ~ "result" # original predicate; other response fields vary
 close lsp
 exit: any # Original child.wait did not assert status.
+# A restarted server reuses nothing from the last one (no compile cache): it
+# checks the document it is sent now, and none of the first server's last
+# revision answers.
+session lsp2 content-length: jet self lsp
+send lsp2: Messages/LSPOverlappingEditsLatestCheckedRevisionWins/0.json
+recv lsp2
+stdout: ~ "documentSymbolProvider" # the restarted server initializes
+send lsp2: Messages/LSPOverlappingEditsLatestCheckedRevisionWins/1.json
+send lsp2: Messages/LSPOverlappingEditsLatestCheckedRevisionWins/11.json
+recv lsp2
+stdout: ~ "publishDiagnostics" # it checks the reopened document
+send lsp2: Messages/LSPOverlappingEditsLatestCheckedRevisionWins/12.json
+recv lsp2
+stdout: ~ "\"id\":4" # the symbols request is answered
+stdout: ~ "marker_restart" # from the text sent to this server
+stdout: !~ "marker_new" # nothing of the first server's last revision survives the restart
+send lsp2: Messages/LSPOverlappingEditsLatestCheckedRevisionWins/10.json
+recv lsp2
+stdout: ~ "\"id\":99" # shutdown answers
+close lsp2
+exit: any # the restarted server's exit status is not part of this contract
