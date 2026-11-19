@@ -5438,7 +5438,14 @@ perf_causal_tick: fn(pc: I64, periods: I64) -> I64 {
             dropped: if (owed < periods) -> owed else -> periods
             _ := sync_add(spun, wrapping(I64{0} - wrapping(period * dropped)))
             kept = wrapping(periods - dropped)
-            if (kept == I64{0}) { return I64{0} }
+            // A sample that keeps none came of the pause's CPU time alone:
+            // its signal's delivery and this handler are the pause's time,
+            // which the thread paid as it paid the spin (perf_causal_pay).
+            if (kept == I64{0}) {
+                cost: wrapping(wrapping(perf_samples_clock() - now) + perf_samples_delivery_ns)
+                rt_text_store(wrapping(thread + I64{8}), wrapping(rt_text_word(wrapping(thread + I64{8})) + cost))
+                return I64{0}
+            }
         }
     }
     delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
@@ -5529,7 +5536,8 @@ perf_causal_switches: fn(thread: I64) -> I64 {
 // blocked, so it owes nothing for the delays inserted before; a task that
 // ends pays what it owes before its joiner can see it. Without them a short
 // task finishes between samples and pays its delay later, in whatever its
-// thread runs next, which can be the line the experiment speeds up.
+// thread runs next, which can be the line the experiment speeds up. A
+// thread's park another thread wakes is the third (perf_causal_woken).
 perf_causal_task_start: fn() {
     state: perf_causal_state
     if (state == I64{0}) {
@@ -5560,6 +5568,39 @@ perf_causal_task_end: fn() {
     perf_causal_mark(thread, perf_samples_clock())
 }
 
+// The global delay as this thread parks (Sync.jet sync_park), for
+// perf_causal_woken; -1 when the lens is off.
+perf_causal_block: fn() -> I64 {
+    state: perf_causal_state
+    if (state == I64{0}) { return I64{-1} }
+    sync_load(wrapping(state + PERF_CAUSAL_DELAY))
+}
+
+// After a park another thread's wake ended, which began when the global
+// delay was `blocked` (perf_causal_block): the delays inserted meanwhile
+// are forgiven, as in Coz's post_block. The waker ran through them and
+// paid them (a task's end before its joiner can see it, any other thread
+// at its samples), so the work the wake lets this thread do comes after
+// them already. Charged them, a thread that parks often but never long
+// enough to count as blocked at its next sample (perf_causal_blocked), as
+// a joiner of short tasks does, pauses for them again on top of its
+// waker's pause: on the critical path, that slows the program as no faster
+// line would, and every line's prediction reads lower. The park is also no
+// time of the thread's own: its next sample measures from the wake.
+perf_causal_woken: fn(blocked: I64) {
+    state: perf_causal_state
+    if (blocked < I64{0} || state == I64{0}) {
+        return
+    }
+    thread: perf_causal_thread(state)
+    if (thread == I64{0}) {
+        return
+    }
+    meanwhile: wrapping(sync_load(wrapping(state + PERF_CAUSAL_DELAY)) - blocked)
+    rt_text_store(wrapping(thread + I64{8}), wrapping(rt_text_word(wrapping(thread + I64{8})) + meanwhile))
+    perf_causal_mark(thread, perf_causal_clock(thread, I64{1}))
+}
+
 // This thread's entry, claimed by its tid on its first sample; 0 when the
 // table is full.
 perf_causal_thread: fn(state: I64) -> I64 {
@@ -5578,12 +5619,13 @@ perf_causal_thread: fn(state: I64) -> I64 {
 }
 
 // Pay this thread's owed delay, `delay` less the `local` it has paid, and
-// keep what it paid. A pause runs past its request by the clock read that
-// ends it, or by a preemption, and the excess counts toward the delays
-// inserted after it, as in Coz: were it dropped, every pause would add
-// time the experiment's accounting (its wall time less the delay inserted)
-// leaves in, and every line's prediction would read lower by the pauses'
-// total excess.
+// keep what it paid. A pause runs past its request by its own clock reads,
+// by a preemption, and by the samples its spin sets off (perf_causal_tick),
+// and the excess counts toward the delays inserted after it, as in Coz:
+// were it dropped, every pause would add time the experiment's accounting
+// (its wall time less the delay inserted) leaves in, and every line's
+// prediction would read lower by the pauses' total excess, more the more
+// often its threads pause, so the more samples a second the lens takes.
 perf_causal_pay: fn(thread: I64, local: I64, delay: I64) {
     paid := local
     if (local < delay) {
@@ -5609,14 +5651,14 @@ perf_causal_pause: fn(thread: I64, ns: I64) -> I64 {
     wait: if (ns > PERF_CAUSAL_PAUSE_MAX_NS) -> PERF_CAUSAL_PAUSE_MAX_NS else -> ns
     pausing: wrapping(thread + PERF_CAUSAL_THREAD_PAUSING)
     sync_store(pausing, I64{1})
-    cpu: perf_causal_clock(thread, I64{3})
     began: perf_causal_clock(thread, I64{1})
+    cpu: perf_causal_clock(thread, I64{3})
     deadline: wrapping(began + wait)
     now := began
     loop now < deadline -> now = perf_causal_clock(thread, I64{1})
     _ := sync_add(wrapping(thread + PERF_CAUSAL_THREAD_SPUN), wrapping(perf_causal_clock(thread, I64{3}) - cpu))
     sync_store(pausing, I64{0})
-    wrapping(now - began)
+    wrapping(perf_causal_clock(thread, I64{1}) - began)
 }
 
 // The clock `clock` (CLOCK_MONOTONIC 1 or CLOCK_THREAD_CPUTIME_ID 3) in

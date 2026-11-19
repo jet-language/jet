@@ -430,6 +430,9 @@ sync_park: fn(slot: I64, timeout_ns: I64) {
         return
     }
     deadline: sync_deadline(timeout_ns)
+    // Under the causal lens a park another thread's wake ends is forgiven
+    // the delays inserted meanwhile (PerfSamples.jet perf_causal_woken).
+    blocked: perf_causal_block()
     loop sync_load(slot) == (I64{2}) {
         if (deadline >= I64{0} && sync_now_ns() >= deadline) {
             if (sync_cas(slot, I64{2}, I64{0}) == I64{2}) {
@@ -440,6 +443,7 @@ sync_park: fn(slot: I64, timeout_ns: I64) {
         _ := sync_futex_wait(slot, I64{2}, deadline)
     }
     _ := sync_swap(slot, I64{0})
+    perf_causal_woken(blocked)
 }
 
 sync_park_wake: fn(slot: I64) { sync_park_wake_as(slot, I64{-1}) }

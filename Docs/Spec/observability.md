@@ -248,14 +248,23 @@ program, and threads in the line at once never pay each other's delays.
 A pause spins and keeps its CPU, where Coz's sleeps: with more threads
 ready than CPUs, a sleeping thread's CPU would go to the line's own
 threads, which would then really run faster and inflate the prediction.
-The samples a pause's CPU time sets off are dropped. A sample
+The samples a pause's CPU time sets off are dropped, and their handling,
+like the pause's own clock reads, counts as time the pause paid: left out,
+every pause would slow the program by more than its delay, and every
+line's prediction would read lower, the more so the more often threads
+pause. A sample
 stands for its period of CPU time, or, when its thread was ready to run
 since its previous sample and that took longer, the wall time between
 them: under load a thread waits for a CPU between samples, and a faster
 line would save that wait too. A thread that was blocked (its last
 sample is more than 5 ms old and it has since given up its CPU of its own
 accord, not merely been preempted) owes nothing for the time it was blocked.
-Delays are paid at sampler ticks, so a thread pays its debt up to one
+A task's start forgives its worker the delays before it, and a task's end
+pays its own before its joiner sees it. A thread another thread wakes from
+a park owes nothing for the delays inserted while it was parked, as in
+Coz: its waker paid them. Charged them, a thread that joins short tasks
+would pause for them again on the program's critical path. Other delays
+are paid at sampler ticks, so a thread pays its debt up to one
 sample period late. A progress point counts passes: each closed zone by
 its name, each finished task as `task`, each answered HTTP request as
 `request`, and each `core.perf.progress(name)`. Outside the lens these record nothing. At the
