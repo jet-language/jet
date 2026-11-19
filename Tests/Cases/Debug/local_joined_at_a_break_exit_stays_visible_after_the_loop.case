@@ -4,14 +4,16 @@
 # moves such a value into a fresh unnamed slot, where no debugger finds
 # `total`; no build a user runs makes that round trip, and the kit leaves
 # the verifier off for Debug cases. Stopped on the line after the loop,
-# `total` is a local with the value the `break` left. The fixture must stay
-# in jet fmt form.
+# `total` is a local with the value the `break` left, listed after the
+# parameter `n`, which no register holds there any more: it reads as the
+# value it entered with.
+# The fixture must stay in jet fmt form.
 fixture: LocalJoinedAtABreakExitStaysVisible.fixture
 env: NO_COLOR=1
 step: jet debug prog.jet
 stdin: local_joined_at_a_break_exit_stays_visible_after_the_loop.stdin
 exit: 0
 stdout: ~ "Breakpoint hit  prog.jet:8  in total_of()" # the line after the loop
-stdout: ~ "Locals:  total = 6" # the joined local is listed at the stop
+stdout: ~ "Locals:  n = 5   total = 6" # the joined local is listed at the stop, after the parameter's entry value
 stdout: ~ "(Jet) print total\ntotal = 6\n" # and reads as the value the `break` left
 stdout: ~ "6\nProgram finished\n" # the program runs on to its end
