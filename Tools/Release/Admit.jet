@@ -1083,8 +1083,10 @@ chain_stage: fn(ctx: &Ctx) -[Env, Exec, FS, IO, Time, Time.Wait]> Never! {
     sha: sha256_file(s2)
     // RELEASE.json records both chain stages so Tools/Release can check the
     // fixed point from the seed alone. The tree's JET_VERSION is the next
-    // release (run_gate), so each names `jet@<next>`.
-    ctx.candidate = Built{jet: s2, runtime: files.join(out, "s2/jet-runtime"), sha: sha, identity: "jet@{ctx.next}#{sha}", jetpack: "", s2: "jet@{ctx.next}#{sha}", s3: "jet@{ctx.next}#{sha256_file(s3)}"}
+    // release (run_gate), so each names `jet@<next>`, with the identity
+    // digest the jet carries (Release.jet identity_digest), not its sha256.
+    named: identity_digest_file(s2)
+    ctx.candidate = Built{jet: s2, runtime: files.join(out, "s2/jet-runtime"), sha: sha, identity: "jet@{ctx.next}#{named}", jetpack: "", s2: "jet@{ctx.next}#{named}", s3: "jet@{ctx.next}#{identity_digest_file(s3)}"}
     ctx.built = true
     row(ctx, "chain", "PASS", "fixed point s2 == s3 (jet {short(sha, 16)}) from {ctx.release.name}, no Rust ({stages.join(", ")}; {verdict_note})")
 }
