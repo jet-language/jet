@@ -1,7 +1,10 @@
 # A value struct that is not shared lives in its frame, not in a heap block.
 # `Mixed` has no #Layout, so the compiler packs its five fields into 24 bytes.
-# At O1 and O2, `run` keeps `value` and its copy `other` in their own 24-byte
-# stack slots (one stack_address each, before and after the passes). Nothing
+# `run` keeps `value` and its copy `other` in their own 24-byte stack slots
+# (one stack_address each before the passes). At O1 and O2 `bump` and
+# `total` are inlined and each Drop is its light glue's inlined member drops
+# (OptGlue.jet), no loan, so scalar replacement takes both: their fields
+# live in registers, and no stack_address is left after the passes. Nothing
 # in `run` allocates on the heap, and `bump` writes `value` in place through
 # its reference. Every tier prints the same values.
 fixture: ValueStructsLivePackedInTheirFrame.fixture
@@ -10,18 +13,18 @@ step: jet inspect decisions -O1 main.jet
 env: JET_OPT_DUMP=run
 exit: 0
 stdout: ~ "O1:" # optimize: O1 runs the O1 passes
-stdout: ~ "local value: Aggregate/24" # value's 24 packed bytes live in the frame
-stdout: ~ "local other: Aggregate/24" # the copy takes its own 24 bytes in the frame
-stdout: count "stack_address" = 4 # value and other, before and after the passes
+stdout: ~ "local value: Aggregate/24" # value's 24 packed bytes in the frame before the passes
+stdout: ~ "local other: Aggregate/24" # the copy's own 24 bytes in the frame before the passes
+stdout: count "stack_address" = 2 # value and other, before the passes; none after
 stdout: count "jet_rt_alloc" = 0 # no heap block for either struct
 stdout: count "jet_rt_record_new" = 0 # no runtime record for either struct
 step: jet inspect decisions --release main.jet
 env: JET_OPT_DUMP=run
 exit: 0
 stdout: ~ "O2:" # --release runs the O2 passes
-stdout: ~ "local value: Aggregate/24" # value's 24 packed bytes live in the frame
-stdout: ~ "local other: Aggregate/24" # the copy takes its own 24 bytes in the frame
-stdout: count "stack_address" = 4 # value and other, before and after the passes
+stdout: ~ "local value: Aggregate/24" # value's 24 packed bytes in the frame before the passes
+stdout: ~ "local other: Aggregate/24" # the copy's own 24 bytes in the frame before the passes
+stdout: count "stack_address" = 2 # value and other, before the passes; none after
 stdout: count "jet_rt_alloc" = 0 # no heap block for either struct
 stdout: count "jet_rt_record_new" = 0 # no runtime record for either struct
 step: jet run -O0 main.jet

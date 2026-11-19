@@ -35,7 +35,9 @@
 // reports none, so that stop point goes with the call: the inlined loop
 // body is the one the direct spelling builds, and the loop's own turn poll
 // stays at its head rather than folding into the leftover one
-// (OptStops.jet ir_opt_fold_polls).
+// (OptStops.jet ir_opt_fold_polls). A glue's call made from a Drop
+// (OptGlue.jet ir_opt_glue_site) left no stop point: the poll after it is
+// that of the call or construct before the Drop, and stays.
 //
 // A callee marked `#Inline(Always)` (IRFunction.inline_always) is inlined
 // before every other pass, on every tier (O0, O1, O2 and a compile-time
@@ -166,7 +168,8 @@ ir_opt_inline_build: fn(m: IRModule, bodies: [[IRFunction]], caller: IRFunction,
             report.inlined_calls += 1
             after := at + 1
             loop after < caller.op.len() && caller.op[after] == .Drop -> after += 1
-            if ir_opt_stops_any_poll(caller, poll, poll, after) && ir_opt_inline_quiet(m, bodies[caller.a[at]][0]) {
+            callee: caller.a[at]
+            if ir_opt_stops_any_poll(caller, poll, poll, after) && ir_opt_inline_quiet(m, bodies[callee][0]) && !ir_opt_glue_site(m, caller, bodies[callee][0].key, at) {
                 skip_from = after
                 skip_to = caller.c[after + 1]
             }
@@ -625,6 +628,46 @@ ir_opt_inline_test_calls_left: fn(op: IROp) -> Int Never! {
     assert_eq(ir_opt_inline_test_calls_left(IROp.Add), 0)
     // An Int shift can stop, and the poll after the body delivers it.
     assert_eq(ir_opt_inline_test_calls_left(IROp.Shl), 1)
+}
+
+// keep(z) calls h, then drops its Zone z (a String) through the glue,
+// the Drop already the glue's call (OptGlue.jet ir_opt_glue_calls), and
+// then polls: h's stop point, past z's drop. The glue is quiet and is
+// inlined, and the poll that delivers h's stop stays.
+#Test("An inlined glue leaves the stop point after it to the call before the Drop") {
+    m := ir_module_new()
+    poll: ir_stop_poll(m, IR_STOP_POLL_KEY)
+    name_rows_set(m.name_rows, IR_STOP_POLL_KEY, poll)
+    text: ir_type_row(m, Type.String) ?? panic("no String row")
+    flag: ir_type_row(m, Type.Bool) ?? panic("no Bool row")
+    zone: ir_intern_type(m, "Zone", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "Zone"}, 8, 8, IRClass.Memory, false, 0, "#drop<Zone>"))
+    glue := ir_hashed_function("drop", "#drop<Zone>", "jet_ir_drop_", "", 0)
+    held: ir_slot(glue, zone, IRSlotKind.Param, ir_intern_name(m, "value"), 0)
+    name: ir_slot(glue, text, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(glue, IROp.Load, name, held, 0, -1, 0)
+    _ := ir_emit(glue, IROp.Drop, -1, name, -1, -1, 0)
+    _ := ir_emit(glue, IROp.Return, -1, -1, -1, -1, 0)
+    keep := ir_function_new("keep", "test:glue.jet.keep", "", "glue.jet", 1)
+    z: ir_slot(keep, zone, IRSlotKind.Param, ir_intern_name(m, "z"), 1)
+    stopped: ir_slot(keep, flag, IRSlotKind.Temp, -1, 0)
+    none: ir_args(keep, [Int]{})
+    _ := ir_emit(keep, IROp.Call, -1, poll + 1, none, 0, 2)
+    dropped: ir_args(keep, [Int]{z})
+    _ := ir_emit(keep, IROp.Call, -1, poll + 2, dropped, 1, 2)
+    _ := ir_emit(keep, IROp.Call, stopped, poll, none, 0, 2)
+    _ := ir_open_if(keep, stopped, 2)
+    _ := ir_emit(keep, IROp.Return, -1, -1, -1, -1, 2)
+    ir_end(keep, 2)
+    _ := ir_emit(keep, IROp.Return, -1, -1, -1, -1, 3)
+    bodies: [[IRFunction]]{[IRFunction]{}, [IRFunction]{}, [IRFunction]{glue.move()}}
+    report := ir_opt_report(1)
+    out: ir_opt_inline_build(m, bodies, keep, [Bool]{false, false, false}, [Int]{0, 1, 1}, false, 1, IROptInline.Auto, report) ?? panic("the glue was not inlined")
+    assert_eq(report.inlined_calls, 1)
+    polls := 0
+    loop at in 0..<out.op.len() {
+        if out.op[at] == .Call && out.a[at] == poll -> polls += 1
+    }
+    assert_eq(polls, 1)
 }
 
 // Function `name` of marked.jet, marked `#Inline(Always)`: its Int
