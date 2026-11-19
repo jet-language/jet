@@ -5,19 +5,31 @@
 // AsyncEvent listener (AsyncEvents.jet), whose dispatch runs on a scheduler
 // thread: its count and active flag are atomic.
 //
-// EventCore56: strong0 weak8 next_id16 listeners{len24 cap32 data40} policy48
+// EventCore72: strong0 weak8 next_id16 listeners{len24 cap32 data40} policy48
+//   id56 source64
 //   An Event handle is its core (Rust: Rc<RefCell<Vec<JetListener>>>); a
-//   subscription's cleanup holds a weak count (Rust: Rc.downgrade).
+//   subscription's cleanup holds a weak count (Rust: Rc.downgrade). source
+//   is the observations' static source text ("Event", "DecisionHook"), 0 for
+//   a Hook, which records none; id is the identity they name it by
+//   (ObserveLive.jet observe_event_id).
 // Listener64: refs0 id8 priority16 once24 sub32 env40 invoke48 release56
 //   One count for the core's list, one per dispatch snapshot holding it
 //   (Rust: the entry clones its handler Rc), so a handler that unsubscribes
 //   itself or another listener mid-dispatch keeps the running closure alive.
 //   invoke(env, payload_slot, scratch) is the lowering's typed adapter; the
 //   payload slot is lent for the call. release(env) frees the closure once.
-// Subscription32: refs0 active8 core16 (weak, 0 none) id24
-// EventScope64: refs0 canceled8 subs{len16 cap24 data32}
+// Subscription40: refs0 active8 core16 (weak, 0 none) id24 note32
+//   note is the observation note of a registration made while the run
+//   publishes live snapshots (event_note_new), else 0.
+// EventNote64: source0 event8 owner16 subscription24 priority32 counts40
+//   capacity48 overflow56: the fields every record naming the subscription
+//   carries (Rust jet_event_observe's arguments). A sync carrier's counts,
+//   capacity and overflow are 0, 0 and "None"; an AsyncEvent's -1, its
+//   capacity and its overflow.
+// EventScope72: refs0 canceled8 subs{len16 cap24 data32}
 //   hard{len40 cap48 data56}: the AsyncEvent cores whose hard cancel the
-//   scope's cancel runs (Rust track_hard_cancel), one count each.
+//   scope's cancel runs (Rust track_hard_cancel), one count each. id64 is
+//   the owner identity its subscriptions' observations name.
 // EventTrace24: delivered0 queued8 dropped16
 
 event_word: fn(address: I64) -> I64 { trap_word(address) }
@@ -81,11 +93,12 @@ event_release_closure: fn(env: I64, release: I64) {
 // ---- Subscription ----------------------------------------------------------
 
 event_sub_new: fn() -> I64 {
-    sub: jet_rt_alloc(I64{32}, I64{8})
+    sub: jet_rt_alloc(I64{40}, I64{8})
     event_store(sub, I64{1})
     event_store(wrapping(sub + I64{8}), I64{1})
     event_store(wrapping(sub + I64{16}), I64{0})
     event_store(wrapping(sub + I64{24}), I64{0})
+    event_store(wrapping(sub + I64{32}), I64{0})
     sub
 }
 
@@ -99,20 +112,25 @@ event_sub_release: fn(sub: I64) {
         return
     }
     core: event_word(wrapping(sub + I64{16}))
-    jet_rt_free(sub, I64{32}, I64{8})
+    note: event_word(wrapping(sub + I64{32}))
+    jet_rt_free(sub, I64{40}, I64{8})
+    if (note != I64{0}) { jet_rt_free(note, I64{64}, I64{8}) }
     if (core != I64{0}) { event_core_weak_release(core) }
 }
 
 event_sub_active: fn(sub: I64) -> Bool { sync_load(wrapping(sub + I64{8})) != I64{0} }
 
 // JetSubscription.unsubscribe :578-590: the first call deactivates and runs
-// the cleanup, which removes the listener while its event is still alive
-// (Weak.upgrade); a later call is a no-op.
+// the cleanup, which observes the removal of a registered subscription and
+// removes the listener while its event is still alive (Weak.upgrade); a
+// later call is a no-op. The flag clears once: an AsyncEvent dispatch on
+// another thread may reserve a once subscription meanwhile
+// (AsyncEvents.jet async_snapshot), and only one of the two observes it.
 event_sub_unsubscribe: fn(sub: I64) {
-    if !event_sub_active(sub) {
+    if (sync_cas(wrapping(sub + I64{8}), I64{1}, I64{0}) != I64{1}) {
         return
     }
-    sync_store(wrapping(sub + I64{8}), I64{0})
+    event_note_observe(event_word(wrapping(sub + I64{32})), I64{0}, rt_static_text("Removed"), rt_static_text("None"))
     core: event_word(wrapping(sub + I64{16}))
     if (core == I64{0} || event_word(core) == I64{0}) {
         return
@@ -129,6 +147,55 @@ event_sub_unsubscribe: fn(sub: I64) {
         }
         at += I64{1}
     }
+}
+
+// Gives the registered `sub` its observation note (EventNote64) while the
+// run publishes live snapshots: a fresh subscription identity under the
+// owner identity of `scope`. Returns the note, else 0.
+event_note_new: fn(sub: I64, source: I64, event: I64, scope: I64, priority: I64, counts: I64, capacity: I64, overflow: I64) -> I64 {
+    if !observe_live() -> return I64{0}
+    note: jet_rt_alloc(I64{64}, I64{8})
+    event_store(note, source)
+    event_store(wrapping(note + I64{8}), event)
+    event_store(wrapping(note + I64{16}), event_word(wrapping(scope + I64{64})))
+    event_store(wrapping(note + I64{24}), observe_event_id())
+    event_store(wrapping(note + I64{32}), priority)
+    event_store(wrapping(note + I64{40}), counts)
+    event_store(wrapping(note + I64{48}), capacity)
+    event_store(wrapping(note + I64{56}), overflow)
+    event_store(wrapping(sub + I64{32}), note)
+    note
+}
+
+// The `lifecycle` record of the subscription whose note is `note` (none
+// for 0), in `dispatch` (0 outside one), with `failure` and no terminal.
+event_note_observe: fn(note: I64, dispatch: I64, lifecycle: I64, failure: I64) {
+    if (note == I64{0}) {
+        return
+    }
+    counts: event_word(wrapping(note + I64{40}))
+    observe_event(event_word(note), event_word(wrapping(note + I64{8})), event_word(wrapping(note + I64{16})), event_word(wrapping(note + I64{24})), dispatch, lifecycle, counts, counts, counts, event_word(wrapping(note + I64{48})), event_word(wrapping(note + I64{56})), event_word(wrapping(note + I64{32})), failure, rt_static_text("None"))
+}
+
+// The note of the subscription of the listener row `listener`.
+event_listener_note: fn(listener: I64) -> I64 {
+    event_word(wrapping(event_word(wrapping(listener + I64{32})) + I64{32}))
+}
+
+// A dispatch's own `lifecycle` record on the sync carrier `core` (none for
+// a Hook's): no owner, subscription or priority.
+event_core_observe: fn(core: I64, dispatch: I64, lifecycle: I64, failure: I64, terminal: I64) {
+    source: event_word(wrapping(core + I64{64}))
+    if (source == I64{0}) {
+        return
+    }
+    observe_event(source, event_word(wrapping(core + I64{56})), I64{0}, I64{0}, dispatch, lifecycle, I64{0}, I64{0}, I64{0}, I64{0}, rt_static_text("None"), I64{0}, failure, terminal)
+}
+
+// A fresh dispatch identity on the sync carrier `core`, 0 for a Hook's or
+// while the run publishes no live snapshot.
+event_core_dispatch: fn(core: I64) -> I64 {
+    if (event_word(wrapping(core + I64{64})) == I64{0}) -> I64{0} else -> observe_event_id()
 }
 
 #Export(c) jet_subscription_unsubscribe: fn(sub: I64) { event_sub_unsubscribe(sub) }
@@ -162,9 +229,10 @@ event_listener_release: fn(listener: I64) {
 // ---- EventScope ------------------------------------------------------------
 
 #Export(c) jet_event_scope_new: fn() -> I64 {
-    scope: jet_rt_alloc(I64{64}, I64{8})
-    coll_zero(scope, I64{64})
+    scope: jet_rt_alloc(I64{72}, I64{8})
+    coll_zero(scope, I64{72})
     event_store(scope, I64{1})
+    event_store(wrapping(scope + I64{64}), observe_event_id())
     scope
 }
 
@@ -284,7 +352,7 @@ event_scope_release_hard: fn(scope: I64, cancel: Bool) {
     capacity: event_word(wrapping(base + I64{8}))
     data: event_word(wrapping(base + I64{16}))
     event_scope_release_hard(scope, false)
-    jet_rt_free(scope, I64{64}, I64{8})
+    jet_rt_free(scope, I64{72}, I64{8})
     at := I64{0}
     loop at < length {
         event_sub_release(event_word(wrapping(data + at * I64{8})))
@@ -364,16 +432,21 @@ event_trace_with_summary: fn(delivered: I64, queued: I64, dropped: I64, summary:
 // JetEvent.with_policy :692-698 borrows the policy ordinal; the caller keeps
 // and releases its policy value.
 #Export(c) jet_event_with_policy: fn(policy: I64) -> I64 {
-    event_core_new(encoding_word(wrapping(policy + ENCODING_ENUM_TAG)))
+    event_core_new(encoding_word(wrapping(policy + ENCODING_ENUM_TAG)), rt_static_text("Event"))
 }
 
 // A fresh EventCore with one strong count and policy ordinal `ordinal` (0 is
-// EventPolicy.Sync, JetEvent.new).
-event_core_new: fn(ordinal: I64) -> I64 {
-    core: jet_rt_alloc(I64{56}, I64{8})
-    coll_zero(core, I64{56})
+// EventPolicy.Sync, JetEvent.new), whose observations name `source` (0 for
+// none, a Hook's).
+event_core_new: fn(ordinal: I64, source: I64) -> I64 {
+    core: jet_rt_alloc(I64{72}, I64{8})
+    coll_zero(core, I64{72})
     event_store(core, I64{1})
     event_store(wrapping(core + I64{48}), ordinal)
+    if (source != I64{0}) {
+        event_store(wrapping(core + I64{56}), observe_event_id())
+        event_store(wrapping(core + I64{64}), source)
+    }
     core
 }
 
@@ -384,7 +457,7 @@ event_core_new: fn(ordinal: I64) -> I64 {
 
 event_core_free: fn(core: I64) {
     event_words_free(event_word(wrapping(core + I64{40})), event_word(wrapping(core + I64{32})))
-    jet_rt_free(core, I64{56}, I64{8})
+    jet_rt_free(core, I64{72}, I64{8})
 }
 
 event_core_weak_release: fn(core: I64) {
@@ -422,7 +495,8 @@ event_core_weak_release: fn(core: I64) {
 
 // JetEvent.add :717-754 (on / once / on_priority). The subscription is
 // tracked by `scope` first; a canceled scope returns it inactive and the
-// handler is released unregistered.
+// handler is released unregistered, unobserved. A registered one is
+// observed Subscribed.
 #Export(c) jet_event_listen: fn(core: I64, scope: I64, priority: I64, once: I64, env: I64, invoke: I64, release: I64) -> I64 {
     sub: event_sub_new()
     event_scope_track(scope, sub)
@@ -445,6 +519,11 @@ event_core_weak_release: fn(core: I64) {
     event_store(wrapping(sub + I64{16}), core)
     event_store(wrapping(sub + I64{24}), id)
     event_store(wrapping(core + I64{8}), event_word(wrapping(core + I64{8})) + I64{1})
+    source: event_word(wrapping(core + I64{64}))
+    if (source != I64{0}) {
+        note: event_note_new(sub, source, event_word(wrapping(core + I64{56})), scope, priority, I64{0}, I64{0}, rt_static_text("None"))
+        event_note_observe(note, I64{0}, rt_static_text("Subscribed"), rt_static_text("None"))
+    }
     sub
 }
 
@@ -521,8 +600,12 @@ event_listener_call: fn(listener: I64, payload: I64, out: I64) {
 // A stop delivered by a handler ends the dispatch and returns no trace.
 // The dispatch holds its own strong count: a handler that drops the last
 // Event handle leaves the core alive until the dispatch releases it.
+// Observed: DispatchStarted, each handler's HandlerStarted and
+// HandlerDelivered, then the Delivered Terminal.
 #Export(c) jet_event_emit: fn(core: I64, payload: I64) -> I64 {
     event_store(core, event_word(core) + I64{1})
+    dispatch: event_core_dispatch(core)
+    event_core_observe(core, dispatch, rt_static_text("DispatchStarted"), rt_static_text("None"), rt_static_text("None"))
     snapshot: event_snapshot(core)
     count: event_snapshot_count(snapshot)
     scratch: jet_rt_alloc(I64{16}, I64{8})
@@ -533,9 +616,12 @@ event_listener_call: fn(listener: I64, payload: I64, out: I64) {
     loop at < count {
         listener: event_snapshot_get(snapshot, at)
         if !stopped && event_listener_take_turn(listener) {
+            note: event_listener_note(listener)
+            event_note_observe(note, dispatch, rt_static_text("HandlerStarted"), rt_static_text("None"))
             event_listener_call(listener, payload, scratch)
             if (jet_rt_session_propagate() != I64{0}) { stopped = true } else {
                 delivered += I64{1}
+                event_note_observe(note, dispatch, rt_static_text("HandlerDelivered"), rt_static_text("None"))
             }
         }
         event_listener_release(listener)
@@ -544,6 +630,9 @@ event_listener_call: fn(listener: I64, payload: I64, out: I64) {
     jet_rt_free(scratch, I64{16}, I64{8})
     event_snapshot_free(snapshot)
     event_prune_listeners(core)
+    if !stopped {
+        event_core_observe(core, dispatch, rt_static_text("Terminal"), rt_static_text("None"), rt_static_text("Delivered"))
+    }
     jet_rt_handle_drop_jet_event(core)
     if stopped -> return I64{0}
     event_trace_new(delivered, I64{0}, I64{0})

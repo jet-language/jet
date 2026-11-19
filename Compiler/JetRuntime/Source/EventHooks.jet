@@ -7,11 +7,13 @@
 //   clones share the listener Rc; a Hook clone's fallback is an equal value).
 //   core is an EventCore holding the listeners. A Hook owns its fallback R
 //   slot under its copied descriptor meta; a DecisionHook keeps 0 in both.
+//   A DecisionHook's core is observed under source DecisionHook; a Hook's
+//   records nothing (Rust jet_event_observe has no Hook source).
 
-hook_new: fn(fallback: I64, meta: I64) -> I64 {
+hook_new: fn(fallback: I64, meta: I64, source: I64) -> I64 {
     hook: jet_rt_alloc(I64{32}, I64{8})
     event_store(hook, I64{1})
-    event_store(wrapping(hook + I64{8}), event_core_new(I64{0}))
+    event_store(wrapping(hook + I64{8}), event_core_new(I64{0}, source))
     event_store(wrapping(hook + I64{16}), fallback)
     event_store(wrapping(hook + I64{24}), meta)
     hook
@@ -32,12 +34,14 @@ hook_value_clone: fn(source: I64, target: I64, meta: I64) {
     owned: coll_meta_copy(meta)
     slot: coll_slot_new(owned)
     coll_copy(fallback, slot, coll_payload(owned))
-    hook_new(slot, owned)
+    hook_new(slot, owned, I64{0})
 }
 
 // JetDecisionHook.new :1788-1794 borrows its policy; FirstCancelElseTransform
 // is the sole ordinal.
-#Export(c) jet_decision_hook_new: fn(_policy: I64) -> I64 { hook_new(I64{0}, I64{0}) }
+#Export(c) jet_decision_hook_new: fn(_policy: I64) -> I64 {
+    hook_new(I64{0}, I64{0}, rt_static_text("DecisionHook"))
+}
 
 #Export(c) jet_rt_handle_clone_jet_hook: fn(hook: I64) -> I64 {
     event_store(hook, event_word(hook) + I64{1})
@@ -157,6 +161,9 @@ OUTCOME_FAIL_AT: I64{104}
 // Continue keeps it, Transform replaces it, Cancel and Fail end the run. The
 // HookOutcome box is built in the lowering's enum layout: Continue moves the
 // current value in, Fail the failure. A stop ends the run with no outcome.
+// Observed: DispatchStarted, each handler's HandlerStarted and its decision
+// (HandlerContinue, HandlerTransform, HandlerCancel, HandlerFail), then the
+// Terminal Continue, Cancel or Fail.
 #Export(c) jet_decision_hook_run: fn(hook: I64, payload: I64, layout: I64) -> I64 {
     event_store(hook, event_word(hook) + I64{1})
     core: event_word(wrapping(hook + I64{8}))
@@ -169,6 +176,9 @@ OUTCOME_FAIL_AT: I64{104}
     failure := I64{0}
     outcome := event_word(wrapping(layout + OUTCOME_CONTINUE))
     stopped := false
+    none: rt_static_text("None")
+    dispatch: event_core_dispatch(core)
+    event_core_observe(core, dispatch, rt_static_text("DispatchStarted"), none, none)
     snapshot: event_snapshot(core)
     count: event_snapshot_count(snapshot)
     at := I64{0}
@@ -176,6 +186,8 @@ OUTCOME_FAIL_AT: I64{104}
         listener: event_snapshot_get(snapshot, at)
         due: !stopped && outcome == event_word(wrapping(layout + OUTCOME_CONTINUE))
         if due && event_listener_take_turn(listener) {
+            note: event_listener_note(listener)
+            event_note_observe(note, dispatch, rt_static_text("HandlerStarted"), none)
             event_listener_call(listener, current, decision)
             if (jet_rt_session_propagate() != I64{0}) { stopped = true } else {
                 boxed: event_word(decision)
@@ -183,12 +195,19 @@ OUTCOME_FAIL_AT: I64{104}
                 if (decision_tag == event_word(wrapping(layout + DECISION_TRANSFORM))) {
                     coll_slot_drop(current, t_meta)
                     hook_value_clone(wrapping(boxed + event_word(wrapping(layout + DECISION_TRANSFORM_AT))), current, t_meta)
+                    event_note_observe(note, dispatch, rt_static_text("HandlerTransform"), none)
                 } else if (decision_tag == event_word(wrapping(layout + DECISION_CANCEL))) {
                     outcome = event_word(wrapping(layout + OUTCOME_CANCEL))
+                    event_note_observe(note, dispatch, rt_static_text("HandlerCancel"), none)
+                    event_core_observe(core, dispatch, rt_static_text("Terminal"), none, rt_static_text("Cancel"))
                 } else if (decision_tag == event_word(wrapping(layout + DECISION_FAIL))) {
                     failure = coll_slot_new(e_meta)
                     hook_value_clone(wrapping(boxed + event_word(wrapping(layout + DECISION_FAIL_AT))), failure, e_meta)
                     outcome = event_word(wrapping(layout + OUTCOME_FAIL))
+                    event_note_observe(note, dispatch, rt_static_text("HandlerFail"), rt_static_text("Handler"))
+                    event_core_observe(core, dispatch, rt_static_text("Terminal"), rt_static_text("Handler"), rt_static_text("Fail"))
+                } else {
+                    event_note_observe(note, dispatch, rt_static_text("HandlerContinue"), none)
                 }
                 coll_slot_drop(decision, d_meta)
             }
@@ -198,6 +217,9 @@ OUTCOME_FAIL_AT: I64{104}
     }
     event_snapshot_free(snapshot)
     event_prune_listeners(core)
+    if (!stopped && outcome == event_word(wrapping(layout + OUTCOME_CONTINUE))) {
+        event_core_observe(core, dispatch, rt_static_text("Terminal"), none, rt_static_text("Continue"))
+    }
     jet_rt_free(decision, coll_size(d_meta), I64{8})
     result := I64{0}
     if stopped {

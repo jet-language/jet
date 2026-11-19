@@ -1,9 +1,10 @@
 // Native task/channel registry. It records only identities and wait/resource
-// facts, never a task payload, channel element or environment. Root168:
+// facts, never a task payload, channel element or environment. Root176:
 // mutex0/next-task8/next-channel16/tasks24/task-count32/channels40/
 // workers48/queued56/exit-reported64/writer72/event-sequence80/events88/
 // event-tail96/event-count104/values112/value-count120/task-table128/
-// game-sequence136/games144/game-tail152/game-count160 (Game.jet's relay).
+// game-sequence136/games144/game-tail152/game-count160 (Game.jet's relay)/
+// event-next-id168 (ObserveLive.jet observe_event_id).
 // Task120: next0/id8/parent16/site24/label32/state40/wait48/deadline-present56/
 // deadline64/canceled72/control80/previous88/open-spans96/arena-allocations104/
 // fiber112. `jet debug` reads the registry from the stopped program, through
@@ -24,12 +25,13 @@ observe_channels_code := I64{0}
     if (observe_root != I64{0}) {
         return
     }
-    root: jet_rt_alloc(I64{168}, I64{8})
+    root: jet_rt_alloc(I64{176}, I64{8})
     #Unsafe("runtime-init runs before any other thread exists") { observe_root = root }
-    thread_zero(observe_root, I64{168})
+    thread_zero(observe_root, I64{176})
     sync_store(wrapping(observe_root + I64{8}), I64{2})
     sync_store(wrapping(observe_root + I64{16}), I64{1})
     sync_store(wrapping(observe_root + I64{80}), I64{1})
+    sync_store(wrapping(observe_root + I64{168}), I64{1})
     #Unsafe("runtime-init runs before any other thread exists") {
         observe_task_key = jet_rt_tls_key_new(I64{0})
     }

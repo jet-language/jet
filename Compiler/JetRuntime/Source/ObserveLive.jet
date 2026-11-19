@@ -132,19 +132,60 @@ observe_event_drop: fn(node: I64) {
 // Source has canonical Event fields:49-65 order; sequence is assigned under the
 // same lock as append, as the Rust VecDeque producer does.
 #Export(c) jet_observe_event: fn(source: I64) {
-    if observe_events_code == (I64{0}) {
-        #Unsafe("an idempotent install: every writer stores the same code address") {
-            observe_events_code = rt_observe_raw_events_address()
-        }
-    }
     node: jet_rt_alloc(I64{128}, I64{8})
-    sync_store(node, I64{0})
     at := I64{8}
     loop at < (I64{120}) {
         word: sync_load(wrapping(source + at))
         sync_store(wrapping(wrapping(node + at) + I64{8}), if observe_event_text_field(at) -> observe_text_clone(word) else -> word)
         at += I64{8}
     }
+    observe_event_append(node)
+}
+
+// One runtime event observation of core.event's carriers (Events.jet,
+// EventHooks.jet, AsyncEvents.jet; Rust jet_event_observe) while the run
+// publishes live snapshots: the record's fields after its sequence, the
+// texts static (rt_static_text, immortal, so the record keeps them as they
+// are). An unobserved run records nothing.
+observe_event: fn(source: I64, event: I64, owner: I64, subscription: I64, dispatch: I64, lifecycle: I64, queued: I64, blocked: I64, running: I64, capacity: I64, overflow: I64, priority: I64, failure: I64, terminal: I64) {
+    if !observe_live() {
+        return
+    }
+    node: jet_rt_alloc(I64{128}, I64{8})
+    sync_store(wrapping(node + I64{16}), source)
+    sync_store(wrapping(node + I64{24}), event)
+    sync_store(wrapping(node + I64{32}), owner)
+    sync_store(wrapping(node + I64{40}), subscription)
+    sync_store(wrapping(node + I64{48}), dispatch)
+    sync_store(wrapping(node + I64{56}), lifecycle)
+    sync_store(wrapping(node + I64{64}), queued)
+    sync_store(wrapping(node + I64{72}), blocked)
+    sync_store(wrapping(node + I64{80}), running)
+    sync_store(wrapping(node + I64{88}), capacity)
+    sync_store(wrapping(node + I64{96}), overflow)
+    sync_store(wrapping(node + I64{104}), priority)
+    sync_store(wrapping(node + I64{112}), failure)
+    sync_store(wrapping(node + I64{120}), terminal)
+    observe_event_append(node)
+}
+
+// A fresh identity for an event, scope, subscription or dispatch the
+// observations name (Rust JET_EVENT_NEXT_ID), from 1; 0 while the run
+// publishes no live snapshot.
+observe_event_id: fn() -> I64 {
+    if !observe_live() -> return I64{0}
+    sync_add(wrapping(observe_root + I64{168}), I64{1})
+}
+
+// Appends the filled record `node` (Event128) to the registry's ring: past
+// 256 records the oldest retires.
+observe_event_append: fn(node: I64) {
+    if observe_events_code == (I64{0}) {
+        #Unsafe("an idempotent install: every writer stores the same code address") {
+            observe_events_code = rt_observe_raw_events_address()
+        }
+    }
+    sync_store(node, I64{0})
     sync_mutex_lock(observe_root)
     sync_store(wrapping(node + I64{8}), sync_add(wrapping(observe_root + I64{80}), I64{1}))
     tail: sync_load(wrapping(observe_root + I64{96}))
@@ -169,8 +210,8 @@ observe_event_drop: fn(node: I64) {
 OBSERVE_GAME_RECORDS: I64{512}
 
 // Whether the run publishes live snapshots, the only reader of the game
-// relay: an unobserved game records nothing.
-observe_game_live: fn() -> Bool {
+// relay and of the event observations: an unobserved run records neither.
+observe_live: fn() -> Bool {
     observe_root != (I64{0}) && sync_load(wrapping(observe_root + I64{72})) != (I64{0})
 }
 
