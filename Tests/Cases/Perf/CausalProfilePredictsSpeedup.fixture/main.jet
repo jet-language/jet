@@ -15,8 +15,11 @@
 // round of each in turn. It writes to FILE how much sooner a round came for
 // the narrow line and for the wide one, each as the low end of its median's
 // 90% interval, the median and the high end, in tenths of a percent, then
-// the runqueue wait its threads took in thousandths of their run time.
-// That wait is the same measure the lens takes of its run.
+// the runqueue wait its threads took in thousandths of their run time, and
+// the means of the highest and the lowest clock, in MHz, of the CPUs its
+// threads that ran last ran on, read after each three rounds (0 for both
+// where the kernel has no cpufreq). The wait and the clocks are the same
+// measures the lens takes of its run.
 use {
     files: core.files
     perf: core.perf
@@ -83,6 +86,32 @@ cpu_times: fn() -> [Int] {
     [Int]{run, wait}
 }
 
+// The highest and the lowest clock, in kHz, of the CPUs this program's
+// threads last ran on, of those threads whose run time grew since `runs`
+// (by thread) last held it, which it now holds; 0 for both when none could
+// be read. A thread's CPU is field 39 of its stat, the 37th after the
+// state that follows its name's last `)`.
+clocks: fn(runs: &[String:Int]) -> [Int] {
+    high := 0
+    low := 0
+    entries: files.list_dir("/proc/self/task") ?? return [Int]{0, 0}
+    loop entry in entries {
+        text: files.read("/proc/self/task/{entry.name}/schedstat") ?? next
+        run: Int.parse(text.trim().split(" ").to_list()[0]) ?? next
+        last: runs.get(entry.name) ?? -1
+        runs[entry.name] = run
+        if last < 0 || run <= last -> next
+        stat: files.read("/proc/self/task/{entry.name}/stat") ?? next
+        parts: stat.split(")").to_list()
+        fields: parts[parts.len() - 1].trim().split(" ").to_list()
+        if fields.len() < 37 -> next
+        khz: Int.parse((files.read("/sys/devices/system/cpu/cpu{fields[36]}/cpufreq/scaling_cur_freq") ?? next).trim()) ?? next
+        if khz > high -> high = khz
+        if khz > 0 && (low == 0 || khz < low) -> low = khz
+    }
+    [Int]{high, low}
+}
+
 // A sorted line's gains as the low end of its median's interval, the median
 // and the high end.
 median_interval: fn(gains: [Int]) -> String {
@@ -100,9 +129,15 @@ run: fn() {
         // load, which drifts over the run, falls alike on both: each
         // three's speedups, and the median of them, in tenths of a percent.
         // The wait the threads took meanwhile tells whether the rounds had
-        // their CPUs or contended for them.
+        // their CPUs or contended for them, and the clocks of their CPUs
+        // whether those that idled clocked down.
         narrow_gains := [Int]{}
         wide_gains := [Int]{}
+        runs := [String:Int]{}
+        khz_high := 0
+        khz_low := 0
+        clocked := 0
+        _ := clocks(runs)
         before: cpu_times()
         loop index in 0..<ROUNDS {
             plain := 0
@@ -118,13 +153,21 @@ run: fn() {
             }
             narrow_gains.push(1000 - narrow_fast * 1000 /% plain)
             wide_gains.push(1000 - wide_fast * 1000 /% plain)
+            read: clocks(runs)
+            if read[0] > 0 && read[1] > 0 {
+                khz_high += read[0]
+                khz_low += read[1]
+                clocked += 1
+            }
         }
         after: cpu_times()
         run_ns: after[0] - before[0]
         wait: if run_ns > 0 -> (after[1] - before[1]) * 1000 /% run_ns else -> 0
+        high_mhz: if clocked > 0 -> khz_high /% clocked /% 1000 else -> 0
+        low_mhz: if clocked > 0 -> khz_low /% clocked /% 1000 else -> 0
         narrow_gains.sort()
         wide_gains.sort()
-        files.write(word, "{median_interval(narrow_gains)} {median_interval(wide_gains)} {wait}\n") ?? panic("cannot write {word}")
+        files.write(word, "{median_interval(narrow_gains)} {median_interval(wide_gains)} {wait} {high_mhz} {low_mhz}\n") ?? panic("cannot write {word}")
         print("measured")
         return
     }

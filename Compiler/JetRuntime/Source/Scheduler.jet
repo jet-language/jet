@@ -1528,26 +1528,38 @@ scheduler_task_file: fn(tid: I64, name: I64, buffer: I64) -> I64 {
     prefix: rt_static_text("/proc/self/task/")
     at := rt_text_len(prefix)
     rt_text_bytes_copy(buffer, rt_text_data(prefix), at)
-    digits := I64{1}
-    scale := I64{10}
-    loop tid >= scale {
-        digits += I64{1}
-        scale *= I64{10}
-    }
-    value := tid
-    place := digits
-    loop place > (I64{0}) {
-        place -= I64{1}
-        rt_text_put(wrapping(buffer + at + place), I64{48} + value % I64{10})
-        value = value /% I64{10}
-    }
-    at = wrapping(at + digits)
+    at = wrapping(at + scheduler_put_number(wrapping(buffer + at), tid))
     rt_text_put(wrapping(buffer + at), I64{47})
     at = wrapping(at + I64{1})
     rt_text_bytes_copy(wrapping(buffer + at), rt_text_data(name), rt_text_len(name))
     rt_text_put(wrapping(buffer + at + rt_text_len(name)), I64{0})
+    scheduler_read_path(buffer)
+}
+
+// Writes `value`, at least 0, in decimal at `at`: the digits written.
+scheduler_put_number: fn(at: I64, value: I64) -> I64 {
+    digits := I64{1}
+    scale := I64{10}
+    loop value >= scale {
+        digits += I64{1}
+        scale *= I64{10}
+    }
+    rest := value
+    place := digits
+    loop place > (I64{0}) {
+        place -= I64{1}
+        rt_text_put(wrapping(at + place), I64{48} + rest % I64{10})
+        rest = rest /% I64{10}
+    }
+    digits
+}
+
+// Reads the file whose NUL-ended path `buffer` holds into `buffer`, at most
+// SCHEDULER_STAT_BYTES: the bytes read, or a negative count when the file
+// cannot be opened or read.
+scheduler_read_path: fn(buffer: I64) -> I64 {
     got := I64{-1}
-    #Unsafe("openat, read and close name and fill only the monitor's own scratch; the descriptor is closed before return") {
+    #Unsafe("openat, read and close the path and fill only the caller's own scratch; the descriptor is closed before return") {
         // openat(AT_FDCWD, path, O_RDONLY | O_CLOEXEC).
         descriptor: os_syscall_i64(I64{257}, I64{-100}, buffer, I64{524288}, I64{0}, I64{0}, I64{0})
         if (descriptor < I64{0}) { return descriptor }
