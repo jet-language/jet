@@ -32,6 +32,7 @@ use {
         jet_driver_present_diagnostics,
         jet_driver_runtime_interface_sources,
     ]
+    jet_eval.[JetEvalNativeSession]
     jet_foundation.[CompilerThreads, FnBody, compiler_take_rows, compiler_threads_failure_text, compiler_transfer_rows, symbol_table]
     jet_ir.[IRCoreLibrary, ir_build_core_library, ir_core_exports_text, ir_core_facts_text, ir_lint_module, ir_opt_options, ir_optimize_module, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[JET_VERSION]
@@ -105,19 +106,20 @@ JetCLICoreLibraryIR: enum {
 }
 
 // The Core library's check, IR build, lint and O2 optimizer, as the
-// `runtime.core` span. They read nothing of the runtime's, so the runtime
-// library build runs them on their own task beside the runtime's check and
-// lowering (Request.jet jet_cli_runtime_library). The compiler's identity is
-// settled before (jet_cli_core_identity).
-jet_cli_core_library_ir: fn(compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibraryIR {
+// `runtime.core` span. The runtime library build runs them on their own task
+// beside the runtime's check and lowering (Request.jet
+// jet_cli_runtime_library); the check's compile-time code runs in `native`,
+// a session over the runtime image without Core. The compiler's identity
+// is settled before (jet_cli_core_identity).
+jet_cli_core_library_ir: fn(native: Shared<JetEvalNativeSession>, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibraryIR {
     if trace_sink == .Val(sink) -> sink.begin("runtime.core", "", -1, -1)
-    built: jet_cli_core_library_lowered(compiler_threads, trace_sink)
+    built: jet_cli_core_library_lowered(native, compiler_threads, trace_sink)
     if trace_sink == .Val(sink) -> sink.end("runtime.core", -1)
     built
 }
 
-jet_cli_core_library_lowered: fn(compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibraryIR {
-    checked := jet_cli_core_checked(trace_sink)
+jet_cli_core_library_lowered: fn(native: Shared<JetEvalNativeSession>, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLICoreLibraryIR {
+    checked := jet_cli_core_checked(native, trace_sink)
     inputs := if checked.move() == {
         .Stopped(output) -> {
             return JetCLICoreLibraryIR.Stopped{problem: "The Core check of the Core library stopped:\n{output.stderr}{output.stdout}"}
@@ -204,10 +206,8 @@ jet_cli_core_bodies_file: fn(captures: &&SemaCoreCaptures, trace_sink: JetCLITra
 
 // The Core library's machine code (jet_cli_core_library) from its IR
 // `built`, as the `runtime.core.object` span, at `prefix`, once the
-// runtime's thread receipt `runtime_threads` is known. The runtime library
-// build runs it on a task of its own while the runtime's machine code and
-// object are made (Request.jet jet_cli_runtime_with_core). A Core check
-// that stopped is the problem.
+// runtime's thread receipt `runtime_threads` is known (Request.jet
+// jet_cli_runtime_with_core). A Core check that stopped is the problem.
 jet_cli_core_library_made: fn(built: &&JetCLICoreLibraryIR, prefix: String, runtime_threads: [String], trace_sink: JetCLITraceSink?) -> JetCLICoreLibrary {
     if built.move() == {
         .Stopped(problem) -> JetCLICoreLibrary{bytes: [U8]{}, problem: problem}
@@ -275,10 +275,11 @@ jet_cli_core_interface_made: fn(prefix: String, compiler_threads: CompilerThread
 // (one import of each public Core module, jet_cli_core_check_source) over the
 // Core sources built into this jet, written to a scratch directory and
 // compiled with every Core body checked, whether a program calls it or not,
-// stopped right before lowering, its phases traced to `trace_sink`; else the
-// output that ends the build (the diagnostics that keep Core from checking
-// clean, a refusal, an internal problem). The compile state the lowering
-// inputs leave behind drops on a detached task while the library's IR builds
+// its compile-time code run in `native`, stopped right before lowering, its
+// phases traced to `trace_sink`; else the output that ends the build (the
+// diagnostics that keep Core from checking clean, a refusal, an internal
+// problem). The compile state the lowering inputs leave behind drops on a
+// detached task while the library's IR builds
 // (JetDriverCompileRequest.release_state_aside), not as the check returns.
 JetCLICoreChecked: enum {
     Checked(inputs: JetDriverLoweringInputs),
@@ -305,7 +306,7 @@ jet_cli_core_identity: fn() -> String {
     ""
 }
 
-jet_cli_core_checked: fn(trace_sink: JetCLITraceSink?) -> JetCLICoreChecked {
+jet_cli_core_checked: fn(native: Shared<JetEvalNativeSession>, trace_sink: JetCLITraceSink?) -> JetCLICoreChecked {
     scratch: core_library_files.temp_dir("jet-core-library") ?? return JetCLICoreChecked.Stopped{output: jet_cli_maintenance_error("E2105", "couldn't create a scratch directory for the Core entry: {jet_cli_io_error_text(err)}", None, false, false)}
     entry: "{scratch.path}/core.jet"
     source: jet_cli_core_check_source()
@@ -322,6 +323,9 @@ jet_cli_core_checked: fn(trace_sink: JetCLITraceSink?) -> JetCLICoreChecked {
             selected.core_seal = true
             selected.trace_sink = jet_cli_trace_boxed(trace_sink)
             selected.release_state_aside = true
+            // The Core library's Core bodies carry the local values this
+            // check computes (JetSema Comptime/LocalValues.jet).
+            selected.eval_config.native = Val(native)
             front := jet_driver_lowering_inputs(selected, None)
             if trace_sink == .Val(sink) -> sink.begin("core_check.diagnostics", "", -1, -1)
             diagnostics: jet_driver_present_diagnostics(front.compile.diagnostics, snapshot, front.compile.generated_source_files)

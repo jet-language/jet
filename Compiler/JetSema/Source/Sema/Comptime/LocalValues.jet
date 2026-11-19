@@ -10,8 +10,10 @@
 // that reason and reports nothing. A local that reads a run-time value,
 // whose calls reach the outside world by their written rows, or that hands
 // a named function to a slot with a closed effect row, is never staged,
-// and neither is any local of a `jet check`, which lowers nothing, or of a
-// Core or Prelude body, whose check every compile shares.
+// and neither is any local of a `jet check`, which lowers nothing. A Core
+// or Prelude body's locals land in the Core library's check, whose captures
+// a plain compile loads (CoreBodies.jet sema_core_body_loaded), so a
+// keep-going compile that checks the body from text lands the same values.
 //
 // A local value is also computed ahead. Beside the module's comptime
 // items, the declaration pass stages some locals of the program's
@@ -67,13 +69,6 @@ sema_comptime_local_value: fn(
     if !sema_comptime_local_value_candidate(init.ty, fact_start, reference_start, node_start, program, scopes, context) {
         return none
     }
-    // A Core or Prelude body stages none, as its declaration pass computes
-    // none ahead (sema_comptime_local_value_ahead_sources). Its check is one
-    // for every compile: a plain compile loads the Core library's check of
-    // it (CoreBodies.jet sema_core_body_loaded), and a keep-going or
-    // `--deep-checks` compile checks it from text, so a site staged in one
-    // and not the other would make the two lower different code.
-    if sema_comptime_local_value_core_body(program, environment.module_identity) -> return none
     // `#Runtime` keeps a local that could be computed to run time, and that
     // is the reason hover and `jet inspect` give for it.
     if context.runtime_policy == .Val(mode) {
@@ -103,9 +98,9 @@ sema_comptime_local_value: fn(
 // optimizer's folding of the lowered code.
 // A `jet check` (graph.check_tests) computes none: it lowers nothing, and a
 // local value reports nothing whether it lands or not, so its outcome
-// changes no diagnostic. A check of every Core body (graph.every_core_body)
-// still computes those of the program's own bodies; no Core or Prelude body
-// stages one (sema_comptime_local_value_core_body).
+// changes no diagnostic. A check of every Core body (graph.every_core_body),
+// the Core library's, computes them, and the library's Core bodies carry
+// them to every compile.
 sema_comptime_local_value_candidate: fn(
     ty: Type,
     fact_start: Int,
@@ -136,15 +131,6 @@ sema_comptime_local_value_candidate: fn(
         calls.push(context.call_facts[index].copy())
     }
     sema_comptime_call_facts_impurity(graph, calls, true) == None
-}
-
-// Whether the module `module_identity` of the compile holds Core or Prelude
-// bodies (CoreBodies.jet sema_core_body_module), whose locals are never
-// computed while compiling.
-sema_comptime_local_value_core_body: fn(program: SemaProgramTables, module_identity: ModuleID) -> Bool {
-    graph: program.registration_graph ?? return false
-    index: sema_registration_module_index(graph, module_identity) ?? return false
-    sema_core_body_module(graph.modules[index])
 }
 
 // Whether the arena rows from `node_start` on hold a named function read
@@ -241,11 +227,13 @@ SEMA_COMPTIME_LOCAL_VALUE_AHEAD: ".local-value-ahead."
 
 // The locals of `source_module`'s top-level functions that its declaration
 // pass stages to be computed ahead: none in a `jet check` (which computes no
-// local value) or in a Core or Prelude module. A compile-time, unsafe,
-// generic or generated function, one a marker template wrote, or one under
-// `#Runtime` stages none. Only the function's own blocks, loop bodies, switch
-// arms and `if` branches are read; a local that a policy, `#Impure` or
-// `#Unsafe` block, or a lambda holds is not staged.
+// local value) or in a Core or Prelude module, whose bodies a plain compile
+// loads with their values landed, so computing them ahead would be work
+// for nothing. A compile-time, unsafe, generic or generated function, one a
+// marker template wrote, or one under `#Runtime` stages none. Only the
+// function's own blocks, loop bodies, switch arms and `if` branches are
+// read; a local that a policy, `#Impure` or `#Unsafe` block, or a lambda
+// holds is not staged.
 sema_comptime_local_value_ahead_sources: fn(graph: SemaRegistrationGraph, source_module: SemaRegistrationModule) -> [SemaComptimeItemSource] {
     sources := [SemaComptimeItemSource]{}
     if graph.check_tests && !graph.every_core_body -> return sources
