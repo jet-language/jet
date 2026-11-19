@@ -1,8 +1,10 @@
-# `#Perf.Profiled` marks the functions to profile, and one handler in the
-# build wraps each marked body in a zone named after the function
-# (`meta.rewrite_body`). The program prints the same total on every tier;
-# under `jet perf run` on every tier each call of a marked function is a
-# zone row, and an unmarked function has none.
+# `#Perf.Profiled` marks the functions to profile, and nothing else asks for
+# it: the package declares no `build: fn` and no `authority` row. The build
+# runs Core's handler `perf.profile` on the program, which wraps each marked
+# body in a zone named after the function (`meta.rewrite_body`). The
+# program prints the same total on every tier; under `jet perf run` on
+# every tier each call of a marked function is a zone row, and an unmarked
+# function has none.
 fixture: ProfiledMarkerZonesMarkedFunctions.fixture
 env: NO_COLOR=1
 step o0: jet run -A -O0 run.jet

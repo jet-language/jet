@@ -3929,7 +3929,8 @@ the `jet perf run` timeline (observability.md).
 | `perf.progress(name)` | `Never!` | One pass of the progress point `name`, which `jet perf run --lens=causal` ranks lines by. |
 | `Perf` | type | A bounded fidelity value consumed by scaling operations. |
 | `Zone` | type | An open zone; its `Close` writes its row. |
-| `Profiled` | marker | Marks a function, method or package whose bodies a root build wraps in zones through `meta.rewrite_body`. |
+| `Profiled` | marker | Marks a function, method or package whose bodies `profile` wraps in zones named after each function. A program with no `build: fn` that holds a marked function, in its own package or a dependency, builds with `profile` run on it; no `authority` row asks for the rewrite, since the marker is the consent. |
+| `perf.profile(meta)` | `Unit` | The handler behind `Profiled`: on the `Compiler` value `meta`, wrap each checked function the marker reaches in a zone named after it (`meta.rewrite_body`). A `build: fn` calls it as `perf.profile(b.compiler(app))`. |
 | `PerfError` | `#Error` enum | D-PERF-ERR1=A. `OutOfRange(Float)` holds the rejected value. |
 
 ### `core.text` — UTF-8 text operations

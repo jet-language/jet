@@ -102,14 +102,40 @@ progress: fn(name: String) Never! { core.perf.__progress(name) }
 
 /// A marker for the functions to profile: `#Perf.Profiled` on a function or
 /// method, or on a package header to reach every function of the package.
-/// A root build wraps each marked function's body in a zone named after it,
-/// with one handler over the compiler's events:
-/// `meta.events(watch: .Functions{marked: perf.Profiled{}}, …)` calling
-/// `meta.rewrite_body(f, #code { _zone: perf.zone(#{name}) … })`.
+/// A program with no `build: fn` that holds a marked function, in its own
+/// package or in a dependency, builds with `profile` run on it; a
+/// `build: fn` runs it itself, as `perf.profile(b.compiler(app))`. No
+/// `authority` row asks for the rewrite: the marker is the consent.
 Profiled: struct {
     impl Marker {
         sites: [.Package, .Function, .Method],
     }
+}
+
+/// The compile-time handler behind `#Perf.Profiled`, which the build runs
+/// on each program that holds a marked function. Each checked function the
+/// marker reaches gets a zone named after it around its body, so under
+/// `jet perf run` each call is one zone row; an unmarked function stays as
+/// written. The new body reads the zone through `jet_profiled_zone`, the
+/// import the build adds to the rewritten function's module, so a function
+/// whose file never imports core.perf (one a package header marks) is
+/// profiled the same way.
+profile: fn(meta: Compiler) {
+    meta.events(
+        watch: .Functions{marked: Profiled{}},
+        fn(event) {
+            if event == .Checked(.Function(f)) {
+                name: f.name
+                meta.rewrite_body(
+                    f,
+                    #code {
+                        _zone: jet_profiled_zone.zone(#{name})
+                        #{f.body}
+                    },
+                )
+            }
+        },
+    )
 }
 
 #Test("perf fidelity round-trips through overrides") {
