@@ -986,6 +986,15 @@ jet_cli_perf_member_symbol: fn(value: CanonicalJSON) -> String? Never! {
     jet_cli_perf_symbol(fields[at].value)
 }
 
+// The name of the row's symbol alone: a core.perf zone's or plot's own
+// name, which its source path does not qualify.
+jet_cli_perf_member_symbol_name: fn(value: CanonicalJSON) -> String? Never! {
+    fields: jettrace_object_view(value, "jettrace row") ?? return None
+    at: jet_cli_perf_key(fields, "symbol") ?? return None
+    symbol: jettrace_object_view(fields[at].value, "symbol") ?? return None
+    jet_cli_perf_field_text(symbol, "name")
+}
+
 // `symbol_label`.
 jet_cli_perf_symbol: fn(value: CanonicalJSON) -> String? Never! {
     fields: jettrace_object_view(value, "symbol") ?? return None
@@ -1219,7 +1228,7 @@ jet_cli_perf_zone_lines: fn(trace: CanonicalJSON) -> [String] Never! {
         kind: jet_cli_perf_member_text(item, "kind") ?? next
         start: jet_cli_perf_member_number(item, "start_ns") ?? next
         end: jet_cli_perf_member_number(item, "end_ns") ?? next
-        symbol: jet_cli_perf_member_symbol(item) ?? next
+        symbol: jet_cli_perf_member_symbol_name(item) ?? next
         if kind == "frame_mark" {
             frames.push(start)
             next

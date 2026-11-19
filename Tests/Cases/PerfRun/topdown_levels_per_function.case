@@ -15,7 +15,7 @@ fixture: TopdownLevelsPerFunction.fixture
 env: NO_COLOR=1
 step: jet perf run --lens=cpu,topdown td.jet --out {work}/td.jettrace
 exit: 0
-stdout: ~ "guesses="
+stdout: ~ "guesses=" # the program runs to its end under the lens
 json: file td.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses #= 2
 json: file td.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses[1] = "topdown"
 json: file td.jettrace doc $.content.profile.rows[?sample_count>=1] #>= 1 # the cpu lens's CPU-time samples, beside the topdown events
@@ -34,8 +34,8 @@ json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.
 step: jet perf view {work}/td.jettrace
 exit: 0
 stdout: ~ "Why hot functions are slow (" # level 1 by function, with the CPU's name
-stdout: ~ "Why hot lines are slow ("
-stdout: ~ ", level 1)"
-stdout: ~ "Level 2 of those lines ("
+stdout: ~ "Why hot lines are slow (" # level 1 by line
+stdout: ~ ", level 1)" # each table names its level
+stdout: ~ "Level 2 of those lines (" # level 2 splits the same lines
 stdout: ~ "td.jet:35" # the hops' line by name
 stdout: !~ "receipt topdown " # the section shows as its view, not as raw JSON
