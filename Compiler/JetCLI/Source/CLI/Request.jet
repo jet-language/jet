@@ -104,7 +104,7 @@ use {
         jet_eval_native_session,
     ]
     jet_backend.[X64ExecutableResult, X64ImageFile, X64_SELF_EXECUTABLE, x64_image_file_read, x64_image_part_file, x64_link_runtime_image, x64_link_runtime_pack, x64_self_read, x64_self_read_into]
-    jet_ir.[IRLibraryExportRow, IRLibraryResult, IRLintFinding, IROptOptions, ir_build_library, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_stop_exports, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
+    jet_ir.[IRLibraryExportRow, IRLibraryResult, IRLintFinding, IROptOptions, ir_build_library, ir_eval_link_receipt, ir_export_abi_json, ir_lint_module, ir_opt_options, ir_optimize_module, ir_stop_exports, ir_thread_exports, ir_x64_compile_module, ir_x64_library_object]
     jet_pkg_model.[BuildStamp, DepSpec, LockFile, LockedBuildContribution, PackageFacts, pkg_load_organization_gate_policy, pkg_lock_load, pkg_manifest_parse, pkg_source_store_path, pkg_to_manifest]
     jet_sema.[SemaOutputIntent, sema_core_bodies_read]
     jet_web.[web_runtime_partition]
@@ -192,7 +192,9 @@ jet_cli_keep_going_append: fn(rows: [String]) -> String Never! {
 // with its export list, ABI receipt and thread receipt (ir_thread_exports:
 // the exports that can start a second thread), `{prefix}.stops`, its stops
 // receipt (ir_stop_exports: the exports whose call can publish a stop, read
-// before the optimizer inlines), and `{prefix}.interface.jet`:
+// before the optimizer inlines), `{prefix}.eval`, the debugger's eval link
+// receipt (ir_eval_link_receipt, read beside the stops receipt), and
+// `{prefix}.interface.jet`:
 // the jet.runtime interface its runtime bindings render
 // (jet_driver_runtime_interface_file), which Toolchain/RuntimePack.jet checks
 // against the embedded copy. The rows alone root the library:
@@ -335,6 +337,7 @@ jet_cli_runtime_ir: fn(front: &&JetDriverLoweringInputsResult, prefix: String, l
     }
     receipt: ir_thread_exports(built.library.program, built.library.exports, [String]{})
     cli_files.write("{prefix}.stops", built.stops.join("\n")) ?? return jet_cli_runtime_stopped("cannot write the runtime stops receipt: {err}")
+    cli_files.write("{prefix}.eval", built.eval_receipt.join("\n")) ?? return jet_cli_runtime_stopped("cannot write the runtime eval receipt: {err}")
     JetCLIRuntimeIR.Built{result: result, library: built.library.move(), interface_text: interface_text, threads: built.threads.move(), receipt: receipt}
 }
 
@@ -345,15 +348,16 @@ jet_cli_library_export_rows: fn(checked: JetDriverLoweringInputs) -> [IRLibraryE
 }
 
 // A native library built as IR (jet_cli_library_ir): the library, the
-// threads its machine code compiles on, its stops receipt when asked for
-// (else empty), and the issues that stop it. With `refused` they are the
-// export and lifecycle problems the build refuses (ir_build_library's
-// errors), else each is a compiler bug: a function the builder could not
-// build, or an IR Lint finding.
+// threads its machine code compiles on, its stops receipt and eval receipt
+// when asked for (else empty), and the issues that stop it. With `refused`
+// they are the export and lifecycle problems the build refuses
+// (ir_build_library's errors), else each is a compiler bug: a function the
+// builder could not build, or an IR Lint finding.
 JetCLILibraryIR: struct {
     library: IRLibraryResult,
     threads: CompilerThreads,
     stops: [String],
+    eval_receipt: [String],
     issues: [String],
     refused: Bool,
 }
@@ -362,7 +366,8 @@ JetCLILibraryIR: struct {
 // export `rows` and the runtime lifecycle rows `lifecycle_rows` (none for a
 // user library): built (`ir.build`), linted, optimized as `opt` says
 // (`ir.opt`) and linted again (`ir.lint`). With `stops`, its stops receipt
-// (ir_stop_exports) is read before the optimizer inlines. The runtime
+// (ir_stop_exports) and eval receipt (ir_eval_link_receipt) are read before
+// the optimizer inlines. The runtime
 // library (jet_cli_runtime_ir) and `jet build --lib` (LibraryBuild.jet)
 // build through it.
 jet_cli_library_ir: fn(checked: &&JetDriverLoweringInputs, rows: [IRLibraryExportRow], lifecycle_rows: [String], opt: IROptOptions, stops: Bool, compiler_threads: CompilerThreads, trace_sink: JetCLITraceSink?) -> JetCLILibraryIR {
@@ -386,7 +391,11 @@ jet_cli_library_ir: fn(checked: &&JetDriverLoweringInputs, rows: [IRLibraryExpor
         if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
     receipt := [String]{}
-    if stops && issues.len() == 0 -> receipt = ir_stop_exports(library.program, library.exports)
+    eval_receipt := [String]{}
+    if stops && issues.len() == 0 {
+        receipt = ir_stop_exports(library.program, library.exports)
+        eval_receipt = ir_eval_link_receipt(library.program, library.exports)
+    }
     if issues.len() == 0 {
         if trace_sink == .Val(sink) -> sink.begin("ir.opt", "", -1, -1)
         _ := ir_optimize_module(library.program, opt, threads)
@@ -397,7 +406,7 @@ jet_cli_library_ir: fn(checked: &&JetDriverLoweringInputs, rows: [IRLibraryExpor
         }
         if trace_sink == .Val(sink) -> sink.end("ir.lint", library.program.functions.len())
     }
-    JetCLILibraryIR{library: library.move(), threads: threads, stops: receipt, issues: issues.move(), refused: refused}
+    JetCLILibraryIR{library: library.move(), threads: threads, stops: receipt, eval_receipt: eval_receipt, issues: issues.move(), refused: refused}
 }
 
 // The runtime's machine code from its IR `library`, then, under

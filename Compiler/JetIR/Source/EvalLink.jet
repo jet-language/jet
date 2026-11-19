@@ -1,0 +1,380 @@
+// The debugger's eval link over the runtime library: which runtime function
+// the eval runtime replaces with a stub of its own, and which export an eval
+// object may call because nothing it reaches makes a syscall the fork's
+// seccomp filter ends it for or a futex call that waits. The runtime
+// library's build writes it as `<prefix>.eval`, packed as `runtime.eval`
+// (JetCLI Request.jet), read from the library as built, before the optimizer
+// inlines, as the stops receipt is (BuildLibrary.jet ir_stop_exports).
+use {
+    jet_backend.[X64_ASM_UNKNOWN]
+    jet_foundation.[name_rows_value]
+}
+
+// The runtime files whose every function the eval runtime replaces: the
+// allocator and its large-block cache with a bump arena, retain and release
+// with a count that never frees, and the journey with one of the fork's own.
+// A file's stub row is its name, lower-cased, without `.jet` or a `TLS`
+// suffix (ir_eval_stub_file_row).
+IR_EVAL_STUB_FILES: [String]{"Alloc.jet", "Refcount.jet", "Journey.jet", "JourneyTLS.jet"}
+
+// The stub row of runtime file `file`, one of IR_EVAL_STUB_FILES: its
+// thread-local half shares the stub of the file it extends.
+ir_eval_stub_file_row: fn(file: String) -> String Never! { file.removesuffix(".jet").removesuffix("TLS").to_lower() }
+
+// The runtime functions the eval runtime replaces by name: the Shared
+// cell's lock, which it takes in the fork's copy, and the scheduler's task
+// context, cleanup shield and stop propagation, which return at once. The
+// stop polls (ir_stop_key) return at once too.
+IR_EVAL_STUB_NAMES: [String]{"shared_acquire_until", "shared_release", "scheduler_control_current", "jet_rt_cleanup_enter", "jet_rt_cleanup_leave", "jet_scheduler_native_propagate"}
+
+// The stub row of each of IR_EVAL_STUB_NAMES.
+IR_EVAL_STUB_NAME_ROWS: [String]{"shared", "shared", "scheduler", "scheduler", "scheduler", "scheduler"}
+
+// The files of the stop report. A function of theirs whose name ends in
+// `_stop` or `_exit` starts a stop report, as do `jet_rt_panic_*`,
+// `jet_rt_unreachable`, the stop's publication `rt_task_panic_publish` and
+// the functions that end the process (IR_STOP_FATAL): ir_eval_stop_root.
+IR_EVAL_STOP_FILES: [String]{"Trap.jet", "TrapMessages.jet", "TrapDefectMessages.jet"}
+
+// The syscalls the fork's seccomp filter allows: mmap, mprotect, munmap,
+// rt_sigreturn, madvise, futex and exit_group.
+IR_EVAL_SYSCALLS: [Int]{9, 10, 11, 15, 28, 202, 231}
+
+IR_EVAL_FUTEX: 202
+
+// The futex operations that wait (the operation's low 7 bits): FUTEX_WAIT,
+// FUTEX_LOCK_PI, FUTEX_WAIT_BITSET, FUTEX_WAIT_REQUEUE_PI, FUTEX_LOCK_PI2.
+IR_EVAL_FUTEX_WAITS: [Int]{0, 6, 9, 11, 13}
+
+// FUTEX_PRIVATE_FLAG, which the filter requires of every futex call.
+IR_EVAL_FUTEX_PRIVATE: 128
+
+// A syscall site of a function: the syscall number and the second argument
+// (a futex call's operation), each a constant (>= 0), the function's
+// parameter i (-1 - i) or X64_ASM_UNKNOWN; the callee it comes through (-1:
+// the function's own `#FFI(asm)` template) and that callee's site.
+IREvalSyscall: struct {
+    number: Int,
+    second: Int,
+    callee: Int,
+    site: Int,
+}
+
+// The calls of each function of a library (ir_eval_calls): the instructions
+// of those that run in the fork (`live`), and the callees of those that
+// never do (`dead`): a call that follows, in its block, a call of a function
+// that starts a stop report, whose stub ends the fork.
+IREvalCalls: struct {
+    live: [[Int]],
+    dead: [[Int]],
+}
+
+// The eval receipt of the runtime library `m`, one tab-separated row each:
+// - `stub <function> <row>`: the eval runtime replaces the function with its
+//   stub of that row: a row of IR_EVAL_STUB_FILES or IR_EVAL_STUB_NAMES, a
+//   stop poll (`stop-poll`), or the stop report (`stop-report`,
+//   ir_eval_stubs), listed by function.
+// - `export <symbol> stub <row>`: an export the eval runtime replaces;
+// - `export <symbol> allowed`: an export through which every syscall, past
+//   the stubs, is one the filter allows with a constant number, and every
+//   futex call is private and does not wait;
+// - `export <symbol> refused <why> <path>`: else, naming the first syscall
+//   that fails and the functions to it, ` > ` between them.
+// A syscall's number, and a futex call's operation, must be a constant at
+// the site or a parameter whose every caller passes a constant, followed
+// through wrappers (os_syscall_i64, os_syscall_stack4_i64, host_call,
+// net_socket_call, trap_syscall and the rest); a number an export's caller
+// passes, or one loaded or computed, fails. Only this check is here: the
+// eval link's other two (no runtime state, no loaded code address) are not.
+ir_eval_link_receipt: fn(m: IRModule, exports: [IRLibraryExport]) -> [String] Never! {
+    count: m.functions.len()
+    name_callees := loop _ in m.names -> -1
+    loop row in exports {
+        if name_rows_value(m.name_rows, row.symbol) == .Val(at) -> name_callees[at] = row.function
+    }
+    entries := loop f in m.functions -> f.host_symbol != ""
+    loop row in exports -> entries[row.function] = true
+    loop f in m.functions {
+        loop (at, op) in f.op {
+            if op == .FunctionAddress && f.a[at] >= 0 && f.a[at] < count -> entries[f.a[at]] = true
+        }
+    }
+    roots: loop f in m.functions -> ir_eval_stop_root(f)
+    calls: ir_eval_calls(m, name_callees, roots)
+    stubs: ir_eval_stubs(m, name_callees, calls, roots, entries)
+    sites: ir_eval_syscalls(m, stubs, name_callees, calls)
+    rows := [String]{}
+    loop (id, f) in m.functions {
+        if stubs[id] != "" -> rows.push("stub\t{f.name}\t{stubs[id]}")
+    }
+    loop row in exports {
+        id: row.function
+        if stubs[id] != "" {
+            rows.push("export\t{row.symbol}\tstub\t{stubs[id]}")
+            next
+        }
+        refused := ""
+        loop (index, site) in sites[id] {
+            why: ir_eval_syscall_refusal(site)
+            if why == "" -> next
+            refused = "{why}\t{ir_eval_syscall_path(m, sites, id, index)}"
+            break
+        }
+        rows.push(if refused == "" -> "export\t{row.symbol}\tallowed" else -> "export\t{row.symbol}\trefused\t{refused}")
+    }
+    rows
+}
+
+// Whether `f` starts a stop report (IR_EVAL_STOP_FILES).
+ir_eval_stop_root: fn(f: IRFunction) -> Bool Never! {
+    if IR_EVAL_STOP_FILES.contains(ir_eval_file_name(f.source_file)) && (f.name.ends_with("_stop") || f.name.ends_with("_exit")) {
+        return true
+    }
+    f.name.starts_with("jet_rt_panic_") || f.name == "rt_task_panic_publish" || IR_STOP_FATAL.contains(f.name)
+}
+
+// The function call `at` of `f` calls, else -1. `name_callees` is the
+// function a CallRuntime of each name row reaches (-1: a C symbol).
+ir_eval_callee: fn(m: IRModule, f: IRFunction, at: Int, name_callees: [Int]) -> Int Never! {
+    callee := -1
+    if f.op[at] == .Call -> callee = f.a[at]
+    if f.op[at] == .CallRuntime -> callee = name_callees[f.a[at]]
+    if callee >= m.functions.len() -> -1 else -> callee
+}
+
+// The calls of each function of `m`, live and dead (IREvalCalls); `roots`
+// marks the functions that start a stop report.
+ir_eval_calls: fn(m: IRModule, name_callees: [Int], roots: [Bool]) -> IREvalCalls Never! {
+    calls := IREvalCalls{live: [[Int]]{}, dead: [[Int]]{}}
+    loop f in m.functions {
+        live := [Int]{}
+        dead := [Int]{}
+        depth := 0
+        // The block depth from whose stop-report call on the code is dead,
+        // -1 while it is live.
+        dead_depth := -1
+        loop (at, op) in f.op {
+            if op == .Else || op == .End {
+                if dead_depth == depth -> dead_depth = -1
+                if op == .End -> depth -= 1
+                next
+            }
+            if op == .Block || op == .Loop || op == .If {
+                depth += 1
+                next
+            }
+            callee: ir_eval_callee(m, f, at, name_callees)
+            if callee < 0 -> next
+            if dead_depth >= 0 -> dead.push(callee) else {
+                live.push(at)
+                if roots[callee] -> dead_depth = depth
+            }
+        }
+        calls.live.push(live.move())
+        calls.dead.push(dead.move())
+    }
+    calls
+}
+
+// Per function of `m`, its stub row (ir_eval_link_receipt), "" for none.
+// The stop report (`stop-report`) is listed by function, not by file: each
+// function that starts one (`roots`), and each function a stop report
+// reaches (a call of a root's, or a dead call: ir_eval_calls) that only the
+// stop report calls: no live call from elsewhere, and not an export or a
+// function whose address is taken (`entries`), whose callers are unknown.
+// So a helper the success path calls too (`trap_word`, `trap_debug_escaped`)
+// is no stub and is checked itself.
+ir_eval_stubs: fn(m: IRModule, name_callees: [Int], calls: IREvalCalls, roots: [Bool], entries: [Bool]) -> [String] Never! {
+    count: m.functions.len()
+    stubs := [String]{}
+    reached := [Bool]{}
+    work := [Int]{}
+    loop (id, f) in m.functions {
+        row := ""
+        if IR_EVAL_STUB_FILES.contains(ir_eval_file_name(f.source_file)) {
+            row = ir_eval_stub_file_row(ir_eval_file_name(f.source_file))
+        }
+        if IR_EVAL_STUB_NAMES.index_of(f.name) == .Val(at) -> row = IR_EVAL_STUB_NAME_ROWS[at]
+        if ir_stop_key(f.key) -> row = "stop-poll"
+        stubs.push(row)
+        reached.push(roots[id])
+        if roots[id] -> work.push(id)
+    }
+    loop callees in calls.dead {
+        loop callee in callees {
+            if reached[callee] -> next
+            reached[callee] = true
+            work.push(callee)
+        }
+    }
+    callers := loop _ in 0..<count -> [Int]{}
+    loop (id, live) in calls.live {
+        loop at in live -> callers[ir_eval_callee(m, m.functions[id], at, name_callees)].push(id)
+    }
+    head := 0
+    loop head < work.len() {
+        id: work[head]
+        head += 1
+        f: m.functions[id]
+        callees := loop at in calls.live[id] -> ir_eval_callee(m, f, at, name_callees)
+        loop callee in calls.dead[id] -> callees.push(callee)
+        loop callee in callees {
+            if reached[callee] -> next
+            reached[callee] = true
+            work.push(callee)
+        }
+    }
+    // A reached function leaves the stop report when anything outside it can
+    // call it, and then so may what it alone called.
+    loop {
+        dropped := false
+        loop id in 0..<count {
+            if !reached[id] || roots[id] -> next
+            outside := entries[id]
+            loop caller in callers[id] {
+                if !reached[caller] -> outside = true
+            }
+            if outside {
+                reached[id] = false
+                dropped = true
+            }
+        }
+        if !dropped -> break
+    }
+    loop id in 0..<count {
+        if reached[id] && stubs[id] == "" -> stubs[id] = "stop-report"
+    }
+    stubs
+}
+
+// The last part of source path `path`.
+ir_eval_file_name: fn(path: String) -> String Never! {
+    at: path.rfind("/")
+    if at < 0 -> path else -> path.slice(at + 1, path.len())
+}
+
+// Per function of `m`, the syscall sites it reaches past the stubs `stubs`
+// (ir_eval_stubs), one per number and second argument: its own template's,
+// then, for each live call (`calls`), the callee's with the callee's
+// parameters read as the arguments the call passes (ir_eval_word_values),
+// grown until no function gains one.
+ir_eval_syscalls: fn(m: IRModule, stubs: [String], name_callees: [Int], calls: IREvalCalls) -> [[IREvalSyscall]] Never! {
+    sites := [[IREvalSyscall]]{}
+    loop f in m.functions {
+        own := [IREvalSyscall]{}
+        if f.asm == .Val(leaf) {
+            pair := 0
+            loop pair + 1 < leaf.syscalls.len() {
+                own.push(IREvalSyscall{number: leaf.syscalls[pair], second: leaf.syscalls[pair + 1], callee: -1, site: -1})
+                pair += 2
+            }
+        }
+        sites.push(own.move())
+    }
+    writes: loop f in m.functions -> ir_slot_writes(f)
+    loop {
+        grown := false
+        loop (id, f) in m.functions {
+            if stubs[id] != "" -> next
+            loop at in calls.live[id] {
+                callee: ir_eval_callee(m, f, at, name_callees)
+                if stubs[callee] != "" -> next
+                loop index in 0..<sites[callee].len() {
+                    site: sites[callee][index]
+                    numbers: ir_eval_argument(f, writes[id], at, site.number)
+                    seconds: ir_eval_argument(f, writes[id], at, site.second)
+                    loop number in numbers {
+                        loop second in seconds {
+                            if sites[id].any(fn(known) { known.number == number && known.second == second }) {
+                                next
+                            }
+                            sites[id].push(IREvalSyscall{number: number, second: second, callee: callee, site: index})
+                            grown = true
+                        }
+                    }
+                }
+            }
+        }
+        if !grown -> break
+    }
+    sites
+}
+
+// What callee word `word` (an IREvalSyscall number or second argument) is in
+// the caller `f` at its call `at`: a constant stays, a callee parameter is
+// the values of the argument the call passes there, and an unknown word
+// stays unknown. `writes` is f's ir_slot_writes.
+ir_eval_argument: fn(f: IRFunction, writes: [[Int]], at: Int, word: Int) -> [Int] Never! {
+    if word >= 0 || word == X64_ASM_UNKNOWN -> return [Int]{word}
+    index: -1 - word
+    if index >= f.c[at] -> return [Int]{X64_ASM_UNKNOWN}
+    ir_eval_word_values(f, writes, f.args[f.b[at] + index])
+}
+
+// The values slot `slot` of `f` can hold, traced back through copies and
+// numeric conversions to each write of it: a constant (>= 0), the function's
+// parameter i (-1 - i), else X64_ASM_UNKNOWN. `writes` is f's ir_slot_writes.
+ir_eval_word_values: fn(f: IRFunction, writes: [[Int]], slot: Int) -> [Int] Never! {
+    found := [Int]{}
+    seen := [Int]{}
+    work := [Int]{slot}
+    loop {
+        at: work.pop() ?? break
+        if at < 0 || at >= writes.len() {
+            ir_eval_value_add(found, X64_ASM_UNKNOWN)
+            next
+        }
+        if seen.contains(at) -> next
+        seen.push(at)
+        if {
+            at < f.param_count -> ir_eval_value_add(found, -1 - at)
+            writes[at].len() == 0 -> ir_eval_value_add(found, X64_ASM_UNKNOWN)
+        }
+        loop index in writes[at] {
+            op: f.op[index]
+            if {
+                op == .Copy || op == .Move || op == .Convert -> work.push(f.a[index])
+                op == .Const && f.a[index] >= 0 -> ir_eval_value_add(found, f.a[index])
+                else -> ir_eval_value_add(found, X64_ASM_UNKNOWN)
+            }
+        }
+    }
+    found
+}
+
+ir_eval_value_add: fn(found: &[Int], value: Int) Never! {
+    if !found.contains(value) -> found.push(value)
+}
+
+// Why syscall site `site` of an export fails the eval link's syscall check,
+// else "".
+ir_eval_syscall_refusal: fn(site: IREvalSyscall) -> String Never! {
+    if site.number == X64_ASM_UNKNOWN -> return "a syscall number no constant fixes"
+    if site.number < 0 -> return "a syscall number the export's caller passes"
+    if !IR_EVAL_SYSCALLS.contains(site.number) -> return "syscall {site.number}"
+    if site.number != IR_EVAL_FUTEX -> return ""
+    if site.second == X64_ASM_UNKNOWN -> return "a futex operation no constant fixes"
+    if site.second < 0 -> return "a futex operation the export's caller passes"
+    if IR_EVAL_FUTEX_WAITS.contains(site.second %% IR_EVAL_FUTEX_PRIVATE) {
+        return "futex wait (operation {site.second})"
+    }
+    if (site.second /% IR_EVAL_FUTEX_PRIVATE) %% 2 == 0 {
+        return "shared futex (operation {site.second})"
+    }
+    ""
+}
+
+// The functions from `id` to the template that makes its syscall site
+// `index`, ` > ` between their names.
+ir_eval_syscall_path: fn(m: IRModule, sites: [[IREvalSyscall]], id: Int, index: Int) -> String Never! {
+    path := "{m.functions[id].name}"
+    at := id
+    site := index
+    loop sites[at][site].callee >= 0 {
+        next_site: sites[at][site].site
+        at = sites[at][site].callee
+        site = next_site
+        path = "{path} > {m.functions[at].name}"
+    }
+    path
+}

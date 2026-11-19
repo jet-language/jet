@@ -905,7 +905,7 @@ points with eval stubs:
 | the `Shared` cell's lock acquire and release (`Shared.jet`; revision 3 named a `SharedAccess.jet`, which does not exist) | Read the lock word. If it is free, take it in the fork's copy; the target's word is not written, and no other thread exists in the fork. If it is held, end the evaluation with the refusal of §3.4, naming the cell's binding or the eval line. |
 | the stop poll (`jet_ir_stop_turn`), the task context, the cleanup shield (`jet_rt_cleanup_enter`, `jet_rt_cleanup_leave`) and the stop propagation a failed operation polls (`jet_scheduler_native_propagate`) | Return at once: there is no scheduler in the fork. `jet_rt_cleanup_enter` returns a token that `jet_rt_cleanup_leave` ignores, and the propagation poll returns 0. |
 | the journey, the error trace a failure carries (`Journey.jet`, `JourneyTLS.jet`: `jet_journey_reset`, `jet_journey_origin`, `jet_journey_frame_text` and the rest) | A journey of the fork's own, in the arena: reset clears it, and origin and frame calls append to it. The target's TLS slot (`JourneyTLS.jet:3` `journey_tls_key`) is never read, and the eval runtime's own copy of that key, which nothing initialized, is never used. |
-| panic and the whole stop report: `jet_rt_panic_*`, `jet_rt_unreachable`, every function of `Trap.jet`, `TrapMessages.jet` and `TrapDefectMessages.jet`, and the stop's publication (`rt_task_panic_publish`) | Format the message with the eval runtime's own text code into the result block, and `exit_group`. Revision 3 named only `jet_rt_panic_*`. But every Int clone, text append and allocation has a stop path, which flushes stdout and reaches `trap_defect_exit` (third review, P4), so without this row the link refuses nearly every expression. |
+| panic and the whole stop report, listed by function, not by file: each function that starts one (`jet_rt_panic_*`, `jet_rt_unreachable`, the stop's publication `rt_task_panic_publish`, the functions that end the process, and each `*_stop` or `*_exit` function of `Trap.jet`, `TrapMessages.jet` and `TrapDefectMessages.jet`), and each function a stop report reaches that nothing else calls. A call after a stop report's start, in its block, never runs in the fork. `trap_word`, `trap_byte`, `trap_store`, `trap_put`, `trap_debug_escaped` and the other helpers success paths call are no stubs and pass the checks themselves (review 4, Q3). | Format the message with the eval runtime's own text code into the result block, and `exit_group`. Revision 3 named only `jet_rt_panic_*`. But every Int clone, text append and allocation has a stop path, which flushes stdout and reaches `trap_defect_exit` (third review, P4), so without this row the link refuses nearly every expression. |
 | `jet_eval_call_target` (§4.2) | Look up the table; on a miss, `int3`. |
 | the 12 register-calling primitives of §4.2 | Their eval bodies: translate the loaded address through `jet_eval_call_target`, then call it. |
 | spawn, channel, timer, I/O and thread entry points, `os_clone_i64` among them | None. If the eval object references one, the link refuses before anything runs, naming the entry point and the source line that reached it. This is where the waits a user writes are refused (§3.4): probe `wait_link` shows `rx.receive()` reaching `jet_rt_native_receiver_receive` and `tx.send` reaching `jet_rt_native_sender_send`. A wait deeper in the runtime fails the third check below. |
@@ -915,8 +915,8 @@ check (`StackSegment.jet`: `cmp rsp, gs:[STACK_TCB_LIMIT]; jb grow`) and
 maps a segment. That is thread-local, its `mmap` is allowed (§6.2), and the
 TCB words it writes are the fork's copy.
 
-The table is a list in the runtime package, next to the entry points it
-names. The link is an allow-list. The eval runtime build defines only the
+The table is a list in JetIR `EvalLink.jet`, which reads the runtime's IR
+as the library build makes it. The link is an allow-list. The eval runtime build defines only the
 stubs, plus the runtime functions that pass the three checks below; it runs
 the checks itself. A reference to any other runtime function is an
 undefined symbol, so the link refuses it, naming the function. A test runs
@@ -940,8 +940,18 @@ all three checks:
   does. Any other such body, in a body the runtime calls, fails the test
   and names the body.
 - **No blocking syscall** (third review, P3). Nothing they reach, in IR or
-  asm, issues `futex` with a `FUTEX_WAIT*` operation, or any syscall
-  outside §6.2's allow-list. The test names the wait and the path to it.
+  asm, issues `futex` with a `FUTEX_WAIT*` operation or without
+  `FUTEX_PRIVATE_FLAG`, or any syscall outside §6.2's allow-list. The check
+  is over syscall sites (review 4, Q2): a syscall's number, and a futex
+  call's operation, must be a constant at the site, or a parameter whose
+  every caller passes a constant, followed through wrappers
+  (`os_syscall_i64`, `os_syscall_stack4_i64`, `host_call`,
+  `net_socket_call`, `trap_syscall` and the rest). Any other number, one
+  loaded or computed or one an export's caller passes, fails. The
+  assembler records each `syscall` a template makes with its number and
+  second argument (JetBackend InlineAsm.jet), and JetIR EvalLink.jet
+  writes the verdicts as the runtime's `runtime.eval` receipt. The test
+  names the wait and the path to it.
   The first two checks say nothing about waiting, and probe `linkchecks`
   shows they are not enough: `alloc_lock` (`Alloc.jet:833`) and
   `sync_futex_wait_shared` (`Sync.jet:102`) already pass both and issue a

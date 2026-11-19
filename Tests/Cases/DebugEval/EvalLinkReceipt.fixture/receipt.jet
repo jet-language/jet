@@ -1,0 +1,34 @@
+// Prints the rows of the runtime's eval link receipt (the file its first
+// argument names) that name one of WANTED, tabs as spaces, then how many
+// exports the receipt refuses and how many it allows.
+use {
+    files: core.files
+    process: core.process
+}
+
+WANTED: [String]{
+    "jet_fd_created_raw",
+    "jet_term_write_stdout_line_direct",
+    "jet_rt_host_program_start",
+    "jet_socket_listen_raw",
+    "jet_socket_shutdown_raw",
+    "jet_rt_int_clone",
+    "trap_header",
+    "trap_word",
+    "trap_debug_escaped",
+}
+
+run: fn() {
+    args: process.args()
+    text: files.read(args[0]) ?? panic("read the eval receipt: {err}")
+    refused := 0
+    allowed := 0
+    loop row in text.split("\n") {
+        fields: row.split("\t").to_list()
+        if fields.len() < 3 -> next
+        if fields[0] == "export" && fields[2] == "refused" -> refused += 1
+        if fields[0] == "export" && fields[2] == "allowed" -> allowed += 1
+        if WANTED.contains(fields[1]) -> print(row.replace("\t", " "))
+    }
+    print("refused {refused > 0}, allowed {allowed > 0}")
+}

@@ -1,7 +1,7 @@
 // The x86-64 template assembler and sema's E3221 check read one mnemonic
 // list, so a mnemonic sema admits always reaches an encoder.
 use {
-    jet_backend.[X64_ALU_COUNT, X64_CLONE_CHILD, X64_FIBER_SWITCH, X64_GS_BASE_WRITE, X64_SHIFT_COUNT, X64_SIGNAL_RETURN, X64Alu, X64Shift, x64_alu_rr, x64_assemble_template, x64_byte, x64_code, x64_group_count, x64_mov_rr, x64_shift_ri]
+    jet_backend.[X64_ALU_COUNT, X64_ASM_UNKNOWN, X64_CLONE_CHILD, X64_FIBER_SWITCH, X64_GS_BASE_WRITE, X64_SHIFT_COUNT, X64_SIGNAL_RETURN, X64Alu, X64Shift, x64_alu_rr, x64_asm_operand_value, x64_assemble_template, x64_byte, x64_code, x64_group_count, x64_mov_rr, x64_shift_ri]
     jet_foundation.[INLINE_ASSEMBLY_X64_MNEMONICS, INLINE_ASSEMBLY_X64_RAIL_MNEMONICS, inline_assembly_x64_unencoded]
 }
 
@@ -67,6 +67,26 @@ inline_assembly_test_problem: fn(template: String, names: [String], returns: Boo
     assert(assembled.code == [U8]{0x44, 0x8b, 0x56, 0xfc, 0x8b, 0x06, 0x44, 0x89, 0x17, 0x89, 0x47, 0x04})
     assert(assembled.quiet)
     assert(inline_assembly_test_problem("mov rax, dword ptr [{{source}}]", [String]{"source"}, false).contains("unsupported source"))
+}
+
+#Test("each syscall names its number and second argument: a constant, an operand, or unknown") {
+    // The number comes through the template's stack (os_syscall_stack4_i64's form).
+    stacked: x64_assemble_template("push {{number}}\npush {{op}}\npop rsi\npop rax\nsyscall\n; clobbers rax, rcx, rsi, r11", [String]{"number", "op"}, false, false)
+    assert(stacked.error == None)
+    assert_eq(stacked.syscalls, [Int]{x64_asm_operand_value(0), x64_asm_operand_value(1)})
+    // A constant number with a register copy of an operand (os_write_line_i64's
+    // writev), then a futex wake with a constant operation.
+    constant: x64_assemble_template("mov rdx, {{bytes}}\nmov rax, 20\nmov rsi, rdx\nsyscall\nmov rax, 202\nmov rsi, 129\nsyscall\n; clobbers rax, rcx, rdx, rsi, r11", [String]{"fd", "bytes"}, false, false)
+    assert(constant.error == None)
+    assert_eq(constant.syscalls, [Int]{20, x64_asm_operand_value(1), 202, 129})
+    // A word the template loads is unknown, and `xor r, r` is 0.
+    loaded: x64_assemble_template("mov rax, qword ptr [{{record}}]\nxor rsi, rsi\nsyscall\n; clobbers rax, rcx, rsi, r11", [String]{"record"}, false, false)
+    assert(loaded.error == None)
+    assert_eq(loaded.syscalls, [Int]{X64_ASM_UNKNOWN, 0})
+    // The signal-return rail is rt_sigreturn.
+    returned: x64_assemble_template(X64_SIGNAL_RETURN.join("\n"), [String]{}, false, true)
+    assert(returned.error == None)
+    assert_eq(returned.syscalls, [Int]{15, X64_ASM_UNKNOWN})
 }
 
 #Test("sema's scan names each unencoded word with its range in the body") {

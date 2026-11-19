@@ -481,13 +481,17 @@ ir_masked_branch_rows: fn(m: IRModule) -> [String] Never! {
 }
 
 // An assembled `#FFI(asm)` template: its bytes, the register operand i is
-// bound to (`regs[i]`), the register holding its result (-1 for none), and
-// whether it keeps r8 and r9 (JetBackend X64AsmResult.quiet).
+// bound to (`regs[i]`), the register holding its result (-1 for none),
+// whether it keeps r8 and r9 (JetBackend X64AsmResult.quiet), and per
+// `syscall` it makes the number and second argument it passes, two words
+// each (X64AsmResult.syscalls: a constant, an operand, or unknown), which
+// the eval link's syscall check reads (EvalLink.jet).
 IRAsmLeaf: struct {
     code: [U8],
     regs: [Int],
     result: Int,
     quiet: Bool{false},
+    syscalls: [Int]{[Int]{}},
 }
 
 // A word of a static object (IRModule.data_relocs) that holds an address:
