@@ -301,6 +301,10 @@ jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String,
     // reruns from it), so it is no TempDir, which would go when this returns.
     dir: cli_files.tmpdir("jet-canvas-debug") ?? return Err(jet_cli_canvas_debug_error("io", "couldn't create the Canvas debug build directory: {err}"))
     out_dir: cli_files.join(dir, "out")
+    // The held check opens while the image builds, at its level, O0
+    // (jet_cli_debug_eval_held_start).
+    held: jet_cli_debug_eval_held_slot()
+    jet_cli_debug_eval_held_start(held, file, jet_cli_debug_eval_argv(DeepChecks{}, 0))
     built: cli_process.cmd(native_debug_build_argv(cli_sys.executable(), file, out_dir, DeepChecks{})).stdout(.Capture).stderr(.Capture).run() ?? {
         jet_cli_canvas_debug_remove(dir)
         return Err(jet_cli_canvas_debug_error("io", "couldn't run the Canvas debug build: {err}"))
@@ -333,7 +337,9 @@ jet_cli_canvas_debug_open: fn(file: String, source_id: String, revision: String,
         }
     }
     level: live.level()
-    live.evaluate_with(JetCLIDebugEvaluator{entry: file, argv: jet_cli_debug_eval_argv(DeepChecks{}, level), color: false, held: Shared{JetCLIDebugEvalHeldSlot{held: None, missed: None, declared: None, core: None}}})
+    argv: jet_cli_debug_eval_argv(DeepChecks{}, level)
+    jet_cli_debug_eval_held_start(held, file, argv)
+    live.evaluate_with(JetCLIDebugEvaluator{entry: file, argv: argv, color: false, held: held})
     jet_file: cli_files.basename(file)
     jet_lines: src.split("\n").to_list()
     opened := NativeDebugStep?{None}

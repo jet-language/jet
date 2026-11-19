@@ -141,27 +141,29 @@ SemaScriptProbeChecked: struct {
 
 // `func`, a top-level function of the probe's module that no registration
 // holds (the debugger's expression), checked against the probe's
-// declarations. It is bound by its name span, with no id, in a copy of the
-// module scope, as a `#Test` block's synthetic function is (Tests.jet
-// sema_check_test_function), so the probe checks the next one as it did
-// this one. Its reports are kept. A name the module already binds is not
-// checked. No effect pass runs over it: its own effects and the functions
-// it calls are gathered from its calls, as a lambda's are
-// (sema_expression_lambda_add_call_effects).
+// declarations. It is bound by its name span, with no id, in the module
+// scope under a rollback mark that drops it after its check, as a function
+// body is checked in place (sema_function_check), so the probe checks the
+// next one as it did this one with no copy of the scope. Its reports are
+// kept. A name the module already binds is not checked. No effect pass runs
+// over it: its own effects and the functions it calls are gathered from its
+// calls, as a lambda's are (sema_expression_lambda_add_call_effects).
 sema_script_probe_check_func: fn(probe: &SemaScriptProbe, func: Func) -> SemaScriptProbeChecked {
     diagnostics := [Diagnostic]{}
     module_name: sema_scope_environment_module_text(probe.environment, probe.program)
     key: symbol_key_text(SymbolKind.Function, module_name, "", func.name)
     symbol := sema_item_symbol(Item.Func{value: func}, probe.environment.module_identity, module_name, probe.environment.source_file, probe.environment.source_origin, probe.environment.source_segments) ?? return SemaScriptProbeChecked{function: None, diagnostics: diagnostics, complete: false}
     symbol.ty = Val(sema_function_symbol_type(func, false, key, probe.environment.source_file, probe.environment.source_origin, probe.environment.source_segments))
-    scopes := sema_scope_snapshot(probe.scopes)
-    if !sema_scope_add_module_symbol(scopes, symbol, key) {
+    mark: sema_scope_mark(probe.scopes)
+    if !sema_scope_add_module_symbol(probe.scopes, symbol, key) {
+        sema_scope_rollback(probe.scopes, mark)
         return SemaScriptProbeChecked{function: None, diagnostics: diagnostics, complete: false}
     }
     call_facts := [SemaCallSiteFact]{}
     requests := [SemaComptimeRequest]{}
     references := [SemaNameReferenceFact]{}
-    checked := sema_function_check_shared(func, key, TFuncKind.TopLevel, false, probe.environment, probe.program, scopes, None, diagnostics, call_facts, requests, references)
+    checked := sema_function_check_shared(func, key, TFuncKind.TopLevel, false, probe.environment, probe.program, probe.scopes, None, diagnostics, call_facts, requests, references)
+    sema_scope_rollback(probe.scopes, mark)
     function := checked.value.move() ?? return SemaScriptProbeChecked{function: None, diagnostics: diagnostics, complete: false}
     direct := [String]{}
     edges := [String]{}
