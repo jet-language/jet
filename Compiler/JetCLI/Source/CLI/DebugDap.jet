@@ -55,6 +55,12 @@
 // each write that changes it, reported as a `data breakpoint` stop whose
 // description is the change (`total: 0 -> 2`). A place no watch can take
 // has no data id; its description is E2237's What.
+// `fix`, a request of Jet's own, is the console's `fix`: the program's
+// source is compiled again as its build compiled it and each function the
+// edit changed is swapped into the stopped program (DebugFix.jet). It
+// answers with what the console would show (`Fixed ...`, or `Nothing to
+// fix ...`) as the response's `message`; a refused fix fails with why, and
+// the program runs on as it was.
 // `disconnect` ends a launched program and lets an attached one go on, then
 // ends the adapter, as the end of stdin does at a stop. The end of stdin
 // while a launched program runs on stops no run: the program runs on to its
@@ -65,7 +71,7 @@ use {
     dap_json: core.encoding.json
     dap_term: core.term
     jet_debug.[NATIVE_ATTACH_INVALID, NATIVE_DEBUG_REFUSED, NATIVE_DEBUG_TASK_RUNNING, NativeDebugError, NativeEvalRefused, NativeLocal, NativeSaid, NativeSession, NativeSettled, NativeStop, NativeStopKind, NativeWatched, native_debug_hex, native_debug_jet_frame, native_debug_report, native_debug_rule_place, native_function_at, native_lookup]
-    jet_foundation.[Diagnostic, foundation_json_integer, foundation_json_quote]
+    jet_foundation.[DeepChecks, Diagnostic, foundation_json_integer, foundation_json_quote]
 }
 
 // One `setBreakpoints` entry: its line, and its condition and log message
@@ -146,8 +152,11 @@ JetCLIDap: struct {
     ended: Bool{false},
     // The watches `setDataBreakpoints` placed.
     data: [JetCLIDapWatch]{[JetCLIDapWatch]{}},
+    // Whether `fix` has the program's source: a built image's build is
+    // not known, so `fix` refuses it.
+    fixable: Bool{false},
 
-    handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
+    handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String, deep_checks: DeepChecks) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
         request := input.move()
         // Another task's frames are read within the request that names them.
         session.focus = None
@@ -191,7 +200,7 @@ JetCLIDap: struct {
                     return
                 }
                 self.launched = true
-                self.run_on(session, "", entry)
+                self.run_on(session, "", entry, deep_checks)
             }
             "restart" -> {
                 if session.attached {
@@ -210,7 +219,7 @@ JetCLIDap: struct {
                 if !self.launched {
                     return
                 }
-                self.run_on(session, "", entry)
+                self.run_on(session, "", entry, deep_checks)
             }
             "pause" -> {
                 // A program not running is paused already.
@@ -312,7 +321,7 @@ JetCLIDap: struct {
                     "stepIn" -> "s"
                     else -> "f"
                 }
-                self.run_on(session, word, entry)
+                self.run_on(session, word, entry, deep_checks)
             }
             "stepBack" | "reverseContinue" -> {
                 if !self.launched || !session.alive() {
@@ -378,6 +387,19 @@ JetCLIDap: struct {
                     .Ok(body) -> { self.respond(request, body) }
                     .Err(failure) -> self.fail(request, failure.detail)
                 }
+            }
+            "fix" -> {
+                if !self.launched || !session.alive() {
+                    return self.fail(request, "the program is not paused")
+                }
+                if !self.fixable {
+                    return self.fail(request, "fix needs the program's source: debug it as `jet debug --dap <file.jet>`")
+                }
+                said: jet_cli_debug_fix(session, entry, deep_checks, false).trim_end()
+                if !said.starts_with("Fixed") && !said.starts_with("Nothing to fix") {
+                    return self.fail(request, said)
+                }
+                self.respond(request, "{{\"message\":{foundation_json_quote(said)}}}")
             }
             else -> self.fail(request, "`jet debug --dap` does not answer `{request.command}`")
         }
@@ -534,7 +556,7 @@ JetCLIDap: struct {
     // next stop (JetCLIDap.waiting); any other request is answered, and the
     // program continues. A replay's runs are made as recorded, without
     // stopping for requests.
-    run_on: fn(&self, session: &NativeSession, word: String, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
+    run_on: fn(&self, session: &NativeSession, word: String, entry: String, deep_checks: DeepChecks) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
         how := word
         loop {
             starting: how == ""
@@ -581,7 +603,7 @@ JetCLIDap: struct {
                 }
                 "restart" -> {
                     attached: session.attached
-                    self.handle(session, request.move(), entry)
+                    self.handle(session, request.move(), entry, deep_checks)
                     // An attached program, which does not restart, runs on.
                     if !attached {
                         return
@@ -590,7 +612,7 @@ JetCLIDap: struct {
                 "stackTrace" | "scopes" | "variables" | "evaluate" | "continue" | "next" | "stepIn" | "stepOut" | "stepBack" | "reverseContinue" -> {
                     self.waiting.push(request.move())
                 }
-                else -> self.handle(session, request.move(), entry)
+                else -> self.handle(session, request.move(), entry, deep_checks)
             }
         }
     }
@@ -753,9 +775,10 @@ JetCLIDap: struct {
 }
 
 // Answer requests until stdin ends or the editor disconnects: those that
-// waited for a stop first, then the next on stdin.
-jet_cli_debug_dap: fn(session: &NativeSession, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
-    dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, launched: false}
+// waited for a stop first, then the next on stdin. `fix` compiles `entry`
+// with `deep_checks`, as the program's build did, when it is `fixable`.
+jet_cli_debug_dap: fn(session: &NativeSession, entry: String, deep_checks: DeepChecks, fixable: Bool{false}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
+    dap := JetCLIDap{seq: 0, stop_on_entry: false, args: [String]{}, placed: [String:[Int]]{}, launched: false, fixable: fixable}
     loop !dap.done {
         request := JetCLIDapRequest{seq: 0, command: "", arguments: [{key: String, value: Dyn}]{}}
         if dap.waiting.len() > 0 {
@@ -773,7 +796,7 @@ jet_cli_debug_dap: fn(session: &NativeSession, entry: String) -[FS, Env, Exec, I
             dap.respond(request, "{{}}")
             break
         }
-        dap.handle(session, request.move(), entry)
+        dap.handle(session, request.move(), entry, deep_checks)
     }
 }
 
