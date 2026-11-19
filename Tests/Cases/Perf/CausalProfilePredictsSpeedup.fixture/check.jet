@@ -1,37 +1,62 @@
 // Reads the causal section of the trace the first argument names and
-// measured.txt: for the `round` progress point the narrow line ranks
-// first, and the speedup measured by hand lands within its interval.
+// measured.txt, the speedups main.jet measured by hand for the narrow line
+// and for the wide one. For the `round` progress point, each of the two
+// lines the lens ranked must have its measured speedup within its predicted
+// interval, and the lens must have ranked one of them at least. A ranked
+// line's interval is at most WIDEST wide, the lens's own bound for ranking a
+// line, so no interval passes by being vague.
 use {
     files: core.files
     process: core.process
 }
 
+// JetCLI CLI/Perf/Causal.jet JET_CLI_PERF_CAUSAL_WIDEST, in tenths of a
+// percent.
+WIDEST: 300
+
 // The integer after `key` in `text`; None when `key` is absent.
 number_after: fn(text: String, key: String) -> Int? {
     parts: text.split(key).to_list()
     if parts.len() < 2 -> return None
-    digits: parts[1].split(",").to_list()[0].split("}}").to_list()[0]
+    digits: parts[1].split(",").to_list()[0].split("}}").to_list()[0].split("]").to_list()[0]
     number: Int.parse(digits) ?? return None
     Val(number)
+}
+
+// Whether the lens ranked the line of `function` among `lines`, the `round`
+// point's; when it did, its interval must hold `measured`.
+check_line: fn(lines: String, function: String, measured: Int) -> Bool {
+    loop line in lines.split("}},{{").to_list() {
+        if !line.contains("\"function\":\"{function}\"") -> next
+        low: number_after(line, "\"low_tenths\":") ?? panic("no low_tenths in {line}")
+        high: number_after(line, "\"high_tenths\":") ?? panic("no high_tenths in {line}")
+        if high - low > WIDEST {
+            panic("the {function} line is ranked with an interval of {low} to {high}, wider than the lens ranks")
+        }
+        if measured < low || measured > high {
+            panic("the {function} line sped up by hand gained {measured}, outside its predicted {low} to {high}")
+        }
+        return true
+    }
+    false
 }
 
 run: fn() {
     args: process.args()
     trace: files.read(args[args.len() - 1]) ?? panic("cannot read the trace")
-    measured: Int.parse((files.read("measured.txt") ?? panic("cannot read measured.txt")).trim()) ?? panic("measured.txt holds no number")
+    measured: (files.read("measured.txt") ?? panic("cannot read measured.txt")).trim().split(" ").to_list()
+    if measured.len() != 2 -> panic("measured.txt holds no two numbers")
+    narrow_gain: Int.parse(measured[0]) ?? panic("measured.txt's narrow speedup is no number")
+    wide_gain: Int.parse(measured[1]) ?? panic("measured.txt's wide speedup is no number")
     // The `round` point's object holds its ranked lines before its name.
     before: trace.split("\"name\":\"round\"").to_list()
     if before.len() < 2 -> panic("no `round` progress point in the causal section")
     pieces: before[0].split("{{\"lines\":[").to_list()
-    first: pieces[pieces.len() - 1].split("}}").to_list()[0]
-    if !first.contains("\"function\":\"narrow\"") {
-        panic("the first ranked line for `round` is not narrow: {first}")
+    lines: pieces[pieces.len() - 1]
+    narrow_ranked: check_line(lines, "narrow", narrow_gain)
+    wide_ranked: check_line(lines, "wide", wide_gain)
+    if !narrow_ranked && !wide_ranked {
+        panic("the lens ranked neither line sped up by hand for `round`: {lines}")
     }
-    print("narrow ranks first for round")
-    low: number_after(first, "\"low_tenths\":") ?? panic("no low_tenths in {first}")
-    high: number_after(first, "\"high_tenths\":") ?? panic("no high_tenths in {first}")
-    if measured < low || measured > high {
-        panic("measured {measured} lies outside {low} to {high}")
-    }
-    print("the measured speedup lies in the predicted interval")
+    print("each line sped up by hand that the lens ranked gained within its predicted interval")
 }

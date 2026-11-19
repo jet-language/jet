@@ -237,9 +237,15 @@ sooner. The runtime's CPU-time sampler runs a series of 25 ms experiments.
 Half of them, at random, are baselines. Each other experiment takes the
 program's own source line of the sample that starts it and speeds it up
 virtually by 30%: each sample that lands in the line adds 30% of the time
-the sample stands for to a global delay, and every other thread pauses at
-its next sample until it has paid that delay. The line therefore runs as
-if it were 30% faster relative to the rest of the program. A sample
+the sample stands for to its thread's count of delays. The global delay
+is the most any thread has counted, as in Coz, and every thread that has
+counted less pauses at its next sample until it has paid up to it. The
+line therefore runs as if it were 30% faster relative to the rest of the
+program, and threads in the line at once never pay each other's delays.
+A pause spins and keeps its CPU, where Coz's sleeps: with more threads
+ready than CPUs, a sleeping thread's CPU would go to the line's own
+threads, which would then really run faster and inflate the prediction.
+The samples a pause's CPU time sets off are dropped. A sample
 stands for its period of CPU time, or, when its thread was ready to run
 since its previous sample and that took longer, the wall time between
 them: under load a thread waits for a CPU between samples, and a faster
@@ -247,8 +253,7 @@ line would save that wait too. A thread that was blocked (its last
 sample is more than 5 ms old and it has since given up its CPU of its own
 accord, not merely been preempted) owes nothing for the time it was blocked.
 Delays are paid at sampler ticks, so a thread pays its debt up to one
-sample period late; while the lens runs, a thread's timer slack is 1 ns,
-so its pauses barely oversleep. A progress point counts passes: each closed zone by
+sample period late. A progress point counts passes: each closed zone by
 its name, each finished task as `task`, each answered HTTP request as
 `request`, and each `core.perf.progress(name)`. Outside the lens these record nothing. At the
 end of each experiment the runtime writes its line, its wall time, the
@@ -280,16 +285,19 @@ example.
 
 Under `alloc` the session builds the program with `--checked-alloc`, whose
 heap keeps each block's ten allocating call sites in its prefix, and the
-runtime links every block allocated from the start of the run into a live
-list until it is freed. A run without the lens tracks nothing and pays
-nothing. `core.perf.heap_mark(name)` takes a heap snapshot named `name`,
-and the runtime takes one named `exit` as the program exits; in any other
-run `heap_mark` does nothing. A snapshot holds the live list while it
-forks: the copy-on-write child walks the list as it stood, groups the live
-blocks by their call sites, writes the groups to the samples file and
-exits, while the program goes on once the child has the copy and waits for
-it to exit. The trace keeps the snapshots in its `heap` receipt section
-(type `JetPerfHeapSnapshots`): the checked source's `path`, then each
+runtime links every block allocated from the program's entry into a live
+list until it is freed. The blocks the runtime and the observation take
+before the entry, and those of the observation's writer thread, are their
+own, not the program's, and stay off the list. A run without the lens
+tracks nothing and pays nothing. `core.perf.heap_mark(name)` takes a heap
+snapshot named `name`, and the runtime takes one named `exit` as the
+program exits; in any other run `heap_mark` does nothing. A snapshot holds
+the live list while it forks: the copy-on-write child walks the list as it
+stood, groups the live blocks by their call sites, writes the groups to the
+samples file and exits, while the program goes on once the child has the
+copy and waits for it to exit. The trace keeps the snapshots in its `heap`
+receipt section (type `JetPerfHeapSnapshots`): the checked source's
+`path`, then each
 snapshot in the order the program took them with its `name`, `number`,
 live `blocks` and their `bytes`, and its `sites`, the blocks by the
 `function` and `line` of the checked source innermost on their allocating
@@ -615,6 +623,25 @@ the zone, frame, plot and log span rows to `.samples.spans`. It then removes
 the request, so the next publication clears the word, and reads the rows into
 the trace beside the ring's, each zone holding the ring's samples inside it.
 Tests/Cases/Perf/attach_turns_zones_on.case is the worked example.
+
+`jet run --observe --checked-alloc app.jet` keeps the live list as a `jet
+perf run --lens=alloc` does, which `jet perf attach <pid> --source app.jet
+--lens=alloc` snapshots while the program runs. It leaves
+`<temp>/jet-flight-<pid>.samples.heap-request` beside the ring, which the
+writer's next publication notices as it looks for the zones request: it
+takes the snapshot on the writer's thread, named `attach`, with the live
+list held as a `heap_mark` holds it, so no block joins or leaves it while
+the child forks, and answers in `.samples.heap`: the time the list was held
+and the snapshot's records. Its roots are the image's writable segments;
+the writer's frames are not the program's. The trace keeps the snapshot in
+its `heap` section, and stderr states how long the program's allocations
+and frees waited, `Heap snapshot: held the program's allocations and frees
+for 412 µs`. A program not started with `--checked-alloc` keeps no live
+list: the attach is refused with that reason and the command that starts
+one, and writes no trace. An observed run that is never attached pays one
+`faccessat` a publication, every 100ms, for the request.
+Tests/Cases/Perf/heap_snapshot_types_retention_and_diff.case is the worked
+example.
 
 A stop that ends an observed process (a panic, a trap, a contract failure)
 writes a typed dump while the stopping stack is whole:

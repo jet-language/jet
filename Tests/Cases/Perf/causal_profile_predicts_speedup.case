@@ -1,13 +1,14 @@
 # `jet perf run --lens=causal` runs virtual speedup experiments on the
 # program's lines, and `jet perf view` ranks, for each progress point, how
-# much sooner its passes would come if a line were 30% faster. In the
-# fixture the narrow task's line bounds every round, though the wide tasks
-# take more CPU time. So it ranks first for the `round` zone, and the
-# program with that line's work cut to seven-tenths speeds up by an amount
-# inside the predicted interval, on every tier. Each finished task is a
-# progress point of its own and is ranked apart. A run too short to rank is
-# refused with the reason, and the lens refuses the company of lenses whose
-# readings its delays would skew.
+# much sooner its passes would come if a line were 30% faster. The fixture
+# times the program by hand with its narrow line's work cut to seven-tenths
+# and, apart, with its wide line's; each of the two the lens ranked for the
+# `round` zone sped up by an amount inside its predicted interval, and it
+# ranked one at least, on every tier. Which of them gains more depends on
+# the CPUs the run gets, so neither is required to rank first. Each
+# finished task is a progress point of its own and is ranked apart. A run
+# too short to rank is refused with the reason, and the lens refuses the
+# company of lenses whose readings its delays would skew.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: CausalProfilePredictsSpeedup.fixture
@@ -15,12 +16,14 @@ env: NO_COLOR=1
 step o0: jet perf run -A -O0 main.jet --lens=causal --out causal.jettrace
 exit: 0
 stdout: = "done\n"
+json: file causal.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses #= 2 # the receipt names each lens that ran
+json: file causal.jettrace doc $.content.receipt_sections[?name="perf"][0].value.capture.sampling.lenses[1] = "causal" # the causal lens, beside the cpu samples it rides on
 step: jet run -A -O0 main.jet -- measure
 exit: 0
 stdout: = "measured\n"
 step: jet run -A check.jet -- causal.jettrace
 exit: 0
-stdout: = "narrow ranks first for round\nthe measured speedup lies in the predicted interval\n" # the bottleneck ranks first, and the hand-sped program lands in its interval
+stdout: = "each line sped up by hand that the lens ranked gained within its predicted interval\n" # the hand-sped program lands in the interval of each ranked line
 step o1: jet perf run -A -O1 main.jet --lens=causal --out causal.jettrace
 exit: 0
 stdout: = "done\n"
@@ -29,7 +32,7 @@ exit: 0
 stdout: = "measured\n"
 step: jet run -A check.jet -- causal.jettrace
 exit: 0
-stdout: = "narrow ranks first for round\nthe measured speedup lies in the predicted interval\n"
+stdout: = "each line sped up by hand that the lens ranked gained within its predicted interval\n" # on every tier
 step o2: jet perf run -A -O2 main.jet --lens=causal --out causal.jettrace
 exit: 0
 stdout: = "done\n"
@@ -38,7 +41,7 @@ exit: 0
 stdout: = "measured\n"
 step: jet run -A check.jet -- causal.jettrace
 exit: 0
-stdout: = "narrow ranks first for round\nthe measured speedup lies in the predicted interval\n"
+stdout: = "each line sped up by hand that the lens ranked gained within its predicted interval\n" # on every tier
 step: jet perf view causal.jettrace
 exit: 0
 stdout: ~ "`round`: if this line were 30% faster, each pass would come sooner by" # the zone is a progress point
@@ -50,6 +53,7 @@ stdout: = "done\n"
 step: jet perf view short.jettrace
 exit: 0
 stdout: ~ "refused: the run kept " # too few experiments to rank, and why
+json: file short.jettrace doc $.content.receipt_sections[?name="causal"][0].value.refused ~ "the run kept " # the receipt keeps the refusal's reason
 step: jet perf run -A main.jet --lens=causal,memory --out mixed.jettrace
 exit: 2
 stderr: ~ "run it alone with `--lens=causal`" # the delays would skew the other lenses

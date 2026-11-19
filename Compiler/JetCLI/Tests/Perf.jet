@@ -39,6 +39,7 @@ use {
         jet_cli_perf_source_position,
         jet_cli_perf_source_profile,
         jet_cli_perf_timed_first,
+        jet_cli_perf_waits_read,
         jet_cli_perf_zones_section,
     ]
     jet_debug.[
@@ -411,6 +412,54 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     json: String.from_bytes(canonical_json_bytes(capture.receipts[capture.receipts.len() - 1].value)) ?? panic("the section is UTF-8")
     assert(json.contains(`"sampled":[{"end_ns":4293,"line":5,"name":"solve","samples":2,"start_ns":1293}]`))
     assert(json.contains(`{"count":1,"lines":[{"line":5,"samples":2}],"longest_ns":3000,"name":"solve","samples":2,"total_ns":3000}`))
+}
+
+// A short task can start and end between two observations, so none sees
+// it: its spawn record, which names its spawner, gives it a done task's row
+// under the spawner's, and the join on it names it, the line that spawned
+// it and its wake.
+#Test("a task no observation saw gets a row under its spawner's, which the join on it names") {
+    table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}
+    words: jet_cli_perf_test_words(
+        [Int]{
+            // Task 1 spawns task 5 at a call site of fib.
+            5 | (3 << 48) | (15 << 59),
+            1,
+            4112,
+            // Task 1 joins task 5 on slot 64, from 100 to 200 ns, with no
+            // name, addresses or stack.
+            1 | (6 << 48) | (14 << 59),
+            64,
+            100,
+            200,
+            5 | (1 << 48),
+            0,
+            // Task 5 wakes slot 64 at 150 ns as it ends.
+            5 | (3 << 48) | (12 << 59),
+            64,
+            150,
+        },
+    )
+    sampled := jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    assert_eq(sampled.spawns.len(), 1)
+    observations: [JetCLIPerfObservation]{JetCLIPerfObservation{at_ns: U64{10}, live: jet_cli_perf_live_from(jet_cli_perf_test_snapshot(1))}}
+    capture := jet_cli_perf_capture_source("fib.jet", "run: fn() -> Int {{ 1 }}", observations, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    jet_cli_perf_waits_read(capture, sampled.waits.move(), sampled.wakes.move(), sampled.spawns.move(), sampled.transfers.move(), "fib.jet", 0)
+    assert_eq(capture.tasks.len(), 2)
+    assert_eq(capture.tasks[1].id, U64{2})
+    assert_eq(capture.tasks[1].parent, U64{1})
+    assert_eq(capture.tasks[1].state, "done")
+    join: capture.spans[capture.spans.len() - 1]
+    assert_eq(join.kind, "task_wait")
+    assert_eq(join.task_id, Val(U64{1}))
+    assert_eq(join.awaited_task_id, Val(U64{2}))
+    assert_eq(join.spawn_line, Val(U64{5}))
+    assert_eq(join.waker, "task")
+    assert_eq(join.waker_task_id, Val(U64{2}))
+    toolchain: TraceToolchain{jet_version: "test", compiler_build_id: "test", stdlib_id: "test", runner_id: "test"}
+    hardware: TraceHardware{cpu_arch: "x86_64", logical_cpus: U64{1}, os: "linux", target: "x86_64-unknown-linux-gnu"}
+    _: jet_cli_perf_capture_bytes(capture, "run", [String]{"fib.jet"}, toolchain, hardware) ?? panic(err.message)
 }
 
 #Test("a heap snapshot's blocks count by their line and by the type their innermost typed allocating call names") {

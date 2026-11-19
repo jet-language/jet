@@ -183,7 +183,7 @@ task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, m
     sync_store(wrapping(child + I64{144}), permit)
     id: jet_rt_observe_task_register(control, site, label)
     sync_store(wrapping(control + I64{56}), id)
-    perf_samples_spawn(id)
+    perf_samples_spawn(id, observe_current_task())
     sync_store(wrapping(child + I64{128}), jet_rt_observe_task_identity(id))
     if (group != I64{0}) { task_group_register(group, child) }
     task_live_link(child)

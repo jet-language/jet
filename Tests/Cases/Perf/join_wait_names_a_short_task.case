@@ -1,0 +1,15 @@
+# A task that only computes can start and end between two of the run's
+# observations, so none sees it. Its spawn record names the task that
+# spawned it, so `jet perf run` still gives it a trace row and each join on
+# it names the task it awaited, the line that spawned it and its waker.
+requires: os-name:linux
+fixture: JoinWaitNamesAShortTask.fixture
+env: NO_COLOR=1
+step: jet perf run main.jet --out {work}/join.jettrace
+exit: 0
+stdout: = "sum=180\n"
+step: jet perf view {work}/join.jettrace
+exit: 0
+stdout: ~ "] task 1 in task join at main.jet:6 for task " # a join names the task it awaited
+stdout: ~ " spawned at main.jet:2, woken by task " # and the line that spawned it and the task that woke it
+stdout: !~ "woken by task ?" # every waker resolves to a task

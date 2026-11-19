@@ -1,0 +1,38 @@
+// chat.jet's four rooms and their 200 message bodies, held: it prints
+// READY once every body is live and then waits, so `jet perf attach
+// --lens=alloc` snapshots its heap while it runs.
+use {
+    term: core.term
+    time: core.time
+}
+
+Message: struct {
+    id: Int,
+    body: [Int],
+}
+
+Room: struct {
+    id: Int,
+    history: [Message],
+}
+
+run: fn() {
+    rooms := [Room]{}
+    loop id in 0..<4 -> rooms.push(Room{id: id, history: [Message]{}})
+    loop turn in 0..<50 {
+        loop index in 0..<rooms.len() {
+            rooms[index].history.push(Message{id: turn, body: [Int]{turn, index}})
+        }
+    }
+    print("READY")
+    // A pipe stdout is written when its buffer fills; flush so the case
+    // sees READY while the program still runs.
+    out := term.stdout()
+    out.flush() ?? panic("flush")
+    loop _ in 0..<6000 -> time.sleep(10ms)
+    total := 0
+    loop room in rooms {
+        loop message in room.history -> total += message.id + message.body.len()
+    }
+    print("rooms={rooms[3].id + 1} total={total}")
+}

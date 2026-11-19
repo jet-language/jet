@@ -2323,7 +2323,10 @@ jet_cli_compile_executable_file: fn(file: String, entry: String?, color: Bool, t
 // (JetDriverCompileResult.comptime_inputs). The settings the
 // package's `build: fn` contributes are recorded and folded first
 // (jet_cli_contributed_request); `color` renders that step's refusal.
-jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, options: BuildOptions, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, color: Bool) -> JetCLIExecutableCompiled {
+// `core_bound` is jet_cli_core_binding's answer for the entry with no Core
+// source under test, when the caller holds it: a debugger's session decides
+// it once (DebugCompile.jet jet_cli_debug_eval_core).
+jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, options: BuildOptions, input_log: Shared<JetDriverComptimeInputLog>?, trace_sink: JetCLITraceSink?, color: Bool, core_bound: Bool?{None}) -> JetCLIExecutableCompiled {
     if prepared.move() == {
         .Refused(output) -> JetCLIExecutableCompiled.Refused{output: output}
         .Prepared(request, snapshot) -> {
@@ -2384,7 +2387,7 @@ jet_cli_compile_executable: fn(prepared: &&JetCLIPrepared, entry: String?, optio
             // jet_cli_native_executable). It decides that now, before its
             // check, so a compile in a checkout whose Core is the built-in one
             // loads those checks as one outside it does.
-            built_in: jet_cli_core_binding(snapshot.entry_path, compiled_request.core_tests)
+            built_in: if core_bound == .Val(bound) -> bound && compiled_request.core_tests == "" else -> jet_cli_core_binding(snapshot.entry_path, compiled_request.core_tests)
             // A traced run with per-function spans whose Core is the built-in
             // one counts its Core demand's checks against the Core facts this
             // jet carries: the sealed keys, and each excluded key's reason

@@ -476,7 +476,10 @@ perf_samples_start: fn() {
     }
     perf_counters_start(buffer, counters)
     perf_topdown_start(buffer, topdown)
-    if ((lenses & PERF_LENS_ALLOC) != I64{0}) { _ := alloc_check_track_start() }
+    // A flight recorder of a checked image (`jet run --observe
+    // --checked-alloc`) keeps the live list too, which `jet perf attach
+    // --lens=alloc` snapshots (perf_flight_heap).
+    if (flight || (lenses & PERF_LENS_ALLOC) != I64{0}) { _ := alloc_check_track_start() }
     // The record of the CPU time sampled, written at exit.
     observe_exit_install()
 }
@@ -1441,25 +1444,34 @@ perf_spans_flush: fn() {
     sync_thread_unlock(buffer)
 }
 
-// The heap snapshot named by text `name`, under the alloc lens: the live
-// list held (Alloc.jet alloc_check_track_hold) across a fork, whose child
-// writes the snapshot (perf_samples_heap_write) and exits, and whose parent
-// releases the list and waits for the child. Where the fork fails, this
-// thread writes it while it holds the list. The frames the snapshot scans
-// for roots are the ones above this call's.
+// The heap snapshot named by text `name`, under the alloc lens
+// (perf_samples_heap_take). The frames the snapshot scans for roots are the
+// ones above this call's.
 perf_samples_heap: fn(name: I64) {
     fd: perf_samples_fd
     if (fd < I64{0} || (perf_samples_lens_mask & PERF_LENS_ALLOC) == I64{0}) {
         return
     }
-    frame: alloc_check_caller_frame()
+    _ := perf_samples_heap_take(fd, name, alloc_check_caller_frame())
+}
+
+// Write the heap snapshot named by text `name` to `fd`, its roots the frames
+// above `frame` (none for 0) and the image's writable segments: the live
+// list held (Alloc.jet alloc_check_track_hold) across a fork, whose child
+// writes the snapshot (perf_samples_heap_write) and exits, and whose parent
+// releases the list and waits for the child. Where the fork fails, this
+// thread writes it while it holds the list. The nanoseconds the list was
+// held, while every allocation and free of the program's waited on it.
+perf_samples_heap_take: fn(fd: I64, name: I64, frame: I64) -> I64 {
     number: alloc_check_track_hold()
+    began: sync_now_ns()
     pid := I64{-1}
     #Unsafe("fork copies the held live list into a child whose only thread writes the snapshot and exits, never returning from here") {
         pid = os_syscall_i64(I64{57}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
     }
     if (pid <= I64{0}) { perf_samples_heap_write(fd, number, name, frame) }
     if (pid == I64{0}) { perf_samples_heap_child_exit() }
+    held: wrapping(sync_now_ns() - began)
     alloc_check_track_release()
     if (pid > I64{0}) {
         reaped := I64{-4}
@@ -1469,6 +1481,7 @@ perf_samples_heap: fn(name: I64) {
             }
         }
     }
+    held
 }
 
 // End the heap snapshot's forked child once it has written the snapshot.
@@ -2002,18 +2015,21 @@ perf_spans_fd_set: fn(fd: I64) {
     perf_zones_set(I64{1})
 }
 
-// The record of task `id`'s spawn, under `jet perf run`: the id in place of
-// a sample's program counter, then the spawning stack (perf_samples_stack).
-// `jet perf run` names the task's spawn by the innermost of its call sites
-// on a line of the checked source.
-perf_samples_spawn: fn(id: I64) {
+// The record of task `id`'s spawn by task `parent`, under `jet perf run`:
+// the id in place of a sample's program counter, the parent's id, then the
+// spawning stack (perf_samples_stack). `jet perf run` names the task's
+// spawn by the innermost of its call sites on a line of the checked source,
+// and gives the task a trace row under its parent's when no observation
+// saw it.
+perf_samples_spawn: fn(id: I64, parent: I64) {
     fd: perf_samples_fd
     if (fd < I64{0} || id == I64{0}) {
         return
     }
-    size: wrapping(wrapping(PERF_SAMPLES_STACK_DEPTH + I64{1}) * I64{8})
+    size: wrapping(wrapping(PERF_SAMPLES_STACK_DEPTH + I64{2}) * I64{8})
     record: jet_rt_alloc(size, I64{8})
-    words: wrapping(perf_samples_stack(wrapping(record + I64{8})) + I64{1})
+    rt_text_store(wrapping(record + I64{8}), parent)
+    words: wrapping(perf_samples_stack(wrapping(record + I64{16})) + I64{2})
     rt_text_store(record, (id & PERF_SAMPLES_ADDRESS_MASK) | (words << PERF_SAMPLES_ADDRESS_BITS) | (PERF_SAMPLES_SPAWN << PERF_SAMPLES_KIND_BITS))
     _ := host_write_all(fd, record, wrapping(words * I64{8}))
     jet_rt_free(record, size, I64{8})
@@ -3502,11 +3518,16 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         return I64{0}
     }
     // A program counter outside the image's code keeps no callers, but a
-    // CPU-time sample's record still takes its time and task.
+    // CPU-time sample's record still takes its time and task. The causal
+    // lens drops the periods its pauses spent (perf_causal_tick).
+    raw: perf_samples_periods(signal, info)
+    periods: if (signal == PERF_SAMPLES_SIGNAL) -> perf_causal_tick(pc, raw) else -> raw
+    if (periods == I64{0}) {
+        perf_samples_charge(buffer, began)
+        return I64{0}
+    }
     walked: perf_samples_in_code(pc)
     slot: if (buffer == I64{0}) -> I64{0} else -> perf_samples_claim(buffer)
-    periods: perf_samples_periods(signal, info)
-    if (signal == PERF_SAMPLES_SIGNAL) { perf_causal_tick(pc, periods) }
     if (slot == I64{0}) {
         perf_samples_put(fd, I64{0}, I64{0}, I64{0}, (I64{1} << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, ring, periods)
         perf_counter_rearm(buffer, counter)
@@ -3950,7 +3971,9 @@ perf_flight_beside: fn(path: I64, suffix: I64) -> I64 {
 
 // At each of the observation writer's publications: drain the socket into
 // the ring and publish it in `directory`, the image beside it the first
-// time. A publication that finds the lock held (a dump) skips its turn.
+// time, answering an attach's zones (perf_flight_zones) and heap snapshot
+// (perf_flight_heap) requests. A publication that finds the lock held (a
+// dump) skips its turn.
 perf_flight_publish: fn(directory: I64) {
     state: perf_flight_state
     if (state == I64{0} || !perf_flight_lock(state, I64{1})) {
@@ -3967,6 +3990,8 @@ perf_flight_publish: fn(directory: I64) {
             }
             jet_rt_string_drop(image)
         }
+        // After the image, which the attach reads the snapshot beside.
+        perf_flight_heap(path)
         _ := perf_flight_file(path, wrapping(state + PERF_FLIGHT_RING_AT), rt_text_word(wrapping(state + PERF_FLIGHT_USED)))
         jet_rt_string_drop(path)
     }
@@ -4004,6 +4029,57 @@ perf_flight_zones: fn(path: I64) {
     }
     if (!wanted && perf_zones_on != I64{0}) { perf_zones_set(I64{0}) }
     perf_spans_flush()
+}
+
+// `jet perf attach --lens=alloc` asks a flight-recorded run for a heap
+// snapshot by leaving `<ring>.heap-request` beside the published ring
+// `path`. The publication that finds it answers in `<ring>.heap`, staged
+// beside it and renamed over it, then removes the request: first a word,
+// the nanoseconds the snapshot held the program's allocations and frees
+// (perf_samples_heap_take), or -1 where the run keeps no live list (it was
+// not started with `--checked-alloc`); then the snapshot `attach`'s
+// records, as a samples file keeps them. Its roots are the image's writable
+// segments alone: this thread's frames are the writer's, not the
+// program's.
+perf_flight_heap: fn(path: I64) {
+    request: perf_flight_beside(path, rt_static_text(".heap-request"))
+    asked: observe_cstring(request)
+    // faccessat(AT_FDCWD, asked, F_OK)
+    wanted: observe_syscall(I64{269}, I64{-100}, asked, I64{0}, I64{0}) == I64{0}
+    if (wanted) {
+        answer: perf_flight_beside(path, rt_static_text(".heap"))
+        staged: perf_flight_beside(path, rt_static_text(".heap.stage"))
+        file: observe_cstring(staged)
+        word: jet_rt_alloc(I64{8}, I64{8})
+        tracked: alloc_check_track_on()
+        rt_text_store(word, if (tracked) -> I64{0} else -> I64{-1})
+        // O_WRONLY|O_CREAT|O_TRUNC|O_CLOEXEC, mode 0600.
+        fd: observe_syscall(I64{257}, I64{-100}, file, I64{524865}, I64{384})
+        if (fd >= I64{0}) {
+            written := host_write_all(fd, word, I64{8})
+            if (written == I64{0} && tracked) {
+                // The child writes its records after the word; the hold
+                // then takes the word's place (pwrite64 at offset 0).
+                rt_text_store(word, perf_samples_heap_take(fd, rt_static_text("attach"), I64{0}))
+                if (observe_syscall(I64{18}, fd, word, I64{8}, I64{0}) != I64{8}) {
+                    written = I64{-1}
+                }
+            }
+            _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
+            if (written == I64{0}) {
+                target: observe_cstring(answer)
+                _ := observe_syscall(I64{82}, file, target, I64{0}, I64{0})
+                jet_rt_free(target, wrapping(rt_text_len(answer) + I64{1}), I64{1})
+            } else { _ := observe_syscall(I64{87}, file, I64{0}, I64{0}, I64{0}) }
+        }
+        _ := observe_syscall(I64{87}, asked, I64{0}, I64{0}, I64{0})
+        jet_rt_free(word, I64{8}, I64{8})
+        jet_rt_free(file, wrapping(rt_text_len(staged) + I64{1}), I64{1})
+        jet_rt_string_drop(staged)
+        jet_rt_string_drop(answer)
+    }
+    jet_rt_free(asked, wrapping(rt_text_len(request) + I64{1}), I64{1})
+    jet_rt_string_drop(request)
 }
 
 // At a run's exit (Observe.jet jet_rt_observe_exit): the published ring and
@@ -5039,9 +5115,16 @@ perf_flight_rotate: fn(state: I64, text: I64) {
 // them (a line of the program's own files, every address range of it in its
 // function, from the image's location table) and speed it up by
 // PERF_CAUSAL_SPEEDUP virtually: each sample that lands in the line adds
-// that share of the time the line took to a global delay, and every other
-// thread pauses at its next sample until it has paid the delays it owes, so
-// the line runs as if faster relative to everything else. The time a sample
+// that share of the time the line took to its thread's own count of
+// delays, the global delay is the most any thread has counted, as in Coz
+// (perf_causal_raise), and every thread that has counted less pauses at its
+// next sample until it has paid up to it, so the line runs as if faster
+// relative to everything else. Threads in the line at once each count their
+// own share and none pays another's: were the global delay their sum, each
+// would pause for its siblings' shares, as if the line ran slower than it
+// does. A pause holds its thread's CPU (perf_causal_pause), so the pauses
+// slow the rest of the program as the line's own time would, and the
+// samples its CPU time sets off are dropped. The time a sample
 // stands for is its thread's wall time since its last sample when the
 // thread wasn't blocked meanwhile, and its CPU time when that is more or
 // the thread was blocked: under load a running thread waits for a CPU
@@ -5089,7 +5172,8 @@ PERF_CAUSAL_THREADS: I64{512}
 // the experiment: the time of its first pass and of its last, the global
 // delay at each, the passes after the first), the record being written,
 // then one entry per thread (tid, delay paid, last sample, voluntary
-// context switches by then, a timespec, a struct rusage).
+// context switches by then, a timespec, a struct rusage, the CPU time its
+// pauses took whose samples are still to drop, and whether it is pausing).
 PERF_CAUSAL_START: I64{8}
 
 PERF_CAUSAL_DELAY: I64{16}
@@ -5118,9 +5202,13 @@ PERF_CAUSAL_RECORD: I64{2128}
 
 PERF_CAUSAL_THREAD_AT: I64{2944}
 
-PERF_CAUSAL_THREAD_BYTES: I64{192}
+PERF_CAUSAL_THREAD_BYTES: I64{208}
 
-PERF_CAUSAL_BYTES: I64{102400}
+PERF_CAUSAL_THREAD_SPUN: I64{192}
+
+PERF_CAUSAL_THREAD_PAUSING: I64{200}
+
+PERF_CAUSAL_BYTES: I64{110592}
 
 // The causal lens's state, 0 unless the lens is on.
 perf_causal_state := I64{0}
@@ -5171,40 +5259,63 @@ perf_causal_table: fn(state: I64, image: I64) -> Bool {
 }
 
 // From the CPU-time samples' handler, for a sample at link-time address
-// `pc` standing for `periods` periods: pay this thread's owed delay, add
-// the target line's share of the sample's time when the sample is in it,
-// and end the experiment once its time is up.
-perf_causal_tick: fn(pc: I64, periods: I64) {
+// `pc` standing for `periods` periods: add the target line's share of the
+// sample's time to this thread's count when the sample is in it, pay what
+// it owes, and end the experiment once its time is up. The periods the
+// sample keeps: those its thread's pauses spent are dropped, as a pause is
+// the lens's time and not the interrupted line's, and a sample that keeps
+// none is not written.
+perf_causal_tick: fn(pc: I64, periods: I64) -> I64 {
     state: perf_causal_state
-    if (state == I64{0}) {
-        return
-    }
+    if (state == I64{0}) { return periods }
     now: perf_samples_clock()
     thread: perf_causal_thread(state)
+    period: wrapping(perf_samples_interval_us * I64{1000})
+    kept := periods
+    if (thread != I64{0}) {
+        spun: wrapping(thread + PERF_CAUSAL_THREAD_SPUN)
+        // A sample taken in a pause outside the handler (perf_causal_task_end)
+        // is the pause's: its periods come off what the pause will add.
+        if (sync_load(wrapping(thread + PERF_CAUSAL_THREAD_PAUSING)) != I64{0}) {
+            _ := sync_add(spun, wrapping(I64{0} - wrapping(period * periods)))
+            return I64{0}
+        }
+        // A pause in the handler holds the timer's signal back, so the next
+        // sample also stands for the periods the pause spent.
+        owed: sync_load(spun) / period
+        if (owed > I64{0}) {
+            dropped: if (owed < periods) -> owed else -> periods
+            _ := sync_add(spun, wrapping(I64{0} - wrapping(period * dropped)))
+            kept = wrapping(periods - dropped)
+            if (kept == I64{0}) { return I64{0} }
+        }
+    }
     delay: sync_load(wrapping(state + PERF_CAUSAL_DELAY))
     // The sample's time: its CPU time, or the wall time since this
     // thread's last sample when it was ready to run all of it and that is
-    // more.
-    spent := wrapping(wrapping(perf_samples_interval_us * I64{1000}) * periods)
+    // more. A thread that was not owes nothing for the delays meanwhile.
+    spent := wrapping(period * kept)
+    ready := false
     if (thread != I64{0}) {
         last: rt_text_word(wrapping(thread + I64{16}))
-        local: rt_text_word(wrapping(thread + I64{8}))
-        if {
-            (last != I64{0} && !perf_causal_blocked(thread, wrapping(now - last))) -> {
-                if (wrapping(now - last) > spent) { spent = wrapping(now - last) }
-                perf_causal_pay(thread, local, delay)
-            }
-            (local < delay) -> rt_text_store(wrapping(thread + I64{8}), delay)
-            else -> {}
+        ready = last != I64{0} && !perf_causal_blocked(thread, wrapping(now - last))
+        if (ready) {
+            if (wrapping(now - last) > spent) { spent = wrapping(now - last) }
+        } else if (rt_text_word(wrapping(thread + I64{8})) < delay) {
+            rt_text_store(wrapping(thread + I64{8}), delay)
         }
     }
     count: sync_load(wrapping(state + PERF_CAUSAL_RANGE_COUNT))
     if (count > I64{0} && perf_causal_in_target(state, pc, count)) {
         share: wrapping(wrapping(sync_load(wrapping(state + PERF_CAUSAL_SPEED)) * spent) / I64{1000})
-        _ := sync_add(wrapping(state + PERF_CAUSAL_DELAY), share)
         if (thread != I64{0}) {
-            rt_text_store(wrapping(thread + I64{8}), wrapping(rt_text_word(wrapping(thread + I64{8})) + share))
-        }
+            local: wrapping(rt_text_word(wrapping(thread + I64{8})) + share)
+            rt_text_store(wrapping(thread + I64{8}), local)
+            perf_causal_raise(state, local)
+        } else { _ := sync_add(wrapping(state + PERF_CAUSAL_DELAY), share) }
+    }
+    if (ready) {
+        perf_causal_pay(thread, rt_text_word(wrapping(thread + I64{8})), sync_load(wrapping(state + PERF_CAUSAL_DELAY)))
     }
     // After the pause: a pause the experiment's end left out of its wall
     // time would still count in its delay and its passes.
@@ -5213,6 +5324,20 @@ perf_causal_tick: fn(pc: I64, periods: I64) {
     if (wrapping(after - sync_load(wrapping(state + PERF_CAUSAL_START))) >= PERF_CAUSAL_EXPERIMENT_NS && sync_cas(state, I64{0}, I64{1}) == I64{0}) {
         perf_causal_next(state, pc, after)
         sync_store(state, I64{0})
+    }
+    kept
+}
+
+// Raise the global delay to `local`, a thread's count, when that is more:
+// the global delay is the most any thread has counted, so a thread that
+// counted it owes none of it and every other thread owes the difference.
+perf_causal_raise: fn(state: I64, local: I64) {
+    at: wrapping(state + PERF_CAUSAL_DELAY)
+    loop {
+        seen: sync_load(at)
+        if (seen >= local || sync_cas(at, seen, local) == seen) {
+            return
+        }
     }
 }
 
@@ -5229,7 +5354,7 @@ perf_causal_blocked: fn(thread: I64, gap: I64) -> Bool {
 }
 
 // Note in this thread's entry its last sample (or sync point) at `now` and
-// its voluntary context switches by then, its own pauses' among them.
+// its voluntary context switches by then.
 perf_causal_mark: fn(thread: I64, now: I64) {
     rt_text_store(wrapping(thread + I64{16}), now)
     rt_text_store(wrapping(thread + I64{24}), perf_causal_switches(thread))
@@ -5285,9 +5410,7 @@ perf_causal_task_end: fn() {
 }
 
 // This thread's entry, claimed by its tid on its first sample; 0 when the
-// table is full. The claim drops the thread's timer slack to 1 ns: a pause
-// (perf_causal_pause) would otherwise sleep the stock 50 us past its
-// request, which it then owes back as excess no other thread shares.
+// table is full.
 perf_causal_thread: fn(state: I64) -> I64 {
     tid: thread_tid()
     probe := wrapping(tid * I64{2654435761}) & wrapping(PERF_CAUSAL_THREADS - I64{1})
@@ -5296,12 +5419,7 @@ perf_causal_thread: fn(state: I64) -> I64 {
         entry: wrapping(wrapping(state + PERF_CAUSAL_THREAD_AT) + wrapping(probe * PERF_CAUSAL_THREAD_BYTES))
         held: sync_load(entry)
         if (held == tid) { return entry }
-        if (held == I64{0} && sync_cas(entry, I64{0}, tid) == I64{0}) {
-            #Unsafe("prctl(PR_SET_TIMERSLACK) takes no pointer and sets this thread's own slack") {
-                _ := os_syscall_i64(I64{157}, I64{29}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0})
-            }
-            return entry
-        }
+        if (held == I64{0} && sync_cas(entry, I64{0}, tid) == I64{0}) { return entry }
         probe = wrapping(probe + I64{1}) & wrapping(PERF_CAUSAL_THREADS - I64{1})
         tries = wrapping(tries + I64{1})
     }
@@ -5309,11 +5427,12 @@ perf_causal_thread: fn(state: I64) -> I64 {
 }
 
 // Pay this thread's owed delay, `delay` less the `local` it has paid, and
-// keep what it paid. A pause sleeps past its request by the timer's slack,
-// and the excess counts toward the delays inserted after it, as in Coz:
-// were it dropped, every pause would add time the experiment's accounting
-// (its wall time less the delay inserted) leaves in, and every line's
-// prediction would read lower by the pauses' total slack.
+// keep what it paid. A pause runs past its request by the clock read that
+// ends it, or by a preemption, and the excess counts toward the delays
+// inserted after it, as in Coz: were it dropped, every pause would add
+// time the experiment's accounting (its wall time less the delay inserted)
+// leaves in, and every line's prediction would read lower by the pauses'
+// total excess.
 perf_causal_pay: fn(thread: I64, local: I64, delay: I64) {
     paid := local
     if (local < delay) {
@@ -5323,18 +5442,41 @@ perf_causal_pay: fn(thread: I64, local: I64, delay: I64) {
     rt_text_store(wrapping(thread + I64{8}), if (paid < delay) -> delay else -> paid)
 }
 
-// Pause this thread for `ns` (at most PERF_CAUSAL_PAUSE_MAX_NS) in its
-// entry's timespec: the time it slept.
+// Pause this thread for `ns`, at most PERF_CAUSAL_PAUSE_MAX_NS: the time it
+// paused. The pause spins on the clock and keeps its CPU. Coz sleeps, which
+// is the same while every thread has a CPU of its own; but with more
+// threads ready than CPUs (a loaded machine, or a cgroup's cap on the
+// program's share) a sleeping thread's CPU goes to the program's other
+// threads, the target line's among them, which then run faster in fact,
+// not virtually, and the experiment credits the line with their gain on top
+// of the delay. Spinning, the paused thread takes the CPU its own work
+// would have taken, as a line slower by the delay would. The CPU time it
+// spins is the lens's, so the samples it sets off are dropped
+// (perf_causal_tick): while it pauses outside the handler its entry says
+// so, and the CPU time it spun is kept for the sample the handler held back.
 perf_causal_pause: fn(thread: I64, ns: I64) -> I64 {
     wait: if (ns > PERF_CAUSAL_PAUSE_MAX_NS) -> PERF_CAUSAL_PAUSE_MAX_NS else -> ns
+    pausing: wrapping(thread + PERF_CAUSAL_THREAD_PAUSING)
+    sync_store(pausing, I64{1})
+    cpu: perf_causal_clock(thread, I64{3})
+    began: perf_causal_clock(thread, I64{1})
+    deadline: wrapping(began + wait)
+    now := began
+    loop now < deadline -> now = perf_causal_clock(thread, I64{1})
+    _ := sync_add(wrapping(thread + PERF_CAUSAL_THREAD_SPUN), wrapping(perf_causal_clock(thread, I64{3}) - cpu))
+    sync_store(pausing, I64{0})
+    wrapping(now - began)
+}
+
+// The clock `clock` (CLOCK_MONOTONIC 1 or CLOCK_THREAD_CPUTIME_ID 3) in
+// nanoseconds, read into this thread's entry's timespec. A pause outside the
+// handler reads its clocks there, not in the handler's words
+// (perf_samples_clock), which a sample taken meanwhile overwrites; such a
+// sample leaves the entry's timespec alone (perf_causal_tick).
+perf_causal_clock: fn(thread: I64, clock: I64) -> I64 {
     spec: wrapping(thread + I64{32})
-    rt_text_store(spec, I64{0})
-    rt_text_store(wrapping(spec + I64{8}), wait)
-    began: perf_samples_clock()
-    #Unsafe("nanosleep reads the timespec in this thread's own entry") {
-        _ := os_syscall_i64(I64{35}, spec, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
-    }
-    wrapping(perf_samples_clock() - began)
+    sync_clock_read(clock, spec)
+    wrapping(wrapping(rt_text_word(spec) * I64{1000000000}) + rt_text_word(wrapping(spec + I64{8})))
 }
 
 // Whether `pc` is in one of the target's `count` ranges.
