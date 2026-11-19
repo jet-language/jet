@@ -402,23 +402,55 @@ sema_eval_probe_writer_refusal: fn(callee: String, written: String, span: Span) 
     sema_error("E3401", span, "the debugger can't evaluate this: {callee} writes module state `{written}`", "an expression the debugger evaluates is checked as `fn() -[]>`, and a write to module state outlives the evaluation", "evaluate the values the expression reads without the call to {callee}")
 }
 
+// The row of each of a held program's checked functions `functions` by its
+// key, where the held check's verdicts on a function no program holds
+// (sema_eval_held_failure_settle, sema_eval_held_effect_refusals) find the
+// functions it calls.
+sema_eval_held_rows: fn(functions: [FnBody]) -> NameRows Never! {
+    by_key := name_rows()
+    loop (row, held) in functions -> name_rows_set(by_key, held.key, row)
+    by_key
+}
+
+// The failure solve's verdict (sema_failure_solve) on `function`, which no
+// program holds, checked against a held program whose checked functions
+// `functions` (rows `by_key`) the solve already settled: a candidate
+// (sema_failure_inference_candidate) whose body has no failure source of
+// its own (`failure`) and propagates only from functions the solve proved
+// infallible takes the `T Never!` carrier, as the solve projects one
+// (sema_failure_reconcile_function). Otherwise, or with no facts, it keeps
+// its declared carrier.
+sema_eval_held_failure_settle: fn(function: &FnBody, candidate: Bool, failure: SemaFunctionFailureFacts?, functions: [FnBody], by_key: NameRows) Never! {
+    facts: failure ?? return
+    if !candidate || facts.direct {
+        return
+    }
+    loop edge in facts.edges {
+        target: name_rows_get_text(by_key, edge) ?? return
+        infallible: functions[target].failure_carrier == .Infallible
+        if !infallible {
+            return
+        }
+    }
+    sema_failure_reconcile_function(function)
+}
+
 // The effect pass's verdict (sema_eval_probe_effect_refusals) on a function
 // no program holds, checked against a held program
 // (sema_script_probe_check_func). `functions` are the program's checked
-// functions, with the solved rows its effect pass stamped. What the function
-// does itself, and the solved row of each function it calls, are judged
-// against the empty ceiling and the deny-only `Unsafe`. A call that reaches
-// a write to module state, through calls or function values, is refused. A
-// call that no function of `functions` has is left out, as the effect pass
-// leaves out a call with no node.
-sema_eval_held_effect_refusals: fn(function: FnBody, functions: [FnBody], span: Span) -> [Diagnostic] {
+// functions, with the solved rows its effect pass stamped, at rows `by_key`
+// (sema_eval_held_rows). What the function does itself, and the solved row
+// of each function it calls, are judged against the empty ceiling and the
+// deny-only `Unsafe`. A call that reaches a write to module state, through
+// calls or function values, is refused. A call that no function of
+// `functions` has is left out, as the effect pass leaves out a call with no
+// node.
+sema_eval_held_effect_refusals: fn(function: FnBody, functions: [FnBody], by_key: NameRows, span: Span) -> [Diagnostic] {
     refusals := [Diagnostic]{}
     own := [String]{}
     loop name in function.effects.direct -> sema_effect_set_add(own, name)
     if function.effects.maximal -> sema_effect_set_union(own, authority_grantable_roots())
     sema_eval_probe_row_refusals(own, "this expression", span, refusals)
-    by_key := name_rows()
-    loop (row, held) in functions -> name_rows_set(by_key, held.key, row)
     seen := (loop _ in functions -> false)
     loop edge in function.effects.call_edges {
         if edge == "__jet_panic__" -> next

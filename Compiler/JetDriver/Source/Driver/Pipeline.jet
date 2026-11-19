@@ -164,6 +164,9 @@ use {
         SemaEvalProbeAnswer,
         SemaEvalProbes,
         sema_eval_held_effect_refusals,
+        sema_eval_held_failure_settle,
+        sema_eval_held_rows,
+        sema_failure_inference_candidate,
         sema_eval_probe_answers,
         sema_eval_probe_parse,
         sema_eval_probes,
@@ -6845,6 +6848,7 @@ jet_driver_held_eval_check: fn(held: &JetDriverHeldEval, functions: [FnBody], sy
         return JetDriverHeldChecked{checked: SemaScriptProbeChecked{function: None, diagnostics: parsed.diagnostics.move(), complete: false}, symbols: symbols.move(), types: types.move()}
     }
     if parsed.program.items[0] == .Func(func) {
+        candidate: sema_failure_inference_candidate(func)
         going := jet_driver_held_eval_lend(held.probe.program.registration_graph.move(), symbols.move(), types.move())
         held.probe.program.registration_graph = going.graph.move()
         held.probe.program.checked_types = going.types.move()
@@ -6852,11 +6856,16 @@ jet_driver_held_eval_check: fn(held: &JetDriverHeldEval, functions: [FnBody], sy
         back := jet_driver_held_eval_lend(held.probe.program.registration_graph.move(), going.symbols.move(), held.probe.program.checked_types.move())
         held.probe.program.registration_graph = back.graph.move()
         held.probe.program.checked_types = [TTypeDef]{}
-        if checked.complete && checked.function == .Val(function) {
-            loop refusal in sema_eval_held_effect_refusals(function, functions, function.source_span) {
+        if checked.complete && checked.function != None {
+            function := checked.function.move() ?? panic("a held check's function went missing")
+            by_key: sema_eval_held_rows(functions)
+            sema_eval_held_failure_settle(function, candidate, checked.failure.move(), functions, by_key)
+            checked.failure = None
+            loop refusal in sema_eval_held_effect_refusals(function, functions, by_key, function.source_span) {
                 checked.diagnostics.push(refusal)
                 checked.complete = false
             }
+            checked.function = Val(function.move())
         }
         return JetDriverHeldChecked{checked: checked.move(), symbols: back.symbols.move(), types: back.types.move()}
     }

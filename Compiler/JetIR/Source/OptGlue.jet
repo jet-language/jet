@@ -3,13 +3,17 @@
 // struct's member drops) is selected as that function's call (X64Select
 // ir_x64_drop). Before the call graph is built such a Drop becomes that
 // Call when it runs often: inside a Loop, or in a glue or a last-owner
-// routine itself (a list's last owner drops each element in its loop). So
-// the glue is optimized before its users and inlining can take a small glue
-// into them. After inlining, a Call of a glue left in place is a Drop again,
-// which scalar replacement lends storage to (OptScalar.jet).
+// routine itself (a list's last owner drops each element in its loop). A
+// light glue's Drop becomes its Call anywhere (ir_opt_glue_is_light): its
+// inlined body costs less than the call. So the glue is optimized before
+// its users and inlining can take a small glue into them. After inlining,
+// a Call of a glue left in place is a Drop again, which scalar replacement
+// lends storage to (OptScalar.jet).
+use jet_foundation.[Type, compiler_threads_single, name_rows_set]
 
-// `glue` is ir_opt_glue_table's: per type row, its glue function or -1.
-ir_opt_glue_calls: fn(f: &IRFunction, glue: [Int]) Never! {
+// `glue` is ir_opt_glue_table's: per type row, its glue function or -1;
+// `light` ir_opt_glue_light's.
+ir_opt_glue_calls: fn(f: &IRFunction, glue: [Int], light: [Bool]) Never! {
     in_glue: (f.name == "drop" || f.name == IR_LAST_OWNER) && f.source_file == ""
     // Open Loops around `at` (an End's `a` is its opener).
     loops := 0
@@ -17,10 +21,11 @@ ir_opt_glue_calls: fn(f: &IRFunction, glue: [Int]) Never! {
         op: f.op[at]
         if op == .Loop -> loops += 1
         if op == .End && f.a[at] >= 0 && f.op[f.a[at]] == .Loop -> loops -= 1
-        if op != .Drop || f.a[at] < 0 || (!in_glue && loops == 0) -> next
+        if op != .Drop || f.a[at] < 0 -> next
         slot: f.a[at]
-        id: glue[f.slot_type[slot]]
-        if id < 0 -> next
+        row: f.slot_type[slot]
+        id: glue[row]
+        if id < 0 || (!in_glue && loops == 0 && !light[row]) -> next
         start: f.args.len()
         f.args.push(slot)
         f.op[at] = .Call
@@ -29,6 +34,33 @@ ir_opt_glue_calls: fn(f: &IRFunction, glue: [Int]) Never! {
         f.b[at] = start
         f.c[at] = 1
     }
+}
+
+// Per type row, whether its glue (`glue`, ir_opt_glue_table, in
+// `functions`) is light (ir_opt_glue_is_light).
+ir_opt_glue_light: fn(m: IRModule, functions: [IRFunction], glue: [Int]) -> [Bool] Never! {
+    light := [Bool]{}
+    loop id in glue {
+        light.push(id >= 0 && id < functions.len() && ir_opt_glue_is_light(m, functions[id]))
+    }
+    light
+}
+
+// Whether glue `f` is a struct's straight member drops that selection
+// open-codes (X64Select ir_x64_drop): an Int's inline test, a String's null,
+// static and count tests. No loop, branch or call: inlined, a Drop of the
+// struct costs those tests, never a call, at a function's end as in a Loop.
+ir_opt_glue_is_light: fn(m: IRModule, f: IRFunction) -> Bool Never! {
+    loop at in 0..<f.op.len() {
+        op: f.op[at]
+        if op == .Load || op == .Return || op == .Nop -> next
+        if op != .Drop -> return false
+        row: m.types[f.slot_type[f.a[at]]]
+        if row.kind != .Int && (row.kind != .String || row.drop != "jet_rt_string_drop") {
+            return false
+        }
+    }
+    true
 }
 
 ir_opt_glue_drops: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
@@ -43,4 +75,64 @@ ir_opt_glue_drops: fn(f: &IRFunction, m: IRModule, keys: [String]) Never! {
         f.b[at] = -1
         f.c[at] = -1
     }
+}
+
+// keep(z, r) drops a Zone (a String and an Int) and then a Res, whose glue
+// frees a box, once each and outside any loop. The Zone's glue is light, so
+// its Drop becomes its call and is inlined: keep drops the String and the
+// Int itself and calls nothing. The Res's glue calls the runtime, so its
+// Drop outside a loop stays a Drop.
+#Test("A Drop through light glue is inlined outside a loop too") {
+    m := ir_module_new()
+    int: ir_type_row(m, Type.Int) ?? panic("no Int row")
+    text: ir_type_row(m, Type.String) ?? panic("no String row")
+    word: ir_type_row(m, Type.IntN{signed: true, bits: 64}) ?? panic("no I64 row")
+    assert_eq(m.types[text].drop, "jet_rt_string_drop")
+    zone: ir_intern_type(m, "Zone", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "Zone"}, 16, 8, IRClass.Memory, false, 0, "#drop<Zone>"))
+    res: ir_intern_type(m, "Res", ir_layout(IRTypeKind.Aggregate, Type.Named{name: "Res"}, 8, 8, IRClass.Memory, false, 0, "#drop<Res>"))
+    light := ir_hashed_function("drop", "#drop<Zone>", "jet_ir_drop_", "", 0)
+    held: ir_slot(light, zone, IRSlotKind.Param, ir_intern_name(m, "value"), 0)
+    name: ir_slot(light, text, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(light, IROp.Load, name, held, 0, -1, 0)
+    _ := ir_emit(light, IROp.Drop, -1, name, -1, -1, 0)
+    start: ir_slot(light, int, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(light, IROp.Load, start, held, 8, -1, 0)
+    _ := ir_emit(light, IROp.Drop, -1, start, -1, -1, 0)
+    _ := ir_emit(light, IROp.Return, -1, -1, -1, -1, 0)
+    heavy := ir_hashed_function("drop", "#drop<Res>", "jet_ir_drop_", "", 0)
+    owned: ir_slot(heavy, res, IRSlotKind.Param, ir_intern_name(m, "value"), 0)
+    box: ir_slot(heavy, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(heavy, IROp.Load, box, owned, 0, -1, 0)
+    size: ir_slot(heavy, word, IRSlotKind.Temp, -1, 0)
+    _ := ir_emit(heavy, IROp.Const, size, 8, -1, -1, 0)
+    freed: ir_args(heavy, [Int]{box, size, size})
+    _ := ir_emit(heavy, IROp.CallRuntime, -1, ir_intern_name(m, "jet_rt_free"), freed, 3, 0)
+    _ := ir_emit(heavy, IROp.Return, -1, -1, -1, -1, 0)
+    assert(ir_opt_glue_is_light(m, light))
+    assert(!ir_opt_glue_is_light(m, heavy))
+    keep := ir_function_new("keep", "test:glue.jet.keep", "", "glue.jet", 1)
+    z: ir_slot(keep, zone, IRSlotKind.Param, ir_intern_name(m, "z"), 1)
+    r: ir_slot(keep, res, IRSlotKind.Param, ir_intern_name(m, "r"), 1)
+    _ := ir_emit(keep, IROp.Drop, -1, z, -1, -1, 2)
+    _ := ir_emit(keep, IROp.Drop, -1, r, -1, -1, 3)
+    _ := ir_emit(keep, IROp.Return, -1, -1, -1, -1, 3)
+    name_rows_set(m.function_rows, "#drop<Zone>", 0)
+    m.functions.push(light)
+    name_rows_set(m.function_rows, "#drop<Res>", 1)
+    m.functions.push(heavy)
+    name_rows_set(m.function_rows, "test:glue.jet.keep", 2)
+    m.functions.push(keep)
+    options := ir_opt_options(1)
+    options.verify = true
+    report: ir_optimize_module(m, options, compiler_threads_single())
+    assert_eq(report.lint.len(), 0)
+    body: m.functions[2]
+    calls := 0
+    dropped := [Int]{}
+    loop at in 0..<body.op.len() {
+        if body.op[at] == .Call -> calls += 1
+        if body.op[at] == .Drop -> dropped.push(body.slot_type[body.a[at]])
+    }
+    assert_eq(calls, 0)
+    assert_eq(dropped, [Int]{text, int, res})
 }
