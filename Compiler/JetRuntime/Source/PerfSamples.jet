@@ -3240,6 +3240,10 @@ PERF_FLIGHT_CAPTURE_SIGNAL: I64{62}
 // How long the dump waits for the captured threads' rows: 200ms.
 PERF_FLIGHT_CAPTURE_NS: I64{200000000}
 
+// How long a deadlocked task waits for the root's dump (perf_flight_await):
+// 10s.
+PERF_FLIGHT_HOLD_NS: I64{10000000000}
+
 // The most reachable memory one dump holds, 32 MiB: past it a reached
 // range is cut off (perf_flight_reach).
 PERF_FLIGHT_DUMP_BUDGET: I64{33554432}
@@ -3519,6 +3523,9 @@ perf_flight_dump: fn() {
     // callee-saved registers from here (the frames' call frame rules).
     // Without the capture, its rip, rsp and rbp as its caller resumes.
     stop: wrapping(text + PERF_FLIGHT_STOP_AT)
+    // What the captured threads and the held tasks (perf_flight_await) wait
+    // on: PERF_FLIGHT_RELEASED once the dump is written or can't be.
+    release: wrapping(text + PERF_FLIGHT_RELEASE_AT)
     process: perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
     me: thread_tid()
     sync_store(wrapping(text + PERF_FLIGHT_SELF_AT), me)
@@ -3537,6 +3544,8 @@ perf_flight_dump: fn() {
     fd: perf_flight_dump_open(state, text, words)
     if (fd < I64{0}) {
         if (scrub != I64{0}) { _ := coll_call1(scrub, I64{0}) }
+        sync_store(release, PERF_FLIGHT_RELEASED)
+        sync_futex_wake(release, I64{2147483647})
         return
     }
     image: perf_samples_image
@@ -3568,7 +3577,6 @@ perf_flight_dump: fn() {
     }
     if (scrub != I64{0}) { _ := coll_call1(scrub, I64{0}) }
     _ := perf_flight_syscall(I64{3}, fd, I64{0}, I64{0})
-    release: wrapping(text + PERF_FLIGHT_RELEASE_AT)
     sync_store(release, PERF_FLIGHT_RELEASED)
     sync_futex_wake(release, I64{2147483647})
     perf_flight_rotate(state, text)
@@ -3577,6 +3585,29 @@ perf_flight_dump: fn() {
     _ := perf_flight_syscall(I64{1}, I64{2}, text, perf_flight_length(text))
     newline: rt_static_text("\n")
     _ := perf_flight_syscall(I64{1}, I64{2}, rt_text_data(newline), rt_text_len(newline))
+}
+
+// A task of a deadlock whose cycle holds the root (WaitCycle.jet
+// wait_cycle_stop), under the flight recorder: it waits where it waited
+// until the root's stop has written its dump, so the dump holds its stack,
+// its frames and their locals as the deadlock left them, not the task's
+// unwinding. It blocks its thread on the futex, a fiber's carrier too, so
+// the dump captures it as a running thread (perf_flight_capture), and the
+// dump's futex wake, which takes no lock, lets it go on to its own stop
+// while the root's cleanup runs. Should no dump come within
+// PERF_FLIGHT_HOLD_NS, it goes on all the same.
+perf_flight_await: fn() {
+    state: perf_flight_state
+    if (state == I64{0}) {
+        return
+    }
+    release: wrapping(wrapping(state + PERF_FLIGHT_TEXT_AT) + PERF_FLIGHT_RELEASE_AT)
+    deadline: sync_deadline(PERF_FLIGHT_HOLD_NS)
+    loop sync_load(release) != PERF_FLIGHT_RELEASED {
+        if (sync_futex_wait(release, sync_load(release), deadline) == I64{-110}) {
+            return
+        }
+    }
 }
 
 // The dump's task rows (PERF_FLIGHT_SECTION_TASKS): the stopping thread's

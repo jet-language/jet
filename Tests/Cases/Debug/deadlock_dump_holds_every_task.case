@@ -1,0 +1,69 @@
+# Three tasks wait on each other: the root receives from task 3, task 2
+# from the root and task 3 from task 2. The runtime stops the cycle, and the
+# root's stop ends the process. Under `jet run --observe` that stop writes a
+# typed dump. The other two tasks wait for it where they waited, so the dump
+# holds every task's whole stack. `jet debug` lists the three tasks and
+# shows each one's frames and typed locals: Jet type names and values, with a
+# Task shown as its task and a channel endpoint as its channel, never as an
+# address. This holds at -O0 and at -O2. A plain `jet run` keeps no flight
+# recorder (D-OBSERVE-FLIGHT1=B): it prints the cycle and writes no dump.
+requires: os-name:linux
+fixture: DeadlockDumpHoldsEveryTask.fixture
+env: NO_COLOR=1
+step plain: jet run cycle.jet
+exit: 70
+stderr: ~ "deadlock: tasks wait on each other" # the cycle, as the stop's trace
+stderr: ~ "task 2 (link)  waits to receive from a channel" # each task of it
+stderr: ~ "task 1 (main)  waits to receive from a channel" # the root too
+stderr: !~ "dump written" # no recorder, no dump
+file: .jet/dumps absent
+step o0: jet run --observe cycle.jet
+exit: 70
+stderr: ~ "deadlock: tasks wait on each other" # the same stop
+stderr: ~ "dump written: " # and, observed, its dump
+entries: .jet/dumps ext = "jetdump" = 1 # one stop, one dump
+capture: dump = sole-entry .jet/dumps ext = "jetdump"
+step: jet debug {cap:dump}
+stdin: deadlock_dump_holds_every_task.stdin
+exit: 0
+stdout: ~ "Stopped  cycle.jet:23  in run()" # the root's stop, at its receive
+stdout: ~ "* task 1  stopped  in run() at cycle.jet:23" # `tasks`: the root, selected
+stdout: ~ "  task 2  " # and the two others, held where they waited
+stdout: ~ "  task 3  " # task 3 too
+stdout: ~ "in link() at cycle.jet:11" # at their own receive
+stdout: ~ "a: Task<Int> = task 2" # the root's locals: a Task is its task
+stdout: ~ "b: Task<Int> = task 3" # the other task
+stdout: ~ "count: Int = 3" # an Int as before
+stdout: ~ "from_b: Receiver<Int> = channel " # an endpoint is its channel
+stdout: ~ "to_a: Sender<Int> = channel " # a Sender too
+stdout: ~ ", 0 of 1 held" # with what it holds of its bound
+stdout: ~ "Stopped  cycle.jet:11  in link()" # `task 2` selects task 2's frame
+stdout: ~ "  link()  at cycle.jet:11" # its backtrace
+stdout: ~ "name: String = \"alpha\"" # task 2's typed locals
+stdout: ~ "order: Order = Order{id: 11, label: \"alpha-order\"}" # a struct's members
+stdout: ~ "items: [Int] = [1, 2, 3]" # a list's elements
+stdout: ~ "input: Receiver<Int> = channel " # the endpoint the task waits on
+stdout: ~ "name: String = \"beta\"" # task 3's
+stdout: ~ "order: Order = Order{id: 10, label: \"beta-order\"}" # its own struct
+stdout: !~ "Pointer = 0x" # no handle shows as an address
+stdout: !~ "No task " # every task is in the dump
+remove: .jet/dumps
+step o2: jet run --observe -O2 cycle.jet
+exit: 70
+stderr: ~ "deadlock: tasks wait on each other" # the same stop at -O2
+stderr: ~ "dump written: " # with its dump
+entries: .jet/dumps ext = "jetdump" = 1 # one stop, one dump
+capture: dump2 = sole-entry .jet/dumps ext = "jetdump"
+step: jet debug {cap:dump2}
+stdin: deadlock_dump_holds_every_task.stdin
+exit: 0
+stdout: ~ "* task 1  stopped  in run() at cycle.jet:23" # the root, selected
+stdout: ~ "  task 2  " # and the two others, held where they waited
+stdout: ~ "  task 3  " # task 3 too
+stdout: ~ "link() at cycle.jet:11" # at their own receive
+stdout: ~ "a: Task<Int> = task 2" # an optimized frame's Task is its task too
+stdout: ~ "b: Task<Int> = task 3" # the other task
+stdout: ~ "name: String = \"alpha\"" # task 2's typed locals
+stdout: ~ "name: String = \"beta\"" # task 3's
+stdout: !~ "Pointer = 0x" # no handle shows as an address
+stdout: !~ "No task " # every task is in the dump

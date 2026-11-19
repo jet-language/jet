@@ -252,8 +252,10 @@ ir_x64_debug_pointer: fn(tables: &IRX64Tables, target: Int) -> Int Never! {
 // (IRModule.debug_members); an enum, union, Option or Result its variants
 // (IRModule.debug_variants, ir_x64_debug_variants); a Decimal or Fraction a
 // pointer to its runtime handle's two exact Ints (JetRuntime
-// RoutePrecise.jet); an allocation word a typedef of what its block holds
-// (ir_x64_debug_alloc). Any other aggregate stays opaque.
+// RoutePrecise.jet); a Task, Sender or Receiver a typedef, named as Jet
+// spells it, of its runtime state's pointer; an allocation word a typedef
+// of what its block holds (ir_x64_debug_alloc). Any other aggregate stays
+// opaque.
 ir_x64_debug_types: fn(m: IRModule, tables: &IRX64Tables) Never! {
     loop _ in 0..<m.types.len() {
         tables.debug_types.push(X64DebugType{name: "", size: 0, kind: X64DebugTypeKind.Opaque})
@@ -307,6 +309,13 @@ ir_x64_debug_type: fn(m: IRModule, tables: &IRX64Tables, shared: &IRX64DebugRows
                     shared.fraction = ir_x64_debug_handle(tables, "Fraction", "numerator", "denominator", shared.int, shared.int)
                 }
                 return X64DebugType{name: "Fraction", size: 8, kind: X64DebugTypeKind.Typedef{target: shared.fraction}}
+            }
+            // A task's or a channel endpoint's handle: named as Jet spells
+            // it, a typedef of the runtime state's pointer, which the
+            // debugger reads by that name (JetDebug Native.jet
+            // native_debug_runtime_handle).
+            if ir_task_element(ty.ty) != None || ir_channel_element(ty.ty, "Sender") != None || ir_channel_element(ty.ty, "Receiver") != None {
+                return X64DebugType{name: ir_type_name(ty.ty), size: 8, kind: X64DebugTypeKind.Typedef{target: shared.pointer}}
             }
             X64DebugType{name: "Pointer", size: 8, kind: X64DebugTypeKind.Pointer{target: -1}}
         }

@@ -4710,6 +4710,14 @@ deadlock: tasks wait on each other
   task 5  waits to receive from a channel only task 3 and task 4 send on  pair.jet:11
 ```
 
+When the main task is in the cycle under `jet run --observe`, its stop
+writes the typed dump that every observed stop writes. The cycle's other
+tasks wait where they waited until the dump is written, so `jet debug` shows
+every task of the cycle with its frames and typed locals. A `Task` shows as
+its task and a `Sender` or `Receiver` as its channel. A run without
+observation prints the report and writes no dump (D-OBSERVE-FLIGHT1=B). Case:
+[`Tests/Cases/Debug/deadlock_dump_holds_every_task.case`](../../Tests/Cases/Debug/deadlock_dump_holds_every_task.case).
+
 The runtime counts which task holds each `Sender`: where it is made, cloned,
 dropped and moved into a task. A receive names no holder, so a cycle through
 it still hangs, once a `Sender` may have left its task another way: in a sent

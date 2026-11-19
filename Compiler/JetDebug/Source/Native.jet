@@ -5962,7 +5962,15 @@ native_render: fn(image: NativeImage, memory: NativeMemory, ty: Int, bytes: [U8]
                 Val("{value}")
             }
             .String -> native_debug_string(word, memory)
-            .Named(_) -> if found.name == "Decimal" || found.name == "Fraction" -> native_debug_precise(found.name, word, memory) else -> native_render(image, memory, found.target, bytes, at, depth)
+            .Named(_) -> {
+                if found.name == "Decimal" || found.name == "Fraction" {
+                    return native_debug_precise(found.name, word, memory)
+                }
+                if native_debug_runtime_handle_type(found.name) {
+                    return native_debug_runtime_handle(found.name, word, memory)
+                }
+                native_render(image, memory, found.target, bytes, at, depth)
+            }
             .Float | .Bool | .Char | .List(_) | .Map(_, _, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_, _, _, _, _, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .IntN(_, _) | .InlineRange(_, _, _) | .Float32 | .Tagged(_, _) | .Union(_) | .Case(_, _) | .Quantity(_, _) | .Measure(_) -> native_render(image, memory, found.target, bytes, at, depth)
         }
         found.tag == NATIVE_TAG_BASE -> if found.encoding == {
@@ -6253,6 +6261,59 @@ native_debug_precise: fn(type_name: String, address: Int, memory: NativeMemory) 
         return Val("{first}/{second}")
     }
     Val(native_debug_decimal_text(first, words[1]))
+}
+
+// Whether the typedef `type_name` is a Task's, Sender's or Receiver's
+// handle (JetIR X64Module.jet ir_x64_debug_type).
+native_debug_runtime_handle_type: fn(type_name: String) -> Bool Never! {
+    type_name.starts_with("Task<") || type_name.starts_with("Sender<") || type_name.starts_with("Receiver<")
+}
+
+// A Task's, Sender's or Receiver's handle (`type_name`) whose runtime
+// state is at `address`. A task shows as `task N`, the id its control
+// holds (JetRuntime Task.jet's state: control8, done24; Scheduler.jet's
+// control: observe56, an observed run's task id), with `, done` once it
+// ended. An endpoint shows as its channel (Channel.jet's state: len16,
+// bound48, closed88, observe136, an observed run's channel id), `channel
+// N, H of B held` (`H held` when unbounded), with `, closed` once closed.
+// An unobserved run's id is 0: `a task`, `a channel`.
+native_debug_runtime_handle: fn(type_name: String, address: Int, memory: NativeMemory) -> String? Never! {
+    if type_name.starts_with("Task<") {
+        state: native_debug_read(memory, address, 8, 4) ?? return None
+        control: native_debug_read(memory, state[1], 8, 8) ?? return None
+        task: if control[7] > 0 -> "task {control[7]}" else -> "a task"
+        return Val(if state[3] != 0 -> "{task}, done" else -> task)
+    }
+    words: native_debug_read(memory, address, 8, 18) ?? return None
+    channel: if words[17] > 0 -> "channel {words[17]}" else -> "a channel"
+    held: if words[6] >= 0 -> "{words[2]} of {words[6]} held" else -> "{words[2]} held"
+    closed: if words[11] != 0 -> ", closed" else -> ""
+    Val("{channel}, {held}{closed}")
+}
+
+#Test("a task's and a channel endpoint's handles show the task and the channel") {
+    // A task's state and its control, an open bounded channel, a done
+    // task's state, and a closed unbounded channel of no observed id.
+    layout: [[Int]]{
+        [Int]{1, 8192, 0, 0},
+        [Int]{0, 0, 0, 0, 0, 0, 0, 2},
+        [Int]{2, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5},
+        [Int]{1, 8192, 0, 1},
+        [Int]{2, 0, 3, 4, 0, 0, -1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0},
+    }
+    blocks := [NativeBlock]{}
+    loop (index, words) in layout {
+        bytes := [U8]{}
+        loop word in words -> bytes.extend(native_low_bytes(word, 8))
+        blocks.push(NativeBlock{address: 4096 * (index + 1), bytes: bytes})
+    }
+    memory: NativeMemory{trace: None, blocks: blocks}
+    assert_eq(native_debug_runtime_handle("Task<Int>", 4096, memory), String?{Val("task 2")})
+    assert_eq(native_debug_runtime_handle("Receiver<Int>", 12288, memory), String?{Val("channel 5, 0 of 1 held")})
+    assert_eq(native_debug_runtime_handle("Task<Int>", 16384, memory), String?{Val("task 2, done")})
+    assert_eq(native_debug_runtime_handle("Sender<Int>", 20480, memory), String?{Val("a channel, 3 held, closed")})
+    assert_eq(native_debug_runtime_handle("Task<Int>", 40960, memory), String?{None})
+    assert(native_debug_runtime_handle_type("Receiver<Order>") && !native_debug_runtime_handle_type("Pointer"), "only a handle's typedef reads as one")
 }
 
 // A Decimal's text: `coefficient` with `scale` digits after the point.
