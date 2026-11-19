@@ -1018,20 +1018,32 @@ sema_failure_record_edge: fn(callee: SemaFailureCallee?, context: &SemaCheckCont
 // A failure passing up into the default `Err` route
 // joins this body's failure-union row: an unannotated callee as an edge the
 // bundle solve joins, any other failure as a member (the Rust reference's
-// failure-union probe arm of `infer_try`).
+// failure-union probe arm of `infer_try`). An edge is appended as found;
+// looking for it first would scan the row once per call, quadratic in a
+// body's calls, so the body's facts keep each edge once when it ends
+// (sema_failure_union_edges_once).
 sema_failure_union_record_propagation: fn(callee: SemaFailureCallee?, error: Type, context: &SemaCheckContext) Never! {
     if callee == .Val(found) {
         if found.inferable {
-            loop edge in context.failure_union_edges {
-                if edge == found.key {
-                    return
-                }
-            }
             context.failure_union_edges.push(found.key)
             return
         }
     }
     sema_failure_union_add_member(context, error)
+}
+
+// The failure-union edges a body appended
+// (sema_failure_union_record_propagation), each once, in the order first
+// appended.
+sema_failure_union_edges_once: fn(edges: &&[String]) -> [String] Never! {
+    seen := [String:Bool]{}
+    once := [String]{}
+    loop edge in edges.move() {
+        if seen.get(edge) != None -> next
+        seen[edge] = true
+        once.push(edge)
+    }
+    once
 }
 
 // The detail prefix of a failure-domain diagnostic that the bundle failure
