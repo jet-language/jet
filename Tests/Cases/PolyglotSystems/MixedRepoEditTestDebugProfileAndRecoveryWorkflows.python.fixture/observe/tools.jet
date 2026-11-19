@@ -21,8 +21,8 @@ run: fn() MissingTool! {
     javac := ""
     loop name in names {
         path: process.which(name) ?? return Err(MissingTool{name: name})
-        if name == "javac" -> javac = path
         fields.push("{quoted(name)}:{quoted(path)}")
+        if name == "javac" -> javac = path.move()
     }
     home: sys.get("JAVA_HOME") ?? files.dirname(files.dirname(javac))
     runtime: files.join(files.join(home, "lib/server"), if sys.name() == "macos" -> "libjvm.dylib" else -> "libjvm.so")

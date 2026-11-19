@@ -22,6 +22,8 @@ run: fn() {
     // Anti-pattern: this repeated owning push is intentionally visible to the
     // cost view. Keep the `.copy()` boundary outside the loop when ownership is needed.
     copies := [String]{}
-    loop _ in 0..<2 -> copies.push(domain)
+    loop _ in 0..<2 {
+        #Allow(jet.HiddenCopyInLoop, "the example shows the anti-pattern the cost view reports: each turn materializes the view") copies.push(domain)
+    }
     print("reused:{copies.len()}")
 }

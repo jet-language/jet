@@ -1,0 +1,14 @@
+// The loop of HiddenCopyInLoop.fixture under a site `#Allow` for L2511: the
+// author kept the per-turn clone its map edit makes on purpose, and the
+// allowance covers every statement of the loop.
+history: fn(keys: [String]) -> [[String:Int]] {
+    counts := [String:Int]{}
+    out := [[String:Int]]{}
+    #Allow(jet.HiddenCopyInLoop, "each snapshot must stay apart from the next edit") loop key in keys {
+        out.push(counts.copy())
+        counts[key] = out.len()
+    }
+    out
+}
+
+run: fn() { print(history([String]{"a", "b"}).len()) }

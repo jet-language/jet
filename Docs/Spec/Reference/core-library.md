@@ -7836,7 +7836,8 @@ A Query-class statement (D-SQL-CLASS1=A: one that starts with `SELECT` or
 `WITH`) run through a driver's `query`, `query_one` or `live` inside a
 `loop` over database rows, the `[String: DBValue]` rows a query returns or a
 table's `Query<T>`, is the tidy error L0308 (`sql_query_in_row_loop`) at
-the inner query: each row costs one more round trip, so N rows cost N + 1
+the inner query, which `jet check` and `jet build` list and fail on and `jet
+run` never stops for: each row costs one more round trip, so N rows cost N + 1
 queries. The fix names the batched form, one query before the loop through a
 `WHERE key IN (…)` list over the rows' keys, or a JOIN with the query that
 produced them. A query outside any loop, a write per row, and a statement the
