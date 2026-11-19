@@ -794,8 +794,14 @@ jet_driver_build_session_package: fn(package: String, entry_path: String) -> Str
 
 // Whether the entry package declares a `build: fn`, the build entry
 // jet_driver_query_build_plan evaluates, read from the loaded sources alone.
-// False when the sources don't load: the compile reports why.
+// False when the sources don't load: the compile reports why. A package
+// none of whose sources writes both the name `build` and the type `Build`
+// declares none, and its sources aren't loaded for the answer
+// (jet_driver_entry_package_may_have_build): the load parses every module
+// the program reaches, a second time for each compile
+// (JetCLI InspectBuild.jet jet_cli_contributed_request).
 jet_driver_entry_package_has_build: fn(request: JetDriverCompileRequest) -> Bool {
+    if !jet_driver_entry_package_may_have_build(request) -> return false
     load: jet_driver_load(request)
     if !load.complete -> return false
     package := String?{None}
@@ -814,8 +820,29 @@ jet_driver_entry_package_has_build: fn(request: JetDriverCompileRequest) -> Bool
     false
 }
 
+// Whether a source of the entry package, a file of the entry root or a
+// generated module, writes both `build` and `Build`, as the build entry
+// `build: fn(b: Build)` does (jet_driver_item_is_build_entry).
+jet_driver_entry_package_may_have_build: fn(request: JetDriverCompileRequest) -> Bool Never! {
+    snapshot: request.authorized_sources
+    loop root in snapshot.roots {
+        if root.identity != snapshot.entry_root_identity -> next
+        loop file in root.files {
+            if file.source.contains("build") && file.source.contains("Build") -> return true
+        }
+    }
+    loop generated in request.generated_modules {
+        if generated.source.contains("build") && generated.source.contains("Build") -> return true
+    }
+    false
+}
+
 // Whether `item` is the build entry `build: fn(b: Build)`; any other `build: fn`
-// is ordinary code.
+// is ordinary code. The test reads the item as written: the name `build` and
+// the parameter's type spelled `Build`, never resolved, so `B: Build`
+// elsewhere and `build: fn(b: B)` is not one. A source that doesn't write
+// both words holds none, which jet_driver_entry_package_may_have_build reads
+// without parsing; a change here changes that test too.
 jet_driver_item_is_build_entry: fn(item: Item) -> Bool Never! {
     if item == .Func(function) && function.name == "build" && function.params.len() == 1 && function.params[0].ty == (Type.Named{name: "Build"}) {
         return true
