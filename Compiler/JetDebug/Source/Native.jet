@@ -5413,7 +5413,8 @@ native_debug_cut: fn(memory: NativeMemory, address: Int, count: Int) -> Bool Nev
 // inlined run `site` (-1: the function's own frame), rendered as Jet values;
 // a variable the image gives no location shows as unavailable, and a
 // parameter no range covers as not kept. A parameter located by its entry
-// value (DW_OP_entry_value) reads the value its `caller` passed.
+// value (DW_OP_entry_value) reads the value its `caller` passed, or, with no
+// DW_OP_stack_value after it (an aggregate's), the bytes at that address.
 native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, lookup: Int, site: Int, caller: NativeUnwound?) -> [NativeLocal] Never! {
     locals := [NativeLocal]{}
     function: native_function_at(image, lookup) ?? return locals
@@ -5431,7 +5432,10 @@ native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeU
             next
         }
         entry: native_entry_register(image.loclists, located.from, located.to)
-        value: if entry >= 0 -> native_entry_value(image, memory, caller, entry, variable.ty) ?? NATIVE_DEBUG_NOT_KEPT else -> native_variable_value(image, memory, frame, located, variable.ty) ?? NATIVE_DEBUG_UNAVAILABLE
+        // An entry value with no DW_OP_stack_value (0x9f) after it names
+        // memory; its register expression never ends in 0x9f.
+        indirect: entry >= 0 && image.loclists[located.to - 1] != 0x9f
+        value: if entry >= 0 -> native_entry_value(image, memory, caller, entry, variable.ty, indirect: indirect) ?? NATIVE_DEBUG_NOT_KEPT else -> native_variable_value(image, memory, frame, located, variable.ty) ?? NATIVE_DEBUG_UNAVAILABLE
         locals.push(NativeLocal{name: variable.name, type_name: type_name, value: value})
     }
     locals
@@ -5450,17 +5454,22 @@ native_entry_register: fn(bytes: [U8], from: Int, to: Int) -> Int Never! {
 
 // The value of type `ty` that `caller` passed in register `register` (a
 // DWARF number) to the call it stopped at: its call site parameter's value
-// (NativeCallArgument), computed in the caller's frame. None when the call
-// records no such value or the caller's frame no longer holds what it is
-// computed from.
-native_entry_value: fn(image: NativeImage, memory: NativeMemory, caller: NativeUnwound?, register: Int, ty: Int) -> String? Never! {
+// (NativeCallArgument), computed in the caller's frame. When `indirect`,
+// that value is the address of the bytes (an aggregate parameter's, which
+// the caller keeps while the call runs). None when the call records no such
+// value or the caller's frame no longer holds what it is computed from.
+native_entry_value: fn(image: NativeImage, memory: NativeMemory, caller: NativeUnwound?, register: Int, ty: Int, indirect: Bool{false}) -> String? Never! {
     outer: caller ?? return None
     size: native_type_size(image, ty)
-    if size <= 0 || size > 8 -> return None
+    if size <= 0 || (!indirect && size > 8) -> return None
     loop argument in image.arguments {
         if argument.at != outer.pc || argument.register != register -> next
         word: native_call_value(memory, outer, argument.value) ?? return None
-        return native_render(image, memory, ty, native_low_bytes(word, size), 0, 0)
+        bytes: if {
+            indirect -> native_debug_bytes(memory, word, size) ?? return None
+            else -> native_low_bytes(word, size)
+        }
+        return native_render(image, memory, ty, bytes, 0, 0)
     }
     None
 }

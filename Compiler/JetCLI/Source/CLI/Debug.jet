@@ -205,7 +205,7 @@ jet_cli_debug_session: fn(image: String, entry: String, lines: [String], scratch
     // `print`, `watch`, conditions, logpoints and the adapter's `evaluate`
     // compile their expressions with this program (DebugCompile.jet).
     level: session.level()
-    session.evaluate_with(JetCLIDebugEvaluator{entry: source_file, argv: jet_cli_debug_eval_argv(deep_checks, level), color: color})
+    session.evaluate_with(JetCLIDebugEvaluator{entry: source_file, argv: jet_cli_debug_eval_argv(deep_checks, level), color: color, held: Shared{JetCLIDebugEvalHeldSlot{held: None, missed: None}}})
     source_lines: if entry == "" -> (cli_files.read(source_file) ?? "").split("\n").to_list() else -> lines
     if dap {
         jet_cli_debug_dap(session, source_file)
@@ -225,7 +225,7 @@ jet_cli_debug_attach: fn(pid: Int, scratch: String, deep_checks: DeepChecks, col
     session := NativeSession.start(binary, cli_files.join(scratch, "output.txt")) ?? return jet_cli_debug_refused(NativeAttachRefused{code: NATIVE_ATTACH_FAILED, detail: err.detail}, color)
     source_file: session.run_source()
     level: session.level()
-    session.evaluate_with(JetCLIDebugEvaluator{entry: source_file, argv: jet_cli_debug_eval_argv(deep_checks, level), color: color})
+    session.evaluate_with(JetCLIDebugEvaluator{entry: source_file, argv: jet_cli_debug_eval_argv(deep_checks, level), color: color, held: Shared{JetCLIDebugEvalHeldSlot{held: None, missed: None}}})
     lines: (cli_files.read(source_file) ?? "").split("\n").to_list()
     file: cli_files.basename(source_file)
     stop: session.attach(pid, "") ?? return jet_cli_debug_refused(err, color)

@@ -1,6 +1,7 @@
-# Best debugger and profiler in existence: adversarial review, revision 3 (2026-11-19)
+# Best debugger and profiler in existence: adversarial review, revision 4 (2026-11-19)
 
-Card: #6841 c39. Base: dev `82821a4de9`. Follows
+Card: #6841 c39. Base: dev `a3fa36e63f` (gate p309; revision 3 was on
+`82821a4de9`). Follows
 [`2026-11-18-best-debugger-profiler.md`](2026-11-18-best-debugger-profiler.md)
 (revision 2: the designs, levers and ranked plan R1-R16, now #6841 c43-c58),
 [`2026-11-17-debug-latency-vs-lldb.md`](2026-11-17-debug-latency-vs-lldb.md)
@@ -16,6 +17,48 @@ in existence, and needs nothing but `jet`.
 
 Terms: "event" (one typed occurrence in a trace, a flight ring or a recording)
 is used as [the vocabulary page](../Spec/vocabulary.md) defines it.
+
+## Revision 4: what changed
+
+Revision 3's verdicts came from gates p299 and p300. Revision 4 rereads every
+axis from the batch compilers of gates p306 to p309 (dev `12ffe8b635` and
+`a3fa36e63f`) and the criteria they met. The axis sections below keep
+revision 3's evidence. Where a later gate changed a verdict, the table names
+the gate and the row.
+
+- D1: per step is flat in the image size. DebugLatency on p308 at 20,000
+  functions, 5 runs, the machine otherwise idle: per step 1 ms against lldb's
+  2 ms; first stop 92 ms against 211 (c59).
+- D2: every replay row passes on p307 (c43).
+- D5: `watch_follows` passes on p308 (c62). The placed conditions it builds on
+  are met (c49).
+- D6: `placed_logpoint_runs_in_the_program` passes on p309 (c63). The p308
+  fixture never ran its loop, because the O0 build computed its literal
+  argument ahead.
+- D7 (c54) and D8 (c48) are met.
+- D11: DAP attach, pause and restart pass (`#6730`'s four rows on p308, c64).
+- P1: `precise_pc_names_its_source` passes on p309 (c65). The receipt is stable
+  (c67).
+- P4 (c52) and P5 (c57) are met.
+
+Still failing on these gates:
+
+- D4: prints are correct, but slow. On p308 at 20,000 functions: first print
+  2,702 ms against the 250 ms bar, a second print of a new expression 2,997 ms
+  against 100 (c45, c66). The held path (one check per session, a root-only
+  build) is written but not landed.
+- P2: zones that are off cost peak memory. The profile-overhead pair on p308:
+  peak RSS 356/264 KB = 1.348 at -O1 and -O2; wall 1.014 at -O1 (c6). The
+  cause is found: the zoned program kept the process root, because a zone's
+  close was fallible and paid a checked conversion and stop polls. The fix is
+  in gate p310.
+- P6: the causal ranking is right ("narrow ranks first" on p309), but the
+  prediction is about 4 points low: alone, about 10% predicted against about
+  14% measured (c55).
+- D9: a dump keeps to its budget, but the stopped frame loses a live local
+  (`crash_dump_keeps_its_budget`, c51).
+- D11 and P3: the Canvas replay mode refuses a missing recording without its
+  E3622 report row (c58).
 
 ## Method
 
@@ -574,36 +617,37 @@ in `Tools/Perf/DebugLatency`.
 ## Verdict table
 
 "Today" is the verdict for "jet alone matches or beats the best peer", from
-gates p299 and p300. PENDING names the SUB whose rows have not run.
+gates p306 to p309 (revision 3's column was from p299 and p300).
 
 | Axis | Best peers | Today | Closed by |
 |---|---|---|---|
-| D1 Start and step | RemedyBG, RAD Debugger, lldb | fails (1,339 ms per step against under 1 ms; first stop wins); PENDING a rerun after `a39f5a5c5e` | c59 |
-| D2 Record, replay, why | rr + Pernosco, TTD, Replay.io, UDB | fails; PENDING c43 SUBs | c43 |
-| D3 Typed values at O2 | Visual Studio, RAD Debugger, lldb | fails on p300; PENDING `Lens-6841-c45v1-fix` | c45, c43(c) |
-| D4 Evaluation | lldb, gdb `compile`, Chrome DevTools | fails; PENDING `Lens-6841-c45v1-fix` | c45, c42, G4-G6 |
-| D5 Watch | gdb, lldb, rr | fails; PENDING `Lens-6841-c45v1-fix` | c49, G8, c43(b) |
-| D6 Conditions, logpoints | gdb, Live++, Chrome DevTools, Replay.io | fails; PENDING `Lens-6841-c45v1-fix`, `Lens-6841-c49-r7-placed-conditions` | c49, G10 |
-| D7 Hot patch | Live++, Chrome DevTools | fails (`fix_swaps_function_in_native_process`) | c54 |
-| D8 Tasks, deadlocks | Go runtime, Java ThreadMXBean | fails; PENDING `IfHole-6-1-c48-s2-channel-cycles` | c48 |
-| D9 Dumps | WinDbg minidumps | fails (the Secret reaches the dump file) | c51 |
-| D10 Visualizers | natvis, gdb and lldb formatters | fails on p300; PENDING `Lens-6841-c45v1-fix` | c45, c50 |
-| D11 Surfaces | RemedyBG, VS Code, Chrome DevTools | fails (DAP attach, pause, restart unbuilt) | c36, c58, G14 |
-| Generic instances | every native debugger | holds only within stated limits (one tier) | c41 |
-| P1 Sampling | Superluminal, Linux perf | holds only within stated limits (no precise PC; overhead row failed on p300) | G16, G17 |
-| P2 Zones | Tracy, Jai Iprof, LLVM XRay | fails; PENDING zone-core SUBs | c47, c3, c6 |
-| P3/P9 Timeline, waits | Superluminal, Tracy, Chrome DevTools | holds only within stated limits (Jet code; not live) | c58 |
-| P4 Heap | Instruments, Heaptrack, Chrome DevTools | fails | c52 |
-| P5 Counters | VTune, `perf stat` | fails; PENDING `IfHole-6-1-c57-topdown.r2` | c57 |
-| P6 Causal | Coz | fails; PENDING c55 SUBs | c55 |
+| D1 Start and step | RemedyBG, RAD Debugger, lldb | holds (p308: per step 1 ms against lldb's 2 at 20,000 functions; first stop 92 ms against 211) | c59 met |
+| D2 Record, replay, why | rr + Pernosco, TTD, Replay.io, UDB | holds (p307 replay rows) | c43 met |
+| D3 Typed values at O2 | Visual Studio, RAD Debugger, lldb | holds only within stated limits (values, Ok/Err and inlined frames are met; evaluation latency is D4's) | c43, c60, c61 met; c45 |
+| D4 Evaluation | lldb, gdb `compile`, Chrome DevTools | fails on latency (p308: 2,702 ms first print, 2,997 ms second, against 250 and 100) | c45, c66 |
+| D5 Watch | gdb, lldb, rr | holds (p308 `watch_follows`) | c49, c62 met |
+| D6 Conditions, logpoints | gdb, Live++, Chrome DevTools, Replay.io | holds (p309 placed logpoint: a million hits under a second) | c49, c63 met |
+| D7 Hot patch | Live++, Chrome DevTools | holds | c54 met |
+| D8 Tasks, deadlocks | Go runtime, Java ThreadMXBean | holds | c48 met |
+| D9 Dumps | WinDbg minidumps | fails narrowly (p309: the dump keeps its budget, but the stop frame loses a live local) | c51 |
+| D10 Visualizers | natvis, gdb and lldb formatters | holds | c50 met |
+| D11 Surfaces | RemedyBG, VS Code, Chrome DevTools | holds only within stated limits (DAP attach, pause and restart pass on p308; the Canvas replay mode fails one refusal row) | c36, c64 met; c58 |
+| Generic instances | every native debugger | holds | c41 met |
+| P1 Sampling | Superluminal, Linux perf | holds (p309 precise PC; stable receipt) | c65, c67 met |
+| P2 Zones | Tracy, Jai Iprof, LLVM XRay | fails (p308: peak RSS 1.348 with zones off; root found, fix in p310) | c6, c47 |
+| P3/P9 Timeline, waits | Superluminal, Tracy, Chrome DevTools | holds only within stated limits (Jet code; Canvas rows open) | c58 |
+| P4 Heap | Instruments, Heaptrack, Chrome DevTools | holds | c52 met |
+| P5 Counters | VTune, `perf stat` | holds | c57 met |
+| P6 Causal | Coz | fails (ranking right, prediction about 4 points low) | c55 |
 | P7 Cost beside measured | none | holds | none |
 | P8 Diffs and gates | pprof, Bencher | holds only within stated limits (repeated captures) | none |
-| P10 Always-on, attach | Parca, Pyroscope | fails (`attach_drains_flight_ring`) | c51 |
+| P10 Always-on, attach | Parca, Pyroscope | holds (p309 `attach_drains_flight_ring`) | c51 (dump row) |
 | Nothing but `jet` | the owner's order | holds | none |
 
-c39 is not met: P7 and "nothing but `jet`" hold, and every other axis has an
-open criterion or a proposed one. The limits no engineering removes are the
-same as in revision 2:
+c39 is not met. Five axes still fail (D4, D9, P2, P6, and the Canvas rows of
+D11 and P3); each has an open criterion: c6, c45, c47, c51, c55, c58, c66.
+When they are met, a fresh-context review of this revision closes c39. The
+limits no engineering removes are the same as in revision 2:
 
 - Jet sees Jet processes;
 - unsafe and FFI code is visible only at its boundary;

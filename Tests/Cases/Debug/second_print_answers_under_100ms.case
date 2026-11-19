@@ -1,0 +1,32 @@
+# A second `print` of a new expression at the same stop answers in under
+# 100 ms on a program of 20,000 functions, the size of a large compiler
+# package's image. The bound is the recv's: it starts when the expression
+# is sent and fails with the time it took ("recv deadline exceeded after
+# N ms") when the answer is later. Before the held check, each new
+# expression compiled the program again: this session's second print took
+# 2,701 ms at 20,000 functions and 2,200 ms at 2,000 (the dev jet of
+# a3fa36e63f).
+# The first print, which names a function of the program, opens the
+# session's held check of the program and its held IR program; the second
+# is checked against that check and built alone in that IR program, with
+# no compile of the program. Both read `total`, 0 at the stop, and call
+# the program's own functions: f_k(x) is (x + k) % 1000.
+# gen/gen.jet writes prog.jet: run's first call, the stop, is line 100003.
+fixture: SecondPrintAnswersUnder100ms.fixture
+env: NO_COLOR=1
+step: jet run gen/gen.jet -- 20000
+exit: 0
+stdout: = ""
+session debug line: jet debug prog.jet
+env: PATH={work}/no-tools
+send debug: "break prog.jet:100003"
+send debug: "c"
+recv debug line until ~ "Breakpoint hit  prog.jet:100003  in run()" timeout 600s # the image builds and the program runs to the stop
+send debug: "print f_1(total)"
+recv debug line until ~ "f_1(total) = 1" timeout 600s # the first print opens the held check
+send debug: "print f_2(total) + f_3(total)"
+recv debug line until ~ "f_2(total) + f_3(total) = 5" within 100ms # a second, new expression answers in under 100 ms
+send debug: "c"
+recv debug line until ~ "Program finished" timeout 600s # the evaluations left the program's run unchanged
+close debug
+exit: 0

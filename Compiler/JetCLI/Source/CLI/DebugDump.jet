@@ -26,7 +26,7 @@ jet_cli_debug_dump: fn(path: String, color: Bool) -[FS, IO, Time.Wait, FFI.Asm]>
     frames: opened.session.backtrace() ?? return jet_cli_debug_unavailable(err, color)
     stop: native_dump_jet_frame(frames, 0) ?? 0
     _ := opened.session.select_frame(stop) ?? return jet_cli_debug_unavailable(err, color)
-    source: opened.session.run_source()
+    source: jet_cli_debug_dump_source(path, opened.session.run_source())
     lines: (cli_files.read(source) ?? "").split("\n").to_list()
     events: native_dump_events(opened.session.image, opened.ring)
     file: cli_files.basename(source)
@@ -50,6 +50,22 @@ jet_cli_debug_dump: fn(path: String, color: Bool) -[FS, IO, Time.Wait, FFI.Asm]>
     }
     jet_cli_debug_write("\n")
     jet_cli_done("", "", JET_DRIVER_EXIT_OK)
+}
+
+// The source file of the run the dump at `path` caught, `source` as its
+// image's line table names it (NativeSession.run_source). A relative one is
+// relative to the directory the run ran in (JetCLI Host.jet
+// jet_cli_debug_directory), which holds the `.jet/dumps` the dump is in
+// (JetRuntime PerfSamples.jet perf_flight_dump_open). A dump kept elsewhere
+// leaves it relative to the working directory.
+jet_cli_debug_dump_source: fn(path: String, source: &&String) -> String Never! {
+    if source == "" || cli_files.is_absolute(source) -> return source
+    dumps: cli_files.dirname(path)
+    kept: cli_files.dirname(dumps)
+    if cli_files.basename(dumps) != "dumps" || cli_files.basename(kept) != ".jet" -> return source
+    ran: cli_files.dirname(kept)
+    if ran == "" -> return source
+    cli_files.join(ran, source)
 }
 
 // One console command's readout of the dump: `line`, as read.
@@ -170,4 +186,11 @@ jet_cli_debug_dump_frame: fn(session: &NativeSession, frames: [NativeFrame], ind
     source: if frame.file == file && frame.line >= 1 && frame.line <= lines.len() -> lines[frame.line - 1] else -> ""
     locals: jet_cli_debug_dump_locals(session) ?? return Err(err)
     Ok("Stopped  {frame.file}:{frame.line}  in {frame.function}()\n{frame.line} | {source}        <- here\n{native_debug_locals_line(locals)}\n")
+}
+
+#Test("a dump's relative source is in the directory whose .jet/dumps holds the dump") {
+    assert_eq(jet_cli_debug_dump_source("/w/run/.jet/dumps/crash-1.jetdump", "crash.jet"), "/w/run/crash.jet")
+    assert_eq(jet_cli_debug_dump_source("/w/run/.jet/dumps/crash-1.jetdump", "/src/crash.jet"), "/src/crash.jet")
+    assert_eq(jet_cli_debug_dump_source("/w/kept/crash-1.jetdump", "crash.jet"), "crash.jet")
+    assert_eq(jet_cli_debug_dump_source("/w/run/.jet/dumps/crash-1.jetdump", ""), "")
 }

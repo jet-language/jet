@@ -444,6 +444,12 @@ IRChecks: struct {
     // (JetCLI Host.jet jet_cli_runtime_quiet_routes), which no stop poll
     // follows (ir_route_can_stop); empty without a receipt.
     quiet_routes: [String:Bool]{[String:Bool]{}},
+    // A debugger's evaluation against a running O0 image (ir_held_program):
+    // the program functions, by key, that the image holds under their own
+    // symbol (ir_symbol_name), which no other function shares. A direct
+    // call of one calls the image's code there and builds no body for it
+    // (ir_held_bound). Empty builds every function it calls.
+    held: [String:Bool]{[String:Bool]{}},
 }
 
 // An argv-selectable job: the checked function `key` that the program word
@@ -671,15 +677,20 @@ ir_source_index: fn(sources: [String:String]) -> IRSourceIndex Never! {
     index := IRSourceIndex{bytes: [[U8]]{}, lines: [[Int]]{}, rows: [String:Int]{}}
     loop (path, text) in sources {
         bytes := text.bytes()
-        starts := [Int]{0}
-        loop (at, byte) in bytes {
-            if byte == (U8{10}) -> starts.push(at + 1)
-        }
         index.rows[path] = index.bytes.len()
+        index.lines.push(ir_source_line_starts(bytes))
         index.bytes.push(bytes)
-        index.lines.push(starts)
     }
     index
+}
+
+// The byte offset each line of `bytes` starts at.
+ir_source_line_starts: fn(bytes: [U8]) -> [Int] Never! {
+    starts := [Int]{0}
+    loop (at, byte) in bytes {
+        if byte == (U8{10}) -> starts.push(at + 1)
+    }
+    starts
 }
 
 // The 1-based line holding byte `offset` of `path`; None when the file is not
@@ -1730,24 +1741,112 @@ ir_build_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolT
 
 // Builds the functions `root_keys` name in `program` (ir_program_new, or
 // ir_program_declared and ir_program_bind) and every function they reach,
-// as ir_build_program does, with no program entry: compile-time evaluation
-// runs each root itself. The program comes back with the build.
+// as ir_build_root_rows does.
 ir_build_roots_in: fn(program: &&IRProgram, root_keys: [String], threads: CompilerThreads) -> IRBuildKept Never! {
     p := program.move()
-    roots := [IRWaveJob]{}
+    rows := [Int]{}
     failures := [IRBuildFailure]{}
     loop key in root_keys {
         row: ir_function_row(p, key) ?? {
             failures.push(IRBuildFailure{key: key.copy(), name: key.copy(), message: "the root function is not among the checked functions", source_file: "", span: Span{start: 0, end: 0}})
             next
         }
-        roots.push(IRWaveJob{key: p.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1})
+        rows.push(row)
     }
     if failures.len() > 0 {
         empty := ir_module_for(p)
         return IRBuildKept{result: IRBuildResult{program: empty.move(), failures: failures}, program: p.move()}
     }
-    ir_build_waves_kept(p, roots, false, threads, None)
+    ir_build_root_rows(p, rows, threads)
+}
+
+// Builds the functions at `rows` of `program` and every function they
+// reach, as ir_build_program does, with no program entry: compile-time
+// evaluation runs each root itself. The program comes back with the build.
+ir_build_root_rows: fn(program: &&IRProgram, rows: [Int], threads: CompilerThreads) -> IRBuildKept Never! {
+    roots: loop row in rows -> IRWaveJob{key: program.functions[row].key.copy(), row: row, args: [Type]{}, lambda: -1, part: -1, local: -1}
+    ir_build_waves_kept(program, roots, false, threads, None)
+}
+
+// A debugger's evaluations against a running program image (JetCLI
+// DebugCompile.jet): the program's checked functions declared and bound
+// once, as ir_program_new does, under `checks`, so each evaluation only puts
+// and builds its root (ir_build_held_root). Under `bind` (an O0 image, whose
+// every non-generic function the build kept), a direct call of a held
+// function the image holds calls the image's code (IRChecks.held,
+// ir_held_symbols).
+ir_held_program: fn(functions: &&[FnBody], decls: DeclTable, symbols: &&SymbolTable, type_defs: &&[TTypeDef], impls: &&[TImplDef], sources: &&[String:String], constants: &&[TConstantDef], foreign: &&[SemaCheckedForeignFunction], checks: IRChecks, bind: Bool{false}) -> IRProgram Never! {
+    p := ir_program_new(functions, decls, symbols, type_defs, impls, sources, constants)
+    p.checks = checks
+    p.sentries = ir_checks_sentries(p.checks)
+    p.user_values = true
+    if !ir_core_image_fits(p) -> p.checks.core = None
+    ir_foreign_index(p, foreign, decls)
+    if bind -> p.checks.held = ir_held_symbols(p.functions)
+    p
+}
+
+// The keys of the non-generic functions of `functions` whose symbol
+// (ir_symbol_name) no other function of them has: the image's symbol of
+// that name is theirs.
+ir_held_symbols: fn(functions: [FnBody]) -> [String:Bool] Never! {
+    names: loop function in functions -> if function.generic_params.len() > 0 -> "" else -> ir_symbol_name(function)
+    counts := [String:Int]{}
+    loop name in names {
+        if name != "" -> counts[name] = (counts.get(name) ?? 0) + 1
+    }
+    held := [String:Bool]{}
+    loop (index, name) in names {
+        if name != "" && counts.get(name) == Val(1) -> held[functions[index].key] = true
+    }
+    held
+}
+
+// The source path a held build's root reads its lines from
+// (ir_build_held_root).
+IR_HELD_ROOT_SOURCE: "<eval>"
+
+// Builds `root` in held program `program` (ir_held_program) with every
+// function it reaches but those the image holds (ir_held_bound), with no
+// program entry, its Core and program cells the image's. The root takes the
+// row of its key, a former evaluation's, else a new last one; the program
+// comes back with the build for the next evaluation. The root's spans count
+// in its own `text`, which no checked file holds, so its file is
+// IR_HELD_ROOT_SOURCE, whose source is `text`.
+ir_build_held_root: fn(program: &&IRProgram, root: &&FnBody, text: String, threads: CompilerThreads) -> IRBuildKept Never! {
+    p := program.move()
+    bytes: text.bytes()
+    if {
+        p.source_rows.get(IR_HELD_ROOT_SOURCE) == .Val(row) -> {
+            p.source_lines[row] = ir_source_line_starts(bytes)
+            p.source_bytes[row] = bytes.move()
+        }
+        else -> {
+            p.source_rows[IR_HELD_ROOT_SOURCE] = p.source_bytes.len()
+            p.source_lines.push(ir_source_line_starts(bytes))
+            p.source_bytes.push(bytes.move())
+        }
+    }
+    owned := [FnBody]{root.move()}
+    ir_declared_owners(owned, p.types)
+    ir_add_signature_union_types(p.types, p.type_rows, owned)
+    function := owned.pop() ?? panic("the held build lost its root")
+    function.source_file = IR_HELD_ROOT_SOURCE
+    row: ir_function_row(p, function.key) ?? p.functions.len()
+    if {
+        row < p.functions.len() -> p.functions[row] = function.move()
+        else -> {
+            name_rows_set(p.rows, function.key, row)
+            p.functions.push(function.move())
+        }
+    }
+    kept := ir_build_root_rows(p, [Int]{row}, threads)
+    if kept.program.checks.core == .Val(image) -> ir_core_cells_bind(kept.result.program, image)
+    // The program's own cells are the running image's (a debuggable image
+    // exports them, ir_debug_cell_exports), not copies placed beside the
+    // evaluation.
+    ir_debug_cells_bind(kept.result.program)
+    kept
 }
 
 // The function the executable starts: `entry` itself when it takes nothing,

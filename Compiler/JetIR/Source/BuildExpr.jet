@@ -4444,8 +4444,11 @@ ir_call_row_emit: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, row: Int, type_a
         }
     }
     // #6328 c22 S7b-1: a Core function the runtime image carries is called
-    // there by its symbol, and not built (ir_core_bound).
-    bound: ir_core_bound(m, p, b, row, type_args, slots, span)
+    // there by its symbol, and not built (ir_core_bound); so is a program
+    // function a debugger's evaluation finds in the running image
+    // (ir_held_bound).
+    bound := ir_core_bound(m, p, b, row, type_args, slots, span)
+    if bound == "" -> bound = ir_held_bound(m, p, b, row, type_args, span)
     callee := -1
     if bound == "" {
         callee = ir_function_row_id(m, p, row, type_args) ?? return ir_fail_slot(b, span, "call of {p.functions[row].key}")

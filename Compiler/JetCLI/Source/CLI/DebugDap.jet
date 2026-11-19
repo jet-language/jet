@@ -41,9 +41,11 @@
 // `reverse-next` and `reverse-continue`, and report where they stopped as
 // a step does. A replay's runs are made as recorded, so a request waits for
 // them.
-// The end of stdin or `disconnect` ends a launched program and lets an
-// attached one go on, then ends the adapter; the requests that wait for a
-// stop are answered first, the program running on to it.
+// `disconnect` ends a launched program and lets an attached one go on, then
+// ends the adapter, as the end of stdin does at a stop. The end of stdin
+// while a launched program runs on stops no run: the program runs on to its
+// next stop or its end, which is reported, and the requests that wait for a
+// stop are answered there; then the session ends.
 use {
     dap_files: core.files
     dap_json: core.encoding.json
@@ -102,8 +104,8 @@ JetCLIDap: struct {
     // The requests that came while the program ran, which wait for its
     // next stop, in the order they came.
     waiting: [JetCLIDapRequest]{[JetCLIDapRequest]{}},
-    // Whether stdin ended while requests waited: no request stops a run
-    // any more.
+    // Whether stdin ended while the program ran: no request stops a run any
+    // more, and the session ends at the next stop.
     ended: Bool{false},
 
     handle: fn(&self, session: &NativeSession, input: &&JetCLIDapRequest, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
@@ -359,11 +361,12 @@ JetCLIDap: struct {
     // continue, or a start that does not stop on entry, stops every thread
     // where it is when a request comes (NativeSession.interrupt, on stdin):
     // `pause` reports that stop; `disconnect` ends the session, as the end
-    // of stdin does when no request waits; `restart` starts the program
-    // again; a request about a stop or a run command waits for the next stop
-    // (JetCLIDap.waiting); any other request is answered, and the program
-    // continues. A replay's runs are made as recorded, without stopping for
-    // requests.
+    // of stdin does for an attached program no request waits on, while a
+    // launched one runs on to its next stop after it; `restart` starts the
+    // program again; a request about a stop or a run command waits for the
+    // next stop (JetCLIDap.waiting); any other request is answered, and the
+    // program continues. A replay's runs are made as recorded, without
+    // stopping for requests.
     run_on: fn(&self, session: &NativeSession, word: String, entry: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> Never! {
         how := word
         loop {
@@ -392,8 +395,9 @@ JetCLIDap: struct {
             how = "c"
             read: jet_cli_dap_read()
             if read == None {
-                if self.waiting.len() == 0 -> return self.end(session)
-                // The waiting requests are answered at the next stop.
+                if session.attached && self.waiting.len() == 0 -> return self.end(session)
+                // A launched program runs on to its next stop or its end,
+                // which the waiting requests are answered at.
                 self.ended = true
                 next
             }
