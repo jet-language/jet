@@ -1,0 +1,50 @@
+// Three functions whose top-down splits differ, their sizes from the
+// command line so nothing folds at compile time. `guesses` branches on a
+// pseudo-random bit no predictor learns (line 18), so the core throws away
+// much of what it issues past the branch: bad speculation. `hops` reads a
+// table larger than an L3 at random (line 35), so its slots wait on
+// memory: back-end bound, memory bound. `sums` adds in a loop the core
+// predicts and feeds (line 42), so most of its slots retire.
+use core.process
+
+guesses: fn(count: Int) -> Int {
+    marks := [Int]{}
+    loop _ in 0..<1024 { marks.push(0) }
+    seed := 7
+    taken := 0
+    loop _ in 0..<count {
+        seed = (seed * 1103515245 + 12345) % 2147483648
+        if {
+            (seed /% 65536) % 2 == 1 -> {
+                at: seed % 1024
+                marks[at] = marks[at] + 1
+            }
+            else -> taken += 1
+        }
+    }
+    taken + marks[7]
+}
+
+hops: fn(count: Int) -> Int {
+    table := [Int]{}
+    loop index in 0..<count * 4 { table.push(index) }
+    total := 0
+    spot := 0
+    loop _ in 0..<count {
+        spot = (spot * 1103515245 + 12345) % (count * 4)
+        total += table[spot]
+    }
+    total
+}
+
+sums: fn(count: Int) -> Int {
+    total := 0
+    loop index in 0..<count -> total += index * 3 + 1
+    total
+}
+
+run: fn() {
+    args: process.args()
+    count: if args.len() > 0 -> Int.parse(args[args.len() - 1]) ?? 4194304 else -> 4194304
+    print("guesses={guesses(count * 8)} hops={hops(count)} sums={sums(count * 32)}")
+}

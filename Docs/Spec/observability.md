@@ -161,10 +161,11 @@ functions that `run` calls; their `inclusive_count` and `allocation_count` are
 null.
 
 `jet perf run` takes `--lens=<lenses>`, comma-separated: `cpu`, the
-program's CPU time and the default, `memory`, its memory behavior, and
-`alloc`, its live heap; `--lens=cpu,memory,alloc` takes all three in one
-run. `jet perf test` takes only `cpu`, and a word that names no lens is
-refused with the three it may name. Under `memory` the
+program's CPU time and the default, `memory`, its memory behavior,
+`alloc`, its live heap, and `topdown`, why its hot lines are slow on the
+CPU; `--lens=cpu,memory,alloc,topdown` takes all four in one run. `jet perf
+test` takes only `cpu`, and a word that names no lens is refused with the
+four it may name. Under `memory` the
 runtime opens four counters of the program's main thread
 with `perf_event_open`, in user mode only: L1D read misses (one sample per
 10007 events), LLC and dTLB read misses (one per 1009) and page faults (one
@@ -314,6 +315,59 @@ path, `  kept[99]  100 blocks  56000 bytes`; a type no snapshot keeps is
 refused with the types they keep.
 Tests/Cases/PerfRun/alloc_lens_heap_snapshots.case and
 Tests/Cases/Perf/heap_snapshot_types_retention_and_diff.case are the
+worked examples.
+
+Under `topdown` the runtime splits the program's issue slots by the
+top-down method: each cycle the core can issue a fixed number of
+operations (its slots), and each slot is retiring (useful work), bad
+speculation (work issued and thrown away), front-end bound (no operation
+to issue) or back-end bound (an operation that waits on data or an
+execution unit), the level 1; level 2 splits retiring into light and heavy
+(microcoded) operations, bad speculation into branch mispredicts and
+machine clears, front-end bound into latency and bandwidth and back-end
+bound into memory and core bound. The runtime reads the CPU's model with
+`cpuid` and takes the formulas it has for it: AMD Zen 4 (six slots a
+cycle) and Zen 5 (eight), from the `de_no_dispatch_per_slot`,
+`de_src_op_disp`, `ex_ret_ops` and `ex_no_retire` events; Intel's Golden
+Cove cores alone (Sapphire and Emerald Rapids), from the `topdown.*_slots`
+events; Gracemont alone (Alder Lake-N), from `topdown_*_bound`; and the
+hybrid Alder and Raptor Lake, Golden Cove's events on the `cpu_core` PMU
+and Gracemont's on `cpu_atom`, each counting while the thread runs on that
+core type. It opens each event on the program's main thread in user mode,
+with its count's enabled and running times and a sampling period, and the
+counter handler records each sample's program counter as a single word
+marked with the event. It writes the formulas' set, the vendor, CPUID.1
+EAX, whether a hypervisor runs it and the events' count to
+`<samples>.topdown`, then each event's PMU type, config, period (0 for one
+the kernel refused) and errno, and at exit each event's count, enabled
+and running nanoseconds. The trace keeps the result as its `topdown`
+receipt section (type `JetPerfTopdown`): the checked source's `path`, the
+`cpu` (`vendor`, `family`, `model`, `name`, `hypervisor`), the `unit`
+(hundredths of a percent of the slots), the `sample_floor` and, per core
+type in `cores`, its `label`, `core`, `slot_width`, the `formulas` it
+applied, its `events` (`name`, `pmu_type`, `config`, `period`, `errno`,
+`count`, `enabled_ns`, `running_ns`, `samples`), the `run`'s split from
+the exact counts, each scaled by its enabled time over its running time,
+and its `functions` and `lines`, at most 64 each, the most slots first.
+A row's split comes from its samples: each event's samples at the row's
+lines times the event's period, scaled the same way. Each row holds the
+level 1 and level 2 shares (`retiring`, `bad_speculation`,
+`frontend_bound`, `backend_bound`, `light_operations`, `heavy_operations`,
+`branch_mispredicts`, `machine_clears`, `frontend_latency`,
+`frontend_bandwidth`, `memory_bound`, `core_bound`, and on AMD
+`smt_contention`, the slots a sibling thread took), its `time` (its share
+of the run's slots), its `samples` of the slots event and
+`low_confidence` when those are fewer than 20; a line's row has its
+`line` too. A CPU the lens has no formulas for, a CPU under a hypervisor,
+an event the kernel refused and a run that never counted make the section
+(or the core type) `unavailable`, with the `reason`. `jet perf view`
+prints, per core type, `Why hot functions are slow (AMD Zen 4, level 1)`
+and `Why hot lines are slow (AMD Zen 4, level 1)` with each row's time,
+retiring, bad spec, front end and back end, then `Level 2 of those lines
+(AMD Zen 4)`, ten rows each, a low-confidence row's name ending in `~`;
+or `topdown unavailable: <reason>`. Only the program's starting thread is
+counted. Tests/Cases/PerfRun/topdown_levels_per_function.case and
+Tests/Cases/PerfRun/topdown_unavailable_names_the_refusal.case are the
 worked examples.
 
 `jet perf run` records every wait of a task too, and what ended it. When a

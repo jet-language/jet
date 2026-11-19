@@ -1,20 +1,20 @@
-# `--lens` names one or more of `cpu`, `memory` and `alloc`,
+# `--lens` names one or more of `cpu`, `memory`, `alloc` and `topdown`,
 # comma-separated. Any other word, or an empty list, is refused before the
 # program builds, with the lenses it may name. `--method` is no flag of
 # `jet perf run`: it reaches the program's run, which refuses it as a flag
-# jet does not understand. The memory lens samples counters and the alloc
-# lens snapshots the heap only under `jet perf run`, so `jet perf test`
-# refuses either.
+# jet does not understand. The memory lens samples counters, the alloc
+# lens snapshots the heap and the topdown lens samples top-down events only
+# under `jet perf run`, so `jet perf test` refuses each.
 requires: os-name:linux
 requires: arch:x86_64
 fixture: MemoryCountersPerLine.fixture
 env: NO_COLOR=1
 step: jet perf run --lens=heap walk.jet --out {work}/heap.jettrace
 exit: 2
-stderr: ~ "`--lens` item `heap` is not a lens; lenses: cpu, memory, alloc" # the word, and the lenses it may be
+stderr: ~ "`--lens` item `heap` is not a lens; lenses: cpu, memory, alloc, topdown" # the word, and the lenses it may be
 step: jet perf run --lens= walk.jet --out {work}/none.jettrace
 exit: 2
-stderr: ~ "`--lens` needs one or more of `cpu`, `memory` and `alloc`, comma-separated" # an empty list names no lens
+stderr: ~ "`--lens` needs one or more of `cpu`, `memory`, `alloc` and `topdown`, comma-separated" # an empty list names no lens
 step: jet perf run --method=memory walk.jet --out {work}/method.jettrace
 exit: 2
 stderr: ~ "`--method` isn't a flag jet understands" # the retired flag is no spelling of a lens
@@ -24,3 +24,7 @@ stderr: ~ "The `memory` lens samples a program's counters, which only `jet perf 
 step: jet perf test --lens=alloc walk.jet
 exit: 2
 stderr: ~ "The `alloc` lens snapshots a program's heap, which only `jet perf run` snapshots" # refused under `jet perf test`
+step: jet perf test --lens=cpu,topdown walk.jet
+exit: 2
+stderr: ~ "The `topdown` lens samples a program's top-down events, which only `jet perf run` samples" # refused under `jet perf test`
+stderr: ~ "jet perf run <file.jet> --lens=cpu,topdown" # and the run that takes it

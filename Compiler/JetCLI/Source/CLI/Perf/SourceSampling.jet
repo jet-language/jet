@@ -43,7 +43,9 @@ JET_CLI_PERF_SAMPLE_US: 1000
 // it; `inclusive` its inclusive time, the samples that hold it anywhere on
 // the stack, once each however often; `allocations` the allocations whose
 // stack holds it innermost of the checked source's lines; `events`, per
-// counter, the events of that counter's samples whose stack holds it so.
+// counter, the events of that counter's samples whose stack holds it so;
+// `topdown`, per topdown event (CLI/Perf/Topdown.jet), the samples of
+// that event whose program counter is on it, empty while it has none.
 JetCLIPerfSampledLine: struct {
     name: String,
     line: Int,
@@ -51,6 +53,7 @@ JetCLIPerfSampledLine: struct {
     inclusive: U64,
     allocations: U64,
     events: [U64],
+    topdown: [Int],
     own: Bool,
 }
 
@@ -342,7 +345,10 @@ jet_cli_perf_samples_owned: fn(table: X64Jetline, source: String) -[FS]> [Bool] 
 // A sample record's first word holds its program counter below this bit,
 // its word count from it up to bit 58 and its kind from bit 59 up to bit
 // 62: 0 for a CPU-time sample, a counter's index plus one for that
-// counter's sample, JET_CLI_PERF_SPAWN_KIND for a task's spawn,
+// counter's sample, JET_CLI_PERF_TOPDOWN_KIND for a topdown event's
+// sample, whose first word holds the event's index from
+// JET_CLI_PERF_TOPDOWN_EVENT_BITS above its program counter,
+// JET_CLI_PERF_SPAWN_KIND for a task's spawn,
 // JET_CLI_PERF_WAIT_KIND for a task's wait, JET_CLI_PERF_WAKE_KIND for a
 // wake and JET_CLI_PERF_IO_KIND for a transfer, whose first words hold a
 // task id in place of the program counter, JET_CLI_PERF_CLOCK_KIND for
@@ -354,6 +360,11 @@ jet_cli_perf_samples_owned: fn(table: X64Jetline, source: String) -[FS]> [Bool] 
 JET_CLI_PERF_ADDRESS_BITS: 48
 
 JET_CLI_PERF_KIND_BITS: 59
+
+// PerfSamples.jet PERF_SAMPLES_TOPDOWN and PERF_TOPDOWN_EVENT_BITS.
+JET_CLI_PERF_TOPDOWN_KIND: 7
+
+JET_CLI_PERF_TOPDOWN_EVENT_BITS: 40
 
 // PerfSamples.jet PERF_SAMPLES_SPAWN, PERF_SAMPLES_WAIT, PERF_SAMPLES_CLOCK,
 // PERF_SAMPLES_WAKE, PERF_SAMPLES_IO, PERF_SAMPLES_HEAP_MARK,
@@ -663,6 +674,25 @@ jet_cli_perf_samples_count: fn(table: &&X64Jetline, functions: &&[X64ImageFuncti
             at += record * 8
             next
         }
+        if kind == JET_CLI_PERF_TOPDOWN_KIND {
+            // Its program counter alone, 0 outside the image's code; the
+            // sample counts at the innermost line of the checked source
+            // there, as a counter's does.
+            sampled.signals += U64{1}
+            event: pc >> JET_CLI_PERF_TOPDOWN_EVENT_BITS
+            own: pc & ((1 << JET_CLI_PERF_TOPDOWN_EVENT_BITS) - 1)
+            if own != 0 {
+                held: jet_cli_perf_samples_own(sampled, jet_cli_perf_samples_chain(sampled, places, resolved, owned, own, false))
+                if held >= 0 {
+                    loop sampled.lines[held].topdown.len() <= event {
+                        sampled.lines[held].topdown.push(0)
+                    }
+                    sampled.lines[held].topdown[event] = sampled.lines[held].topdown[event] + 1
+                }
+            }
+            at += record * 8
+            next
+        }
         if kind > 0 {
             sampled.signals += U64{1}
             // A counter the session did not ask for has no period to weigh.
@@ -757,7 +787,7 @@ jet_cli_perf_samples_chain: fn(sampled: &JetCLIPerfSamples, places: &[String:Int
             places[name] = sampled.lines.len()
             events := [U64]{}
             loop _ in sampled.periods -> events.push(U64{0})
-            sampled.lines.push(JetCLIPerfSampledLine{name: frame.name, line: frame.line, count: U64{0}, inclusive: U64{0}, allocations: U64{0}, events: events, own: frame.own})
+            sampled.lines.push(JetCLIPerfSampledLine{name: frame.name, line: frame.line, count: U64{0}, inclusive: U64{0}, allocations: U64{0}, events: events, topdown: [Int]{}, own: frame.own})
         }
         chain.push(places[name])
     }

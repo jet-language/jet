@@ -1,0 +1,41 @@
+# `jet perf run --lens=cpu,topdown` samples the CPU's top-down events on the
+# program's main thread beside its CPU time and splits each hot function's
+# and line's issue slots, in hundredths of a percent, into retiring, bad
+# speculation, front-end bound and back-end bound (level 1), and each of
+# those once more (level 2), by the formulas of the CPU's model. The trace
+# keeps them as its `topdown` receipt section, with the formulas and the
+# events it used. `guesses` branches on a bit no predictor learns, so much
+# of its work is thrown away; `hops` reads a table larger than an L3 at
+# random, so its slots wait on memory; `sums` mostly retires. A CPU the lens
+# has no formulas for is reported unavailable, with the reason
+# (topdown_unavailable_names_the_refusal).
+requires: os-name:linux
+requires: arch:x86_64
+fixture: TopdownLevelsPerFunction.fixture
+env: NO_COLOR=1
+step: jet perf run --lens=cpu,topdown td.jet --out {work}/td.jettrace
+exit: 0
+stdout: ~ "guesses="
+json: file td.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses #= 2
+json: file td.jettrace doc $.content.receipt_sections[0].value.capture.sampling.lenses[1] = "topdown"
+json: file td.jettrace doc $.content.profile.rows[?sample_count>=1] #>= 1 # the cpu lens's CPU-time samples, beside the topdown events
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"] #= 1
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].type_name = "JetPerfTopdown"
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.status = "captured"
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].status = "captured"
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].events[?errno!=null] #= 0 # the kernel opened every event
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].run.retiring >= 1 # the run's split from its exact counts
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].formulas.retiring ~ "/ slots" # the formulas it applied
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].functions[?function="guesses"][?bad_speculation>=1000] #= 1 # the unpredictable branch throws work away
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].functions[?function="hops"][?backend_bound>=3000] #= 1 # the random hops wait on the back end
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].functions[?function="hops"][?memory_bound>=1000] #= 1 # on memory, at level 2
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].functions[?function="sums"][?retiring>=2000] #= 1 # the plain loop mostly retires
+json: file td.jettrace doc $.content.receipt_sections[?name="topdown"][0].value.cores[0].lines[?line=35][?function="hops"] #= 1 # each line's split too
+step: jet perf view {work}/td.jettrace
+exit: 0
+stdout: ~ "Why hot functions are slow (" # level 1 by function, with the CPU's name
+stdout: ~ "Why hot lines are slow ("
+stdout: ~ ", level 1)"
+stdout: ~ "Level 2 of those lines ("
+stdout: ~ "td.jet:35" # the hops' line by name
+stdout: !~ "receipt topdown " # the section shows as its view, not as raw JSON

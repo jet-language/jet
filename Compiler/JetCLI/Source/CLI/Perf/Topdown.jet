@@ -1,0 +1,553 @@
+// `jet perf run --lens=topdown`: why each hot line and
+// function is slow on the CPU, by the top-down method. Each cycle's issue
+// slots are retiring (useful work), bad speculation (work thrown away),
+// front-end bound (no instruction to issue) or back-end bound (waiting on
+// data or an execution unit), and level 2 splits each once more. The
+// runtime opens the CPU's top-down events on the program's thread and
+// writes which formulas its CPU model takes (PerfSamples.jet
+// perf_topdown_start); this file holds those formulas, applies them per
+// line and function to the events' samples and to the run to their exact
+// counts, and keeps the result as the trace's `topdown` receipt section,
+// with the formulas and events it used.
+use {
+    perf_files: core.files
+    jet_backend.[link_debug_addr]
+    jet_foundation.[CanonicalJSON, CanonicalJSONField, TraceReceiptSection, canonical_json_sha256, jettrace_array, jettrace_object_view, trace_receipt_section_from_json]
+}
+
+// The formulas the runtime picked (PerfSamples.jet PERF_TOPDOWN_ZEN4 and
+// on): each a table of events, but the hybrid chip's, which is Golden
+// Cove's table then Gracemont's.
+JET_CLI_PERF_TOPDOWN_ZEN4: 1
+
+JET_CLI_PERF_TOPDOWN_ZEN5: 2
+
+JET_CLI_PERF_TOPDOWN_GOLDEN_COVE: 3
+
+JET_CLI_PERF_TOPDOWN_HYBRID: 4
+
+JET_CLI_PERF_TOPDOWN_GRACEMONT: 5
+
+// A row whose slots event took fewer samples than this is low confidence.
+JET_CLI_PERF_TOPDOWN_FLOOR: 20
+
+// The most lines and functions a core type's rows keep, the most slots
+// first, and the most the view shows.
+JET_CLI_PERF_TOPDOWN_ROWS: 64
+
+JET_CLI_PERF_TOPDOWN_SHOWN: 10
+
+// The split's entries (jet_cli_perf_topdown_split), each in hundredths of a
+// percent of the slots: level 1, then level 2, then the slots themselves.
+JET_CLI_PERF_TOPDOWN_RETIRING: 0
+
+JET_CLI_PERF_TOPDOWN_BAD: 1
+
+JET_CLI_PERF_TOPDOWN_FRONTEND: 2
+
+JET_CLI_PERF_TOPDOWN_BACKEND: 3
+
+JET_CLI_PERF_TOPDOWN_SMT: 4
+
+JET_CLI_PERF_TOPDOWN_LIGHT: 5
+
+JET_CLI_PERF_TOPDOWN_HEAVY: 6
+
+JET_CLI_PERF_TOPDOWN_MISPREDICTS: 7
+
+JET_CLI_PERF_TOPDOWN_CLEARS: 8
+
+JET_CLI_PERF_TOPDOWN_LATENCY: 9
+
+JET_CLI_PERF_TOPDOWN_BANDWIDTH: 10
+
+JET_CLI_PERF_TOPDOWN_MEMORY: 11
+
+JET_CLI_PERF_TOPDOWN_CORE: 12
+
+JET_CLI_PERF_TOPDOWN_SLOTS: 13
+
+// One core type's events in `<samples>.topdown`: its table, and the index
+// of its first event among the file's.
+JetCLIPerfTopdownCore: struct {
+    table: Int,
+    first: Int,
+    label: String,
+}
+
+// A line or function's estimated count of each of its core type's events,
+// and the samples its slots event took; a function's line is 0.
+JetCLIPerfTopdownRow: struct {
+    function: String,
+    line: Int,
+    events: [Int],
+    samples: Int,
+}
+
+// The trace's `topdown` receipt section of the run whose samples file is
+// `samples`: the formulas `<samples>.topdown` names, applied for each core
+// type to the run's exact counts and, per line of `source` and per
+// function, to the events' samples in `sampled`. Unavailable, with the
+// reason, on a CPU the lens has no formulas for, under a hypervisor, and
+// where the kernel refused an event. The file is removed once read.
+jet_cli_perf_topdown_section: fn(samples: String, sampled: JetCLIPerfSamples?, source: String) -[FS]> TraceReceiptSection Never! {
+    path: "{samples}.topdown"
+    words: perf_files.read_bytes(path) ?? [U8]{}
+    perf_files.remove(path).drop("the session reads its topdown events once")
+    cores := [CanonicalJSON]{}
+    cpu := CanonicalJSON.Null
+    status := "unavailable"
+    reason := "the program recorded no topdown events, as a program that never started its observation does"
+    if words.len() >= 40 {
+        set: link_debug_addr(words, 0)
+        vendor: link_debug_addr(words, 8)
+        signature: link_debug_addr(words, 16)
+        hypervisor: link_debug_addr(words, 24) != 0
+        count: link_debug_addr(words, 32)
+        base: (signature >> 8) & 15
+        family: if base == 15 -> base + ((signature >> 20) & 255) else -> base
+        model: ((signature >> 4) & 15) | (if base == 6 || base == 15 -> ((signature >> 16) & 15) << 4 else -> 0)
+        maker: if vendor == {
+            1 -> "AMD"
+            2 -> "Intel"
+            else -> "unknown"
+        }
+        name: jet_cli_perf_topdown_cpu_name(set, model)
+        cpu = CanonicalJSON.Object(
+            [CanonicalJSONField]{
+                {key: "family", value: CanonicalJSON.Integer("{family}")},
+                {key: "hypervisor", value: CanonicalJSON.Bool(hypervisor)},
+                {key: "model", value: CanonicalJSON.Integer("{model}")},
+                {key: "name", value: if name == "" -> CanonicalJSON.Null else -> CanonicalJSON.String(name)},
+                {key: "vendor", value: CanonicalJSON.String(maker)},
+            },
+        )
+        if {
+            set == 0 -> {
+                reason = if hypervisor -> "the CPU runs under a hypervisor, whose counters are not the hardware's top-down events" else -> "no top-down formulas for this CPU ({maker} family {family} model {model}): the lens has them for AMD Zen 4 and Zen 5 and Intel Golden Cove and Gracemont cores"
+            }
+            else -> {
+                reason = "per line and function, each event's samples at its period, scaled by the time it ran over the time it was enabled; the run's split from its exact counts. A row with fewer than {JET_CLI_PERF_TOPDOWN_FLOOR} samples of slots is low confidence. Only the program's starting thread is counted"
+                refused := ""
+                loop core in jet_cli_perf_topdown_cores(set, name) {
+                    built: jet_cli_perf_topdown_core(core, words, count, sampled)
+                    if built.reason == "" -> status = "captured"
+                    if built.reason != "" && refused == "" -> refused = built.reason.move()
+                    cores.push(built.value.move())
+                }
+                if status != "captured" -> reason = refused
+            }
+        }
+    }
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "cores", value: CanonicalJSON.Array(cores)},
+            {key: "cpu", value: cpu},
+            {key: "path", value: CanonicalJSON.String(source)},
+            {key: "reason", value: CanonicalJSON.String(reason)},
+            {key: "sample_floor", value: CanonicalJSON.Integer("{JET_CLI_PERF_TOPDOWN_FLOOR}")},
+            {key: "status", value: CanonicalJSON.String(status)},
+            {key: "unit", value: CanonicalJSON.String("hundredths of a percent of the issue slots")},
+        },
+    )
+    digest: canonical_json_sha256(value)
+    TraceReceiptSection{name: "topdown", type_name: "JetPerfTopdown", value: value, digest: digest}
+}
+
+// A core type's object in the section, and why it is unavailable, empty
+// where the lens captured it.
+JetCLIPerfTopdownBuilt: struct {
+    reason: String,
+    value: CanonicalJSON,
+}
+
+// The core types of formulas `set` on the CPU named `name`.
+jet_cli_perf_topdown_cores: fn(set: Int, name: String) -> [JetCLIPerfTopdownCore] Never! {
+    if set == JET_CLI_PERF_TOPDOWN_HYBRID {
+        return [JetCLIPerfTopdownCore]{{table: JET_CLI_PERF_TOPDOWN_GOLDEN_COVE, first: 0, label: "{name} P-cores"}, {table: JET_CLI_PERF_TOPDOWN_GRACEMONT, first: 9, label: "{name} E-cores"}}
+    }
+    [JetCLIPerfTopdownCore]{{table: set, first: 0, label: name}}
+}
+
+// The CPU's name by the formulas the runtime picked and its model.
+jet_cli_perf_topdown_cpu_name: fn(set: Int, model: Int) -> String Never! {
+    if set == JET_CLI_PERF_TOPDOWN_ZEN4 -> return "AMD Zen 4"
+    if set == JET_CLI_PERF_TOPDOWN_ZEN5 -> return "AMD Zen 5"
+    if set == JET_CLI_PERF_TOPDOWN_GOLDEN_COVE {
+        return if model == 143 -> "Intel Sapphire Rapids" else -> "Intel Emerald Rapids"
+    }
+    if set == JET_CLI_PERF_TOPDOWN_HYBRID {
+        return if model == 151 || model == 154 -> "Intel Alder Lake" else -> "Intel Raptor Lake"
+    }
+    if set == JET_CLI_PERF_TOPDOWN_GRACEMONT -> return "Intel Alder Lake-N"
+    ""
+}
+
+// The key of a table's core type in the section.
+jet_cli_perf_topdown_core_name: fn(table: Int) -> String Never! {
+    if table == JET_CLI_PERF_TOPDOWN_ZEN4 -> return "zen4"
+    if table == JET_CLI_PERF_TOPDOWN_ZEN5 -> return "zen5"
+    if table == JET_CLI_PERF_TOPDOWN_GOLDEN_COVE -> return "golden_cove"
+    "gracemont"
+}
+
+// The issue slots each cycle has: the dispatch width the formulas assume.
+jet_cli_perf_topdown_width: fn(table: Int) -> Int Never! {
+    if table == JET_CLI_PERF_TOPDOWN_ZEN5 -> return 8
+    if table == JET_CLI_PERF_TOPDOWN_GRACEMONT -> return 5
+    6
+}
+
+// The events of `table`, in the order the runtime opens them
+// (PerfSamples.jet perf_topdown_config), as perf names them.
+jet_cli_perf_topdown_events: fn(table: Int) -> [String] Never! {
+    if table == JET_CLI_PERF_TOPDOWN_GOLDEN_COVE {
+        return [String]{"topdown.slots_p", "idq_bubbles.core", "topdown.bad_spec_slots", "topdown.backend_bound_slots", "uops_retired.slots", "idq_bubbles.cycles_0_uops_deliv.core", "topdown.br_mispredict_slots", "topdown.memory_bound_slots", "uops_retired.heavy"}
+    }
+    if table == JET_CLI_PERF_TOPDOWN_GRACEMONT {
+        return [String]{"cpu_clk_unhalted.core_p", "topdown_fe_bound.all", "topdown_bad_speculation.all", "topdown_be_bound.all", "topdown_retiring.all", "topdown_fe_bound.frontend_latency", "topdown_bad_speculation.mispredict", "topdown_be_bound.alloc_restrictions", "uops_retired.ms"}
+    }
+    [String]{"ls_not_halted_cyc", "de_no_dispatch_per_slot.no_ops_from_frontend", "de_no_dispatch_per_slot.backend_stalls", "de_no_dispatch_per_slot.smt_contention", "de_src_op_disp.all", "ex_ret_ops", "de_no_dispatch_per_slot.no_ops_from_frontend:cmask={jet_cli_perf_topdown_width(table)}", "ex_ret_brn_misp", "resyncs_or_nc_redirects", "ex_no_retire.load_not_complete", "ex_no_retire.not_complete", "ex_ret_ucode_ops"}
+}
+
+// The formulas of `table` over its events, the ones the split applies.
+jet_cli_perf_topdown_formulas: fn(table: Int) -> CanonicalJSON Never! {
+    width: jet_cli_perf_topdown_width(table)
+    texts: if table == {
+        JET_CLI_PERF_TOPDOWN_GOLDEN_COVE -> [String]{"topdown.backend_bound_slots / slots", "topdown.bad_spec_slots / slots", "topdown.br_mispredict_slots / slots", "backend_bound - memory_bound", "frontend_bound - frontend_latency", "idq_bubbles.core / slots", "{width} * idq_bubbles.cycles_0_uops_deliv.core / slots", "uops_retired.heavy / slots", "retiring - heavy_operations", "bad_speculation - branch_mispredicts", "topdown.memory_bound_slots / slots", "uops_retired.slots / slots", "topdown.slots_p", ""}
+        JET_CLI_PERF_TOPDOWN_GRACEMONT -> [String]{"topdown_be_bound.all / slots", "topdown_bad_speculation.all / slots", "topdown_bad_speculation.mispredict / slots", "topdown_be_bound.alloc_restrictions / slots", "frontend_bound - frontend_latency", "topdown_fe_bound.all / slots", "topdown_fe_bound.frontend_latency / slots", "uops_retired.ms / slots", "retiring - heavy_operations", "bad_speculation - branch_mispredicts", "backend_bound - core_bound", "topdown_retiring.all / slots", "{width} * cpu_clk_unhalted.core_p", ""}
+        else -> [String]{"de_no_dispatch_per_slot.backend_stalls / slots", "(de_src_op_disp.all - ex_ret_ops) / slots", "bad_speculation * ex_ret_brn_misp / (ex_ret_brn_misp + resyncs_or_nc_redirects)", "backend_bound - memory_bound", "frontend_bound - frontend_latency", "de_no_dispatch_per_slot.no_ops_from_frontend / slots", "{width} * de_no_dispatch_per_slot.no_ops_from_frontend:cmask={width} / slots", "ex_ret_ucode_ops / slots", "retiring - heavy_operations", "bad_speculation - branch_mispredicts", "backend_bound * ex_no_retire.load_not_complete / ex_no_retire.not_complete", "ex_ret_ops / slots", "{width} * ls_not_halted_cyc", "de_no_dispatch_per_slot.smt_contention / slots"}
+    }
+    fields := [CanonicalJSONField]{}
+    loop (index, text) in texts.move() {
+        fields.push(CanonicalJSONField{key: jet_cli_perf_topdown_formula_key(index), value: if text == "" -> CanonicalJSON.Null else -> CanonicalJSON.String(text)})
+    }
+    CanonicalJSON.Object(fields)
+}
+
+// The key of formula `index` (jet_cli_perf_topdown_formulas), in key order.
+jet_cli_perf_topdown_formula_key: fn(index: Int) -> String Never! {
+    if index == {
+        0 -> "backend_bound"
+        1 -> "bad_speculation"
+        2 -> "branch_mispredicts"
+        3 -> "core_bound"
+        4 -> "frontend_bandwidth"
+        5 -> "frontend_bound"
+        6 -> "frontend_latency"
+        7 -> "heavy_operations"
+        8 -> "light_operations"
+        9 -> "machine_clears"
+        10 -> "memory_bound"
+        11 -> "retiring"
+        12 -> "slots"
+        else -> "smt_contention"
+    }
+}
+
+// `part` of `whole` in hundredths of a percent, from 0 to 10000.
+jet_cli_perf_topdown_share: fn(part: Int, whole: Int) -> Int Never! {
+    if whole <= 0 || part <= 0 -> return 0
+    share: part * 10000 /% whole
+    if share > 10000 -> 10000 else -> share
+}
+
+jet_cli_perf_topdown_least: fn(left: Int, right: Int) -> Int Never! {
+    if left < right -> left else -> right
+}
+
+// The top-down split of `table`'s event counts `events`, each entry at its
+// JET_CLI_PERF_TOPDOWN_* index in hundredths of a percent of the slots,
+// smt contention -1 where the table has none, and the slots last; None
+// when the counts hold no slot.
+jet_cli_perf_topdown_split: fn(table: Int, events: [Int]) -> [Int]? Never! {
+    width: jet_cli_perf_topdown_width(table)
+    zen: table == JET_CLI_PERF_TOPDOWN_ZEN4 || table == JET_CLI_PERF_TOPDOWN_ZEN5
+    cove: table == JET_CLI_PERF_TOPDOWN_GOLDEN_COVE
+    slots: if cove -> events[0] else -> width * events[0]
+    if slots <= 0 -> return None
+    frontend: jet_cli_perf_topdown_share(events[1], slots)
+    backend: jet_cli_perf_topdown_share(if zen -> events[2] else -> events[3], slots)
+    bad: jet_cli_perf_topdown_share(if zen -> events[4] - events[5] else -> events[2], slots)
+    retiring: jet_cli_perf_topdown_share(if zen -> events[5] else -> events[4], slots)
+    smt: if zen -> jet_cli_perf_topdown_share(events[3], slots) else -> -1
+    stalled: if {
+        zen -> width * events[6]
+        cove -> width * events[5]
+        else -> events[5]
+    }
+    latency: jet_cli_perf_topdown_least(jet_cli_perf_topdown_share(stalled, slots), frontend)
+    restarts: events[7] + events[8]
+    mispredicts: if zen -> (if restarts > 0 -> bad * events[7] /% restarts else -> 0) else -> jet_cli_perf_topdown_least(jet_cli_perf_topdown_share(events[6], slots), bad)
+    waits: if zen -> (if events[10] > 0 -> jet_cli_perf_topdown_least(backend * events[9] /% events[10], backend) else -> 0) else -> jet_cli_perf_topdown_least(jet_cli_perf_topdown_share(events[7], slots), backend)
+    // Gracemont's event is the core-bound part, the allocation
+    // restrictions; the rest of its back end waits on resources.
+    memory: if zen || cove -> waits else -> backend - waits
+    heavy: jet_cli_perf_topdown_least(jet_cli_perf_topdown_share(if zen -> events[11] else -> events[8], slots), retiring)
+    Val([Int]{retiring, bad, frontend, backend, smt, retiring - heavy, heavy, mispredicts, bad - mispredicts, latency, frontend - latency, memory, backend - memory, slots})
+}
+
+// The split's fields and `extra`'s, sorted by key.
+jet_cli_perf_topdown_split_fields: fn(split: [Int], extra: &&[CanonicalJSONField]) -> CanonicalJSON Never! {
+    fields := [CanonicalJSONField]{
+        {key: "backend_bound", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_BACKEND]}")},
+        {key: "bad_speculation", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_BAD]}")},
+        {key: "branch_mispredicts", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_MISPREDICTS]}")},
+        {key: "core_bound", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_CORE]}")},
+        {key: "frontend_bandwidth", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_BANDWIDTH]}")},
+        {key: "frontend_bound", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_FRONTEND]}")},
+        {key: "frontend_latency", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_LATENCY]}")},
+        {key: "heavy_operations", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_HEAVY]}")},
+        {key: "light_operations", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_LIGHT]}")},
+        {key: "machine_clears", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_CLEARS]}")},
+        {key: "memory_bound", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_MEMORY]}")},
+        {key: "retiring", value: CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_RETIRING]}")},
+        {key: "smt_contention", value: if split[JET_CLI_PERF_TOPDOWN_SMT] < 0 -> CanonicalJSON.Null else -> CanonicalJSON.Integer("{split[JET_CLI_PERF_TOPDOWN_SMT]}")},
+    }
+    loop field in extra.move() -> fields.push(field)
+    fields.sort_by(fn(left: CanonicalJSONField, right: CanonicalJSONField) { left.key <=> right.key })
+    CanonicalJSON.Object(fields)
+}
+
+// One core type's object: its events as opened and counted, its formulas,
+// the run's split and its lines' and functions', the most slots first, each
+// with its share of the run's slots (`time`).
+jet_cli_perf_topdown_core: fn(core: JetCLIPerfTopdownCore, words: [U8], count: Int, sampled: JetCLIPerfSamples?) -> JetCLIPerfTopdownBuilt Never! {
+    names: jet_cli_perf_topdown_events(core.table)
+    listed: names.len()
+    counted: 40 + count * 32 + count * 24 <= words.len()
+    events := [CanonicalJSON]{}
+    periods := [Int]{}
+    scales := [Int]{}
+    totals := [Int]{}
+    refused := ""
+    loop (index, name) in names.move() {
+        at: 40 + (core.first + index) * 32
+        if at + 32 > words.len() {
+            if refused == "" -> refused = "the program listed no {name} event"
+            next
+        }
+        pmu: link_debug_addr(words, at)
+        config: link_debug_addr(words, at + 8)
+        period: link_debug_addr(words, at + 16)
+        errno: link_debug_addr(words, at + 24)
+        if (errno != 0 || period <= 0) && refused == "" {
+            refused = "the kernel refused {name} (errno {errno})"
+        }
+        tally: 40 + count * 32 + (core.first + index) * 24
+        value: if counted -> link_debug_addr(words, tally) else -> 0
+        enabled: if counted -> link_debug_addr(words, tally + 8) else -> 0
+        running: if counted -> link_debug_addr(words, tally + 16) else -> 0
+        // Multiplexed with others, an event counts only while it runs:
+        // its count scales by the time it was enabled over that time, in
+        // thousandths.
+        scale: if running > 0 -> enabled * 1000 /% running else -> 0
+        taken := 0
+        if sampled == .Val(found) {
+            loop line in found.lines {
+                if line.own && core.first + index < line.topdown.len() {
+                    taken += line.topdown[core.first + index]
+                }
+            }
+        }
+        periods.push(period)
+        scales.push(scale)
+        totals.push(value * scale /% 1000)
+        events.push(
+            CanonicalJSON.Object(
+                [CanonicalJSONField]{
+                    {key: "config", value: CanonicalJSON.Integer("{config}")},
+                    {key: "count", value: if counted && errno == 0 -> CanonicalJSON.Integer("{value}") else -> CanonicalJSON.Null},
+                    {key: "enabled_ns", value: if counted && errno == 0 -> CanonicalJSON.Integer("{enabled}") else -> CanonicalJSON.Null},
+                    {key: "errno", value: if errno == 0 -> CanonicalJSON.Null else -> CanonicalJSON.Integer("{errno}")},
+                    {key: "name", value: CanonicalJSON.String(name)},
+                    {key: "period", value: if period > 0 -> CanonicalJSON.Integer("{period}") else -> CanonicalJSON.Null},
+                    {key: "pmu_type", value: CanonicalJSON.Integer("{pmu}")},
+                    {key: "running_ns", value: if counted && errno == 0 -> CanonicalJSON.Integer("{running}") else -> CanonicalJSON.Null},
+                    {key: "samples", value: CanonicalJSON.Integer("{taken}")},
+                },
+            ),
+        )
+    }
+    if refused == "" && !counted {
+        refused = "the program ended before its counts were read, as a killed program does"
+    }
+    run: if refused == "" -> jet_cli_perf_topdown_split(core.table, totals) else -> None
+    if refused == "" && run == None -> refused = "the program's thread never ran on these cores"
+    captured: refused == ""
+    lines := [CanonicalJSON]{}
+    functions := [CanonicalJSON]{}
+    run_value := CanonicalJSON.Null
+    if run == .Val(whole) {
+        run_value = jet_cli_perf_topdown_split_fields(whole, [CanonicalJSONField]{})
+        rows := [JetCLIPerfTopdownRow]{}
+        if sampled == .Val(found) {
+            loop line in found.lines {
+                if !line.own -> next
+                estimates := [Int]{}
+                held := false
+                loop index in 0..<listed {
+                    at: core.first + index
+                    taken: if at < line.topdown.len() -> line.topdown[at] else -> 0
+                    if taken > 0 -> held = true
+                    estimates.push(taken * periods[index] * scales[index] /% 1000)
+                }
+                if !held -> next
+                first: core.first
+                samples: if first < line.topdown.len() -> line.topdown[first] else -> 0
+                rows.push(JetCLIPerfTopdownRow{function: line.name.copy(), line: line.line, events: estimates, samples: samples})  // copy: the samples keep their lines.
+            }
+        }
+        grouped := [JetCLIPerfTopdownRow]{}
+        loop row in rows {
+            found := -1
+            loop (index, group) in grouped {
+                if group.function == row.function {
+                    found = index
+                    break
+                }
+            }
+            if found < 0 {
+                found = grouped.len()
+                grouped.push(JetCLIPerfTopdownRow{function: row.function.copy(), line: 0, events: loop _ in row.events -> 0, samples: 0})  // copy: the line's row keeps its function.
+            }
+            loop (index, estimate) in row.events {
+                grouped[found].events[index] = grouped[found].events[index] + estimate
+            }
+            grouped[found].samples = grouped[found].samples + row.samples
+        }
+        lines = jet_cli_perf_topdown_rows(core.table, rows, whole[JET_CLI_PERF_TOPDOWN_SLOTS])
+        functions = jet_cli_perf_topdown_rows(core.table, grouped, whole[JET_CLI_PERF_TOPDOWN_SLOTS])
+    }
+    value: CanonicalJSON.Object(
+        [CanonicalJSONField]{
+            {key: "core", value: CanonicalJSON.String(jet_cli_perf_topdown_core_name(core.table))},
+            {key: "events", value: CanonicalJSON.Array(events)},
+            {key: "formulas", value: jet_cli_perf_topdown_formulas(core.table)},
+            {key: "functions", value: CanonicalJSON.Array(functions)},
+            {key: "label", value: CanonicalJSON.String(core.label.copy())},  // copy: the caller keeps its core.
+            {key: "lines", value: CanonicalJSON.Array(lines)},
+            {key: "reason", value: if captured -> CanonicalJSON.Null else -> CanonicalJSON.String(refused.copy())},  // copy: the section takes the reason too.
+            {key: "run", value: run_value},
+            {key: "slot_width", value: CanonicalJSON.Integer("{jet_cli_perf_topdown_width(core.table)}")},
+            {key: "status", value: CanonicalJSON.String(if captured -> "captured" else -> "unavailable")},
+        },
+    )
+    JetCLIPerfTopdownBuilt{reason: refused, value: value}
+}
+
+// `rows`' objects, the most slots first, at most JET_CLI_PERF_TOPDOWN_ROWS:
+// each one's split of its estimated events, its share of the run's
+// `slots`, the samples of its slots event and whether those are too few;
+// with its line for a line's row.
+jet_cli_perf_topdown_rows: fn(table: Int, rows: [JetCLIPerfTopdownRow], slots: Int) -> [CanonicalJSON] Never! {
+    splits := [[Int]]{}
+    kept := [Int]{}
+    loop (index, row) in rows {
+        if jet_cli_perf_topdown_split(table, row.events) == .Val(split) {
+            splits.push(split)
+            kept.push(index)
+        }
+    }
+    order := loop index in 0..<kept.len() -> index
+    order.sort_by(fn(left: Int, right: Int) { (splits[right][JET_CLI_PERF_TOPDOWN_SLOTS] <=> splits[left][JET_CLI_PERF_TOPDOWN_SLOTS]).then(rows[kept[left]].function <=> rows[kept[right]].function).then(rows[kept[left]].line <=> rows[kept[right]].line) })
+    out := [CanonicalJSON]{}
+    loop at in order {
+        if out.len() >= JET_CLI_PERF_TOPDOWN_ROWS -> break
+        held: kept[at]
+        extra := [CanonicalJSONField]{
+            {key: "function", value: CanonicalJSON.String(rows[held].function.copy())},  // copy: the caller keeps its rows.
+            {key: "low_confidence", value: CanonicalJSON.Bool(rows[held].samples < JET_CLI_PERF_TOPDOWN_FLOOR)},
+            {key: "samples", value: CanonicalJSON.Integer("{rows[held].samples}")},
+            {key: "time", value: CanonicalJSON.Integer("{jet_cli_perf_topdown_share(splits[at][JET_CLI_PERF_TOPDOWN_SLOTS], slots)}")},
+        }
+        if rows[held].line > 0 {
+            extra.push(CanonicalJSONField{key: "line", value: CanonicalJSON.Integer("{rows[held].line}")})
+        }
+        out.push(jet_cli_perf_topdown_split_fields(splits[at], extra.move()))
+    }
+    out
+}
+
+// The view of the trace's `topdown` receipt section: for each core type
+// the lens captured, its functions and then its lines, the most time
+// first, at level 1 (`Why hot lines are slow (<CPU>, level 1)`), then those
+// lines at level 2, a row with too few samples marked `~`; or `topdown
+// unavailable: <reason>`. Empty for a trace without the section.
+jet_cli_perf_topdown_lines: fn(trace: CanonicalJSON) -> [String] Never! {
+    items: jet_cli_perf_rows(trace, "receipt_sections") ?? return [String]{}
+    out := [String]{}
+    loop item in items {
+        section: trace_receipt_section_from_json(item) ?? next
+        if section.name != "topdown" -> next
+        status: jet_cli_perf_member_text(section.value, "status") ?? ""
+        if status != "captured" {
+            out.push("topdown unavailable: {jet_cli_perf_member_text(section.value, "reason") ?? "the trace names no reason"}")
+            next
+        }
+        path: jet_cli_perf_member_text(section.value, "path") ?? ""
+        file: perf_files.basename(path)
+        fields: jettrace_object_view(section.value, "receipt topdown") ?? next
+        at: jet_cli_perf_key(fields, "cores") ?? next
+        cores: jettrace_array(fields[at].value, "receipt topdown.cores") ?? next
+        low := false
+        loop core in cores {
+            label: jet_cli_perf_member_text(core, "label") ?? "this CPU"
+            if (jet_cli_perf_member_text(core, "status") ?? "") != "captured" {
+                out.push("topdown on {label} unavailable: {jet_cli_perf_member_text(core, "reason") ?? "the trace names no reason"}")
+                next
+            }
+            members: jettrace_object_view(core, "receipt topdown core") ?? next
+            loop (heading, key) in ([String]{"functions", "lines"}) {
+                slot: jet_cli_perf_key(members, key) ?? next
+                rows: jettrace_array(members[slot].value, "receipt topdown core.{key}") ?? next
+                out.push("Why hot {key} are slow ({label}, level 1)")
+                out.push("  {jet_cli_pad(if heading == 0 -> "function" else -> "line", 24)}{jet_cli_perf_topdown_cells([String]{"time", "retiring", "bad spec", "front end", "back end"})}")
+                loop (index, row) in rows {
+                    if index >= JET_CLI_PERF_TOPDOWN_SHOWN -> break
+                    name: jet_cli_perf_topdown_row_name(row, file)
+                    if name.ends_with("~") -> low = true
+                    out.push("  {jet_cli_pad(name, 24)}{jet_cli_perf_topdown_cells(jet_cli_perf_topdown_percents(row, [String]{"time", "retiring", "bad_speculation", "frontend_bound", "backend_bound"}))}")
+                }
+                if heading == 1 {
+                    out.push("Level 2 of those lines ({label})")
+                    out.push("  {jet_cli_pad("line", 24)}{jet_cli_perf_topdown_cells([String]{"light", "heavy", "mispredict", "clears", "fe latency", "fe bandwidth", "memory", "core"})}")
+                    loop (index, row) in rows {
+                        if index >= JET_CLI_PERF_TOPDOWN_SHOWN -> break
+                        out.push("  {jet_cli_pad(jet_cli_perf_topdown_row_name(row, file), 24)}{jet_cli_perf_topdown_cells(jet_cli_perf_topdown_percents(row, [String]{"light_operations", "heavy_operations", "branch_mispredicts", "machine_clears", "frontend_latency", "frontend_bandwidth", "memory_bound", "core_bound"}))}")
+                    }
+                }
+            }
+        }
+        if low {
+            out.push("~ fewer than {JET_CLI_PERF_TOPDOWN_FLOOR} samples of slots: low confidence")
+        }
+    }
+    out
+}
+
+// A row's name: `<file>:<line>` for a line's, else its function; `~`
+// after it when its samples are too few.
+jet_cli_perf_topdown_row_name: fn(row: CanonicalJSON, file: String) -> String Never! {
+    line: jet_cli_perf_member_number(row, "line") ?? 0
+    name: if line > 0 -> "{file}:{line}" else -> jet_cli_perf_member_text(row, "function") ?? ""
+    fields: jettrace_object_view(row, "receipt topdown row") ?? return name
+    at: jet_cli_perf_key(fields, "low_confidence") ?? return name
+    if fields[at].value == .Bool(true) -> return "{name}~"
+    name
+}
+
+// The row's `keys`, each a whole percent of its hundredths.
+jet_cli_perf_topdown_percents: fn(row: CanonicalJSON, keys: [String]) -> [String] Never! {
+    loop key in keys -> "{((jet_cli_perf_member_number(row, key) ?? 0) + 50) /% 100}%"
+}
+
+// `cells`, each right-aligned in 13 characters.
+jet_cli_perf_topdown_cells: fn(cells: [String]) -> String Never! {
+    out := ""
+    loop cell in cells {
+        pad: if cell.len() < 13 -> 13 - cell.len() else -> 0
+        out = "{out}{" ".repeat(pad)}{cell}"
+    }
+    out
+}
