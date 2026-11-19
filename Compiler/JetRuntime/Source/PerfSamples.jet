@@ -248,6 +248,15 @@ perf_samples_interval_us := PERF_SAMPLES_INTERVAL_US
 // The log spans file, `<samples>.spans`, -1 unless the start opened it.
 perf_spans_fd := I64{-1}
 
+// Nonzero while zones are recorded: a compiled zone site (JetIR
+// X64Select.jet ir_x64_zone_site) tests it through the runtime's data symbol
+// jet_rt_perf_zones and calls jet_perf_zone_open and _close only then.
+perf_zones_on := I64{0}
+
+// The rows not yet written to the spans file (perf_zone_row), 0 until the
+// start opens the file.
+perf_spans_buffer := I64{0}
+
 // Start sampling once per process: into the file JET_PERF_SAMPLES names,
 // or, when it is unset, into the flight recorder's ring (perf_flight_open),
 // CPU time alone at PERF_FLIGHT_INTERVAL_US.
@@ -440,8 +449,10 @@ perf_samples_process_cpu_ns: fn() -> I64 {
 // sampling started, the time every handler ran (perf_samples_charge) and
 // the kernel's time for one signal (perf_samples_delivery), each in
 // nanoseconds. A second exit writes a later one. Under the alloc lens the
-// heap snapshot named `exit` comes first (perf_samples_heap).
+// heap snapshot named `exit` comes first (perf_samples_heap). The spans
+// buffer's rows are written out first (perf_spans_flush).
 perf_samples_exit: fn() {
+    perf_spans_flush()
     fd: perf_samples_fd
     if (fd < I64{0}) {
         return
@@ -461,6 +472,120 @@ perf_samples_exit: fn() {
 // core.perf.heap_mark(name): the heap snapshot named by the borrowed text
 // `name` under `jet perf run --lens=alloc`, nothing otherwise.
 #Export(c) jet_perf_heap_mark: fn(name: I64) { perf_samples_heap(name) }
+
+// What a row of the spans file (perf_spans_fd) is, in the high half of its
+// length word (perf_zone_row): a closed core.log span, a closed
+// core.perf.zone, a frame mark or a plotted value.
+PERF_ZONE_LOG: I64{0}
+
+PERF_ZONE_ZONE: I64{1}
+
+PERF_ZONE_FRAME: I64{2}
+
+PERF_ZONE_PLOT: I64{3}
+
+// core.perf.zone(name): the zone's start on the monotonic clock under `jet
+// perf run`, 0 otherwise. A native zone site calls it only while
+// perf_zones_on is set, so a zone outside a run costs its site's test.
+#Export(c) jet_perf_zone_open: fn() -> I64 {
+    jet_int_owned_from_i64(if (perf_spans_fd < I64{0}) -> I64{0} else -> time_host_monotonic_i64())
+}
+
+// The close of the zone named by the borrowed text `name` that opened at
+// `start` (jet_perf_zone_open): its row, from `start` to now.
+#Export(c) jet_perf_zone_close: fn(name: I64, start: I64) {
+    began: host_native_int(start)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
+    if (began == I64{0} || perf_zones_on == I64{0}) {
+        return
+    }
+    perf_zone_row(PERF_ZONE_ZONE, began, time_host_monotonic_i64(), name)
+}
+
+// core.perf.frame(): a frame mark at now, under `jet perf run`.
+#Export(c) jet_perf_frame: fn() {
+    if (perf_spans_fd < I64{0}) {
+        return
+    }
+    now: time_host_monotonic_i64()
+    perf_zone_row(PERF_ZONE_FRAME, now, now, rt_static_text("frame"))
+}
+
+// core.perf.plot(name, value): the value whose float bits are `bits`, at
+// now, on the plot named by the borrowed text `name`, under `jet perf run`.
+#Export(c) jet_perf_plot: fn(name: I64, bits: I64) {
+    value: host_native_int(bits)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        return
+    }
+    if (perf_spans_fd < I64{0}) {
+        return
+    }
+    perf_zone_row(PERF_ZONE_PLOT, time_host_monotonic_i64(), value, name)
+}
+
+// One row of the spans file, the one timeline that log spans, zones, frame
+// marks and plots share: `start`, `end` (a plot's value bits), the
+// current task (0 outside every task), the byte length of the text `name`
+// with `kind` (PERF_ZONE_LOG and the others) from bit 32, each a
+// little-endian word, then the name. Rows gather in the spans buffer
+// (perf_spans_buffer), written out when it fills and at exit
+// (perf_spans_flush), so a recorded zone costs a copy, not a write; a row
+// larger than the buffer is written alone.
+perf_zone_row: fn(kind: I64, start: I64, end: I64, name: I64) {
+    length: rt_text_len(name)
+    size: I64{32} + length
+    task: if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task()
+    buffer: perf_spans_buffer
+    if (buffer == I64{0} || size > PERF_SPANS_BUFFER_BYTES) {
+        row: jet_rt_alloc(size, I64{8})
+        perf_zone_row_store(row, kind, start, end, task, name, length)
+        _ := host_write_all(perf_spans_fd, row, size)
+        jet_rt_free(row, size, I64{8})
+        return
+    }
+    sync_thread_lock(buffer)
+    used := rt_text_word(wrapping(buffer + I64{8}))
+    if (used + size > PERF_SPANS_BUFFER_BYTES) {
+        _ := host_write_all(perf_spans_fd, wrapping(buffer + PERF_SPANS_HEADER_BYTES), used)
+        used = I64{0}
+    }
+    perf_zone_row_store(wrapping(wrapping(buffer + PERF_SPANS_HEADER_BYTES) + used), kind, start, end, task, name, length)
+    rt_text_store(wrapping(buffer + I64{8}), used + size)
+    sync_thread_unlock(buffer)
+}
+
+perf_zone_row_store: fn(row: I64, kind: I64, start: I64, end: I64, task: I64, name: I64, length: I64) {
+    rt_text_store(row, start)
+    rt_text_store(wrapping(row + I64{8}), end)
+    rt_text_store(wrapping(row + I64{16}), task)
+    rt_text_store(wrapping(row + I64{24}), length | (kind << I64{32}))
+    coll_copy(rt_text_data(name), wrapping(row + I64{32}), length)
+}
+
+// The spans buffer's bytes for rows, and its header: the lock word, then
+// the bytes used.
+PERF_SPANS_BUFFER_BYTES: I64{65536}
+
+PERF_SPANS_HEADER_BYTES: I64{16}
+
+// Write out the rows the spans buffer holds (perf_zone_row); at exit
+// (perf_samples_exit) and before the samples' last record.
+perf_spans_flush: fn() {
+    buffer: perf_spans_buffer
+    if (buffer == I64{0} || perf_spans_fd < I64{0}) {
+        return
+    }
+    sync_thread_lock(buffer)
+    used: rt_text_word(wrapping(buffer + I64{8}))
+    if (used > I64{0}) {
+        _ := host_write_all(perf_spans_fd, wrapping(buffer + PERF_SPANS_HEADER_BYTES), used)
+        rt_text_store(wrapping(buffer + I64{8}), I64{0})
+    }
+    sync_thread_unlock(buffer)
+}
 
 // The heap snapshot named by text `name`, under the alloc lens: the live
 // list held (Alloc.jet alloc_check_track_hold) across a fork, whose child
@@ -1004,14 +1129,20 @@ perf_samples_open_beside: fn(samples: I64, suffix: I64) -> I64 {
     fd
 }
 
-// Keep `<samples>.spans` for the closed log spans' rows; a file that cannot
-// be opened (-1) leaves the spans without rows, as before.
+// Keep `<samples>.spans` for the closed log spans' rows, with its buffer
+// (perf_zone_row); a file that cannot be opened (-1) leaves the spans
+// without rows, as before.
 perf_spans_fd_set: fn(fd: I64) {
     if (fd < I64{0}) {
         return
     }
+    buffer: jet_rt_alloc(PERF_SPANS_HEADER_BYTES + PERF_SPANS_BUFFER_BYTES, I64{8})
+    rt_text_store(buffer, I64{0})
+    rt_text_store(wrapping(buffer + I64{8}), I64{0})
     #Unsafe("the observation start runs before the entry, whose span closes read it") {
+        perf_spans_buffer = buffer
         perf_spans_fd = fd
+        perf_zones_on = I64{1}
     }
 }
 
