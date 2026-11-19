@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112448,
+    "rev": 112449,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -75083,6 +75083,15 @@
           "verifiedBy": null,
           "evidence": "p324 batch compiler (dev 6dda4bf451, IfHole c68-default-8khz landed): Perf/task_clock_keeps_eight_khz PASS (receipt source perf_event task-clock, rate 8000 Hz, kept share >= 90% for four fib tasks at -O2) and Perf/timer_fallback PASS (forced timer path, receipt states the CONFIG_HZ cap and its reason). Overhead at the 8 kHz default, m68 harness ($JET_SCRATCH_ROOT/lanes/IfHole-6-1/m68/m68.sh, 38 runs x 5): 1894 samples, handler 331 ns + delivery 1753 ns = 2080 ns per sample, measured overhead 1.24% (cost projection 1.66%), under the c44(d) 2% bar. Perf/receipt_reports_measured_overhead failed once in the p324 full suite under load and passes alone twice on p324 (known load flake).",
           "at": "2026-11-19T16:05:50.822Z"
+        },
+        {
+          "n": 69,
+          "text": "The three JetPerfTraceParts capture cases pass: perf_run_captures_wall_and_alloc_into_jettrace (honesty.jet:150, the span never reaches \"status\":\"captured\"), perf_run_keeps_completed_socket_echo_io_span (the socket echo trace has no completed I/O span: \"JSON filter selected no values\") and perf_attach_captures_wall_and_alloc_with_jet_symbol_from_observe (observe_ready.jet:23, the observe snapshot is never readable with allocs, a child, contention and I/O within 5 s). They fail on every batch compiler from p328 to p330 and in the c39 pass on p330. Proof: `jet test Compiler --profile cases --filter JetPerfTraceParts` reports 0 FAIL.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T20:25:33.805Z"
         }
       ],
       "refs": [],
@@ -75090,9 +75099,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T20:25:14.218Z",
-      "updatedBy": "Main",
-      "criteriaLastN": 68
+      "updated": "2026-11-19T20:25:33.805Z",
+      "updatedBy": "agent",
+      "criteriaLastN": 69
     },
     {
       "id": "c0in2dft",
@@ -159197,6 +159206,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T20:25:33.806Z",
+      "by": "agent",
+      "action": "card.over-limit",
+      "ref": "c0nwrfck",
+      "note": "69 criteria, soft limit 6: profiler capture defects found by the c39 pass; P1/P3 evidence for c39"
+    },
+    {
+      "at": "2026-11-19T20:25:33.805Z",
+      "by": "agent",
+      "action": "card.criteria-add",
+      "ref": "c0nwrfck",
+      "note": "#69 The three JetPerfTraceParts capture cases pass: perf_run_cap"
+    },
     {
       "at": "2026-11-19T20:25:14.218Z",
       "by": "Main",
