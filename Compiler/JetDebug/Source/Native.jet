@@ -2902,7 +2902,7 @@ native_debug_variant: fn(image: NativeImage, memory: NativeMemory, part: NativeV
         return native_render(image, memory, chosen.ty, bytes, at + chosen.offset, depth)
     }
     payload: image.types.get(chosen.ty) ?? return None
-    shown: native_jet_spelling(chosen.name)
+    shown: native_variant_spelling(chosen.name)
     if payload.group < 0 || image.members[payload.group].len() == 0 -> return Val(shown)
     fields: native_debug_fields(image, memory, image.members[payload.group], bytes, at + chosen.offset, depth + 1) ?? return None
     positional: loop member in image.members[payload.group] {
@@ -2912,6 +2912,21 @@ native_debug_variant: fn(image: NativeImage, memory: NativeMemory, part: NativeV
     } ?? true
     if positional -> return Val("{shown}({fields.join(", ")})")
     Val("{shown}{{{fields.join(", ")}}}")
+}
+
+// Variant `name` as Jet spells it: its type's name without module paths
+// (native_jet_spelling), `.` and the variant's own name (`Shape.Rect`); a
+// name with no type, such as `Ok` or `None`, alone.
+native_variant_spelling: fn(name: String) -> String Never! {
+    cut: name.rpartition(".")
+    if cut.sep == "" -> return native_jet_spelling(name)
+    "{native_jet_spelling(cut.head)}.{cut.tail}"
+}
+
+#Test("a variant keeps its type's name and drops the module path") {
+    assert_eq(native_variant_spelling("Shape.Rect"), "Shape.Rect")
+    assert_eq(native_variant_spelling("module:3:app:src/prog.jet.Shape.Rect"), "Shape.Rect")
+    assert_eq(native_variant_spelling("Ok"), "Ok")
 }
 
 // A List whose inline header [len, cap, data] starts at `at` in `bytes`: its
