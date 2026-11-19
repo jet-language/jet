@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112418,
+    "rev": 112425,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -43,7 +43,7 @@
         "board-ideas"
       ]
     },
-    "completionCursor": "2026-11-18T07:53:28.091Z",
+    "completionCursor": "2026-11-19T17:25:16.634Z",
     "dayStart": {
       "date": "2026-11-19",
       "openCards": 323,
@@ -74730,6 +74730,11 @@
       "assignee": null,
       "log": [
         {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "Flake noted: Compile/E3012_comptime_stack_overflow failed in the p324 suite and passed in p325 with no change to its inputs; it depends on the environment (stack limit). Watch it in later suites."
+        },
+        {
           "at": "2026-11-16",
           "by": "Main",
           "text": "c42 status: its check half landed in p210 (c1fca7426c). p210 runs probes w03b, w03c and y01 as E0212 on O0, O1 and O2 (D-PRIM-ANY1 review 10). The 'not silently copied' half stays with c46, so c42 is met only if its proof is the E0212 snapshot alone."
@@ -75288,6 +75293,24 @@
           "verifiedBy": null,
           "evidence": "",
           "at": "2026-11-16T08:52:22.012Z"
+        },
+        {
+          "n": 59,
+          "text": "The JetCLI unit tests pass: on batch compiler p325 (dev e6ddae4d43), jet test Compiler/JetCLI gives 168 passed, 22 failed, none of which any per-cycle suite ran until now. Failing: public API and semver (pap_api, PublicAPIPorts.jet:43): capability_sigil_frozen_in_public_api, cli_typed_default_is_not_frozen_as_positional, physical_unit_api_freeze_and_semver_share_one_canonical_signature, soft_public_names_are_not_semver_promises, inferred_public_effect_drift_is_breaking, written_caps_are_public_api_rows, v2_snapshot_upgrade_matches_duplicate_inline_leaves, public_effect_metadata_preserves_symbolic_rows, public_trait_effect_contract_drift_is_breaking, physical_unit_trait_methods_use_canonical_dimensions, a_reexport_row_spells_its_target_signature; receipt store (rsp_claim, ReceiptStorePorts.jet:45): content_keys_reuse_without_timestamps_and_invalidate_only_dependents, explicit_check_receipt_tracks_package_workspace_and_generated_authorities, result_payloads_share_one_receipt_codec_and_store; inspect (InspectBuild.jet:49, InspectOutput.jet:18): inspect_build, inspect_build planned fn build, inspect_output; jobs_metadata (JobsMetadata.jet:52); try (Try.jet:75); the settings census (CommandSettings.jet:231); an exported run: fn builds as a library export (RuntimeLibraryFeed.jet:35); fix_recheck_rolls_back (SourceTransaction.jet:80). Proof: jet test Compiler/JetCLI reports 0 failed on the batch compiler, and the landing suite now runs every compiler package s unit tests each cycle, so a new unit failure lands on the cycle that caused it.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T17:40:24.572Z"
+        },
+        {
+          "n": 60,
+          "text": "jet fmt keeps an `#Allow(...)` written on an assignment statement (`#Allow(jet.HiddenCopyInLoop, \"...\") counts[key] = ...`): today it drops the attribute and refuses the file with an internal compiler error (\"would change the syntax tree\"), while an `#Allow` on a loop statement is kept. Found by the #6897 c2 sweep (IfHole-6-1-sweep-check-only-tidy msg). Proof: a fmt case formatting an #Allow on an assignment, a field write and a compound assignment, idempotent and lossless, plus jet fmt --check on the sweep s allowed fixtures.",
+          "status": "open",
+          "metBy": null,
+          "verifiedBy": null,
+          "evidence": "",
+          "at": "2026-11-19T17:44:10.203Z"
         }
       ],
       "refs": [],
@@ -75295,9 +75318,9 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T02:02:00.791Z",
-      "updated": "2026-11-17T01:47:34.594Z",
+      "updated": "2026-11-19T17:44:10.203Z",
       "updatedBy": "Main",
-      "criteriaLastN": 58
+      "criteriaLastN": 60
     },
     {
       "id": "c0nwrfck",
@@ -87147,6 +87170,11 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "Correction to the c10 evidence: the step-over row is Debug/next_ PASS 3/3 (FAIL 0), not 4/4. c11 not met: on gate-p325, jet check Compiler/JetDebug exits 0 but prints 6 warnings (2 BranchArmTable, 2 PositionalBoolParameter trail_note/native_debug_text, MutableNeverReassigned diff, ErrFallbackShadow err), and jet test Compiler/JetDebug passes 24 tests, none of them a DAP test."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "Gap map on p323 (dev f8a0b329ca), from the collect-all suite and source: 82 Debug cases pass, including replay_reverse_steps_back_by_line_call_and_caller, replay_reverse_continue_goes_back_to_a_watch_hit, replay_reverse_over_dap, replay_why_names_the_last_write, watch_stops_at_the_changing_write, fix_swaps_function_in_native_process and every dap_cli_ case but one. Open work: c1 `jet debug --record` is registered unported (CLICommands.jet form \"debug --record\", ported false; recording works through `jet run --record`); c7 JetDebug still hand-parses watch paths (Native.jet native_watch path cut, \"needs a literal index\"), so the compiler-parser rule is not met; c13 five EventObservations cases are KNOWN-FAILING; c8/c10 Debug/dap_cli_launches_and_projects_a_live_target_in_jet_terms fails under suite load on p322 and p323 (passes alone); c2-c6 need their named cases (navigation_watches_fix_) or a mapping to the replay cases checked clause by clause; c11 needs `jet check Compiler/JetDebug` and `jet test Compiler/JetDebug` run on the batch compiler."
         },
         {
@@ -87260,11 +87288,11 @@
         {
           "n": 10,
           "text": "`jet debug prog.jet --break file:line` stops there, prints locals with their types, and steps over and into, and `jet debug --dap` drives the same session from VS Code. Proof: `jet test Compiler --profile cases --filter Debug/break_then_continue_stops_at_breakpoint` and `--filter debug/dap_cli_`. (was #6730 c23)",
-          "status": "open",
-          "metBy": null,
+          "status": "met",
+          "metBy": "Main",
           "verifiedBy": null,
-          "evidence": "",
-          "at": "2026-11-16T13:13:28.280Z"
+          "evidence": "Batch compiler gate-p325 (dev e6ddae4d43), 2026-11-19: jet test Compiler --profile cases --filter Debug/break_then_continue_stops_at_breakpoint PASS 1/1; --filter Debug/dap_cli_ PASS 10/10, FAIL 0 (the criterion spells it debug/dap_cli_, which selects nothing; the case folder is Debug/), including dap_cli_steps_over_and_into_with_typed_variables over the production DAP wire. Every other clause has its own case: --break flag with typed locals, Debug/break_flag_stops_there_and_shows_typed_locals PASS; step into, Debug/step_ PASS 2/2 (step_into_call_and_backtrace, step_stops_at_first_line_with_caret_and_locals); step over, Debug/next_ PASS 4/4.",
+          "at": "2026-11-19T17:34:14.640Z"
         },
         {
           "n": 11,
@@ -87302,7 +87330,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:09:16.617Z",
-      "updated": "2026-11-19T15:20:56.178Z",
+      "updated": "2026-11-19T17:34:22.276Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -92980,7 +93008,13 @@
       "visualMedia": [],
       "blockedBy": [],
       "assignee": null,
-      "log": [],
+      "log": [
+        {
+          "at": "2026-11-19",
+          "by": "Main",
+          "text": "When c8 (lazy lines()) and c9 (views lent to String params and split receivers) land, remove the temporary `#Allow(jet.HiddenCopyInLoop, ...)` that the #6897 c2 sweep put on compiler-owned copies in built targets: Examples/Systems/Process/ProcessExec.jet:30,32 (lines()), Tests/Run/Foundations/Arrays/arrays.jet:159 (split receiver), Tests/Run/Foundations/DSL/rules.jet:61 (view to a String parameter); the sweep SUB lists the final sites. Each removal is part of the proof of c8/c9."
+        }
+      ],
       "criteria": [
         {
           "n": 1,
@@ -93073,7 +93107,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T05:23:48.351Z",
-      "updated": "2026-11-19T17:22:56.019Z",
+      "updated": "2026-11-19T17:27:36.336Z",
       "updatedBy": "Main",
       "criteriaLastN": 9
     },
@@ -161034,6 +161068,69 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T17:44:10.203Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0oe96sn",
+      "note": "59 criteria, soft limit 6: findings of one sweep share one card"
+    },
+    {
+      "at": "2026-11-19T17:44:10.203Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#60 jet fmt keeps an `#Allow(...)` written on an assignment stat"
+    },
+    {
+      "at": "2026-11-19T17:40:28.167Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0oe96sn",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T17:40:24.572Z",
+      "by": "Main",
+      "action": "card.over-limit",
+      "ref": "c0oe96sn",
+      "note": "58 criteria, soft limit 6: findings of one sweep share one card"
+    },
+    {
+      "at": "2026-11-19T17:40:24.572Z",
+      "by": "Main",
+      "action": "card.criteria-add",
+      "ref": "c0oe96sn",
+      "note": "#59 The JetCLI unit tests pass: on batch compiler p325 (dev e6dd"
+    },
+    {
+      "at": "2026-11-19T17:34:22.276Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c06lmp17",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T17:34:14.640Z",
+      "by": "Main",
+      "action": "card.criteria-meet",
+      "ref": "c06lmp17",
+      "note": "#10"
+    },
+    {
+      "at": "2026-11-19T17:27:36.337Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0gwtnue",
+      "note": "logEntry"
+    },
+    {
+      "at": "2026-11-19T17:25:16.635Z",
+      "by": "owner",
+      "action": "done.clear",
+      "ref": null,
+      "note": "2026-11-19T17:25:16.634Z"
+    },
     {
       "at": "2026-11-19T17:23:58.058Z",
       "by": "Main",
