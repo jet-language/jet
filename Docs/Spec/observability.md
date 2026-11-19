@@ -778,6 +778,46 @@ source-level prompt supports:
 These queries use recorded local snapshots. They do not reverse execution, move
 the program through time, or keep a standing per-variable history buffer.
 
+## Sync-order log
+
+A program's run records its synchronization order when `JET_RECORD` names a
+file, and replays it when `JET_REPLAY` names one
+(`Compiler/JetRuntime/Source/RecordReplay.jet`). The log holds sync events in
+one global turn order:
+
+- spawn and join;
+- a Shared read or edit permit, taken or given up;
+- a channel's send, receive, try-receive, close, and endpoint drops;
+- a select's chosen arm;
+- each print and eprint.
+
+It also holds the bytes of each input: a wall or monotonic clock read, an
+entropy fill, an environment value, the program's arguments, and each file,
+pipe, socket, and stdin read. A UDP sender's address, a positioned file read,
+and a connect are not logged yet.
+
+Tasks, Shared values, and channels are named by ids that do not depend on
+timing. The main task is 1. Any other task, Shared value, or channel mixes
+the id of the task that made it with how many things that task made before
+it. The log holds no instruction counts, so a recording made at one tier
+replays at any other tier.
+
+A replaying task waits at each sync event until the log's next turn names it.
+It then checks that its event is the recorded one, and does it. A select takes
+its recorded arm, and an input reads its recorded bytes. The first mismatch,
+or a turn that no task takes for 10 seconds, stops the program with exit 70:
+
+```text
+replay diverged at sync event 7: recorded edit of Shared value 1 by task 2, got send on channel 1 by task 3  main.jet:14
+```
+
+Only a program that links the runtime's observation start records or
+replays. `jet run --record=<name>` links it, runs the program in a child with
+`JET_RECORD` naming a scratch file, and writes the log into
+`.jet/replays/<name>.jetproof-replay` as `RunSync` frames
+(`Docs/Spec/proof-replay-decisions.md`). The artifact is written with mode
+0600 and stays local: its log holds every input's bytes.
+
 ## Implementation homes
 
 - Live scheduler: `Compiler/JetFoundation/Source/Devtools/LiveSnapshot.jet` (codec and transport), viewed by `Compiler/JetCLI/Source/CLI/LiveReport.jet` and `Compiler/JetDevServer/Source/LiveInspect.jet`

@@ -1,0 +1,750 @@
+// Record and replay over the sync order (`jet run --record=NAME`, `jet debug
+// --replay=NAME`). A recording run (JET_RECORD names the file) logs each
+// sync event as it completes: a spawn, a join, a Shared read or edit permit,
+// a channel's send, receive, close or endpoint drop, a select's chosen arm,
+// and a print or eprint. One process-wide turn counter orders them: the
+// event takes the next turn by a fetch-and-add inside the lock that orders
+// it (the Shared value's, the channel's, the output's), so the log's order
+// is an order the run synchronized in. Inputs are events too, carrying
+// their values: a clock read, the entropy bytes, an environment value, the
+// process arguments, and the result and bytes of a file, pipe or socket read.
+//
+// A replaying run (JET_REPLAY names the file) gives each event its turn:
+// a task waits until the log's next turn names it, checks that the event it
+// is at is the recorded one, does it, and passes the turn on. An input
+// event answers the recorded value. No instruction counts are logged, so a
+// recording made at one optimization level replays at any other. An event
+// that is not the recorded one, a program that ends before the log does or
+// a turn that no task takes in REPLAY_STALL_NS stops the program with the
+// first sync event where the run diverged: the recorded event, the one the
+// run got instead, and the line the task was at.
+//
+// Tasks are named by a replay id that does not depend on timing: the main
+// task's is 1; a spawned task's mixes its spawner's id with the count of
+// tasks, Shared values and channels its spawner made before it (Scheduler.jet
+// Control208: replayId192 replayOrdinal200); a Shared value's (Shared.jet
+// Cell104 at 96) and a channel's (Channel.jet State168 at 160) is made the
+// same way. A context with no replay id (a runtime thread, a parallel loop's
+// worker, code before the main task's root) logs and waits for nothing.
+//
+// The file: REPLAY_MAGIC, REPLAY_VERSION, the event count, the data bytes;
+// then each event's four words (task, kind, object, extra); then the data
+// the input events point into (object the length, extra the offset).
+
+REPLAY_OFF: I64{0}
+
+REPLAY_RECORD: I64{1}
+
+REPLAY_REPLAY: I64{2}
+
+// "JETRPLY1" as a little-endian word.
+REPLAY_MAGIC: I64{3555957288648066378}
+
+REPLAY_VERSION: I64{1}
+
+REPLAY_HEADER_BYTES: I64{32}
+
+REPLAY_EVENT_BYTES: I64{32}
+
+// The most events and input bytes one recording holds. An event past
+// either is logged as the recording's end, where its replay diverges.
+REPLAY_EVENTS_MAX: I64{2097152}
+
+REPLAY_DATA_MAX: I64{16777216}
+
+// How long a replay waits for a turn that no task takes: 10s.
+REPLAY_STALL_NS: I64{10000000000}
+
+// A turn wait's re-check period: 100ms.
+REPLAY_POLL_NS: I64{100000000}
+
+// Event kinds: a family in the high bits, an outcome in the low four. A
+// replay compares families, and below REPLAY_SELECT the object too; the
+// recorded outcome tells the replaying operation which way it went. Kind 0
+// is the end: of the recording, or of the replaying run.
+REPLAY_END: I64{0}
+
+REPLAY_SPAWN: I64{16}
+
+REPLAY_JOIN: I64{32}
+
+REPLAY_READ: I64{48}
+
+REPLAY_EDIT: I64{64}
+
+REPLAY_SEND: I64{80}
+
+REPLAY_RECEIVE: I64{96}
+
+REPLAY_TRY_RECEIVE: I64{112}
+
+REPLAY_CLOSE: I64{128}
+
+REPLAY_SENDER_DROP: I64{144}
+
+REPLAY_RECEIVER_DROP: I64{160}
+
+REPLAY_SELECT: I64{176}
+
+REPLAY_PRINT: I64{192}
+
+REPLAY_EPRINT: I64{208}
+
+REPLAY_CLOCK: I64{224}
+
+REPLAY_ENTROPY: I64{240}
+
+REPLAY_ENV: I64{256}
+
+// The process arguments' count, then each argument.
+REPLAY_ARGUMENTS: I64{272}
+
+REPLAY_ARGUMENT: I64{288}
+
+// A file, pipe or socket read: its result, and the bytes it filled.
+REPLAY_INPUT: I64{304}
+
+// The outcome of an operation that did not go through: a permit that timed
+// out, a send refused, a receive that found the channel closed or empty, a
+// replayed select whose arm held no value.
+REPLAY_FAILED: I64{1}
+
+// A select's object: the chosen arm, or one of these.
+REPLAY_SELECT_NONE: I64{-1}
+
+REPLAY_SELECT_CLOSED: I64{-2}
+
+// Off, recording or replaying, set once at the start.
+replay_mode := I64{0}
+
+// State64: turn0, events8, eventCount16 (a replay's), data24, dataUsed32 (a
+// recording's cursor, a replay's length), path40 (a recording's text),
+// stopped48 (the first divergence's claim), exited56.
+replay_root := I64{0}
+
+replay_started := I64{0}
+
+replay_event: fn(turn: I64) -> I64 {
+    wrapping(sync_load(wrapping(replay_root + I64{8})) + turn * REPLAY_EVENT_BYTES)
+}
+
+replay_data: fn() -> I64 { sync_load(wrapping(replay_root + I64{24})) }
+
+// The events a replay has, or a recording logged so far.
+replay_count: fn() -> I64 {
+    if (replay_mode == REPLAY_REPLAY) { return sync_load(wrapping(replay_root + I64{16})) }
+    taken: sync_load(replay_root)
+    if (taken > REPLAY_EVENTS_MAX) -> REPLAY_EVENTS_MAX else -> taken
+}
+
+// True in a replay, where an input's recorded value stands for the host's.
+replay_replaying: fn() -> Bool { replay_mode == REPLAY_REPLAY }
+
+// The run's mode from JET_RECORD or JET_REPLAY, once per process, at the
+// observation start (ObserveLive.jet jet_rt_observe_runtime_start_from_env),
+// with the exit step that writes the recording or checks that the replay
+// reached its end (Observe.jet jet_rt_observe_exit).
+replay_start: fn() {
+    if (replay_started != I64{0}) {
+        return
+    }
+    #Unsafe("the observation start runs on the main thread before any task") {
+        replay_started = I64{1}
+    }
+    record: rt_env_get(env_name_jet_record())
+    if (record != I64{0} && rt_text_len(record) != I64{0}) {
+        replay_record_start(record)
+        return
+    }
+    if (record != I64{0}) { jet_rt_string_drop(record) }
+    replay: rt_env_get(env_name_jet_replay())
+    if (replay != I64{0} && rt_text_len(replay) != I64{0}) {
+        replay_replay_start(replay)
+        return
+    }
+    if (replay != I64{0}) { jet_rt_string_drop(replay) }
+}
+
+replay_root_new: fn(events: I64, data: I64) -> I64 {
+    root: jet_rt_alloc(I64{64}, I64{8})
+    thread_zero(root, I64{64})
+    sync_store(wrapping(root + I64{8}), events)
+    sync_store(wrapping(root + I64{24}), data)
+    root
+}
+
+replay_record_start: fn(path: I64) {
+    events: alloc_map_try(REPLAY_EVENTS_MAX * REPLAY_EVENT_BYTES)
+    data: if (events == I64{0}) -> I64{0} else -> alloc_map_try(REPLAY_DATA_MAX)
+    if (data == I64{0}) {
+        if (events != I64{0}) { alloc_unmap(events, REPLAY_EVENTS_MAX * REPLAY_EVENT_BYTES) }
+        replay_refuse(rt_static_text("record: no memory for the recording's log of "), path)
+        return
+    }
+    root: replay_root_new(events, data)
+    sync_store(wrapping(root + I64{40}), path)
+    #Unsafe("the observation start runs on the main thread before any task") {
+        replay_root = root
+        replay_mode = REPLAY_RECORD
+    }
+    observe_exit_install()
+}
+
+// The whole recording, read into one mapping: its header checked, and its
+// events and data sized to fill the file exactly.
+replay_replay_start: fn(path: I64) {
+    name: fd_c_path(path)
+    fd: host_call(I64{2}, name, I64{524288}, I64{0})
+    fd_c_path_drop(name, path)
+    if (fd < I64{0}) {
+        replay_refuse(rt_static_text("replay: cannot open the recording "), path)
+        return
+    }
+    size: host_call(I64{8}, fd, I64{0}, I64{2})
+    _ := host_call(I64{8}, fd, I64{0}, I64{0})
+    region: if (size >= REPLAY_HEADER_BYTES) -> alloc_map_try(size) else -> I64{0}
+    got := I64{0}
+    if (region != I64{0}) {
+        loop got < size {
+            read: host_call(I64{0}, fd, wrapping(region + got), wrapping(size - got))
+            if (read == I64{-4}) { next }
+            if (read <= I64{0}) { break }
+            got = wrapping(got + read)
+        }
+    }
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    whole: region != I64{0} && got == size
+    count: if whole -> rt_text_word(wrapping(region + I64{16})) else -> I64{-1}
+    bytes: if whole -> rt_text_word(wrapping(region + I64{24})) else -> I64{-1}
+    valid: whole && rt_text_word(region) == REPLAY_MAGIC && rt_text_word(wrapping(region + I64{8})) == REPLAY_VERSION && count >= I64{0} && count <= REPLAY_EVENTS_MAX && bytes >= I64{0} && bytes <= REPLAY_DATA_MAX && REPLAY_HEADER_BYTES + count * REPLAY_EVENT_BYTES + bytes == size
+    if !valid {
+        if (region != I64{0}) { alloc_unmap(region, size) }
+        replay_refuse(rt_static_text("replay: not a recording of `jet run --record`: "), path)
+        return
+    }
+    events: wrapping(region + REPLAY_HEADER_BYTES)
+    root: replay_root_new(events, wrapping(events + count * REPLAY_EVENT_BYTES))
+    sync_store(wrapping(root + I64{16}), count)
+    sync_store(wrapping(root + I64{32}), bytes)
+    jet_rt_string_drop(path)
+    #Unsafe("the observation start runs on the main thread before any task") {
+        replay_root = root
+        replay_mode = REPLAY_REPLAY
+    }
+    observe_exit_install()
+}
+
+// A control's replay id: 1 for a root, 0 for a context that has none.
+replay_task: fn(control: I64) -> I64 {
+    if (control == I64{0}) { return I64{0} }
+    id: sync_load(wrapping(control + I64{192}))
+    if (id != I64{0} || !scheduler_control_is_root(control)) { return id }
+    sync_store(wrapping(control + I64{192}), I64{1})
+    I64{1}
+}
+
+// `value` shifted right by `bits` (1..63), zeros shifted in.
+replay_shift: fn(value: I64, bits: I64) -> I64 {
+    (value >> bits) & wrapping((I64{1} << (I64{64} - bits)) - I64{1})
+}
+
+// The id of the `ordinal`th thing `maker` made: SplitMix64's finalizer over
+// the two, never 0 (no id) or 1 (a root).
+replay_mix: fn(maker: I64, ordinal: I64) -> I64 {
+    mixed := wrapping(wrapping(maker * I64{-7046029254386353131}) + ordinal)
+    mixed = wrapping((mixed ~ replay_shift(mixed, I64{30})) * I64{-4658895280553007687})
+    mixed = wrapping((mixed ~ replay_shift(mixed, I64{27})) * I64{-7723592293110705685})
+    mixed = mixed ~ replay_shift(mixed, I64{31})
+    if (mixed == I64{0} || mixed == I64{1}) { mixed = wrapping(mixed + I64{2}) }
+    mixed
+}
+
+// A new Shared value's or channel's replay id, 0 outside a mode or a task
+// with one.
+replay_object_new: fn() -> I64 {
+    if (replay_mode == REPLAY_OFF) { return I64{0} }
+    maker: scheduler_control_current()
+    id: replay_task(maker)
+    if (id == I64{0}) { return I64{0} }
+    replay_mix(id, sync_add(wrapping(maker + I64{200}), I64{1}))
+}
+
+// A task's spawn (Task.jet task_state_new), before it can run: the child
+// control's replay id, and the spawn event.
+replay_spawned: fn(control: I64) {
+    if (replay_mode == REPLAY_OFF) {
+        return
+    }
+    id: replay_object_new()
+    if (id == I64{0}) {
+        return
+    }
+    sync_store(wrapping(control + I64{192}), id)
+    ticket: replay_take(REPLAY_SPAWN, id)
+    replay_log(REPLAY_SPAWN, id)
+    replay_give(ticket)
+}
+
+// A replay's turn for the running task's next event, `kind`'s family on
+// `object`: waits until the log's next turn names the task, then checks the
+// recorded event and answers its kind, the ticket replay_give takes. -1
+// outside a replay or a task with a replay id: nothing to give back.
+replay_take: fn(kind: I64, object: I64) -> I64 {
+    if (replay_mode != REPLAY_REPLAY) { return I64{-1} }
+    id: replay_task(scheduler_control_current())
+    if (id == I64{0}) { return I64{-1} }
+    count: replay_count()
+    ticket := I64{-1}
+    seen := I64{-1}
+    since := I64{0}
+    loop {
+        turn: sync_load(replay_root)
+        if (turn >= count) {
+            replay_diverge(turn, kind, object, id)
+            break
+        }
+        event: replay_event(turn)
+        if (sync_load(event) == id) {
+            recorded: sync_load(wrapping(event + I64{8}))
+            if ((recorded >> I64{4}) != (kind >> I64{4}) || (kind < REPLAY_SELECT && sync_load(wrapping(event + I64{16})) != object)) {
+                replay_diverge(turn, kind, object, id)
+                break
+            }
+            ticket = recorded
+            break
+        }
+        now: sync_now_ns()
+        if (turn != seen) {
+            seen = turn
+            since = now
+        } else if (now - since >= REPLAY_STALL_NS) {
+            replay_stalled(turn)
+            break
+        }
+        _ := sync_wait(replay_root, turn, sync_deadline(REPLAY_POLL_NS))
+    }
+    ticket
+}
+
+// The object or extra word (`at` 16 or 24) of the event whose turn the
+// running task holds.
+replay_recorded: fn(at: I64) -> I64 {
+    sync_load(wrapping(replay_event(sync_load(replay_root)) + at))
+}
+
+// Passes the turn a replay_take ticket holds on.
+replay_give: fn(ticket: I64) {
+    if (ticket < I64{0}) {
+        return
+    }
+    sync_store(replay_root, wrapping(sync_load(replay_root) + I64{1}))
+    sync_wake(replay_root, I64{2147483647})
+}
+
+// A recording's event of the running task, `kind` on `object`, logged where
+// the operation completes, inside the lock that orders it.
+replay_log: fn(kind: I64, object: I64) {
+    if (replay_mode != REPLAY_RECORD) {
+        return
+    }
+    id: replay_task(scheduler_control_current())
+    if (id != I64{0}) { replay_append(id, kind, object, I64{0}) }
+}
+
+replay_append: fn(task: I64, kind: I64, object: I64, extra: I64) {
+    turn: sync_add(replay_root, I64{1})
+    if (turn >= REPLAY_EVENTS_MAX) {
+        return
+    }
+    event: replay_event(turn)
+    sync_store(event, task)
+    sync_store(wrapping(event + I64{8}), kind)
+    sync_store(wrapping(event + I64{16}), object)
+    sync_store(wrapping(event + I64{24}), extra)
+}
+
+// An input of `length` bytes at `bytes`: copied into the recording's data,
+// as the event's extra, or the recording's end when they do not fit.
+replay_append_bytes: fn(task: I64, kind: I64, bytes: I64, length: I64) {
+    offset: sync_add(wrapping(replay_root + I64{32}), length)
+    if (offset > REPLAY_DATA_MAX - length) {
+        replay_append(task, REPLAY_END, length, I64{-1})
+        return
+    }
+    rt_text_bytes_copy(wrapping(replay_data() + offset), bytes, length)
+    replay_append(task, kind, length, offset)
+}
+
+// A two-word input at `out` (a clock read's seconds and nanoseconds): logged
+// by a recording, the recorded words in a replay.
+replay_words: fn(kind: I64, out: I64) {
+    if (replay_mode == REPLAY_OFF) {
+        return
+    }
+    if (replay_mode == REPLAY_RECORD) {
+        id: replay_task(scheduler_control_current())
+        if (id != I64{0}) {
+            replay_append(id, kind, sync_load(out), sync_load(wrapping(out + I64{8})))
+        }
+        return
+    }
+    ticket: replay_take(kind, I64{0})
+    if (ticket < I64{0}) {
+        return
+    }
+    sync_store(out, replay_recorded(I64{16}))
+    sync_store(wrapping(out + I64{8}), replay_recorded(I64{24}))
+    replay_give(ticket)
+}
+
+// An input of `length` bytes at `bytes` (the entropy a read filled): logged
+// by a recording, the recorded bytes in a replay, which must be as many.
+replay_bytes: fn(kind: I64, bytes: I64, length: I64) {
+    if (replay_mode == REPLAY_OFF) {
+        return
+    }
+    if (replay_mode == REPLAY_RECORD) {
+        id: replay_task(scheduler_control_current())
+        if (id != I64{0}) { replay_append_bytes(id, kind, bytes, length) }
+        return
+    }
+    ticket: replay_take(kind, I64{0})
+    if (ticket < I64{0}) {
+        return
+    }
+    if (replay_recorded(I64{16}) != length) {
+        replay_mismatch(kind, length)
+        return
+    }
+    rt_text_bytes_copy(bytes, wrapping(replay_data() + replay_recorded(I64{24})), length)
+    replay_give(ticket)
+}
+
+// The running task, at the turn it holds, cannot do the recorded event: it
+// did `kind` on `object` instead.
+replay_mismatch: fn(kind: I64, object: I64) {
+    replay_diverge(sync_load(replay_root), kind, object, replay_task(scheduler_control_current()))
+}
+
+// An owned text input or 0 (an environment value, or none): logged by a
+// recording; in a replay, dropped for the recorded one.
+replay_text: fn(kind: I64, value: I64) -> I64 {
+    if (replay_mode == REPLAY_OFF) { return value }
+    if (replay_mode == REPLAY_RECORD) {
+        id: replay_task(scheduler_control_current())
+        if (id == I64{0}) { return value }
+        if (value == I64{0}) { replay_append(id, kind, I64{-1}, I64{0}) } else {
+            replay_append_bytes(id, kind, rt_text_data(value), rt_text_len(value))
+        }
+        return value
+    }
+    ticket: replay_take(kind, I64{0})
+    if (ticket < I64{0}) { return value }
+    if (value != I64{0}) { jet_rt_string_drop(value) }
+    length: replay_recorded(I64{16})
+    result: if (length < I64{0}) -> I64{0} else -> rt_text_copy(wrapping(replay_data() + replay_recorded(I64{24})), length)
+    replay_give(ticket)
+    result
+}
+
+// A one-word input (the process's argument count): logged by a recording,
+// the recorded word in a replay.
+replay_word: fn(kind: I64, value: I64) -> I64 {
+    if (replay_mode == REPLAY_OFF) { return value }
+    if (replay_mode == REPLAY_RECORD) {
+        id: replay_task(scheduler_control_current())
+        if (id != I64{0}) { replay_append(id, kind, value, I64{0}) }
+        return value
+    }
+    ticket: replay_take(kind, I64{0})
+    if (ticket < I64{0}) { return value }
+    recorded: replay_recorded(I64{16})
+    replay_give(ticket)
+    recorded
+}
+
+// A host read into `bytes` (room for `length`) that answered `result`, the
+// count read or a negated errno: a recording logs the result and the bytes
+// it filled; a replay fills `bytes` from the recording and answers the
+// recorded result, whatever the read did this time.
+replay_read: fn(bytes: I64, length: I64, result: I64) -> I64 {
+    if (replay_mode == REPLAY_OFF) { return result }
+    if (replay_mode == REPLAY_RECORD) {
+        id: replay_task(scheduler_control_current())
+        if (id == I64{0}) { return result }
+        if (result > I64{0}) { replay_append_bytes(id, REPLAY_INPUT, bytes, result) } else {
+            replay_append(id, REPLAY_INPUT + REPLAY_FAILED, result, I64{0})
+        }
+        return result
+    }
+    ticket: replay_take(REPLAY_INPUT, I64{0})
+    if (ticket < I64{0}) { return result }
+    recorded: replay_recorded(I64{16})
+    if ((ticket & REPLAY_FAILED) == I64{0}) {
+        if (recorded > length) {
+            replay_mismatch(REPLAY_INPUT, length)
+            return result
+        }
+        rt_text_bytes_copy(bytes, wrapping(replay_data() + replay_recorded(I64{24})), recorded)
+    }
+    replay_give(ticket)
+    recorded
+}
+
+// The run's exit or stop (Observe.jet jet_rt_observe_exit, `stop` 1 for a
+// stop), once: a recording is written; a replay that exits before its log's
+// end diverged there.
+replay_exit: fn(stop: I64) {
+    if (replay_mode == REPLAY_OFF || sync_swap(wrapping(replay_root + I64{56}), I64{1}) != I64{0}) {
+        return
+    }
+    if (replay_mode == REPLAY_RECORD) {
+        replay_write()
+        return
+    }
+    turn: sync_load(replay_root)
+    if (stop == I64{0} && turn < replay_count()) {
+        replay_diverge(turn, REPLAY_END, I64{0}, I64{0})
+    }
+}
+
+replay_write: fn() {
+    path: sync_load(wrapping(replay_root + I64{40}))
+    count: replay_count()
+    used: sync_load(wrapping(replay_root + I64{32}))
+    bytes: if (used > REPLAY_DATA_MAX) -> REPLAY_DATA_MAX else -> used
+    header: jet_rt_alloc(REPLAY_HEADER_BYTES, I64{8})
+    rt_text_store(header, REPLAY_MAGIC)
+    rt_text_store(wrapping(header + I64{8}), REPLAY_VERSION)
+    rt_text_store(wrapping(header + I64{16}), count)
+    rt_text_store(wrapping(header + I64{24}), bytes)
+    name: fd_c_path(path)
+    // O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, owner-only.
+    fd: host_call(I64{2}, name, I64{524865}, I64{384})
+    fd_c_path_drop(name, path)
+    if (fd >= I64{0}) {
+        _ := host_write_all(fd, header, REPLAY_HEADER_BYTES)
+        _ := host_write_all(fd, replay_event(I64{0}), count * REPLAY_EVENT_BYTES)
+        _ := host_write_all(fd, replay_data(), bytes)
+        _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    }
+    jet_rt_free(header, REPLAY_HEADER_BYTES, I64{8})
+}
+
+replay_push: fn(text: I64, part: I64) {
+    rt_text_append(text, rt_text_data(part), rt_text_len(part))
+}
+
+// A recording that cannot be had stops the program: `head`, then the path.
+replay_refuse: fn(head: I64, path: I64) {
+    message: jet_rt_string_builder_new()
+    replay_push(message, head)
+    replay_push(message, path)
+    jet_rt_string_drop(path)
+    replay_stop(message)
+}
+
+// Ends the process with `message` on stderr, exit 70, as a runtime stop.
+replay_stop: fn(message: I64) {
+    trap_stop(I64{1}, rt_text_data(message), rt_text_len(message), I64{0}, I64{0})
+    trap_defect_prepare()
+    jet_rt_stdout_flush()
+    trap_write(rt_text_data(message), rt_text_len(message))
+    trap_write_static(rt_static_text("\n"))
+    trap_defect_exit(EXIT_RUNTIME_PANIC)
+}
+
+// The first divergence's claim. A task that loses it waits for the
+// process's end rather than run on past its turn.
+replay_claim: fn() -> Bool {
+    stopped: wrapping(replay_root + I64{48})
+    claimed: sync_swap(stopped, I64{1}) == I64{0}
+    if !claimed {
+        loop -> _ := sync_wait(stopped, I64{1}, I64{-1})
+    }
+    claimed
+}
+
+// `replay diverged at sync event 7: recorded edit of Shared value 1 by task
+// 2, got send on channel 1 by task 3  main.jet:14`.
+replay_diverge: fn(turn: I64, kind: I64, object: I64, task: I64) {
+    if !replay_claim() {
+        return
+    }
+    message: replay_head(turn)
+    replay_push(message, rt_static_text(", got "))
+    replay_push_event(message, kind, object)
+    if (kind != REPLAY_END) {
+        replay_push(message, rt_static_text(" by "))
+        replay_push_task(message, task)
+    }
+    replay_finish(message)
+}
+
+// `replay diverged at sync event 7: recorded print by task 2, which no task
+// took in 10s`.
+replay_stalled: fn(turn: I64) {
+    if !replay_claim() {
+        return
+    }
+    message: replay_head(turn)
+    replay_push(message, rt_static_text(", which no task took in 10s"))
+    replay_finish(message)
+}
+
+replay_head: fn(turn: I64) -> I64 {
+    message: jet_rt_string_builder_new()
+    replay_push(message, rt_static_text("replay diverged at sync event "))
+    rt_text_push_number(message, wrapping(turn + I64{1}))
+    replay_push(message, rt_static_text(": recorded "))
+    if (turn >= replay_count()) {
+        replay_push(message, rt_static_text("the recording's end"))
+        return message
+    }
+    event: replay_event(turn)
+    kind: sync_load(wrapping(event + I64{8}))
+    replay_push_event(message, kind, sync_load(wrapping(event + I64{16})))
+    if (kind != REPLAY_END) {
+        replay_push(message, rt_static_text(" by "))
+        replay_push_task(message, sync_load(event))
+    }
+    message
+}
+
+// The running task's line, then the stop.
+replay_finish: fn(message: I64) {
+    site: wait_cycle_site()
+    if (site != I64{0}) {
+        replay_push(message, rt_static_text("  "))
+        replay_push(message, site)
+        jet_rt_string_drop(site)
+    }
+    replay_stop(message)
+}
+
+// `spawn of task 3`, `edit of Shared value 1`, `receive on channel 2`.
+replay_push_event: fn(text: I64, kind: I64, object: I64) {
+    family: kind & I64{-16}
+    failed: (kind & I64{15}) != I64{0}
+    if (family == REPLAY_END) {
+        replay_push(text, rt_static_text("the run's end"))
+        return
+    }
+    if (family == REPLAY_SPAWN || family == REPLAY_JOIN) {
+        replay_push(text, if (family == REPLAY_SPAWN) -> rt_static_text("spawn of ") else -> rt_static_text("join of "))
+        replay_push_task(text, object)
+        return
+    }
+    if (family == REPLAY_READ || family == REPLAY_EDIT) {
+        if failed -> replay_push(text, rt_static_text("timed-out "))
+        replay_push(text, if (family == REPLAY_READ) -> rt_static_text("read of ") else -> rt_static_text("edit of "))
+        replay_push_object(text, object, REPLAY_READ, rt_static_text("Shared value"))
+        return
+    }
+    if (family >= REPLAY_SEND && family < REPLAY_SELECT) {
+        replay_push(text, replay_channel_verb(family, failed))
+        replay_push_object(text, object, REPLAY_SEND, rt_static_text("channel"))
+        return
+    }
+    if (family == REPLAY_SELECT) {
+        if {
+            (object == REPLAY_SELECT_NONE) -> {
+                replay_push(text, rt_static_text("select with no arm ready"))
+            }
+            (object == REPLAY_SELECT_CLOSED) -> {
+                replay_push(text, rt_static_text("select of closed channels"))
+            }
+            else -> {
+                replay_push(text, if failed -> rt_static_text("select of empty arm ") else -> rt_static_text("select of arm "))
+                rt_text_push_number(text, object)
+            }
+        }
+        return
+    }
+    replay_push(
+        text,
+        if {
+            (family == REPLAY_PRINT) -> rt_static_text("print")
+            (family == REPLAY_EPRINT) -> rt_static_text("eprint")
+            (family == REPLAY_CLOCK) -> rt_static_text("clock read")
+            (family == REPLAY_ENTROPY) -> rt_static_text("entropy read")
+            (family == REPLAY_ENV) -> rt_static_text("environment read")
+            (family == REPLAY_ARGUMENTS || family == REPLAY_ARGUMENT) -> rt_static_text("argument read")
+            else -> rt_static_text("file or socket read")
+        },
+    )
+}
+
+replay_channel_verb: fn(family: I64, failed: Bool) -> I64 {
+    if {
+        (family == REPLAY_SEND) -> if failed -> rt_static_text("refused send on ") else -> rt_static_text("send on ")
+        (family == REPLAY_RECEIVE) -> if failed -> rt_static_text("receive of the close of ") else -> rt_static_text("receive on ")
+        (family == REPLAY_TRY_RECEIVE) -> if failed -> rt_static_text("empty try_receive on ") else -> rt_static_text("try_receive on ")
+        (family == REPLAY_CLOSE) -> rt_static_text("close of ")
+        (family == REPLAY_SENDER_DROP) -> rt_static_text("sender drop of ")
+        else -> rt_static_text("receiver drop of ")
+    }
+}
+
+// `task N`: the main task is task 1, a spawned one numbered after it in the
+// recording's spawn order.
+replay_push_task: fn(text: I64, task: I64) {
+    number := if (task == I64{1}) -> I64{1} else -> I64{0}
+    spawns := I64{1}
+    at := I64{0}
+    count: replay_count()
+    loop number == (I64{0}) && at < count {
+        event: replay_event(at)
+        if (sync_load(wrapping(event + I64{8})) == REPLAY_SPAWN) {
+            spawns += I64{1}
+            if (sync_load(wrapping(event + I64{16})) == task) { number = spawns }
+        }
+        at += I64{1}
+    }
+    if (number == I64{0}) {
+        replay_push(text, rt_static_text("a task not in the recording"))
+        return
+    }
+    replay_push(text, rt_static_text("task "))
+    rt_text_push_number(text, number)
+}
+
+// `<noun> N`: Shared values (from REPLAY_READ) or channels (from
+// REPLAY_SEND) numbered in the order the recording first names them.
+replay_push_object: fn(text: I64, object: I64, low: I64, noun: I64) {
+    high: if (low == REPLAY_READ) -> REPLAY_SEND else -> REPLAY_SELECT
+    replay_push(text, noun)
+    if (object == I64{0}) {
+        return
+    }
+    capacity: I64{4096}
+    seen: jet_rt_alloc(capacity * I64{8}, I64{8})
+    known := I64{0}
+    number := I64{0}
+    at := I64{0}
+    count: replay_count()
+    loop number == (I64{0}) && at < count && known < capacity {
+        event: replay_event(at)
+        kind: sync_load(wrapping(event + I64{8}))
+        named: sync_load(wrapping(event + I64{16}))
+        if (kind >= low && kind < high && named != I64{0}) {
+            index := I64{0}
+            loop index < known && sync_load(wrapping(seen + index * I64{8})) != named {
+                index += I64{1}
+            }
+            if (index == known) {
+                sync_store(wrapping(seen + known * I64{8}), named)
+                known += I64{1}
+                if (named == object) { number = known }
+            }
+        }
+        at += I64{1}
+    }
+    jet_rt_free(seen, capacity * I64{8}, I64{8})
+    if (number == I64{0}) {
+        replay_push(text, rt_static_text(" not in the recording"))
+        return
+    }
+    replay_push(text, rt_static_text(" "))
+    rt_text_push_number(text, number)
+}

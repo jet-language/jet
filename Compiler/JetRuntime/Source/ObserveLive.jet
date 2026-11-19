@@ -562,8 +562,11 @@ observe_env_key: fn(index: I64) -> I64 {
 
 // Read the ONE logical Env cell, not startup environ. All five supplied
 // components must be present, nonempty, <=16KiB and Cc-free. An observed
-// run under `jet perf run` also samples its CPU time (PerfSamples.jet).
+// run under `jet perf run` also samples its CPU time (PerfSamples.jet). A
+// run under `jet run --record` or `jet debug --replay` starts its log here
+// (RecordReplay.jet).
 #Export(c) jet_rt_observe_runtime_start_from_env: fn() {
+    replay_start()
     key: jet_rt_string_builder_new()
     observe_msg_env_observe(key)
     enabled: jet_rt_logical_env_get(key)

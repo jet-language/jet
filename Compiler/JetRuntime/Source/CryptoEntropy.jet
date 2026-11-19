@@ -140,6 +140,8 @@ rt_crypto_entropy_fill: fn(out: I64, count: I64) -> I64 {
         jet_rt_free(bytes, capacity, I64{8})
         return I64{0}
     }
+    // A recording logs the bytes; a replay reads the recorded ones.
+    replay_bytes(REPLAY_ENTROPY, bytes, count)
     // The provider filled packed bytes in the FINAL allocation. Widen from the
     // end so padding initialization cannot overwrite a byte not yet consumed.
     if (RT_HOST_U8_STRIDE != I64{1}) {

@@ -370,9 +370,13 @@ valid.
 | `0x00f0` `Outcome` | normal/explicit exit or `runtime_stop` with exact diagnostic code and output hashes |
 | `0x4000` `GameEvent` | `game.v1.action`, `fixed_step`, `backend`, or `budget` |
 | `0x1001` `RunAct` extension | `{function,line,locals}` causal act snapshot |
+| `0x1002` `RunSync` extension | `{chunk_index,bytes}` piece of a `jet run --record` sync-order log |
 
 The source codec writes `TimeWall` and, when a recorded run is supplied,
 optional `RunAct` frames; its header marks that extension as `recorded_run`.
+A `jet run --record=NAME` artifact carries its run's sync-order log
+(`Compiler/JetRuntime/Source/RecordReplay.jet`) after the `TimeWall` frame as
+`RunSync` frames of at most 512 KiB each, numbered from zero in order.
 
 `TimeSleep` permits only `interrupted`; I/O and network terminal records use
 the portable error registry

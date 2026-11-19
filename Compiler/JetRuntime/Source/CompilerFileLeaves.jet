@@ -15,7 +15,7 @@
             filled := fd_word(reader, I64{48})
             if (position == filled) {
                 began: perf_samples_io_start()
-                count: host_call(I64{0}, fd_word(reader, I64{8}), buffer, I64{8192})
+                count: replay_read(buffer, I64{8192}, host_call(I64{0}, fd_word(reader, I64{8}), buffer, I64{8192}))
                 perf_samples_io_file(began, PERF_SAMPLES_IO_READ, count, reader)
                 if (count == I64{-4}) { next }
                 if (count <= I64{0}) {
@@ -113,7 +113,7 @@
             filled := fd_word(reader, I64{48})
             if (position == filled) {
                 began: perf_samples_io_start()
-                count: host_call(I64{0}, fd_word(reader, I64{8}), buffer, I64{8192})
+                count: replay_read(buffer, I64{8192}, host_call(I64{0}, fd_word(reader, I64{8}), buffer, I64{8192}))
                 perf_samples_io_file(began, PERF_SAMPLES_IO_READ, count, reader)
                 if (count == I64{-4}) { next }
                 if (count <= I64{0}) {

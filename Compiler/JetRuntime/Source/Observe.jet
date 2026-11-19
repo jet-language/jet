@@ -415,6 +415,7 @@ observe_cancel_live_tasks: fn() {
 // stack is whole (Trap.jet trap_root_prepare): the flight recorder's typed
 // dump (perf_flight_dump), and nothing else, as the exit still follows.
 #Export(c) jet_rt_observe_exit: fn(stop: I64) -> I64 {
+    replay_exit(stop)
     if (stop == I64{1}) {
         perf_flight_dump()
         return I64{0}

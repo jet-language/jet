@@ -1,0 +1,27 @@
+// Three workers share one channel of lines and one lock-guarded tally. Which
+// worker takes the lock and the channel first decides the order of the lines
+// and the tally each one reports, so only a replay that keeps the recorded
+// sync order prints them as the recorded run did.
+
+Score: struct {
+    count: Int,
+}
+
+work: fn(id: Int, rounds: Int, results: Sender<String>, tally: Shared<Score>) -> Int {
+    loop _ in 0..<rounds {
+        tally.count += 1
+        results.send("worker {id} saw tally {tally.count}")
+    }
+    rounds
+}
+
+run: fn() {
+    { sender: results, receiver: lines }: channel<String>(capacity: 2)
+    tally: Shared{Score{count: 0}}
+    first: task work(1, 4, results.copy(), tally)
+    second: task work(2, 4, results.copy(), tally)
+    third: task work(3, 4, results.copy(), tally)
+    loop _ in 0..<12 { print(lines.receive() ?? "closed") }
+    done: (first.join() ?? 0) + (second.join() ?? 0) + (third.join() ?? 0)
+    print("joined {done} rounds, tally {tally.count}")
+}

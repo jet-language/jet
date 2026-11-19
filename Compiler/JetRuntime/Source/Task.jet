@@ -164,6 +164,7 @@ task_state_new: fn(site: I64, label: I64, env: I64, invoke: I64, release: I64, m
     control: scheduler_control_new()
     sync_store(wrapping(control + I64{104}), SCHEDULER_SCOPE_TASK)
     sync_store(wrapping(child + I64{8}), control)
+    replay_spawned(control)
     copied: coll_meta_copy(meta)
     sync_store(wrapping(child + I64{40}), copied)
     slot: if (coll_size(copied) <= I64{24}) -> child + I64{160} else -> coll_slot_new(copied)
@@ -630,6 +631,12 @@ task_take_outcome: fn(child: I64, flatten: Bool, out: I64) -> I64 {
         task_drop(child)
         return I64{0}
     }
+    // A join's event is taken once the child has finished: a child its join
+    // ran here has logged its own events first (RecordReplay.jet).
+    joined: sync_load(wrapping(sync_load(wrapping(child + I64{8})) + I64{192}))
+    ticket: replay_take(REPLAY_JOIN, joined)
+    replay_log(REPLAY_JOIN, joined)
+    replay_give(ticket)
     task_take_outcome(child, (flatten & I64{255}) != I64{0}, out)
 }
 

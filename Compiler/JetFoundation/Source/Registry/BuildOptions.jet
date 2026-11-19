@@ -239,7 +239,9 @@ BuildSettingOverride: struct {
 // (Registry/CompilerEvents.jet) and the build writes one line for each; it
 // shapes no image. `library` is `jet build --lib`: the build writes the
 // entry's native Library, a static archive and its C header, in place of an
-// executable.
+// executable. `record` is the NAME of `jet run --record=NAME`, "" when none
+// is given: the program links the observation start, as an observed one
+// does, and its run writes the replay `.jet/replays/NAME.jetproof-replay`.
 BuildOptions: struct {
     command: String,
     profile: String,
@@ -255,6 +257,7 @@ BuildOptions: struct {
     target_machine: String{""},
     compiler_events: Bool{false},
     library: Bool{false},
+    record: String{""},
 }
 
 // The deep checks one compile keeps (`--deep-checks` of run, dev, test, build,
@@ -706,7 +709,8 @@ JET_BUILD_OPTIONS_UNKEYED: [String]{"output_dir", "action_timeout"}
 JET_BUILD_DEFAULT_PROFILE: "dev"
 
 // The options' identity in a cache key: the profile, then each resolved row
-// that shapes the image, then each `--set` setting value, then `observe`,
+// that shapes the image, then each `--set` setting value, then `observe`
+// (a `record` links the same observation start; its NAME shapes no image),
 // `log` and the deep checks a flag selects.
 build_options_key: fn(options: BuildOptions) -> String Never! {
     out := if options.profile == "" -> JET_BUILD_DEFAULT_PROFILE else -> options.profile
@@ -716,7 +720,7 @@ build_options_key: fn(options: BuildOptions) -> String Never! {
         }
     }
     loop setting in options.settings -> out = "{out};set.{setting.name}={setting.value}"
-    if options.observe -> out = "{out};observe"
+    if options.observe || options.record != "" -> out = "{out};observe"
     if options.log != "" -> out = "{out};log={options.log}"
     deep: deep_checks_key(options.deep_checks)
     if deep != "" -> out = "{out};deep={deep}"
