@@ -745,6 +745,20 @@ A step that passes a breakpoint which does not stop goes on to where the
 step would have ended. `jet debug --dap` settles every run the same way
 (`Compiler/JetDebug/Source/Native.jet`, NativeSession.settle).
 
+While `jet debug --dap` runs the program on (`continue`, and the start from
+`configurationDone` or `restart`), the next request stops every thread where
+it is: `pause` answers and reports the stop; `disconnect` ends the session;
+`restart` starts the program again (an attached one does not restart); any
+other request is answered with the program stopped, and it runs on. A
+replay's runs are made as recorded, without stopping for requests.
+`stackTrace` with `showRawFrames: true` adds the machine frames, each named
+`[raw] <function>` with its `instructionPointerReference`, whose one scope,
+`[raw] Locals`, holds its pc and canonical frame address; a `showRawFrames`
+that is not true or false is E2236 (`jet.invalidArguments`). A frame id or
+variable reference names the stop it was made at: once the program runs
+again it is E2238 (`jet.staleReference`). The error's `jetCode` names the
+diagnostic.
+
 Every expression the debugger is given (`print`, `watch`, a condition, a
 logpoint's message, the adapter's `evaluate`) has one evaluator, the
 compiler (`Compiler/JetDebug/Source/NativeEval.jet`,

@@ -1,6 +1,9 @@
-# tests/debug.rs::dap_cli_projects_raw_frames_only_when_requested_through_production_wire
-# Original source and wire predicates; PENDING-GRAMMAR(batch-four), PENDING-SAME-HEAD; runtime UNRUN.
-# Native compiler rustc availability guard retires at Jet backend cutover.
+# `stackTrace` shows the Jet frames only, unless `showRawFrames` is true:
+# then each machine frame follows, named `[raw]` with its instruction
+# pointer, and its one scope is `[raw] Locals`. A `showRawFrames` that is
+# not true or false is E2236 (jet.invalidArguments, 22032). A frame's
+# references name its stop: after `next`, the old Locals scope is E2238
+# (jet.staleReference, 22036). The Jet code is the error's `jetCode`.
 fixture: DapCLIProjectsRawFramesOnlyWhenRequestedThroughProductionWire.fixture
 env: NO_COLOR=1
 session dap content-length: jet debug --dap {work}/main.jet
@@ -14,7 +17,7 @@ json: stdout doc $.type = "response"
 json: stdout doc $.command = "stackTrace"
 json: stdout doc $.success = false
 stdout: ~ "\"id\":22032" # original substring predicate
-stdout: ~ "\"code\":\"E2236\"" # original substring predicate
+stdout: ~ "\"jetCode\":\"E2236\"" # the registered diagnostic's code
 send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
 recv dap until $.request_seq = 5 timeout 30s every 100ms
 json: stdout doc $.type = "response"
@@ -44,7 +47,7 @@ json: stdout doc $.type = "response"
 json: stdout doc $.command = "stackTrace"
 json: stdout doc $.success = true
 stdout: ~ "\"name\":\"[raw]" # original substring predicate
-stdout: ~ "\"path\":\"main.rs\"" # original substring predicate
+stdout: ~ "\"instructionPointerReference\":\"0x" # a raw frame names its instruction pointer
 capture: raw_frame stdout doc $.body.stackFrames[?name^="[raw]"][0].id
 send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"scopes\",\"arguments\":{\"frameId\":{cap:raw_frame}}}"
 recv dap until $.request_seq = 9 timeout 30s every 100ms
@@ -67,7 +70,7 @@ json: stdout doc $.type = "response"
 json: stdout doc $.command = "variables"
 json: stdout doc $.success = false
 stdout: ~ "\"id\":22036" # original substring predicate
-stdout: ~ "\"code\":\"E2238\"" # original substring predicate
+stdout: ~ "\"jetCode\":\"E2238\"" # the registered diagnostic's code
 send dap: "{\"seq\":13,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{\"terminateDebuggee\":true}}"
 recv dap until $.request_seq = 13 timeout 30s every 100ms
 json: stdout doc $.type = "response"

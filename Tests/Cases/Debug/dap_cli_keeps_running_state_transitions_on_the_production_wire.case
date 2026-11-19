@@ -1,6 +1,7 @@
-# tests/debug.rs::dap_cli_keeps_running_state_transitions_on_the_production_wire
-# Original source and wire predicates; PENDING-GRAMMAR(batch-four), PENDING-SAME-HEAD; runtime UNRUN.
-# Native compiler rustc availability guard retires at Jet backend cutover.
+# `restart` before `configurationDone` only takes the configuration again;
+# after it, while the program runs, the request stops it and starts it
+# again from the top. A `setBreakpoints` sent while it runs is answered
+# with the program stopped, which then runs on to the new breakpoint.
 fixture: DapCLIKeepsRunningStateTransitionsOnTheProductionWire.fixture
 env: NO_COLOR=1
 session dap content-length: jet debug --dap {work}/main.jet
@@ -25,7 +26,7 @@ recv dap until $.request_seq = 5 timeout 30s every 100ms
 json: stdout doc $.type = "response"
 json: stdout doc $.command = "restart"
 json: stdout doc $.success = true
-send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/main.jet\"},\"breakpoints\":[{\"line\":4}]}}"
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/main.jet\"},\"breakpoints\":[{\"line\":3}]}}"
 recv dap collect until ndjson $[?request_seq=6][?type="response"][?command="setBreakpoints"][?success=true] #>= 1 && ndjson $[?hitBreakpointIds=[1]] #>= 1 timeout 30s
 json: stdout ndjson $[?request_seq=6][0].type = "response"
 json: stdout ndjson $[?request_seq=6][0].command = "setBreakpoints"

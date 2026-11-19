@@ -20652,22 +20652,45 @@ DebugConfigInvalid: struct {
     impl Diagnostic {
         code: "E2236",
         safety_class: .Soundness,
-        safety_reason: "Attaching to a target that is not as given would debug the wrong program.",
+        safety_reason: "Attaching to a target that is not as given, or reading a field as a value it does not hold, would debug the wrong program.",
         expert_path: "none: name the process and its program as they are",
         stage: [.Tooling],
-        meaning: "A `jet debug` attach names a process id that is no running process, or a program other than the one that process runs",
+        meaning: "A `jet debug` configuration field is not as it must be: an attach names a process id that is no running process, or a program other than the one that process runs, or an editor request's field holds a value it does not take",
         detail: true,
         no_fix: .Behavior,
 
         what: fn(self) -> String { "Jet debug configuration is invalid: {self.detail}." }
 
         why: fn(self) -> String {
-            "The debugger attaches only to the target exactly as given, so a process id that names no running process, or a program that process does not run, leaves it nothing it may attach to."
+            "The debugger takes its configuration exactly as given, so a field outside the values it takes, a process id that names no running process, or a program that process does not run, leaves it nothing it may do."
         }
 
         fix: fn(self) -> String {
-            "Correct the process id or the program, in `jet debug --attach PID` or the editor's Jet debug configuration, then start the session again."
+            "Correct the named field, the process id or the program, in `jet debug --attach PID` or the editor's Jet debug configuration, then send the request again."
         }
+    }
+}
+
+DebugStaleReference: struct {
+    detail: String,
+
+    impl Diagnostic {
+        code: "E2238",
+        safety_class: .Soundness,
+        safety_reason: "A frame or variable read from an earlier stop would show values the program no longer holds.",
+        expert_path: "none: refresh the view after the next stop",
+        stage: [.Tooling],
+        meaning: "A `jet debug --dap` request names a frame, scope or variable reference of an earlier stop, which expired when the program ran again",
+        detail: true,
+        no_fix: .Behavior,
+
+        what: fn(self) -> String { "The debug view is from an earlier stop: {self.detail}." }
+
+        why: fn(self) -> String {
+            "A frame, scope or variable reference names what one stop showed; once the program runs again, those frames and values are gone, so the reference names nothing."
+        }
+
+        fix: fn(self) -> String { "Refresh the editor's stack and variables after the next stop." }
     }
 }
 

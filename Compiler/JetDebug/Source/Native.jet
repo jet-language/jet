@@ -8,7 +8,7 @@
 use {
     native_files: core.files
     native_math: core.math
-    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_write]
+    jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
     jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
 }
 
@@ -452,6 +452,11 @@ NativeSession: struct {
     logged: [NativeLogRead]{[NativeLogRead]{}},
     clock: Int{0},
     exits: Bool{false},
+    // The descriptor whose input stops a run of every thread where it is
+    // (the DAP adapter's requests), -1 for none; and whether that input
+    // stopped the last run.
+    interrupt: Int{-1},
+    interrupted: Bool{false},
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -2877,7 +2882,8 @@ NativeSession: struct {
         }
         if going -> self.let_all_go()
         loop {
-            stop: x64_trace_wait(self.trace)
+            waited: if going && self.interrupt >= 0 -> x64_trace_wait_or_input(self.trace, self.interrupt) else -> Val(x64_trace_wait(self.trace))
+            stop: waited ?? return self.interrupted_run()
             if stop.thread < 0 {
                 return Err(NativeDebugError{detail: "waiting for the program failed (errno {-stop.thread})"})
             }
@@ -3020,6 +3026,20 @@ NativeSession: struct {
         loop row in 0..<self.threads.len() {
             if !self.threads[row].running -> _ := self.let_go(row, X64TraceResume.Run)
         }
+    }
+
+    // A run of every thread that the session's input stopped (interrupt):
+    // every thread stops where it is (halt), the current one's stop a pause
+    // (NativeEvent code -1). The program's end when it ended meanwhile.
+    interrupted_run: fn(&self) -> NativeEvent NativeDebugError! {
+        if self.halt() == {
+            .Ok(ended) -> {
+                if ended == .Val(event) -> return Ok(event)
+            }
+            .Err(failure) -> return Err(failure)
+        }
+        self.interrupted = true
+        Ok(NativeEvent{kind: NativeStopKind.Paused, code: -1})
     }
 
     // Stop every running thread for the current thread's stop: each gets a
@@ -3871,12 +3891,14 @@ NativeSession: struct {
     }
 
     // The stop `event` is: a write a watch saw, a trap byte's breakpoint,
-    // rewinding the pc onto it, a trap the program made itself, or its end.
+    // rewinding the pc onto it, a trap the program made itself, a pause
+    // the session's input made (interrupted_run), or its end.
     stopped: fn(&self, event: NativeEvent) -> NativeStop NativeDebugError! {
         if event.kind == {
             .Exited -> Ok(NativeStop{kind: NativeStopKind.Exited, reason: "exited", code: event.code, frame: None})
             .Signaled -> Ok(NativeStop{kind: NativeStopKind.Signaled, reason: native_debug_signal_name(event.code), code: -1, frame: None})
             .Paused -> {
+                if event.code < 0 -> return self.paused("pause")
                 registers := self.registers() ?? return Err(err)
                 // The trap comes after the write: its line holds pc - 1.
                 if event.code > 0 {

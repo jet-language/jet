@@ -2037,6 +2037,12 @@ LOADER_TRACE_WORD: 256
 // The timespec x64_trace_wait_within sleeps on, in this process.
 LOADER_TRACE_SLEEP: 448
 
+// The pollfd x64_trace_wait_or_input polls its input with, in this process.
+LOADER_TRACE_POLL: 464
+
+// poll's event bit for bytes to read.
+LOADER_POLLIN: 1
+
 LOADER_TRACE_CALL: 320
 
 // Within the call: the call's result, the byte that crosses the channel
@@ -2392,6 +2398,33 @@ x64_trace_wait: fn(trace: X64Trace) -> X64TraceStop {
         }
     }
     X64TraceStop{thread: result, status: status}
+}
+
+// Wait for any thread of the traced program to stop or end, as
+// x64_trace_wait does, while watching the descriptor `input`: None when
+// the input has bytes to read (or has ended) first. The program is asked
+// without waiting, then the input is waited on for up to a millisecond,
+// in turn.
+x64_trace_wait_or_input: fn(trace: X64Trace, input: Int) -> X64TraceStop? {
+    loop {
+        result := -OS_EINTR
+        status := 0
+        ready := 0
+        #Unsafe("the helper's wait4 writes one int status to the trace's scratch word; poll reads and writes the one pollfd at LOADER_TRACE_POLL, in the scratch page") {
+            loop result == -OS_EINTR {
+                result = x64_trace_call(trace, OS_SYS_WAIT4, -1, trace.scratch + LOADER_TRACE_WORD, LOADER_WAIT_ALL | LOADER_WAIT_NOHANG, 0, 0, 0)
+            }
+            if result > 0 {
+                status = Int{os_load_i64(I64{trace.scratch + LOADER_TRACE_WORD})} & 0xffffffff
+            }
+            if result == 0 {
+                os_store_i64(I64{trace.scratch + LOADER_TRACE_POLL}, I64{input | LOADER_POLLIN << 32})
+                ready = os_syscall(OS_SYS_POLL, trace.scratch + LOADER_TRACE_POLL, 1, 1, 0, 0, 0)
+            }
+        }
+        if result != 0 -> return Val(X64TraceStop{thread: result, status: status})
+        if ready > 0 -> return None
+    }
 }
 
 // Stop the running thread `thread` of the traced program: a SIGSTOP to it
