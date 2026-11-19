@@ -4,7 +4,9 @@
 // lines the lens ranked must have its measured speedup within its predicted
 // interval, and the lens must have ranked one of them at least. A ranked
 // line's interval is at most WIDEST wide, the lens's own bound for ranking a
-// line, so no interval passes by being vague.
+// line, so no interval passes by being vague; and a measured speedup above
+// BOUND, which no line 30% faster can give, is refused as a measurement
+// gone wrong, so none passes by being wild.
 use {
     files: core.files
     process: core.process
@@ -13,6 +15,20 @@ use {
 // JetCLI CLI/Perf/Causal.jet JET_CLI_PERF_CAUSAL_WIDEST, in tenths of a
 // percent.
 WIDEST: 300
+
+// The most a line 30% faster can make a round sooner, in tenths of a
+// percent: all of the round's time on the line, every part of it 30% less.
+// main.jet's measured gain above it is no speedup of the line but a
+// measurement gone wrong, and is refused.
+BOUND: 300
+
+// Refuse the measured `gain` of the `function` line when the line cannot
+// have given it (BOUND).
+check_bound: fn(function: String, gain: Int) {
+    if gain > BOUND {
+        panic("the {function} line sped up by hand gained {gain}, more than the {BOUND} a line 30% faster can give a round: the measurement is invalid")
+    }
+}
 
 // The integer after `key` in `text`; None when `key` is absent.
 number_after: fn(text: String, key: String) -> Int? {
@@ -53,6 +69,8 @@ run: fn() {
     if before.len() < 2 -> panic("no `round` progress point in the causal section")
     pieces: before[0].split("{{\"lines\":[").to_list()
     lines: pieces[pieces.len() - 1]
+    check_bound("narrow", narrow_gain)
+    check_bound("wide", wide_gain)
     narrow_ranked: check_line(lines, "narrow", narrow_gain)
     wide_ranked: check_line(lines, "wide", wide_gain)
     if !narrow_ranked && !wide_ranked {
