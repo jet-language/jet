@@ -320,3 +320,27 @@ NATIVE_TEST_RING: "DebugItem: struct {{\n    label: String,\n    value: String,\
     session.close()
     native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
 }
+
+// Two instances of one generic module: at O1 and O2 each instance's `bump`
+// is inlined into `run`, two copies of one line.
+NATIVE_TEST_GENERIC_MODULE: "use core.process\n\ncounter: module<T>(start: Int) {{\n    HITS: start\n\n    bump: fn(by: Int) -> Int {{\n        total := HITS + by\n        return total\n    }}\n}}\n\nsmall: counter<Int>(8)\n\nlarge: counter<Int>(64)\n\nrun: fn() {{\n    by: process.args().len() + 1\n    print(\"{{small.bump(by)}}\")\n    print(\"{{large.bump(by)}}\")\n}}\n"
+
+#Test("a_generic_module_member_line_stops_in_each_inlined_instance") {
+    levels: [String]{"-O1", "-O2"}
+    loop level in levels {
+        scratch: native_test_files.temp_dir("jet-debug-generic-module") ?? panic("scratch: {err}")
+        root: scratch.path
+        session := native_test_session(root, NATIVE_TEST_GENERIC_MODULE, [String]{level})
+        lines: NATIVE_TEST_GENERIC_MODULE.split("\n").to_list()
+        first: session.run_to([NativeBreak]{{file: "prog.jet", line: 7}}, "prog.jet", lines, [String]{}) ?? panic("run_to: {err.detail}")
+        assert(first.text.contains("Breakpoint hit  prog.jet:7"), "{level}: {first.text}")
+        shown: session.command("bt", first.stop, "prog.jet", lines) ?? panic("bt: {err.detail}")
+        assert(shown.text.contains("run()  at prog.jet:18"), "{level}: {shown.text}")
+        second: session.command("c", first.stop, "prog.jet", lines) ?? panic("continue: {err.detail}")
+        assert(second.text.contains("Breakpoint hit  prog.jet:7"), "{level}: {second.text}")
+        again: session.command("bt", second.stop, "prog.jet", lines) ?? panic("bt: {err.detail}")
+        assert(again.text.contains("run()  at prog.jet:19"), "{level}: {again.text}")
+        session.close()
+        native_test_files.remove_all(root) ?? panic("scratch cleanup: {err}")
+    }
+}

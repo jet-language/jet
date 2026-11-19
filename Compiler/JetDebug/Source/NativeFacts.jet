@@ -194,6 +194,16 @@ native_image_read: fn(elf: [U8]) -> NativeImage? Never! {
 
 // The bytes of the section named `name`; None when the image has none.
 native_elf_section: fn(elf: [U8], name: String) -> [U8]? Never! {
+    found: native_elf_header(elf, name) ?? return None
+    offset: link_debug_addr(elf, found + 24)
+    length: link_debug_addr(elf, found + 32)
+    if offset < 0 || length < 0 || offset + length > elf.len() -> return None
+    Val(elf[offset..<offset + length])
+}
+
+// The offset of the header of the section named `name`; None when the image
+// has none.
+native_elf_header: fn(elf: [U8], name: String) -> Int? Never! {
     headers: link_debug_addr(elf, 40)
     size: link_debug_le(elf, 58, 2)
     count: link_debug_le(elf, 60, 2)
@@ -201,20 +211,26 @@ native_elf_section: fn(elf: [U8], name: String) -> [U8]? Never! {
     if headers < 0 || size < 64 || names_index < 0 || names_index >= count -> return None
     names: link_debug_addr(elf, headers + names_index * size + 24)
     if names < 0 -> return None
-    found := -1
     loop k in 0..<count {
         header: headers + k * size
         at: link_debug_le(elf, header, 4)
-        if at >= 0 && x64_jetline_text(elf, names + at) == name {
-            found = header
-            break
-        }
+        if at >= 0 && x64_jetline_text(elf, names + at) == name -> return Val(header)
     }
-    if found < 0 -> return None
-    offset: link_debug_addr(elf, found + 24)
-    length: link_debug_addr(elf, found + 32)
-    if offset < 0 || length < 0 || offset + length > elf.len() -> return None
-    Val(elf[offset..<offset + length])
+    None
+}
+
+// The image's code: the bytes of its `.text` and the address they load at
+// (none when the image has no `.text`).
+NativeCode: struct {
+    address: Int,
+    bytes: [U8],
+}
+
+native_elf_code: fn(elf: [U8]) -> NativeCode Never! {
+    none: NativeCode{address: 0, bytes: [U8]{}}
+    found: native_elf_header(elf, ".text") ?? return none
+    bytes: native_elf_section(elf, ".text") ?? return none
+    NativeCode{address: link_debug_addr(elf, found + 16), bytes: bytes}
 }
 
 // The value of the symbol named `name` in the image's symbol table; None

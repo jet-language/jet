@@ -225,6 +225,9 @@ NativeSession: struct {
     watches: [NativeWatch],
     watched: String,
     notes: String,
+    // Where each function of the image's line table opens its frame, read
+    // from the image's code (native_openings).
+    openings: [NativeOpening],
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -234,13 +237,22 @@ NativeSession: struct {
         image: native_image_load(binary, elf) ?? return Err(NativeDebugError{detail: "`{binary}` has no Jet debug information; build it with `jet build -O0`"})
         native_files.write(output_path, "") ?? return Err(NativeDebugError{detail: "couldn't create the program output file: {err}"})
         observe_root: native_elf_symbol(elf, X64_OBSERVE_ROOT_SYMBOL) ?? 0
-        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [NativeSite]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: ""})
+        openings: native_openings(image, native_elf_code(elf))
+        Ok(NativeSession{binary: binary, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: output_path, output_read: 0, started: false, threads: [NativeThread]{}, observe_root: observe_root, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [NativeSite]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings})
     }
 
     // A breakpoint on `line` of the Jet source `file` (its base name, as the
     // line table names it): its number, or None when no code is on that line.
+    // A function's start moves past its prologue (entry).
     break_at: fn(&self, file: String, line: Int) -> Int? NativeDebugError! {
-        self.place(native_line_addresses(self.image, file, line))
+        addresses := native_line_addresses(self.image, file, line)
+        loop k in 0..<addresses.len() {
+            index: x64_jetline_find(self.image.lines, addresses[k])
+            if index >= 0 && addresses[k] == self.image.lines.functions[index].low {
+                addresses[k] = self.entry(index)
+            }
+        }
+        self.place(addresses)
     }
 
     // A breakpoint at the start of the Jet function `function`, past its
@@ -248,9 +260,21 @@ NativeSession: struct {
     break_in: fn(&self, function: String) -> Int? NativeDebugError! {
         addresses := [Int]{}
         loop (index, found) in self.image.lines.functions {
-            if found.name == function -> addresses.push(native_body_start(self.image, index))
+            if found.name == function -> addresses.push(self.entry(index))
         }
         self.place(addresses)
+    }
+
+    // Where a breakpoint on the start of function `index` traps: past the
+    // prologue that opens its frame there (native_body_start), or the start
+    // itself when its code runs before any frame: a frame-free prefix
+    // returns without reaching the frame.
+    entry: fn(self, index: Int) -> Int Never! {
+        low: self.image.lines.functions[index].low
+        if self.openings[index].at == low && native_frame_open(self.openings[index].prologue) >= 0 {
+            return native_body_start(self.image, index)
+        }
+        low
     }
 
     // A new breakpoint on `addresses`, trapped at once in a running program;
@@ -1617,8 +1641,7 @@ NativeSession: struct {
         function: x64_jetline_find(self.image.lines, start)
         if function < 0 -> return self.step_out()
         line: x64_jetline_line(self.image.lines, self.image.lines.functions[function], start) ?? 0
-        low_start: self.image.lines.functions[function].low
-        base: native_frame_base(self.code(low_start, NATIVE_DEBUG_PROLOGUE), low_start, registers, start, self.code(start, 1))
+        base: native_frame_base(self.openings, function, registers, start, self.code(start, 1))
         if calls == NativeStepCalls.Over -> return self.line_over(function, line, base, reason)
         loop _ in 0..<NATIVE_DEBUG_MOST_STEPS {
             before: registers
@@ -1644,10 +1667,9 @@ NativeSession: struct {
                 if registers[X64_TRACE_RSP] >= base -> return self.paused(reason)
                 next
             }
-            low: self.image.lines.functions[here].low
-            frame: native_frame_base(self.code(low, NATIVE_DEBUG_PROLOGUE), low, registers, pc, self.code(pc, 1))
+            frame: native_frame_base(self.openings, here, registers, pc, self.code(pc, 1))
             if frame > base -> return self.paused(reason)
-            if pc == low || !native_row_start(self.image, here, pc) -> next
+            if pc == self.openings[here].at || !native_row_start(self.image, here, pc) -> next
             if frame < base -> return self.paused(reason)
             if (x64_jetline_line(self.image.lines, self.image.lines.functions[here], pc) ?? 0) != line {
                 return self.paused(reason)
@@ -1710,7 +1732,6 @@ NativeSession: struct {
     line_over_run: fn(&self, index: Int, line: Int, base: Int, returned: Int, owned: [Int], reason: String) -> NativeStop NativeDebugError! {
         low: self.image.lines.functions[index].low
         high: self.image.lines.functions[index].high
-        prologue: self.code(low, NATIVE_DEBUG_PROLOGUE)
         stepping: self.trace.thread
         self.plant_owned(owned) ?? return Err(err)
         loop {
@@ -1727,7 +1748,7 @@ NativeSession: struct {
             if self.trace.thread != stepping -> next
             if at == returned && registers[X64_TRACE_RSP] >= base -> return self.paused(reason)
             if at < low || at >= high -> next
-            frame: native_frame_base(prologue, low, registers, at, self.code(at, 1))
+            frame: native_frame_base(self.openings, index, registers, at, self.code(at, 1))
             if frame > base -> return self.paused(reason)
             if frame < base {
                 self.lift_owned(owned)
@@ -1777,18 +1798,17 @@ NativeSession: struct {
             pc: registers[X64_TRACE_RIP]
             lookup: if frames.len() == 0 -> pc else -> pc - 1
             function: x64_jetline_find(self.image.lines, lookup)
-            low: if function >= 0 -> self.image.lines.functions[function].low else -> -1
-            prologue: if low >= 0 -> self.code(low, NATIVE_DEBUG_PROLOGUE) else -> [U8]{}
-            cfa: native_frame_base(prologue, low, registers, pc, self.code(pc, 1))
+            here: self.code(pc, 1)
+            cfa: native_frame_base(self.openings, function, registers, pc, here)
             frames.push(NativeUnwound{pc: pc, cfa: cfa, registers: registers.copy(), known: known.copy()})
             if cfa <= registers[X64_TRACE_RSP] -> break
             returned: native_debug_word(self.trace, cfa - 8) ?? break
             if returned <= 0 -> break
-            caller_rbp: native_caller_rbp(prologue, low, registers, self.trace, pc, self.code(pc, 1)) ?? break
+            caller_rbp: native_caller_rbp(self.openings, function, registers, self.trace, pc, here) ?? break
             next_known := loop _ in 0..<registers.len() -> false
             loop index in NATIVE_DEBUG_CALLEE_SAVED -> next_known[index] = known[index]
-            loop save in native_prologue_saves(prologue, low) {
-                if pc >= save.after && registers[X64_TRACE_RBP] > 0 && low >= 0 && pc != low && pc != low + 1 {
+            loop save in native_prologue_saves(self.openings, function) {
+                if pc >= save.after && registers[X64_TRACE_RBP] > 0 {
                     if native_debug_word(self.trace, registers[X64_TRACE_RBP] - 8 * (save.slot + 1)) == .Val(saved) {
                         registers[save.register] = saved
                         next_known[save.register] = true
@@ -1890,9 +1910,14 @@ native_bytes_at: fn(bytes: [U8], at: Int, want: [U8]) -> Bool Never! {
     true
 }
 
-// The callee-saved registers the prologue pushes after it opens the frame.
-native_prologue_saves: fn(prologue: [U8], low: Int) -> [NativeSave] Never! {
+// The callee-saved registers the prologue of function `function` pushes
+// after it opens the frame (none for code without Jet line information,
+// `function` -1).
+native_prologue_saves: fn(openings: [NativeOpening], function: Int) -> [NativeSave] Never! {
     saves := [NativeSave]{}
+    if function < 0 -> return saves
+    prologue: openings[function].prologue
+    low: openings[function].at
     open: native_frame_open(prologue)
     if open < 0 -> return saves
     at := open + 4
@@ -1916,15 +1941,19 @@ native_prologue_saves: fn(prologue: [U8], low: Int) -> [NativeSave] Never! {
     saves
 }
 
-// The canonical frame address of the frame at `pc` whose function starts at
-// `low` with `prologue` (low -1: code without Jet line information, where
-// the frame pointer chain is trusted); `here` is the code byte at `pc`.
-native_frame_base: fn(prologue: [U8], low: Int, registers: [Int], pc: Int, here: [U8]) -> Int Never! {
+// The canonical frame address of the frame at `pc` in Jet function
+// `function` (-1: code without Jet line information, where the frame
+// pointer chain is trusted); `here` is the code byte at `pc`. Up to where
+// the function opens its frame, a frame-free prefix included, the return
+// address is on top of the stack.
+native_frame_base: fn(openings: [NativeOpening], function: Int, registers: [Int], pc: Int, here: [U8]) -> Int Never! {
     rsp: registers[X64_TRACE_RSP]
     rbp: registers[X64_TRACE_RBP]
-    open: if low >= 0 -> native_frame_open(prologue) else -> -1
+    if function < 0 -> return rbp + 16
+    low: openings[function].at
+    open: native_frame_open(openings[function].prologue)
     if open >= 0 {
-        if pc >= low && pc <= low + open -> return rsp + 8
+        if pc <= low + open -> return rsp + 8
         if pc == low + open + 1 -> return rsp + 16
         if here.len() == 1 && here[0] == (U8{0xc3}) -> return rsp + 8
     }
@@ -1933,17 +1962,65 @@ native_frame_base: fn(prologue: [U8], low: Int, registers: [Int], pc: Int, here:
 
 // The caller's frame pointer, for the frame native_frame_base measured;
 // `here` is the code byte at `pc`.
-native_caller_rbp: fn(prologue: [U8], low: Int, registers: [Int], trace: X64Trace, pc: Int, here: [U8]) -> Int? Never! {
+native_caller_rbp: fn(openings: [NativeOpening], function: Int, registers: [Int], trace: X64Trace, pc: Int, here: [U8]) -> Int? Never! {
     rsp: registers[X64_TRACE_RSP]
     rbp: registers[X64_TRACE_RBP]
-    open: if low >= 0 -> native_frame_open(prologue) else -> -1
+    open: if function >= 0 -> native_frame_open(openings[function].prologue) else -> -1
     if open >= 0 {
-        if pc >= low && pc <= low + open -> return Val(rbp)
+        low: openings[function].at
+        if pc <= low + open -> return Val(rbp)
         if pc == low + open + 1 -> return native_debug_word(trace, rsp)
         if here.len() == 1 && here[0] == (U8{0xc3}) -> return Val(rbp)
     }
     if rbp <= 0 -> return None
     native_debug_word(trace, rbp)
+}
+
+// Where a Jet function opens its frame: at `at`, whose code bytes are
+// `prologue`. That is the function's start, or, for a body that starts
+// with a frame-free prefix (JetIR X64Select.jet ir_x64_wrap), the row past
+// the prefix whose code opens the frame; before `at` the function has no
+// frame of its own. A start that opens none and has no such row keeps `at`
+// at the start.
+NativeOpening: struct {
+    at: Int,
+    prologue: [U8],
+}
+
+// The opening of each function of `image`'s line table, read from `code`.
+native_openings: fn(image: NativeImage, code: NativeCode) -> [NativeOpening] Never! {
+    openings := [NativeOpening]{}
+    loop index in 0..<image.lines.functions.len() {
+        openings.push(native_opening(image, index, code))
+    }
+    openings
+}
+
+native_opening: fn(image: NativeImage, index: Int, code: NativeCode) -> NativeOpening Never! {
+    function: image.lines.functions[index]
+    start: native_code_at(code, function.low)
+    if native_frame_open(start) >= 0 -> return NativeOpening{at: function.low, prologue: start}
+    at := function.rows
+    address := function.low
+    loop at < function.rows_end {
+        address += link_debug_uleb(image.lines.table, at)
+        _ := x64_jetline_sleb(image.lines.table, at)
+        if address == function.low -> next
+        bytes: native_code_at(code, address)
+        if native_bytes_at(bytes, 0, [U8]{0x55, 0x48, 0x89, 0xe5}) {
+            return NativeOpening{at: address, prologue: bytes}
+        }
+    }
+    NativeOpening{at: function.low, prologue: start}
+}
+
+// The NATIVE_DEBUG_PROLOGUE bytes of `code` from `address` (fewer at its
+// end, none outside it).
+native_code_at: fn(code: NativeCode, address: Int) -> [U8] Never! {
+    at: address - code.address
+    if at < 0 || at >= code.bytes.len() -> return [U8]{}
+    end: if at + NATIVE_DEBUG_PROLOGUE < code.bytes.len() -> at + NATIVE_DEBUG_PROLOGUE else -> code.bytes.len()
+    code.bytes[at..<end]
 }
 
 // The word of the stopped program at `address`.
@@ -1953,18 +2030,20 @@ native_debug_word: fn(trace: X64Trace, address: Int) -> Int? Never! {
 }
 
 // The addresses of `line` in the Jet source `file` (by base name): in each
-// function with code on it, the first row of the line, else of the nearest
-// later line the function has code on; a row at the function's start moves
-// past its prologue.
+// function, the first row of the line in its own code and in each inlined
+// copy it holds (two instances of a generic module's member inlined into one
+// caller are two copies). A function with no row of the line, but rows on or
+// before it, gives its first row of the nearest later line instead.
 native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] Never! {
     wanted: native_files.basename(file)
     addresses := [Int]{}
-    loop (index, function) in image.lines.functions {
+    loop function in image.lines.functions {
         if native_files.basename(function.file) != wanted -> next
-        exact := -1
+        described: native_function_at(image, function.low)
+        sites := [NativeLineSite]{}
+        covers := false
         nearest := -1
         nearest_line := 0
-        covers := false
         at := function.rows
         address := function.low
         current := 1
@@ -1972,21 +2051,37 @@ native_line_addresses: fn(image: NativeImage, file: String, line: Int) -> [Int] 
             address += link_debug_uleb(image.lines.table, at)
             current += x64_jetline_sleb(image.lines.table, at)
             if current <= line -> covers = true
-            if current == line && exact < 0 -> exact = address
             if current > line && (nearest < 0 || current < nearest_line) {
                 nearest = address
                 nearest_line = current
             }
+            if current != line -> next
+            site: native_line_site(described, address)
+            seen := false
+            loop found in sites {
+                if found.site == site -> seen = true
+            }
+            if !seen -> sites.push(NativeLineSite{site: site, address: address})
         }
-        found: if {
-            exact >= 0 -> exact
-            covers -> nearest
-            else -> -1
-        }
-        if found < 0 -> next
-        addresses.push(if found == function.low -> native_body_start(image, index) else -> found)
+        loop found in sites -> addresses.push(found.address)
+        if sites.len() == 0 && covers && nearest >= 0 -> addresses.push(nearest)
     }
     addresses
+}
+
+// The first row of the searched line in one run of code: the function's own
+// code (`site` -1) or one inlined copy (the run's index).
+NativeLineSite: struct {
+    site: Int,
+    address: Int,
+}
+
+// The innermost inlined run of `function` holding `address`; -1 for the
+// function's own code, or without its DWARF facts.
+native_line_site: fn(function: NativeFunction?, address: Int) -> Int Never! {
+    described: function ?? return -1
+    chain: native_inline_chain(described, address)
+    if chain.len() == 0 -> -1 else -> chain[0]
 }
 
 // The first address past function `index`'s prologue: its second row, or

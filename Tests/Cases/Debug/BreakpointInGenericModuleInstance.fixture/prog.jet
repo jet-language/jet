@@ -1,0 +1,24 @@
+use core.process
+
+counter: module<T>(start: Int) {
+    HITS: start
+
+    bump: fn(by: Int) -> Int {
+        total := HITS + by
+        return total
+    }
+
+    peek: fn() -> Int { HITS + 1 }
+}
+
+small: counter<Int>(8)
+
+large: counter<Int>(64)
+
+run: fn() {
+    by: process.args().len() + 1
+    print("{small.bump(by)}")
+    print("{large.bump(by)}")
+    print("{small.peek()}")
+    print("{large.peek()}")
+}
