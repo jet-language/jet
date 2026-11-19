@@ -1718,8 +1718,17 @@ IR_X64_PERF_ZONES_SYMBOL: "jet_rt_perf_zones"
 // test and branch, and its name and arguments are not even set up. r11 may
 // hold a close's argument, so it is saved around the test (a pop keeps the
 // flags). A close whose open ran before the profiler turned zones on gets 0
-// and writes no row (PerfSamples.jet jet_perf_zone_close).
+// and writes no row (PerfSamples.jet jet_perf_zone_close). A `zones: strip`
+// module (IRModule.zones_stripped) keeps no site: an open is the Int 0 and a
+// close is nothing.
 ir_x64_zone_site: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, symbol: String, dst: Int) Never! {
+    if m.zones_stripped {
+        if dst >= 0 {
+            x64_zero(e.code, X64_RAX)
+            ir_x64_store(e, m, f, al, dst, X64_RAX)
+        }
+        return
+    }
     x64_push(e.code, X64_R11)
     flag: x64_load_rip(e.code, X64_R11)
     e.relocs.push(X64Reloc{at: flag, target: X64RelocTarget.RuntimeData{symbol: IR_X64_PERF_ZONES_SYMBOL}})

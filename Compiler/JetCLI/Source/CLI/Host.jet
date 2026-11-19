@@ -1999,6 +1999,8 @@ jet_cli_ir_checks: fn(result: JetDriverCompileResult, inputs: JetDriverLoweringI
     // An image with debug information keeps every DebugView implementation,
     // which `jet debug` calls to show a value of its type.
     checks.debug_views = build_options_value(options, "debug_info") != "false"
+    // `zones: strip` leaves the core.perf zone sites out of the image.
+    checks.zones_stripped = build_options_value(options, "zones") == "strip"
     // An entry-module `#Export(c)` function named for a runtime provider
     // hook (a scheduler provider's run queue) replaces the runtime's own at
     // link time: the object exports it, and the runtime calls it directly.

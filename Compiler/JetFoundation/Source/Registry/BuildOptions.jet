@@ -96,6 +96,11 @@ JET_BUILD_OPTIONS: #run { [BuildOptionRow]{
     // `.jet/generated/<package>/<name>.jet` path under the package root for
     // inspection; off (the stock) writes none.
     {name: "write_generated", kind: BuildOptionKind.Choice, values: [String]{"off", "on"}, stock_build: "off", stock_run: "off", removes_check: [String]{}, help: "Whether fn build's generated sources are written to .jet/generated/: off or on"},
+    // keep (the stock) builds each core.perf zone, frame mark and plot site
+    // as a test of one runtime word, so the site does nothing until `jet perf
+    // run` or `jet perf attach` sets it; strip leaves the zone sites out of
+    // the image, so no profiler can turn them on.
+    {name: "zones", kind: BuildOptionKind.Choice, values: [String]{"keep", "strip"}, stock_build: "keep", stock_run: "keep", removes_check: [String]{}, help: "Whether the image keeps its profiler zone sites, which stay off until jet perf run or jet perf attach turns them on"},
     // Where `jet build` writes its executables: a directory under the package
     // root, or an absolute one; "" (the stock) is `.jet/build`. A run builds
     // its image in memory and writes none.
