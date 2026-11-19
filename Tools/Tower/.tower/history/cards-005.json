@@ -17805,6 +17805,285 @@
       "completedAt": "2026-11-16T20:33:28.729Z",
       "questions": [],
       "retiredAt": "2026-11-19T20:52:40.175Z"
+    },
+    {
+      "id": "c0apk7x9",
+      "num": 6845,
+      "title": "Reflection reads typed facts: callables, declarations, fields, markers and run-time views",
+      "body": "Destination: every reflection read in Jet returns a typed record from one checked fact path, so a library can read a function's parameters, a type's fields, a marker's arguments or a run-time value without parsing strings. This is the reading half of the metaprogramming ladder (D-META-LADDER1=A) and what markers, derives and fn build all stand on.\n\nGoverning decisions: D-META-REFLECT2=A (the TypeInfo, FieldInfo, FunctionInfo records; TypeId identity; PreparedValue), D-PREP-SURFACE2=A, D-MARKER-REFLECT1=A (a marker reads as the typed record its declaration describes), D-REFLECT-FIELDTYPE1=A (field.type is a TypeId). Spec: Docs/spec/reference/metaprogramming.md.\n\nDecisions already taken for this work (Main, 2026-11-11): PreparedValue is a public enum mirroring the compiler's compile-time value cases (Int, Float, Bool, Char, String, Enum, List, Struct, Unit); TypeId is the TypeInfo identity; SourceSpan gains its file; SettingOrigin adds Build beside Declaration, Profile and CommandLine because fn build writes settings. A guard refuses a String-typed reflection field wherever a typed value exists. Fact reads are compile-time only since 4328d5ff94, so run-time examples read them through #run.\n\nCarried from #3520 (closed 2026-11-14) and #6039 (closed 2026-11-14).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All 18 criteria met; c11 owed-row MetaSuite check landed af0db1d3e1 and passed on p227 (dev eab1677096). Owed rows tracked on #6947 c4 and #6418 c154."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p210 status (D-PRIM-ANY1 round 10 probes): reflect.of on a private type held as a trait value now reports Secret and path n05_private_type_trait_value.lib.Secret (p209 gave M3LibSecret), probably from #3147 n14's ledger paths (9d83b463cd). c16 may now hold; rerun probes n09 and n13 on the next batch compiler before meeting it. c17 is still open: n16 prints the mangled M3GeoPoint."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "c11 dependency (GoalsA-1-4, p188, 2026-11-15): meta_suite's check.jet fails a KNOWN-FAILING witness by design. J34 (C-to-Jet callbacks) has no passing witness until #6947 and #6945 are built; J35 (native jet build --lib) has none until #6418 and #4833. c11 stays open on those cards; every other row passes once GoalsA-1-4-typevalues-meta-suite lands. That SUB also fixes a jet fmt defect from the corpus fmt cutover (28ce99130b): fmt rewrote a bare-name field into name: name, which changed meaning in 8 corpus lines (TypeValues among them). The formatter now keeps bare-name fields, and the 8 lines are restored."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "p188 (dev 953b842367), 2026-11-15: c7's Reflection golden group has 79 rows, 3 failing, all TypeValues (E0303 'Struct literal for Type has no field Rock' at TypeValues.jet:40:16, the same on p187). c11's meta_suite is down from 48 coverage problems to 8: ui code_value_paste_takes_a_string and code_value_has_no_register_expansion (snapshot mismatch), plus KNOWN-FAILING J34/J35 witnesses owned by other cards (jet inspect bind and native C callbacks, jet build --lib). GoalsA-1-4 owns TypeValues and the two snapshots."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Decision for c11 meta_suite (Main, 2026-11-15): the Jai families J34 (C-to-Jet callbacks) and J35 (dynamic-library exports) list their real witnesses (cffi_named_pure_callback, Examples/Interop/FFI/Callbacks, the library_outputs cases), so meta_suite fails truthfully on those rows until #6947 and #4833/#6418 land; partial witnesses do not stand in. c11 depends on those cards."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "p184 proofs (dev 61b4ee98a7): golden CallableCatalog fails at o0/o1/o2 with E0118 (name bound already taken, run.jet:165), and golden DeclarationFacts is an ICE (exit 101). ReflectionRungs ICEs on p183 and p184 (comptime.build unlowered: argument type TypeInfo) but runs on p182, so it is a regression from p182 to p183; suspects are e90813862d typeid-signature and bce840440f core-bodies-load. GoalsA-1-4 is fixing all three as one SUB ahead of reflect-value."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Decision (Main, 2026-11-15, within D-META-REFLECT2=A), for c2: one typed record per declaration kind, not a single DeclarationInfo. definitions() entries carry a closed DeclarationKind enum in place of the String kind (fixed by the grammar; its row goes in the closed-list kernel ledger as grammar), plus identity and scope. TraitInfo, ConstantInfo and SettingInfo gain identity and scope. ProgramInfo.complete() reports completeness next to the revision. Owner: GoalsA-1-4. c1 SUB GoalsA-1-4-typeid-signature (TypeId.signature gives the CallableSignature) is queued for the next batch."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "Main",
+          "text": "Handoff (PrecompiledCore-5 stopped, agent cap): SUB g6-callable-fact is in census222 and does not by itself meet c1. Left for c1: function types read one typed callable fact (D-META-REFLECT2). Planned shape: add signature: CallableSignature? to TypeId (CoreRecordRows TypeId row, JetIR CompilerOwned.jet:183, FactReads.jet:631); in Reflection.jet type_id and written_type_id, build it from Type.Fn's params, ret, effect_bound, param_contract and call_metadata, and add it to type_id_record; the other TypeId makers are BuildAdapter.jet:247/289 and Derives.jet:2121; then the spec text at metaprogramming.md ~562 and a fn-typed parameter read in CallableCatalog."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "FunctionInfo, MethodInfo and function types read one typed callable fact: parameters with labels and defaults (never run), declared and inferred effects, captures with ownership, access and type, and specialization identity. The callable example reads every field with no string parsing, and changing a callee's signature re-checks code that reads it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p186 (dev 80906d9d14), 2026-11-15: golden --filter Metaprogramming/Reflection/CallableCatalog 3/3 PASS (o0, o1, o2; fix landed 6333e7e70e)",
+          "at": "2026-11-15T17:35:24.847Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Reflection/CallableCatalog"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Every declaration kind has a typed reflection record with a stable identity and scope; comments, docs and marker arguments stay distinct; package settings show their value, type and origin (Declaration, Profile, CommandLine or Build) as typed values, not text; a whole-program query reports whether it is complete and at which revision.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p188 (dev 953b842367, with signature-scope 267b650149), 2026-11-15: jet test Compiler --profile golden --filter Metaprogramming/Reflection runs 79 rows with only TypeValues failing; DeclarationFacts passes at o0, o1 and o2.",
+          "at": "2026-11-15T19:42:00.511Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Reflection/DeclarationFacts"
+          }
+        },
+        {
+          "n": 3,
+          "text": "`reflect.of(value)` keeps typed values and identity with no reading of display strings; capturing a value is complete or refused with a registered diagnostic; retention is explicit and inspectable; O0, O1 and O2 print the same output.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p186 (dev 80906d9d14), 2026-11-15: golden --filter Metaprogramming/Reflection/ReflectValue 3/3 PASS (fix landed 6333e7e70e)",
+          "at": "2026-11-15T17:35:26.163Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Reflection/ReflectValue"
+          }
+        },
+        {
+          "n": 4,
+          "text": "A field's type (a TypeId), default and offset read the same in a marker expand body, a derive expand body, ordinary code through `T.reflect()` and fn build, for a struct with a defaulted field (today the default read is E0956 and `Rock.reflect()` outside a template is E0311).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: golden --filter Metaprogramming/Reflection/FieldFacts 3/3 PASS (o0, o1, o2; landed 09584321e1)",
+          "at": "2026-11-15T15:56:59.867Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Reflection/FieldFacts"
+          }
+        },
+        {
+          "n": 5,
+          "text": "TypeInfo lists associated constants with their values and the generic bindings of a specialized type, and a numeric type reports its signedness and bit width.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: golden --filter Metaprogramming/Reflection/TypeFacts 3/3 PASS (landed 9557198431)",
+          "at": "2026-11-15T15:57:01.039Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Reflection/TypeFacts"
+          }
+        },
+        {
+          "n": 6,
+          "text": "A type's implemented traits read as the typed `traits` list; no string `implements(\"X\")` read remains in Compiler/, Core or Examples (one cutover).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: cases --filter reflect_traits_are_typed 1/1 PASS (landed 24845e3af9)",
+          "at": "2026-11-15T15:57:02.028Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "reflect_traits_are_typed"
+          }
+        },
+        {
+          "n": 7,
+          "text": "TypeInfo.identity is a TypeId (D-META-REFLECT2=A), not a String, and every reader moves to it in one cutover.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p203 batch compiler (dev 686e086a2c; the cutover landed as 93276d86a7): jet test Compiler --profile golden --filter Metaprogramming/Reflection gives n=79, bad=0 (O0/O1/O2). TypeValues.jet matches its .out, and git grep finds no identity: String left on TypeInfo (the remaining identity: String fields belong to ProgramFact and RunFact).",
+          "at": "2026-11-16T04:08:40.146Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Reflection"
+          }
+        },
+        {
+          "n": 8,
+          "text": "An engine-style library marks entity types with its own marker and derives the count, the sorted names, per-type `Rows<T>` storage and default constructors from `Entity.reflect().uses`, with no hand-kept list; adding one marked struct, including a generated one, is the only edit needed for it to appear.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p185 (dev b6b255de57), 2026-11-15: golden --filter EntityBuckets 1/1 PASS (landed 2eb629ef41; its sidecar case runs jet build then the built program, see #6846 c13)",
+          "at": "2026-11-15T15:57:03.008Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Reflection/EntityBuckets"
+          }
+        },
+        {
+          "n": 9,
+          "text": "`target.marker(T)` returns the typed marker record (`T?`, or `[T]` for a repeatable marker) on every site kind, fields included, and `Rock.reflect().marker(T)` works on named types; a non-marker argument is a registered refusal with a UI snapshot.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 72a8142651 (typed marker(T) lookup landed in 38cb96129c, every site kind in 7a0d0f7d8d). Checked 2026-11-14 with the gate-p136 jet: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/Marker` PASS 9 (MarkerSites reads target.marker(T) at type, variant, function, method, field and module sites; MarkerUses; MarkerViews), `--profile golden --filter Metaprogramming/Reflection/CommentsAndDocs` PASS 3 (Order.reflect().marker(Note)), `--profile ui --filter marker_lookup_refusals` PASS 1 (jet.MarkerLookupNotMarker).",
+          "at": "2026-11-15T02:18:21.504Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Attributes/MarkerRead"
+          }
+        },
+        {
+          "n": 10,
+          "text": "No string `has_marker(\"X\")` read remains in the compiler (today Sema/Calls/Reflection.jet and Registration/Derives.jet); a one-time in-repo script converts them to typed marker reads (D-MARKER-REFLECT1=A), and no jet fix rule ships. Proof: `git grep -n 'has_marker(\"' Compiler` prints nothing and `jet test Compiler --profile cases --filter marker_read` passes",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "The string has_marker reads in Sema/Calls/Reflection.jet and Registration/Derives.jet were retired in 1e193c4e3f (G6Decl-11d). On dev 72a8142651 `git grep -n 'has_marker(\"' Compiler` prints nothing; `jet test Compiler --profile ui --filter marker_lookup_refusals` PASS 1 with the gate-p136 jet.",
+          "at": "2026-11-15T02:18:22.553Z"
+        },
+        {
+          "n": 11,
+          "text": "One executable manifest covers the 40 Jai metaprogramming peer families and every reflection registry row, each with a passing witness on its tiers; a missing, inconclusive or untracked row fails the check, and historical Jai behavior is marked apart from observed Jai behavior. A row whose witness is a known-failing row owned by another card's open criterion is reported as owed, never as passed (today J34 native C callbacks, owned by #6947 c4, and J35 library exports, owned by #6418 c154).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p227 batch compiler (dev eab1677096), commit af0db1d3e1: jet test Compiler --profile cases --filter MetaSuite PASS 1/1. A row with a KNOWN-FAILING witness counts as owed (J34 -> #6947 c4, J35 -> #6418 c154); untracked failures, skips and missed levels still fail the check.",
+          "at": "2026-11-16T21:13:01.935Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "MetaSuite"
+          }
+        },
+        {
+          "n": 12,
+          "text": "A type name is a value of type Type wherever a Type is expected: `counts[Position] = 2` keys a map by type, `if t == { Position -> … }` switches on it, `Type{Rock}` builds one explicitly and `type_of(p)` gives a name's static type; Box<Int> and Box<String> are different keys (D-PRIM-TYPEKEY2=A, amending D-PRIM-TYPEKEY1=A). Proof: `jet test Compiler --profile golden --filter Metaprogramming/Reflection/TypeValues` on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "batch compiler p186 (dev 80906d9d14), 2026-11-15: golden --filter Metaprogramming/Reflection/TypeValues 3/3 PASS on o0, o1 and o2 (landed 8f441cf0e3)",
+          "at": "2026-11-15T17:35:27.770Z"
+        },
+        {
+          "n": 13,
+          "text": "A trait value prints and debug-prints as its concrete value: print and interpolation dispatch on the box's type key to the concrete type's own print, for every trait, with one print arm per type the program converts. On gate-p199, print(\"{shape}\") of a Shape is E0915 and print(shapes[0]) is E0112 while the concrete struct prints (Any audit, probes p1 and p4; Docs/audits/any-type-info-pointer-2026-11-15.md, claim 3). Proof: jet test Compiler --profile cases --filter traits/trait_value_prints, which prints a [Shape] list's values on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p204 batch compiler (dev 686cdaaee7): jet test Compiler --profile cases --filter traits/trait_value_prints gives n=1, bad=0 (commits d5c6efe2c1 and the fix 3c615e25d9; the case runs on O0, O1 and O2).",
+          "at": "2026-11-16T04:40:16.785Z"
+        },
+        {
+          "n": 14,
+          "text": "Builtin types are Type values: counts[Int] = 1 works as user types do (today E0107 'Nothing named Int'; found by the 2026-11-15 D-PRIM-ANY1 adversarial review on p201, probe in $JET_SCRATCH_ROOT/lanes/GoalsA-1-4/any-review, g3b_type_keyed_builtin). ValueInfo.type of an erased trait value equals T.reflect()'s TypeId through one key→TypeId mapping, and the key is stable across builds that add a module; an Any value, if D-PRIM-ANY1 adds one, uses the same mapping. Proof: cases reflect/builtin_types_are_type_values and erased_trait_value_reflects_its_type.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p205 batch compiler (dev 16c1bda2d9; erased value type landed as 31829360d9, builtin type values landed in p203): jet test Compiler --profile cases --filter reflect/builtin_types_are_type_values → PASS 1 FAIL 0; --filter erased_trait_value_reflects_its_type → PASS 1 FAIL 0 (also the p205 cycle proof row). The Any half is conditional on D-PRIM-ANY1, which is still open; whatever it adds must use this same key→TypeId mapping.",
+          "at": "2026-11-16T05:13:47.974Z"
+        },
+        {
+          "n": 15,
+          "text": "A value of a trait with no methods prints and interpolates as its concrete value, as a one-method trait does (c13 says every trait; spec.md:939-941). Today it prints an empty line directly, in \"bare: {s}\" and inside a list, on O0, O1 and O2 (p204, probes c2 and c2b in $JET_SCRATCH_ROOT/lanes/AnyBallot/probes, D-PRIM-ANY1 round 3). Proof: a traits/ cases row printing a method-less trait value three ways on each tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 1e6bb8daf2. jet test Compiler --profile cases --filter empty_trait_value_prints -> 1/0 on the p214 batch compiler (dev aa8715dacd), cycle p214 proof rows. tests/cases/traits/empty_trait_value_prints runs jet run -O0, -O1 and -O2 and prints a method-less trait value directly, in \"bare: {s}\" and in a list (14 / bare: 14 / hi / Point { x: 1, y: 2 } / [14, hi, Point { x: 1, y: 2 }]).",
+          "at": "2026-11-16T10:40:12.625Z"
+        },
+        {
+          "n": 16,
+          "text": "reflect.of on a trait value reports the user's spelling: type_name() gives the concrete type's name and path() its module path, never the internal key (today module:14:…::Shown) (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probes n09_reflect_trait_value.jet and n13_reflect_trait_value_method.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a reflect/ cases row on each tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 26ac9d9275 (with the reflection path already on dev). jet test Compiler --profile cases --filter reflect/ -> 15 pass, 1 known-failing unrelated (checked_text_contract_is_reflected_on_the_nominal_type) on the p214 batch compiler (dev aa8715dacd), cycle p214 proof rows. tests/cases/reflect/erased_trait_value_reflects_its_type and erased_trait_value_reflects_a_builtin run O0, O1 and O2; type_name and path print the user's spelling (Square main.Square, label: String String), never the internal module:N:…::Shown key.",
+          "at": "2026-11-16T10:40:13.774Z"
+        },
+        {
+          "n": 17,
+          "text": "A struct declared in an inline module prints with its declared name: Point { x: 1, y: 2 }, never the mangled M3GeoPoint { … } (p204, O0/O1/O2 alike; D-PRIM-ANY1 review 4), probe n16_inline_use_fn_control.jet in $JET_SCRATCH_ROOT/lanes/AnyReview4/probes. Proof: a cases row printing an inline-module struct directly, interpolated and in a list on each tier.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 50d75d6587. jet test Compiler --profile cases --filter inline_module_struct_prints_its_source_name -> 1/0, and --filter inline_module_ 12/0 on the p214 batch compiler (dev aa8715dacd), cycle p214 proof rows. The case runs O0, O1 and O2 and prints Point { x: 1, y: 2 } directly, interpolated (at Point { … }) and in a list, never M3GeoPoint.",
+          "at": "2026-11-16T10:40:14.849Z"
+        },
+        {
+          "n": 18,
+          "text": "A type-key collision between two types is a registered build diagnostic naming both types, never a process-stopping panic (AGENTS.md collect-all rule). Today Compiler BuildTraits.jet:21-24 panics (found by reading, D-PRIM-ANY1 review 5; no probe can force a collision). Proof: a unit test that feeds two colliding keys to the key table and gets the diagnostic.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed 7d09f2d053 (p213, dev 78f4541780). p213 gate: jet test Compiler/JetIR/Source/BuildTraits.jet rc=0 (the unit test feeds two colliding type keys to the key table and gets the registered build diagnostic naming both types; the panic at BuildTraits.jet:21-24 is gone); cases traits/ 1/0, trait_value_prints 1/0, erased_trait_value_reflects_its_type 1/0.",
+          "at": "2026-11-16T09:46:43.435Z"
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "meta",
+        "reflection",
+        "metaprogramming"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:10:40.964Z",
+      "updated": "2026-11-16T21:13:10.229Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 18,
+      "completedAt": "2026-11-16T21:13:10.229Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T21:27:10.169Z"
     }
   ]
 }
