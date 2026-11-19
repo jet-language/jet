@@ -118,19 +118,22 @@ jet_cli_debug_eval_offset: fn(source: String, line: Int, column: Int) -> Int? Ne
 // the source `path` (NativeEval.jet); `binders` and `owned` as
 // NativeEvaluator.compile takes them. An expression of locals is first
 // checked against the session's held check `held` and built in its held
-// program (jet_cli_debug_eval_held).
+// program (jet_cli_debug_eval_held). Only the check where the frame stopped
+// (jet_cli_debug_eval_answer) reads where the node is in `path`, so only it
+// finds that offset; the other compiles append the expression's function to
+// a source.
 jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, held: Shared<JetCLIDebugEvalHeldSlot>, path: String, line: Int, column: Int, text: String, binders: [NativeEvalBinder]?, owned: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval NativeEvalRefused! {
     if entry == "" {
         return Err(jet_cli_debug_eval_refused("the debugger has no source of the program to compile it with; debug it as `jet debug <file.jet>`"))
     }
     source: debug_eval_files.read(path) ?? return Err(jet_cli_debug_eval_refused("couldn't read `{path}`: {err}"))
-    offset: jet_cli_debug_eval_offset(source, line, column) ?? return Err(jet_cli_debug_eval_refused("`{path}` has no line {line} now"))
-    parsed: sema_eval_probe_parse(text, offset)
+    parsed: sema_eval_probe_parse(text, 0)
     if parsed.expression == None {
         what: if parsed.diagnostics.len() > 0 -> parsed.diagnostics[0].what else -> "it is not one expression"
         return Err(jet_cli_debug_eval_refused("`{text}` is not a Jet expression: {what}"))
     }
     entry_source: debug_eval_files.read(entry) ?? return Err(jet_cli_debug_eval_refused("couldn't read `{entry}`: {err}"))
+    core: jet_cli_debug_eval_core(held, entry)
     chosen := BuildOptions?{None}
     if jet_cli_build_options(argv, "build", entry, entry_source, color, true) == {
         .Refused(_) -> return Err(jet_cli_debug_eval_refused("the debug build's options don't apply to `{entry}` now"))
@@ -139,7 +142,7 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, held:
     options: chosen ?? return Err(jet_cli_debug_eval_refused("the debug build's options don't apply to `{entry}` now"))
     if binders == .Val(locals) {
         if jet_cli_debug_eval_params(text, locals) == .Val(params) {
-            if jet_cli_debug_eval_sliced(entry, color, options, held, path, text, params, owned) == {
+            if jet_cli_debug_eval_sliced(entry, color, options, held, path, text, params, owned, core_bound: Val(core)) == {
                 .Ok(built) -> {
                     if built == .Val(code) -> return Ok(code)
                 }
@@ -151,7 +154,7 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, held:
                 }
                 .Err(refusal) -> return Err(refusal)
             }
-            if jet_cli_debug_eval_direct(entry, color, options, path, source, text, params, owned) == {
+            if jet_cli_debug_eval_direct(entry, color, options, path, source, text, params, owned, core_bound: Val(core)) == {
                 .Ok(built) -> {
                     if built == .Val(code) -> return Ok(code)
                 }
@@ -159,12 +162,13 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, held:
             }
         }
     }
-    answer: jet_cli_debug_eval_answer(entry, color, options, path, offset, line, text) ?? return Err(err)
+    offset: jet_cli_debug_eval_offset(source, line, column) ?? return Err(jet_cli_debug_eval_refused("`{path}` has no line {line} now"))
+    answer: jet_cli_debug_eval_answer(entry, color, options, path, offset, line, text, core_bound: Val(core)) ?? return Err(err)
     function: sema_eval_probe_function(answer, text, JET_CLI_DEBUG_EXPRESSION) ?? return Err(jet_cli_debug_eval_refused("`{text}` has no value"))
     value: answer.value_type ?? return Err(jet_cli_debug_eval_refused("`{text}` has no value"))
     overlay: JetCLIOverlay{path: path, source: "{source}\n{function}"}
     prepared: jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{overlay}, color, None, JetDriverCompileMode.Program, appended: true)
-    compiled: jet_cli_compile_executable(prepared, None, options, None, None, color) ?? return Err(jet_cli_debug_eval_refused("the compiler stopped before finishing it"))
+    compiled: jet_cli_compile_executable(prepared, None, options, None, None, color, core_bound: Val(core)) ?? return Err(jet_cli_debug_eval_refused("the compiler stopped before finishing it"))
     if compiled.move() == {
         .Refused(refusal) -> Err(jet_cli_debug_eval_refused("the compiler refused it: {refusal.stderr.trim()}"))
         .Checked(result, inputs, snapshot) -> {
@@ -181,6 +185,19 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, held:
             jet_cli_debug_eval_build(result, checked, snapshot, options, entry, at, names, value, text, owned)
         }
     }
+}
+
+// Whether the session `held`'s evaluations of the program of `entry` take
+// the Core built into this jet (Request.jet jet_cli_core_binding), decided
+// at its first: the image was built with the one Core it runs, which an
+// edit of a toolchain tree's Core during the session doesn't change, and the
+// decision reads every Core file of that tree.
+jet_cli_debug_eval_core: fn(held: Shared<JetCLIDebugEvalHeldSlot>, entry: String) -> Bool Never! {
+    permit := held.guard_edit()
+    if permit.value.core == .Val(known) -> return known
+    decided: jet_cli_core_binding(entry, "")
+    permit.value.core = Val(decided)
+    decided
 }
 
 // The locals of `binders` that `text`'s names read, each a parameter of the
@@ -266,27 +283,34 @@ jet_cli_debug_eval_alone: fn(text: String, params: [NativeEvalBinder], declared:
             if !locals.contains(name) && !wanted.contains(name) -> wanted.push(name)
         }
     }
+    // The items each source keeps, by row: those the names reach, the
+    // entry's carrier, and the `use` blocks that name a wanted name.
+    picked := loop _ in declared.files -> [Int]{}
+    loop (slot, _) in kept -> picked[declared.owners[slot]].push(declared.rows[slot])
+    if carrier >= 0 -> picked[0].push(carrier)
+    loop (file, rows) in declared.imports {
+        loop at in rows {
+            used := false
+            loop name in jet_cli_debug_eval_item_names(jet_cli_debug_eval_item_code(declared.sources[file], declared.files[file], at)) {
+                if name != "use" && wanted.contains(name) -> used = true
+            }
+            if used -> picked[file].push(at)
+        }
+    }
     cut := [String]{}
     loop (file, items) in declared.files {
+        picked[file].sort()
         parts := [String]{}
         // The line the cut's next byte is on.
         line := 1
-        loop at in 0..<items.len() {
-            slot: if items[at].name == "" -> -1 else -> declared.index.get(items[at].name) ?? -1
-            reached: slot >= 0 && declared.owners[slot] == file && declared.rows[slot] == at && kept.has_key(slot)
-            carries: file == 0 && at == carrier
-            if !reached && !carries && !items[at].imports -> next
-            code: jet_cli_debug_eval_item_code(declared.sources[file], items, at)
-            used := reached || carries
-            if !used {
-                loop name in jet_cli_debug_eval_item_names(code) {
-                    if name != "use" && wanted.contains(name) -> used = true
-                }
-            }
-            if !used -> next
+        // A row the carrier and a `use` block both keep is cut once.
+        last := -1
+        loop at in picked[file] {
+            if at == last -> next
+            last = at
             // An item's code runs to the next item's first line.
             parts.push("\n".repeat(items[at].line - line))
-            parts.push(code)
+            parts.push(jet_cli_debug_eval_item_code(declared.sources[file], items, at))
             if at + 1 < items.len() -> line = items[at + 1].line
         }
         if file == 0 {
@@ -312,15 +336,17 @@ jet_cli_debug_eval_alone_types: fn(params: [NativeEvalBinder]) -> Bool Never! {
 // The top-level items of the package sources `sources`, entry first
 // (jet_cli_debug_eval_items), and where each name they declare is, by its
 // slot in `index`: its source in `owners` and its item in `rows`, the slot
-// -1 for a name two sources declare. A session keeps the last ones a cut
-// compile read (JetCLIDebugEvalHeldSlot.declared), which the next takes
-// while the sources read the same.
+// -1 for a name two sources declare; `imports` holds each source's `use`
+// blocks by row. A session keeps the last ones a cut compile read
+// (JetCLIDebugEvalHeldSlot.declared), which the next takes while the
+// sources read the same.
 JetCLIDebugEvalDeclared: struct {
     sources: [String],
     files: [[JetCLIDebugEvalItem]],
     index: [String:Int],
     owners: [Int],
     rows: [Int],
+    imports: [[Int]],
 }
 
 jet_cli_debug_eval_declared: fn(sources: &&[String]) -> JetCLIDebugEvalDeclared Never! {
@@ -328,8 +354,11 @@ jet_cli_debug_eval_declared: fn(sources: &&[String]) -> JetCLIDebugEvalDeclared 
     index := [String:Int]{}
     owners := [Int]{}
     rows := [Int]{}
+    imports := [[Int]]{}
     loop (file, items) in files {
+        imports.push([Int]{})
         loop (at, item) in items {
+            if item.imports -> imports[file].push(at)
             if item.name == "" -> next
             if index.get(item.name) == .Val(slot) {
                 if slot < 0 || owners[slot] != file -> index[item.name] = -1
@@ -341,7 +370,7 @@ jet_cli_debug_eval_declared: fn(sources: &&[String]) -> JetCLIDebugEvalDeclared 
             rows.push(at)
         }
     }
-    JetCLIDebugEvalDeclared{sources: sources.move(), files: files.move(), index: index.move(), owners: owners.move(), rows: rows.move()}
+    JetCLIDebugEvalDeclared{sources: sources.move(), files: files.move(), index: index.move(), owners: owners.move(), rows: rows.move(), imports: imports.move()}
 }
 
 // `text`, an expression of the locals `params` (jet_cli_debug_eval_params)
@@ -350,10 +379,11 @@ jet_cli_debug_eval_declared: fn(sources: &&[String]) -> JetCLIDebugEvalDeclared 
 // the source of the stop (or to the entry, when the stop is in none of
 // them): its other names may call the sources' functions when the stop is
 // in one of them and the image is built at O0. The sources' items are the
-// session's `session` when it read the same sources last. As
-// jet_cli_debug_eval_direct answers; None, so the held check or the
-// program's compile answers, when the sources can't be cut.
-jet_cli_debug_eval_sliced: fn(entry: String, color: Bool, options: BuildOptions, session: Shared<JetCLIDebugEvalHeldSlot>, path: String, text: String, params: [NativeEvalBinder], owned: Bool) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval? NativeEvalRefused! {
+// session's `session` when it read the same sources last. `core_bound` as
+// jet_cli_debug_eval_direct takes it. As jet_cli_debug_eval_direct answers;
+// None, so the held check or the program's compile answers, when the
+// sources can't be cut.
+jet_cli_debug_eval_sliced: fn(entry: String, color: Bool, options: BuildOptions, session: Shared<JetCLIDebugEvalHeldSlot>, path: String, text: String, params: [NativeEvalBinder], owned: Bool, core_bound: Bool?{None}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval? NativeEvalRefused! {
     if !jet_cli_debug_eval_alone_types(params) -> return Ok(None)
     held := JetDriverAuthorizedSourceSnapshot?{None}
     if jet_cli_prepare_snapshot(entry, entry, [JetCLIOverlay]{}, color, appended: true) == {
@@ -416,7 +446,7 @@ jet_cli_debug_eval_sliced: fn(entry: String, color: Bool, options: BuildOptions,
         source = piece
         if at > 0 -> asked = place
     }
-    jet_cli_debug_eval_direct(entry, color, options, asked, source, text, params, owned, others: others.move())
+    jet_cli_debug_eval_direct(entry, color, options, asked, source, text, params, owned, others: others.move(), core_bound: core_bound)
 }
 
 // The rows of `files`, an entry root's, that a cut compile
@@ -551,13 +581,14 @@ jet_cli_debug_eval_item_names: fn(code: String) -> [String] Never! {
 // compile that also asks the checker how `text` checks as that function's
 // statement (JetSema EvalProbe.jet): its type, and a refusal of an effect
 // it uses, which names the effect as the stop's check would. `others` stand
-// in for the package's other sources (jet_cli_debug_eval_sliced). The
+// in for the package's other sources (jet_cli_debug_eval_sliced);
+// `core_bound` is the session's Core binding (jet_cli_debug_eval_core). The
 // function discards the value (`_ := text`); once checked, that statement
 // returns it and the function's result is its type. The compiled
 // expression, or the debugger's refusal of an effect it uses; None, so the
 // check where the frame stopped answers, for any other refusal, a value
 // that can fail, or a build that doesn't finish.
-jet_cli_debug_eval_direct: fn(entry: String, color: Bool, options: BuildOptions, path: String, source: String, text: String, params: [NativeEvalBinder], owned: Bool, others: &&[JetCLIOverlay]{[JetCLIOverlay]{}}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval? NativeEvalRefused! {
+jet_cli_debug_eval_direct: fn(entry: String, color: Bool, options: BuildOptions, path: String, source: String, text: String, params: [NativeEvalBinder], owned: Bool, others: &&[JetCLIOverlay]{[JetCLIOverlay]{}}, core_bound: Bool?{None}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> NativeEval? NativeEvalRefused! {
     typed: loop param in params -> "{param.name}: {param.type_name}"
     lead: "{JET_CLI_DEBUG_EXPRESSION}: fn({typed.join(", ")}) {{\n    "
     // The ask's offset is the statement's first byte in the appended source.
@@ -572,7 +603,7 @@ jet_cli_debug_eval_direct: fn(entry: String, color: Bool, options: BuildOptions,
             JetCLIPrepared.Prepared{request: held, snapshot: snapshot}
         }
     }
-    compiled: jet_cli_compile_executable(asked, None, options, None, None, color) ?? return Ok(None)
+    compiled: jet_cli_compile_executable(asked, None, options, None, None, color, core_bound: core_bound) ?? return Ok(None)
     if compiled.move() == {
         .Refused(_) -> Ok(None)
         .Checked(result, inputs, snapshot) -> {
@@ -730,12 +761,15 @@ JetCLIDebugEvalHeldStamp: struct {
 
 // The session's held check, None until its first evaluation of locals
 // opens it (JetCLIDebugEvaluator.held), the sources of the last one that
-// didn't open, which no evaluation tries again until they change, and the
-// items of the sources its last cut compile read (jet_cli_debug_eval_sliced).
+// didn't open, which no evaluation tries again until they change, the
+// items of the sources its last cut compile read (jet_cli_debug_eval_sliced)
+// and its Core binding, None until its first evaluation decides it
+// (jet_cli_debug_eval_core).
 JetCLIDebugEvalHeldSlot: struct {
     held: JetCLIDebugEvalHeld?,
     missed: JetCLIDebugEvalHeldStamp?,
     declared: JetCLIDebugEvalDeclared?,
+    core: Bool?,
 }
 
 // A held evaluation's answer (jet_cli_debug_eval_held_run) and the held
@@ -917,9 +951,10 @@ jet_cli_debug_eval_native: fn(built: &&IRModule, key: String, names: [String], v
 }
 
 // How the checker checks `text` at byte `offset` of `path` in the program of
-// `entry`: the answer of the function there, or why it can't be evaluated
-// (the first refusal, which names an effect it uses).
-jet_cli_debug_eval_answer: fn(entry: String, color: Bool, options: BuildOptions, path: String, offset: Int, line: Int, text: String) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> SemaEvalProbeAnswer NativeEvalRefused! {
+// `entry`, compiled with the session's Core binding `core_bound`: the answer
+// of the function there, or why it can't be evaluated (the first refusal,
+// which names an effect it uses).
+jet_cli_debug_eval_answer: fn(entry: String, color: Bool, options: BuildOptions, path: String, offset: Int, line: Int, text: String, core_bound: Bool?{None}) -[FS, Env, Exec, IO, Net, Time, FFI.Asm]> SemaEvalProbeAnswer NativeEvalRefused! {
     answers := [SemaEvalProbeAnswer]{}
     asked: if jet_cli_prepare_overlays(entry, entry, [JetCLIOverlay]{}, color, None, JetDriverCompileMode.Program) == {
         .Refused(output) -> JetCLIPrepared.Refused{output: output}
@@ -929,7 +964,7 @@ jet_cli_debug_eval_answer: fn(entry: String, color: Bool, options: BuildOptions,
             JetCLIPrepared.Prepared{request: held, snapshot: snapshot}
         }
     }
-    compiled: jet_cli_compile_executable(asked, None, options, None, None, color) ?? return Err(jet_cli_debug_eval_refused("the compiler stopped before finishing the program"))
+    compiled: jet_cli_compile_executable(asked, None, options, None, None, color, core_bound: core_bound) ?? return Err(jet_cli_debug_eval_refused("the compiler stopped before finishing the program"))
     if compiled.move() == {
         .Refused(refusal) -> return Err(jet_cli_debug_eval_refused("the program doesn't compile now: {refusal.stderr.trim()}"))
         .Checked(result, _, _) -> {

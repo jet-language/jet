@@ -7,8 +7,11 @@
 # functions and 2,200 ms at 2,000 (the dev jet of a3fa36e63f).
 # Each print compiles the package's sources cut to the functions it
 # reaches (DebugCompile.jet jet_cli_debug_eval_sliced), with no compile of
-# the program. Both read `total`, 0 at the stop, and call the program's own
-# functions: f_k(x) is (x + k) % 1000.
+# the program. The first print reads the package's items and decides the
+# session's Core binding, which the second takes without reading a named
+# toolchain tree's Core again (jet_cli_debug_eval_core). Both read
+# `total`, 0 at the stop, and call the program's own functions: f_k(x) is
+# (x + k) % 1000.
 # gen/gen.jet writes prog.jet: run's first call, the stop, is line 100003.
 fixture: SecondPrintAnswersUnder100ms.fixture
 env: NO_COLOR=1
@@ -21,7 +24,7 @@ send debug: "break prog.jet:100003"
 send debug: "c"
 recv debug line until ~ "Breakpoint hit  prog.jet:100003  in run()" timeout 600s # the image builds and the program runs to the stop
 send debug: "print f_1(total)"
-recv debug line until ~ "f_1(total) = 1" timeout 600s # the first print opens the held check
+recv debug line until ~ "f_1(total) = 1" timeout 600s # the first print reads the package's items and decides the Core binding
 send debug: "print f_2(total) + f_3(total)"
 recv debug line until ~ "f_2(total) + f_3(total) = 5" within 100ms # a second, new expression answers in under 100 ms
 send debug: "c"
