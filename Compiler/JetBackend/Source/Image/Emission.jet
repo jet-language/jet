@@ -50,12 +50,16 @@ X64LineRow: struct {
 }
 
 // A register (hardware number; xmm n as 16 + n), a frame slot at `offset`
-// from rbp, or the frame address rbp + `offset` itself (a StackSlot's
-// address).
+// from rbp, the frame address rbp + `offset` itself (a StackSlot's
+// address), a constant `value`, or the value the parameter register `reg`
+// held when the function was entered (its caller's argument, which the
+// debugger reads from the caller's X64CallArgument for that register).
 X64DebugLocation: enum {
     Register(reg: Int),
     Frame(offset: Int),
     FrameAddress(offset: Int),
+    Constant(value: Int),
+    EntryValue(reg: Int),
 }
 
 // X64FunctionSource.variables[variable] is at `location` for code offsets
@@ -87,11 +91,22 @@ X64AllocSite: struct {
 // A call whose instruction names a call-site row (JetIR BuildCallSites.jet):
 // its return address `at` (an offset in the function's code) and the line
 // and character column of the source node whose lowering made it, which
-// `jet debug` names a caller's frame by (a DW_TAG_call_site, Image/Dwarf.jet).
+// `jet debug` names a caller's frame by (a DW_TAG_call_site, Image/Dwarf.jet),
+// and each argument whose value the caller still holds at the return.
 X64CallSite: struct {
     at: Int,
     line: Int,
     column: Int,
+    arguments: [X64CallArgument]{[X64CallArgument]{}},
+}
+
+// An argument a call passes in register `reg` (hardware number) and where
+// its caller still holds its value while the call runs: a constant, a
+// callee-saved register, a frame slot or a frame address (a
+// DW_TAG_call_site_parameter).
+X64CallArgument: struct {
+    reg: Int,
+    value: X64DebugLocation,
 }
 
 X64FunctionDebug: struct {
