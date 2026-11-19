@@ -332,16 +332,22 @@ jet_cli_perf_html_escape: fn(text: String) -> String Never! {
     text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;")
 }
 
-// `compare`: two verified traces of one toolchain and machine. `--heap
-// <base>..<head>` sets the base trace's heap snapshot named `<base>` against
-// the head trace's named `<head>` (jet_cli_perf_heap_pick), one trace's two
-// when it names one trace; without it two traces that both kept snapshots
-// set their last ones, the `exit` ones of a run.
+// `compare`: two sides of one toolchain and machine, each a verified trace
+// or a folder of them (jet_cli_perf_side), and each side's captures of one
+// source. Wall, CPU and allocation deltas set the sides' means; receipt
+// and heap deltas their first captures; the function and line tables
+// every capture's CPU-time samples, judged with enough captures
+// (jet_cli_perf_compare_samples). `--heap <base>..<head>` sets the base
+// trace's heap snapshot named `<base>` against the head trace's named
+// `<head>` (jet_cli_perf_heap_pick), one trace's two when it names one
+// trace; without it two traces that both kept snapshots set their last
+// ones, the `exit` ones of a run.
 jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
     extension: artifact_extension()
-    usage: "run `jet perf compare base{extension} head{extension} [--baseline <name>] [--override-identity] [--heap <base>..<head>]`, or `jet perf compare run{extension} --heap <base>..<head>`"
+    usage: "run `jet perf compare <base> <head> [--baseline <name>] [--override-identity] [--heap <base>..<head>] [--json]`, each side a {extension} or a folder of them, or `jet perf compare run{extension} --heap <base>..<head>`"
     paths := [String]{}
     override_identity := false
+    json := false
     baseline := String?{None}
     heap := String?{None}
     skip := false
@@ -352,6 +358,10 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
         }
         if arg == "--override-identity" {
             override_identity = true
+            next
+        }
+        if arg == "--json" {
+            json = true
             next
         }
         if arg.starts_with("--baseline=") {
@@ -380,7 +390,7 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
         paths.push(arg.copy())
     }
     if paths.len() != 2 && (paths.len() != 1 || heap == None) {
-        return jet_cli_perf_error("`jet perf compare` needs two {extension} paths, or one and `--heap`", usage, color)
+        return jet_cli_perf_error("`jet perf compare` needs two sides, each a {extension} or a folder of them, or one {extension} and `--heap`", usage, color)
     }
     marks := [String]{}
     if heap == .Val(range) {
@@ -389,31 +399,39 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
             return jet_cli_perf_error("`--heap` needs two heap snapshots, `<base>..<head>`, not `{range}`", usage, color)
         }
     }
-    base: jet_cli_perf_read(paths[0]) ?? return jet_cli_perf_error("base trace: {err.message}", JET_CLI_PERF_FIX, color)
-    head: jet_cli_perf_read(paths[paths.len() - 1]) ?? return jet_cli_perf_error("head trace: {err.message}", JET_CLI_PERF_FIX, color)
-    same_tool: jet_cli_perf_same(jet_cli_perf_identity(base, "toolchain", "digest"), jet_cli_perf_identity(head, "toolchain", "digest"))
-    same_hardware: jet_cli_perf_same(jet_cli_perf_identity(base, "hardware", "fingerprint"), jet_cli_perf_identity(head, "hardware", "fingerprint"))
-    mismatch: !same_tool || !same_hardware
+    base_side: jet_cli_perf_side(paths[0]) ?? return jet_cli_perf_error("base: {err.message}", JET_CLI_PERF_FIX, color)
+    head_side: jet_cli_perf_side(paths[paths.len() - 1]) ?? return jet_cli_perf_error("head: {err.message}", JET_CLI_PERF_FIX, color)
+    // Receipt and heap deltas set the sides' first captures.
+    base: base_side.traces[0]
+    head: head_side.traces[0]
+    odd_tool: jet_cli_perf_identity_odd(base_side, head_side, "toolchain", "digest")
+    odd_hardware: jet_cli_perf_identity_odd(base_side, head_side, "hardware", "fingerprint")
+    mismatch: odd_tool != None || odd_hardware != None
     if mismatch && !override_identity {
-        part: if !same_tool -> "toolchain" else -> "hardware"
-        why: if !same_tool -> "compare requires matching toolchain digests" else -> "compare requires matching hardware fingerprints"
-        return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "{part} identity mismatch between traces", why, "recapture both traces on the same machine/toolchain, or pass `--override-identity`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        part: if odd_tool != None -> "toolchain" else -> "hardware"
+        why: if odd_tool != None -> "compare requires matching toolchain digests" else -> "compare requires matching hardware fingerprints"
+        odd := odd_hardware ?? ""
+        if odd_tool == .Val(path) -> odd = "{path}"
+        return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", "{part} identity mismatch between traces: {odd} against {base_side.paths[0]}", why, "recapture every trace on the same machine/toolchain, or pass `--override-identity`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if jet_cli_perf_side_mixed(base_side, head_side) == .Val(mixed) {
+        return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", mixed, "a side's captures set one source's samples against the other side's", "capture each side from one version of the source, each version into its own folder", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
     }
     if baseline == .Val(name) {
         if jet_cli_perf_baseline_refusal(name) == .Val(message) {
             return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2102", message, "`--baseline` selects a pinned baseline name", "create the baseline with `jet budget update --baseline {name}`, or omit `--baseline`", color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
         }
     }
-    base_wall: jet_cli_perf_sample_duration(base, "wall")
-    head_wall: jet_cli_perf_sample_duration(head, "wall")
+    base_wall: jet_cli_perf_side_mean(base_side, "wall")
+    head_wall: jet_cli_perf_side_mean(head_side, "wall")
     deltas := [String]{}
     if base_wall == .Val(before) && head_wall == .Val(after) {
         deltas.push("wall {before}->{after} ns")
     }
-    if jet_cli_perf_sample_duration(base, "cpu") == .Val(before) && jet_cli_perf_sample_duration(head, "cpu") == .Val(after) {
+    if jet_cli_perf_side_mean(base_side, "cpu") == .Val(before) && jet_cli_perf_side_mean(head_side, "cpu") == .Val(after) {
         deltas.push("cpu {before}->{after} ns")
     }
-    if jet_cli_perf_allocation_bytes(base) == .Val(before) && jet_cli_perf_allocation_bytes(head) == .Val(after) {
+    if jet_cli_perf_side_mean(base_side, "alloc") == .Val(before) && jet_cli_perf_side_mean(head_side, "alloc") == .Val(after) {
         deltas.push("alloc {before}->{after} B")
     }
     receipt_deltas: jet_cli_perf_receipt_deltas(base, head) ?? return jet_cli_perf_error("receipt sections: {err.message}", JET_CLI_PERF_FIX, color)
@@ -426,20 +444,54 @@ jet_cli_perf_compare: fn(args: [String], color: Bool) -[FS, Env]> JetDriverVerbO
         after = jet_cli_perf_heap_pick(head_heaps, marks[1]) ?? return jet_cli_perf_error("the head trace kept no heap snapshot `{marks[1]}`{jet_cli_perf_heap_kept(head_heaps)}", usage, color)
     }
     heap_lines: if before >= 0 && after >= 0 -> jet_cli_perf_heap_delta(base_heaps[before], head_heaps[after]) else -> [String]{}
-    // #241 budgets: wall AbsoluteFrom/RelativeTo against the pinned base trace.
+    // #241 budgets: wall AbsoluteFrom/RelativeTo against the pinned base side.
     budget := "budgets: no comparable wall samples for #241 RelativeTo evaluation"
     if base_wall == .Val(base_ns) && head_wall == .Val(head_ns) && base_ns > 0 {
         regression: if head_ns > base_ns -> head_ns - base_ns else -> 0
         named: if baseline == .Val(name) -> name else -> "trace-baseline"
         budget = "budgets: wall RelativeTo({named}) regression={regression * 10000 /% base_ns}bp · base={base_ns}ns head={head_ns}ns"
     }
+    // One trace's heap snapshots set against each other compare no samples.
+    samples := JetCLIPerfCompared?{None}
+    if paths.len() == 2 -> samples = Val(jet_cli_perf_compare_samples(base_side, head_side))
+    if json {
+        functions := CanonicalJSON.Array([CanonicalJSON]{})
+        lines := CanonicalJSON.Array([CanonicalJSON]{})
+        verdict := CanonicalJSON.Array([CanonicalJSON]{})
+        if samples == .Val(compared) {
+            functions = jet_cli_perf_compare_json(compared.functions, compared.function_order)
+            lines = jet_cli_perf_compare_json(compared.lines, compared.line_order)
+            verdict = jet_cli_perf_strings(compared.verdict)
+        }
+        value: CanonicalJSON.Object(
+            [CanonicalJSONField]{
+                {key: "base", value: jet_cli_perf_strings(base_side.paths)},
+                {key: "budget", value: CanonicalJSON.String("{budget}")},
+                {key: "deltas", value: jet_cli_perf_strings(deltas)},
+                {key: "functions", value: functions},
+                {key: "head", value: jet_cli_perf_strings(head_side.paths)},
+                {key: "heap", value: jet_cli_perf_strings(heap_lines)},
+                {key: "identity_override", value: CanonicalJSON.Bool(mismatch && override_identity)},
+                {key: "kind", value: CanonicalJSON.String("jet.perf.compare")},
+                {key: "lines", value: lines},
+                {key: "receipt_deltas", value: jet_cli_perf_strings(receipt_deltas)},
+                {key: "verdict", value: verdict},
+            },
+        )
+        return JetDriverVerbOutput{stdout: jet_cli_perf_json("perf.compare", value), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
     override_note: if mismatch && override_identity -> " · identity override" else -> ""
     baseline_note: if baseline == .Val(name) -> " · baseline {name}" else -> ""
-    out := "Compare OK · schema {TRACE_SCHEMA} v{TRACE_VERSION} · base {trace_id(base) ?? "unknown"} · head {trace_id(head) ?? "unknown"}{override_note}{baseline_note}\n"
+    out := "Compare OK · schema {TRACE_SCHEMA} v{TRACE_VERSION} · base {jet_cli_perf_side_label(base_side)} · head {jet_cli_perf_side_label(head_side)}{override_note}{baseline_note}\n"
+    out = "{out}Captures: base {base_side.paths.join(", ")} · head {head_side.paths.join(", ")}\n"
     if deltas.len() > 0 -> out = "{out}Deltas: {deltas.join(" · ")}\n"
     if receipt_deltas.len() > 0 -> out = "{out}Receipt deltas: {receipt_deltas.join(" · ")}\n"
     loop line in heap_lines -> out = "{out}{line}\n"
-    JetDriverVerbOutput{stdout: "{out}{budget}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    out = "{out}{budget}\n"
+    if samples == .Val(compared) {
+        loop line in jet_cli_perf_compare_text(compared) -> out = "{out}{line}\n"
+    }
+    JetDriverVerbOutput{stdout: out, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
 }
 
 jet_cli_perf_same: fn(left: String?, right: String?) -> Bool Never! {

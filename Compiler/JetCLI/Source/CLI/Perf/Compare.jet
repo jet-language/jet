@@ -1,0 +1,486 @@
+// `jet perf compare`'s sides and the CPU-time samples it sets against each
+// other. A side is one `.jettrace` or a folder of them, captures of one
+// source. With at least JET_CLI_PERF_JUDGE_CAPTURES captures a side, each
+// function and line that holds enough of a side's samples gets a verdict:
+// an exact two-sided Mann-Whitney U test over its per-capture samples, its
+// p adjusted for the rows judged in its table (Benjamini-Hochberg).
+use {
+    perf_files: core.files
+    jet_foundation.[CanonicalJSON, CanonicalJSONField, JetTraceError, artifact_extension, jettrace_error, trace_id]
+}
+
+// The fewest captures a side needs for a verdict: 4 against 4 gives an
+// exact two-sided p of 0.029 at best.
+JET_CLI_PERF_JUDGE_CAPTURES: 4
+
+// The most captures of both sides whose exact U distribution the verdict
+// counts in 64 bits: C(62, 31) orders still fit, with the room the
+// p's long division needs.
+JET_CLI_PERF_EXACT_CAPTURES: 62
+
+// The adjusted p, in parts per million, below which a row is faster or
+// slower.
+JET_CLI_PERF_SIGNIFICANT_PPM: 50000
+
+// One side of a comparison: the argument as typed, and the path and
+// verified trace of each capture it stands for, in name order.
+JetCLIPerfSide: struct {
+    named: String,
+    paths: [String],
+    traces: [CanonicalJSON],
+}
+
+// The captures `named` stands for: the `.jettrace` it names, or every one
+// directly in the folder it names, which must hold one.
+jet_cli_perf_side: fn(named: String) -[FS]> JetCLIPerfSide JetTraceError! {
+    extension: artifact_extension()
+    folder: perf_files.is_dir(named)
+    paths := [String]{}
+    if !folder -> paths.push("{named}")
+    if folder {
+        names := perf_files.listdir(named) ?? return Err(jettrace_error("cannot list {named}: {err}"))
+        names.sort()
+        loop name in names {
+            path: perf_files.join(named, name)
+            if name.ends_with(extension) && perf_files.is_file(path) -> paths.push(path)
+        }
+        if paths.len() == 0 {
+            return Err(jettrace_error("{named} holds no {extension} capture; capture into it with `jet perf run <program> --out {named}/1{extension}`"))
+        }
+    }
+    traces := [CanonicalJSON]{}
+    loop path in paths {
+        trace: jet_cli_perf_read(path) ?? return Err(jettrace_error("{path}: {err.message}"))
+        traces.push(trace)
+    }
+    Ok(JetCLIPerfSide{named: "{named}", paths: paths, traces: traces})
+}
+
+// How the header names a side: its one trace's id, or how many captures
+// its folder holds.
+jet_cli_perf_side_label: fn(side: JetCLIPerfSide) -> String Never! {
+    if side.traces.len() == 1 -> return trace_id(side.traces[0]) ?? "unknown"
+    "{side.traces.len()} captures in {side.named}"
+}
+
+// The first capture of `base` or `head` whose `object`.`key` identity
+// (jet_cli_perf_identity) differs from the first base capture's; None when
+// every capture agrees.
+jet_cli_perf_identity_odd: fn(base: JetCLIPerfSide, head: JetCLIPerfSide, object: String, key: String) -> String? Never! {
+    want: jet_cli_perf_identity(base.traces[0], object, key)
+    loop (at, trace) in base.traces {
+        if !jet_cli_perf_same(jet_cli_perf_identity(trace, object, key), want) {
+            return Val("{base.paths[at]}")
+        }
+    }
+    loop (at, trace) in head.traces {
+        if !jet_cli_perf_same(jet_cli_perf_identity(trace, object, key), want) {
+            return Val("{head.paths[at]}")
+        }
+    }
+    None
+}
+
+// The sources a capture ran, as one text: each source's path and digest
+// (`content.source_identity`), sorted.
+jet_cli_perf_source_key: fn(trace: CanonicalJSON) -> String Never! {
+    rows: jet_cli_perf_rows(trace, "source_identity") ?? return ""
+    keys := loop row in rows -> "{jet_cli_perf_member_text(row, "path") ?? ""}={jet_cli_perf_member_text(row, "sha256") ?? ""}"
+    keys.sort()
+    keys.join("\n")
+}
+
+// The first capture of a side that ran other sources than its side's
+// first capture; None when each side's captures ran one source.
+jet_cli_perf_side_mixed: fn(base: JetCLIPerfSide, head: JetCLIPerfSide) -> String? Never! {
+    first_base: jet_cli_perf_source_key(base.traces[0])
+    loop (at, trace) in base.traces {
+        if jet_cli_perf_source_key(trace) != first_base {
+            return Val("{base.paths[at]} ran other sources than {base.paths[0]}")
+        }
+    }
+    first_head: jet_cli_perf_source_key(head.traces[0])
+    loop (at, trace) in head.traces {
+        if jet_cli_perf_source_key(trace) != first_head {
+            return Val("{head.paths[at]} ran other sources than {head.paths[0]}")
+        }
+    }
+    None
+}
+
+// The rounded mean over a side's captures of `measure`: `wall` or `cpu`
+// sampled nanoseconds (jet_cli_perf_sample_duration) or `alloc` bytes
+// (jet_cli_perf_allocation_bytes); None when a capture lacks it.
+jet_cli_perf_side_mean: fn(side: JetCLIPerfSide, measure: String) -> Int? Never! {
+    sum := 0
+    loop trace in side.traces {
+        value: if measure == "alloc" -> jet_cli_perf_allocation_bytes(trace) else -> jet_cli_perf_sample_duration(trace, measure)
+        known: value ?? return None
+        sum += known
+    }
+    count: side.traces.len()
+    Val((2 * sum + count) /% (2 * count))
+}
+
+// One function's (`line` 0) or one line's CPU-time samples: one count per
+// capture of each side, 0 where a capture never sampled it; once judged,
+// its p in parts per million adjusted for its table (-1 before); and its
+// verdict.
+JetCLIPerfCompareRow: struct {
+    path: String,
+    line: Int,
+    function: String,
+    base: [Int],
+    head: [Int],
+    p_ppm: Int,
+    verdict: String,
+}
+
+// The samples of two sides set against each other: the function and line
+// rows, each table's order (the most samples first), and the verdict's
+// lines.
+JetCLIPerfCompared: struct {
+    functions: [JetCLIPerfCompareRow],
+    function_order: [Int],
+    lines: [JetCLIPerfCompareRow],
+    line_order: [Int],
+    verdict: [String],
+}
+
+// The function and line rows of `base` and `head` and, with enough
+// captures, each row's verdict.
+jet_cli_perf_compare_samples: fn(base: JetCLIPerfSide, head: JetCLIPerfSide) -> JetCLIPerfCompared Never! {
+    base_totals := loop trace in base.traces -> jet_cli_perf_line_totals(trace)
+    head_totals := loop trace in head.traces -> jet_cli_perf_line_totals(trace)
+    functions := jet_cli_perf_compare_rows(base_totals, head_totals, false)
+    lines := jet_cli_perf_compare_rows(base_totals, head_totals, true)
+    base_count: base.traces.len()
+    head_count: head.traces.len()
+    counted: if base_count == 1 && head_count == 1 -> "one capture each" else -> "{base_count} captures against {head_count}"
+    few: base_count < JET_CLI_PERF_JUDGE_CAPTURES || head_count < JET_CLI_PERF_JUDGE_CAPTURES
+    many: base_count + head_count > JET_CLI_PERF_EXACT_CAPTURES
+    verdict := [String]{}
+    if few {
+        verdict.push("verdict: none ({counted}; capture each side at least {JET_CLI_PERF_JUDGE_CAPTURES} times)")
+        verdict.push("  capture each side into its own folder with `jet perf run <program> --out <folder>/<n>{artifact_extension()}`, then compare the two folders")
+    }
+    if !few && many {
+        verdict.push("verdict: none ({counted}; the exact test takes at most {JET_CLI_PERF_EXACT_CAPTURES} captures in all)")
+    }
+    if !few && !many {
+        base_total := 0
+        head_total := 0
+        loop row in lines {
+            base_total += jet_cli_perf_sum(row.base)
+            head_total += jet_cli_perf_sum(row.head)
+        }
+        jet_cli_perf_compare_judge(functions, base_total, head_total)
+        jet_cli_perf_compare_judge(lines, base_total, head_total)
+        verdict.push("verdict: exact Mann-Whitney U over {counted}, each p adjusted for its table's judged rows (Benjamini-Hochberg); faster or slower below p=0.05; a row under 1% of both sides' samples is too few to judge")
+    }
+    function_order: jet_cli_perf_compare_order(functions)
+    line_order: jet_cli_perf_compare_order(lines)
+    JetCLIPerfCompared{functions: functions, function_order: function_order, lines: lines, line_order: line_order, verdict: verdict}
+}
+
+// Each function's (`by_line` false) or line's rows, in the order the
+// captures first sampled them.
+jet_cli_perf_compare_rows: fn(base: [JetCLIPerfLineTotals], head: [JetCLIPerfLineTotals], by_line: Bool) -> [JetCLIPerfCompareRow] Never! {
+    rows := [JetCLIPerfCompareRow]{}
+    places := [String:Int]{}
+    jet_cli_perf_compare_add(rows, places, base, false, by_line, base.len(), head.len())
+    jet_cli_perf_compare_add(rows, places, head, true, by_line, base.len(), head.len())
+    rows
+}
+
+// Add each capture's samples of `captures`, the head side's when `head`,
+// to the row of its function (and line, when `by_line`) in `rows`, which
+// `places` finds by key.
+jet_cli_perf_compare_add: fn(rows: &[JetCLIPerfCompareRow], places: &[String:Int], captures: [JetCLIPerfLineTotals], head: Bool, by_line: Bool, base_count: Int, head_count: Int) Never! {
+    loop (capture, totals) in captures {
+        loop total in totals.rows {
+            if total.samples <= 0 -> next
+            line: if by_line -> total.line else -> 0
+            key: "{totals.names[total.path]}\n{line}\n{totals.names[total.function]}"
+            at: places.get(key) ?? rows.len()
+            if at == rows.len() {
+                places[key] = at
+                rows.push(JetCLIPerfCompareRow{path: "{totals.names[total.path]}", line: line, function: "{totals.names[total.function]}", base: jet_cli_perf_zeros(base_count), head: jet_cli_perf_zeros(head_count), p_ppm: -1, verdict: ""})
+            }
+            if head -> rows[at].head[capture] = rows[at].head[capture] + total.samples else {
+                rows[at].base[capture] = rows[at].base[capture] + total.samples
+            }
+        }
+    }
+}
+
+jet_cli_perf_zeros: fn(count: Int) -> [Int] Never! {
+    loop _ in 0..<count -> 0
+}
+
+jet_cli_perf_sum: fn(values: [Int]) -> Int Never! {
+    sum := 0
+    loop value in values -> sum += value
+    sum
+}
+
+// The indexes of `rows` in table order: the most samples first, weighing
+// each side's sum by the other side's capture count (the order of their
+// means' sum), then by file, line and function.
+jet_cli_perf_compare_order: fn(rows: [JetCLIPerfCompareRow]) -> [Int] Never! {
+    order := [Int]{}
+    loop at in 0..<rows.len() {
+        spot := order.len()
+        loop spot > 0 && jet_cli_perf_compare_before(rows[at], rows[order[spot - 1]]) -> spot -= 1
+        order.insert(spot, at)
+    }
+    order
+}
+
+jet_cli_perf_compare_before: fn(left: JetCLIPerfCompareRow, right: JetCLIPerfCompareRow) -> Bool Never! {
+    a: jet_cli_perf_sum(left.base) * left.head.len() + jet_cli_perf_sum(left.head) * left.base.len()
+    b: jet_cli_perf_sum(right.base) * right.head.len() + jet_cli_perf_sum(right.head) * right.base.len()
+    if a != b -> return a > b
+    if left.path != right.path -> return left.path < right.path
+    if left.line != right.line -> return left.line < right.line
+    left.function < right.function
+}
+
+// Each row's verdict. A row under 1% of both sides' samples (`base_total`,
+// `head_total`) is too few samples to judge. Every other row takes U's
+// exact two-sided p (jet_cli_perf_p_ppm), adjusted over the rows judged:
+// each p times their count over its rank, at most every larger p's
+// adjusted value, and at most 1 (Benjamini-Hochberg). Below
+// JET_CLI_PERF_SIGNIFICANT_PPM it is `slower` when the head captures
+// sampled it more, else `faster`; at or above it, `no significant change`.
+jet_cli_perf_compare_judge: fn(rows: &[JetCLIPerfCompareRow], base_total: Int, head_total: Int) Never! {
+    // The judged rows, the smallest p first.
+    judged := [Int]{}
+    loop at in 0..<rows.len() {
+        if jet_cli_perf_sum(rows[at].base) * 100 < base_total && jet_cli_perf_sum(rows[at].head) * 100 < head_total {
+            rows[at].verdict = "too few samples to judge"
+            next
+        }
+        rows[at].p_ppm = jet_cli_perf_p_ppm(jet_cli_perf_u2(rows[at].base, rows[at].head), rows[at].base.len(), rows[at].head.len())
+        spot := judged.len()
+        loop spot > 0 && rows[judged[spot - 1]].p_ppm > rows[at].p_ppm -> spot -= 1
+        judged.insert(spot, at)
+    }
+    least := 1000000
+    rank := judged.len()
+    loop rank > 0 {
+        at: judged[rank - 1]
+        scaled: (rows[at].p_ppm * judged.len() + rank - 1) /% rank
+        if scaled < least -> least = scaled
+        rows[at].p_ppm = least
+        slower: jet_cli_perf_u2(rows[at].base, rows[at].head) < rows[at].base.len() * rows[at].head.len()
+        rows[at].verdict = if {
+            least >= JET_CLI_PERF_SIGNIFICANT_PPM -> "no significant change"
+            slower -> "slower"
+            else -> "faster"
+        }
+        rank -= 1
+    }
+}
+
+// Twice the Mann-Whitney U of `base` against `head`: of every pair of a
+// base and a head capture, 2 when the base one counted more, 1 for a tie.
+jet_cli_perf_u2: fn(base: [Int], head: [Int]) -> Int Never! {
+    u := 0
+    loop before in base {
+        loop after in head -> u += jet_cli_perf_pair_score(before, after)
+    }
+    u
+}
+
+jet_cli_perf_pair_score: fn(before: Int, after: Int) -> Int Never! {
+    if {
+        before > after -> 2
+        before == after -> 1
+        else -> 0
+    }
+}
+
+// How many orders of `m` base and `n` head captures give each U from 0 to
+// m·n when no counts tie: the coefficients of the Gaussian binomial
+// [m+n choose m] in q, built one factor (1 - q^(n+i)) / (1 - q^i) at a
+// time, every power past m·n dropped.
+jet_cli_perf_u_counts: fn(m: Int, n: Int) -> [Int] Never! {
+    size: m * n + 1
+    counts := jet_cli_perf_zeros(size)
+    counts[0] = 1
+    last: m + 1
+    loop i in 1..<last {
+        shift: n + i
+        k := size - 1
+        loop k >= shift {
+            counts[k] = counts[k] - counts[k - shift]
+            k -= 1
+        }
+        loop at in i..<size -> counts[at] = counts[at] + counts[at - i]
+    }
+    counts
+}
+
+// The two-sided p of twice-U `u2` for `m` base and `n` head captures, in
+// parts per million rounded up: twice the smaller tail of U's exact
+// distribution (jet_cli_perf_u_counts), at most 1. A tie counts half a
+// pair, against the distribution without ties.
+jet_cli_perf_p_ppm: fn(u2: Int, m: Int, n: Int) -> Int Never! {
+    total := 0
+    lower := 0
+    upper := 0
+    loop (u, count) in jet_cli_perf_u_counts(m, n) {
+        total += count
+        if 2 * u <= u2 -> lower += count
+        if 2 * u >= u2 -> upper += count
+    }
+    tail: if lower < upper -> lower else -> upper
+    if 2 * tail >= total -> return 1000000
+    rest := 2 * tail
+    ppm := 0
+    loop _ in 0..<6 {
+        rest *= 10
+        ppm = ppm * 10 + rest /% total
+        rest = rest %% total
+    }
+    if rest > 0 -> ppm += 1
+    ppm
+}
+
+// The function and line tables and the verdict as the text shows them, at
+// most JET_CLI_PERF_LINE_ROWS rows a table.
+jet_cli_perf_compare_text: fn(compared: JetCLIPerfCompared) -> [String] Never! {
+    lines := [String]{"functions (CPU-time samples, base mean -> head mean):"}
+    loop (shown, at) in compared.function_order {
+        if shown == JET_CLI_PERF_LINE_ROWS {
+            lines.push("  ({compared.function_order.len() - shown} more functions)")
+            break
+        }
+        lines.push(jet_cli_perf_compare_row_text(compared.functions[at]))
+    }
+    lines.push("lines (CPU-time samples, base mean -> head mean):")
+    loop (shown, at) in compared.line_order {
+        if shown == JET_CLI_PERF_LINE_ROWS {
+            lines.push("  ({compared.line_order.len() - shown} more lines)")
+            break
+        }
+        lines.push(jet_cli_perf_compare_row_text(compared.lines[at]))
+    }
+    loop line in compared.verdict -> lines.push("{line}")
+    lines
+}
+
+// A row as the text shows it: `  main.jet:11 spin_hot_loop 59 -> 118
+// samples (+100%) slower (p=0.029)`, a function's without its line.
+jet_cli_perf_compare_row_text: fn(row: JetCLIPerfCompareRow) -> String Never! {
+    place: if row.line > 0 -> "{row.path}:{row.line} {row.function}" else -> "{row.path} {row.function}"
+    base_sum: jet_cli_perf_sum(row.base)
+    head_sum: jet_cli_perf_sum(row.head)
+    change: jet_cli_perf_change(base_sum * row.head.len(), head_sum * row.base.len())
+    verdict: if {
+        row.p_ppm >= 0 -> " {row.verdict} ({jet_cli_perf_p_text(row.p_ppm)})"
+        row.verdict != "" -> " {row.verdict}"
+        else -> ""
+    }
+    "  {place} {jet_cli_perf_mean_text(base_sum, row.base.len())} -> {jet_cli_perf_mean_text(head_sum, row.head.len())} samples ({change}){verdict}"
+}
+
+// The rounded mean of `count` captures' `sum`.
+jet_cli_perf_mean_text: fn(sum: Int, count: Int) -> String Never! {
+    "{(2 * sum + count) /% (2 * count)}"
+}
+
+// The change from `before` to `after` as a whole percent (`+100%`,
+// `-27%`), `new` when there was none before.
+jet_cli_perf_change: fn(before: Int, after: Int) -> String Never! {
+    if before == 0 -> return "new"
+    if after >= before -> return "+{(after - before) * 100 /% before}%"
+    "-{(before - after) * 100 /% before}%"
+}
+
+// p from parts per million `ppm`, to three places rounded up: `p=0.029`,
+// `p=1`, `p<0.001`.
+jet_cli_perf_p_text: fn(ppm: Int) -> String Never! {
+    if ppm < 1000 -> return "p<0.001"
+    thousandths: (ppm + 999) /% 1000
+    if thousandths >= 1000 -> return "p=1"
+    digits: "{thousandths + 1000}"
+    "p=0.{digits.slice(1..<4)}"
+}
+
+// A table's rows in its order as JSON: each row's `path`, `line` (lines
+// only), `function`, per-capture `base` and `head` samples, adjusted
+// `p_ppm` (null unjudged) and `verdict` (null without one).
+jet_cli_perf_compare_json: fn(rows: [JetCLIPerfCompareRow], order: [Int]) -> CanonicalJSON Never! {
+    CanonicalJSON.Array(loop at in order -> jet_cli_perf_compare_row_json(rows[at]))
+}
+
+jet_cli_perf_compare_row_json: fn(row: JetCLIPerfCompareRow) -> CanonicalJSON Never! {
+    fields := [CanonicalJSONField]{
+        {key: "base", value: jet_cli_perf_counts_json(row.base)},
+        {key: "function", value: CanonicalJSON.String("{row.function}")},
+        {key: "head", value: jet_cli_perf_counts_json(row.head)},
+    }
+    if row.line > 0 {
+        fields.push(CanonicalJSONField{key: "line", value: CanonicalJSON.Integer("{row.line}")})
+    }
+    p: if row.p_ppm >= 0 -> CanonicalJSON.Integer("{row.p_ppm}") else -> CanonicalJSON.Null
+    fields.push(CanonicalJSONField{key: "p_ppm", value: p})
+    fields.push(CanonicalJSONField{key: "path", value: CanonicalJSON.String("{row.path}")})
+    verdict: if row.verdict != "" -> CanonicalJSON.String("{row.verdict}") else -> CanonicalJSON.Null
+    fields.push(CanonicalJSONField{key: "verdict", value: verdict})
+    CanonicalJSON.Object(fields)
+}
+
+jet_cli_perf_counts_json: fn(counts: [Int]) -> CanonicalJSON Never! {
+    CanonicalJSON.Array(loop count in counts -> CanonicalJSON.Integer("{count}"))
+}
+
+#Test("the exact U test gives 4 against 4 fully apart p=0.029 and ties p=1") {
+    p: jet_cli_perf_p_ppm(jet_cli_perf_u2([Int]{59, 60, 58, 61}, [Int]{118, 119, 117, 120}), 4, 4)
+    // 2 of the C(8, 4) = 70 orders are as far apart: 2/70 = 0.028571...
+    assert_eq(p, 28572)
+    assert_eq(jet_cli_perf_p_text(p), "p=0.029")
+    assert_eq(jet_cli_perf_p_ppm(jet_cli_perf_u2([Int]{5, 5, 5, 5}, [Int]{5, 5, 5, 5}), 4, 4), 1000000)
+    counts: jet_cli_perf_u_counts(2, 2)
+    assert_eq(counts, [Int]{1, 1, 2, 1, 1})
+    assert_eq(jet_cli_perf_sum(jet_cli_perf_u_counts(31, 31)), 465428353255261088)
+}
+
+#Test("Benjamini-Hochberg adjusts each judged row and leaves cold rows unjudged") {
+    hot: JetCLIPerfCompareRow{path: "main.jet", line: 11, function: "spin", base: [Int]{59, 60, 58, 61}, head: [Int]{118, 119, 117, 120}, p_ppm: -1, verdict: ""}
+    flat: JetCLIPerfCompareRow{path: "main.jet", line: 4, function: "run", base: [Int]{10, 12, 11, 13}, head: [Int]{11, 12, 13, 10}, p_ppm: -1, verdict: ""}
+    cold: JetCLIPerfCompareRow{path: "main.jet", line: 9, function: "spin", base: [Int]{0, 1, 0, 0}, head: [Int]{0, 0, 1, 0}, p_ppm: -1, verdict: ""}
+    rows := [JetCLIPerfCompareRow]{hot, flat, cold}
+    jet_cli_perf_compare_judge(rows, 300, 540)
+    // Two rows judged: the hot row's p doubles over rank 1, 0.057.
+    assert_eq(rows[0].p_ppm, 57144)
+    assert_eq(rows[0].verdict, "no significant change")
+    assert_eq(rows[1].verdict, "no significant change")
+    assert_eq(rows[2].p_ppm, -1)
+    assert_eq(rows[2].verdict, "too few samples to judge")
+    assert_eq(jet_cli_perf_compare_row_text(rows[2]), "  main.jet:9 spin 0 -> 0 samples (+0%) too few samples to judge")
+    alone := [JetCLIPerfCompareRow]{JetCLIPerfCompareRow{path: "main.jet", line: 11, function: "spin", base: [Int]{59, 60, 58, 61}, head: [Int]{118, 119, 117, 120}, p_ppm: -1, verdict: ""}}
+    jet_cli_perf_compare_judge(alone, 238, 474)
+    assert_eq(jet_cli_perf_compare_row_text(alone[0]), "  main.jet:11 spin 60 -> 119 samples (+99%) slower (p=0.029)")
+}
+
+#Test("rows key each function and line over both sides and order by weighted samples") {
+    names: [String]{"main.jet", "spin", "run"}
+    one: JetCLIPerfLineTotals{names: names, rows: [JetCLIPerfLineTotal]{JetCLIPerfLineTotal{path: 0, line: 11, function: 1, samples: 60}, JetCLIPerfLineTotal{path: 0, line: 4, function: 2, samples: 3}}}
+    two: JetCLIPerfLineTotals{names: [String]{"main.jet", "spin"}, rows: [JetCLIPerfLineTotal]{JetCLIPerfLineTotal{path: 0, line: 11, function: 1, samples: 120}, JetCLIPerfLineTotal{path: 0, line: 12, function: 1, samples: 5}}}
+    base := [JetCLIPerfLineTotals]{one}
+    head := [JetCLIPerfLineTotals]{two}
+    lines := jet_cli_perf_compare_rows(base, head, true)
+    functions := jet_cli_perf_compare_rows(base, head, false)
+    assert_eq(lines.len(), 3)
+    assert_eq(functions.len(), 2)
+    // A capture that never sampled a row counts 0 for it.
+    assert_eq(functions[0].head, [Int]{125})
+    order: jet_cli_perf_compare_order(lines)
+    assert_eq(order, [Int]{0, 2, 1})
+    compared: JetCLIPerfCompared{functions: functions, function_order: jet_cli_perf_compare_order(functions), lines: lines, line_order: order, verdict: [String]{"verdict: none"}}
+    text: jet_cli_perf_compare_text(compared)
+    assert_eq(text.join("\n"), "functions (CPU-time samples, base mean -> head mean):\n  main.jet spin 60 -> 125 samples (+108%)\n  main.jet run 3 -> 0 samples (-100%)\nlines (CPU-time samples, base mean -> head mean):\n  main.jet:11 spin 60 -> 120 samples (+100%)\n  main.jet:12 spin 0 -> 5 samples (new)\n  main.jet:4 run 3 -> 0 samples (-100%)\nverdict: none")
+}

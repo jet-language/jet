@@ -399,6 +399,37 @@ as `receipt perf <canonical JSON>`, and `jet perf compare` lists each field
 that differs between two traces' receipts (`perf.build.options.optimize: "O0"
 -> "O2"`). `jet perf attach` records no `perf` section.
 
+## Comparing captures
+
+`jet perf compare <base> <head>` takes each side as one `.jettrace` or a
+folder of them: every `.jettrace` directly in the folder, in name order,
+is one capture of that side (`jet perf run main.jet --out base/1.jettrace`
+creates the folder). An empty folder is refused. Every capture must share
+the first base capture's toolchain digest and hardware fingerprint unless
+`--override-identity`, and each side's captures must have run one source
+(the same path and digest for every source file); either refusal is E2102
+naming the capture. The `Captures:` line lists each side's captures. The
+wall, CPU and allocation deltas and the budget line set the sides' means
+against each other; the receipt and heap deltas set the first capture of
+each side against each other.
+
+Compare then prints a function table and a line table of CPU-time
+samples, the most samples first, each row the base side's mean, the head
+side's and the change: `main.jet:11 spin_hot_loop 59 -> 118 samples
+(+100%) slower (p=0.029)`. A row a capture never sampled counts 0 for it.
+With at least 4 captures a side and at most 62 in all, each row holding
+at least 1% of either side's samples gets a verdict from an exact
+two-sided Mann-Whitney U test over its per-capture samples, its p
+adjusted over the rows judged in its table (Benjamini-Hochberg) and
+rounded up: `slower` or `faster` below 0.05, else `no significant
+change`; a smaller row is `too few samples to judge`. With fewer captures
+the verdict is none, naming why (`verdict: none (one capture each;
+capture each side at least 4 times)`), and the rows show the means
+alone. Compare exits 0 either way: `jet budget check` is the gate.
+`--json` prints the same under `perf`, kind `jet.perf.compare`: each row's
+per-capture `base` and `head` samples, `p_ppm` (the adjusted p in parts
+per million, null when unjudged) and `verdict`.
+
 ## Canonical devtools protocol
 
 `jet.devtools.v1` is the single observation envelope for development hosts.
