@@ -589,6 +589,11 @@ live session reads one, with typed locals; a `Secret` shows as
 The runtime's frames between the stop and the program are stepped out of
 by the image's call frame information (`.eh_frame`), so a register they
 saved holds its value in the program's frames.
+A parameter the code no longer keeps where a frame stopped reads the value
+its caller passed, as the call recorded it (a DWARF call site parameter,
+read through `DW_OP_entry_value`); when the call recorded none, or the body
+may rebind the parameter, it shows `unavailable (not kept at this point)`,
+never a register's later value. Live sessions read parameters the same way.
 `tasks` lists every task the dump holds, the selected one marked `*`, as
 `task <id>  stopped`, `running` or `parked`, then its innermost Jet frame
 and, when that frame is outside the program's source, the innermost one

@@ -4,8 +4,8 @@
 use {
     native_test_process: core.process
     native_test_files: core.files
-    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NativeBlock, NativeBreak, NativeCode, NativeCut, NativeDebugError, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeInlined, NativeLocal, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeVariable, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_frames_index, native_inline_chain, native_jet_spelling]
-    jet_backend.[x64_eval_fork_filter, x64_jetline_sleb]
+    jet_debug.[NATIVE_CFI_RETURN, NATIVE_CFI_SAME, NATIVE_CFI_SAVED, NATIVE_DEBUG_CUT_OFF, NATIVE_DEBUG_NOT_KEPT, NativeAbstract, NativeBlock, NativeBreak, NativeCallArgument, NativeCode, NativeCut, NativeDebugError, NativeEnumerator, NativeFde, NativeFrame, NativeFrames, NativeFunction, NativeImage, NativeInlined, NativeLocal, NativeMember, NativeMemory, NativeSession, NativeStop, NativeStopKind, NativeType, NativeUnwound, NativeVariable, NativeVariableRole, NativeVariants, native_cfi_row, native_debug_backtrace, native_debug_build_argv, native_debug_decimal_text, native_debug_hit_breakpoint, native_debug_int, native_debug_locals_typed, native_debug_precise, native_debug_string, native_frame_locals, native_frames_index, native_inline_chain, native_jet_spelling]
+    jet_backend.[X64DebugEncoding, X64Jetline, X64JetlineFunction, x64_eval_fork_filter, x64_jetline_sleb]
     jet_foundation.[DeepChecks]
 }
 
@@ -140,6 +140,40 @@ native_test_bytes: fn(words: [Int], size: Int) -> [U8] {
     assert_eq(framed.offset, 16)
     assert_eq(native_cfi_row(frames, 0x1010) == None, true)
     assert_eq(native_cfi_row(frames, 0xfff) == None, true)
+}
+
+// A frame stopped at `pc` that knows none of its registers.
+native_test_unwound: fn(pc: Int) -> NativeUnwound {
+    registers: loop _ in 0..<27 -> 0
+    known: loop _ in 0..<27 -> false
+    NativeUnwound{pc: pc, cfa: 0, registers: registers, known: known}
+}
+
+// `count` is in rbx over [0x1010, 0x1020), then its entry value (rdi's when
+// `check` was called); `other` is only in rsi over [0x1010, 0x1020). At
+// 0x1050 `count` is the 3 the call returning to 0x2005 passed in rdi (its
+// call site parameter), and `other` is not kept; a caller whose call
+// recorded no value leaves `count` not kept either, never a stale register.
+#Test("a_parameter_past_its_range_reads_the_value_its_caller_passed") {
+    loclists: [U8]{0x04, 0x10, 0x20, 0x01, 0x53, 0x04, 0x20, 0x80, 0x02, 0x04, 0xa3, 0x01, 0x55, 0x9f, 0x00, 0x04, 0x10, 0x20, 0x01, 0x54, 0x00}
+    count: NativeVariable{name: "count", line: 1, ty: 40, list: 0, base: 0x1000, role: NativeVariableRole.Parameter, site: -1}
+    other: NativeVariable{name: "other", line: 1, ty: 40, list: 15, base: 0x1000, role: NativeVariableRole.Parameter, site: -1}
+    function: NativeFunction{low: 0x1000, high: 0x1100, name: "check", file: -1, variables: [NativeVariable]{count, other}, inlined: [NativeInlined]{}}
+    types := [Int:NativeType]{}
+    types[40] = NativeType{name: "I64", size: 8, tag: 0x24, encoding: X64DebugEncoding.Signed, target: -1, group: -1}
+    arguments: [NativeCallArgument]{NativeCallArgument{at: 0x2005, register: 5, value: [U8]{0x11, 0x03}}}
+    image: NativeImage{lines: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{}}, functions: [NativeFunction]{function}, types: types, members: [[NativeMember]]{}, enumerators: [[NativeEnumerator]]{}, variants: [NativeVariants]{}, loclists: loclists, abstracts: [Int:NativeAbstract]{}, allocs: [Int:Int]{}, arguments: arguments}
+    memory: NativeMemory{trace: None, blocks: [NativeBlock]{}}
+    shown: native_frame_locals(image, memory, native_test_unwound(0x1050), 0x1050, -1, NativeUnwound?{Val(native_test_unwound(0x2005))})
+    assert_eq(shown.len(), 2)
+    assert_eq(shown[0].name, "count")
+    assert_eq(shown[0].value, "3")
+    assert_eq(shown[1].name, "other")
+    assert_eq(shown[1].value, NATIVE_DEBUG_NOT_KEPT)
+    unrecorded: native_frame_locals(image, memory, native_test_unwound(0x1050), 0x1050, -1, NativeUnwound?{Val(native_test_unwound(0x3000))})
+    assert_eq(unrecorded[0].value, NATIVE_DEBUG_NOT_KEPT)
+    alone: native_frame_locals(image, memory, native_test_unwound(0x1050), 0x1050, -1, NativeUnwound?{None})
+    assert_eq(alone[0].value, NATIVE_DEBUG_NOT_KEPT)
 }
 
 #Test("an_unavailable_debugger_is_e2203") {

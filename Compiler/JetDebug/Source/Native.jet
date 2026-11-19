@@ -793,7 +793,9 @@ NativeSession: struct {
         if native_eval_is_name(name) {
             shown: self.locals() ?? return Err(native_eval_refused(err.detail))
             loop local in shown {
-                if local.name != name || local.value == NATIVE_DEBUG_UNAVAILABLE -> next
+                if local.name != name || local.value == NATIVE_DEBUG_UNAVAILABLE || local.value == NATIVE_DEBUG_NOT_KEPT {
+                    next
+                }
                 truth: local.type_name == "Bool" && local.value == "true"
                 said: "{local.value}"
                 return Ok(NativeEvalValue{shown: local.value, type_name: local.type_name, text: said, truth: truth})
@@ -1722,11 +1724,14 @@ NativeSession: struct {
         index: level.frame
         memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
         lookup: native_lookup(index, frames[index].pc)
+        // The frame that called this one, for a parameter's entry value; an
+        // inlined run's caller is no frame of its own.
+        caller: if level.site < 0 && index + 1 < frames.len() -> NativeUnwound?{Val(frames[index + 1])} else -> None
         // A dump runs no view: nothing runs it.
         if self.dump == .Val(dumped) {
-            return Ok(native_frame_locals(self.image, dumped.memory, frames[index], lookup, level.site))
+            return Ok(native_frame_locals(self.image, dumped.memory, frames[index], lookup, level.site, caller))
         }
-        shown := native_frame_locals(self.image, memory, frames[index], lookup, level.site)
+        shown := native_frame_locals(self.image, memory, frames[index], lookup, level.site, caller)
         function: native_function_at(self.image, lookup) ?? return Ok(shown)
         // The variables native_frame_locals shows, in its order.
         at := 0
@@ -1735,7 +1740,7 @@ NativeSession: struct {
             located := NativeRange?{None}
             if variable.list >= 0 {
                 located = native_variable_covering(self.image, variable, lookup)
-                if located == None -> next
+                if located == None && variable.role != .Parameter -> next
             }
             local: at
             at += 1
@@ -4793,6 +4798,10 @@ NATIVE_DEBUG_BREAKPOINT_HIT: "Breakpoint hit"
 // The value shown for a local the image's debug information cannot show.
 NATIVE_DEBUG_UNAVAILABLE: "<Unavailable>"
 
+// The value shown for a parameter the code no longer keeps where the frame
+// stopped, and whose caller recorded no value it passed.
+NATIVE_DEBUG_NOT_KEPT: "unavailable (not kept at this point)"
+
 // The value shown for one whose bytes a dump cut off past its memory
 // budget.
 NATIVE_DEBUG_CUT_OFF: "<cut off>"
@@ -5116,8 +5125,10 @@ native_debug_cut: fn(memory: NativeMemory, address: Int, count: Int) -> Bool Nev
 
 // The parameters and locals live at `lookup` in `frame` that belong to the
 // inlined run `site` (-1: the function's own frame), rendered as Jet values;
-// a variable the image gives no location shows as unavailable.
-native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, lookup: Int, site: Int) -> [NativeLocal] Never! {
+// a variable the image gives no location shows as unavailable, and a
+// parameter no range covers as not kept. A parameter located by its entry
+// value (DW_OP_entry_value) reads the value its `caller` passed.
+native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeUnwound, lookup: Int, site: Int, caller: NativeUnwound?) -> [NativeLocal] Never! {
     locals := [NativeLocal]{}
     function: native_function_at(image, lookup) ?? return locals
     loop variable in function.variables {
@@ -5127,11 +5138,58 @@ native_frame_locals: fn(image: NativeImage, memory: NativeMemory, frame: NativeU
             locals.push(NativeLocal{name: variable.name, type_name: type_name, value: NATIVE_DEBUG_UNAVAILABLE})
             next
         }
-        located: native_variable_covering(image, variable, lookup) ?? next
-        value: native_variable_value(image, memory, frame, located, variable.ty) ?? NATIVE_DEBUG_UNAVAILABLE
+        located: native_variable_covering(image, variable, lookup) ?? {
+            if variable.role == .Parameter {
+                locals.push(NativeLocal{name: variable.name, type_name: type_name, value: NATIVE_DEBUG_NOT_KEPT})
+            }
+            next
+        }
+        entry: native_entry_register(image.loclists, located.from, located.to)
+        value: if entry >= 0 -> native_entry_value(image, memory, caller, entry, variable.ty) ?? NATIVE_DEBUG_NOT_KEPT else -> native_variable_value(image, memory, frame, located, variable.ty) ?? NATIVE_DEBUG_UNAVAILABLE
         locals.push(NativeLocal{name: variable.name, type_name: type_name, value: value})
     }
     locals
+}
+
+// The register (a DWARF number) whose value at the function's entry the
+// expression `bytes[from..<to]` names (DW_OP_entry_value of a register),
+// else -1.
+native_entry_register: fn(bytes: [U8], from: Int, to: Int) -> Int Never! {
+    if to - from < 3 || to > bytes.len() || bytes[from] != 0xa3 -> return -1
+    at := from + 1
+    length: link_debug_uleb(bytes, at)
+    if length <= 0 || at + length > to -> return -1
+    native_location_register(bytes, at, at + length)
+}
+
+// The value of type `ty` that `caller` passed in register `register` (a
+// DWARF number) to the call it stopped at: its call site parameter's value
+// (NativeCallArgument), computed in the caller's frame. None when the call
+// records no such value or the caller's frame no longer holds what it is
+// computed from.
+native_entry_value: fn(image: NativeImage, memory: NativeMemory, caller: NativeUnwound?, register: Int, ty: Int) -> String? Never! {
+    outer: caller ?? return None
+    size: native_type_size(image, ty)
+    if size <= 0 || size > 8 -> return None
+    loop argument in image.arguments {
+        if argument.at != outer.pc || argument.register != register -> next
+        word: native_call_value(memory, outer, argument.value) ?? return None
+        return native_render(image, memory, ty, native_low_bytes(word, size), 0, 0)
+    }
+    None
+}
+
+// The word the call site parameter value `value` computes in `frame`: a
+// constant (DW_OP_consts), or an address native_place_base and
+// native_place_through find (a register's value is its DW_OP_breg* 0).
+native_call_value: fn(memory: NativeMemory, frame: NativeUnwound, value: [U8]) -> Int? Never! {
+    if value.len() == 0 -> return None
+    if value[0] == 0x11 {
+        at := 1
+        return Val(x64_jetline_sleb(value, at))
+    }
+    base: native_place_base(frame, value, 0) ?? return None
+    native_place_through(memory, value, base, value.len())
 }
 
 // The first range of `variable`'s location list that covers `lookup`.

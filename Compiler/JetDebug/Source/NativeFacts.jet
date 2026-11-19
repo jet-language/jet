@@ -40,6 +40,8 @@ NATIVE_TAG_VARIABLE: 0x34
 
 NATIVE_TAG_CALL_SITE: 0x48
 
+NATIVE_TAG_CALL_SITE_PARAMETER: 0x49
+
 // One member of a struct or union type: its name, offset and type (a
 // NativeImage.types key), and the offset of its DIE.
 NativeMember: struct {
@@ -154,9 +156,10 @@ NativeAbstract: struct {
 // `allocs` the type each allocating call of a `--checked-alloc` image
 // allocates for (a `types` key), by the call's return address; `calls` the
 // call-site row of each call that has one (the source node that made it),
-// by the call's return address; `level` the optimization level the program
-// was built at, as its unit's producer names it (native_producer_level);
-// `frames` its call frame information.
+// by the call's return address; `arguments` the values each such call
+// passes in its argument registers (DW_TAG_call_site_parameter); `level`
+// the optimization level the program was built at, as its unit's producer
+// names it (native_producer_level); `frames` its call frame information.
 NativeImage: struct {
     lines: X64Jetline,
     functions: [NativeFunction],
@@ -168,6 +171,7 @@ NativeImage: struct {
     abstracts: [Int:NativeAbstract],
     allocs: [Int:Int],
     calls: [Int:NativeCallSite]{[Int:NativeCallSite]{}},
+    arguments: [NativeCallArgument]{[NativeCallArgument]{}},
     level: Int{0},
     frames: NativeFrames{NativeFrames{sections: [NativeCode]{}, fdes: [NativeFde]{}}},
 }
@@ -177,6 +181,16 @@ NativeImage: struct {
 NativeCallSite: struct {
     line: Int,
     column: Int,
+}
+
+// A value a call passes in argument register `register` (a DWARF register
+// number), as its caller computes it: the DWARF expression `value`
+// (DW_AT_call_value), evaluated in the caller's frame at the call's return
+// address `at`.
+NativeCallArgument: struct {
+    at: Int,
+    register: Int,
+    value: [U8],
 }
 
 // One range of a variable's location list: [start, end), and the DWARF
@@ -706,7 +720,9 @@ native_encoding: fn(code: Int) -> X64DebugEncoding Never! {
 // abstract subprogram an inlined run is of and `call_line` and `call_file`
 // its call's line and file (and a call site's line and `call_column`);
 // `file` is a declaration's file, `return_pc` a call site's return
-// address and `producer` a unit's producer.
+// address and `producer` a unit's producer; `expression` is an exprloc
+// DW_AT_location (a call site parameter's register) and `call_value` a
+// call site parameter's DW_AT_call_value.
 NativeDie: struct {
     tag: Int,
     offset: Int,
@@ -730,6 +746,8 @@ NativeDie: struct {
     return_pc: Int,
     call_column: Int{0},
     producer: String{""},
+    expression: [U8]{[U8]{}},
+    call_value: [U8]{[U8]{}},
 }
 
 // The DIEs of the unit at [start, end) of `info`, into `image`.
@@ -777,6 +795,16 @@ native_image_unit: fn(image: &NativeImage, info: [U8], abbrev: [U8], start: Int,
 
 // Record attribute `attribute` of `die`, a `form` value at `at`.
 native_die_attribute: fn(die: &NativeDie, attribute: Int, form: Int, info: [U8], at: Int, unit: Int) Never! {
+    if form == 0x18 && (attribute == 0x02 || attribute == 0x7e) {
+        cursor := at
+        length: link_debug_uleb(info, cursor)
+        if length < 0 || cursor + length > info.len() {
+            return
+        }
+        expression: info[cursor..<cursor + length]
+        if attribute == 0x02 -> die.expression = expression else -> die.call_value = expression
+        return
+    }
     value: if form == {
         0x08 -> 0
         0x01 | 0x07 -> link_debug_addr(info, at)
@@ -942,6 +970,20 @@ native_image_die: fn(image: &NativeImage, die: NativeDie, open: [NativeDie], bas
             if die.call_line > 0 {
                 image.calls[die.return_pc] = NativeCallSite{line: die.call_line, column: die.call_column}
             }
+        }
+        code == NATIVE_TAG_CALL_SITE_PARAMETER -> {
+            if open.len() == 0 {
+                return
+            }
+            site: open[open.len() - 1]
+            if site.tag != NATIVE_TAG_CALL_SITE || site.return_pc < 0 {
+                return
+            }
+            register: native_location_register(die.expression, 0, die.expression.len())
+            if register < 0 || die.call_value.len() == 0 {
+                return
+            }
+            image.arguments.push(NativeCallArgument{at: site.return_pc, register: register, value: die.call_value})
         }
         code == NATIVE_TAG_PARAMETER || code == NATIVE_TAG_VARIABLE -> {
             if image.functions.len() == 0 || !native_open_in_function(open) {
