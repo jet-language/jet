@@ -5430,12 +5430,12 @@ IR_ROUTES_FROZEN: #run { [String]{"jet_sys_image_part_raw"} }
 
 // Whether the builder lowers a Core call of route `name` itself, with no
 // runtime or environment route: an inline or leaf route, a special of
-// ir_core_call (crypto.wipe, channels and timer receivers, event policy), or
-// an Iter route (BuildLazy.jet ir_lazy_symbol).
+// ir_core_call (crypto.wipe and a Secret's keep, channels and timer
+// receivers, event policy), or an Iter route (BuildLazy.jet ir_lazy_symbol).
 // IR Lint's registry check (Lint.jet ir_lint_core_routes) reads it.
 ir_route_builder_lowered: fn(name: String) -> Bool Never! {
     if IR_ROUTES_INLINE.contains(name) || ir_leaf_route(name) != None -> return true
-    if name == "jet_raw_crypto_wipe" -> return true
+    if name == "jet_raw_crypto_wipe" || name == "jet_raw_crypto_secret_keep" -> return true
     if name == "jet_std.channel" || name == "jet_std.channel_bounded" || name == "jet_std.after_value" || name == "jet_std.JetEvent.with_policy" {
         return true
     }
@@ -6690,8 +6690,8 @@ ir_core_call: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: Co
 
 ir_core_call_routed: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, record: CoreCallRecord, args: [Int], type_args: [Type], widen: [Bool], split_armed: Bool, span: Span) -> Int Never! {
     canonical: ir_canonical_core_record(record)
-    if canonical.module_name == "core.crypto" && canonical.member == "__wipe" {
-        return ir_core_crypto_wipe(m, p, b, args, span)
+    if canonical.module_name == "core.crypto" && (canonical.member == "__wipe" || canonical.member == "__secret_keep") {
+        return ir_core_crypto_header(m, p, b, args, canonical.member, span)
     }
     // A `core.compiler` query (`compiler.lex(source)`, ...): compile-time
     // only, the compiler answers it (ir_host_method `compiler.member`).
@@ -7232,15 +7232,18 @@ ir_core_word_int: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, word: Int, span:
     word
 }
 
-// `crypto.__wipe(bytes)`: the runtime wipes the written List header's buffer
-// (jet_rt_crypto_wipe), so it reaches spare capacity and the buffer's owner
-// count, which a pointer and length would not.
-ir_core_crypto_wipe: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], span: Span) -> Int Never! {
-    if args.len() != 1 -> return ir_fail_slot(b, span, "crypto.__wipe has invalid checked arity")
+// `crypto.__wipe(bytes)` and `crypto.__secret_keep(bytes)` hand the runtime
+// the written List header. jet_rt_crypto_wipe wipes its buffer, so it reaches
+// spare capacity and the buffer's owner count, which a pointer and length
+// would not; jet_rt_crypto_secret_keep records the header's words as a live
+// Secret's, for a dump's redaction and a process end's scrub.
+ir_core_crypto_header: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, args: [Int], member: String, span: Span) -> Int Never! {
+    if args.len() != 1 -> return ir_fail_slot(b, span, "crypto.{member} has invalid checked arity")
+    runtime: if member == "__wipe" -> "jet_rt_crypto_wipe" else -> "jet_rt_crypto_secret_keep"
     backs := [IRWriteBack]{}
     list: ir_place_address(m, p, b, args[0], backs, span)
     if ir_failed(b) || list < 0 -> return -1
-    _: ir_runtime(m, b, "jet_rt_crypto_wipe", [Int]{list}, -1)
+    _: ir_runtime(m, b, runtime, [Int]{list}, -1)
     ir_write_backs(m, p, b, backs, span)
     ir_release(m, b, list)
     return -1

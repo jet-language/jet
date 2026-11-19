@@ -89,18 +89,21 @@ rt_crypto_entropy_fill: fn(out: I64, count: I64) -> I64 {
     return I64{0}
 }
 
-// crypto.wipe(bytes) (BuildRoutes.jet ir_core_crypto_wipe) over the written
-// native [U8] header [len, cap, data]. The length never changes. A buffer
-// this List alone owns is wiped in place, spare capacity included. A buffer
-// another List shares keeps its bytes for that List: this List takes a fresh
-// zeroed buffer of the same capacity, and the shared one is marked
-// zero-at-free (Refcount.jet RC_ZERO_MARK) before this List's reference is
-// released, so its last owner's release wipes it. Frozen static bytes
-// (capacity 0) cannot be written; this List takes fresh zeroes of its length.
+// crypto.wipe(bytes) (BuildRoutes.jet ir_core_crypto_header) over the written
+// native [U8] header [len, cap, data]. The length never changes. A Secret's
+// record of the buffer (Secret.jet jet_rt_crypto_secret_keep) is dropped
+// first. A buffer this List alone owns is wiped in place, spare capacity
+// included. A buffer another List shares keeps its bytes for that List: this
+// List takes a fresh zeroed buffer of the same capacity, and the shared one
+// is marked zero-at-free (Refcount.jet RC_ZERO_MARK) before this List's
+// reference is released, so its last owner's release wipes it. Frozen static
+// bytes (capacity 0) cannot be written; this List takes fresh zeroes of its
+// length.
 #Export(c) jet_rt_crypto_wipe: fn(header: I64) {
     length: trap_word(header)
     capacity: trap_word(wrapping(header + I64{8}))
     data: trap_word(wrapping(header + I64{16}))
+    secret_forget(header, data)
     if (capacity != I64{0} && jet_rt_block_unique(data)) {
         rt_wipe_bytes(data, rt_secret_buffer_bytes(capacity))
         return
