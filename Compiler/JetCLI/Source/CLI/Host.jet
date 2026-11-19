@@ -2737,12 +2737,7 @@ jet_cli_run_recorded: fn(executable: X64Executable, file: String, program_args: 
         .Ok(_) -> {}
     }
     if failure != "" -> return jet_cli_launch_failed(failure, color)
-    signal: status & 0x7f
-    code: if signal == 0 -> (status >> 8) & 0xff else -> 128 + signal
-    if sync.len() == 0 {
-        return jet_cli_prove_refused(jet_cli_replay_unfinalized("the program ended (status {code}) without writing its sync-order log"), color, false)
-    }
-    path: jet_cli_replay_record_finish(recording, code, sync, program_args) ?? return jet_cli_prove_refused(err, color, false)
+    path: jet_cli_replay_record_run(recording, status, sync, program_args) ?? return jet_cli_prove_refused(err, color, false)
     cli_term.eprint("jet run: recorded replay `{path}`")
     JetDriverVerbOutput{stdout: "", stderr: "", exit_code: x64_process_mirror(status)}
 }

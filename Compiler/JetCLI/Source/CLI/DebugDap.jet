@@ -112,7 +112,7 @@ JetCLIDap: struct {
         request := input.move()
         if request.command == {
             "initialize" -> {
-                back: if session.env != None -> ",\"supportsStepBack\":true" else -> ""
+                back: if session.replaying() -> ",\"supportsStepBack\":true" else -> ""
                 self.respond(request, "{{\"supportsConfigurationDoneRequest\":true,\"supportsConditionalBreakpoints\":true,\"supportsLogPoints\":true,\"supportsEvaluateForHovers\":true,\"supportsRestartRequest\":true{back}}}")
             }
             "launch" -> {
@@ -377,7 +377,7 @@ JetCLIDap: struct {
             // A start that stops on entry is not stopped early: its entry
             // breakpoint goes when the launch stops.
             resumes: how == "c" || (starting && !self.stop_on_entry)
-            if resumes && session.env == None && !self.ended -> session.interrupt = 0
+            if resumes && !session.replaying() && !self.ended -> session.interrupt = 0
             outcome := NativeSettled?{None}
             if self.start(session, how) == {
                 .Ok(stop) -> { outcome = Val(stop) }

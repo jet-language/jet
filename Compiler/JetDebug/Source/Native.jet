@@ -9,7 +9,7 @@ use {
     native_files: core.files
     native_math: core.math
     jet_backend.[X64DebugEncoding, X64Trace, X64TraceResume, X64_OBSERVE_ROOT_SYMBOL, X64_TRACE_EVENT_CLONE, X64_TRACE_EVENT_EXIT, X64_TRACE_EVENT_STOP, X64_TRACE_GS_BASE, X64_TRACE_ORIG_RAX, X64_TRACE_RBP, X64_TRACE_RDI, X64_TRACE_RIP, X64_TRACE_RSI, X64_TRACE_RSP, link_debug_uleb, x64_jetline_find, x64_jetline_line, x64_jetline_sleb, x64_jetline_text, x64_trace_attach, x64_trace_close, x64_trace_debug_register, x64_trace_detach, x64_trace_follow_exits, x64_trace_peek, x64_trace_poke, x64_trace_read, x64_trace_registers, x64_trace_resume, x64_trace_seize, x64_trace_set_debug_register, x64_trace_set_registers, x64_trace_spawn, x64_trace_stop, x64_trace_wait, x64_trace_wait_for, x64_trace_wait_or_input, x64_trace_write]
-    jet_foundation.[DeepChecks, Diagnostic, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
+    jet_foundation.[DeepChecks, Diagnostic, ENV_JET_REPLAY, deep_checks_flags, diagnostic_display_identities, diagnostic_from_registry, diagnostic_registry_row, foundation_named_type]
 }
 
 #Error
@@ -433,11 +433,16 @@ NativeSession: struct {
     placed: [NativePlaced]{[NativePlaced]{}},
     held: Bool{false},
     // The environment `launch` starts the program with: jet's own, or these
-    // rows (`jet debug --replay` adds JET_REPLAY).
+    // rows (`jet debug --replay` adds JET_REPLAY, `jet debug --record`
+    // JET_RECORD); replaying says which.
     env: [String]?{None},
     // Whether the image links the runtime's observation start, where a
-    // recorded run's replay begins (JetRuntime RecordReplay.jet).
+    // recorded run's recording and its replay begin (JetRuntime
+    // RecordReplay.jet).
     replay_start: Bool{false},
+    // The wait status the program's last run ended with (`finished`), -1
+    // while it hasn't ended (`begin`) or when the session ended it.
+    status: Int{-1},
     // A replay's moves since its launch, which a reverse command makes
     // again (reverse), the argv the program started with (its path
     // first), and the watches set since the last move.
@@ -536,7 +541,7 @@ NativeSession: struct {
     // Remove breakpoint or watch `number`. A replay shelves the breakpoint
     // and its rule for the moves made with them.
     delete_breakpoint: fn(&self, number: Int) NativeDebugError! {
-        self.drop_breakpoint(number, shelve: self.env != None)
+        self.drop_breakpoint(number, shelve: self.replaying())
     }
 
     // Remove breakpoint or watch `number`, once what a logpoint of it
@@ -585,7 +590,7 @@ NativeSession: struct {
     // replay shelves them and their rules.
     clear_breakpoints: fn(&self) NativeDebugError! {
         self.drain()
-        shelve: self.env != None
+        shelve: self.replaying()
         loop self.breakpoints.len() > 0 {
             gone: self.breakpoints.pop() ?? break
             self.drop_rule(gone.number, shelve: shelve)
@@ -604,7 +609,7 @@ NativeSession: struct {
         placeable: (rule.condition != None || rule.log != None) && rule.placement == ""
         reason := "{rule.placement}"
         self.drain()
-        self.drop_rule(number, shelve: self.env != None)
+        self.drop_rule(number, shelve: self.replaying())
         self.rules[number] = rule
         if !self.alive() -> return reason
         addresses := [Int]{}
@@ -1486,6 +1491,7 @@ NativeSession: struct {
         if self.attached -> self.detach()
         if self.trace.pid > 0 || self.trace.scratch != 0 -> x64_trace_close(self.trace)
         self.started = true
+        self.status = -1
         self.sites = [Int:Int]{}
         self.forget_placed()
         self.probe.sites = [Int:Int]{}
@@ -1639,7 +1645,20 @@ NativeSession: struct {
 
     // Whether the session records its moves: a replay's, while no reverse
     // command makes them again.
-    recording: fn(self) -> Bool Never! { self.env != None && !self.rerunning }
+    recording: fn(self) -> Bool Never! { self.replaying() && !self.rerunning }
+
+    // Whether the program runs under a recording (`jet debug --replay`):
+    // its environment names one in JET_REPLAY, so each run of it is the
+    // same and reverse commands run it again.
+    replaying: fn(self) -> Bool Never! {
+        rows: self.env ?? return false
+        loop row in rows {
+            if row.starts_with("{ENV_JET_REPLAY}=") && row.len() > ENV_JET_REPLAY.len() + 1 {
+                return true
+            }
+        }
+        false
+    }
 
     // The move `word` about to be made, with the breakpoints, rules and
     // watches it is made with; the watches set since the last move go
@@ -3310,6 +3329,7 @@ NativeSession: struct {
     // status, or the signal that killed it.
     finished: fn(&self, status: Int) -> NativeEvent Never! {
         self.ended()
+        self.status = status
         if status & 0x7f == 0 {
             return NativeEvent{kind: NativeStopKind.Exited, code: (status >> 8) & 0xff}
         }
@@ -3337,7 +3357,7 @@ NativeSession: struct {
     // which a new run would not have.
     replay_refusal: fn(self, what: String) -> String Never! {
         if {
-            self.env == None || self.moves.len() == 0 -> "{what} runs in a replay: start the session with `jet debug --replay=NAME`"
+            !self.replaying() || self.moves.len() == 0 -> "{what} runs in a replay: start the session with `jet debug --replay=NAME`"
             self.fixed.len() > 0 -> "{what} can't run after `fix`: a new run of the program would run the code before the fix"
             !self.alive() -> "The program has finished"
             else -> ""

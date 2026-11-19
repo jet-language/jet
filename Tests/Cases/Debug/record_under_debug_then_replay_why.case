@@ -1,0 +1,39 @@
+# `jet debug --record=NAME` runs the program behind the console while its
+# runtime records the run as `jet run --record=NAME` does, and publishes the
+# same `.jet/replays/NAME.jetproof-replay` once the program has ended. That
+# recording replays under `jet debug --replay=NAME`, where `why total` names
+# the write that gave `total` its value (line 21 on the loop's second pass,
+# replacing 0) and `rc` goes back to the breakpoint hit before. A NAME
+# already recorded is refused before anything runs, a bare `--record` is a
+# usage error, and `--record` with `--replay` is refused. The helper task's
+# tally races the loop, so only the main task's total is asserted.
+# The fixture must stay in jet fmt form; line 21 adds `d` to `total`.
+fixture: ReplayReverse.fixture
+env: NO_COLOR=1
+step: jet debug --record=why prog.jet
+stdin: record_under_debug_then_replay_why.record.stdin
+exit: 0
+stdout: ~ "(Jet) c\nBreakpoint hit  prog.jet:21  in run()\n21 |         total += d        <- here\n" # the recorded run stops at its breakpoint
+stdout: ~ "total 6 tally " # the program's own output among the session's
+stdout: ~ "Program finished\n" # the session runs the program to its end
+stderr: ~ "jet debug: recorded replay `.jet/replays/why.jetproof-replay`" # and publishes the recording
+file: .jet/replays/why.jetproof-replay is-file
+step: jet debug --record=why prog.jet
+exit: 1
+stderr: ~ "The recording `.jet/replays/why.jetproof-replay` already exists" # a taken NAME is refused
+stdout: !~ "total" # before the program runs
+step: jet debug --record prog.jet
+exit: 2
+stderr: ~ "`--record` needs a NAME" # a bare `--record` is a usage error
+step: jet debug --record=other --replay=why prog.jet
+exit: 2
+stderr: ~ "`--record` makes a new recording, but `--replay` reruns one already made" # the two flags are refused together
+step: jet debug --replay=why prog.jet
+stdin: record_under_debug_then_replay_why.replay.stdin
+exit: 0
+stdout: ~ "(Jet) why total\ntotal = 2, set at prog.jet:21 in run() (task 1)\n  before: 0\n  #0  run()  at prog.jet:21\n" # the last write, its task, the value it replaced and its stack
+stdout: ~ "(Jet) rc\nBreakpoint hit  prog.jet:21  in run()\n21 |         total += d        <- here\nLocals:  d = 2" # back to the hit before, with the locals as they were there
+stdout: ~ "total 6 tally " # the program runs on to its end
+stdout: ~ "Program finished\n" # the session runs the program to its end
+stdout+stderr: !~ "replay diverged" # the replay stays faithful to the recording the debugger made
+stdout+stderr: !~ "No earlier" # the reverse step finds an earlier stop

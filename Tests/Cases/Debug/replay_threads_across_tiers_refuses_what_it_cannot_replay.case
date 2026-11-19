@@ -3,8 +3,8 @@
 # observation start (a program with no task, channel, live value or event,
 # built by `jet build`), where its runtime would run without the recording.
 # jet debug's own -O0 build keeps every runtime function, the start among
-# them, so the image comes from `jet build`. `--record` stays unbuilt on
-# `jet debug`.
+# them, so the image comes from `jet build`. `jet debug --record` records a
+# source file alone, so it refuses that image before anything runs.
 fixture: ReplayThreadsAcrossTiers.fixture
 env: NO_COLOR=1
 step: jet debug --replay=../tiers prog.jet
@@ -24,6 +24,7 @@ exit: 2
 stderr: ~ "can't replay its recording" # the line that names the refusal or the result
 stderr: ~ "has no observation start" # the line that names the refusal or the result
 stdout: !~ "plain" # nothing ran
-step: jet debug --record=other prog.jet
-exit: any # the recorder that is not built yet refuses; its status is not the contract
-stderr: ~ "`jet debug --record` is not built yet" # the line that names the refusal or the result
+step: jet debug --record=other {work}/.jet/build/prog
+exit: 2
+stderr: ~ "records a run of a `.jet` source file" # the line that names the refusal or the result
+stdout: !~ "plain" # nothing ran
