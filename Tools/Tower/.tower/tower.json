@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112461,
+    "rev": 112463,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -85628,12 +85628,12 @@
         },
         {
           "n": 3,
-          "text": "Recorded histories keep per-sequence write transitions and watch-aware forward and reverse navigation, and a live watch change refreshes its baseline.",
+          "text": "Reverse and forward navigation over a recording are watch-aware: `back` and `continue` with a watch set stop at the previous or next event where the watched value changes (found by re-execution, c4), and changing a live watch refreshes its baseline at the current event. The test-only DebugHistory model (JetDebug/Source/Debug/History.jet) is removed with its tests, so one mechanism serves replay navigation. Proof: `jet test Compiler --profile cases --filter Debug/replay_watch_` on the native and DAP routes, and `git grep -n DebugHistory -- Compiler` prints nothing.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:13:20.817Z",
+          "at": "2026-11-19T21:52:00.322Z",
           "proof": {
             "profile": "cases",
             "filter": "Debug/recorded_history_watch_navigation"
@@ -85641,12 +85641,12 @@
         },
         {
           "n": 4,
-          "text": "Replay navigation uses indexed retained events and never re-executes the program.",
+          "text": "Replay navigation follows D-TIMETRAVEL2=B: `jump N` re-executes the recording from the start (or from the nearest checkpoint) with its recorded values and stops at event N, and `back K` from event E is `jump E-K`. Repeated jumps to one event give byte-identical locals on the native and DAP routes, and an index of the recording s events names where each re-execution stops. Proof: `jet test Compiler --profile cases --filter Debug/replay_` passes on the native and DAP routes, including a case that jumps to one event three times and compares the locals.",
           "status": "open",
           "metBy": null,
           "verifiedBy": null,
           "evidence": "",
-          "at": "2026-11-16T13:13:22.244Z",
+          "at": "2026-11-19T21:51:59.281Z",
           "proof": {
             "profile": "cases",
             "filter": "Debug/replay_uses_indexed_events"
@@ -85750,7 +85750,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-15T04:09:16.617Z",
-      "updated": "2026-11-19T20:16:02.236Z",
+      "updated": "2026-11-19T21:52:00.322Z",
       "updatedBy": "Main",
       "criteriaLastN": 13
     },
@@ -158781,6 +158781,20 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T21:52:00.322Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06lmp17",
+      "note": "#3: The text described write-transition histories (the DebugHistory model in JetDebug/Source/Debug/History.jet, used only by tests and without navigation), which D-TIMETRAVEL2=B does not use. Reworded to watch-aware navigation over the re-executed recording; the unused model goes in the same change (one mechanism).; was: Recorded histories keep per-sequence write transitions and watch-aware forward and reverse navigation, and a live watch change refreshes its baseline."
+    },
+    {
+      "at": "2026-11-19T21:51:59.281Z",
+      "by": "Main",
+      "action": "card.criteria-edit",
+      "ref": "c06lmp17",
+      "note": "#4: The text contradicted ratified D-TIMETRAVEL2=B (replay re-executes from the start with recorded values; checkpoints may optimize it without changing its meaning), and Docs/Audits/2026-11-18-best-debugger-profiler.md sides with re-execution. Reworded to the ratified design.; was: Replay navigation uses indexed retained events and never re-executes the program."
+    },
     {
       "at": "2026-11-19T21:43:10.035Z",
       "by": "Main",
