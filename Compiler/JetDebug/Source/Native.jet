@@ -228,6 +228,10 @@ NativeSession: struct {
     // Where each function of the image's line table opens its frame, read
     // from the image's code (native_openings).
     openings: [NativeOpening],
+    // The functions `fix` placed, latest last, and the address the next fix
+    // maps its code at (0: none mapped yet).
+    fixed: [NativeFixed]{[NativeFixed]{}},
+    fix_next: Int{0},
 
     // Load the debug facts of `binary` (a native image with debug info, its
     // own or in the side file its `.gnu_debuglink` names). The program's
@@ -717,6 +721,154 @@ NativeSession: struct {
             else -> text = "Unknown command `{word}`. {NATIVE_DEBUG_HELP}\n"
         }
         Ok(NativeDebugStep{text: text, stop: stop})
+    }
+
+    // Swap `edit`, the program compiled again, into the stopped program
+    // (NativeFix.jet): what the console shows of it. Nothing changes when
+    // the fix is refused.
+    fix: fn(&self, edit: NativeFixEdit) -> String NativeDebugError! {
+        self.ready() ?? return Err(err)
+        elf: native_files.read_bytes(self.binary) ?? return Err(NativeDebugError{detail: "couldn't read the program `{self.binary}`: {err}"})
+        symbols: native_fix_symbols(elf)
+        code: native_elf_code(elf)
+        planned := NativeFixPlan?{None}
+        if native_fix_plan(self.image, edit, symbols, code.bytes, code.address, self.fixed) == {
+            .Refused(reason) -> return Ok("Fix refused: {reason}; restart the program to run the edit\n")
+            .Unchanged -> return Ok("Nothing to fix: the program already runs this code\n")
+            .Planned(found) -> planned = Val(found)
+        }
+        plan: planned ?? return Ok("")
+        pc: (self.registers() ?? return Err(err))[X64_TRACE_RIP]
+        // Each changed function's running entry, -1 for a new function.
+        entries := [Int]{}
+        sizes := [Int]{}
+        loop row in plan.changed {
+            running: native_fix_running(edit.functions[row].name, symbols, code.bytes, code.address, self.fixed)
+            at: if running == .Val(found) -> found.address else -> -1
+            if at >= 0 && pc > at && pc < at + 5 {
+                return Ok("Fix refused: the program is stopped in the first instruction of `{native_fix_shown(edit, row)}`; step once, then fix again\n")
+            }
+            entries.push(at)
+            sizes.push(if running == .Val(found) -> found.code.len() else -> 0)
+        }
+        syscall := -1
+        loop k in 0..<code.bytes.len() - 1 {
+            if native_fix_is_syscall(code.bytes, k) && !self.has_site(code.address + k) {
+                syscall = code.address + k
+                break
+            }
+        }
+        if syscall < 0 -> return Ok("Fix refused: the program's code holds no system call to map the edit with; restart the program to run the edit\n")
+        base: self.map_code(plan.size, code.address + code.bytes.len(), syscall) ?? return Err(err)
+        region: native_fix_region(plan, edit, symbols, base)
+        if !self.poke_bytes(base, region) -> return Err(NativeDebugError{detail: "couldn't write the fixed code at {native_debug_hex(base)}"})
+        // Breakpoints in the old code move to the same lines of the new.
+        moved := [NativeBreakpoint]{}
+        loop breakpoint in self.breakpoints {
+            addresses := [Int]{}
+            loop address in breakpoint.addresses {
+                target := address
+                loop (k, row) in plan.changed {
+                    at: entries[k]
+                    if at < 0 || address < at || address >= at + sizes[k] -> next
+                    target = -1
+                    index: x64_jetline_find(self.image.lines, address)
+                    line: if index >= 0 -> x64_jetline_line(self.image.lines, self.image.lines.functions[index], address) ?? 0 else -> 0
+                    loop piece in plan.pieces {
+                        if piece.function != row -> next
+                        if native_fix_line_address(edit.debug[row], base + piece.offset, line) == .Val(found) -> target = found
+                    }
+                }
+                if target >= 0 -> addresses.push(target)
+            }
+            moved.push(NativeBreakpoint{number: breakpoint.number, addresses: addresses})
+        }
+        loop (k, at) in entries {
+            if at < 0 -> next
+            loop site in self.sites {
+                if site.address >= at && site.address < at + sizes[k] -> self.lift(site.address)
+            }
+        }
+        shown := [String]{}
+        loop piece in plan.pieces {
+            if piece.function < 0 -> next
+            row: piece.function
+            function: edit.functions[row]
+            low: base + piece.offset
+            at: entries[plan.changed.index_of(row) ?? 0]
+            if at >= 0 {
+                word: x64_trace_read(self.trace, at, 8) ?? return Err(NativeDebugError{detail: "couldn't read the code of `{function.name}`"})
+                patched := word
+                loop (k, byte) in native_fix_jump(at, low) -> patched[k] = byte
+                if !self.poke_bytes(at, patched) -> return Err(NativeDebugError{detail: "couldn't redirect `{function.name}` to its fixed code"})
+            }
+            id: function.id.value
+            source: if id >= 0 && id < edit.object.functions.len() -> Val(edit.object.functions[id]) else -> None
+            like: if at >= 0 -> x64_jetline_find(self.image.lines, at) else -> -1
+            name := native_fix_shown(edit, row)
+            file := ""
+            dir := edit.object.debug.directory
+            decl := 0
+            if source == .Val(facts) {
+                if facts.file >= 0 && facts.file < edit.object.debug.files.len() -> file = edit.object.debug.files[facts.file]
+                decl = facts.line
+            }
+            if like >= 0 {
+                was: self.image.lines.functions[like]
+                name = was.name
+                file = was.file
+                dir = was.dir
+            }
+            if file != "" {
+                native_fix_lines(self.image.lines, low, function.code.len(), edit.debug[row], name, file, dir, decl)
+                self.openings.push(native_opening(self.image, self.image.lines.functions.len() - 1, NativeCode{address: base, bytes: region}))
+            }
+            self.fixed.push(NativeFixed{name: function.name, address: low, code: region[piece.offset..<piece.offset + function.code.len()]})
+            shown.push("`{name}`")
+        }
+        self.breakpoints = moved
+        loop breakpoint in self.breakpoints {
+            loop address in breakpoint.addresses {
+                if !self.plant(address) -> return Err(NativeDebugError{detail: "couldn't write a breakpoint at {native_debug_hex(address)}"})
+            }
+        }
+        Ok("Fixed {shown.join(", ")}: the edit runs from the next call\n")
+    }
+
+    // Map `size` bytes of code for a fix in the stopped program, within
+    // reach of a rel32 from the image's code, which ends at `after`: the
+    // program runs one `mmap` at the system call `syscall` of its code, then
+    // its registers are put back.
+    map_code: fn(&self, size: Int, after: Int, syscall: Int) -> Int NativeDebugError! {
+        hint := if self.fix_next > 0 -> self.fix_next else -> (after + NATIVE_FIX_GAP).div_euclid(NATIVE_FIX_PAGE) * NATIVE_FIX_PAGE
+        loop _ in 0..<NATIVE_FIX_TRIES {
+            saved: self.registers() ?? return Err(err)
+            registers := self.registers() ?? return Err(err)
+            registers[NATIVE_FIX_RAX] = NATIVE_FIX_MMAP
+            registers[X64_TRACE_RDI] = hint
+            registers[X64_TRACE_RSI] = size
+            registers[NATIVE_FIX_RDX] = NATIVE_FIX_PROTECTION
+            registers[NATIVE_FIX_R10] = NATIVE_FIX_FLAGS
+            registers[NATIVE_FIX_R8] = -1
+            registers[NATIVE_FIX_R9] = 0
+            registers[NATIVE_FIX_ORIG_RAX] = -1
+            registers[X64_TRACE_RIP] = syscall
+            if !x64_trace_set_registers(self.trace, registers) {
+                return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+            }
+            event: self.resume(X64TraceResume.Step) ?? return Err(err)
+            if event.kind != NativeStopKind.Paused -> return Err(NativeDebugError{detail: "the program ended while `fix` mapped its code"})
+            mapped: (self.registers() ?? return Err(err))[NATIVE_FIX_RAX]
+            if !x64_trace_set_registers(self.trace, saved) {
+                return Err(NativeDebugError{detail: "couldn't set the program's registers"})
+            }
+            if mapped == hint {
+                self.fix_next = hint + size
+                return Ok(hint)
+            }
+            hint += NATIVE_FIX_GAP
+        }
+        Err(NativeDebugError{detail: "couldn't map the fixed code into the program"})
     }
 
     // Run one run-control command. A step that lands in code without Jet line
@@ -2248,7 +2400,7 @@ native_debug_image: fn(entry: String, out_dir: String) -> String Never! {
 // both speak it. Every stop prints the Jet source line with its `<- here`
 // caret and the frame's locals; frames without Jet line information (the
 // runtime) are never shown. Each readout starts with a capital.
-NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), tasks, help (h), quit (q)"
+NATIVE_DEBUG_HELP: "Commands: step (s), next (n), continue (c), finish (f), break LINE|FILE:LINE|FUNCTION [if EXPR] (b), log FILE:LINE \"TEXT {{EXPR}}\", watch PLACE, breaks, delete N, frame N, up, down, locals, print NAME (p NAME), backtrace (bt), tasks, fix, help (h), quit (q)"
 
 // The console's prompt.
 NATIVE_DEBUG_PROMPT: "(Jet) "

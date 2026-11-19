@@ -1033,6 +1033,25 @@ ir_x64_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
     }
 }
 
+// The program of `compiled` as ir_x64_object writes it with debug info,
+// unwritten: the module with its debug files, types and function sources
+// beside its data, `main` and the functions it reaches with their debug
+// rows. `jet debug`'s `fix` swaps these into a running image (JetDebug
+// NativeFix.jet).
+ir_x64_debug_program: fn(compiled: &&IRX64Result) -> IRX64Program Never! {
+    owned := compiled.move()
+    functions := [X64CompiledFunction]{}
+    debug := [X64FunctionDebug]{}
+    errors := ir_x64_main_rows(owned, functions, debug)
+    IRX64Program{
+        program: ir_x64_object_module(owned),
+        functions: functions.move(),
+        debug: debug.move(),
+        threads: CompilerThreads{cap: owned.threads.cap, cores: owned.threads.cores, memory_available: owned.threads.memory_available},
+        errors: errors.move(),
+    }
+}
+
 // The object's functions of `owned` into `functions`, with their debug rows
 // into `debug`: `main` for its entry function (x64_object_main), then the
 // compiled functions it or a kept root reaches (ir_x64_reached_only). Else
