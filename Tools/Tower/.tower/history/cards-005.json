@@ -17260,6 +17260,377 @@
       "completedAt": "2026-11-16T19:12:24.856Z",
       "questions": [],
       "retiredAt": "2026-11-19T19:13:00.133Z"
+    },
+    {
+      "id": "c0w7t4qu",
+      "num": 3147,
+      "title": "Enum case metadata in the typed reflection path (D-ENUM-CASEMETA1)",
+      "body": "Destination: a program reads an enum's cases, their names, payload fields and markers, and a value's active case, through the same typed reflection records as every other type, with zero cost for programs that do not reflect. Why: codecs, UI builders and tests all need case metadata, and a second path would drift.\n\nGoverning decisions: D-ENUM-CASEMETA1=A, D-NAME-REFLECT1=A, D-ONE-SHAPE1=A, D-META-REFLECT2=A. The general typed reflection records are built on the reflection card (see the 2026-11-14 log). Spec: Docs/spec/reference/metaprogramming.md.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e3",
+      "milestoneId": "e3-m20-enum-language-reflection",
+      "phase": "done",
+      "priority": "P2",
+      "plan": "## Goal\nImplement ratified D-ENUM-CASEMETA1=A inside the existing reflection model: typed `TypeInfo.cases` descriptors and the runtime active-case projection `value.case()`. Type-only metadata stays erased and payload values stay typed. No enum-only library, visitor or runtime registry.\n\n## Current state\n- Enum TypeInfo is built by `sema_comptime_reflection_enum_type_info` (`Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:1395-1449`). It puts variants in the generic `fields` slot as `FieldInfo` rows (`sema_comptime_reflection_enum_variant_info`, :1129-1155) whose `ty` is a display string (`\"Unit\"`, the payload type name, or `\"{a: Int}\"`, :1118-1127). There is no `cases` field or `CaseInfo` row, and no canonical wire name.\n- Typed accessors are limited to `has_marker/implements/has_method` (`Compiler/JetSema/Source/Sema/Calls/Reflection.jet:132-155`). Codegen and eval mirror that list (`Compiler/JetCodegen/Source/Codegen/ReflectionMethods.jet:19-22`, `Compiler/JetEval/Source/ReflectionMethods.jet:11-15`). There is no `case()` projection anywhere in Compiler/ or `Core/reflect`.\n- Criterion 1 (owner ratification) is met. The scope extension (2026-09-21) asks for a typed descriptor for every type family or a precise refusal, with no fabricated empty catalogs.\n\n## Changes\n1. `Reflection.jet`: add `CaseInfo` rows under a `cases` field. Each row carries identity, source name, canonical wire name (serde markers), index or discriminant, group, ordered payload shape (`Unit`, tuple or named) with typed payload `TypeInfo` references, and markers in source-versus-expanded order. Rows are derived from `EnumDef.variants/groups/payloads`. Stop emitting variants as `FieldInfo`. Non-enum types return a registered refusal for `cases`, not an empty list. Generic enums describe the instantiated arguments.\n2. `Calls/Reflection.jet`: type `TypeInfo.cases`, the `CaseInfo` accessors and `value.case()`.\n3. `ReflectionMethods.jet` in codegen and eval: `value.case()` returns the active case identity plus typed payload fields through one Prelude helper. It does complete-or-refuse capture, refuses shared or noncopyable graphs, and follows copy rules. A program that never reflects emits no case table and allocates nothing.\n4. Layout and ABI facts (discriminant width, payload offsets) come from `Compiler/JetFoundation/Source/Target/Layout.jet` for the selected target.\n5. Archived crates (`jet-foundation/Reflection.rs`, `jet-comptime/Reflect.rs`, `core_types.rs`, `jet-codegen/TIR`) are not edited.\n\n## Proof\n- `jet test Compiler --profile golden reflection/enum_cases`: a new example covers unit, named-payload and tuple cases plus one generic enum. It prints `cases` and `value.case()` identically on O0, O1 and O2.\n- `jet test Compiler --profile ui reflect_cases_non_enum` covers the refusal.\n- Generated Rust for a non-reflecting enum program contains no case table (criterion 12).\n- The example uses the current ratified reflection spelling. #3662 migrates it if D-META-ROOT3=A retires `T.reflect()`.\n\n## Batch\n`batch-jetc-sema`: the descriptor model and typing are sema. The runtime projection is a thin codegen/eval consumer.\n\n## Dependencies\n#3520 (the closed D-METAREFLECT1 metadata path, building). The runtime proof runs on the self-hosted compiler, so #218 is needed.",
+      "checkSteps": "1. Owner ratifies whether general case descriptors are public and where they live; a full example includes unit, named-payload and tuple-like cases.\n2. Descriptors carry identity, source/canonical wire names, payload fields/types and markers without constructing arbitrary payload values.\n3. Use D-METAREFLECT1’s one closed metadata path; non-enums, generics, ordering and visibility have explicit behavior.\n4. Runtime inspection exposes only the active case and typed payload fields; ordinary enum use needs no reflection allocation or pre-stringified values.\n\nRebuild: scripts/agent/jet-env cargo build -p jet --bin jet with CARGO_INCREMENTAL=0. Keep scratch at ~/.cache/jet-test-scratch. Existing stale CoreModuleExports.rs is an execution prerequisite, not evidence that any feature passes.\n\nExtend tests/reflect.rs and the existing enum reflection witnesses. Add a golden type-catalog example covering every AST Type family and enum case shape. Exercise declared and instantiated types, same-layout distinct nominals, field visibility, target layout and generic identity. Compare selected target facts to the target dossier, not host sizeof.\n\nFor each planned package witness, use scripts/agent/jet-env jet check, jet run, jet run --interpret, jet dev --watch=off where relevant, and jet build from that package directory; launch its emitted .jet/build/run artifact. Compare the named golden and actual state changes. Use the existing web harness when the feature reaches web. No broad suite outside the composed closeout gate.",
+      "probe": "Reproducible evidence and bounded future witness: docs/research/mine-for-jet-2026-09-12.md#finding-enum-f21-case-metadata-api. Reuse the exact retained inputs and commands where recorded. Run no broad suite as a substitute for this contract. Historical receipts remain historical; no measurement or current-tree success is claimed here.",
+      "visualMedia": [],
+      "blockedBy": [
+        "c0apk7x9"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All 17 criteria met (c27 on the p223 batch compiler, dev a8b53c68d8, commit 2e95600ee5). The blocked-by link to #6845 covers #6845 c11 (the MetaSuite manifest), which no #3147 criterion needs. Closed by Main."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p221 (dev 88dc8f59b9) landed c27's core-type-names.r2, but the case program_type_named_like_core_keeps_core_methods still fails: program Sender/Receiver hide send/receive (E0104 at :58, E0405/E0109 at :60). Returned to DeclTypes-6-1-3 as r3."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Found by DeclTypes-6-1 during #6867: a program type named Task hides task.join/detach (repro: Task: struct + working: task {...}; working.detach()). Added as a criterion and assigned to DeclTypes-6-1."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p216: the c8 series landed. CoreErrorFamily, CompilerOwnedTypeNames, ForInReaders, NetworkHandleMethods and enum_paths pass; held on bare_core_enums_carry_their_declared_payloads, encoding_parity, corelib_parts_encoding_streams, Guards/core_declarations, core_surface_ledger x2, dns_error and the imported_secret lint. Sent to GoalsA-1-4."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Correction: at 16:07 Main met #12 and #14 by list position instead of criterion number, overwriting their evidence. Both were already met; their original evidence (p208 and p210 proofs) is restored. The intended criteria #16, #22, #23 and #24 are now met with the p215 proofs. #26 (the key_is_the_core_term regression) is GoalsA's."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Decision (Main, n15 step 3): TaskFailure { Cancelled, DeadlineBlown, Panicked(String) } is declared once in Core, and core.service's TaskOutcome becomes { Finished, Failed(TaskFailure) }. The two enums carried one meaning (I8; closed_lists refuses the duplicate and the ledger takes no new rows). Every caller migrates in one cutover, with no alias. Keeping TaskFailure compiler-owned was rejected: it is the compiler-owned list n15 removes. Owner: GoalsA-1-4."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "n15 step 4 scope (Main, 2026-11-16): TaskFailure (jet_builtins: Cancelled DeadlineBlown Panicked) joins PreparedValue as compiler-owned until the step-4 Core value-kind vocabulary lands. core.service TaskOutcome {Finished Panicked Cancelled DeadlineBlown} is TaskFailure plus Finished, so neither a mirror nor a subset ledger fits. Step 4 makes both checked views of one vocabulary constant, with no per-file #run check and no new duplicate-baseline row."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "n15 step 3 (Main, decided): CasePayload is declared in core.reflect, and the compiler's VariantPayload, TVariantPayload and IRCompilerOwnedPayload become closed-list mirrors of it (SUB n15-3d). PreparedValue stays compiler-owned for now: its six near-duplicate partners are supersets (TComptimeValue, CtValue) or carry members of their own (CLIValueKind Path, WebRouterValueType JSON, ForeignScalar Unsupported), so neither the mirror nor the subset ledger holds them honestly, and the duplicate baseline only shrinks. End state, an n15 step-4 item: one Core value-kind vocabulary in core.reflect, with PreparedValue, the comptime value kinds and the scalar lists as checked views of it."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "n15 step 3 decision (Main): the compiler-owned families become real Core enums one family at a time. Each family's declaration is the type, with IRRuntimeHandle/IRNativeType rows <corelib>/jet_builtins::X (as DataEvent has), reconciled runtime routes and Display, and its hand-written rows deleted. Rejected: a Core declaration file no module loads, with the compiler-owned types kept beside it (two definitions of one meaning, I8). ProcessResourceLimit's CpuTime becomes CPUTime, following E0358. Its interpolation going from E0915 to accepted is the one meaning every Core enum with Display already has."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "p210 landed n15 step 1 (cecfbab8c7): CoreEnumCases --check passes on the gate tree (174 lists from Core sources, 15 compiler-owned). c5's template cutover (ccf4ad95e7) regressed every enum with payload cases (generated right_<Case>_value bindings are E0107) and its own golden reflect/enum_cases_template fails (Signal.Paint.Stroke, E0119); GoalsA-1-4 is fixing it. c5 stays open."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "n15 shape (Main): the built-in enum case lists come from one table generated from the Core/*.jet enum declarations (a Jet generator with --write and --check that the lane check runs, committed with its sources), not from loading the declaring Core modules into every program. Compile speed ranks first, and the generated table is neither handwritten nor a second source. Sema, menus and IR read it; core_enum_variants is removed; the sourceless leaves and payload families join it as they become real Core enums."
+        },
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "n15 scope decided by Main (from the criterion's text: no handwritten case list in Compiler/; lists come from the Core declarations): GoalsA-1-4 removes the core_enum_variants/CORE_ENUM_ROWS catalog first (sema, menus and IR read the registered nominal; 174 Core.rows plain lists already match their source). Then it declares the 15 sourceless Core.rows leaves (BrowserError, ComputeError, DataLoaderKind, DispatchState, Dyn, EnvError, EventConfigError, FailurePolicy, HTTPOperation, HookPolicy, Overflow, PluginError, PluginLimit, TaskStatus, WebFormLifecycle) and the 14 CoreEnumPayloadRows families (IOError, IOOperation, TaskFailure, Key, DataEvent and the rest) as real Core enums, and finally deletes CoreEnumPayloadRows and every plain(A|B) list. n15 is met only after the last step."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Deconfliction 2026-11-06: reworded to match I9 tiers O0, O1, O2 and web (D-EXEC1, D-EXEC2=A: no interpreter or JIT); the Rust-free toolchain (Jet suites and tests/cases rows replace cargo tests and .rs sources)."
+        },
+        {
+          "at": "2026-11-04",
+          "by": "Main",
+          "text": "#6563 c1 precut audit re-added 5 criteria from archived #1632: each was not proven on 9c7ddf1359. Row verdicts and reasons: Docs/audits/precut-2026-11/PRECUT-AUDIT.tsv (ff5dd7fd7b)."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #1804, #3155; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed #1804, #3155; their criteria are carried here as [#n] rows."
+        },
+        {
+          "at": "2026-10-04",
+          "by": "Pip",
+          "text": "Burn-down consolidation 2026-10-04: absorbed ; their criteria are carried here verbatim as [#n] rows."
+        },
+        {
+          "at": "2026-10-01",
+          "by": "TowerCloser",
+          "text": "Split into 3 session-sized children (#4079 #4080 #4081) on 2026-10-01: 12 open specific criteria (~7.25 sessions) in one card; split into 3 session-sized children of ~4 criteria each. This card stays open as their umbrella; meet its criteria from the children's evidence."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0b plan build-out (2026-09-29, Opus 5.5): plan rewritten for the self-hosted direction with a runnable proof and batch key batch-jetc-sema."
+        },
+        {
+          "at": "2026-09-29",
+          "by": "Pip",
+          "text": "Phase 0 triage 2026-09-28 (syntax1a, Opus 5.5): C_RETARGET. D-ENUM-CASEMETA1=A (TypeInfo.cases + active Value.case()) is ratified but absent: the self-hosted comptime TypeInfo has no cases/payload descriptors and there is no runtime case projection. The plan's source owners are all archived Rust paths, and the card is still gated by #3520 (D-METAREFLECT1 closed metadata path). Evidence: Compiler/JetSema/Source/Sema/Comptime/Reflection.jet:1199-1330 (TypeInfo struct built without cases); Compiler/JetSema/Source/Sema/Calls/Reflection.jet:132-155 (TypeInfo methods: has_marker/implements/has_method only); grep for `cases`/`case()` over Core/reflect and Compiler reflection returns nothing; plan owners list crates/jet-driver, crates/jet-foundation/src/Reflection.rs, AST/types.rs, crates/jet-comptime/src/Comptime/Reflect.rs, crates/jet-sema/.../core_types.rs, crates/jet-codegen/src/Codegen/TIR"
+        },
+        {
+          "at": "2026-09-21",
+          "by": "Main",
+          "text": "Enum recovery 0732a643 is partial; runtime Value.case remains unimplemented and core_types integration is owner-dirty."
+        },
+        {
+          "at": "2026-09-12",
+          "by": "Main",
+          "text": "#3396 reviewed D-ENUM-CASEMETA1. Added specific user/mechanism/type/metadata guidance; no outcome or implementation criterion was changed."
+        },
+        {
+          "at": "2026-09-12",
+          "text": "All decisions ratified; advanced out of deciding."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Owner ratifies whether general case descriptors are public and where they live; a full example includes unit, named-payload and tuple-like cases.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Tower decision D-ENUM-CASEMETA1 ratified with outcome A on 2026-09-12 (owner gate; the executable case-shape proof is met by the card's later criteria).",
+          "at": "2026-11-16T19:34:44.546Z",
+          "closure": "decision"
+        },
+        {
+          "n": 6,
+          "text": "D-ENUM-CASEMETA1 is exercised for unit/named/tuple payloads, copied captures, active case and refused shared/noncopyable graphs. Proof: `jet test Compiler --profile golden --filter reflect/enum_case_meta` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile golden --filter reflect/enum_case_meta: n=9, 0 bad, on the p208 batch compiler (dev 54326edf75, census build), cycle p208 proof run by Main. Landed as GoalsA-1-4-g6-enum-case-meta-r2 ff642d1583 and -rows-r2 ffc7abb6ce.",
+          "at": "2026-11-16T06:16:45.956Z"
+        },
+        {
+          "n": 8,
+          "text": "Layout and ABI facts describe the selected compilation target. Compile-time metadata does not impose a runtime table or allocation on unrelated programs. Proof: `jet test Compiler --profile cases --filter reflect/enum_case_meta_zero_cost` shows no runtime table or allocation in a program that does not reflect.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter reflect/enum_case_meta_zero_cost: n=1, 0 bad, on the p208 batch compiler (dev 54326edf75, census build), cycle p208 proof run by Main. Landed as GoalsA-1-4-g6-enum-case-zero-cost-r2 523a73197f.",
+          "at": "2026-11-16T06:16:47.066Z"
+        },
+        {
+          "n": 10,
+          "text": "A case descriptor carries its identity, source and canonical wire names, payload fields and types, and markers without constructing a payload value; canonical identity and display spelling stay distinct and ordered.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p205 batch compiler (dev 16c1bda2d9; enum cases catalog landed as 7932823ff2): jet test Compiler --profile golden --filter Metaprogramming/Reflection/EnumCases → PASS 3 FAIL 0 (O0/O1/O2). The whole Metaprogramming/Reflection golden passes 82 of 82 in the p205 cycle, and the p205 golden suite has 4971 PASS and 0 FAIL.",
+          "at": "2026-11-16T05:14:00.582Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Reflection/EnumCases"
+          }
+        },
+        {
+          "n": 11,
+          "text": "Enum case metadata reads through the same typed reflection path as every other type (TypeInfo); a non-enum, a generic enum, case ordering and private cases each have explicit behavior or a registered refusal, and no empty trait or case catalog is made up.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev aa8715dacd (rerun by Main on p214): jet test Compiler --profile ui --filter enum_cases_refuse_ -> PASS enum_cases_refuse_generic_without_arguments.jet (E0904) and enum_cases_refuse_private_payload_field/run.jet (E0605), 2/0. Non-enum (empty cases), declaration order and no made-up catalog are stated in Docs/spec/reference/metaprogramming.md:431-460 and read through TypeInfo; the reflection goldens Metaprogramming/Reflection are 85/0 on p214.",
+          "at": "2026-11-16T10:38:06.076Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "enum_cases_refuse_"
+          }
+        },
+        {
+          "n": 12,
+          "text": "`value.case()` exposes only the active case and its typed payload; a program that does not reflect emits no reflection table or allocation, checked in the generated IR.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "jet test Compiler --profile cases --filter enum_case_no_unused_table: n=1, 0 bad, on the p208 batch compiler (dev 54326edf75, census build), cycle p208 proof run by Main. Landed as GoalsA-1-4-g6-enum-case-named-literals-r2 f37675ef99 and -zero-cost-r2 523a73197f.",
+          "at": "2026-11-16T16:08:47.741Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "enum_case_no_unused_table"
+          }
+        },
+        {
+          "n": 14,
+          "text": "`T.reflect().path` and a run-time `value.path` read the canonical path from the name ledger (D-NAME-REFLECT1=A) instead of concatenating module path and name (Reflection.jet today); `.name` stays the leaf; diagnostics use the leaf when it is unique and the path when ambiguous, and hover, project output and JSON use the same spelling.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "`jet test Compiler --profile golden --filter Metaprogramming/Reflection/ReflectPaths`: 3 rows (O0, O1, O2), 0 failed. Leaf-unless-ambiguous diagnostics: ui type_names_leaf_unless_ambiguous passes. Hover and JSON: cases lsp_hover_and_json_spell_an_inline_module_type_by_its_path passes. Project output: cases cli_parts_core 11 pass, and the other 5 are older known-failing budget and lua rows. p210 batch compiler (dev 7f902dd915, census-clean build), proofs log $JET_STATE_ROOT/lander3-tmp/proofsp210.out",
+          "at": "2026-11-16T16:08:48.685Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Reflection/ReflectPaths"
+          }
+        },
+        {
+          "n": 15,
+          "text": "No handwritten built-in enum case list remains in Compiler/ (today CoreEnumRows.jet and CoreModules.jet hold `core_enum_variants`); completion, construction and missing-case lists come from the Core declarations (D-ONE-SHAPE1=A), and rename, skip, computed and default values, field order and unknown fields round-trip through the derived shape. Proof: `git grep -n core_enum_variants Compiler` prints nothing and `jet test Compiler --profile ui --filter core_enum_missing_case` passes",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev aa8715dacd (found by GoalsA-1-4, rerun by Main on the p214 batch compiler): git grep -n core_enum_variants aa8715dacd -- Compiler prints nothing (exit 1); jet test Compiler --profile ui --filter core_enum_missing_case -> PASS tests/ui/core_enum_missing_case.jet, 1/0. The Core declarations (CasePayload, PluginError, PluginLimit, IOOperation, ProcessResourceLimit, landed in p214) are the only case lists.",
+          "at": "2026-11-16T10:38:05.104Z"
+        },
+        {
+          "n": 16,
+          "text": "(proof addition for criterion 12; reflection proposal B5) Proof: paired size cells in the canonical manifest. A program with no reflection has byte-identical output to the same program with the reflect import removed. A program reflecting only `Rock` carries no record for a declared and used `Door`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: ga-reflsize PASS",
+          "at": "2026-11-16T16:08:49.634Z"
+        },
+        {
+          "n": 18,
+          "text": "(was #1632 c2) A test proves every backend reads the Prelude discriminants for every covered enum and fails when they drift [precut audit: failing on 9c7ddf1359: C:comptime_cli_parity/comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions FAIL exit 0; expected nonzero]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed bea27bbb6f (G6Meta-3147range, batch 17, Lander5). b17proofs on the batch-17 jet: jet test Compiler --profile cases --filter comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions gives 1/0. An invalid discriminant expression and an out-of-range discriminant now fail the build (nonzero exit), so a drifted or reordered Prelude enum can no longer pass silently.",
+          "at": "2026-11-14T01:45:10.063Z"
+        },
+        {
+          "n": 19,
+          "text": "(was #1632 c3) Reordering a Prelude enum variant fails the build or updates every consumer automatically; it can no longer pass silently [precut audit: failing on 9c7ddf1359: C:comptime_cli_parity/comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions FAIL exit 0; expected nonzero]",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed bea27bbb6f (G6Meta-3147range, batch 17, Lander5). b17proofs on the batch-17 jet: jet test Compiler --profile cases --filter comptime_enum_discriminants_keep_duplicates_and_report_invalid_expressions gives 1/0. An invalid discriminant expression and an out-of-range discriminant now fail the build (nonzero exit), so a drifted or reordered Prelude enum can no longer pass silently.",
+          "at": "2026-11-14T01:45:11.381Z"
+        },
+        {
+          "n": 22,
+          "text": "Success, absence and error labels and payload values of a three-state outcome are observable through each legal reflection boundary, including nested optional and result types.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: golden Metaprogramming/Reflection/OutcomeCases PASS (ga-outcome-golden)",
+          "at": "2026-11-16T16:08:50.569Z",
+          "proof": {
+            "profile": "golden",
+            "filter": "Metaprogramming/Reflection/OutcomeCases"
+          }
+        },
+        {
+          "n": 23,
+          "text": "Reflection does not treat a named unit case, an optional's absence and a structural unit as the same case; a program that relies on that collapse is refused with a UI snapshot.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: ui enum_cases_no_unit_collapse PASS (ga-unitcollapse)",
+          "at": "2026-11-16T16:08:51.532Z",
+          "proof": {
+            "profile": "ui",
+            "filter": "enum_cases_no_unit_collapse"
+          }
+        },
+        {
+          "n": 24,
+          "text": "The shared reflection and codec generation keeps the built-in roles of outcome cases and does not expose a payload's infinite value domain as `T.cases`.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p215 batch compiler (census build of dev add8c1ce16), proofrun on gate-p215: cases enum_cases_builtin_roles PASS (ga-enumroles)",
+          "at": "2026-11-16T16:08:52.467Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "enum_cases_builtin_roles"
+          }
+        },
+        {
+          "n": 25,
+          "text": "A grouped enum case with a named payload is constructible, and E0764's fix compiles. Today (p210, dev 7f902dd915) building Signal.Paint.Stroke { … } is E0764, and the literal its fix suggests is then E0119 'There's no type called Signal.Paint.Stroke' (found by GoalsA-1-4's p210 fix SUB). Either the literal builds the case on O0, O1 and O2, or E0764's fix names a spelling that compiles. Proof: a golden building and matching a grouped named-payload case on every tier, and the E0764 UI snapshot whose fix text compiles.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p211 gate (dev d6d482c5f7; bf85cc4c42, 04af41eb40): jet test Compiler --profile golden --filter GroupedNamedPayloadBraceLiteral -> n=3 bad=0 (O0, O1, O2: builds and matches a grouped named-payload case); jet test Compiler --profile ui --filter enum_grouped_named_payload_needs_dot_brace -> n=1 bad=0 (the E0764 snapshot whose fix spelling the golden compiles).",
+          "at": "2026-11-16T09:23:36.765Z"
+        },
+        {
+          "n": 26,
+          "text": "Regression from p215 (0974d35064): cases CoreLib/key_is_the_core_term_declaration passes again on the batch compiler (it exits 1 on the p215 batch compiler and passed on the previous cycle's). Proof: jet test Compiler --profile cases --filter key_is_the_core_term_declaration",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p217 batch compiler (census build of dev ec9df40248): jet test Compiler --profile cases --filter key_is_the_core_term_declaration PASS",
+          "at": "2026-11-16T17:11:12.250Z"
+        },
+        {
+          "n": 27,
+          "text": "A program type that shares a Core type's name never hides the Core type's methods: with a program `Task: struct` in scope, `working: task { … }` is still Core's task handle and `working.detach()` / `working.join()` resolve on it, on O0/O1/O2. Sema resolves a Core value's type by its owner, never by the bare name.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p223 batch compiler (dev a8b53c68d8): jet test Compiler --profile cases --filter program_type_named_like_core_keeps_core_methods PASS 1/1 (DeclTypes r2 88dc8f59b9 + r4 2e95600ee5); suite p223 0 new failures",
+          "at": "2026-11-16T19:34:02.702Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "program_type_named_like_core_keeps_core_methods"
+          }
+        }
+      ],
+      "refs": [
+        "docs/research/mine-for-jet-2026-09-12.md#finding-enum-f21-case-metadata-api",
+        "D-METAREFLECT1",
+        "D-CLAIM-CASES1",
+        "#3155",
+        "#3398",
+        "#3509",
+        "crates/jet-foundation/src/Reflection.rs",
+        "crates/jet-foundation/src/AST/types.rs",
+        "crates/jet-comptime/src/Comptime/Reflect.rs",
+        "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.rs",
+        "crates/jet-codegen/src/Codegen/TIR"
+      ],
+      "tags": [
+        "mining-20260912",
+        "enums",
+        "mine-playlist-20260911",
+        "ballot-streamlining",
+        "meta-suite",
+        "retargeted",
+        "batch-jetc-sema",
+        "wayfinder:decision"
+      ],
+      "parentId": "c0apk7x9",
+      "needsAcceptance": false,
+      "created": "2026-09-12T13:26:55.371Z",
+      "updated": "2026-11-16T19:34:46.963Z",
+      "updatedBy": "Main",
+      "workOrder": 171,
+      "criteriaLastN": 27,
+      "completedAt": "2026-11-16T19:34:46.963Z",
+      "questions": [
+        {
+          "id": "q02yzjc5",
+          "cardId": "c0w7t4qu",
+          "decisionId": "D-REFLECT-TYPEINFO1",
+          "by": "owner",
+          "kind": "question",
+          "text": "reflect should not require .of method, that reads poorly. reflect should take a \"Type\" arg, so you can pass the type directly as \"print(reflect(Rock))\" or \"print(reflect(Rock{}))\", but preferably without the curly brackets.",
+          "status": "answered",
+          "answer": "Agreed: every option now uses one call, reflect(Rock) for a type and reflect(rock) for one value, and jet fix retires .of and T.reflect(). reflect(Rock{}) stays legal and reflects a fresh Rock built from its defaults, so its .type is reflect(Rock); refusing it would be a special case. A type is still not an ordinary value, so t :: Rock stays an error whose fix offers reflect(Rock); today that line crashes the compiler. The ballot's question is unchanged: recommended A still makes requested the default for which types keep run-time info.",
+          "created": "2026-11-04T19:54:19.983Z",
+          "answeredAt": "2026-11-04",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-19T19:35:12.390Z"
     }
   ]
 }

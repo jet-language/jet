@@ -68796,6 +68796,337 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-16",
       "retiredAt": "2026-11-19T19:13:00.134Z"
+    },
+    {
+      "id": "D-ENUM-CASEMETA1",
+      "cardId": "c0w7t4qu",
+      "group": "Types and Core libraries",
+      "title": "One enum case reflection model",
+      "gist": "Should the existing reflection model expose enum cases and active payload fields?",
+      "lesson": "An enum selects a case and payload—the attached value. A/C generate complete catalogs or reject inaccessible nested details. A returns a handle holding an independent ordinary value copy. It refuses shared mutable data and unproved field access. Passing a lawful handle exports its captured fields. B writes catalogs and matches. C generates catalogs but keeps runtime matching.",
+      "explainer": "",
+      "story": "Mina writes a documentation generator and a reusable enum inspector. The generator should include new cases automatically. The inspector should handle different payload types without new case arms. She must not accidentally expose private nested data or retain live shared state.",
+      "inWild": "const std = @import(\"std\");\nconst Message = union(enum) { Quit: void, Text: []const u8, Count: i64 };\npub fn main() void {\n    std.debug.print(\"Cases\\n\", .{});\n    inline for (@typeInfo(Message).@\"union\".fields) |field| {\n        if (field.type == void) std.debug.print(\"{s}\\n\", .{field.name})\n        else std.debug.print(\"{s}({s})\\n\", .{field.name, @typeName(field.type)});\n    }\n    const messages = [_]Message{ .{ .Text = \"hello\" }, .{ .Count = 7 }, .{ .Quit = {} } };\n    for (messages) |message| {\n        switch (message) {\n            .Quit => std.debug.print(\"Quit\\n\", .{}),\n            .Text => |text| std.debug.print(\"Text\\nvalue:[]const u8={s}\\n\", .{text}),\n            .Count => |count| std.debug.print(\"Count\\nvalue:i64={d}\\n\", .{count}),\n        }\n    }\n}\n// Source-composed from the cited Zig reflection model. Expected; NOT RUN.",
+      "detail": "## Complete technical contract\n\nA and C add case descriptions to the existing compiler-owned Core reflection module. A also adds runtime case inspection. B adds neither. The new projections are TypeInfo.cases and Value.case(); this proposal adds no enum-only module, runtime type registry, permission token, capture flag, freezing operation, or new ownership trait.\n\n### One checked row model\n\nTypeInfo.cases: [CaseInfo] uses the existing registered declaration rows. CaseInfo contains name:String, path:String, payload:CasePayload, discriminant:?Int, markers:[MarkerInfo], and span:SourceSpan. CasePayload is Unit, Single(Type), or Named([FieldInfo]). Type, FieldInfo, MarkerInfo, and SourceSpan are existing reflection descriptions. FieldInfo.ty is the payload field's Type handle. No sample payload value is constructed to describe its type.\n\nA adds Value.case(): ?Case. Case.name(), path(), and fields() describe the active alternative and return existing typed Field handles. Field.name() names a field; Field.value() returns a typed Value, not a String. Value.display() is the existing operation that produces text. There is no new get, read, cast, write-by-name, or constructor operation.\n\nA unit case has no fields. A single unnamed payload has one synthetic field named value. Named payloads preserve their declared field names and order. A non-sum type has an empty cases catalog; a non-sum Value.case() returns None. That shape result is separate from source refusal for inaccessible or unsnapshotable data. The generic inspector below explicitly panics on an unintended non-sum input; it does not use a runtime permission failure.\n\nNamed enums expose declaration-ordered flattened leaf cases. Groups contribute to paths but are not values or separate rows. Structural sums use their existing canonical member order and canonical member type names; written order does not invent new identities. Canonical option/result rows use their registered case order. Generic rows describe instantiated payload types. None of these rules reopen D-TAG1, D-UNIONTYPE1, or the independent payload-free value iterator in D-ENUM-CASEVALUES1.\n\nLet P be the existing canonical path of Message. Text(String) has name Text, path P + \".Text\", payload Single(String's Type handle), and no explicit discriminant. A group Action containing Text yields P + \".Action.Text\". For enum Mode { Read = 1 Write = 4 }, Write's discriminant is Val(4), not its row index or a JSON name. Markers remain checked source/expanded facts. Custom codec output is not guessed from a declaration row.\n\n### The visibility rule is complete-or-refuse\n\nA and C check a cases query in the ordinary source context that checks that expression. They reuse existing private, pub(package), and pub visibility. A type being public does not make all of its stored payload details public. A generator receiving a Type argument gains no extra authority from the type's owner.\n\nBefore returning any case catalog, checking must establish permission for all the declaration information reachable through its rows and payload type/field descriptions. This includes nested structs and sums, instantiated type arguments, and the markers/spans attached to those exposed rows. An inaccessible reachable detail makes the entire query a source error. There is no filtered list, placeholder row, partial schema, or silent omission. The catalog is therefore complete when it is returned, or unavailable to that caller.\n\nThis is a finite check over the existing registered type graph, not recursive construction of values. Revisiting a recursive type closes the graph edge; it does not omit that type's other fields or leaves. Built-in String and container implementation internals are not new reflected rows. The check follows the compiler's existing exposed row model and relevant instantiated element types, not private allocation machinery.\n\n| Catalog query location | A/C outcome |\n| --- | --- |\n| Defining source context can read every reachable detail. | Return the full catalog. |\n| Same package can read all required pub(package) details. | Return the full catalog. |\n| Another package cannot read one nested private or package-visible detail. | Reject the whole query before any CaseInfo is returned. |\n| All relevant types, fields, and case details are public. | A foreign generator may return the complete catalog. |\n| A generic query has not resolved enough type information to check access. | Reject the unresolved query; do not emit incomplete runtime metadata. |\n\nAn owner may deliberately publish a catalog or generated String obtained by a lawful query, just as it may publish other ordinary data. That is intentional publication, not a foreign generator receiving the owner's privileges. Further independent reflection queries still use the normal context that checks them. A/C do not silently rewrite existing visibility rules.\n\n### Runtime authority closes over every derived Value\n\nA's capture is checked before reflect.of erases the source type. The original capture site must be allowed to read the entire transitive graph that runtime field/case projections can expose. Follow each stored field, every possible sum payload, nested struct/sum, and relevant instantiated element type. Apply the same rule again to the type of every Value that Field.value() could return. Recursive type edges are checked through the finite registered graph. Checking only the outer case or the currently selected leaf is insufficient.\n\nConsequently, outer.case().fields()[i].value().case() cannot discover a new permission question. Either the original proof already covers that nested case and every further derived Value, or no root capture is created. There is no later receiver-package check, newly invented permission object, truncated nested view, or private-field fallback. The same closure applies when an existing struct Value can lead to a nested case; starting from a struct is not a bypass.\n\nThe root reflect.of call retains the existing Display eligibility rule. Display permits ordinary text output, not arbitrary field access. Nested Field.value() handles use the existing typed field/display operations; this does not introduce a separate Display requirement or new string-only field model. A custom Display implementation cannot override the transitive access or ordinary value-copy checks.\n\nA lawful Value, Case, or Field can be passed to a generic inspector in another package. It intentionally conveys read access to its captured data, including nested private fields that the original provider was permitted to capture. Recipients gain no construction or mutation operation and no access to uncaptured state. Export sanitized text instead when a complete captured handle would disclose too much.\n\n### Snapshot means ordinary value-copy semantics, not freezing\n\nA must take an owned ordinary Jet value copy at capture. For every reachable payload, the normal language value-copy rules must guarantee that later edits through the original value cannot change the captured value. Native strings, records, sums, and value-semantic collections use those existing rules. Physical sharing for copy-on-write storage is allowed only because ordinary mutation already isolates the copies. This ballot adds no deep-freeze operation, locking rule, reference registry, or bespoke graph copier.\n\nA type graph containing observable shared mutable state, borrowed/live handles, or resource state without ordinary snapshot-preserving value-copy semantics is refused at source checking. Shared<T> anywhere in that graph is refused, even under a custom Display implementation or an inactive enum leaf. A user-defined Clone operation is not proof of an independent snapshot. If the ordinary checker cannot prove the required value-copy property, it refuses capture rather than retaining a live alias or replacing the semantic value with display text.\n\nA captured nested value therefore shows its old contents after a permitted original-value mutation. A fresh capture shows the later contents. Derived Value/Case/Field handles refer to that same captured value, and remain valid after the original local ends. The copy strategy, physical allocation count, and speed remain unmeasured; the old-versus-later result does not. B and C add no snapshot mechanism and may keep ordinary live application processing.\n\n### Read the notation before the examples\n\nA compiler checks source before the program runs. @catalog asks it to compute the catalog then; {@catalog} puts that computed text into the program's print call. case_text<T> has a type parameter T. case_text<Message>() supplies the concrete Message type before the reflection query is checked.\n\nA :: binding keeps one value. A := binding permits later assignment with =. [String] means a list of strings. loop visits each item; the generated catalog and runtime inspector both visit all of their returned items. In a match, .Text(s) binds the attached value to s. Value is an erased reflection handle: the inspector knows the operations it supports, not the original Message type.\n\n?Case means Val(case) or None. The inspector's ?? panic(\"expected sum\") makes a mistaken non-sum input explicit. It is not a runtime permission check: inaccessible or noncopyable captures never produce a usable handle.\n\n### The complete shared workload\n\nThe documentation job lists every declared case and its payload shape. The inspector job handles Text(\"hello\"), Count(7), and Quit. All current/A/B/C programs below have these Expected observations; all are source-composed and NOT RUN:\n\n```text\nCases\nQuit\nText(String)\nCount(Int)\nText\nvalue:String=hello\nCount\nvalue:Int=7\nQuit\n```\n\nB writes the catalog text and a Message-specific visitor. C computes the catalog, then uses that same explicit visitor. A computes the catalog and passes each lawful erased Value to inspect. inspect never names Message, Text, Count, or a payload type, and never indexes field 0. It iterates all active fields, including an empty unit field list. The fixed Display text Message only permits root capture; the printed payload comes from Field.value().display().\n\n### The generic compile-time generator\n\ncase_text<T> below is an ordinary generic helper, not a new Core operation. The @catalog binding evaluates its Message instance during compilation. Its loop visits every returned row, and its Named arm visits every field. The generated program retains the resulting String, not Type handles, markers, source spans, or TypeInfo tables. @ interpolation prints that generated String.\n\n```jet\nfn case_text<T>() String -> {\n    text := \"Cases\"\n    loop row in T.reflect().cases -> {\n        if row.payload == {\n            .Unit -> text = \"{text}\\n{row.name}\",\n            .Single(t) -> text = \"{text}\\n{row.name}({t.name})\",\n            .Named(fields) -> {\n                text = \"{text}\\n{row.name}\"\n                loop field in fields -> text = \"{text}\\n  {field.name}:{field.ty.name}\"\n            }\n        }\n    }\n    return text\n}\n```\n\nA and C include this entire helper in their full option code. The surface calls it by name and identifies it as this helper, not a builtin. Generic checking uses the existing concrete instantiation and source context. A resolved instance with sufficient access succeeds; an unresolved or inaccessible instance fails. No new Reflectable bound or permission parameter is introduced.\n\nA runtime inspector is generic in a different way: inspect(v: Value) receives an already lawful erased value. It does not need the original source type because capture already proved the complete authority and value-copy graph. It must not perform a fresh unproved capture after erasure.\n\n### Make the change that distinguishes the options\n\nAdd Flag(Bool) to Message and append Message.Flag(true) to the input list.\n\nUnder A, neither case_text nor inspect changes. Expected: the catalog adds Flag(Bool), and inspection adds Flag followed by value:Bool=true. The concrete capture remains eligible if the new leaf satisfies the same existing access/value-copy rules. Adding a leaf that fails those rules produces a source refusal, not a partial inspector.\n\nUnder C, case_text still includes Flag(Bool), but the explicit describe match must add .Flag(b) -> \"Flag\\nvalue:Bool={b}\" before the program is complete. Under B, the same visitor edit is needed, and the literal catalog must also add Flag(Bool). Omitting B's catalog edit can leave stale documentation even after its visitor is fixed. These are Expected source consequences, NOT RUN, not invented diagnostic wording.\n\n### Nested private data: reject at the first capture/query\n\nThis two-package source composition fixes the exact nested disclosure question. The default-private Payload.text is readable in provider/messages.jet, but not in app. The public Outer and Inner declarations do not make that field public.\n\n```jet\n// provider/package.jet\nname: \"provider\"\nversion: \"0.1.0\"\n// app/package.jet\nname: \"app\"\nversion: \"0.1.0\"\ndeps: { provider: ../provider }\n// provider/messages.jet\nuse core.reflect as reflect\npub struct Payload { text: String }\npub enum Inner { Data(Payload) }\npub enum Outer { Item(Inner) impl Display { fn display(self) String -> \"Outer\" } }\npub fn make() Outer -> Outer.Item(Inner.Data(Payload{ text: \"secret\" }))\npub fn exported_snapshot() Value -> reflect.of(make())\n// app/run.jet\nuse provider\nuse core.reflect as reflect\nfn rejected_capture() { value :: reflect.of(provider.make()) }\n@rejected_catalog :: provider.Outer.reflect().cases\n```\n\nExpected under A: rejected_capture is a source refusal before any Value is produced. Under A/C: rejected_catalog is a source refusal before any CaseInfo is produced. Both refusals arise from the same nested Payload.text visibility fact. Do not run this combined file as a successful fixture; it deliberately contains two failing declarations. Exact diagnostics are not claimed.\n\nRemove those two deliberately rejected declarations and use this separate client body to demonstrate intentional provider disclosure:\n\n```jet\nuse provider\nfn run() {\n    outer :: provider.exported_snapshot()\n    inner :: (outer.case() ?? panic(\"expected Outer\")).fields()[0].value()\n    payload :: (inner.case() ?? panic(\"expected Inner\")).fields()[0].value()\n    print(payload.fields()[0].value().display())\n}\n```\n\nExpected under A: secret. NOT RUN. The provider's exported_snapshot query/capture is lawful in its defining context; passing that handle intentionally exports the nested readable value. The indexes in this small nesting witness refer to the fixed Item/Data/text shape only. The reusable inspector above does not rely on indexes. Calling case() or fields() on a derived handle cannot expand its authority beyond the already proved captured graph.\n\n### Mutate a nested ordinary value after capture\n\nThis uses the same Value/Field model beneath a case projection. A struct root is included deliberately: an existing struct handle must not bypass the rule when its fields later lead to a case.\n\n```jet\nuse core.reflect as reflect\nstruct Inner { texts: [String] }\nstruct State { inner: Inner impl Display { fn display(self) String -> \"State\" } }\nfn run() {\n    state := State{ inner: Inner{ texts: [\"old\"] } }\n    saved :: reflect.of(state)\n    state.inner.texts[0] = \"new\"\n    texts :: saved.fields()[0].value().fields()[0].value()\n    print(texts.display() == reflect.of([\"old\"]).display())\n    print(texts.display() == reflect.of([\"new\"]).display())\n    print(state.inner.texts[0])\n}\n```\n\nExpected under A: true, then false, then new. NOT RUN. The saved nested list still has old, while the original nested list has new. Comparing with the ordinary display of each one-element list avoids inventing punctuation for list formatting. This is a requirement on semantic value-copy behavior, not permission to store only those display strings. A physical copy-on-write list is acceptable only if its existing mutation semantics yield this result.\n\nThe corresponding active-case replacement is also explicit:\n\n```jet\nuse core.reflect as reflect\nenum Message { Text(String) impl Display { fn display(self) String -> \"Message\" } }\nfn run() {\n    message := Message.Text(\"old\")\n    saved :: reflect.of(message)\n    message = Message.Text(\"new\")\n    old_case :: saved.case() ?? panic(\"expected sum\")\n    new_case :: reflect.of(message).case() ?? panic(\"expected sum\")\n    print(old_case.fields()[0].value().display())\n    print(new_case.fields()[0].value().display())\n}\n```\n\nExpected under A: old, then new. NOT RUN. saved still describes the captured Text(\"old\"), even though the original variable now holds Text(\"new\").\n\n### Shared mutable data is refused, not secretly frozen\n\n```jet\nuse core.reflect as reflect\nstruct Item { text: String }\nenum AliasMessage {\n    Empty\n    Data(Shared<Item>)\n    impl Display { fn display(self) String -> \"AliasMessage\" }\n}\nfn refused(message: AliasMessage) {\n    saved :: reflect.of(message)\n}\n```\n\nExpected under A: refuse the reflect.of call during source checking. No saved handle exists, so there is no later-mutation ambiguity to defer to runtime. The custom Display implementation does not help. The static AliasMessage graph contains Shared<Item>; even an Empty input does not authorize a special-case capture. NOT RUN. A/C may still describe this type in a context with lawful catalog visibility, because a description does not copy a live Shared value. B/C ordinary visitors remain available for processing its live data under existing language rules.\n\n### Generic code does not gain the type owner's privileges\n\nUse the provider package above and the already defined case_text helper:\n\n```jet\nuse provider\nuse core.reflect as reflect\nfn capture<T>(value: T) Value -> reflect.of(value)\n@foreign_catalog :: case_text<provider.Outer>()\nfn rejected() { saved :: capture(provider.make()) }\n```\n\nExpected: reject foreign_catalog under A/C and reject the capture instance in rejected under A. NOT RUN. The concrete type is known, but app still cannot read provider.Payload.text. A known type is necessary for checking, not a substitute for permission. The same helpers instantiated with a fully accessible ordinary Message succeed under the proposed contract. A caller that only has an unresolved type or an erased value must not cause a hidden runtime access check; it supplies a previously lawful Value to inspect instead.\n\n### Read the Zig comparison without inventing parity\n\nZig’s @typeInfo obtains the union descriptions.\n\ninline for visits every field during compilation; @typeName prints its native type spelling.\n\nThe ordinary for and switch process the same three runtime values, binding each active payload.\n\nstd.debug.print writes these Expected observations to stderr.\n\nvoid denotes a unit payload; []const u8 and i64 are Zig's spellings in this example.\n\nJet's worked labels are String and Int.\n\nNative type spellings differ; no cross-language type identity is asserted.\n\nThe peer comparison is a source-composed illustration, NOT RUN, and does not demonstrate Jet's capture authority or snapshot behavior.\n\nSources: https://ziglang.org/documentation/0.15.2/#typeInfo, https://ziglang.org/documentation/0.15.2/#typeName, and https://ziglang.org/documentation/0.15.2/#tagName. The current peer capture establishes the reflection model; the worked program remains unexecuted.\n\n### Evidence and authority, not implementation proof\n\nExisting capture reader-reflection-primitives.md supplies the current Value/Field method signatures and source paths. reader-package-phase-primitives.md supplies the package/phase teaching context. adversarial-reflection-access.md (SHA-256 62fbb98d01fc98b74ac4fb88407f4b8810b9a4aa27ea0d0c04edd7f7e6976345) records the root Display gate, registered rows, erased runtime visibility, and transferable handle representation. It does not establish a reflection-specific cross-package rule or exact Tower status for D-METAREFLECT1.\n\nThe captured D-METAREFLECT1 spec text requires one registered row model and semantic typed field values, not pre-stringified copies. The captured source bodies do not by themselves prove that requirement across execution routes. The creation-time transitive access rule, complete-or-refuse catalog rule, and ordinary-copy snapshot eligibility above are explicit proposed terms of A/C, not inferred current conformance. Main must reconcile them with the owning reflection law and prove the selected behavior before any implementation claim.\n\nNo source, compiler, runtime, test, probe, build, lint, formatter, or new capture was run for this final author repair. The Expected labels define proposed observable outcomes. Quantitative copy cost, storage layout, route parity, and exact diagnostic wording remain unmeasured. These author repairs are not execution evidence; the separately bound reader receipts determine their review status.\n\n\n### Read the names, indexes and noncopyable boundary\n\n`T.reflect()` asks for T's compile-time type description.\n\nUnder A/C, the proposed `.cases` projection adds its complete case rows.\n\nA row's `.name` is its declared case name.\n\nA payload `Type` descriptor's `.name` is its displayed type label: the worked types here are exactly String, Int and Bool.\n\n`Value.type_name()` returns that captured value's type label as a String; `Value.display()` returns its displayed value.\n\nThus a String payload holding hello contributes `value:String=hello`; 7 contributes `value:Int=7`; Flag(true) contributes `value:Bool=true`.\n\nNames are display labels, not a substitute for checking type identity.\n\nThis explains the operations already used by these workloads, not a second type-name API.\n\nIndexes start at zero: `[0]` selects the first item.\n\nIn the private-data witness, Outer's Item case has one field containing Inner.\n\nIts first projection gives `inner`.\n\nInner's Data case has one field containing Payload; its first projection gives `payload`.\n\nPayload's first struct field is `text`, whose saved value displays secret.\n\nIn the mutation witness, State's first field is `inner`; Inner's first field is `texts`.\n\nThe two `.fields()[0].value()` steps therefore reach the saved list.\n\n`state.inner.texts[0]` addresses the first element of the original list, not that saved list.\n\nThe last witness's first Text field is the saved or newly captured string.\n\nThese fixed-shape examples do not replace the generic inspector's loops.\n\nA callback supplies a concrete noncopyable part, separate from Shared's aliasing issue:\n\n```jet\nuse core.reflect as reflect\nenum CallbackMessage {\n    Idle\n    Work(fn(Int) Int)\n    impl Display { fn display(self) String -> \"CallbackMessage\" }\n}\nfn visit(message: ^CallbackMessage) Int -> if message == {\n    .Idle -> 0\n    .Work(callback) -> callback(7)\n}\nfn refused(message: CallbackMessage) {\n    saved :: reflect.of(message)\n}\nfn run() {\n    for_visit :: CallbackMessage.Work((n: Int) -> (n + 1))\n    print(visit(^for_visit))\n    for_capture :: CallbackMessage.Work((n: Int) -> (n + 1))\n    refused(for_capture)\n}\n```\n\nExpected under A: source checking refuses `reflect.of(message)`; the complete program runs nothing.\n\nNOT RUN.\n\nThe root has Display, but Work contains a function value.\n\nOrdinary copying requires duplicable parts, and a function value is not duplicable.\n\nEven Idle cannot bypass this static type-graph check.\n\nThe move marker ^ gives the visitor ownership; if message == inspects that owned case and binds its callback without copying it.\n\nThe caller must not reuse for_visit.\n\nA separate for_capture value isolates the refused capture.\n\nRemove refused and its call to run only the ordinary visitor; its intended result is 8 under every option.\n\nReplacing Work's callback with an ordinary Int, and adjusting construction and the visitor to that Int, removes this noncopyable part.\n\nA user-defined Clone that invents a replacement callback would not prove an ordinary value copy of the captured callback; the same static eligibility check still applies.\n\nSource grounding, not a new execution: `tests/ui/copy_verb_not_cloneable.jet` uses the same `(n: Int) -> (n + 1)` callback and refuses `~f`; its retained E0211 snapshot explains duplicable parts. `crates/jet-codegen/src/Prelude/CoreLib/Top/Reflect.rs` defines Value.type_name and Value.display. The proposed case projection and capture rules still require implementation proof.\n\n\n## ratified constraints\n\nD-METAREFLECT1\n\nD-UNIONTYPE1=A\n\nD-TAG1\n\n## corelib change\n\n### kind\n\nexisting Core reflection extension\n\n### library\n\nCompiler-owned TypeInfo/Type, reflect.Value and reflect.Field APIs\n\n### addition\n\nA and C: CaseInfo/CasePayload descriptors and TypeInfo.cases. A only: active Value.case() with typed Case fields. B: no new public reflection surface.\n\n### distribution\n\nStock existing reflection; no enum-only module\n\n### external dependency\n\nNone\n\n### owner gate\n\nD-ENUM-CASEMETA1\n\n## Review provenance and author disposition\n\nThe latest actual beginner was CaseMetaFinalBeginner (OpenAI GPT-5.6 Luna). Its complete receipt reports zero material findings and preserves five minor/keep observations. The separate actual adversary was CaseMetaFinalAdversary (OpenAI GPT-5.6 Sol). Its independent result records four material contract gaps. Both reviewed immutable casemeta-final-review-input.json, SHA-256 44ecf568bb20c8e461b3646468d2fe255260cc3b65d5226be2ef586dfc06f2c1, taken from the prior 529c6873 packet.\n\npayload.reviewPasses contains those two actual summaries verbatim. The complete latest receipts, their identities and scope, the original Astra receipts, and earlier author dispositions remain in final_review. The actual Sol result is recovered from agent://CaseMetaFinalAdversary, not represented as a filesystem receipt that was unavailable at read time.\n\nThis later author repair closes the four reported questions: authority over all derived Values, complete-or-refuse catalog visibility, old-value snapshot semantics using ordinary value-copy rules, and complete generic/generated workloads. The exact final ledger maps each finding to its current contract and Expected example. No reader is claimed to have approved these later bytes.\n\nOnly CaseMeta changed in this five-ballot packet. No child, new source capture, implementation edit, compiler, runtime, test, probe, build, lint, formatter, or Tower action was used. Main owns final checks, publication, exact-law reconciliation, and proof of any selected implementation. Expected/NOT RUN labels are semantic proposals, not execution receipts.\n",
+      "options": [
+        {
+          "key": "A",
+          "name": "Extend existing reflection",
+          "detail": "A adds the complete TypeInfo.cases catalog and active Value.case() projection to existing Core reflection.\n\nBoth creation-time access and ordinary value-copy eligibility close transitively over all derived Values.\n\nCatalogs and captures are complete or source-refused, never filtered.\n\nOrdinary value copies preserve old nested contents; shared mutable or noncopyable graphs are refused.\n\nThe full program generates every catalog row and passes Text, Count, and Quit through one erased-Value inspector without field indexes or named-case branches.\n\nA lawful exported handle intentionally discloses its complete captured graph.\n\nThese are proposed terms, not runtime proof.",
+          "code": "use core.reflect as reflect\n\nfn case_text<T>() String -> {\n    text := \"Cases\"\n    loop row in T.reflect().cases -> {\n        if row.payload == {\n            .Unit -> text = \"{text}\\n{row.name}\",\n            .Single(t) -> text = \"{text}\\n{row.name}({t.name})\",\n            .Named(fields) -> {\n                text = \"{text}\\n{row.name}\"\n                loop field in fields -> text = \"{text}\\n  {field.name}:{field.ty.name}\"\n            }\n        }\n    }\n    return text\n}\n\nenum Message { Quit Text(String) Count(Int) impl Display { fn display(self) String -> \"Message\" } }\n@catalog :: case_text<Message>()\nfn inspect(v: Value) {\n    c :: v.case() ?? panic(\"expected sum\")\n    print(c.name())\n    loop f in c.fields() -> print(\"{f.name()}:{f.value().type_name()}={f.value().display()}\")\n}\nfn run() {\n    print(\"{@catalog}\")\n    loop m in [Message.Text(\"hello\"), Message.Count(7), Message.Quit] -> inspect(reflect.of(m))\n}\n// PROPOSED cases/case; Expected observations below. NOT RUN."
+        },
+        {
+          "key": "B",
+          "name": "Keep explicit visitors",
+          "detail": "B retains the existing reflection surface. The complete Message program writes a literal catalog and uses one explicit exhaustive visitor for Text, Count, and Quit. A shared helper centralizes that visitor; no mandatory per-application copies are claimed. Adding a case requires a visitor arm and a separate catalog edit. Ordinary visibility and live-value rules remain unchanged; no new runtime snapshot or reflection query is added.",
+          "code": "enum Message { Quit Text(String) Count(Int) }\nfn describe(m: Message) String -> {\n    return if m == {\n        .Quit -> \"Quit\",\n        .Text(s) -> \"Text\\nvalue:String={s}\",\n        .Count(n) -> \"Count\\nvalue:Int={n}\"\n    }\n}\nfn run() {\n    print(\"Cases\\nQuit\\nText(String)\\nCount(Int)\")\n    loop m in [Message.Text(\"hello\"), Message.Count(7), Message.Quit] -> print(describe(m))\n}\n// Current/B source composition; Expected observations below. NOT RUN."
+        },
+        {
+          "key": "C",
+          "name": "Compile-time catalog, explicit runtime match",
+          "detail": "C adds the same compile-time TypeInfo.cases/CaseInfo catalog as A, with the same caller-context, transitive complete-or-refuse visibility rule. It adds no Value.case() or runtime snapshot. case_text<Message>() visits every row during @ evaluation; ordinary describe still matches each active case. C can describe a Shared-bearing type when its metadata is accessible because it does not copy a live Shared value. Adding a leaf updates the generated catalog, but its explicit runtime visitor must handle that leaf.",
+          "code": "fn case_text<T>() String -> {\n    text := \"Cases\"\n    loop row in T.reflect().cases -> {\n        if row.payload == {\n            .Unit -> text = \"{text}\\n{row.name}\",\n            .Single(t) -> text = \"{text}\\n{row.name}({t.name})\",\n            .Named(fields) -> {\n                text = \"{text}\\n{row.name}\"\n                loop field in fields -> text = \"{text}\\n  {field.name}:{field.ty.name}\"\n            }\n        }\n    }\n    return text\n}\n\nenum Message { Quit Text(String) Count(Int) }\n@catalog :: case_text<Message>()\nfn describe(m: Message) String -> {\n    return if m == {\n        .Quit -> \"Quit\",\n        .Text(s) -> \"Text\\nvalue:String={s}\",\n        .Count(n) -> \"Count\\nvalue:Int={n}\"\n    }\n}\nfn run() {\n    print(\"{@catalog}\")\n    loop m in [Message.Text(\"hello\"), Message.Count(7), Message.Quit] -> print(describe(m))\n}\n// PROPOSED cases only; Expected observations below. NOT RUN."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Zig 0.15.2",
+          "note": "Zig generates every case row, then explicitly matches the same three inputs. Native type labels differ. Source: https://ziglang.org/documentation/0.15.2/#typeInfo. NOT RUN.",
+          "code": "const std = @import(\"std\");\nconst Message = union(enum) { Quit: void, Text: []const u8, Count: i64 };\npub fn main() void {\n    std.debug.print(\"Cases\\n\", .{});\n    inline for (@typeInfo(Message).@\"union\".fields) |field| {\n        if (field.type == void) std.debug.print(\"{s}\\n\", .{field.name})\n        else std.debug.print(\"{s}({s})\\n\", .{field.name, @typeName(field.type)});\n    }\n    const messages = [_]Message{ .{ .Text = \"hello\" }, .{ .Count = 7 }, .{ .Quit = {} } };\n    for (messages) |message| {\n        switch (message) {\n            .Quit => std.debug.print(\"Quit\\n\", .{}),\n            .Text => |text| std.debug.print(\"Text\\nvalue:[]const u8={s}\\n\", .{text}),\n            .Count => |count| std.debug.print(\"Count\\nvalue:i64={d}\\n\", .{count}),\n        }\n    }\n}\n// Source-composed from the cited Zig reflection model. Expected; NOT RUN."
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "why": "A serves both an automatically updated catalog and a reusable runtime inspector. C is preferable when generated descriptions suffice.",
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B’s literal catalog can become stale. The shown A helpers need no case-specific edits after an eligible new case."
+          },
+          {
+            "key": "C",
+            "reason": "C avoids runtime capture restrictions. A also handles mixed values without new visitor arms."
+          }
+        ],
+        "tradeoff": "A can reject a whole query or capture, and exporting its handles discloses captured fields. C avoids runtime capture."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 4,
+      "reviewPasses": {
+        "beginner": "Fresh agent: EnumRepairBeginnerFinal. Skill: rli5. The reader explained all three options and their boundary witnesses. The later adversarial pass required the source-grounded callback ownership repair.",
+        "adversarial": "Author model family: OpenAI GPT6. Adversarial model family: OpenAI GPT5. Fresh agent: EnumRepairAdversaryFinal. The final bound review confirmed the owned-pattern correction and resolved all five prior findings. These source-composed examples remain unexecuted."
+      },
+      "checkInstructions": "Source evidence, exact witnesses, alternative rationale and original references: docs/research/mine-for-jet-2026-09-12.md#finding-enum-f21-case-metadata-api. Source reading and frozen execution are different evidence. No current-tree behavior or performance win is inferred.",
+      "surface": {
+        "gist": "Should the existing reflection model expose enum cases and active payload fields?",
+        "lesson": "An enum selects a case and payload—the attached value. A/C generate complete catalogs or reject inaccessible nested details. A returns a handle holding an independent ordinary value copy. It refuses shared mutable data and unproved field access. Passing a lawful handle exports its captured fields. B writes catalogs and matches. C generates catalogs but keeps runtime matching.",
+        "trio": {
+          "current": {
+            "note": "Current/B writes the catalog and matches all three inputs. Expected output follows below. NOT RUN.",
+            "code": "enum Message { Quit Text(String) Count(Int) }\nfn describe(m: Message) String -> {\n    return if m == {\n        .Quit -> \"Quit\",\n        .Text(s) -> \"Text\\nvalue:String={s}\",\n        .Count(n) -> \"Count\\nvalue:Int={n}\"\n    }\n}\nfn run() {\n    print(\"Cases\\nQuit\\nText(String)\\nCount(Int)\")\n    loop m in [Message.Text(\"hello\"), Message.Count(7), Message.Quit] -> print(describe(m))\n}\n// Current/B source composition; Expected observations below. NOT RUN."
+          },
+          "wild": {
+            "lang": "Zig 0.15.2",
+            "note": "Zig generates all rows, then matches the same inputs. Native type labels differ. Source: https://ziglang.org/documentation/0.15.2/#typeInfo. NOT RUN.",
+            "code": "const std = @import(\"std\");\nconst Message = union(enum) { Quit: void, Text: []const u8, Count: i64 };\npub fn main() void {\n    std.debug.print(\"Cases\\n\", .{});\n    inline for (@typeInfo(Message).@\"union\".fields) |field| {\n        if (field.type == void) std.debug.print(\"{s}\\n\", .{field.name})\n        else std.debug.print(\"{s}({s})\\n\", .{field.name, @typeName(field.type)});\n    }\n    const messages = [_]Message{ .{ .Text = \"hello\" }, .{ .Count = 7 }, .{ .Quit = {} } };\n    for (messages) |message| {\n        switch (message) {\n            .Quit => std.debug.print(\"Quit\\n\", .{}),\n            .Text => |text| std.debug.print(\"Text\\nvalue:[]const u8={s}\\n\", .{text}),\n            .Count => |count| std.debug.print(\"Count\\nvalue:i64={d}\\n\", .{count}),\n        }\n    }\n}\n// Source-composed from the cited Zig reflection model. Expected; NOT RUN."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Extend existing reflection",
+            "gist": "PROPOSED complete catalogs and checked owned-value inspection.",
+            "gains": [
+              "Generated catalogs include every declared case and payload shape.",
+              "One inspector handles different active payloads without case-specific branches."
+            ],
+            "losses": [
+              "Foreign catalogs fail when nested details are inaccessible.",
+              "Capture refuses inaccessible, shared-mutable, or noncopyable nested payloads.",
+              "Exported handles disclose all captured nested fields."
+            ],
+            "proposed": {
+              "code": "use core.reflect as reflect\nenum Message { Quit Text(String) Count(Int) impl Display { fn display(self) String -> \"Message\" } }\n@catalog :: case_text<Message>()\nfn inspect(v: Value) {\n    c :: v.case() ?? panic(\"expected sum\")\n    print(c.name())\n    loop f in c.fields() -> print(\"{f.name()}:{f.value().type_name()}={f.value().display()}\")\n}\nfn run() {\n    print(\"{@catalog}\")\n    loop m in [Message.Text(\"hello\"), Message.Count(7), Message.Quit] -> inspect(reflect.of(m))\n}",
+              "note": "case_text below loops over every row during compilation. Display permits text output, not field access. Expected; NOT RUN."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Keep explicit visitors",
+            "gist": "Keep written catalogs and ordinary explicit visitors.",
+            "gains": [
+              "Ordinary matching keeps its existing visibility and live-value behavior."
+            ],
+            "losses": [
+              "Manual catalogs can silently miss newly added cases."
+            ],
+            "proposed": {
+              "code": "enum Message { Quit Text(String) Count(Int) }\nfn describe(m: Message) String -> {\n    return if m == {\n        .Quit -> \"Quit\",\n        .Text(s) -> \"Text\\nvalue:String={s}\",\n        .Count(n) -> \"Count\\nvalue:Int={n}\"\n    }\n}\nfn run() {\n    print(\"Cases\\nQuit\\nText(String)\\nCount(Int)\")\n    loop m in [Message.Text(\"hello\"), Message.Count(7), Message.Quit] -> print(describe(m))\n}",
+              "note": "Same cases and Expected output as A/C. NOT RUN."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Compile-time catalog, explicit runtime match",
+            "gist": "PROPOSED complete catalogs; runtime matching stays explicit.",
+            "gains": [
+              "Generated catalogs include new cases without copying their values.",
+              "No new runtime capture or snapshot rule is added."
+            ],
+            "losses": [
+              "Foreign catalogs fail when nested details are inaccessible."
+            ],
+            "proposed": {
+              "code": "enum Message { Quit Text(String) Count(Int) }\n@catalog :: case_text<Message>()\nfn describe(m: Message) String -> {\n    return if m == {\n        .Quit -> \"Quit\",\n        .Text(s) -> \"Text\\nvalue:String={s}\",\n        .Count(n) -> \"Count\\nvalue:Int={n}\"\n    }\n}\nfn run() {\n    print(\"{@catalog}\")\n    loop m in [Message.Text(\"hello\"), Message.Count(7), Message.Quit] -> print(describe(m))\n}",
+              "note": "case_text below loops over every row during compilation. Same Expected output; NOT RUN."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A serves both an automatically updated catalog and a reusable runtime inspector. C is preferable when generated descriptions suffice.",
+          "gains": [
+            "Generated catalogs include every declared case and payload shape.",
+            "One inspector handles different active payloads without case-specific branches."
+          ],
+          "losses": [
+            {
+              "loss": "Foreign catalogs fail when nested details are inaccessible.",
+              "mitigation": "A/C promise complete catalogs. Omitting private rows would silently describe a different set of cases."
+            },
+            {
+              "loss": "Capture refuses inaccessible, shared-mutable, or noncopyable nested payloads.",
+              "mitigation": "A uses existing visibility and value-copy rules. It neither freezes shared state nor invents access."
+            },
+            {
+              "loss": "Exported handles disclose all captured nested fields.",
+              "mitigation": "Recipients receive readable captured values. Export sanitized text instead when those fields must remain private."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B’s literal catalog can become stale. The shown A helpers need no case-specific edits after an eligible new case."
+            },
+            {
+              "key": "C",
+              "reason": "C avoids runtime capture restrictions. A also handles mixed values without new visitor arms."
+            }
+          ],
+          "tradeoff": "A can reject a whole query or capture, and exporting its handles discloses captured fields. C avoids runtime capture."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-09-12T18:04:03.829Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-09-12",
+      "retiredAt": "2026-11-19T19:35:12.393Z"
+    },
+    {
+      "id": "D-REFLECT-TYPEINFO1",
+      "cardId": "c0w7t4qu",
+      "group": "other",
+      "title": "With reflect(Rock), which types keep run-time type info by default?",
+      "situation": "You asked that reflect take the type itself, as print(reflect(Rock)), with no .of. This revision does that under every option. reflect(Rock) gives the type's record, and reflect(rock) gives one value's record. reflect(Rock{}) stays legal: it reflects a new Rock built from its defaults, so it shows values as well as the type. The open question is unchanged. Already ratified: a program that never reflects gets no type-info table, and only types a program asks about keep info. A build setting copies Jai's three words, full, reachable and none, and none of them means only what was asked about. Recommended A adds that word, requested, as the default.",
+      "gist": "When a game reflects a rock but never a door, does the door's type info ship?",
+      "lesson": "reflect(Rock) reads a type, and reflect(rock) reads one value. Run-time type info is kept only for what a program asks about, and the build setting must say so.",
+      "explainer": "",
+      "story": "Bo ships a small game. Its level editor calls reflect(rock) to list a rock's fields, and nothing ever reflects Door. He wants the release build to carry only what the editor uses, and a full table in a debug build.",
+      "inWild": "probes/D-REFLECT-TYPEINFO1/r01_today.jet (c865bb06, 2026-11-04): today a value reads as reflect.of(rock) and a type as Rock.$fields.\nprobes/D-REFLECT-TYPEINFO1/r02_reflect_type_arg.jet: reflect(Rock) is E0803 today, \"reflect is Unknown, not a function\".\nprobes/D-REFLECT-TYPEINFO1/r03, r04 and r08: a bare type name used as a value crashes the compiler, a defect found 2026-11-04.\nprobes/D-REFLECT-TYPEINFO1/r10: [Int] and Int? already parse as call arguments; Box<Int> parses but loses its <Int>.\nJai: type_info(Rock) and Zig: @typeInfo(Rock) take the type itself.\nCompiler/JetIR/Source/BuildRoutes.jet:4976-5021: per-call-site records, no global table today.",
+      "detail": "THE SPELLING YOU ASKED FOR\n\nEvery option uses one call, reflect, so any vote adopts it. reflect(Rock) gives the type's record: its name, path, fields and markers. reflect(rock) gives one value's record: each field with its value, and .type, which is reflect(Rock).\n\nprint(reflect(Rock)) prints the type's shape, struct Rock { size: Float, hard: Bool }. print(reflect(rock)) prints the value, Rock { size: 1.5, hard: true }.\n\nWHAT reflect(Rock{}) MEANS\n\nIt is legal and means the value form. Rock{} builds a new Rock from its defaults, and reflect reads that value. So reflect(Rock{}).type is reflect(Rock), and its fields also carry 1.0 and true.\n\nIt is not refused, because refusing one kind of argument would be a special case. If a field has no default, Rock{} is E0303 today, and that stays (probe r09). When code reads only .type from it, a lint offers reflect(Rock).\n\nHOW THE ARGUMENT IS READ\n\nName lookup decides, as it does for every name. A type spelling, such as Rock, [Int], Int?, Box<Int> or a generic T, names a type. Anything else is a value. The parser already accepts these as call arguments, though it drops Box's <Int> today (probe r10).\n\nIn generic code, reflect(T) replaces T.reflect(), and each copy reads its own T.\n\nTYPES STAY TYPES\n\nA type is still not an ordinary value. t :: Rock stays an error, and its fix offers reflect(Rock); today it crashes the compiler. User functions take types through <T>, so reflect is the one call that takes a type.\n\nAn effect row already takes either a type or a constant struct literal (D-DECL-TYPES1 A). The earlier @TYPE(T) and @VALUE(value) forms also passed types and values as arguments (D-META-REFLECT2).\n\nMIGRATION\n\njet fix rewrites reflect.of(x) to reflect(x), 44 lines in 21 files today. It rewrites T.reflect() to reflect(T), 34 lines in 25 files. It deletes the alias line use reflect :: core.reflect. The core.reflect module keeps its record types.\n\nThe spelling amends D-METAREFLECT1, D-NAME-REFLECT1, D-ANY-JAI1's of entry and D-META-HASH1's template reads. The record shapes, the type field (D-REFLECT-FIELDTYPE1) and read-only reflection stay. No file declares a function named reflect.\n\nWHAT IS ALREADY DECIDED ABOUT KEEPING INFO\n\nD-META-REFLECT2 A: run time exposes type and value facts kept for requested roots. Dead-code removal must keep requested facts without keeping unrelated ones by default. A program without run-time reflection gets no new table.\n\nD-JAI-BUILDOPT1 A: every Jai build-setting family becomes a typed Build field. Its list includes type_info full, reachable or none. It names no default.\n\nTHE CONFLICT\n\nThe ratified default, requested roots only, is not one of the three words. In Jai, reachable keeps every type the program uses, which is wider. Choosing any of the three words as the default breaks one record.\n\nWHAT COUNTS AS A REQUEST\n\nA reflect call that runs while the program runs requests that type's record and the types its fields reach. reflect(Rock) used only while building requests nothing at run time.\n\nWHAT A DOES\n\nThe setting gets a fourth word, requested, and it is the default. reachable and full widen it for debug or tool builds. none turns any reflect call that runs while the program runs into a compile error naming the setting.\n\nCOST\n\nUnder A, a program with one reflect(rock) call carries records only for Rock's field graph. Paired size cells compare requested against full on the same game.\n\nGENERIC CODE\n\nUnder A and C, a reflect call in generic code asks about each type the code is used with. So fn show<T>(x: T) that calls reflect(x), used only with Rock, keeps Rock's info and not Door's.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Add requested, the default",
+          "detail": "With nothing set, only the types a program reflects while running keep info, as already ratified. reachable and full widen it for debugging or tools, and none turns any run-time reflect into a compile error. No program changes beyond the new spelling.",
+          "technical": "Build.type_info: requested (default) | reachable | full | none. requested keeps the type graphs of reflect calls that run while the program runs, plus explicit keep roots. none makes such a call a registered compile error naming the setting. Amends D-JAI-BUILDOPT1 A's list; D-META-REFLECT2 A unchanged. The reflect(x) spelling is shared by every option.",
+          "code": "// proposed: reflect takes a type or a value\n// package.jet: nothing set, so type_info is requested\nbuild: { game: Build{ } }\n\n// run.jet\nstruct Rock { size: Float{1.0} }\nstruct Door { open: Bool{false} }\n\nfn run() {\n    rock :: Rock{}\n    print(reflect(rock).type.name)   // Rock: its info is kept\n    print(reflect(Rock))             // struct Rock { size: Float }\n    print(Door{}.open)               // Door's info is not shipped\n}\n\n// a debug build may keep everything\nbuild: { debug: Build{ type_info: full } }"
+        },
+        {
+          "key": "B",
+          "name": "reachable is the default, as in Jai",
+          "detail": "With nothing set, every type the program uses keeps its info, so Door's info ships too. This matches Jai, but a program that reflects one type pays for all of them, against the ratified no-cost rule.",
+          "technical": "Build.type_info: reachable (default) | full | none. D-META-REFLECT2 A's default keep rule is amended to keep every reachable type whenever any reflect call runs. The reflect(x) spelling is shared by every option.",
+          "code": "// proposed: reflect takes a type or a value\n// package.jet: nothing set, so type_info is reachable\nbuild: { game: Build{ } }\n\n// run.jet\nstruct Rock { size: Float{1.0} }\nstruct Door { open: Bool{false} }\n\nfn run() {\n    rock :: Rock{}\n    print(reflect(rock).type.name)   // Rock\n    print(reflect(Rock))             // struct Rock { size: Float }\n    print(Door{}.open)               // Door's info ships as well\n}"
+        },
+        {
+          "key": "C",
+          "name": "Keep three words; reachable means requested",
+          "detail": "No new word. reachable is redefined as \"reached by a reflect call\" and is the default. The behaviour is A's, but the word means something different from Jai's.",
+          "technical": "Build.type_info: reachable (default, defined as requested roots) | full | none. Amends D-JAI-BUILDOPT1 A's meaning of reachable only. The reflect(x) spelling is shared by every option.",
+          "code": "// proposed: reflect takes a type or a value\n// package.jet: nothing set, so type_info is reachable (= requested)\nbuild: { game: Build{ } }\n\n// run.jet\nstruct Rock { size: Float{1.0} }\nstruct Door { open: Bool{false} }\n\nfn run() {\n    rock :: Rock{}\n    print(reflect(rock).type.name)   // Rock\n    print(reflect(Rock))             // struct Rock { size: Float }\n    print(Door{}.open)               // Door's info is not shipped\n}"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A keeps the ratified rule that unused reflection costs nothing, and still gives Jai's wider settings to builds that want them. The default is what is already promised, and reflect(Rock) reads the way you asked.",
+        "gains": [
+          "No reflection cost unless a program reflects.",
+          "Debug and tool builds can keep everything with one setting.",
+          "none is checked at compile time, never a run-time surprise."
+        ],
+        "losses": [
+          {
+            "loss": "The setting has four words instead of Jai's three.",
+            "mitigation": "Only the default is new; reachable and full keep Jai's meaning."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B ships info for types nobody reflects, breaking the ratified no-cost default."
+          },
+          {
+            "key": "C",
+            "reason": "C gives reachable a meaning that differs from Jai's, which misleads porters."
+          }
+        ],
+        "tradeoff": "One extra setting word, for zero cost unless used."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing Research's draft, because the owner caps agents at four. Findings were that one call spelling now serves every option, as the owner asked, and keeping reflect(Rock{}) legal avoids a special case; the type-as-value crash is filed as a defect."
+      },
+      "checkInstructions": null,
+      "surface": {
+        "gist": "When a game reflects a rock but never a door, does the door's type info ship?",
+        "lesson": "reflect(Rock) reads a type and reflect(rock) one value. Type info is kept only for what a program asks about.",
+        "trio": {
+          "current": {
+            "note": "Today a value reads as reflect.of(rock), and reflect(Rock) is an error.",
+            "code": "use reflect :: core.reflect\n\nrock :: Rock{}\nprint(reflect.of(rock).type_name())"
+          },
+          "wild": {
+            "lang": "Jai",
+            "note": "Jai keeps a full type table unless a build option trims it.",
+            "code": "#run {\n    opts := get_build_options();\n    opts.runtime_storageless_type_info = true;\n    set_build_options(opts);\n}"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Add requested, the default",
+            "gist": "Only asked-about types ship; full and reachable widen it.",
+            "gains": [
+              "Zero cost unless used.",
+              "No program changes."
+            ],
+            "losses": [
+              "A fourth setting word."
+            ],
+            "proposed": {
+              "code": "// proposed\nbuild: { game: Build{ } }                  // requested\nprint(reflect(rock).type.name)             // Rock kept, Door not\nprint(reflect(Rock))                       // struct Rock { size: Float }\nbuild: { debug: Build{ type_info: full } } // keep all"
+            }
+          },
+          {
+            "key": "B",
+            "name": "reachable is the default",
+            "gist": "Every used type ships its info, as in Jai.",
+            "gains": [
+              "Matches Jai."
+            ],
+            "losses": [
+              "Unreflected types cost size."
+            ],
+            "proposed": {
+              "code": "// proposed\nbuild: { game: Build{ } }                  // reachable\nprint(reflect(rock).type.name)             // Rock and Door kept"
+            }
+          },
+          {
+            "key": "C",
+            "name": "reachable means requested",
+            "gist": "Three words; reachable is redefined.",
+            "gains": [
+              "No new word."
+            ],
+            "losses": [
+              "Differs from Jai's word."
+            ],
+            "proposed": {
+              "code": "// proposed\nbuild: { game: Build{ } }                  // reachable = requested\nprint(reflect(rock).type.name)             // Rock kept, Door not"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Keeps the promised zero cost, adds Jai's wider settings as opt-ins, and reads as reflect(Rock).",
+          "gains": [
+            "Zero cost unless used.",
+            "Opt-in full table."
+          ],
+          "losses": [
+            {
+              "loss": "A fourth setting word.",
+              "mitigation": "Only the default is new."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Pays for unreflected types."
+            },
+            {
+              "key": "C",
+              "reason": "Misleading word."
+            }
+          ],
+          "tradeoff": "One word, for zero cost unless used."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-04T18:24:18.575Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-04",
+      "retiredAt": "2026-11-19T19:35:12.393Z"
     }
   ]
 }
