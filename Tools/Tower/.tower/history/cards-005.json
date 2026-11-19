@@ -18423,6 +18423,86 @@
       "completedAt": "2026-11-16T22:53:26.086Z",
       "questions": [],
       "retiredAt": "2026-11-19T22:58:08.727Z"
+    },
+    {
+      "id": "c07b6pyn",
+      "num": 6863,
+      "title": "jet new adds services, routes, jobs and migrations to an app, with preview and undo",
+      "body": "Destination: inside an app package, `jet new` generates a service, a route, a job or a migration from explicit inputs, shows a preview first, and can undo what it generated from its receipt. Generated code uses the ratified app APIs (D-WEBAPP-SHAPE1=A: #App.Job, app.enqueue) and the migration CLI (D-DX-MIGRATE1=A), and compiles as written.\n\nWhy it matters: generators are how most people start a backend feature; generated code that does not compile or cannot be undone teaches the wrong shape.\n\nSource: #5985 c16-c19 (archived #2458 c1-c4, re-added by the 2026-11 precut audit as unproven). Related: #6825 (jobs), #6552 (web framework).",
+      "kind": "feature",
+      "track": "sidequest",
+      "epoch": null,
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P2",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "All 3 criteria met on p230/p232 (dev 823706b2d9)."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "`jet new service|route|job|migration <name>` in an app package writes the generated files from explicit inputs, and `--preview` prints the exact files and contents without writing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p230 batch compiler (dev 47086f2eb3), commit 1579aacf8c: jet test Compiler --profile cases --filter jet_new_app_generators PASS 1/1; Compiler/JetCLI/Tests/CommandModel.jet PASS; CLIPartsRuntime/help_all PASS.",
+          "at": "2026-11-16T22:20:26.016Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "jet_new_app_generators"
+          }
+        },
+        {
+          "n": 2,
+          "text": "Every generated service, route, job and migration compiles unchanged and uses the ratified app APIs (#App.Job, app.enqueue, the migration form of D-DX-MIGRATE1=A), with deterministic file and declaration names.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p230 batch compiler (dev 47086f2eb3), commits 1579aacf8c (page files under a .routes(from:) folder keep page file-private) + 7902872cd8 + f14557e1e4: jet test Compiler --profile cases --filter jet_new_app_generated_code_compiles PASS 1/1, generating a service, a job, a migration and 1, 2 and 3 routes into one app package and checking the app and each file after each.",
+          "at": "2026-11-16T22:20:27.359Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "jet_new_app_generated_code_compiles"
+          }
+        },
+        {
+          "n": 3,
+          "text": "Undo removes exactly the files its receipt lists, refuses when one was edited since (integrity check), and a regenerated migration reuses its version number.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "p232 batch compiler (dev 823706b2d9), commits 2912e85f8e + d1dc9b6b36: jet test Compiler --profile cases --filter jet_new_app_generator_undo PASS 1/1.",
+          "at": "2026-11-16T23:03:10.589Z",
+          "proof": {
+            "profile": "cases",
+            "filter": "jet_new_app_generator_undo"
+          }
+        }
+      ],
+      "refs": [],
+      "tags": [
+        "web",
+        "cli",
+        "scaffold"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-15T02:49:14.678Z",
+      "updated": "2026-11-16T23:03:12.827Z",
+      "updatedBy": "Main",
+      "completedAt": "2026-11-16T23:03:12.827Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T23:15:39.458Z"
     }
   ]
 }

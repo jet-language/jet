@@ -3,7 +3,7 @@
     "version": 4,
     "project": "Jet",
     "nextNum": 6995,
-    "rev": 112467,
+    "rev": 112468,
     "ui": {
       "toggled": [
         "dec-group:syntax",
@@ -74165,6 +74165,11 @@
         {
           "at": "2026-11-19",
           "by": "Main",
+          "text": "c55 probe (quiet, p336, O1, 12,706 rounds; IfHole probe in its lane): of 2,809 tail rounds, 1,333 are slow-clock (the late wide task at 3.9 GHz against 5.0, after a 1.4 ms carrier idle against 0.7). Idle cores clock down while the long narrow line runs, a real speedup shortens the idle gap, and a virtual speedup cannot. Decision: the lens samples core clocks and flags its gains when idle cores clock down past a stated share (the same pattern as the contention refusal), and the case compares only clock-steady runs. 153 rounds are woken-late (begin 718 us late). The runtime wake is a single FUTEX_WAKE_PRIVATE right after unlock, with no polling or floor, so the delay is the CPU leaving deep idle. A bounded spin before an idle carrier parks (about 50 us, checking workSeq, as Go and Tokio do) would trade CPU for wake latency. Finding for the scheduler performance work; not needed for c55."
+        },
+        {
+          "at": "2026-11-19",
+          "by": "Main",
           "text": "c70 measure, p336 batch compiler (dev 33cc7b35f2, with Lens heldcut.r2), DebugLatency --runs 3 at load 3, ms, Jet against lldb 21.1.8: first_stop 14/144, print_place 0.1/16.8, print_first 27.4/6.2, second_eval 1.8/1.0, per_step 0.4/0.8, print_again 0.9/2.7, watch_per_stop 3.7/6.8, condition_per_hit 0.0/0.7. Seven of nine at or under lldb. Open: print_first (Lens 2B, the held-cut append plus the source record) and second_eval (IfHole, the in-process call instead of the fork). The DebugLatency bars still read the old fixed ones; they move to at most lldb per measure."
         },
         {
@@ -75128,7 +75133,7 @@
       "parentId": null,
       "needsAcceptance": false,
       "created": "2026-11-14T14:55:01.368Z",
-      "updated": "2026-11-19T22:58:08.603Z",
+      "updated": "2026-11-19T23:15:38.752Z",
       "updatedBy": "Main",
       "criteriaLastN": 70
     },
@@ -77699,84 +77704,6 @@
       "created": "2026-11-15T02:49:13.746Z",
       "updated": "2026-11-17T01:48:30.772Z",
       "updatedBy": "Main"
-    },
-    {
-      "id": "c07b6pyn",
-      "num": 6863,
-      "title": "jet new adds services, routes, jobs and migrations to an app, with preview and undo",
-      "body": "Destination: inside an app package, `jet new` generates a service, a route, a job or a migration from explicit inputs, shows a preview first, and can undo what it generated from its receipt. Generated code uses the ratified app APIs (D-WEBAPP-SHAPE1=A: #App.Job, app.enqueue) and the migration CLI (D-DX-MIGRATE1=A), and compiles as written.\n\nWhy it matters: generators are how most people start a backend feature; generated code that does not compile or cannot be undone teaches the wrong shape.\n\nSource: #5985 c16-c19 (archived #2458 c1-c4, re-added by the 2026-11 precut audit as unproven). Related: #6825 (jobs), #6552 (web framework).",
-      "kind": "feature",
-      "track": "sidequest",
-      "epoch": null,
-      "milestoneId": null,
-      "phase": "done",
-      "priority": "P2",
-      "plan": null,
-      "checkSteps": null,
-      "probe": null,
-      "visualMedia": [],
-      "blockedBy": [],
-      "assignee": null,
-      "log": [
-        {
-          "at": "2026-11-16",
-          "by": "Main",
-          "text": "All 3 criteria met on p230/p232 (dev 823706b2d9)."
-        }
-      ],
-      "criteria": [
-        {
-          "n": 1,
-          "text": "`jet new service|route|job|migration <name>` in an app package writes the generated files from explicit inputs, and `--preview` prints the exact files and contents without writing.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p230 batch compiler (dev 47086f2eb3), commit 1579aacf8c: jet test Compiler --profile cases --filter jet_new_app_generators PASS 1/1; Compiler/JetCLI/Tests/CommandModel.jet PASS; CLIPartsRuntime/help_all PASS.",
-          "at": "2026-11-16T22:20:26.016Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "jet_new_app_generators"
-          }
-        },
-        {
-          "n": 2,
-          "text": "Every generated service, route, job and migration compiles unchanged and uses the ratified app APIs (#App.Job, app.enqueue, the migration form of D-DX-MIGRATE1=A), with deterministic file and declaration names.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p230 batch compiler (dev 47086f2eb3), commits 1579aacf8c (page files under a .routes(from:) folder keep page file-private) + 7902872cd8 + f14557e1e4: jet test Compiler --profile cases --filter jet_new_app_generated_code_compiles PASS 1/1, generating a service, a job, a migration and 1, 2 and 3 routes into one app package and checking the app and each file after each.",
-          "at": "2026-11-16T22:20:27.359Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "jet_new_app_generated_code_compiles"
-          }
-        },
-        {
-          "n": 3,
-          "text": "Undo removes exactly the files its receipt lists, refuses when one was edited since (integrity check), and a regenerated migration reuses its version number.",
-          "status": "met",
-          "metBy": "Main",
-          "verifiedBy": null,
-          "evidence": "p232 batch compiler (dev 823706b2d9), commits 2912e85f8e + d1dc9b6b36: jet test Compiler --profile cases --filter jet_new_app_generator_undo PASS 1/1.",
-          "at": "2026-11-16T23:03:10.589Z",
-          "proof": {
-            "profile": "cases",
-            "filter": "jet_new_app_generator_undo"
-          }
-        }
-      ],
-      "refs": [],
-      "tags": [
-        "web",
-        "cli",
-        "scaffold"
-      ],
-      "parentId": null,
-      "needsAcceptance": false,
-      "created": "2026-11-15T02:49:14.678Z",
-      "updated": "2026-11-16T23:03:12.827Z",
-      "updatedBy": "Main",
-      "completedAt": "2026-11-16T23:03:12.827Z"
     },
     {
       "id": "c0sf9ixl",
@@ -158451,6 +158378,13 @@
     }
   ],
   "events": [
+    {
+      "at": "2026-11-19T23:15:38.752Z",
+      "by": "Main",
+      "action": "card.update",
+      "ref": "c0nwrfck",
+      "note": "logEntry"
+    },
     {
       "at": "2026-11-19T22:58:08.603Z",
       "by": "Main",
