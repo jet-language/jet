@@ -1767,16 +1767,19 @@ IR_X64_PERF_ZONES_STORAGE: "perf_zones_on"
 
 IR_X64_PERF_ZONES_SYMBOL: "jet_rt_perf_zones"
 
-// A zone site, core.perf.__zone_open or __zone_close at `at`: the hot path
-// tests the runtime's zones word and, while it is zero, skips the call (an
-// open's result is the Int 0, which a close skipped the same way never
-// reads). So a zone the profiler is not recording costs the word's load,
-// test and branch, and its name and arguments are not even set up. r11 may
+// A zone site, core.perf.__zone_open, __zone_close, __frame or __plot at
+// `at`: the hot path tests the runtime's zones word and, while it is zero,
+// skips the call (an open's result is the Int 0, which a close skipped the
+// same way never reads; a frame mark or a plot records nothing while zones
+// are off). So a zone, frame mark or plot the profiler is not recording
+// costs the word's load, test and branch, and the call's arguments are not
+// even set up. r11 may
 // hold a close's argument, so it is saved around the test (a pop keeps the
 // flags). A close whose open ran before the profiler turned zones on gets 0
 // and writes no row (PerfSamples.jet jet_perf_zone_close). A `zones: strip`
-// module (IRModule.zones_stripped) keeps no site: an open is the Int 0 and a
-// close is nothing.
+// module (IRModule.zones_stripped) keeps no zone site: an open is the Int 0
+// and a close is nothing, while its frame marks and plots stay plain calls,
+// which record under a profiler as the setting promises.
 ir_x64_zone_site: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocation, at: Int, symbol: String, dst: Int) Never! {
     if m.zones_stripped {
         if dst >= 0 {
@@ -3727,7 +3730,7 @@ ir_x64_select: fn(e: &IRX64Emitter, m: IRModule, f: IRFunction, al: IRX64Allocat
                     e.routed = at
                 }
                 symbol == "jet_std_math_fma" && ir_x64_fma(e, m, f, al, tables, at) -> {}
-                symbol == "jet_perf_zone_open" || symbol == "jet_perf_zone_close" -> {
+                symbol == "jet_perf_zone_open" || symbol == "jet_perf_zone_close" || (!m.zones_stripped && (symbol == "jet_perf_frame" || symbol == "jet_perf_plot")) -> {
                     ir_x64_zone_site(e, m, f, al, at, symbol, dst)
                 }
                 entry != "" -> {
