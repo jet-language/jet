@@ -756,9 +756,13 @@ step would have ended. `jet debug --dap` settles every run the same way
 While `jet debug --dap` runs the program on (`continue`, and the start from
 `configurationDone` or `restart`), the next request stops every thread where
 it is: `pause` answers and reports the stop; `disconnect` ends the session;
-`restart` starts the program again (an attached one does not restart); any
-other request is answered with the program stopped, and it runs on. A
-replay's runs are made as recorded, without stopping for requests.
+`restart` starts the program again (an attached one does not restart); a
+request about a stop (`stackTrace`, `scopes`, `variables`, `evaluate`) or a
+run command waits for the next stop, the program running on to it, and is
+answered there in the order it came; any other request is answered with the
+program stopped, and it runs on. The end of stdin ends the session once the
+requests waiting for a stop are answered. A replay's runs are made as
+recorded, without stopping for requests.
 `stackTrace` with `showRawFrames: true` adds the machine frames, each named
 `[raw] <function>` with its `instructionPointerReference`, whose one scope,
 `[raw] Locals`, holds its pc and canonical frame address; a `showRawFrames`
@@ -825,7 +829,9 @@ the List grows past its capacity (or a write copies a shared buffer) and
 moves to a new buffer, the watch moves to the same item there; the copy
 leaves the item's value as it was, so the move runs on. If the List lets go
 of its buffer, the watch ends and the next stop says so. A watch on a
-frame's local ends when that frame returns; the next stop says so. Every
+frame's local ends when that frame returns (a frame of another function a
+later call puts at the same stack address is not it); the next stop says
+so. Every
 thread gets the watch's debug registers, so a write from any thread stops;
 a watch on a register local follows the thread whose frame holds it. A
 Float held in a vector register can't be watched. Globals can't be watched

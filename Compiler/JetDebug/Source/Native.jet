@@ -172,7 +172,10 @@ NativeSettled: struct {
 // trace's registers (else -1), and `ranges` the code where it is there. An
 // item of a List (`watch xs[3]`) also holds a span on the List's data word
 // at `anchor` (else 0): when a write moves the List to a new buffer, the
-// watch moves to the item at `offset` in it (follow_list).
+// watch moves to the item at `offset` in it (follow_list). `function` is
+// where the function of the local's frame begins (-1: any): a frame of
+// another function a later call puts at the same canonical frame address
+// is not the local's (frame_live).
 NativeWatch: struct {
     number: Int,
     shown: String,
@@ -186,6 +189,7 @@ NativeWatch: struct {
     ranges: [NativeRange],
     anchor: Int{0},
     offset: Int{0},
+    function: Int{-1},
 }
 
 // One debug register a watch holds: DR0 to DR3 (`slot`), trapping a write
@@ -717,7 +721,7 @@ NativeSession: struct {
         if log != "" {
             rule.log = Val(self.compiled(at.path, at.line, at.column, native_eval_message(log)) ?? return Err(err))
             if condition.trim() == "" {
-                split: self.log_parts(number, at, log)
+                split: self.log_parts(number, address, at, log)
                 rule.placement = split.reason
                 rule.texts = split.texts
                 rule.parts = split.parts
@@ -728,15 +732,18 @@ NativeSession: struct {
 
     // Logpoint `number`'s message `log` as the program runs it (NativeRule):
     // the text around each `{…}` part and each part compiled on its own at
-    // `at`, where the breakpoint traps. `reason` says why the logpoint can't
-    // run in the program, "" when it can: a part's value is not a word of
-    // its own (a String's points at memory the program may change before
-    // the debugger reads it), or its code can't run there (placement).
-    log_parts: fn(&self, number: Int, at: {path: String, line: Int, column: Int}, log: String) -> {reason: String, texts: [String], parts: [Shared<NativeEval>]} Never! {
+    // `at`, where the breakpoint traps (`address`). `reason` says why the
+    // logpoint can't run in the program, "" when it can: a part's value is
+    // not a word of its own (a String's points at memory the program may
+    // change before the debugger reads it), or its code can't run there
+    // (placement). A part that is a variable's own name and doesn't compile
+    // names a value its function only reads, of a type no read copies,
+    // which is no word either.
+    log_parts: fn(&self, number: Int, address: Int, at: {path: String, line: Int, column: Int}, log: String) -> {reason: String, texts: [String], parts: [Shared<NativeEval>]} Never! {
         split: native_log_split(log) ?? return {reason: "a `{{` of its message has no `}}`", texts: [String]{}, parts: [Shared<NativeEval>]{}}
         parts := [Shared<NativeEval>]{}
         loop hole in split.holes {
-            compiled: self.compiled(at.path, at.line, at.column, hole) ?? return {reason: "`{hole}` doesn't compile on its own: {err.message}", texts: [String]{}, parts: [Shared<NativeEval>]{}}
+            compiled: self.compiled(at.path, at.line, at.column, hole) ?? return self.log_refused(address, at.line, hole, err.message)
             name: compiled.guard_read().value.result.name
             if !native_log_word(compiled.guard_read().value.result) {
                 return {reason: "`{hole}` is a {name}, which the debugger would read after the hit rather than at it", texts: [String]{}, parts: [Shared<NativeEval>]{}}
@@ -748,6 +755,22 @@ NativeSession: struct {
             parts.push(compiled)
         }
         {reason: "", texts: split.texts, parts: parts}
+    }
+
+    // Why logpoint part `hole`, which the compiler refused (`refusal`),
+    // keeps its logpoint out of the program, for log_parts: a variable's own
+    // name the function at `address` declares by line `line` names its
+    // type (as `locals` names it), and other parts the refusal.
+    log_refused: fn(self, address: Int, line: Int, hole: String, refusal: String) -> {reason: String, texts: [String], parts: [Shared<NativeEval>]} Never! {
+        if native_eval_is_name(hole) {
+            function: native_function_at(self.image, address) ?? return {reason: "`{hole}` doesn't compile on its own: {refusal}", texts: [String]{}, parts: [Shared<NativeEval>]{}}
+            loop variable in function.variables {
+                if variable.name != hole || variable.line > line -> next
+                type_name: native_type_name(self.image, variable.ty)
+                return {reason: "`{hole}` is a {type_name}, which the debugger would read after the hit rather than at it", texts: [String]{}, parts: [Shared<NativeEval>]{}}
+            }
+        }
+        {reason: "`{hole}` doesn't compile on its own: {refusal}", texts: [String]{}, parts: [Shared<NativeEval>]{}}
     }
 
     // The source file (its path, as the image's line table records it),
@@ -2334,6 +2357,10 @@ NativeSession: struct {
         memory: NativeMemory{trace: Val(self.trace), blocks: [NativeBlock]{}}
         place: native_watch_place(self.image, memory, frame, native_lookup(level.frame, frame.pc), level.site, operand)
         if place.refusal != "" -> return Ok("{place.refusal}\n")
+        begins := -1
+        if native_function_at(self.image, native_lookup(level.frame, frame.pc)) == .Val(owner) {
+            begins = owner.low
+        }
         size: native_type_size(self.image, place.ty)
         if size <= 0 -> return Ok("`{operand}` has no bytes to watch\n")
         if place.register >= 0 {
@@ -2345,7 +2372,7 @@ NativeSession: struct {
             held: native_low_bytes(frame.registers[place.register], if size < 8 -> size else -> 8)
             self.numbered += 1
             self.ask(operand)
-            self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: 0, ty: place.ty, spans: [NativeWatchSpan]{}, thread: self.trace.thread, cfa: frame.cfa, bytes: held, register: place.register, ranges: place.ranges})
+            self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: 0, ty: place.ty, spans: [NativeWatchSpan]{}, thread: self.trace.thread, cfa: frame.cfa, bytes: held, register: place.register, ranges: place.ranges, function: begins})
             return Ok("Watchpoint {self.numbered}  {operand} = {value.shown}\n")
         }
         bytes: native_debug_bytes(memory, place.address, size) ?? return Ok("`{operand}` can't be read here\n")
@@ -2372,7 +2399,7 @@ NativeSession: struct {
         }
         self.numbered += 1
         self.ask(operand)
-        self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: place.address, ty: place.ty, spans: spans, thread: self.trace.thread, cfa: frame.cfa, bytes: bytes, register: -1, ranges: [NativeRange]{}, anchor: place.anchor, offset: place.offset})
+        self.watches.push(NativeWatch{number: self.numbered, shown: "{operand}", address: place.address, ty: place.ty, spans: spans, thread: self.trace.thread, cfa: frame.cfa, bytes: bytes, register: -1, ranges: [NativeRange]{}, anchor: place.anchor, offset: place.offset, function: begins})
         if !self.set_debug_register(7, native_watch_control(self.watches)) {
             return Err(NativeDebugError{detail: "couldn't set the program's debug control register"})
         }
@@ -2406,7 +2433,7 @@ NativeSession: struct {
             if !hit -> next
             if self.watches[index].anchor != 0 {
                 // A write to the List's data word may have moved the item.
-                live: self.frame_live(self.watches[index].thread, self.watches[index].cfa) ?? return Err(err)
+                live: self.frame_live(index) ?? return Err(err)
                 if !live {
                     self.end_watch(index) ?? return Err(err)
                     return Ok({fired: true, number: 0})
@@ -2426,7 +2453,7 @@ NativeSession: struct {
                 self.trail_write(index, bytes) ?? return Err(err)
                 return Ok({fired: true, number: 0})
             }
-            live: self.frame_live(self.watches[index].thread, self.watches[index].cfa) ?? return Err(err)
+            live: self.frame_live(index) ?? return Err(err)
             if !live {
                 self.end_watch(index) ?? return Err(err)
                 return Ok({fired: true, number: 0})
@@ -2583,9 +2610,13 @@ NativeSession: struct {
         }
     }
 
-    // Whether the frame of thread `thread` whose canonical frame address is
-    // `cfa` is still on its stack.
-    frame_live: fn(&self, thread: Int, cfa: Int) -> Bool NativeDebugError! {
+    // Whether the frame whose local watch `index` watches is still on its
+    // thread's stack: a frame at its canonical frame address, in its
+    // function.
+    frame_live: fn(&self, index: Int) -> Bool NativeDebugError! {
+        thread: self.watches[index].thread
+        cfa: self.watches[index].cfa
+        begins: self.watches[index].function
         if self.thread_row(thread) < 0 -> return Ok(false)
         current: self.trace.thread
         self.trace.thread = thread
@@ -2593,8 +2624,12 @@ NativeSession: struct {
         self.trace.thread = current
         registers: found ?? return Err(NativeDebugError{detail: "couldn't read the program's registers"})
         frames: self.unwind_from(registers) ?? return Err(err)
-        loop frame in frames {
-            if frame.cfa == cfa -> return Ok(true)
+        loop (level, frame) in frames {
+            if frame.cfa != cfa -> next
+            if begins < 0 -> return Ok(true)
+            if native_function_at(self.image, native_lookup(level, frame.pc)) == .Val(owner) && owner.low == begins {
+                return Ok(true)
+            }
         }
         Ok(false)
     }

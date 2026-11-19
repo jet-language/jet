@@ -8,7 +8,7 @@ send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"argument
 send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/main.jet\",\"stopOnEntry\":false,\"args\":[],\"env\":{}}}"
 send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
 send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"pause\",\"arguments\":{}}"
-recv dap collect until ndjson $[?request_seq=4][?success=true][?command="pause"] #>= 1 && ndjson $[?event="stopped"][?reason="pause"] #>= 1 timeout 30s
+recv dap collect until ndjson $[?request_seq=4][?success=true][?command="pause"] #>= 1 && ndjson $[?event="stopped"][?body.reason="pause"] #>= 1 timeout 30s
 json: stdout ndjson $[?request_seq=4][0].success = true
 stdout: ~ "\"event\":\"stopped\"" # original paused transcript conjunction
 stdout: ~ "\"reason\":\"pause\"" # original paused transcript conjunction
