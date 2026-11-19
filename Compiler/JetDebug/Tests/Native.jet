@@ -11,9 +11,9 @@ use {
 
 #Test("the_debug_build_keeps_the_selected_deep_checks") {
     off: native_debug_build_argv("jet", "prog.jet", "out", DeepChecks{})
-    assert_eq(off, [String]{"jet", "build", "-O0", "--output-dir=out", "prog.jet"})
+    assert_eq(off, [String]{"jet", "build", "-O0", "--dead-code=keep", "--output-dir=out", "prog.jet"})
     kept: native_debug_build_argv("jet", "prog.jet", "out", DeepChecks{all: true, scopes: [String]{"tree", "tree.run"}})
-    assert_eq(kept, [String]{"jet", "build", "-O0", "--deep-checks", "--deep-checks=tree", "--deep-checks=tree.run", "--output-dir=out", "prog.jet"})
+    assert_eq(kept, [String]{"jet", "build", "-O0", "--dead-code=keep", "--deep-checks", "--deep-checks=tree", "--deep-checks=tree.run", "--output-dir=out", "prog.jet"})
 }
 
 // The evaluation fork's seccomp program: 32 instructions of 8 bytes (code,
