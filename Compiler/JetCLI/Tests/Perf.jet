@@ -28,6 +28,7 @@ use {
         jet_cli_perf_heap_retention_lines,
         jet_cli_perf_heap_types,
         jet_cli_perf_live_from,
+        jet_cli_perf_log_spans_read,
         jet_cli_perf_samples_count,
         jet_cli_perf_samples_profile,
         jet_cli_perf_source,
@@ -66,6 +67,9 @@ use {
         verify_jettrace,
     ]
     perf_hex: core.encoding.hex
+    perf_test_files: core.files
+    perf_test_process: core.process
+    perf_test_sys: core.sys
 }
 
 // A decoded, process-bound live snapshot (jet_foundation's LiveSnapshot.jet
@@ -314,6 +318,53 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert(json.contains(`"sampled":[{"end_ns":3000,"line":5,"name":"solve","samples":3,"start_ns":0}]`))
     assert(json.contains(`"source":"fib.jet"`))
     assert(json.contains(`{"count":1,"lines":[{"line":5,"samples":2}],"longest_ns":3000,"name":"solve","samples":3,"total_ns":3000}`))
+}
+
+// The runtime times zones, waits and log spans from the process epoch, its
+// first monotonic read (time_host_monotonic_i64), which the first zone's
+// open may be: a run's first zone opens 1293 ns after it. Each CPU-time
+// sample is stamped on that clock too, -1 before the epoch is set.
+#Test("a zone holds the CPU-time samples its task took inside it, both timed from the process epoch") {
+    table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}}
+    three: 3 << 48
+    words: jet_cli_perf_test_words(
+        [Int]{
+            // Before the epoch was set: in no zone.
+            4112 | three,
+            -1,
+            7,
+            // Inside solve, of solve's task 7.
+            4112 | three,
+            1500,
+            7,
+            4112 | three,
+            4000,
+            7,
+            // Inside solve's time, of task 9.
+            4112 | three,
+            2000,
+            9,
+            // At solve's end, so past it.
+            4112 | three,
+            4293,
+            7,
+        },
+    )
+    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    assert_eq(sampled.timed.len(), 5)
+    // solve's row of the spans file, as perf_zone_row writes it.
+    row := jet_cli_perf_test_words([Int]{1293, 4293, 7, 5 | (1 << 32)})
+    row.extend("solve".bytes())
+    path: "{perf_test_sys.temp_dir()}/jet-perf-zone-clock-{perf_test_process.current_pid()}.spans"
+    perf_test_files.write_bytes(path, row) ?? panic("the spans file: {err}")
+    capture := jet_cli_perf_capture_source("fib.jet", "fib: fn() -> Int {{ 1 }}", [JetCLIPerfObservation]{}, None, "x86_64-unknown-linux-gnu", None) ?? panic(err.message)
+    jet_cli_perf_log_spans_read(capture, path, "fib.jet", 0, sampled.timed)
+    assert(!perf_test_files.exists(path))
+    assert_eq(capture.spans[capture.spans.len() - 1].start_ns, Val(U64{1293}))
+    json: String.from_bytes(canonical_json_bytes(capture.receipts[capture.receipts.len() - 1].value)) ?? panic("the section is UTF-8")
+    assert(json.contains(`"sampled":[{"end_ns":4293,"line":5,"name":"solve","samples":2,"start_ns":1293}]`))
+    assert(json.contains(`{"count":1,"lines":[{"line":5,"samples":2}],"longest_ns":3000,"name":"solve","samples":2,"total_ns":3000}`))
 }
 
 #Test("a heap snapshot's blocks count by their line and by the type their innermost typed allocating call names") {

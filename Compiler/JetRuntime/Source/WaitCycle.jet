@@ -364,7 +364,10 @@ wait_cycle_site: fn() -> I64 {
 
 // Stops the running task with the deadlock delivered to it: adds its own
 // line's site, waits until every task of the cycle has added its own, then
-// publishes the whole cycle as a panic (a root's ends the process).
+// publishes the whole cycle as a panic (a root's ends the process). When
+// the cycle holds the root, whose stop ends the process, each other task of
+// it first waits for that stop's dump (PerfSamples.jet perf_flight_await),
+// so an observed run's dump holds every task of the cycle where it waited.
 wait_cycle_stop: fn(control: I64) {
     record: sync_load(wrapping(control + I64{184}))
     length: sync_load(wrapping(record + I64{8}))
@@ -384,6 +387,9 @@ wait_cycle_stop: fn(control: I64) {
             _ := sync_wait(remaining, left, I64{-1})
             left = sync_load(remaining)
         }
+    }
+    if (!scheduler_control_is_root(control) && wait_cycle_holds_root(record)) {
+        perf_flight_await()
     }
     message: jet_rt_string_builder_new()
     // A joiner reads a failed task's reason as its first line unless the
@@ -411,6 +417,17 @@ wait_cycle_stop: fn(control: I64) {
     wait_cycle_release(record)
     jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
     jet_rt_string_drop(message)
+}
+
+// Whether a task of the cycle `record` is the root.
+wait_cycle_holds_root: fn(record: I64) -> Bool {
+    length: sync_load(wrapping(record + I64{8}))
+    at := I64{0}
+    loop at < length {
+        if scheduler_control_is_root(sync_load(wait_cycle_entry(record, at))) -> return true
+        at += I64{1}
+    }
+    false
 }
 
 wait_cycle_release: fn(record: I64) {

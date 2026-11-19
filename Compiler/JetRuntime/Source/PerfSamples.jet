@@ -2893,14 +2893,14 @@ perf_cfi_sort: fn(table: I64, count: I64) {
 // a sample outside the image's code keeps no callers, and one taken while
 // other handlers hold every buffer is its program counter alone. A
 // CPU-time sample's record in a buffer ends in its time, the handler's
-// start on the monotonic clock zones are timed on, and its task as a zone's
-// row names it (perf_zone_row), so the session counts each sample in the
-// zones of its task that hold it (PERF_SAMPLES_TIMED). A timer's SIGPROF
-// stands for its own period and each the kernel folded into it while it was
-// pending (perf_samples_periods), so its record is written once for each,
-// as many samples as the CPU time it covers gives. A write the kernel
-// refuses loses that one sample; O_APPEND puts each record after the last.
-// Under a
+// start on the process-relative monotonic clock zones are timed on, and its
+// task as a zone's row names it (perf_zone_row), so the session counts each
+// sample in the zones of its task that hold it (PERF_SAMPLES_TIMED). A
+// timer's SIGPROF stands for its own period and each the kernel folded into
+// it while it was pending (perf_samples_periods), so its record is written
+// once for each, as many samples as the CPU time it covers gives. A write
+// the kernel refuses loses that one sample; O_APPEND puts each record after
+// the last. Under a
 // precise source (perf_precise_choose) a SIGPROF reports its sampler's
 // ring instead, and the record is written once for each sample the ring
 // holds, by the program counter the sample names, under the callers its
@@ -3014,7 +3014,11 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         }
     }
     if (timed) {
-        rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), began)
+        // Its time from the process epoch, the clock zones, waits and log
+        // spans are timed on (time_host_monotonic_i64); before that epoch is
+        // set no zone has opened, so -1 lies before every one.
+        epoch: time_host_epoch_ns()
+        rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), if (epoch == I64{0}) -> I64{-1} else -> wrapping(began - epoch))
         rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{2}) * I64{8})), if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task())
         count = wrapping(count + PERF_SAMPLES_TIMED)
     }
@@ -3235,6 +3239,10 @@ PERF_FLIGHT_CAPTURE_SIGNAL: I64{62}
 
 // How long the dump waits for the captured threads' rows: 200ms.
 PERF_FLIGHT_CAPTURE_NS: I64{200000000}
+
+// How long a deadlocked task waits for the root's dump (perf_flight_await):
+// 10s.
+PERF_FLIGHT_HOLD_NS: I64{10000000000}
 
 // The most reachable memory one dump holds, 32 MiB: past it a reached
 // range is cut off (perf_flight_reach).
@@ -3515,6 +3523,9 @@ perf_flight_dump: fn() {
     // callee-saved registers from here (the frames' call frame rules).
     // Without the capture, its rip, rsp and rbp as its caller resumes.
     stop: wrapping(text + PERF_FLIGHT_STOP_AT)
+    // What the captured threads and the held tasks (perf_flight_await) wait
+    // on: PERF_FLIGHT_RELEASED once the dump is written or can't be.
+    release: wrapping(text + PERF_FLIGHT_RELEASE_AT)
     process: perf_flight_syscall(I64{39}, I64{0}, I64{0}, I64{0})
     me: thread_tid()
     sync_store(wrapping(text + PERF_FLIGHT_SELF_AT), me)
@@ -3533,6 +3544,8 @@ perf_flight_dump: fn() {
     fd: perf_flight_dump_open(state, text, words)
     if (fd < I64{0}) {
         if (scrub != I64{0}) { _ := coll_call1(scrub, I64{0}) }
+        sync_store(release, PERF_FLIGHT_RELEASED)
+        sync_futex_wake(release, I64{2147483647})
         return
     }
     image: perf_samples_image
@@ -3564,7 +3577,6 @@ perf_flight_dump: fn() {
     }
     if (scrub != I64{0}) { _ := coll_call1(scrub, I64{0}) }
     _ := perf_flight_syscall(I64{3}, fd, I64{0}, I64{0})
-    release: wrapping(text + PERF_FLIGHT_RELEASE_AT)
     sync_store(release, PERF_FLIGHT_RELEASED)
     sync_futex_wake(release, I64{2147483647})
     perf_flight_rotate(state, text)
@@ -3573,6 +3585,29 @@ perf_flight_dump: fn() {
     _ := perf_flight_syscall(I64{1}, I64{2}, text, perf_flight_length(text))
     newline: rt_static_text("\n")
     _ := perf_flight_syscall(I64{1}, I64{2}, rt_text_data(newline), rt_text_len(newline))
+}
+
+// A task of a deadlock whose cycle holds the root (WaitCycle.jet
+// wait_cycle_stop), under the flight recorder: it waits where it waited
+// until the root's stop has written its dump, so the dump holds its stack,
+// its frames and their locals as the deadlock left them, not the task's
+// unwinding. It blocks its thread on the futex, a fiber's carrier too, so
+// the dump captures it as a running thread (perf_flight_capture), and the
+// dump's futex wake, which takes no lock, lets it go on to its own stop
+// while the root's cleanup runs. Should no dump come within
+// PERF_FLIGHT_HOLD_NS, it goes on all the same.
+perf_flight_await: fn() {
+    state: perf_flight_state
+    if (state == I64{0}) {
+        return
+    }
+    release: wrapping(wrapping(state + PERF_FLIGHT_TEXT_AT) + PERF_FLIGHT_RELEASE_AT)
+    deadline: sync_deadline(PERF_FLIGHT_HOLD_NS)
+    loop sync_load(release) != PERF_FLIGHT_RELEASED {
+        if (sync_futex_wait(release, sync_load(release), deadline) == I64{-110}) {
+            return
+        }
+    }
 }
 
 // The dump's task rows (PERF_FLIGHT_SECTION_TASKS): the stopping thread's

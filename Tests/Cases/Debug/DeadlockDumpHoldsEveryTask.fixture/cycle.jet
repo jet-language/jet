@@ -1,0 +1,26 @@
+// Three tasks wait on each other: the root receives from b, a from the
+// root, and b from a, so no send ever comes.
+Order: struct {
+    id: Int,
+    label: String,
+}
+
+link: fn(name: String, input: Receiver<Int>, out: Sender<Int>) -> Int {
+    order: Order{id: name.len() + 6, label: "{name}-order"}
+    items: [Int]{1, 2, 3}
+    n: input.receive() ?? 0
+    out.send(n + order.id + items.len())
+    n
+}
+
+run: fn() {
+    { sender: to_a, receiver: from_root }: channel<Int>(1)
+    { sender: to_b, receiver: from_a }: channel<Int>(1)
+    { sender: to_root, receiver: from_b }: channel<Int>(1)
+    a: task link("alpha", from_root, to_b)
+    b: task link("beta", from_a, to_root)
+    count: 3
+    got: from_b.receive() ?? 0
+    to_a.send(got + count)
+    print("total {(a.join() ?? 0) + (b.join() ?? 0)}")
+}
