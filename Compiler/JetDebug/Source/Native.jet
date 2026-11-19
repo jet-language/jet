@@ -5247,7 +5247,8 @@ native_line_source: fn(dir: String, file: String) -> String Never! {
 // A task the runtime's registry lists (JetRuntime Observe.jet): its id, its
 // label, its state (NATIVE_DEBUG_TASK_RUNNING and the rest; -1 for the main
 // thread's task when the registry has none), what it waits on, whether it
-// is canceled, and the fiber it runs on (0: none).
+// is canceled, the fiber it runs on (0: none) and its control (Scheduler.jet
+// Control216; 0: none).
 NativeTask: struct {
     id: Int,
     label: String,
@@ -5255,6 +5256,7 @@ NativeTask: struct {
     wait: String,
     canceled: Bool,
     fiber: Int,
+    control: Int{0},
 }
 
 // A thread of the stopped program as `tasks` matches it to a task: its id,
@@ -5268,20 +5270,26 @@ NativeTaskThread: struct {
 }
 
 // The tasks the runtime's registry lists, newest first, from the address of
-// its root's storage (`root`; 0: the program has none). At most
-// NATIVE_DEBUG_MOST_TASKS, so a list a stopped thread was changing ends.
+// its root's storage (`root`; 0: the program has none).
 native_tasks: fn(memory: NativeMemory, root: Int) -> [NativeTask] Never! {
+    if root == 0 -> return [NativeTask]{}
+    registry: native_debug_read(memory, root, 8, 1) ?? return [NativeTask]{}
+    native_registry_tasks(memory, registry[0])
+}
+
+// The tasks the registry whose root is at `registry` lists (0: none), newest
+// first. At most NATIVE_DEBUG_MOST_TASKS, so a list a stopped thread was
+// changing ends.
+native_registry_tasks: fn(memory: NativeMemory, registry: Int) -> [NativeTask] Never! {
     tasks := [NativeTask]{}
-    if root == 0 -> return tasks
-    registry: native_debug_read(memory, root, 8, 1) ?? return tasks
-    if registry[0] == 0 -> return tasks
-    head: native_debug_read(memory, registry[0] + NATIVE_DEBUG_REGISTRY_TASKS, 8, 1) ?? return tasks
+    if registry == 0 -> return tasks
+    head: native_debug_read(memory, registry + NATIVE_DEBUG_REGISTRY_TASKS, 8, 1) ?? return tasks
     node := head[0]
     loop node != 0 && tasks.len() < NATIVE_DEBUG_MOST_TASKS {
         words: native_debug_read(memory, node, 8, NATIVE_DEBUG_TASK_WORDS) ?? break
         label: if words[4] == 0 -> "" else -> native_debug_text(words[4], memory, false) ?? ""
         wait: if words[6] == 0 -> "" else -> native_debug_text(words[6], memory, false) ?? ""
-        tasks.push(NativeTask{id: words[1], label: label, state: words[5], wait: wait, canceled: words[9] != 0, fiber: words[14]})
+        tasks.push(NativeTask{id: words[1], label: label, state: words[5], wait: wait, canceled: words[9] != 0, fiber: words[14], control: words[10]})
         node = words[0]
     }
     tasks

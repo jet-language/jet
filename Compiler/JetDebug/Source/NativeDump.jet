@@ -2,18 +2,18 @@
 // ends the process (JetRuntime PerfSamples.jet perf_flight_dump), opened as
 // a session that never runs. Its words: NATIVE_DUMP_MAGIC, the version, the
 // pid, the Unix time, the load bias, the stopped thread's rip, rsp and rbp
-// where it captured itself (or as its caller resumes), its tid and the
-// image's byte count; the image itself, padded to a word; then sections of
-// [kind, address, bytes] each padded to a word: the flight ring's records,
-// every task's registers, a range of the memory the stop reaches (every
-// thread's and task's stack, the globals, and what their words point to,
-// within the dump's budget), the ranges reached but cut off past that
-// budget, and the end. The
-// image's loaded segments stand for the code and read-only data the dump
-// does not copy, so `bt`, `locals` and `print` read the stop, or the task
-// `task N` selects, as they read a live one, a value cut off showing as
-// NATIVE_DEBUG_CUT_OFF; `tasks` lists every task, and `events` lists the
-// ring.
+// where it captured itself (or as its caller resumes), its tid, the image's
+// byte count and the task registry's root (JetRuntime Observe.jet
+// observe_root; 0: none); the image itself, padded to a word; then sections
+// of [kind, address, bytes] each padded to a word: the flight ring's
+// records, every task's registers, a range of the memory the stop reaches
+// (every thread's and task's stack, the globals, and what their words point
+// to, within the dump's budget), the ranges reached but cut off past that
+// budget, and the end. The image's loaded segments stand for the code and
+// read-only data the dump does not copy, so `bt`, `locals` and `print` read
+// the stop, or the task `task N` selects, as they read a live one, a value
+// cut off showing as NATIVE_DEBUG_CUT_OFF; `tasks` lists every task, each a
+// deadlock held with its wait, and `events` lists the ring.
 use {
     native_dump_files: core.files
     jet_backend.[X64DebugEncoding, X64Trace, X64_TRACE_RBP, X64_TRACE_RIP, X64_TRACE_RSP]
@@ -22,10 +22,10 @@ use {
 // "JETDUMP1", the dump's first word.
 NATIVE_DUMP_MAGIC: 3553425134609253706
 
-NATIVE_DUMP_VERSION: 3
+NATIVE_DUMP_VERSION: 4
 
 // The words before the image.
-NATIVE_DUMP_HEADER: 10
+NATIVE_DUMP_HEADER: 11
 
 // The kernel's register count, as x64_trace_registers reads it.
 NATIVE_DUMP_REGISTERS: 27
@@ -81,10 +81,12 @@ NATIVE_DUMP_REDACTED: "<redacted>"
 
 NATIVE_DUMP_HELP: "Commands: backtrace (bt), frame N, locals, print NAME (p NAME), tasks, task N, events [--last N], help (h), quit (q)"
 
-// A dump's tasks, the stopped one first, and its memory, with the image's.
+// A dump's tasks, the stopped one first, its memory, with the image's, and
+// the address of its task registry's root (0: none).
 NativeDump: struct {
     tasks: [NativeDumpTask],
     memory: NativeMemory,
+    registry: Int,
 }
 
 // One task of a dump: its id (0: a thread outside every task, the stop's
@@ -141,6 +143,7 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     image: native_image_read(elf) ?? return Err(NativeDebugError{detail: "the program of `{path}` has no Jet debug information"})
     // A dump's frames open as the image's code opens them.
     openings: native_openings(image, native_elf_codes(elf, ".text"))
+    registry: native_dump_word(bytes, 80)
     // Each memory section is a span of the dump's bytes, which back them.
     blocks := [NativeBlock]{}
     cut := [NativeCut]{}
@@ -192,9 +195,45 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     pid: native_dump_word(bytes, 16)
     seconds: native_dump_word(bytes, 24)
     records: bytes.len() - native_dump_pad(length) - memory
-    dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: bytes.move(), cut: cut}}
+    dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: bytes.move(), cut: cut}, registry: registry}
     session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0}
     Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds, image: length, memory: memory, records: records, budget: budget, cut_off: cut_off})
+}
+
+// A Control's delivered deadlock record (JetRuntime WaitCycle.jet
+// waitCycle184), and the record's words: its task count at 8, then from
+// 24 each task's [control, line, site].
+NATIVE_DUMP_WAIT_CYCLE: 184
+
+NATIVE_DUMP_CYCLE_COUNT: 8
+
+NATIVE_DUMP_CYCLE_ENTRIES: 24
+
+NATIVE_DUMP_CYCLE_ENTRY: 24
+
+// The wait each task a deadlock stop held was in, by task id, as the stop's
+// diagnostic says it (`waits to receive from a channel only task 1 sends
+// on`): the line of the cycle record delivered to its control, past the
+// task's name. The tasks are those the registry whose root is `registry`
+// lists; a stop that was no deadlock has none.
+native_dump_waits: fn(memory: NativeMemory, registry: Int) -> [Int:String] Never! {
+    waits := [Int:String]{}
+    loop task in native_registry_tasks(memory, registry) {
+        if task.control == 0 -> next
+        delivered: native_debug_read(memory, task.control + NATIVE_DUMP_WAIT_CYCLE, 8, 1) ?? next
+        record: delivered[0]
+        if record == 0 -> next
+        count: native_debug_read(memory, record + NATIVE_DUMP_CYCLE_COUNT, 8, 1) ?? next
+        entries: if count[0] < NATIVE_DEBUG_MOST_TASKS -> count[0] else -> NATIVE_DEBUG_MOST_TASKS
+        loop at in 0..<entries {
+            entry: native_debug_read(memory, record + NATIVE_DUMP_CYCLE_ENTRIES + at * NATIVE_DUMP_CYCLE_ENTRY, 8, 2) ?? break
+            if entry[0] != task.control -> next
+            line: native_debug_text(entry[1], memory, false) ?? break
+            if line.contains("  ") -> waits[task.id] = line.after("  ")
+            break
+        }
+    }
+    waits
 }
 
 // The little-endian word at `at`.
@@ -245,8 +284,10 @@ native_dump_known: fn(dump: NativeDump, index: Int) -> [Bool] Never! {
     known
 }
 
-// How a task's registers were had, as `tasks` shows it.
-native_dump_task_state: fn(task: NativeDumpTask) -> String Never! {
+// How a task's registers were had, as `tasks` shows it, or for a task a
+// deadlock held, its wait among `waits` (native_dump_waits).
+native_dump_task_state: fn(task: NativeDumpTask, waits: [Int:String]) -> String Never! {
+    if task.how != NATIVE_DUMP_TASK_STOPPED && waits.get(task.id) == .Val(wait) -> return wait
     if task.how == {
         NATIVE_DUMP_TASK_STOPPED -> "stopped"
         NATIVE_DUMP_TASK_RUNNING -> "running"

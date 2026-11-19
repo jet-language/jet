@@ -2,10 +2,12 @@
 # from the root and task 3 from task 2. The runtime stops the cycle, and the
 # root's stop ends the process. Under `jet run --observe` that stop writes a
 # typed dump. The other two tasks wait for it where they waited, so the dump
-# holds every task's whole stack. `jet debug` lists the three tasks and
-# shows each one's frames and typed locals: Jet type names and values, with a
-# Task shown as its task and a channel endpoint as its channel, never as an
-# address. This holds at -O0 and at -O2. A plain `jet run` keeps no flight
+# holds every task's whole stack. `jet debug` lists the three tasks, each
+# held one with the wait the stop's trace names, and shows each one's frames
+# and typed locals: Jet type names and values, with a Task shown as its task
+# and a channel endpoint as its channel, never as an address. The dump holds
+# every page it reaches whole, so a block on a page a frame chain led into is
+# there too. This holds at -O0 and at -O2. A plain `jet run` keeps no flight
 # recorder (D-OBSERVE-FLIGHT1=B): it prints the cycle and writes no dump.
 requires: os-name:linux
 fixture: DeadlockDumpHoldsEveryTask.fixture
@@ -31,6 +33,9 @@ stdout: ~ "* task 1  stopped  in run() at cycle.jet:23" # `tasks`: the root, sel
 stdout: ~ "  task 2  " # and the two others, held where they waited
 stdout: ~ "  task 3  " # task 3 too
 stdout: ~ "in link() at cycle.jet:11" # at their own receive
+stdout: ~ "  task 2  waits to receive from a channel only task 1 sends on  in link() at cycle.jet:11" # a held task shows its wait, as the stop's trace says it
+stdout: ~ "  task 3  waits to receive from a channel only task 1 and task 2 send on  in link()" # task 3's own wait
+stdout: !~ "  running  in link()" # a held task never shows as running
 stdout: ~ "a: Task<Int> = task 2" # the root's locals: a Task is its task
 stdout: ~ "b: Task<Int> = task 3" # the other task
 stdout: ~ "count: Int = 3" # an Int as before
@@ -61,6 +66,8 @@ stdout: ~ "* task 1  stopped  in run() at cycle.jet:23" # the root, selected
 stdout: ~ "  task 2  " # and the two others, held where they waited
 stdout: ~ "  task 3  " # task 3 too
 stdout: ~ "link() at cycle.jet:11" # at their own receive
+stdout: ~ "  task 2  waits to receive from a channel only task 1 sends on" # the wait at -O2 too
+stdout: !~ "  running  in link()" # never as running
 stdout: ~ "a: Task<Int> = task 2" # an optimized frame's Task is its task too
 stdout: ~ "b: Task<Int> = task 3" # the other task
 stdout: ~ "name: String = \"alpha\"" # task 2's typed locals

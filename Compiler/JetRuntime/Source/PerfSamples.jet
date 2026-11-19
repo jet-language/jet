@@ -3413,7 +3413,7 @@ PERF_FLIGHT_ZEROS: I64{1024}
 // "JETDUMP1", the dump's first word, then its version.
 PERF_FLIGHT_MAGIC: I64{3553425134609253706}
 
-PERF_FLIGHT_VERSION: I64{3}
+PERF_FLIGHT_VERSION: I64{4}
 
 // The kinds of the dump's sections after its image, each [kind, address,
 // bytes] and the bytes padded to a word: a range of reachable memory, the
@@ -3726,8 +3726,10 @@ perf_flight_image_bytes: fn(image: I64) -> I64 {
 // PERF_FLIGHT_MAGIC, PERF_FLIGHT_VERSION, the pid, the Unix time, the load
 // bias, the stopping thread's rip, rsp and rbp, where it captured itself in
 // this frame (perf_flight_capture) or else as its caller resumes, its
-// tid, and the image's byte count; then the image, so the dump needs no
-// other file; then the sections: the ring, every task's registers
+// tid, the image's byte count and the task registry's root (Observe.jet
+// observe_root), whose tasks name their controls and so the wait a
+// deadlock held each in; then the image, so the dump needs no other file;
+// then the sections: the ring, every task's registers
 // (perf_flight_tasks), the memory the stop reaches from every thread's and
 // task's stack and the globals within PERF_FLIGHT_DUMP_BUDGET, and the
 // ranges cut off past it (perf_flight_reach). The other
@@ -3791,7 +3793,8 @@ perf_flight_dump: fn() {
     rt_text_store(wrapping(words + I64{56}), rt_text_word(wrapping(stop + I64{32})))
     rt_text_store(wrapping(words + I64{64}), me)
     rt_text_store(wrapping(words + I64{72}), length)
-    good := perf_flight_bytes(fd, zeros, words, I64{80})
+    rt_text_store(wrapping(words + I64{80}), observe_root)
+    good := perf_flight_bytes(fd, zeros, words, I64{88})
     if (good) {
         good = perf_flight_redacted(fd, state, zeros, image, length, false) && perf_flight_bytes(fd, zeros, zeros, wrapping(I64{0} - length) & I64{7})
     }
@@ -4173,20 +4176,20 @@ perf_flight_number: fn(scratch: I64, length: I64, at: I64, into: I64) {
 }
 
 // The memory the dump holds: what the stop can reach, within
-// PERF_FLIGHT_DUMP_BUDGET. The roots are each task row's stack, from its
-// rsp less the red zone to the end of its mapping, and each mapping its
-// frame-pointer chain reaches (a deeper stack segment's bridge frame names
-// the one it grew from: StackSegment.jet), then the image's writable
-// segments, its globals. Each range held is written as a memory section
-// and every aligned word in it that points into a writable mapping of
-// /proc/self/maps reaches more: the pointer's page (a small block never
+// PERF_FLIGHT_DUMP_BUDGET. The roots are each task row's stack, from the
+// page of its rsp less the red zone to the end of its mapping, and each
+// mapping its frame-pointer chain reaches (a deeper stack segment's bridge
+// frame names the one it grew from: StackSegment.jet), then the image's
+// writable segments, its globals. Each range held is written as a memory
+// section and every aligned word in it that points into a writable mapping
+// of /proc/self/maps reaches more: the pointer's page (a small block never
 // crosses one: Alloc.jet), or a large block's whole mapping when the two
 // words before the pointer name the mapping that starts on its page. Ranges
-// are held page by page in the order they are reached, each page once;
-// past the budget the rest of a reached range is cut off and listed in the
-// cut section, so `jet debug` shows a value there as cut off. The walk is
-// conservative, a superset of what the program's typed pointers reach: the
-// stop cannot read the image's types without allocating.
+// are held whole pages at a time in the order they are reached, each page
+// once; past the budget the rest of a reached range is cut off and listed
+// in the cut section, so `jet debug` shows a value there as cut off. The
+// walk is conservative, a superset of what the program's typed pointers
+// reach: the stop cannot read the image's types without allocating.
 perf_flight_reach: fn(fd: I64, state: I64, words: I64, zeros: I64) -> Bool {
     walk: wrapping(state + PERF_FLIGHT_WALK_AT)
     image: perf_samples_image
@@ -4308,7 +4311,7 @@ perf_flight_span_bound: fn(state: I64, index: I64, end: Bool) -> I64 {
 // The stack of a task row whose registers are `rsp` and `rbp`: from rsp
 // less the red zone to its mapping's end, then each mapping the frame
 // pointers lead to that the walk does not hold yet, from that frame to the
-// mapping's end.
+// mapping's end, each from its page's start (perf_flight_take).
 perf_flight_stack: fn(state: I64, rsp: I64, rbp: I64) {
     span: perf_flight_span(state, rsp)
     if (span < I64{0}) {
@@ -4405,10 +4408,14 @@ perf_flight_follow: fn(state: I64, value: I64) {
 
 // Hold [start, end) page by page in the walk's order, skipping each page it
 // holds already: each run of new pages, while the budget has a page left,
-// goes on the queue; once it has none, the rest is cut off.
+// goes on the queue; once it has none, the rest is cut off. A page is held
+// whole, from its start even when `start` is past it: a pointer into the
+// page finds it held and reaches no more of it (perf_flight_follow), as a
+// frame chain's last word may name a heap block another block shares a
+// page with.
 perf_flight_take: fn(state: I64, start: I64, end: I64) {
     walk: wrapping(state + PERF_FLIGHT_WALK_AT)
-    at := start
+    at := start & PERF_FLIGHT_PAGE_MASK
     loop at < end {
         run := at
         loop run < end {
