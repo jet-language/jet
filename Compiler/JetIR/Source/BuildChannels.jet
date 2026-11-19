@@ -19,6 +19,89 @@ ir_channel_row: fn(m: &IRModule, ty: Type, endpoint: String) -> Int Never! {
     ir_intern_type(m, type_carrier_identity(ty), ir_owned_layout(IRTypeKind.Pointer, ty, "jet_rt_native_{atom}_drop", "jet_rt_native_{atom}_clone"))
 }
 
+// How deep ir_carries_sender looks into a type before it answers yes.
+IR_SENDER_DEPTH: 16
+
+// Whether a value of type row `row` may hold a Sender, which the runtime's
+// sender ledger (Channel.jet) cannot follow when the value reaches another
+// task: the Sender itself, a member, element or payload that may, a function
+// value or a trait value (either may capture one) and any other owned handle
+// but a String, a Receiver or a Task. A Task's result leaves a finished task,
+// whose ledger rows no armed wait can name, so it is followed by none.
+ir_carries_sender: fn(m: &IRModule, p: IRProgram, row: Int, depth: Int) -> Bool Never! {
+    if depth > IR_SENDER_DEPTH -> return true
+    ty: ir_untag(m.types[row].ty)
+    if ir_channel_element(ty, "Sender") != None -> return true
+    if m.types[row].clone == ir_closure_share() || ir_trait_row(m, row) -> return true
+    kind: m.types[row].kind
+    if kind == .Aggregate {
+        if ir_buffer_element(m, p, row) == .Val(element) {
+            return ir_carries_sender(m, p, element, depth + 1)
+        }
+        members: ir_inline_members(m, p, row) ?? return true
+        loop member in members {
+            if ir_carries_sender(m, p, member.ty, depth + 1) -> return true
+        }
+        return false
+    }
+    if kind != .Pointer || m.types[row].drop == "" || ty == .String -> return false
+    if ir_channel_element(ty, "Receiver") != None || ir_task_element(ty) != None -> return false
+    if ty == .Option(inner) -> return ir_type_carries_sender(m, p, inner, depth + 1)
+    if ty == .Shared(inner) -> return ir_type_carries_sender(m, p, inner, depth + 1)
+    if ty == .Result(ok, err) {
+        return ir_type_carries_sender(m, p, ok, depth + 1) || ir_type_carries_sender(m, p, err, depth + 1)
+    }
+    definition: ir_enum_def(m, p, row) ?? return true
+    if p.types[definition].kind == .Enum(variants, _) {
+        args: ir_type_args(ty)
+        loop index in 0..<variants.len() {
+            members: ir_variant_members(m, p, definition, args, index) ?? return true
+            loop member in members {
+                if ir_carries_sender(m, p, member.ty, depth + 1) -> return true
+            }
+        }
+        return false
+    }
+    true
+}
+
+ir_type_carries_sender: fn(m: &IRModule, p: IRProgram, ty: Type, depth: Int) -> Bool Never! {
+    row: ir_value_type(m, p, ty) ?? return true
+    ir_carries_sender(m, p, row, depth)
+}
+
+// Marks the running task as one whose Senders the ledger no longer follows
+// (Channel.jet jet_rt_native_sender_leak) when a value of type `ty` leaves it
+// for another task here.
+ir_sender_leak: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type) Never! {
+    if ir_type_carries_sender(m, p, ty, 0) {
+        _: ir_runtime(m, b, "jet_rt_native_sender_leak", [Int]{}, -1)
+    }
+}
+
+// The Senders among a new closure box's captures, for the runtime's sender
+// ledger: a Sender a task body owns is handed to the task, whose body takes
+// it as it starts (ir_build_lambda). Any other capture that may hold one, of
+// a task body or of a lambda that escapes, leaves the running task's Senders
+// unfollowed (jet_rt_native_sender_leak).
+ir_hand_senders: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, boxed: Int, captures: [IRCaptureSlot]) Never! {
+    leaks := false
+    loop capture in captures {
+        if ir_sender_owned(m, capture) {
+            pointer_row: ir_pointer_row(m)
+            handle: ir_temp(m, b, pointer_row)
+            ir_emit(b.f, IROp.Load, handle, boxed, capture.offset, -1, b.line)
+            _: ir_runtime(m, b, "jet_rt_native_sender_pass", [Int]{handle}, -1)
+        } else if !leaks && ir_carries_sender(m, p, capture.row, 0) { leaks = true }
+    }
+    if leaks -> _: ir_runtime(m, b, "jet_rt_native_sender_leak", [Int]{}, -1)
+}
+
+// Whether `capture` is a Sender a task body owns.
+ir_sender_owned: fn(m: IRModule, capture: IRCaptureSlot) -> Bool Never! {
+    capture.body_owned && ir_channel_element(m.types[capture.row].ty, "Sender") != None
+}
+
 // `channel<T>()` / `channel_bounded<T>(capacity)`: both endpoints of one
 // runtime channel, written into the result tuple; the bound crosses as its
 // exact Int.
@@ -88,6 +171,7 @@ ir_timer_after: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, result_ty: Type, a
     slot: ir_lazy_value_slot(m, b, owned)
     meta: ir_lazy_meta(m, p, b, element, span)
     if meta < 0 -> return -1
+    ir_sender_leak(m, p, b, element)
     receiver: ir_runtime(m, b, "after_value", [Int]{nanoseconds, slot, meta}, row)
     ir_release(m, b, nanoseconds)
     receiver
@@ -168,6 +252,7 @@ ir_channel_method: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, recei
             slot: ir_lazy_value_slot(m, b, owned)
             meta: ir_lazy_meta(m, p, b, element, span)
             if meta < 0 -> return Val(-1)
+            ir_sender_leak(m, p, b, element)
             // The runtime answers 1 when the channel took the value, the
             // Result's selector. On 0 it kept nothing, and the value comes
             // back as the error's `value` (as ir_task_outcome).

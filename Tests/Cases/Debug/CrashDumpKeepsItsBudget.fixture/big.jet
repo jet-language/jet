@@ -1,0 +1,15 @@
+// Three lists of two million Ints, 48 MB in all, that the stop reaches
+// through `chunks`: more than a dump's 32 MiB budget holds.
+check: fn(chunks: [[Int]]) {
+    total: chunks.len()
+    if total == 3 -> panic("stopped with {total} chunks")
+}
+
+chunk: fn(part: Int) -> [Int] {
+    loop k in 0..<2000000 -> part * 2000000 + k
+}
+
+run: fn() {
+    chunks: loop part in 0..<3 -> chunk(part)
+    check(chunks)
+}

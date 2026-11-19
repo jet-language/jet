@@ -482,8 +482,21 @@ NativeSession: struct {
         Ok(cell)
     }
 
-    // The value of `text` in the selected frame.
+    // The value of `text` in the selected frame. A local's own name reads as
+    // `locals` shows it, its DebugView included: reading a value runs no
+    // code, so a dump and an inlined frame answer it too, and the local's
+    // type need not be one a compiled function can take (`[Int String!]`).
     evaluate: fn(&self, text: String) -> NativeEvalValue NativeEvalRefused! {
+        name: text.trim()
+        if native_eval_is_name(name) {
+            shown: self.locals() ?? return Err(native_eval_refused(err.detail))
+            loop local in shown {
+                if local.name != name || local.value == NATIVE_DEBUG_UNAVAILABLE -> next
+                truth: local.type_name == "Bool" && local.value == "true"
+                said: "{local.value}"
+                return Ok(NativeEvalValue{shown: local.value, type_name: local.type_name, text: said, truth: truth})
+            }
+        }
         if self.dump != None {
             return Err(native_eval_refused("a dump runs no code; `locals` shows the values it holds"))
         }
@@ -3206,6 +3219,10 @@ NATIVE_DEBUG_BREAKPOINT_HIT: "Breakpoint hit"
 // The value shown for a local the image's debug information cannot show.
 NATIVE_DEBUG_UNAVAILABLE: "<Unavailable>"
 
+// The value shown for one whose bytes a dump cut off past its memory
+// budget.
+NATIVE_DEBUG_CUT_OFF: "<cut off>"
+
 // The deepest run of runtime frames a step finishes out of before it lets the
 // program continue.
 NATIVE_DEBUG_RUNTIME_DEPTH: 16
@@ -3468,11 +3485,13 @@ native_debug_condition_place: fn(condition: String, refusal: String) -> String N
 // Bytes a readout may read: the stopped program's memory, when there is a
 // program, and `blocks` (each its bytes from its address) before it.
 // `backing` holds the bytes of the blocks that name a span of it (a dump's
-// sections), so they share one buffer.
+// sections), so they share one buffer. `cut` lists the ranges a dump
+// reached but left out past its memory budget.
 NativeMemory: struct {
     trace: X64Trace?,
     blocks: [NativeBlock],
     backing: [U8]{[U8]{}},
+    cut: [NativeCut]{[NativeCut]{}},
 }
 
 // Known bytes from `address`: `bytes`, or with `from` 0 or more the `size`
@@ -3482,6 +3501,21 @@ NativeBlock: struct {
     bytes: [U8],
     from: Int{-1},
     size: Int{0},
+}
+
+// The `size` bytes from `address` that a dump cut off.
+NativeCut: struct {
+    address: Int,
+    size: Int,
+}
+
+// Whether any of the `count` bytes from `address` lies in a range the dump
+// cut off.
+native_debug_cut: fn(memory: NativeMemory, address: Int, count: Int) -> Bool Never! {
+    loop cut in memory.cut {
+        if address < cut.address + cut.size && address + count > cut.address -> return true
+    }
+    false
 }
 
 // The parameters and locals live at `lookup` in `frame` that belong to the
@@ -3911,7 +3945,7 @@ native_render: fn(image: NativeImage, memory: NativeMemory, ty: Int, bytes: [U8]
             // one its address.
             size: native_type_size(image, found.target)
             if found.target < 0 || word == 0 || size <= 0 -> return Val(native_debug_hex(word))
-            pointed: native_debug_bytes(memory, word, size) ?? return Val(native_debug_hex(word))
+            pointed: native_debug_bytes(memory, word, size) ?? return Val(if native_debug_cut(memory, word, size) -> NATIVE_DEBUG_CUT_OFF else -> native_debug_hex(word))
             native_render(image, memory, found.target, pointed, 0, depth + 1)
         }
         found.tag == NATIVE_TAG_STRUCT && found.variants >= 0 -> native_debug_variant(image, memory, image.variants[found.variants], bytes, at, depth)
@@ -4029,7 +4063,7 @@ native_debug_list: fn(image: NativeImage, memory: NativeMemory, members: [Native
     size: native_type_size(image, element)
     if data == 0 || size <= 0 -> return None
     shown: if length > NATIVE_DEBUG_SHOWN_ITEMS -> NATIVE_DEBUG_SHOWN_ITEMS else -> length
-    stored: native_debug_bytes(memory, data, size * shown) ?? return None
+    stored: native_debug_bytes(memory, data, size * shown) ?? return if native_debug_cut(memory, data, size * shown) -> Val(NATIVE_DEBUG_CUT_OFF) else -> None
     items := [String]{}
     loop k in 0..<shown {
         items.push(native_render(image, memory, element, stored, k * size, depth + 1) ?? NATIVE_DEBUG_UNAVAILABLE)
@@ -4082,11 +4116,11 @@ native_debug_string: fn(address: Int, memory: NativeMemory) -> String? Never! {
 // `quoted`, else as its own text: its first NATIVE_DEBUG_SHOWN_BYTES bytes,
 // then its length when it has more.
 native_debug_text: fn(address: Int, memory: NativeMemory, quoted: Bool) -> String? Never! {
-    header: native_debug_read(memory, address, 8, 2) ?? return None
+    header: native_debug_read(memory, address, 8, 2) ?? return if native_debug_cut(memory, address, 16) -> Val(NATIVE_DEBUG_CUT_OFF) else -> None
     length: header[1]
     if length < 0 -> return None
     shown: if length > NATIVE_DEBUG_SHOWN_BYTES -> NATIVE_DEBUG_SHOWN_BYTES else -> length
-    bytes: if shown == 0 -> [U8]{} else -> native_debug_bytes(memory, header[0], shown) ?? return None
+    bytes: if shown == 0 -> [U8]{} else -> native_debug_bytes(memory, header[0], shown) ?? return if native_debug_cut(memory, header[0], shown) -> Val(NATIVE_DEBUG_CUT_OFF) else -> None
     lossy: String.from_bytes_lossy(bytes)
     text: if quoted -> native_debug_text_literal(lossy) else -> lossy
     if length > shown -> return Val("{text}… ({length} bytes)")

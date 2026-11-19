@@ -1,0 +1,18 @@
+# `print` of a call that can fail shows what the call returned, as `locals`
+# shows a fallible result: `Ok` with the value, or `Err` with the error,
+# whether the function declares its failure or the compiler finds it. A
+# condition that can fail is no Bool, so a breakpoint refuses it. The program
+# then runs on unchanged.
+fixture: PrintAFallibleCallShowsOkOrErr.fixture
+env: NO_COLOR=1
+env: PATH={work}/no-tools
+step: jet debug prog.jet
+stdin: print_a_fallible_call_shows_ok_or_err.stdin
+exit: 0
+stdout: ~ "Breakpoint hit  prog.jet:22  in run()" # both locals are bound by the print line
+stdout: ~ "(Jet) print parse(word)\nparse(word) = Ok(3)\n" # a declared failure that did not happen
+stdout: ~ "(Jet) print parse(blank)\nparse(blank) = Err(ParseError.Empty)\n" # the error the call returned
+stdout: ~ "(Jet) print loose(word) + 1\nloose(word) + 1 = Ok(4)\n" # a failure the compiler found, in a larger expression
+stdout: ~ "Can't use the condition: `parse(word) > 1` is a " # a condition that can fail
+stdout: ~ ", not a Bool\n" # is refused as no Bool
+stdout: ~ "3 0\nProgram finished\n" # the evaluations left the program's run unchanged

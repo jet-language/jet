@@ -4686,8 +4686,9 @@ cancellation can bound a wait; neither makes a deadlock successful.
 
 The runtime stops the wait cycles it can see (D-DBG-DEADLOCK1=A). A task
 that blocks with no deadline outside a shield records what it waits for: a
-joined task, or the task holding the edit permit of a `Shared<T>` it reads or
-edits. When the last task of a cycle of such waits blocks, every task in the
+joined task, the task holding the edit permit of a `Shared<T>` it reads or
+edits, or every task holding a `Sender` of the empty channel it receives
+from. When the last task of a cycle of such waits blocks, every task in the
 cycle fails as a panicking task fails: its join returns `.Panicked` with one
 report, and its scope unwinds. Tasks outside the cycle run on; if the main
 task is in the cycle, the program stops (exit 70). The report names each
@@ -4699,8 +4700,23 @@ deadlock: tasks wait on each other
   task 2  waits to edit a Shared value task 1 holds  main.jet:10
 ```
 
-Waits on channels, on read permits, on writers queued ahead, and on a
-`Condition` are not yet part of a cycle, so a cycle through one still hangs.
+A cycle through channels, two tasks that each wait for the other's word while
+the task that started them joins the first, reads:
+
+```text
+deadlock: tasks wait on each other
+  task 3  waits to join task 4  pair.jet:22
+  task 4  waits to receive from a channel only task 3 and task 5 send on  pair.jet:11
+  task 5  waits to receive from a channel only task 3 and task 4 send on  pair.jet:11
+```
+
+The runtime counts which task holds each `Sender`: where it is made, cloned,
+dropped and moved into a task. A receive names no holder, so a cycle through
+it still hangs, once a `Sender` may have left its task another way: in a sent
+value, in a capture of a closure that outlives the call or of a task that
+borrows it, or in a `Shared<T>` that may hold one. Waits on read permits, on
+writers queued ahead, on a full channel, in a `select` and on a `Condition`
+are not part of a cycle either.
 
 See [channel buffering](#bounded-buffering-law) and
 [concurrency boundary safety](architecture.md#concurrency-boundary-safety).

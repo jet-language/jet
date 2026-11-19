@@ -1,0 +1,30 @@
+# A dump holds the memory the stop reaches, not every writable page, and at
+# most its budget of it: 32 MiB by default (PerfSamples.jet
+# PERF_FLIGHT_DUMP_BUDGET). The program stops with three 16 MB lists
+# reachable, so the dump holds the image and its records beside at most
+# 32 MiB of memory, and lists what it reached past the budget as cut off.
+# `jet debug` names the budget and shows a kept list's first items and a
+# list it cut off as `<cut off>`, never as bytes it does not have. Which
+# list is cut off follows the order the walk reaches them, so the case
+# asserts that one is, not which.
+requires: os-name:linux
+fixture: CrashDumpKeepsItsBudget.fixture
+env: NO_COLOR=1
+step: jet build big.jet
+exit: 0
+capture: image = size file .jet/build/big
+step: jet run --observe big.jet
+exit: nonzero
+stderr: ~ "stopped with 3 chunks" # the panic's own report
+stderr: ~ "dump written: " # and where its dump went
+capture: dump = sole-entry .jet/dumps ext = "jetdump"
+file: {cap:dump} size <= {cap:image}+35651584 # the image, 32 MiB of memory and under 2 MiB of records, not the 48 MB of lists
+step: jet debug {cap:dump}
+stdin: crash_dump_keeps_its_budget.stdin
+exit: 0
+stdout: ~ "Dump of process " # a dump, not a live process
+stdout: ~ "within the 33554432-byte budget; " # the budget it kept to
+stdout: !~ "; 0 bytes cut off past it" # and the bytes it cut off past it
+stdout: ~ "Stopped  big.jet:5  in check()" # the stopping line
+stdout: ~ "… 1999984 more]" # a list the dump holds shows its first items
+stdout: ~ "<cut off>" # a list it cut off says so

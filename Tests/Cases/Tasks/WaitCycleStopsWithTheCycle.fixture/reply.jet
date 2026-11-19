@@ -1,0 +1,32 @@
+// Each request carries the Sender its answer goes back on. While the client
+// waits for an answer it may look like the only holder of the answers'
+// Senders, but the request it sent holds one too, which the server sends on
+// once it takes the request: that wait is no cycle, and both run to the end.
+
+Request: struct {
+    value: Int,
+    reply: Sender<Int>,
+}
+
+// Answers every request with twice its value until the requests close.
+serve: fn(requests: Receiver<Request>) -> Int {
+    served := 0
+    loop request in requests {
+        request.reply.send(request.value * 2) ?? return served
+        served += 1
+    }
+    served
+}
+
+run: fn() {
+    { sender: requests, receiver: inbox }: channel<Request>()
+    { sender: replies, receiver: answers }: channel<Int>()
+    server: task serve(inbox)
+    loop at in 0..<3 {
+        // copy: the request carries its own Sender of the answers.
+        requests.send(Request{value: at + 1, reply: replies.copy()}) ?? panic("the server is gone")
+        print("answer: {answers.receive() ?? -1}")
+    }
+    requests.close()
+    print("served: {server.join() ?? 0}")
+}

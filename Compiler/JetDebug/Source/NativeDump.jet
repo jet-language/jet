@@ -5,11 +5,14 @@
 // as its caller resumes, its tid and the image's byte count; the image
 // itself, padded to a word; then sections of [kind, address, bytes] each
 // padded to a word: the flight ring's records, every task's registers, a
-// writable memory segment (every thread's and task's stack among them),
-// and the end. The image's loaded segments stand for the code and
-// read-only data the dump does not copy, so `bt`, `locals` and `print` read
-// the stop, or the task `task N` selects, as they read a live one, `tasks`
-// lists every task, and `events` lists the ring.
+// range of the memory the stop reaches (every thread's and task's stack,
+// the globals, and what their words point to, within the dump's budget),
+// the ranges reached but cut off past that budget, and the end. The
+// image's loaded segments stand for the code and read-only data the dump
+// does not copy, so `bt`, `locals` and `print` read the stop, or the task
+// `task N` selects, as they read a live one, a value cut off showing as
+// NATIVE_DEBUG_CUT_OFF; `tasks` lists every task, and `events` lists the
+// ring.
 use {
     native_dump_files: core.files
     jet_backend.[X64DebugEncoding, X64Trace, X64_TRACE_RBP, X64_TRACE_RIP, X64_TRACE_RSP]
@@ -18,7 +21,7 @@ use {
 // "JETDUMP1", the dump's first word.
 NATIVE_DUMP_MAGIC: 3553425134609253706
 
-NATIVE_DUMP_VERSION: 1
+NATIVE_DUMP_VERSION: 2
 
 // The words before the image.
 NATIVE_DUMP_HEADER: 10
@@ -33,6 +36,10 @@ NATIVE_DUMP_SECTION_MEMORY: 1
 NATIVE_DUMP_SECTION_RING: 2
 
 NATIVE_DUMP_SECTION_TASKS: 3
+
+// The cut section: the budget, the bytes the dump holds and the bytes it
+// cut off, its row count, then each cut range's [address, bytes].
+NATIVE_DUMP_SECTION_CUT: 4
 
 // A task row's words: its task's id, how its registers were had, its rip,
 // rsp and rbp, and its thread's tid (0 for a parked task's).
@@ -83,13 +90,17 @@ NativeDumpTask: struct {
     tid: Int,
 }
 
-// An opened dump: its session, the flight ring's records, and the pid and
-// Unix time of its stop.
+// An opened dump: its session, the flight ring's records, the pid and Unix
+// time of its stop, and its memory budget, the bytes of reached memory it
+// holds and the bytes it cut off past the budget.
 NativeDumpOpened: struct {
     session: NativeSession,
     ring: [U8],
     pid: Int,
     seconds: Int,
+    budget: Int,
+    held: Int,
+    cut_off: Int,
 }
 
 // Open the dump at `path`.
@@ -114,8 +125,12 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     openings: native_openings(image, native_elf_code(elf))
     // Each memory section is a span of the dump's bytes, which back them.
     blocks := [NativeBlock]{}
+    cut := [NativeCut]{}
     ring_at := 0
     ring_size := 0
+    budget := 0
+    held := 0
+    cut_off := 0
     tasks := [NativeDumpTask]{}
     at := header + native_dump_pad(length)
     loop at + 24 <= bytes.len() {
@@ -132,6 +147,16 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
             ring_size = size
         }
         if kind == NATIVE_DUMP_SECTION_TASKS -> native_dump_tasks(tasks, bytes, at, size)
+        if kind == NATIVE_DUMP_SECTION_CUT && size >= 32 {
+            budget = native_dump_word(bytes, at)
+            held = native_dump_word(bytes, at + 8)
+            cut_off = native_dump_word(bytes, at + 16)
+            row := at + 32
+            loop row + 16 <= at + size {
+                cut.push(NativeCut{address: native_dump_word(bytes, row), size: native_dump_word(bytes, row + 8)})
+                row += 16
+            }
+        }
         at += native_dump_pad(size)
     }
     // The dump's own segments come first, so a writable one's bytes are
@@ -145,9 +170,9 @@ native_dump_open: fn(path: String) -[FS.Read]> NativeDumpOpened NativeDebugError
     ring: loop k in ring_at..<ring_at + ring_size -> bytes[k]
     pid: native_dump_word(bytes, 16)
     seconds: native_dump_word(bytes, 24)
-    dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: bytes.move()}}
+    dump: NativeDump{tasks: tasks, memory: NativeMemory{trace: None, blocks: blocks, backing: bytes.move(), cut: cut}}
     session: NativeSession{binary: path, image: image, trace: X64Trace{pid: -1, scratch: 0, failure: ""}, output_path: "", output_read: 0, started: true, threads: [NativeThread]{}, observe_root: 0, breakpoints: [NativeBreakpoint]{}, rules: [Int:NativeRule]{}, numbered: 0, sites: [Int:Int]{}, selected: 0, watches: [NativeWatch]{}, watched: "", notes: "", openings: openings, dump: Val(dump), task: 0}
-    Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds})
+    Ok(NativeDumpOpened{session: session, ring: ring, pid: pid, seconds: seconds, budget: budget, held: held, cut_off: cut_off})
 }
 
 // The little-endian word at `at`.

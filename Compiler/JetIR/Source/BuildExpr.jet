@@ -8493,6 +8493,7 @@ ir_lambda_box: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, ty: Type, lambda: B
             if lambda.capture_facts.escapes -> ir_move_stored(m, p, b, slot.row, boxed, slot.offset)
         }
     }
+    if task_body || lambda.capture_facts.escapes -> ir_hand_senders(m, p, b, boxed, captures)
     id: ir_lambda_function(m, b, lambda, captures, task_body)
     pointer_row: ir_pointer_row(m)
     code: ir_temp(m, b, pointer_row)
@@ -8610,6 +8611,11 @@ ir_build_lambda: fn(m: &IRModule, p: IRProgram, b: &IRBuilder, job: IRLambdaJob)
             // parameter: its scope end closes and drops what the body did
             // not move on.
             value: ir_load_at(m, b, env, capture.offset, capture.row)
+            // A Sender the spawner handed over (ir_hand_senders) becomes
+            // the task's in the runtime's sender ledger.
+            if ir_sender_owned(m, capture) {
+                _: ir_runtime(m, b, "jet_rt_native_sender_take", [Int]{value}, -1)
+            }
             b.bindings.push(IRBinding{name: capture.name, slot: value, owned: ir_has_drop(m, b, value)})
             ir_close_arm(m, p, b, value, false, span)
         } else if capture.by_ref {

@@ -1,11 +1,12 @@
 // L8a scheduler: an OS worker runs each task to completion. A wait returns a
 // delivered stop word; no Jet frame unwinds. Linux synchronization is Sync.jet.
-// Control208: refs0 paused8 canceled16 attention24 status32 stop40 pending48
+// Control216: refs0 paused8 canceled16 attention24 status32 stop40 pending48
 // observe56 park64 mutex72 waiters80 callbacks88 inline96 scopeFlags104
 // requestedRootCode112 capture120 openGroups128 joinedReason136
 // joinedSite144 site152 waitKind160 waitTarget168 waitArmed176 waitCycle184
 // (WaitCycle.jet's deadlock stops) replayId192 replayOrdinal200
-// (RecordReplay.jet). StopCleanup's opaque token
+// (RecordReplay.jet) leaky208 (Channel.jet's sender ledger no longer counts
+// the task as a holder). StopCleanup's opaque token
 // owns old flags. openGroups heads the task groups the task has open
 // (TaskGroup.jet task_group_open), linked through each group and read under
 // mutex72. joinedReason and joinedSite are the reason and site of the last
@@ -1215,7 +1216,7 @@ scheduler_root := I64{0}
 
 SCHEDULER_ROOT_BYTES: I64{272}
 
-SCHEDULER_CONTROL_BYTES: I64{208}
+SCHEDULER_CONTROL_BYTES: I64{216}
 
 SCHEDULER_CARRIER_BYTES: I64{72}
 

@@ -174,13 +174,14 @@ run: fn() {
     print("{total} {box.items.len()}")
 }
 `
-    // A binding statement's node starts at its `:` or `:=`.
-    before_box: source.find(":= Box")
+    // A binding statement's node starts at its name, where a debugger's stop
+    // on its line asks.
+    at_box: source.find("box := Box")
     at_print: source.find(`print("{total}`)
     in_total: source.find(": xs.len()") + 1
     moved_at: source.find("xs}}")
     asks: [EvalProbeAsk]{
-        EvalProbeAsk{offset: before_box, texts: [String]{"total + 1", "xs.len() > 2", "helper(total)", "print(\"x\")"}},
+        EvalProbeAsk{offset: at_box, texts: [String]{"total + 1", "xs.len() > 2", "helper(total)", "print(\"x\")"}},
         EvalProbeAsk{offset: at_print, texts: [String]{"xs.len()", "total"}},
         EvalProbeAsk{offset: in_total, texts: [String]{"xs.len() + 1"}},
     }
@@ -318,6 +319,9 @@ run: fn() {
     if !sum.contains("box: Box") || !sum.contains("total: Int") || !sum.contains(`) -> Int {`) {
         failures.push("`box.items[1] + total` is not a function of `box` and `total` to Int:\n{sum}")
     }
+    // `first` declares no failure: its call is the failure solve's to settle,
+    // never a refusal of the probe, and so is the function's.
+    eval_probe_expect_value(probed, 0, 1, Type.Bool, true, failures)
     called: eval_probe_function_checks(source, probed, 0, 1, "box.first() > total", failures)
     if !called.contains(`) -> Bool {`) {
         failures.push("`box.first() > total` is not a function to Bool:\n{called}")
@@ -325,6 +329,48 @@ run: fn() {
     own: eval_probe_function_checks(source, probed, 1, 0, "self.items.len() * 2", failures)
     if !own.contains("jet_debug_self: Box") || !own.contains("jet_debug_self.items.len() * 2") {
         failures.push("`self` is not the parameter `jet_debug_self`:\n{own}")
+    }
+    eval_probe_report(failures)
+}
+
+// A call that can fail evaluates to its carrier: the function declares the
+// expression's success type and no failure, so the failure solve makes it
+// return `Ok(…)` or `Err(…)`, whether the callee declares its failure or
+// the solve finds it.
+#Test("eval_probe_function_of_a_fallible_call") {
+    failures := [String]{}
+    source: `#Error
+ParseError: enum {
+    Empty,
+    Bad,
+}
+
+parse: fn(s: String) -> Int ParseError! {
+    if s == "" -> return Err(ParseError.Empty)
+    s.len()
+}
+
+loose: fn(s: String) -> Int {
+    if s == "" -> return Err(.Empty)
+    s.len()
+}
+
+run: fn() {
+    word: "ab"
+    print("{word}")
+}
+`
+    texts: [String]{"parse(word)", "parse(word) + 1", "loose(word)"}
+    probed: eval_probe_run(source, [EvalProbeAsk]{EvalProbeAsk{offset: source.find(`print("{word}`), texts: texts}}, failures)
+    loop (expression, text) in texts {
+        answer: eval_probe_answer(probed, 0, expression, failures) ?? next
+        if !answer.complete || answer.refusals.len() > 0 {
+            failures.push("`{text}` was refused: {answer.refusals:Debug}")
+        }
+        function: eval_probe_function_checks(source, probed, 0, expression, text, failures)
+        if !function.contains(`(word: String) -> Int {`) {
+            failures.push("`{text}` is not a function of `word` to Int that declares no failure:\n{function}")
+        }
     }
     eval_probe_report(failures)
 }

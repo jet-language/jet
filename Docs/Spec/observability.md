@@ -562,29 +562,40 @@ writes a typed dump while the stopping stack is whole:
 `.jet/dumps/<program>-<UTC time>.jetdump` under the working directory, mode
 0600, `~<n>` after the time when a dump of the same second exists, of which
 the newest three stay. Stderr names it (`dump written: <path>`). The dump
-holds every task's registers, the program's writable memory (every thread's
-and task's stack among it), the flight ring, and the program's image, so it
-opens without the binary. The stopping thread's registers are its own; each
-other thread is interrupted by a real-time signal (62), records its task and
-registers, and waits until the dump is written, so its stack is the one its
-registers name; a parked or queued task's registers are the ones its last
-switch saved. A thread that does not answer within 200ms is left out. Every
-`core.crypto.Secret`'s bytes are zeroed before the write.
+holds every task's registers, the memory the stop reaches, the flight ring,
+and the program's image, so it opens without the binary. The memory starts
+from every thread's and task's stack and the program's globals and follows
+each word that points into the program's writable memory: to its page, or
+to a whole large block (a mapping of its own) at that block's start. The
+walk is conservative, so it holds at least what the typed pointers reach,
+without reading the image's types in the stop. It holds at most 32 MiB of
+that memory, in the order it reaches it; past that budget the rest is cut
+off, and the dump lists each range it cut off. The stopping thread's
+registers are its own; each other thread is interrupted by a real-time
+signal (62), records its task and registers, and waits until the dump is
+written, so its stack is the one its registers name; a parked or queued
+task's registers are the ones its last switch saved. A thread that does not
+answer within 200ms is left out. Every `core.crypto.Secret`'s bytes are
+zeroed before the write.
 
 `jet debug <file>.jetdump` opens a dump behind the `(Jet)` console: `Dump of
-process <pid>, <n> flight events`, then the innermost Jet frame of the stop
-(`Stopped  main.jet:9  in check()`), its source line and its locals. `bt`,
-`frame N`, `locals` and `print NAME` read the stop as a live session reads
-one, with typed locals; a `Secret` shows as `<redacted>`. `tasks` lists every
-task the dump holds, the selected one marked `*`, as `task <id>  stopped`,
-`running` or `parked`, then its innermost Jet frame and, when that frame is
-outside the program's source, the innermost one inside it (`task 3  parked
-in sleep() at time.jet:41, from run() at main.jet:14`); `task N` selects
-task N for `bt`, `frame`, `locals` and `print`. `events [--last N]` (20 by
-default) lists the ring's records, oldest first, each at the first Jet frame
-of its stack: `sample`, `spawn`, `wake`, `clock`, `wait` and `io`. A
-run-control command answers that a dump doesn't run.
-Tests/Cases/Debug/crash_dump_opens_typed.case is the worked example.
+process <pid>, <n> flight events`, then `Memory: <n> bytes held, within
+the 33554432-byte budget; <n> bytes cut off past it`, then the innermost Jet
+frame of the stop (`Stopped  main.jet:9  in check()`), its source line and
+its locals. `bt`, `frame N`, `locals` and `print NAME` read the stop as a
+live session reads one, with typed locals; a `Secret` shows as
+`<redacted>`, and a value whose bytes the dump cut off as `<cut off>`.
+`tasks` lists every task the dump holds, the selected one marked `*`, as
+`task <id>  stopped`, `running` or `parked`, then its innermost Jet frame
+and, when that frame is outside the program's source, the innermost one
+inside it (`task 3  parked in sleep() at time.jet:41, from run() at
+main.jet:14`); `task N` selects task N for `bt`, `frame`, `locals` and
+`print`. `events [--last N]` (20 by default) lists the ring's records,
+oldest first, each at the first Jet frame of its stack: `sample`, `spawn`,
+`wake`, `clock`, `wait` and `io`. A run-control command answers that a
+dump doesn't run. Tests/Cases/Debug/crash_dump_opens_typed.case is the
+worked example; Tests/Cases/Debug/crash_dump_keeps_its_budget.case shows
+the budget and a value cut off past it.
 
 ## Canonical devtools protocol
 
@@ -736,8 +747,12 @@ compiled expression is kept per line, column and text, so a condition compiles o
 and runs in a fork at each hit. The fork runs the program's own runtime, so
 a lock another thread held at the stop is never released there (code that
 takes it fails at the 2 s budget), and a function value runs the image's
-code. An expression reads at most 5 locals, and an inlined frame is not
-evaluated in. A dump runs no code: its `print` shows a local by its name.
+code. An expression that calls a function that can fail shows its result as
+`locals` shows a fallible result, `parse(s) = Ok(3)` or `Err(ParseError.Empty)`,
+so a condition that can fail is refused, not a Bool. An expression reads at
+most 5 locals, and an inlined frame is not evaluated in. A local's own name
+is no expression: `print total` shows the local as `locals` does, in an
+inlined frame and in a dump, and a dump runs no code.
 
 A watch on a place in memory takes the CPU's debug registers (at most 4,
 each an aligned 1, 2, 4 or 8 bytes), so the program runs at full speed

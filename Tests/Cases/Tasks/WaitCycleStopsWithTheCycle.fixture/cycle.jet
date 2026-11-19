@@ -1,0 +1,47 @@
+use time: core.time
+
+// `left` and `right` each wait for a word from the other before they answer,
+// so neither can go on, and the task that started them waits to join `left`
+// while it keeps a Sender of each inbox. When the last of the three blocks,
+// all three stop with one deadlock that names them, their waits and their
+// lines, while a ticker outside the cycle finishes its count.
+
+// Waits for a word on `inbox`, then answers on `outbox`.
+answer: fn(inbox: Receiver<Int>, outbox: Sender<Int>) -> Int {
+    word: inbox.receive() ?? return -1
+    outbox.send(word + 1) ?? return -1
+    word
+}
+
+// Starts `left` and `right`, joins them, then closes its own Senders.
+pair: fn() -> String {
+    { sender: to_left, receiver: left_inbox }: channel<Int>()
+    { sender: to_right, receiver: right_inbox }: channel<Int>()
+    left: task answer(left_inbox, to_right)
+    right: task answer(right_inbox, to_left)
+    words: "{left.join() ?? -1} {right.join() ?? -1}"
+    to_left.close()
+    to_right.close()
+    words
+}
+
+// Counts to three, a tick every 100ms.
+ticker: fn() -[Time.Wait]> Int {
+    count := 0
+    loop _ in 0..<3 {
+        time.sleep(100ms)
+        count += 1
+    }
+    count
+}
+
+run: fn() {
+    worker: task ticker()
+    started: task pair()
+    if started.join() == {
+        .Ok(words) -> { print("pair: {words}") }
+        .Err(.Panicked(reason)) -> { print("pair: {reason}") }
+        .Err(_) -> print("pair: stopped")
+    }
+    print("ticker: {worker.join() ?? 0}")
+}

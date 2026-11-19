@@ -1,0 +1,29 @@
+# Tasks that wait on each other in a cycle through channels and joins stop
+# together instead of hanging: when the last of them blocks, each fails as a
+# panicking task fails, with one deadlock report naming every task of the
+# cycle, what it waits for and its line. A receive waits on every task that
+# holds one of the channel's Senders. Tasks outside the cycle run on, and a
+# cycle through the main task stops the program. A Sender that travels in a
+# request makes no cycle: the client waiting for the answer runs on.
+fixture: WaitCycleStopsWithTheCycle.fixture
+env: NO_COLOR=1
+step: jet run cycle.jet
+exit: 0
+stdout: ~ "pair: " # the task that started the cycle failed rather than finished
+stdout: ~ "deadlock: tasks wait on each other" # each task of the cycle stops with the deadlock
+stdout: ~ "task 3  waits to join task 4  " # the starter waits on `left`
+stdout: ~ "task 4  waits to receive from a channel only task 3 and task 5 send on  " # `left` waits on every holder of its inbox's Senders
+stdout: ~ "task 5  waits to receive from a channel only task 3 and task 4 send on  " # `right` too, closing the cycle
+stdout: ~ "cycle.jet:11" # each receive's line
+stdout: ~ "cycle.jet:22" # the join's line
+stdout: ~ "ticker: 3\n" # the task outside the cycle finished its count
+step: jet run alone.jet
+exit: 70
+stdout: = ""
+stderr: ~ "deadlock: tasks wait on each other" # the main task in a cycle stops the program
+stderr: ~ "task 1 (main)  waits to receive from a channel only task 1 sends on  " # main holds the only Sender it waits on
+stderr: ~ "alone.jet:7" # at its receive
+step: jet run reply.jet
+exit: 0
+stdout: = "answer: 2\nanswer: 4\nanswer: 6\nserved: 3\n"
+stderr: !~ "deadlock" # a Sender carried in a request is no cycle

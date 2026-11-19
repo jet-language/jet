@@ -13,7 +13,7 @@ use {
     jet_driver.[JetDriverCompileMode, JetDriverEvalAsk, JetDriverIceRow, jet_driver_check_failures, jet_driver_entry_root_path]
     jet_eval.[jet_eval_native_add, jet_eval_native_wrapper]
     jet_foundation.[BuildOptions, CompilerThreads, DeepChecks, deep_checks_flags, name_rows_get_text, type_name, type_unqualified_nominals]
-    jet_ir.[IRTypeKind, ir_eval_place_refusal, ir_module_new, ir_pointer_row, ir_x64_compile_module_logged, ir_x64_debug_program]
+    jet_ir.[IRTypeKind, ir_eval_place_refusal, ir_module_new, ir_pointer_row, ir_untag, ir_x64_compile_module_logged, ir_x64_debug_program]
     jet_sema.[SemaEvalProbeAnswer, sema_eval_probe_function, sema_eval_probe_parse]
 }
 
@@ -24,8 +24,9 @@ JET_CLI_DEBUG_EXPRESSION: "jet_debug_expression"
 // addresses (NativeEval.entry).
 JET_CLI_DEBUG_EVAL_ENTRY: "jet_debug_eval"
 
-// The prefix of the checker's refusals, which the console's own
-// `Can't evaluate` says already.
+// The prefix of the debugger's own refusals in the checker's answer, which
+// the console's `Can't evaluate` says already; the checker's other
+// refusals show as the compiler's.
 JET_CLI_DEBUG_EVAL_REFUSAL: "the debugger can't evaluate this: "
 
 // The evaluator of a session debugging the program whose entry file is
@@ -43,9 +44,10 @@ JetCLIDebugEvaluator: struct {
 }
 
 // The flags an evaluation's compile takes: the debug build's, -O0 and its
-// `deep_checks`.
+// `deep_checks`, with `dead_code: keep`: nothing in the program calls the
+// expression's function, which `remove` would drop unbuilt.
 jet_cli_debug_eval_argv: fn(deep_checks: DeepChecks) -> [String] Never! {
-    argv := [String]{"-O0"}
+    argv := [String]{"-O0", "--dead-code=keep"}
     loop word in deep_checks_flags(deep_checks) -> argv.push(word)
     argv
 }
@@ -154,7 +156,11 @@ jet_cli_debug_eval_compile: fn(entry: String, argv: [String], color: Bool, path:
             if result_row < 0 || program.types[result_row].kind == IRTypeKind.Unit {
                 return Err(jet_cli_debug_eval_refused("`{text}` has no value"))
             }
-            part: NativeEvalPart{name: type_name(type_unqualified_nominals(value)), size: program.types[result_row].size, inline: program.types[result_row].kind == IRTypeKind.Aggregate}
+            // A function the failure solve found can fail returns its
+            // carrier, which names the result: `Int ParseError!`.
+            carried: ir_untag(program.types[result_row].ty)
+            shown: if carried == .Result(_, _) -> carried else -> value
+            part: NativeEvalPart{name: type_name(type_unqualified_nominals(shown)), size: program.types[result_row].size, inline: program.types[result_row].kind == IRTypeKind.Aggregate, ty: result_row}
             pointer: ir_pointer_row(program)
             wrapper: jet_eval_native_wrapper(program, JET_CLI_DEBUG_EVAL_ENTRY, row, params, result_row, pointer, loads: true)
             at: jet_eval_native_add(program, wrapper)
@@ -205,7 +211,7 @@ jet_cli_debug_eval_answer: fn(entry: String, color: Bool, options: BuildOptions,
     answer: chosen ?? return Err(jet_cli_debug_eval_refused("no Jet function holds {path}:{line}"))
     if answer.refusals.len() > 0 {
         what: answer.refusals[0].what
-        shown: if what.starts_with(JET_CLI_DEBUG_EVAL_REFUSAL) -> what.slice(JET_CLI_DEBUG_EVAL_REFUSAL.len()..<what.len()) else -> what
+        shown: if what.starts_with(JET_CLI_DEBUG_EVAL_REFUSAL) -> what.slice(JET_CLI_DEBUG_EVAL_REFUSAL.len()..<what.len()) else -> "the compiler refused it: {what}"
         return Err(jet_cli_debug_eval_refused(shown))
     }
     if answer.value_type == None -> return Err(jet_cli_debug_eval_refused("`{text}` has no value"))
