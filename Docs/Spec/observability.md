@@ -843,9 +843,12 @@ D-DBG-VERBS1=A names the commands:
   its message at each hit, which stops the program each time.
 - `watch <place>` stops at each write that changes a local of the selected
   frame, a field path under one (`watch order.total`), or an item of a List
-  at a literal index (`watch xs[3]`, `watch order.lines[0]`). The stop
-  names the line that wrote it and shows `total: 0 -> 2`. A write that
-  leaves the value as it was runs on.
+  (`watch xs[3]`, `watch order.lines[i + 1]`). The compiler's parser reads
+  the place, as `print` reads its expression, so a malformed one is refused
+  with the parser's diagnostic. An index that is not a literal is evaluated
+  as `print` evaluates it, once, when the watch is set, and the watch stays
+  on that item. The stop names the line that wrote it and shows
+  `total: 0 -> 2`. A write that leaves the value as it was runs on.
 - `breaks` lists the breakpoints and watches by number, as `  2 break
   cart.jet:88 if total < 0` and `  3 watch total`; `delete <n>` removes one.
   A condition or logpoint that runs in the program adds how many of its
