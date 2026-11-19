@@ -2017,7 +2017,7 @@ sema_function_check_pass: fn(func: Func, owner_key: String, function_kind: TFunc
     body := [TStmt]{}
     if stand_in == None {
         // With no written return type the function returns
-        // nothing, so a value on its last line is lost (E0433). With a value
+        // nothing, so a value on its last line is lost (L0508). With a value
         // return (not a generator; written, or projected by the bundle failure
         // solve) the last line is the value handed back, and a table on the last
         // line hands back the value its arms end in. A `Never` function hands
@@ -2750,7 +2750,7 @@ sema_keep_going_stub: fn(func: Func, owner_id: SymbolID, function_kind: TFuncKin
 }
 
 // This rule reads a function with no written return type as losing the value
-// of its last line (E0433). A trap's `todo` is a stop, never a value handed
+// of its last line (L0508). A trap's `todo` is a stop, never a value handed
 // to nobody, so the trap's placeholder return position counts as written.
 sema_keep_going_trap_return_span: fn(func: Func) -> Span? Never! {
     if func.return_type_span == None -> Val(func.span) else -> func.return_type_span
@@ -11807,7 +11807,7 @@ sema_failure_recheck_modules: fn(graph: SemaRegistrationGraph, modules: [SemaGra
 // `is_result_carrier`, `plain_named_fn_value`). A module checked before the solve
 // projected `projected` takes it here: each projected function's checked signature
 // names the `T Never!` carrier, and a dropped call to one is a discarded result
-// (E0433). Its call sites keep the carrier they were checked against; lowering hands
+// (L0508). Its call sites keep the carrier they were checked against; lowering hands
 // a plain-return callee's value to any `Result` carrier a call site names.
 sema_failure_reconcile_infallible: fn(modules: &[SemaGraphModuleResult], projected: [String], symbols: SymbolTable) Never! {
     if projected.len() == 0 {

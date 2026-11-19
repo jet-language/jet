@@ -6152,7 +6152,7 @@ sema_effect_row_has_no_outcome: fn(node: SemaEffectNode, solved: [String]) -> Bo
 // The callee as written stands in for the call text (the Rust reference's
 // span covers the callee name, so its call text is that name).
 sema_effect_discarded_result_diagnostic: fn(node: SemaEffectNode, span: Span) -> Diagnostic {
-    diagnostic: sema_error("E0433", span, "the result of `{node.name}` is thrown away", "`{node.name}` is pure (it has no effects and changes nothing through `&`), so this line does nothing", "use the result, bind it with `result: {node.name}`, or write `.drop(\"reason\")` if dropping it is intended")
+    diagnostic: sema_lint("L0508", span, "the result of `{node.name}` is thrown away", "`{node.name}` is pure (it has no effects and changes nothing through `&`), so this line does nothing", "use the result, bind it with `result: {node.name}`, or write `.drop(\"reason\")` if dropping it is intended")
     diagnostic_with_source_derived_suggestion(diagnostic, Span{start: span.start, end: span.start}, "result: ")
 }
 
@@ -7084,7 +7084,7 @@ sema_effect_check_module_regions: fn(functions: [FnBody], module_row: SemaEffect
     sema_effect_publish_diagnostics(diagnostics, module_row.source_segments, region_diagnostics)
 }
 
-// A discarded call result of a function whose row has no outcome (E0433).
+// A discarded call result of a function whose row has no outcome (L0508).
 sema_effect_check_discarded: fn(call_facts: [SemaCallSiteFact], module_row: SemaEffectModuleInput, nodes: [SemaEffectNode], node_by_key: NameRows, symbols: SymbolTable, solved: [[String]], diagnostics: &[Diagnostic]) {
     discarded := [Diagnostic]{}
     loop fact in call_facts {

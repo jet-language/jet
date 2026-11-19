@@ -7263,26 +7263,19 @@ RetiredErrorTypeName: struct {
     }
 }
 
-ValueThrownAway: struct {
-    call: String,
-
+RetiredValueThrownAway: struct {
     impl Diagnostic {
         code: "E0433",
-        safety_class: .Opinion,
-        safety_reason: "Dropping the result would run safely, and Jet refuses it because a pure call whose result is dropped does nothing.",
-        meaning: "Value is thrown away (lost function tail or pure call result)",
-        detail: true,
-        fix_next: "Use the value, add the missing `-> T`, or write `.drop(\"reason\")` if dropping it is intended.",
+        status: .Retired,
+        no_fix: None,
 
-        what: fn(self) -> String { "The result of `{self.call}` is thrown away" }
+        what: fn(self) -> String { "*Retired* (was: a value thrown away, now the tidy error L0508)" }
 
         why: fn(self) -> String {
-            "A pure call (no effects, nothing passed with `&`) does nothing when its result is dropped; a function with no return type loses the value of its last line"
+            "A thrown-away value runs safely, so it is a tidy error that `jet check` and `jet build` list and `jet run` never stops on"
         }
 
-        fix: fn(self) -> String {
-            "For a pure call, use the result or bind it with `result: {self.call}`; for a last line, write `-> T` after the parameter list if the function should return it; write `.drop(\"reason\")` to discard on purpose"
-        }
+        fix: fn(self) -> String { "Follow the guidance for L0508" }
     }
 }
 
@@ -7850,22 +7843,27 @@ BranchArmTable: struct {
     }
 }
 
-ArrowLoopValueDrop: struct {
+ValueThrownAway: struct {
+    call: String,
+
     impl Diagnostic {
         code: "L0508",
         severity: .Lint,
-        status: .Retired,
-        no_fix: None,
+        tier: .Tidy,
+        lint_name: "discarded_pure_result",
+        meaning: "Value is thrown away (lost function tail or pure call result)",
+        detail: true,
+        fix_next: "Use the value, add the missing `-> T`, or write `.drop(\"reason\")` if dropping it is intended.",
 
-        what: fn(self) -> String {
-            "*Retired* (was: an arrow loop body computes and drops a non-unit value)"
-        }
+        what: fn(self) -> String { "The result of `{self.call}` is thrown away" }
 
         why: fn(self) -> String {
-            "The parser rejects a loop body value that nothing uses (E0003), so no dropped value reaches the lint"
+            "A pure call (no effects, nothing passed with `&`) does nothing when its result is dropped; a function with no return type loses the value of its last line"
         }
 
-        fix: fn(self) -> String { "Do not use L0508" }
+        fix: fn(self) -> String {
+            "For a pure call, use the result or bind it with `result: {self.call}`; for a last line, write `-> T` after the parameter list if the function should return it; write `.drop(\"reason\")` to discard on purpose"
+        }
     }
 }
 

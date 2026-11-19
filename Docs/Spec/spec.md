@@ -1579,7 +1579,7 @@ expected type fixes. With no expected type, omitted parameter annotations
 report **E0801** (S46).
 A lambda stored where no type is expected writes its result as a named
 function does (D-LAMBDA-STORED1=A). With no written result it returns nothing,
-so a value its body ends in is thrown away (**E0433**).
+so a value its body ends in is thrown away (tidy error **L0508**).
 A stored lambda keeps the failure contract proved by its own body, whether or
 not it writes a result. A body with no failure has a `Never` failure rail. A
 same-named file function cannot supply the local binding's call or failure
@@ -1943,17 +1943,22 @@ or bind it. The sole intentional-discard spelling is
 `.drop("reason")`; the reason is part of the source-level audit trail.
 (D-IGNORERET2, D-MARK-DISCARD1)
 
-Two other lost values are errors (E0433, D-DISCARD1=A). A statement that
-calls a pure function and ignores a non-Unit result does nothing: the call is
-pure when its solved effect row is empty, it cannot fail, and it passes
-nothing with `&`. Calls with effects or `&` arguments may still drop their
-result. The last line of a named function with no written return type is
-the other case: the function returns nothing, so a non-Unit value there is
-lost, and the fix is the missing `-> T` or `.drop("reason")`. Lambdas are
-unaffected, because their result type comes from the body. When a return type
-is written and the last line does not match it, E0113 reports the value's
-type or shape and names the conversion or wrap; the declared return type is
-the contract and is never the suggested fix.
+Two other lost values are tidy errors (L0508 `discarded_pure_result`,
+D-DISCARD1=A, D-NO-WARNINGS1=A): `jet check` and `jet build` list them and
+fail, and `jet run` and `jet dev` neither stop on them nor print them. A
+statement that calls a pure function and ignores a non-Unit result does
+nothing: the call is pure when its solved effect row is empty, it cannot
+fail, and it passes nothing with `&`. Calls with effects or `&` arguments may
+still drop their result, and an arrow loop body that is a Unit statement
+(`loop n in xs -> sum += n`) loses nothing. The last line of a named function
+with no written return type is the other case: the function returns nothing,
+so a non-Unit value there is lost, and the fix is the missing `-> T` or
+`.drop("reason")`. Lambdas passed where a function type is expected are
+unaffected, because their result type comes from that type or the body. A
+stored lambda follows the named-function rule (D-LAMBDA-STORED1=A). When a
+return type is written and the last line does not match it, E0113 reports
+the value's type or shape and names the conversion or wrap; the declared
+return type is the contract and is never the suggested fix.
 
 An infallible unit call written with no return arrow and `Never!` also has
 no result to lose: its checked `Result<Unit, Never>` carrier is classified by
