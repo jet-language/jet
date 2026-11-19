@@ -2,7 +2,10 @@
 # and plots record a moment, and a core.log span writes the same timeline:
 # under `jet perf run` each is a span row of the .jettrace, and `jet perf
 # view` totals each zone name, the frames' intervals and each plot's last
-# value. Outside a perf run the program prints the same on every tier.
+# value. Each zone holds the CPU-time samples its task took inside it: the
+# view names how many and the lines they were on, and its timeline shows
+# them on the zone rows. Outside a perf run the program prints the same on
+# every tier.
 fixture: ZonesFramesPlotsShareTheTimeline.fixture
 env: NO_COLOR=1
 step o0: jet run -A -O0 main.jet
@@ -33,3 +36,7 @@ stdout: ~ "zone physics count=5 " # one outer zone per frame
 stdout: ~ "frames count=5 " # one mark per frame
 stdout: ~ "plot moved count=5 last=" # one value per frame
 stdout: ~ "log spans count=1 " # the log span beside the zones
+stdout: ~ "zone solve count=5 samples=" # the solve zone holds samples
+stdout: !~ "zone solve count=5 samples=0 " # at least one
+stdout: ~ " · main.jet:14 " # most on the solve loop's line
+stdout: ~ "main.jet#solve · " # the timeline's solve rows show their samples

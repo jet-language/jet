@@ -79,6 +79,10 @@ PERF_SAMPLES_OVERRUNS: I64{1000}
 // of its innermost callers.
 PERF_SAMPLES_DEPTH: I64{1024}
 
+// The words a CPU-time sample's record ends with, when a record buffer
+// holds it (jet_rt_perf_samples_signal): its time and its task.
+PERF_SAMPLES_TIMED: I64{2}
+
 // A record's first word: the word count above bit 48, the address below.
 PERF_SAMPLES_ADDRESS_BITS: I64{48}
 
@@ -116,8 +120,6 @@ PERF_SAMPLES_IO: I64{11}
 // The kinds of a heap snapshot's records (perf_samples_heap): its mark,
 // then one per group of its live blocks, then the retention records
 // (perf_samples_heap_refs), one or more per live block and the roots'.
-// Kinds 7 and 8 are reserved: 8 for #6841 c47's zones and 7 for c55's
-// progress points.
 PERF_SAMPLES_HEAP_MARK: I64{10}
 
 PERF_SAMPLES_HEAP_SITE: I64{9}
@@ -725,13 +727,15 @@ perf_samples_put: fn(fd: I64, record: I64, head: I64, pc: I64, ring: I64, period
 // walked frame in the sampled function (its call frame information's
 // range); when none is, the sampled function returned before the signal
 // came, and the interrupted frame is its caller. A sample outside every
-// range keeps the interrupted frame's callers.
+// range keeps the interrupted frame's callers. A CPU-time sample's record
+// (kind 0) ends in PERF_SAMPLES_TIMED words, which are no callers.
 perf_samples_put_precise: fn(fd: I64, record: I64, head: I64, pc: I64, precise: I64) {
     if (record == I64{0}) {
         perf_samples_put_one(fd, I64{0}, head, precise)
         return
     }
-    count: (head >> PERF_SAMPLES_ADDRESS_BITS) & I64{2047}
+    trailer: if ((head >> PERF_SAMPLES_KIND_BITS) == I64{0}) -> PERF_SAMPLES_TIMED else -> I64{0}
+    count: wrapping(((head >> PERF_SAMPLES_ADDRESS_BITS) & I64{2047}) - trailer)
     rt_text_store(wrapping(record + I64{8}), pc)
     entry: perf_cfi_find(precise)
     at := I64{1}
@@ -2886,12 +2890,17 @@ perf_cfi_sort: fn(table: I64, count: I64) {
 // report's walk does (Fault.jet trace_frames). A frame neither can follow
 // ends the stack there. Each handler fills a record buffer of its own, with
 // its own scratch for the rules (perf_samples_claim, perf_samples_scratch);
-// a sample outside the image's code, or one taken while other handlers hold
-// every buffer, is its program counter alone. A timer's SIGPROF stands for
-// its own period and each the kernel folded into it while it was pending
-// (perf_samples_periods), so its record is written once for each, as many
-// samples as the CPU time it covers gives. A write the kernel refuses loses
-// that one sample; O_APPEND puts each record after the last. Under a
+// a sample outside the image's code keeps no callers, and one taken while
+// other handlers hold every buffer is its program counter alone. A
+// CPU-time sample's record in a buffer ends in its time, the handler's
+// start on the monotonic clock zones are timed on, and its task as a zone's
+// row names it (perf_zone_row), so the session counts each sample in the
+// zones of its task that hold it (PERF_SAMPLES_TIMED). A timer's SIGPROF
+// stands for its own period and each the kernel folded into it while it was
+// pending (perf_samples_periods), so its record is written once for each,
+// as many samples as the CPU time it covers gives. A write the kernel
+// refuses loses that one sample; O_APPEND puts each record after the last.
+// Under a
 // precise source (perf_precise_choose) a SIGPROF reports its sampler's
 // ring instead, and the record is written once for each sample the ring
 // holds, by the program counter the sample names, under the callers its
@@ -2934,7 +2943,10 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         perf_samples_charge(buffer, began)
         return I64{0}
     }
-    slot: if (buffer == I64{0} || !perf_samples_in_code(pc)) -> I64{0} else -> perf_samples_claim(buffer)
+    // A program counter outside the image's code keeps no callers, but a
+    // CPU-time sample's record still takes its time and task.
+    walked: perf_samples_in_code(pc)
+    slot: if (buffer == I64{0}) -> I64{0} else -> perf_samples_claim(buffer)
     periods: perf_samples_periods(signal, info)
     if (signal == PERF_SAMPLES_SIGNAL) { perf_causal_tick(pc, periods) }
     if (slot == I64{0}) {
@@ -2944,14 +2956,17 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         return I64{0}
     }
     // A precise sample's record leaves word 1 for the interrupted program
-    // counter (perf_samples_put_precise).
+    // counter (perf_samples_put_precise). A CPU-time sample's record ends in
+    // PERF_SAMPLES_TIMED words.
+    timed: kind == I64{0}
+    room: if (timed) -> wrapping(PERF_SAMPLES_DEPTH - PERF_SAMPLES_TIMED) else -> PERF_SAMPLES_DEPTH
     count := if (ring != I64{0}) -> I64{2} else -> I64{1}
     stack: rt_text_word(wrapping(context + I64{160}))
-    frame := rt_text_word(wrapping(context + I64{120}))
-    scratch: perf_samples_scratch(slot, buffer)
+    frame := if (walked) -> rt_text_word(wrapping(context + I64{120})) else -> I64{0}
+    scratch: if (walked) -> perf_samples_scratch(slot, buffer) else -> I64{0}
     sp := stack
     address := pc
-    loop scratch != (I64{0}) && count < PERF_SAMPLES_DEPTH {
+    loop scratch != (I64{0}) && count < room {
         entry: perf_cfi_find(address)
         if (entry == I64{0} || !perf_cfi_rule(scratch, rt_text_word(wrapping(entry + I64{16})), rt_text_word(entry), address)) {
             break
@@ -2985,7 +3000,7 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         address = site
     }
     if (frame < sp || wrapping(frame - stack) >= I64{16777216}) { frame = I64{0} }
-    loop count < PERF_SAMPLES_DEPTH {
+    loop count < room {
         if (frame == I64{0} || frame & I64{7} != I64{0}) { break }
         // frame is a [saved rbp][return address] pair of the interrupted
         // thread's chain: rbp of a frame that keeps it, or the saved rbp of
@@ -2997,6 +3012,11 @@ perf_cfi_sort: fn(table: I64, count: I64) {
         #Unsafe("each followed link ascends by less than 16 MiB or crosses a stack segment's bridge frame, so frame stays on the thread's chain") {
             frame = stack_frame_caller(frame)
         }
+    }
+    if (timed) {
+        rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{1}) * I64{8})), began)
+        rt_text_store(wrapping(slot + wrapping(wrapping(count + I64{2}) * I64{8})), if (scheduler_control_current() == I64{0}) -> I64{0} else -> observe_current_task())
+        count = wrapping(count + PERF_SAMPLES_TIMED)
     }
     perf_samples_put(fd, wrapping(slot + I64{8}), (count << PERF_SAMPLES_ADDRESS_BITS) | kind, pc, ring, periods)
     sync_store(slot, I64{0})

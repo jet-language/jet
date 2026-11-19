@@ -15,7 +15,10 @@ use {
         JetCLIPerfHeapSnapshot,
         JetCLIPerfInlines,
         JetCLIPerfObservation,
+        JetCLIPerfPlotTotal,
         JetCLIPerfRetained,
+        JetCLIPerfZoneSampled,
+        JetCLIPerfZoneTotal,
         jet_cli_perf_browser_decode,
         jet_cli_perf_capture_bytes,
         jet_cli_perf_capture_source,
@@ -28,6 +31,8 @@ use {
         jet_cli_perf_source,
         jet_cli_perf_source_position,
         jet_cli_perf_source_profile,
+        jet_cli_perf_timed_first,
+        jet_cli_perf_zones_section,
     ]
     jet_debug.[
         NATIVE_TAG_POINTER,
@@ -54,6 +59,7 @@ use {
         JetLiveValue,
         TraceHardware,
         TraceToolchain,
+        canonical_json_bytes,
         sha256_hex,
         verify_jettrace,
     ]
@@ -252,6 +258,60 @@ jet_cli_perf_test_words: fn(values: [Int]) -> [U8] Never! {
     assert_eq(profile.overhead_status, "measured")
     assert_eq(profile.overhead_ns, Val(U64{9000}))
     assert_eq(profile.overhead_reason, "the sampler took 9 microseconds, 0.22% of the 4000 microseconds of CPU time sampled: 6 in its handlers and 3 signals at the 1000 nanoseconds the kernel took to deliver and return from one as sampling started")
+}
+
+#Test("a CPU-time sample's record ends in its time and task, and a zone of that task holds the samples inside it") {
+    table: X64Jetline{table: [U8]{}, functions: [X64JetlineFunction]{X64JetlineFunction{low: 4096, high: 4352, name: "fib", file: "fib.jet", dir: "", decl: 5, rows: 0, rows_end: 0}}}
+    functions: [X64ImageFunction]{X64ImageFunction{start: 4096, size: 256, name: "fib.fib"}, X64ImageFunction{start: 12288, size: 16, name: "jet_rt_alloc"}}
+    two: 2 << 48
+    three: 3 << 48
+    four: 4 << 48
+    words: jet_cli_perf_test_words(
+        [Int]{
+            // In fib called from fib, at 2000 ns, of task 7.
+            4112 | four,
+            4160,
+            2000,
+            7,
+            // In fib with no stack, at 1000 ns, of task 7.
+            4112 | three,
+            1000,
+            7,
+            // In the runtime at 1500 ns: no line of the source.
+            12292 | three,
+            1500,
+            7,
+            // In fib at 5000 ns, of task 9.
+            4112 | three,
+            5000,
+            9,
+            // Two words and no more: a program counter and a caller, untimed.
+            4112 | two,
+            4160,
+        },
+    )
+    sampled: jet_cli_perf_samples_count(table, functions, JetCLIPerfInlines{functions: [Int:NativeFunction]{}, abstracts: [Int:NativeAbstract]{}}, [Bool]{true}, [U64]{}, [Int:Int]{}, [Int:String]{}, words, 0)
+    assert_eq(sampled.total, U64{5})
+    assert_eq(sampled.stackless, U64{2})
+    assert_eq(sampled.outside, U64{1})
+    assert_eq(sampled.timed.len(), 4)
+    assert_eq(sampled.timed[0].at_ns, 1000)
+    assert_eq(sampled.timed[0].line, 5)
+    assert_eq(sampled.timed[1].at_ns, 1500)
+    assert_eq(sampled.timed[1].line, 0)
+    assert_eq(sampled.timed[2].at_ns, 2000)
+    assert_eq(sampled.timed[2].task, 7)
+    assert_eq(sampled.timed[3].task, 9)
+    assert_eq(jet_cli_perf_timed_first(sampled.timed, 0), 0)
+    assert_eq(jet_cli_perf_timed_first(sampled.timed, 1500), 1)
+    assert_eq(jet_cli_perf_timed_first(sampled.timed, 1501), 2)
+    assert_eq(jet_cli_perf_timed_first(sampled.timed, 9000), 4)
+    zone: JetCLIPerfZoneTotal{name: "solve", count: 1, total: 3000, longest: 3000, samples: 3, lines: [Int:Int]{5: 2}}
+    section: jet_cli_perf_zones_section([JetCLIPerfZoneTotal]{zone}, [Int]{}, [JetCLIPerfPlotTotal]{}, [JetCLIPerfZoneSampled]{JetCLIPerfZoneSampled{name: "solve", start_ns: U64{0}, end_ns: U64{3000}, samples: 3, line: 5}}, "fib.jet")
+    json: String.from_bytes(canonical_json_bytes(section.value)) ?? panic("the section is UTF-8")
+    assert(json.contains(`"sampled":[{"end_ns":3000,"line":5,"name":"solve","samples":3,"start_ns":0}]`))
+    assert(json.contains(`"source":"fib.jet"`))
+    assert(json.contains(`{"count":1,"lines":[{"line":5,"samples":2}],"longest_ns":3000,"name":"solve","samples":3,"total_ns":3000}`))
 }
 
 #Test("a heap snapshot's blocks count by their line and by the type their innermost typed allocating call names") {
