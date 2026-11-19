@@ -66905,6 +66905,1339 @@
       "outcome": "A",
       "ratifiedAt": "2026-11-05",
       "retiredAt": "2026-11-19T01:12:18.630Z"
+    },
+    {
+      "id": "D-HOST-LEAF1",
+      "cardId": "c0w1wcfc",
+      "group": "stdlib",
+      "title": "Core declares the runtime functions it calls with a checked #Import(jet), bound only to the runtime's published #Export(jet) surface",
+      "situation": "Core calls runtime functions that no Jet source declares. Core/Time/Time.jet calls core.time.__sleep_ns(duration.ns), and only a row in Compiler/Prelude/Core.jet binds it to jet_std_time_sleep_duration_ns. Dev 97ec15f323 has 1057 such rows naming 575 runtime symbols. The runtime defines 3216 #Export(c) functions, so most exports are internals that Core never binds. The runtime side is typed Jet already: HostTime.jet:214 exports jet_std_time_sleep_duration_ns(nanos: I64). Packages bind C symbols with `#Import(c) name: fn(…) -> T = \"symbol\"`, a gated unsafe region. `#Import(jet)` does not parse today (E0081). Card #6151 needs one ratified, safe way for any package to declare such a leaf, so the compiler tables and module-name gates can go.",
+      "gist": "How does Jet source, Core included, declare a function the Jet runtime provides, so that the call is checked, safe and keeps its effects?",
+      "lesson": "A pairs the runtime's export with the package's import, using the marker Jet already has for foreign symbols. The runtime marks what it publishes `#Export(jet)` and writes the effects there. A package writes `#Import(jet) name: fn(…) -[Effects]> T = \"symbol\"`, and the compiler checks both signatures, effects included. A declaration can then neither drop an effect nor reach an internal runtime function. Internal functions stay `#Export(c)`, reachable only through `#Import(c)` inside `#Unsafe`. The cost is one cutover of 575 symbols and an export manifest inside jet.",
+      "explainer": "",
+      "story": "Core's sleep is ordinary Jet: `sleep: fn(duration: Duration) Never! -[Time.Wait]> { __sleep_ns(duration.ns) }`, and `__sleep_ns` is declared one line above it, not hidden in a compiler table. Mia writes a metrics package and wants the runtime's monotonic clock. She writes the same one-line import Core uses, the compiler checks it against what the runtime publishes, and her package's authority line must still grant Time. When she copies a symbol that the runtime keeps internal, the compiler refuses it and points at the published list.",
+      "inWild": "Rust binds foreign symbols in `extern` blocks renamed with #[link_name], and every call is `unsafe` (https://doc.rust-lang.org/reference/items/external-blocks.html). Zig's `extern fn` binds by name and trusts the declaration (https://ziglang.org/documentation/master/#extern). Swift's unofficial @_silgen_name binds a declaration to a runtime symbol without a check (https://github.com/swiftlang/swift/blob/main/docs/ReferenceGuides/UnderscoredAttributes.md). Go's //go:linkname let packages reach runtime internals, and Go 1.23 began restricting it because those internals could no longer change (https://go.dev/doc/go1.23#linker). None checks a declaration against the provider's signature.",
+      "detail": "WHAT VOTING A INCLUDES\n\n1. Runtime side. A runtime function published to Jet code is written `#Export(jet) symbol: fn(params) -[Effects]> T Failure! { … }`. `#Export(c)` stays for the C ABI and for internals. Published signatures obey a Jet-safe boundary law: typed handles, no raw pointers, no bare handle ids.\n\n2. Package side. A package writes `#Import(jet) name: fn(params) -[Effects]> T Failure! = \"symbol\"`, a bodiless declaration like `#Import(c)`. The symbol must be a published export. Types must match under the Int-to-I64 marshalling law. Effects and failure must be identical. Each mismatch is one registered diagnostic with a UI snapshot (#6151 c3).\n\n3. Calls. A call needs no `#Unsafe`. Its effects come from the declaration, so the package's authority must grant them. `jet inspect` shows the same effects for a Core call and a user call (c33). Visibility is ordinary: a `__` name is module-private (c5, c6).\n\n4. Internals. An unpublished runtime symbol is reachable only as `#Import(c)` inside `#Unsafe(\"reason\")`. That is today's expert path, with its sentry and ratchet row. Core uses it for handle internals as vetted standard-library code (I1).\n\n5. Manifest. jet generates the export manifest when it builds its runtime pack, embeds it, and ships it with each release. A chain drift check compares it with the runtime sources. The web tier links the same published symbols from the shared runtime (I9). A target that cannot provide an export reports it through the existing target-capability rule.\n\n6. Cutover. The 575 bound symbols move to `#Export(jet)`, with effects taken from today's Core wrappers. Each dispatcher row becomes an `#Import(jet)` declaration in its Core module. The dispatcher tables and member-keyed Route*.jet tables are deleted (c11). Core and user leaves lower to one IR call shape (c12).\n\nNEW SPELLINGS (I7). The marker argument `jet` on `#Import` and `#Export`. Both markers and the `= \"symbol\"` form already exist.\n\nREVIEW FINDINGS. The draft let a declaration choose its own effects, which bypasses authority; A now checks effects against the export. The draft let any package bind any of 3216 exports; A now publishes a deliberate surface. Measured counts replaced the draft's estimate of 2,000 rows. Option D was added.\n\nLIMITS. Runtime-side effects are asserted by vetted runtime code, not proved. Web provision of every published export is required by I9 but not yet measured.",
+      "options": [
+        {
+          "key": "A",
+          "name": "#Import(jet) bound to the runtime's published #Export(jet) surface, checked (recommended)",
+          "detail": "The runtime marks what it publishes and writes the effects there; packages import by symbol with the same marker they use for C. The compiler checks types, effects and failure on both sides. Internal runtime functions stay #Export(c), reachable only through #Import(c) inside #Unsafe.",
+          "technical": "New marker argument `jet` on #Import/#Export. Parser: `#Import(jet)` takes the `= \"symbol\"` body like `#Import(c)`. Sema: a manifest of #Export(jet) signatures (generated with the runtime pack, embedded in jet) checks each import; calls carry the declaration's effects. Codegen: one foreign-call IR shape for every leaf.",
+          "code": "// Compiler/JetRuntime/Source/HostTime.jet (the runtime publishes it)\n#Export(jet) jet_std_time_sleep_duration_ns: fn(nanos: I64) -[Time.Wait]> { … }\n\n// Core/Time/Time.jet (or any package)\n#Import(jet) __sleep_ns: fn(nanos: Int) -[Time.Wait]> = \"jet_std_time_sleep_duration_ns\"\n\nsleep: fn(duration: Duration) Never! -[Time.Wait]> {\n    __sleep_ns(duration.ns)\n}\n\n// Dropping the effect, or naming an internal symbol, is a compile error:\n// #Import(jet) nap: fn(nanos: Int) = \"jet_std_time_sleep_duration_ns\"   // effect row differs from the export\n// #Import(jet) free: fn(id: Int) = \"jet_rt_handle_release\"              // not a published #Export(jet)"
+        },
+        {
+          "key": "B",
+          "name": "A separate #Host marker, with the same checks",
+          "detail": "`#Host(\"symbol\") name: fn(…) -[Effects]> T` declares a runtime leaf; the runtime still publishes with #Export(jet) or a matching #Hosted marker. Checks and safety as in A.",
+          "technical": "A new registered marker with its own parser rule, formatter rule and sema path beside #Import.",
+          "code": "#Host(\"jet_std_time_sleep_duration_ns\") __sleep_ns: fn(nanos: Int) -[Time.Wait]>\n\nsleep: fn(duration: Duration) Never! -[Time.Wait]> {\n    __sleep_ns(duration.ns)\n}"
+        },
+        {
+          "key": "C",
+          "name": "#Import(jet) with the symbol derived from the module path",
+          "detail": "No symbol string: `#Import(jet) __sleep_ns: fn(nanos: Int) -[Time.Wait]>` in core.time binds `jet_core_time___sleep_ns` by a naming law. Checks as in A.",
+          "technical": "Every published runtime export is renamed to the law in one cutover. Moving a Core function to another module renames its runtime symbol (an ABI change), and one runtime function cannot serve two Jet names.",
+          "code": "#Import(jet) __sleep_ns: fn(nanos: Int) -[Time.Wait]>\n// binds jet_core_time___sleep_ns\n\nsleep: fn(duration: Duration) Never! -[Time.Wait]> {\n    __sleep_ns(duration.ns)\n}"
+        },
+        {
+          "key": "D",
+          "name": "A generated runtime module; no leaf declarations at all",
+          "detail": "jet generates a module `jet.runtime` from the #Export(jet) manifest. Core and packages write `use rt: jet.runtime` and call `rt.jet_std_time_sleep_duration_ns(d.ns)`. Nothing can drift, because nothing is hand-written.",
+          "technical": "No new marker on the import side. Callers see C-style symbol names, and every package sees the whole published surface. #6151 c1 and c3 (a declaration that can disagree) have no subject and would need rewording.",
+          "code": "use rt: jet.runtime\n\nsleep: fn(duration: Duration) Never! -[Time.Wait]> {\n    rt.jet_std_time_sleep_duration_ns(duration.ns)\n}"
+        },
+        {
+          "key": "E",
+          "name": "The runtime is an ordinary library",
+          "detail": "The runtime package jet_runtime ships prebuilt with the compiler, and any package, Core included, uses it like any other library. Its public functions have Jet names, Jet types and their own inferred effects. Private functions stay unreachable through ordinary visibility. There is no marker, no symbol string and no manifest, because the declaration is the runtime's own code.",
+          "technical": "The compiler loads the runtime package interface from the toolchain, the way it reads any precompiled dependency. Calls lower to direct calls into the one shared runtime library, so every tier runs the same code. The dispatcher rows in the compiler go away. A few runtime helpers written in C keep a C import inside the runtime, under #Unsafe. #Export(c) stays only for the C ABI used by generated code and foreign hosts.",
+          "code": "use rt: jet.runtime.time\nsleep: fn(duration: Duration) Never! -[Time.Wait]> { rt.sleep_ns(duration.ns) }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "E",
+      "recommendation": {
+        "rec": "A",
+        "why": "Core uses only what any package can use, and nothing can drift because the declaration is the runtime's own code.",
+        "gains": [
+          "Core leaves are ordinary declared Jet; the compiler's Core tables and member-keyed route tables go.",
+          "Any package can bind a published runtime service safely, with its effects enforced by authority.",
+          "The runtime's internal functions stay changeable, because only #Export(jet) is a public contract."
+        ],
+        "losses": [
+          {
+            "loss": "A one-time rename of about 575 runtime functions to Jet names and types.",
+            "mitigation": "The rename is mechanical, and the compiler's check of every caller proves it complete."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "A",
+            "reason": "A checked boundary is still a boundary: markers and symbol strings that E does not need."
+          },
+          {
+            "key": "B",
+            "reason": "Same checks as A, but a second marker for the meaning #Import already has (an I8 cost) with its own parser, formatter and sema path."
+          },
+          {
+            "key": "C",
+            "reason": "Ties runtime symbol names to Core module paths: moving a function becomes an ABI change, one runtime function cannot serve two Jet names, and all published symbols are renamed."
+          },
+          {
+            "key": "D",
+            "reason": "No drift, but C-style names leak into every caller, Core keeps no readable leaf declarations, and #6151 c1/c3 lose their subject."
+          }
+        ],
+        "tradeoff": "About 575 runtime functions get Jet names and types in one cutover, and the compiler must load the runtime interface."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude. Adversarial model family: Claude. Fresh agent: Main, reviewing by owner direction. A to D were reviewed on 2026-11-06; the review of E is the first criterion of its build card."
+      },
+      "checkInstructions": "Probes: dev 97ec15f323 with s1 at 6c15482301. `jet check` of a file declaring `#Import(jet) sleep_ns: fn(nanos: Int) -[Time.Wait]> Unit = \"jet_std_time_sleep_duration_ns\"` gives E0081 and an invalid-statement error. Compiler/Prelude/Core.jet has 1057 `dispatcher_row` lines naming 575 runtime symbols. Compiler/JetRuntime/Source has 3216 `#Export(c)` functions,. parser_marker_is_c_guest_import (JetParser Items.jet:1204) accepts only `c`. safety.md lines 206-208 make #Import(c) a gated region.",
+      "surface": {
+        "gist": "How should Jet code, Core included, call a runtime function so the call is checked, safe and keeps its effects?",
+        "lesson": "E makes the runtime an ordinary library that any package uses; its own code is the declaration, and visibility hides internals.",
+        "trio": {
+          "current": {
+            "note": "Core calls a runtime function that no source declares; a compiler table binds it.",
+            "code": "// Core/Time/Time.jet\nsleep: fn(duration: Duration) Never! -[Time.Wait]> {\n    core.time.__sleep_ns(duration.ns)   // bound by a row in Compiler/Prelude/Core.jet\n}"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "An extern block binds a symbol; nothing checks it, so every call is unsafe.",
+            "code": "extern \"C\" {\n    #[link_name = \"jet_std_time_sleep_duration_ns\"]\n    fn sleep_ns(nanos: i64);\n}\nunsafe { sleep_ns(1000) }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Checked #Import(jet) to #Export(jet)",
+            "gist": "One marker pair, checked both ways, effects kept.",
+            "gains": [
+              "No compiler tables",
+              "Safe for any package",
+              "Internals stay private"
+            ],
+            "losses": [
+              "A published runtime surface",
+              "One mechanical cutover"
+            ],
+            "proposed": {
+              "code": "#Import(jet) __sleep_ns: fn(nanos: Int) -[Time.Wait]> = \"jet_std_time_sleep_duration_ns\"\nsleep: fn(duration: Duration) Never! -[Time.Wait]> { __sleep_ns(duration.ns) }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "#Host marker",
+            "gist": "Same checks, a second marker.",
+            "gains": [
+              "Visually distinct from FFI"
+            ],
+            "losses": [
+              "Second mechanism (I8)"
+            ],
+            "proposed": {
+              "code": "#Host(\"jet_std_time_sleep_duration_ns\") __sleep_ns: fn(nanos: Int) -[Time.Wait]>\nsleep: fn(duration: Duration) Never! -[Time.Wait]> { __sleep_ns(duration.ns) }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Derived symbol",
+            "gist": "No strings; names follow module paths.",
+            "gains": [
+              "No spelling drift"
+            ],
+            "losses": [
+              "Moves become ABI changes",
+              "Mass rename"
+            ],
+            "proposed": {
+              "code": "#Import(jet) __sleep_ns: fn(nanos: Int) -[Time.Wait]>\n// binds jet_core_time___sleep_ns by the naming law"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Generated runtime module",
+            "gist": "No declarations; call the runtime module.",
+            "gains": [
+              "Nothing to drift"
+            ],
+            "losses": [
+              "C names in callers",
+              "c1/c3 need rewording"
+            ],
+            "proposed": {
+              "code": "use rt: jet.runtime\nsleep: fn(duration: Duration) Never! -[Time.Wait]> { rt.jet_std_time_sleep_duration_ns(duration.ns) }"
+            }
+          },
+          {
+            "key": "E",
+            "name": "Runtime as a library",
+            "gist": "Use the runtime like any package.",
+            "gains": [
+              "No markers or strings",
+              "Nothing can drift",
+              "Internals hidden by visibility"
+            ],
+            "losses": [
+              "Rename about 575 functions"
+            ],
+            "proposed": {
+              "code": "use rt: jet.runtime.time\nsleep: fn(duration: Duration) Never! -[Time.Wait]> { rt.sleep_ns(duration.ns) }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "E",
+          "why": "Core uses only ordinary package mechanisms, and the runtime's own code is the declaration.",
+          "gains": [
+            "The compiler tables go",
+            "Effects come from the runtime's code"
+          ],
+          "losses": [
+            {
+              "loss": "One rename of runtime functions.",
+              "mitigation": "Checking every caller proves the rename complete."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "A",
+              "reason": "Markers and symbol strings that E does not need."
+            },
+            {
+              "key": "B",
+              "reason": "Same checks as A, but a second marker for one meaning (I8)."
+            },
+            {
+              "key": "C",
+              "reason": "Moving a function becomes an ABI change, and every symbol is renamed."
+            },
+            {
+              "key": "D",
+              "reason": "C names leak into callers, and #6151 c1/c3 lose their subject."
+            }
+          ],
+          "tradeoff": "One rename now; no boundary to maintain after."
+        }
+      },
+      "designAway": [
+        {
+          "loss": "An unchecked leaf could drop its effect row and bypass a package's authority.",
+          "attempts": [
+            "Effects are written on the runtime #Export(jet) and must be identical on the #Import(jet)."
+          ],
+          "result": "Removed by design; a mismatch is a registered compile error."
+        },
+        {
+          "loss": "Any package could call runtime internals (free a handle, forge an id) from safe code, breaking I1.",
+          "attempts": [
+            "Only #Export(jet) is importable without #Unsafe; published exports must obey the Jet-safe boundary law (typed handles, no raw pointers or bare ids)."
+          ],
+          "result": "Removed by design; internals need #Import(c) inside #Unsafe, counted by the ratchet."
+        },
+        {
+          "loss": "The compiler needs the runtime's signatures at check time.",
+          "attempts": [
+            "Generate the manifest when jet builds its runtime pack and embed it; the chain's drift check compares it with the runtime sources."
+          ],
+          "result": "Required design; cost is one generated table inside jet."
+        }
+      ],
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-06T21:05:25.801Z",
+      "outcome": "E",
+      "comment": "Owner ruled in chat 2026-11-06 after asking on Tower (q0304gub) why a boundary is needed at all. Build card's first criterion: a passing adversarial review of E in Docs/audits.",
+      "ratifiedAt": "2026-11-06",
+      "retiredAt": "2026-11-19T04:02:02.718Z"
+    },
+    {
+      "id": "D-FLOAT-INT1",
+      "cardId": "c0w1wcfc",
+      "group": "conversions",
+      "title": "What `Int{f}` means when f is a Float",
+      "situation": "",
+      "gist": "What should `Int{f}` do with a Float, and how do experts pick the exact rounding and overflow behavior they need?",
+      "lesson": "Conversions are written `Type{value}`, and `Float{n}` already stops when the result would be inexact. Across languages and fields, the agreed practice is that the default never loses information silently. The rounding direction is always named. An out-of-range value stops, returns a value you can check, or saturates because you asked. Fields disagree on rounding (games want floor, statistics and money want ties-to-even, everyday arithmetic wants ties-away, audio and pixels want saturation), so no single silent default serves them all.",
+      "explainer": "",
+      "story": "Ana has `pos: Float` and wants a list index. She writes `Int{pos}`; when pos is 2.0 she gets 2, and when it is 2.5 the program stops. The message offers `math.floor`, `math.trunc`, `math.ceil`, `math.round` and `math.round_even`. She picks `Int{math.floor(pos)}`.\n\nBen writes an audio mixer and wants out-of-range samples clipped, never a stop: he writes `I16.saturating_from(sample * 32767.0)`. Chen totals invoice lines and writes `math.round_even(cents)`, the rounding accountants and IEEE 754 use.",
+      "inWild": "IEEE 754-2019 section 5.8 defines one float-to-integer conversion per rounding direction: toward zero, down, up, nearest-even and nearest-away. Each signals invalid operation on NaN, infinity or out of range, never a silent value (https://standards.ieee.org/ieee/754/6210/).\n\nJulia: `Int(2.5)` throws InexactError and `Int(2.0)` is 2. Rounding is named: `trunc(Int, x)`, `floor(Int, x)`, `ceil(Int, x)` and `round(Int, x)`. `round` is ties-to-even unless a RoundingMode says otherwise, and out of range throws (https://docs.julialang.org/en/v1/manual/mathematical-operations/#Rounding-functions). This is option A's design.\n\nSwift: `Int(3.7)` truncates and traps on NaN, infinity or out of range. `Int(exactly: 3.5)` is nil. `x.rounded(.toNearestOrEven)` names any of six rounding rules (https://developer.apple.com/documentation/swift/floatingpointroundingrule).\n\nRust: `f as i64` truncates and saturates, and NaN becomes 0; before 1.45 it was undefined behavior. `to_int_unchecked` is the unsafe fast form. `round_ties_even` arrived in 1.77, because `round` is ties-away (https://doc.rust-lang.org/reference/expressions/operator-expr.html#numeric-cast). Java and Kotlin `toInt()` also truncate and saturate with NaN as 0.\n\nPython `int(3.7)` truncates and raises on NaN and infinity. Its `round()` is ties-to-even. NumPy, R and C# `Math.Round` also default to ties-to-even. Go `int(f)` truncates and is implementation-defined out of range.",
+      "detail": "WHAT A INCLUDES\n\n1. `Int{f}` is exact. A whole, finite Float inside Int converts; a fraction, NaN, infinity or an out-of-range value stops the program with a registered error naming each rounding function. A literal body is checked at compile time: `Int{3.0}` is 3, `Int{3.5}` is an error.\n\n2. Every rounding direction is named. `Int{math.trunc(f)}`, `Int{math.floor(f)}` and `Int{math.ceil(f)}` use the existing Float functions. `math.round(f) -> Int` keeps ties-away-from-zero (2.5 is 3, -2.5 is -3). New `math.round_even(f) -> Int` rounds ties to even (2.5 is 2, 3.5 is 4), the IEEE 754 default used by statistics and money.\n\n3. `math.round` stops on NaN, infinity or an out-of-range value. Today it returns 0 for NaN and silently clamps, which breaks the rule in item 1. `math.round_even` behaves the same way.\n\n4. The recoverable form stays: `Int.from_float(f)` truncates and returns None on NaN, infinity or out of range.\n\n5. Saturation is an explicit opt-in. New `Int.saturating_from(f)` truncates toward zero, clamps to the type's range and maps NaN to 0, and never stops. Every integer head has it: `U8.saturating_from(f)` for a pixel, `I16.saturating_from(f)` for an audio sample.\n\n6. Cost. `Int{math.floor(f)}` must compile to the CPU's round and convert instructions plus one range check, and the check disappears when the optimizer proves the range. That is why no unchecked `#Unsafe` form is proposed: the check costs one compare.\n\n7. `I64{f}`, `U8{f}` and the other integer heads follow the same rules as `Int{f}`. `Float{n}`, `F32{f}` and integer-to-integer heads do not change.\n\nBEGINNER PATH: `Int{f}`, and the stop message teaches the named roundings. EXPERT PATH: pick the exact rounding (`trunc`, `floor`, `ceil`, `round`, `round_even`) and the exact failure handling (stop with `Int{...}`, None with `from_float`, clamp with `saturating_from`).\n\nEDGE CASES: -0.0 converts to 0. 9223372036854775807.0 is out of range, because the nearest Float is 2^63. A subnormal is not whole, so it stops unless it is rounded first.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Exact by default, every rounding and overflow behavior named",
+          "detail": "`Int{f}` converts a whole number and stops otherwise. trunc, floor, ceil, round (ties away) and round_even (ties to even) pick the rounding. `from_float` returns None and `saturating_from` clamps. `math.round` stops on NaN and out of range instead of returning 0 or clamping.",
+          "code": "idx: Int{pos}                  // 2.0 -> 2; 2.5 stops\ncell: Int{math.floor(-2.5)}    // -3\ncents: math.round_even(2.5)    // 2\nsample: I16.saturating_from(4.0e4)  // 32767\nmaybe: Int.from_float(pos) ?? 0"
+        },
+        {
+          "key": "B",
+          "name": "Truncate and stop (Swift, Python)",
+          "detail": "`Int{f}` truncates toward zero and stops only on NaN, infinity or a value outside Int.",
+          "code": "idx: Int{2.7}    // 2\nneg: Int{-2.7}   // -2"
+        },
+        {
+          "key": "C",
+          "name": "Truncate and saturate, never stop (Rust `as`, Java, Kotlin)",
+          "detail": "`Int{f}` truncates toward zero, clamps to the type's range and maps NaN to 0. It never stops.",
+          "code": "idx: Int{2.7}       // 2\nbig: Int{1.0e30}    // 9223372036854775807\nnan: Int{math.NAN}  // 0"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "It is the shared best practice: the default never loses information silently, as in IEEE 754, Julia and Jet's own `Float{n}`. Fields disagree on rounding and overflow, so each choice is named instead of guessed. Beginners get the short spelling with a teaching stop; experts get each IEEE rounding direction and each failure style explicitly.",
+        "tradeoff": "A fraction is caught when the program runs, not at check time, because the checker cannot know whether a Float value is whole. Literal bodies are still checked at compile time.",
+        "gains": [
+          "`Int{f}` works, with the same rule as `Float{n}`.",
+          "Every rounding a field needs is one named call, including ties-to-even, which Jet lacks today.",
+          "Audio, pixel and sensor code gets saturation explicitly, without a stop.",
+          "`math.round` no longer turns NaN into 0 silently."
+        ],
+        "losses": [
+          {
+            "loss": "Code that wants truncation writes `Int{math.trunc(f)}` instead of a bare `Int{f}`.",
+            "mitigation": "The stop message names each rounding, and `jet fix` offers them."
+          },
+          {
+            "loss": "Three failure styles exist: stop, None and clamp.",
+            "mitigation": "They differ only in failure handling, like indexing versus `.get()`. Beginners meet only `Int{f}`."
+          },
+          {
+            "loss": "`math.round` stopping on NaN changes current behavior.",
+            "mitigation": "Every in-repository caller is migrated in the same cutover; code that wants a fallback writes `Int.from_float`."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "Silent truncation is a classic bug: `Int{-0.5}` is 0 and `Int{2.9999}` is 2, with no sign a fraction was dropped. Games also need floor, not truncation, for negative coordinates."
+          },
+          {
+            "key": "C",
+            "reason": "Silent clamping and NaN as 0 turn bad data into plausible numbers; Rust kept `as` only for compatibility and added explicit forms. Saturation belongs to the code that asks for it, which A gives as `saturating_from`."
+          }
+        ]
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": null,
+      "surface": {
+        "gist": "What should `Int{f}` do, and how do experts pick the exact rounding and overflow?",
+        "lesson": "Best practice everywhere: never lose information silently, and name the rounding, because fields disagree.",
+        "trio": {
+          "current": {
+            "note": "Today Int{f} is an error; from_float truncates and returns None; math.round turns NaN into 0 and clamps.",
+            "code": "lo: Int{pos}                  // E0112\nlo: Int.from_float(pos) ?? 0  // works"
+          },
+          "wild": {
+            "lang": "Julia",
+            "note": "Julia's `Int(x)` is exact; every rounding is named.",
+            "code": "Int(2.0)          # 2\nInt(2.5)          # InexactError\nfloor(Int, -2.5)  # -3\nround(Int, 2.5)   # 2 (ties to even)"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Exact default, named control",
+            "gist": "Int{f} is exact; trunc, floor, ceil, round, round_even and saturating_from give experts each behavior.",
+            "gains": [
+              "Your spelling",
+              "Never loses a fraction silently",
+              "Ties-to-even and saturation available"
+            ],
+            "losses": [
+              "Fractions are caught at run time"
+            ],
+            "proposed": {
+              "code": "idx: Int{pos}\ncell: Int{math.floor(x)}\ncents: math.round_even(c)\ns: I16.saturating_from(v)"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Truncate",
+            "gist": "Int{f} drops the fraction, stops on NaN.",
+            "gains": [
+              "Short"
+            ],
+            "losses": [
+              "Silent loss of the fraction"
+            ],
+            "proposed": {
+              "code": "idx: Int{2.7}  // 2"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Saturate",
+            "gist": "Int{f} truncates and clamps; NaN is 0; never stops.",
+            "gains": [
+              "Never stops"
+            ],
+            "losses": [
+              "Bad data becomes plausible numbers"
+            ],
+            "proposed": {
+              "code": "nan: Int{math.NAN}  // 0"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "The default never loses information, and every field's rounding and overflow is one named call.",
+          "gains": [
+            "Int{f} works",
+            "Matches Float{n}",
+            "Experts control rounding and overflow exactly"
+          ],
+          "losses": [
+            {
+              "loss": "Truncation is written out.",
+              "mitigation": "The stop message and jet fix offer each rounding."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Drops fractions silently."
+            },
+            {
+              "key": "C",
+              "reason": "Turns NaN and overflow into plausible numbers."
+            }
+          ],
+          "tradeoff": "Fractions are caught when the program runs, not at check time."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-07T01:24:45.114Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-08",
+      "retiredAt": "2026-11-19T04:02:02.718Z"
+    },
+    {
+      "id": "D-CORE-HELPERS1",
+      "cardId": "c0w1wcfc",
+      "group": "visibility",
+      "title": "Package-private helpers: priv in Core and every package, with __ kept for generated names",
+      "situation": "",
+      "gist": "How should any package, Core included, mark a helper that only its own code may call?",
+      "lesson": "User source cannot spell double-underscore names, while Core currently takes a generated-source lexer route. Explicit visibility should instead follow the same declaration rule in ordinary packages.",
+      "explainer": "",
+      "story": "Ana writes a text library whose public functions share a pad helper. She wants pad hidden from the library's users, the same way Core hides its own helpers.",
+      "inWild": "Rust's pub(crate) makes an item visible inside its crate (https://doc.rust-lang.org/reference/visibility-and-privacy.html). That is explicit visibility, not a compiler-library lexer exemption.",
+      "detail": "Exercised: p1 gives E0067 for __pad; p2 E0413 for item priv; p3 E0067 for __decode_dyn; p4 E0605 for greeter.text.pad. p4 never runs its earlier greet line. A separate BallotReview/helpers-good app prints two spaces then hello using the public dependency function.\n\nLoader citations were stale. Current Loader.jet:3763-3796 selects a Core parse job. User source uses lex_threads at :3699; Core uses lex_generated_threads at :3811 and filters members/tests at :3824-3827. Payload.jet:951-956 implements the reserved-name flag. A prefix rename alone cannot remove every Core parse decision.\n\nVIS-ITEM1=A is ratified, unimplemented in p2. Item priv means enclosing module plus children; package-root priv is package-only. Nested priv(package) widens to the package. A applies that rule uniformly and keeps __ reserved in authored source. Compiler hygiene uses issued identities, never a prefix as permission.\n\nClassify declarations before migration. True private helpers use priv; public FFI/library primitives remain public. Only the five already-ratified CORE-PRIVATE-SEAM1 entrypoints use priv(toolchain) modules. That qualifier is module-only, not a blanket new privilege for every generated call. Migrate source declarations, semantic callers and registry references together; external ABI symbols are not automatically helper source names.\n\nA also unifies authored-source lexing/parsing. Move ownership/member/test selection to ordinary declared mechanisms rather than an is-Core syntax mode. #6151 c35 is not met by a rename alone. c36 replaces its stale __ wording with the chosen visibility and proves inside/outside behavior in ordinary and Core dependencies.\n\nB can avoid duplicate mechanisms: __ becomes the single package-private item spelling, replacing overlapping item priv/priv(package) uses; priv remains for narrower module/field access. Generated names remain hygienic without another reserved text prefix. B's cost is a wider visibility cutover and access meaning carried by names, not loss of hygiene.\n\nC retains a protected toolchain setting and a source-mode exception. Self-written package metadata must not confer installed-toolchain identity. Choosing C amends c35 rather than satisfying uniformity. Its exception must be explicit.\n\nNo unverified helper count or mechanical-rename promise is used. Resolve collisions by declaration identity. Beginners use explicit privacy; experts retain existing module/package visibility and only the ratified toolchain seam scope. A/B/C remain proposals, not behavior proved by p1-p4.",
+      "options": [
+        {
+          "key": "A",
+          "name": "priv everywhere; __ only for generated names",
+          "detail": "Use ratified item priv in Core and user packages; keep __ reserved in authored source. Unify parser decisions too, not just spellings.",
+          "code": "// Greeter/greeter.jet\npriv pad: fn(s: String) -> String { \"  {s}\" }   // package-only\n\ngreet: fn() -> String { pad(\"hello\") }\n\n// run.jet, in another package\nuse greeter\n\nrun: fn() {\n    print(greeter.greet())      //   hello\n    print(greeter.pad(\"hi\"))    // error E0605: `pad` is private to its package\n}"
+        },
+        {
+          "key": "B",
+          "name": "__ means package-private everywhere",
+          "detail": "__ becomes the single package-private item spelling, replacing overlapping forms. priv remains for narrower visibility; generated names use hygienic identities.",
+          "code": "// Proposed B: __ replaces, rather than duplicates, package-private items.\n__pad: fn(s: String) -> String { \"  {s}\" }\ngreet: fn() -> String { __pad(\"hello\") }\n// another package:\nuse greeter\nrun: fn() {\n    print(greeter.greet()) // two spaces then hello\n    print(greeter.__pad(\"hi\")) // E0605: package-private\n}"
+        },
+        {
+          "key": "C",
+          "name": "A toolchain-only package setting",
+          "detail": "The __ prefix stays reserved. Core's exemption becomes a package setting that only toolchain packages may set; users keep priv.",
+          "code": "// Core's package.jet; a user package that sets it is refused\nreserved_names: .Toolchain\n\n// Core/Text/Fmt.jet\n__pad: fn(s: String) -> String { \"  {s}\" }"
+        }
+      ],
+      "comparisons": [],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A reuses ratified visibility and removes authored-source grammar privilege without a new naming convention. The Core parse route must also be unified; renaming alone is insufficient.",
+        "gains": [
+          "One spelling and one error for package-only helpers.",
+          "Shared authored-source grammar and visibility, retaining only the existing toolchain seam scope."
+        ],
+        "losses": [
+          {
+            "loss": "A declaration, caller and registry cutover is needed; some names collide.",
+            "mitigation": "Classify helpers, public primitives and protected seams, then rename by semantic identity with all callers."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B can retire duplicate forms, but carries visibility in names and requires a broader visibility cutover."
+          },
+          {
+            "key": "C",
+            "reason": "C keeps two lexer modes and a rule users cannot use, so Core still differs from user packages."
+          }
+        ],
+        "tradeoff": "A one-time Core rename for one visibility spelling everywhere."
+      },
+      "hybrid": null,
+      "ballotMode": "short",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": null,
+      "checkInstructions": "Run p1-p4 and BallotReview/helpers-good/run.jet, then Validate.jet. Delivery proves ordinary/Core dependency visibility, generated hygiene, exact toolchain-module scope, spoofed metadata refusal and all lexer/parse selectors covered by #6151 c35/c36.",
+      "surface": {
+        "gist": "How should any package, Core included, mark a helper that only its own code may call?",
+        "lesson": "Core currently takes a generated-source lexer route. A uses shared visibility and authored-source grammar instead.",
+        "trio": {
+          "current": {
+            "note": "A user __ helper is refused; only Core may write one.",
+            "code": "__pad: fn(s: String) -> String { \"  {s}\" }\n// error E0067: `__pad` is reserved for Jet"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "pub(crate) hides an item outside its crate.",
+            "code": "pub(crate) fn pad(s: &str) -> String { format!(\"  {s}\") }\npub fn greet() -> String { pad(\"hello\") }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "priv everywhere",
+            "gist": "Core and users write priv; __ stays for generated names.",
+            "gains": [
+              "One spelling.",
+              "No Core lexer rule."
+            ],
+            "losses": [
+              "Core renames its helpers."
+            ],
+            "proposed": {
+              "code": "priv pad: fn(s: String) -> String { \"  {s}\" }\ngreet: fn() -> String { pad(\"hello\") }\n// outside: greeter.pad(\"hi\") is E0605"
+            }
+          },
+          {
+            "key": "B",
+            "name": "__ means package-private",
+            "gist": "A leading __ hides a name outside its package.",
+            "gains": [
+              "Core keeps its names."
+            ],
+            "losses": [
+              "Must retire overlapping package-private spellings."
+            ],
+            "proposed": {
+              "code": "__pad: fn(s: String) -> String { \"  {s}\" }\ngreet: fn() -> String { __pad(\"hello\") }"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Toolchain setting",
+            "gist": "Only toolchain packages may write __ names.",
+            "gains": [
+              "No rename."
+            ],
+            "losses": [
+              "Core still differs from users."
+            ],
+            "proposed": {
+              "code": "// Core's package.jet\nreserved_names: .Toolchain"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A reuses ratified visibility and unifies grammar. Renaming alone is not enough.",
+          "gains": [
+            "One spelling.",
+            "Same error everywhere."
+          ],
+          "losses": [
+            {
+              "loss": "A one-time Core rename.",
+              "mitigation": "Classify declarations and migrate semantic callers/registries, not a blind prefix replacement."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "B must replace overlapping forms and places visibility in names."
+            },
+            {
+              "key": "C",
+              "reason": "Core keeps a rule users cannot use."
+            }
+          ],
+          "tradeoff": "One Core rename for one spelling everywhere."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-09T20:06:13.685Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-09",
+      "retiredAt": "2026-11-19T04:02:02.718Z"
+    },
+    {
+      "id": "D-CORE-LOWER1",
+      "cardId": "c0w1wcfc",
+      "group": "build",
+      "title": "jet check and jet build lower every function body; jet run and jet dev lower only what they reach",
+      "situation": "Lowering turns checked code into the compiler's simpler internal form, and that step can find faults of its own. Today jet check never lowers, so it cannot report those faults. jet build lowers the package's own functions, reached or not.\n\nThe owner asked for a strict check that finds every error, reached or not. An earlier draft proposed lowering only reached code everywhere. This ballot has check and build lower everything, while run and dev lower only what they reach.",
+      "gist": "Should jet check and jet build lower every function, reached or not, so every error shows in one run?",
+      "lesson": "Lowering turns checked code into the simpler form the machine-code step reads, and it can find errors of its own. Today jet check never lowers, so it cannot report those errors. This vote decides which commands lower every function and which lower only what the program uses.",
+      "explainer": "Words used here. Checking reads source and finds type and name errors. Lowering rewrites each checked function into the compiler's internal form, called IR, and an IR lint checks that form. A reached function is one the program can call from its entry.\n\nA dependency is a package your package uses.",
+      "story": "Sam's package has greet and an unused helper with a fault only lowering finds. jet check says ok. Months later a caller reaches the helper, and the build fails in code nobody has touched.",
+      "inWild": "// Go: go vet and go build compile every function of the package, used or not.\n// Rust: cargo check runs the front end and borrow checker on every function,\n// but not code generation; unused functions still get every check.",
+      "detail": "What this ballot decides. Which commands lower which function bodies. Every command still checks every declaration, and dead_code still decides what the final program keeps. Where handle layouts come from is D-CORE-LAYOUT1, and either outcome there combines with this one.\n\nToday, re-measured on the t6c compiler (dev 76955986d0) with jet check --trace=FILE on G6Lead's probe s02, a 17-line program that pulls in Core. The trace has no lower, ir.build or ir.lint phase, so jet check cannot report any fault that only lowering finds, in any package.\n\njet build --trace on the same probe lowers 761 items; lower, IR build and IR lint take about 21 ms of 1,018 ms of CPU, about 2%. G6Lead measured the same shape on the seed: 654 items under both --dead-code=remove and keep, about 12 ms of 467 ms.\n\nSo jet build already lowers the entry package's own bodies whether they are reached or not. Unreached Core bodies are pruned by jet_driver_prunable_core_modules in Compiler/JetDriver/Source/Driver/Pipeline.jet, with exclusions for build-time-only and test modules.\n\nWhat lowering covers under every option. Generic functions are lowered once per concrete type list (JetIR Build.jet:328), so a generic body that nothing instantiates is lowered by no command. Bodies under a false #if target condition are lowered only by jet check --target for that target. A cannot remove either limit; it finds strictly more than C or D.\n\nThe cost on Compiler/, the largest package, as G6Lead measured it on the seed. jet check Compiler takes 20.3 s wall, 10.8 s of phase CPU and 5.5 GB peak memory. A dev build lowers 28,955 items; IR build takes about 1.0 to 1.3 s of CPU, and the build peaks at 6.8 GB. So adding lowering and IR lint to jet check Compiler costs about 1.4 s of CPU, about 13%, and about 1.3 GB as built today.\n\nThe rule under A. jet check and jet build lower every function body of the packages being checked, the entry package and workspace members, reached or not. They report every lowering and IR lint error together with every other error, collect-all. jet check stops after IR lint: no optimization, no machine code and no link.\n\nDependencies are lowered by reach in every command, because their own jet check lowered all their bodies when they were published or built. jet run and jet dev lower by reach in every package, which keeps card c0w1wcfc's c17 for the commands where speed matters most.\n\nEngineering away the cost. First, lowering runs in parallel per function, under --threads. Second, each function's IR is linted and then freed before the next, so peak memory grows by the largest function per thread, not by 1.3 GB. Third, lowered bodies are cached by the content of the function and its callees, so a repeated check lowers only what changed.\n\nWith the cache, a warm jet check Compiler after a one-function edit lowers that function and its changed callees. The 13% applies only to a cold check with an empty cache, such as a first clone or CI without a cache. None of these three steps exists yet; they are part of building A.\n\nWhat remains after the engineering. A cold jet check of a very large package pays the parallel lowering time: about 1.4 s of CPU on Compiler/, spread over the compiler threads. jet run and jet dev pay nothing, because they lower by reach.\n\nThe same program under each option is the Greeter package: greet is called, and never_called is not. Under A, jet check Greeter lowers both. jet run run.jet lowers greet only. Under C, nothing lowers never_called until something calls it.\n\nBeginner path. jet check is the command that finds everything; jet run starts fast. A fault in an unused helper appears in jet check's list the day it is written, not the day someone calls the helper.\n\nExpert path. --threads bounds lowering's parallelism. A team auditing its dependency tree runs jet check inside each dependency, or uses B's switch if you choose it. --trace shows lower and ir.lint as separate phases with their cost.\n\nOther options. B is A plus one expert switch, jet check --all-deps, which also lowers every dependency body for a full audit. C is the posted draft: reach-based lowering in every command, check included, so a fault is found only once the body is reached. D keeps today's rule: check never lowers, build lowers own bodies, and only eligible Core modules prune.\n\nB adds a flag whose findings belong to other packages' authors, since their own check already lowers those bodies. C reports a fault late and far from where it was written. D leaves jet check unable to report any lowering fault.",
+      "options": [
+        {
+          "key": "A",
+          "name": "check and build lower everything; run and dev lower by reach",
+          "detail": "jet check and jet build lower every body of the packages being checked and list every error. jet run and jet dev lower only reached bodies. Dependencies lower by reach everywhere, since their own check lowered them.",
+          "technical": "Adds lower and ir.lint to jet check for the packages being checked, stopping before optimization and codegen. Keeps today's own-body lowering in jet build. jet run and jet dev prune by reach in every package (c17). Proposed engineering: per-function parallel lowering, free IR after lint, and a content-keyed lowered-body cache.",
+          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n\n// $ jet check Greeter     lowers greet and never_called; lists every error\n// $ jet run run.jet       lowers greet only\n// Proposed (A), not built: today jet check lowers nothing."
+        },
+        {
+          "key": "B",
+          "name": "A plus an expert switch for dependencies",
+          "detail": "Everything in A, plus jet check --all-deps, which also lowers every body of every dependency for an audit of the whole tree.",
+          "technical": "A, plus one flag on jet check. The flag lowers each dependency's unreached bodies and reports their errors under the dependency's name.",
+          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n\n// $ jet check --all-deps run.jet   lowers greet and never_called in Greeter too\n// Proposed (B), not built."
+        },
+        {
+          "key": "C",
+          "name": "Reach-based lowering everywhere",
+          "detail": "Every command lowers only reached bodies, in every package. jet check keeps checking every declaration but lowers nothing unreached.",
+          "technical": "The posted draft: dead_code=remove prunes early lowering for every package, with roots for exports, callbacks, drop and trait targets. c17 holds for every command.",
+          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n\n// $ jet build run.jet     never_called is checked but never lowered\n// Proposed (C), not built."
+        },
+        {
+          "key": "D",
+          "name": "Keep today's rule",
+          "detail": "jet check never lowers. jet build lowers the entry package's own bodies. Only eligible Core modules prune unreached bodies.",
+          "technical": "No change. Pipeline.jet's Core-only pruning and its build-time-only and test exclusions stay; c17 is revised to match.",
+          "code": "// Greeter/greeter.jet\ngreet: fn() -> String { \"hello\" }\nnever_called: fn() -> Int { 42 }\n\n// run.jet\nuse greeter\nrun: fn() { print(greeter.greet()) }\n\n// $ jet check Greeter     no lowering phase in the trace\n// Today (D): G6Lead's probes s01 and s02 show this."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Go",
+          "note": "go build and go vet compile every function in the package; the linker drops unreached code from the binary.",
+          "code": "go vet ./...\ngo build ./..."
+        },
+        {
+          "lang": "Rust",
+          "note": "cargo check runs every check except code generation on every function, used or not.",
+          "code": "cargo check   # no codegen\ncargo build   # codegen, unused code warned"
+        },
+        {
+          "lang": "Zig",
+          "note": "Zig analyzes only reached functions, so an unused function's errors appear only once it is called.",
+          "code": "fn unused() void { @compileError(\"x\"); }  // no error unless referenced"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A makes jet check find every error, reached or not, as you asked. jet run and jet dev stay fast, and the cache and parallel lowering keep warm checks cheap.",
+        "gains": [
+          "jet check reports lowering errors in unused code the day it is written.",
+          "jet run and jet dev lower only what they reach, in every package.",
+          "One rule: check and build list everything; run and dev never wait for it."
+        ],
+        "losses": [
+          {
+            "loss": "A cold check of a very large package costs about 13% more CPU.",
+            "mitigation": "Parallel per-function lowering and a content cache make warm checks lower only changed functions."
+          },
+          {
+            "loss": "Built today, lowering in check would add about 1.3 GB of peak memory on Compiler/.",
+            "mitigation": "Freeing each function's IR after its lint bounds the growth to one function per thread."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B's switch reports other packages' errors, which their own check already lowers."
+          },
+          {
+            "key": "C",
+            "reason": "C finds a lowering fault only when something calls the body, late and far from its author."
+          },
+          {
+            "key": "D",
+            "reason": "D leaves jet check unable to report any lowering fault."
+          }
+        ],
+        "tradeoff": "Some cold-check CPU, in return for a jet check that finds every error."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. BallotFix (Claude Opus) repaired the board ballot on 2026-11-10, probing each claim with the t6c compiler on dev 76955986d0. No separate adversarial review ran on this repair."
+      },
+      "checkInstructions": "With the t6c compiler (dev 76955986d0), work in $JET_SCRATCH_ROOT/lanes/BallotFix/probes/lw. Run jet check --trace=c1.trace s02_core_user.jet and jet build --trace=b1.trace s02_core_user.jet. Summarize each with node phases.mjs TRACE --phases lower,ir.build,ir.lint. The Compiler/ figures are G6Lead's, in lanes/G6Lead/BALLOT-HANDOFF.md section 1. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "Should jet check and jet build lower every function, reached or not, so every error shows in one run?",
+        "lesson": "Lowering turns checked code into the form the machine-code step reads, and it can find errors of its own. Today jet check never lowers. This vote decides which commands lower every function and which lower only what the program uses.",
+        "trio": {
+          "current": {
+            "note": "jet check never lowers.",
+            "code": "$ jet check --trace Greeter\n(no lower or ir phase)\nok"
+          },
+          "wild": {
+            "lang": "Go",
+            "note": "Every function is compiled.",
+            "code": "go vet ./...\ngo build ./..."
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Check lowers everything",
+            "gist": "check and build lower every body; run and dev by reach.",
+            "gains": [
+              "Every error in one run.",
+              "run and dev stay fast."
+            ],
+            "losses": [
+              "Cold checks cost about 13% more CPU."
+            ],
+            "proposed": {
+              "code": "$ jet check Greeter   # lowers never_called too\n$ jet run run.jet     # lowers greet only"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Plus a dependency switch",
+            "gist": "A, plus jet check --all-deps.",
+            "gains": [
+              "Full tree audits."
+            ],
+            "losses": [
+              "Reports others' errors."
+            ],
+            "proposed": {
+              "code": "$ jet check --all-deps run.jet"
+            }
+          },
+          {
+            "key": "C",
+            "name": "Reach everywhere",
+            "gist": "Every command lowers only reached bodies.",
+            "gains": [
+              "Least lowering work."
+            ],
+            "losses": [
+              "Faults found late."
+            ],
+            "proposed": {
+              "code": "$ jet build run.jet   # never_called not lowered"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Today",
+            "gist": "check never lowers; only Core prunes.",
+            "gains": [
+              "Nothing to build."
+            ],
+            "losses": [
+              "check misses lowering faults."
+            ],
+            "proposed": {
+              "code": "$ jet check Greeter   # no lowering"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A makes jet check find every error, while jet run and jet dev stay fast.",
+          "gains": [
+            "Every error in one run.",
+            "run and dev stay fast."
+          ],
+          "losses": [
+            {
+              "loss": "Cold checks cost more CPU.",
+              "mitigation": "Parallel lowering and a content cache keep warm checks cheap."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Others' errors."
+            },
+            {
+              "key": "C",
+              "reason": "Faults found late."
+            },
+            {
+              "key": "D",
+              "reason": "check misses faults."
+            }
+          ],
+          "tradeoff": "Some cold-check CPU, for a check that finds every error."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-09T21:01:51.292Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-10",
+      "retiredAt": "2026-11-19T04:02:02.718Z"
+    },
+    {
+      "id": "D-CORE-LAYOUT1",
+      "cardId": "c0w1wcfc",
+      "group": "build",
+      "title": "Runtime carriers are ordinary declarations, and the compiler's handle table goes",
+      "situation": "Some Core types hold an object the runtime made, such as an open file. Today a compiler table, RuntimeHandles.jet, says how each one copies, compares and prints, found by bare name or a Core path prefix. Card c0w1wcfc's c18 requires that BuildTypes.jet have no such Core prefix test.\n\nD-HOST-LEAF1=E made the runtime an ordinary library. This ballot decides where a carrier's facts come from. It amends the registry clause of D-PRIVATE-NATIVE-CARRIER1=A; keeping the table is options B and D.",
+      "gist": "Should a Core carrier's copy, equality and text come from its own declaration, so the compiler's handle table can go?",
+      "lesson": "Some Core types hold something the runtime made, such as an open file. The compiler must know whether such a value copies, compares and prints. This vote decides whether that knowledge lives in the type's own declaration, under rules every package uses, or in a hidden compiler table.",
+      "explainer": "Words used here. A carrier is a Core type whose value holds a runtime object, such as an open file. A row is one entry in the compiler's table. A derive is a power Jet gives a type from its fields, such as ==.\n\nA refusal mark, such as #!Equatable, turns a derive off for one type.",
+      "story": "Sam names his own type Reader. Today the compiler's table has a bare row named Reader, and only a later check keeps it from Sam's type. Under A no table exists: Sam's Reader has his fields and nothing else.",
+      "inWild": "// Rust: OwnedFd is an ordinary struct; cleanup is a normal Drop impl.\npub struct OwnedFd { fd: RawFd }\nimpl Drop for OwnedFd { fn drop(&mut self) { unsafe { libc::close(self.fd); } } }",
+      "detail": "What this ballot decides. Where a carrier's copy, cleanup, equality and text come from. Lowering is D-CORE-LOWER1; the runtime boundary itself is D-HOST-LEAF1=E, unchanged.\n\nToday, on seed a0_042. RuntimeHandles.jet has 470 rows naming 364 distinct runtime objects. 184 rows are keyed by a Core path, 12 by a double-underscore name, and the other 274 by a bare name, mostly second keys for the same type.\n\nProbe y07 is the same program in today's form. It prints stdin copies compare true, entries compare false, the DirEntry text, and user reader 3 true. The StdinHandle row says it neither copies nor compares, yet the program does both: Core's declaration wins. The table and the declaration already disagree.\n\nEvery capability already has an ordinary form, shown by probes on the seed. Probe y01 copies a struct with private fields and gets an independent copy, and prints a record as Entry { name: n, path: a/n, is_dir: false }. Probe y02 refuses == with #!Equatable, E0312. Probe y06 refuses default text with #!Printable, E0915.\n\nProbe y04 gives a handle a Close impl, moves it, and closes it once, after moved. #!Debug refuses the debug text. #!Copyable is ratified by D-GENERIC-CLOSE-COPY1 but not built: probe y03 gets E0931.\n\nThe rule under A. A carrier is an ordinary struct, in Core or in jet_runtime, and its declaration is the only source of its facts. The compiler reads no table and tests no name or prefix, so c18 is met. A user type named Reader is its own declaration and gets only its own fields.\n\nCopying. A carrier whose state is plain Jet fields copies them, so each copy has its own cursor, as today's clone routines do by copying bytes and position. Under D-COPY-DEFAULT1 that copy is made on first write, which is cheaper than today's eager clone.\n\nSharing and owning. A carrier that shares one runtime object holds it in Shared, which closes it once when the last holder goes. A carrier that owns a descriptor holds a jet_runtime handle type with a Close impl. A struct with a Close part is not copyable, so the one-owner rule follows from the field.\n\nThat closes the copying hole a raw number would open. A descriptor is never a bare Int in a copyable struct: it lives in a typed handle with Close, so a copy cannot alias it. A carrier with no cleanup that must still have one owner uses #!Copyable.\n\nEquality and text. A row with eq false becomes #!Equatable. show false becomes #!Printable, and debug false becomes #!Debug. display true becomes an impl Display. The table's 12 distinct capability combinations all map to these marks, one to one.\n\nPrivacy and identity. D-PRIVATE-NATIVE-CARRIER1's opacity stays: a priv field cannot be read or forged outside its module, E0605. Its registry clause goes. Layout and version come from jet_runtime's precompiled interface, as for any dependency, and the toolchain pins that version.\n\nEvery tier and build time. The same declarations run in the interpreter, the JIT, native builds and build-time evaluation, because HOST-LEAF1 uses one runtime library. A carrier still cannot be stored in a build-time constant; that refusal, E0956, stays.\n\nDelivery proof, part of building A. For each of the 364 runtime objects, a test pins independent copy or sharing, close count on every exit, equality and text, on o0, o1, o2 and at build time. A row is deleted only when its test passes against the declaration.\n\nBeginner path. Nothing to learn: Core's types copy, compare and print as their declarations say, and hover shows it. Expert path. Write a carrier in your own package with the same fields, handles and refusal marks Core uses, and get the same facts.\n\nDownsides of A, and what the design does about them. The cutover touches 364 runtime objects. A generator writes each declaration's marks from its row once, since the combinations map one to one. The bare-name rows are second keys and need no type of their own.\n\nWhat remains. Carriers whose state lives in raw allocations today must move that state into Jet fields or a typed handle, which is porting work per object. #!Copyable must be built before the one-owner carriers without cleanup can move.\n\nOther options. B keeps the table but keys each row by exact declaration, so no name or prefix test remains. C imports C handle types with a new #Handle marker. D keeps today's table and tests, and revises c18. E puts a #Runtime marker on each declaration, which any package may use, and takes the other facts from derives.\n\nTheir best cases. B is the smallest change and keeps every clone routine. C lets any package bind a C handle directly. D needs no work. E keeps the runtime routines while removing the table. B and D keep a second source of truth, the disagreement y07 shows.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Facts from the declaration",
+          "detail": "Each carrier is an ordinary struct. Copying, cleanup, equality and text follow from its fields, Close and refusal marks. The table and every name and prefix test go.",
+          "technical": "Amends D-PRIVATE-NATIVE-CARRIER1=A's registry clause; keeps its E0605 opacity. Descriptors live in jet_runtime handle types with Close; shared objects in Shared. Row flags map to #!Equatable, #!Printable, #!Debug, #!Copyable and impl Display. Layout from the runtime's precompiled interface per HOST-LEAF1. Per-object tests gate each row's deletion.",
+          "code": "// jet_runtime: a typed handle that owns its descriptor\nFileHandle: struct {\n    priv raw: Int\n    impl Close { close: fn(&&self) { close_descriptor(self.raw) } }\n}\n\n// core.files: the declaration is the only source of facts\nDirEntry: struct { name: String, path: String, is_dir: Bool }   // copies, compares, prints\n\nFileReader: struct {\n    path: String\n    priv handle: rt.FileHandle   // holds a Close part, so it has one owner\n}\n\n// app/run.jet, the same under every option\nuse term: core.term\nuse files: core.files\n\nReader: struct { fd: Int }   // a user type named like a Core carrier\n\nrun: fn() {\n    a: term.stdin()\n    b: a.copy()\n    print(\"stdin copies compare {a == b}\")\n    e: files.DirEntry{name: \"n\", path: \"a/n\", is_dir: false}\n    f: files.DirEntry{name: \"n\", path: \"b/n\", is_dir: false}\n    print(\"entries compare {e == f}\")\n    print(\"{e}\")\n    mine: Reader{fd: 3}\n    print(\"user reader {mine.fd} {mine == Reader{fd: 3}}\")\n}\n// Proposed (A): prints stdin copies compare true, entries compare false, DirEntry { name: n, path: a/n, is_dir: false }, user reader 3 true, as today. No table row is read."
+        },
+        {
+          "key": "B",
+          "name": "Exact table rows",
+          "detail": "The table stays. Each row names one declaration exactly, and the bare-name rows go. User packages cannot add carriers.",
+          "technical": "Rows keyed by canonical declaration identity; a missing or disagreeing declaration is a build error. Clone, drop, equality and text routines stay the runtime's.",
+          "code": "// Compiler/JetFoundation/Source/Registry/RuntimeHandles.jet\nIRRuntimeHandle{jet_name: \"<corelib>/core.files::DirEntry\", runtime: \"DirEntry\",\n    clone: true, display: false, show: true, debug: false, eq: true},\nIRRuntimeHandle{jet_name: \"<corelib>/core.files::FileReader\", runtime: \"JetFileReader\",\n    clone: false, display: false, show: false, debug: false, eq: false},\n// The 274 bare-name rows are deleted; a row matches one declaration exactly,\n// and a row whose declaration is missing or disagrees is a build error.\n\n// app/run.jet, the same under every option\nuse term: core.term\nuse files: core.files\n\nReader: struct { fd: Int }   // a user type named like a Core carrier\n\nrun: fn() {\n    a: term.stdin()\n    b: a.copy()\n    print(\"stdin copies compare {a == b}\")\n    e: files.DirEntry{name: \"n\", path: \"a/n\", is_dir: false}\n    f: files.DirEntry{name: \"n\", path: \"b/n\", is_dir: false}\n    print(\"entries compare {e == f}\")\n    print(\"{e}\")\n    mine: Reader{fd: 3}\n    print(\"user reader {mine.fd} {mine == Reader{fd: 3}}\")\n}\n// Proposed (B): prints stdin copies compare true, entries compare false, DirEntry { name: n, path: a/n, is_dir: false }, user reader 3 true."
+        },
+        {
+          "key": "C",
+          "name": "C handles with #Handle",
+          "detail": "Core imports the runtime's C symbols as handle types. A new #Handle marker names each one's drop, clone, equality and text routines.",
+          "technical": "New marker; build-time code must call foreign routines. Reverses D-HOST-LEAF1=E's Jet-only runtime boundary.",
+          "code": "// core.files\n#Import c.jet_rt: module {\n    #Handle(drop: jet_rt_handle_drop_jet_file_reader)          // no clone: one owner\n    JetFileReader: type\n}\nFileReader: struct { path: String, priv handle: c.jet_rt.JetFileReader }\n\n// app/run.jet, the same under every option\nuse term: core.term\nuse files: core.files\n\nReader: struct { fd: Int }   // a user type named like a Core carrier\n\nrun: fn() {\n    a: term.stdin()\n    b: a.copy()\n    print(\"stdin copies compare {a == b}\")\n    e: files.DirEntry{name: \"n\", path: \"a/n\", is_dir: false}\n    f: files.DirEntry{name: \"n\", path: \"b/n\", is_dir: false}\n    print(\"entries compare {e == f}\")\n    print(\"{e}\")\n    mine: Reader{fd: 3}\n    print(\"user reader {mine.fd} {mine == Reader{fd: 3}}\")\n}\n// Proposed (C), not built: #Handle is new, and it reverses D-HOST-LEAF1=E."
+        },
+        {
+          "key": "D",
+          "name": "Today's table and tests",
+          "detail": "Keep the table, found by bare name or Core prefix. Revise c18 to accept it.",
+          "technical": "No change. c18 is revised. Rows and declarations can disagree; the declaration wins where BuildTypes.jet keeps the source shape.",
+          "code": "// Today: RuntimeHandles.jet rows, found by bare name or a <corelib>/ prefix.\nIRRuntimeHandle{jet_name: \"StdinHandle\", runtime: \"JetStdinReader\",\n    clone: false, display: false, show: false, debug: false, eq: false},\n\n// app/run.jet, the same under every option\nuse term: core.term\nuse files: core.files\n\nReader: struct { fd: Int }   // a user type named like a Core carrier\n\nrun: fn() {\n    a: term.stdin()\n    b: a.copy()\n    print(\"stdin copies compare {a == b}\")\n    e: files.DirEntry{name: \"n\", path: \"a/n\", is_dir: false}\n    f: files.DirEntry{name: \"n\", path: \"b/n\", is_dir: false}\n    print(\"entries compare {e == f}\")\n    print(\"{e}\")\n    mine: Reader{fd: 3}\n    print(\"user reader {mine.fd} {mine == Reader{fd: 3}}\")\n}\n// Today (D): probe y07 prints stdin copies compare true, entries compare false, DirEntry { name: n, path: a/n, is_dir: false }, user reader 3 true.\n// The StdinHandle row says no copy and no ==, yet the program copies and compares."
+        },
+        {
+          "key": "E",
+          "name": "A #Runtime marker",
+          "detail": "A #Runtime(\"Name\") marker on a declaration names its runtime object; copying, equality and text come from derives and refusal marks.",
+          "technical": "Replaces table rows with a marker any package may write. The runtime's clone and drop routines stay; the marker binds them by object name.",
+          "code": "// core.files: a marker names the runtime object; facts still come from derives\n#Runtime(\"JetFileReader\")\n#!Copyable\nFileReader: struct { path: String }\n\n// app/run.jet, the same under every option\nuse term: core.term\nuse files: core.files\n\nReader: struct { fd: Int }   // a user type named like a Core carrier\n\nrun: fn() {\n    a: term.stdin()\n    b: a.copy()\n    print(\"stdin copies compare {a == b}\")\n    e: files.DirEntry{name: \"n\", path: \"a/n\", is_dir: false}\n    f: files.DirEntry{name: \"n\", path: \"b/n\", is_dir: false}\n    print(\"entries compare {e == f}\")\n    print(\"{e}\")\n    mine: Reader{fd: 3}\n    print(\"user reader {mine.fd} {mine == Reader{fd: 3}}\")\n}\n// Proposed (E), not built. Any package may use #Runtime on a runtime object it can reach."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Rust",
+          "note": "OwnedFd is an ordinary struct; Drop closes it and try_clone duplicates it explicitly.",
+          "code": "pub struct OwnedFd { fd: RawFd }\nimpl Drop for OwnedFd { fn drop(&mut self) { /* close */ } }"
+        },
+        {
+          "lang": "Swift",
+          "note": "FileHandle is an ordinary class; its identity is shared by reference.",
+          "code": "let h = FileHandle.standardInput\nlet g = h   // same handle"
+        },
+        {
+          "lang": "Go",
+          "note": "os.File is an ordinary struct holding a private pointer; copying a *File shares it.",
+          "code": "type File struct { *file }"
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "A gives Core's carriers the rules every package uses, so no name carries privilege. It ends the disagreement between table and declaration. Every capability already has an ordinary form.",
+        "gains": [
+          "No compiler table, name test or prefix test.",
+          "One source of truth: the declaration a reader can see.",
+          "A package can write a carrier with Core's exact rules."
+        ],
+        "losses": [
+          {
+            "loss": "Porting 364 runtime objects whose state lives in raw allocations.",
+            "mitigation": "A generator writes the marks from the rows; per-object tests gate each deletion."
+          },
+          {
+            "loss": "One-owner carriers without cleanup wait for #!Copyable to be built.",
+            "mitigation": "It is already ratified; those rows stay until it lands."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "B keeps a compiler-only table that can disagree with the declaration."
+          },
+          {
+            "key": "C",
+            "reason": "C adds a marker and reverses D-HOST-LEAF1=E."
+          },
+          {
+            "key": "D",
+            "reason": "D keeps the name privilege c18 exists to remove."
+          },
+          {
+            "key": "E",
+            "reason": "E keeps routines the reader cannot see in the declaration."
+          }
+        ],
+        "tradeoff": "A porting job per runtime object, in return for one visible source of truth and no privileged names."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude Opus. Adversarial model family: none. Fresh agent: none. No separate adversarial review ran; Main waived it, and BallotReview3 reviewed an earlier draft. The author ran one adversarial fix pass, probing each claim on seed a0_042."
+      },
+      "checkInstructions": "With seed a0_042 on PATH, run $JET_SCRATCH_ROOT/lanes/AgreedBallots/probes/run.sh ly run; outputs are in probes/ly/out. Count the rows of Compiler/JetFoundation/Source/Registry/RuntimeHandles.jet. Then run Tools/agent/ballots/Validate.jet on this payload.",
+      "surface": {
+        "gist": "Should a Core carrier's copy, equality and text come from its own declaration, so the compiler's handle table can go?",
+        "lesson": "Some Core types hold something the runtime made, such as an open file. The compiler must know whether such a value copies, compares and prints. This vote decides whether that lives in the type's declaration or in a hidden table.",
+        "trio": {
+          "current": {
+            "note": "A table row, found by name.",
+            "code": "IRRuntimeHandle{jet_name: \"StdinHandle\", clone: false, eq: false, ...}\n// yet stdin().copy() == stdin() prints true"
+          },
+          "wild": {
+            "lang": "Rust",
+            "note": "An ordinary struct with Drop.",
+            "code": "pub struct OwnedFd { fd: RawFd }"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Declaration",
+            "gist": "Fields, Close and refusal marks give every fact.",
+            "gains": [
+              "No table.",
+              "One source of truth."
+            ],
+            "losses": [
+              "Porting per runtime object."
+            ],
+            "proposed": {
+              "code": "FileReader: struct {\n    path: String\n    priv handle: rt.FileHandle   // Close: one owner\n}\n#!Equatable\nCursor: struct { priv bytes: [U8], priv position: Int }"
+            }
+          },
+          {
+            "key": "B",
+            "name": "Exact rows",
+            "gist": "The table stays, keyed by declaration.",
+            "gains": [
+              "Smallest change."
+            ],
+            "losses": [
+              "A second source of truth."
+            ],
+            "proposed": {
+              "code": "IRRuntimeHandle{jet_name: \"<corelib>/core.files::FileReader\", ...}"
+            }
+          },
+          {
+            "key": "C",
+            "name": "#Handle",
+            "gist": "Import C handles with a new marker.",
+            "gains": [
+              "Binds C handles."
+            ],
+            "losses": [
+              "Reverses HOST-LEAF1."
+            ],
+            "proposed": {
+              "code": "#Handle(drop: jet_rt_handle_drop_jet_file_reader)\nJetFileReader: type"
+            }
+          },
+          {
+            "key": "D",
+            "name": "Today",
+            "gist": "Name and prefix tests stay; c18 revised.",
+            "gains": [
+              "No work."
+            ],
+            "losses": [
+              "Names carry privilege."
+            ],
+            "proposed": {
+              "code": "// BuildTypes.jet keeps its <corelib>/ tests"
+            }
+          },
+          {
+            "key": "E",
+            "name": "#Runtime",
+            "gist": "A marker names the runtime object.",
+            "gains": [
+              "Keeps routines."
+            ],
+            "losses": [
+              "Hidden routines."
+            ],
+            "proposed": {
+              "code": "#Runtime(\"JetFileReader\")\n#!Copyable\nFileReader: struct { path: String }"
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "A gives Core's carriers the rules every package uses, with one visible source of truth.",
+          "gains": [
+            "No table.",
+            "One source of truth."
+          ],
+          "losses": [
+            {
+              "loss": "Porting per runtime object.",
+              "mitigation": "Marks generated from rows; tests gate each deletion."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "A second source of truth."
+            },
+            {
+              "key": "C",
+              "reason": "Reverses HOST-LEAF1."
+            },
+            {
+              "key": "D",
+              "reason": "Names carry privilege."
+            },
+            {
+              "key": "E",
+              "reason": "Hidden routines."
+            }
+          ],
+          "tradeoff": "Porting work, for one visible source of truth."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-10T03:47:02.695Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-10",
+      "retiredAt": "2026-11-19T04:02:02.718Z"
+    },
+    {
+      "id": "D-NET-HOSTREADS1",
+      "cardId": "c0bbj6h3",
+      "group": "effects",
+      "title": "Which permission covers the host reads used by TLS?",
+      "situation": "HTTPS uses TLS to protect a connection. Jet's TLS code samples the clock, gets OS entropy, and can read environment variables and certificate files. Its host calls currently report Net, so denying FS, Rand or Env does not reject those TLS operations. This is a choice about the meaning of declared program effects, not a promise that the whole process makes no file or clock calls. The original draft recommended treating grants and denials differently inside the engine. This review instead recommends declaring the host effects normally. Beginners can still omit an authority list and use inference. Written ceilings become longer, but they do not need an engine-only permission rule. The alternatives below retain the same client and server workload.",
+      "gist": "Should TLS declare its host reads, or should Net cover them?",
+      "lesson": "An effect describes an operation the program may reach. A grant permits it; a denial prohibits it. TLS uses more than sockets: its default client also reads trust settings and certificates. We must decide whether Net includes those operations. Effect checking is not itself an OS sandbox or a ban on runtime housekeeping.",
+      "explainer": "",
+      "story": "Mia downloads a price list over HTTPS. Her package permits Net but denies files. She needs to know whether that excludes certificate files too, and how to limit secret paths without disabling certificate verification.",
+      "inWild": "// Deno documentation example, not executed in this review.\n// deno run --no-prompt --allow-net=example.com fetch.ts\nconst page = await fetch(\"https://example.com/\");\nconsole.log(page.status);\n// Network access is host-scoped; success and status depend on the server.\n// Deno's default roots can be embedded, not read from system files.\n// Source: https://docs.deno.com/runtime/reference/permissions/\n// Source: https://raw.githubusercontent.com/denoland/deno/main/ext/tls/lib.rs",
+      "detail": "Source scope is origin/dev plus the staged TlsLead-3rows patch to RuntimeEffectRows.jet. Initial source reads used origin/dev at 0d9e4b845ffd6d6afb8a7a7b910b72804911c472. During review it advanced to 5142789ba45286ed2c54763832210193c1bd7030, adding the split table. The staged patch adds removed_when; it was read, not applied or executed. Seed-b5 is the published probe compiler, not a compiler rebuilt from either revision. Future-option outcomes are proposed contracts, not implementation receipts.\n\nCore/Net/Tls.jet:836-855 reads SSL_CERT_FILE and SSL_CERT_DIR. Nonempty overrides replace distribution defaults. Otherwise six bundle paths are tried until roots load, then /etc/ssl/certs if none loaded. The directory loader at 810-828 enumerates files, not only hash names. CustomOnly PEM avoids this loader at runtime; path-based custom roots still read files. Static inference can include both branches.\n\nCore/Net/Tls.jet:620-628 seeds a context from 48 bytes of OS entropy. Client and server contexts use it. Core/Net/SSL/Defs.jet ssl_time samples the wall clock through the TLS host leaf. Generated CoreCallRows.jet:703-709 classifies seven TLS host leaves as Net: wall sample, entropy, file read, directory open/list/close, and environment read.\n\nThe later origin/dev row_splits table has five TLS-related symbols. The staged patch gives all five one removal condition, but some also encode non-TLS differences. Removing the TLS classification does not justify deleting wall-clock Time/pure, entropy Rand/pure or directory-close Read/Write splits. The rowSplitOutcomes table specifies all five symbols for each option. The staged condition also omits Env; the TLS inventory includes it.\n\nSeed-b5 checked Net-only clients, including deny FS and deny Rand/Env. Controlled localhost HTTPS runs returned 200 under those policies. Combining deny FS/Rand/Env with a function denial covering the actual CA file also returned 200. scoped-denied-live.trace:384-385 shows a 48-byte getrandom and that CA content open. These connections used certificate verification, not an insecure bypass. No example.com status was used as proof.\n\nThe server checked with Net, FS.Read and Time, including deny Rand. A live server under that denial served hello to curl trusting its generated certificate. server-live.trace:361-363 shows 48-byte entropy requests. The application read its certificate and key before passing text to server.tls. This current server path loads no client trust store; that says nothing about future mutual TLS.\n\nControls distinguish the meanings. An ordinary files.read under allow Net fails E0749. Reserved __host_read_bytes access fails E0067. A DB-row function can read a file, but its caller's !FS rejects it. Core's service declarations and Effects/Checks.jet:1803-1815 support that library rule, not an existing privileged kernel Net boundary. The original recommendation therefore needs more than a claim of reuse.\n\nPackage scoped denials fail E1221 today, so path examples use function rows. A dynamic files.read under !FS.Read(\"server.pem\") returned PermissionDenied. The equivalent TLS CA open succeeded. Runtime Authority.jet arms resource checks through scope publishers; TLS wiring and permission-error propagation are required work. Existing path checks document a check/open race needing kernel confinement.\n\nWritten allow acknowledges effects. The Net-only live client printed no notice; the no-authority client printed the network notice. Time.Wait needs no grant, but deny Time also denies Time.Wait and already fails E0749 today. Do not mistake that wait rejection for newly enforced certificate-clock authority.\n\nEvery option concerns this named TLS inventory, not all process syscalls. The trace also opened /etc/hosts during networking. Compiler, loader, allocator, resolver and native FFI boundaries need separate treatment before claiming complete confinement. Parsing a secret only as certificates does not make access, timing, errors or resource use harmless. This review does not certify secret erasure: no memory-lifetime proof ran.\n\nEach option shows the same GET and server in separate files, with a controlled matching certificate. Only E adds configuration arguments. Production URLs do not guarantee status 200. Denied CA overrides must not fall back silently; preserve permission errors through TLS and HTTP. Test directories, links, relative paths, working-directory changes, callbacks and task inheritance. No option may disable hostname/date checks or substitute deterministic production entropy.\n\nIn-memory roots can avoid runtime file and environment reads without proving a file-free static row. A server key remains an ordinary file read unless supplied in memory. Embedded targets missing trustworthy time, entropy or files need explicit inputs or honest unsupported-capability errors, never invented clocks or skipped verification. These Linux seed probes establish no applicable-tier parity.\n\nMigration for A touches TLS host leaves, declared TLS/HTTP rows and callers. It also affects service dependency lists, generated registries, split conditions, authority fixtures, diagnostics, examples and notices. Exact additions follow the call graph, not a blanket requirement for Env on every server. Beginners can still omit allow lists. No speed result or counted repository-wide migration estimate is claimed.",
+      "options": [
+        {
+          "key": "A",
+          "name": "Declare the host effects normally",
+          "detail": "This was option C in the author draft. The default client's written ceiling lists Net, Time, Rand, Env and FS.Read. Beginners can omit the ceiling and let inference report unacknowledged effects. Experts get ordinary grant and denial rules, with no TLS-only privilege. Proposed: Net alone fails E0749 for the default client; denied FS, Rand or Env rejects it. Scoped file denials build when not statically covered and are enforced on the actual TLS paths.",
+          "code": "// PROPOSED A: fetch.jet; run against a trusted localhost TLS endpoint.\npackage: { name: \"fetch\", authority: { allow: [Net, Time, Rand, Env, FS.Read] } }\nuse { http: core.http }\nrun: fn() {\n    page: http.get(\"https://localhost:18443/\") ?? panic(\"fetch\")\n    print(page.status)\n}\n// Proposed: allow Net alone or add deny FS/Rand/Env -> E0749.\n// A !FS.Read(\"secrets/\") function row builds for a dynamic CA path.\n// SSL_CERT_FILE inside secrets/ -> permission refusal before content read.\n// Written allow acknowledges effects; no default notice is promised.\n\n// PROPOSED A: serve.jet, a separate file.\npackage: { name: \"hello_tls\", authority: { allow: [Net, FS.Read, Time, Rand] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key)) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Proposed: deny Rand -> E0749, not a running server.\n// The current server path loads no system CA bundle.\n",
+          "technical": "Reclassify actual TLS host ingress under ordinary Time, Rand.Draw, Env and FS.Read. Propagate the solved rows through Core rather than special-casing Net. Preserve Time.Wait separately. Route TLS file and directory ingress through the existing scope-publisher checks and preserve permission errors through HTTP.\n\nCost: more written grants and a full caller/registry/test cutover. A file-free configuration can still inherit a conservative FS row; precision requires separate entry paths or existing effect-polymorphic machinery, not pretending runtime branch choice is a static proof. Review new host-read dependencies when Core changes.\n\nI8: one effect mechanism for grants, denials, inference and scopes. Service-effect declarations remain the existing library abstraction; update their listed machine dependencies where needed. No engine-exclusive authority exemption is introduced."
+        },
+        {
+          "key": "B",
+          "name": "Cover engine reads for grants, not denials",
+          "detail": "This is the original recommendation, now an alternative. Net alone admits the engine reads, but FS/Rand/Env denials still reject them. Beginner grants stay short. Experts must understand two views of the same call: a covering root for ceilings and actual leaves for denials. These are proposed semantics, not today's service-effect behavior for Net.",
+          "code": "// PROPOSED B: fetch.jet\npackage: { name: \"fetch\", authority: { allow: [Net] } }\nuse { http: core.http }\nrun: fn() {\n    page: http.get(\"https://localhost:18443/\") ?? panic(\"fetch\")\n    print(page.status)\n}\n// Proposed: add deny FS/Rand/Env -> E0749.\n// Ordinary user files.read still requires FS.Read.\n// Scoped denial covering SSL_CERT_FILE -> permission refusal.\n\n// PROPOSED B: serve.jet, separate file\npackage: { name: \"hello_tls\", authority: { allow: [Net, FS.Read, Time] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key)) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Proposed: add deny Rand -> E0749.\n",
+          "technical": "Retain both the protocol permission and actual host-effect provenance at each covered boundary. Denials, nested scopes and dependency sandbox checks must keep the latter through wrappers, callbacks and tasks. Explain output must show that provenance, even when Net acknowledges the grant. The read set must be bounded to protocol work; no arbitrary user read can borrow that coverage.\n\nCost is not established as one checker rule. Kernel roots and library service effects have different declaration paths today. This needs an owner-approved, generally expressible rule rather than a Core-only hook; its exact public boundary contract remains a pre-build review gate. Scoped enforcement and error propagation cost the same work as A. No performance advantage has been measured."
+        },
+        {
+          "key": "C",
+          "name": "Treat the reads as Net completely",
+          "detail": "This retains current TLS classification. Net permits the engine reads, and FS/Rand/Env denials do not apply to them. Beginner and explicit-grant paths stay short. Experts must accept that FS means declared program file operations, excluding this trust-store work. That is a coherent narrower contract if stated plainly, not proof of zero host file reads.",
+          "code": "// C: fetch.jet; today's authority behavior on seed-b5\npackage: { name: \"fetch\", authority: { allow: [Net], deny: [FS, Rand, Env] } }\nuse { http: core.http }\nrun: fn() {\n    page: http.get(\"https://localhost:18443/\") ?? panic(\"fetch\")\n    print(page.status)\n}\n// Observed 200 with SSL_CERT_FILE pointing at the test CA.\n// A scoped denial covering that CA file also did not stop the open.\n\n// C: serve.jet, separate file\npackage: { name: \"hello_tls\", authority: { allow: [Net, FS.Read, Time], deny: [Rand] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key)) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Live variant served hello despite deny Rand; trace shows OS entropy.\n",
+          "technical": "Specify the exclusion explicitly and keep TLS host rows under Net. Retain the five TLS-related splits and replace the staged removal condition with an explicit retained-policy rationale. rowSplitOutcomes gives this option's action for every symbol. Low implementation cost is not zero work: document the boundary, add regressions and expose protocol-internal reads in tools.\n\nBest case: a narrow network service consumes a trust source without exposing arbitrary raw bytes to its caller. Cost: Net still permits reads of paths selected by CA environment variables. Parsing may fail after a secret file was read. FS and Rand denials cannot certify absence of these TLS operations."
+        },
+        {
+          "key": "D",
+          "name": "Expand Net into an inspectable grant set",
+          "detail": "Add a named Net host-read set that explain output expands. It contains Time, Rand.Draw, Env and FS.Read, and Net grants those rights normally throughout the package. This avoids an engine-only exception and keeps one-word grants. Denials still win. The price is broader authority: code holding Net can now read ordinary files too.",
+          "code": "// PROPOSED D: fetch.jet\npackage: { name: \"fetch\", authority: { allow: [Net] } }\nuse { http: core.http }\nrun: fn() {\n    page: http.get(\"https://localhost:18443/\") ?? panic(\"fetch\")\n    print(page.status)\n}\n// Proposed explain: Net includes Time, Rand.Draw, Env, FS.Read.\n// Add deny FS/Rand/Env -> E0749. Ordinary file reads are also granted.\n\n// PROPOSED D: serve.jet, separate file\npackage: { name: \"hello_tls\", authority: { allow: [Net] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key)) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Proposed: deny Rand -> E0749; !FS.Read on a key path also refuses it.\n",
+          "technical": "The named set is declaration metadata, not an extra grant or second runtime policy. Extend the canonical effect dependency relation to kernel protocol grants and display the transitive set in jet explain effects and machine-readable authority facts. Dependencies are fixed and reviewed, never inferred into a silently growing grant from an arbitrary implementation change. Denials inspect actual solved leaves using A's classification and scoped ingress.\n\nExpert ceilings cannot use Net while excluding its ordinary positive host rights except by explicit denials. A host-scoped Net grant must not turn into an unexplained unrestricted FS grant: explain output must expose that widening. This option deliberately chooses broad implied grants, unlike B's engine-only coverage. It requires owner approval for that changed meaning and the shared dependency relation."
+        },
+        {
+          "key": "E",
+          "name": "Declare a host-read ceiling on TLS configuration",
+          "detail": "Use A's actual effect rows and add a TLS configuration ceiling. A default System setting permits the standard host-read set within the caller's authority. An explicit list can narrow it, never grant rights the caller lacks. Beginners keep defaults; experts review each connection's settings. This is extra configuration, not a substitute for package denials. The API below is proposed, not present on seed-b5.",
+          "code": "// PROPOSED E: fetch.jet; new TLS ceiling argument, same GET\npackage: { name: \"fetch\", authority: { allow: [Net, Time, Rand, Env, FS.Read] } }\nuse { http: core.http, tls: core.net.tls }\nrun: fn() {\n    cfg: tls.ClientConfig{host_reads: .Only([String]{\"Time\", \"Rand.Draw\", \"Env\", \"FS.Read\"})}\n    page: http.get(\"https://localhost:18443/\", tls: cfg) ?? panic(\"fetch\")\n    print(page.status)\n}\n// Proposed: package deny FS/Rand/Env -> E0749.\n// Remove FS.Read from cfg: trust-store access is refused at runtime.\n// !FS.Read on SSL_CERT_FILE also refuses it; neither list bypasses the other.\n\n// PROPOSED E: serve.jet, separate file\npackage: { name: \"hello_tls\", authority: { allow: [Net, FS.Read, Time, Rand] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key, host_reads: .Only([String]{\"Time\", \"Rand.Draw\"}))) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Proposed: package deny Rand -> E0749; config excluding Rand.Draw refuses setup.\n",
+          "technical": "Proposed TLSHostReads is an enum System or Only([String]); ClientConfig.host_reads defaults to System. Only entries are checked using canonical authority-right parsing and intersection, not a new permission matcher. Unknown or nongrantable entries are configuration errors before connection setup. Strings here describe existing rights; they are not code-level decision IDs.\n\nSystem resolves the fixed TLS host inventory; it never overrides package, task or function restrictions. Both modes keep conservative actual effect rows, so changing a value does not silently remove static obligations. Propagate the ceiling to every deferred handshake operation, including entropy and clocks, and to server context creation at bind. Key-file reads in the application remain outside this TLS ceiling.\n\nThis materially extends HTTP/TLS APIs and adds a per-connection restriction carrier. The existing config has trust selection but not this host-read field. It does not itself supply a missing embedded clock or entropy source. A capability-provider version would need a separately complete API and lifetime review; merely putting an Authority handle in an escaping config would conflict with today's scoped-handle rules. I8 requires this to remain an explicit narrower view of the one authority mechanism."
+        },
+        {
+          "key": "F",
+          "name": "Name TLS separately under Net",
+          "detail": "Add Net.TLS to the secure-operation rows, while retaining A's actual host leaves. Net still covers its descendant, so existing Net grants cover the protocol but not unrelated host reads. Beginners infer effects; experts may deny Net.TLS while keeping plaintext networking. This makes TLS visible but does not by itself solve the host-read question.",
+          "code": "// PROPOSED F: fetch.jet\npackage: { name: \"fetch\", authority: { allow: [Net, Time, Rand, Env, FS.Read] } }\nuse { http: core.http }\nrun: fn() {\n    page: http.get(\"https://localhost:18443/\") ?? panic(\"fetch\")\n    print(page.status)\n}\n// Proposed: explain includes Net.TLS and actual host leaves.\n// Deny Net.TLS, FS, Rand or Env -> E0749.\n\n// PROPOSED F: serve.jet, separate file\npackage: { name: \"hello_tls\", authority: { allow: [Net, FS.Read, Time, Rand] } }\nuse { files: core.files, server: core.http.server }\nrun: fn() {\n    cert: files.read(\"server.pem\") ?? panic(\"certificate\")\n    key: files.read(\"server.key\") ?? panic(\"key\")\n    mux: server.mux()\n    mux.get(\"/\", (_request: HTTPRequest) -> Ok(server.response(200, \"hello\")))\n    listener: server.bind(\"127.0.0.1:18444\", mux, tls: server.tls(cert, key)) ?? panic(\"bind\")\n    _: listener.serve() ?? panic(\"serve\")\n}\n// Proposed: deny Rand or Net.TLS -> E0749; scoped CA policy is A's.\n",
+          "technical": "Register the protocol leaf and report it on TLS handshakes and stream operations. TCP transport still requires Net; granting only Net.TLS does not grant all sockets. Keeping Net plus Net.TLS is not two authorization mechanisms: ordinary ancestor/descendant coverage applies. Host reads retain their ordinary leaves and scope checks from A.\n\nA generic HTTP entry that can reach HTTPS conservatively carries Net.TLS even when a particular runtime URL is HTTP. Exact separation would require separate entry paths or a proven existing static specialization. This option adds useful protocol denial vocabulary but does not shorten the host grant list. Making Net.TLS imply host reads instead would choose B or D's additional coverage policy, not solve it by naming a leaf."
+        }
+      ],
+      "comparisons": [
+        {
+          "lang": "Deno",
+          "note": "Deno offers runtime host/path permissions, explicit deny precedence, prompts, query APIs and permission audit logs. These are real deployment controls that static rows alone do not provide. Its documented permission boundary excludes some runtime-internal I/O, and its default Rust TLS root store is embedded Mozilla roots. Thus HTTPS is not evidence that Deno secretly reads an OS CA directory.",
+          "sources": [
+            "https://docs.deno.com/runtime/fundamentals/security/",
+            "https://docs.deno.com/runtime/reference/permissions/",
+            "https://raw.githubusercontent.com/denoland/deno/main/ext/tls/lib.rs"
+          ]
+        },
+        {
+          "lang": "WASI / Wasmtime",
+          "note": "A Wasm guest can use only linked host imports; WASI filesystem access is capability-based and restricts the files and directories supplied to it. This is stronger isolation than a source row by itself. TLS implemented inside the guest needs suitable imports; TLS supplied as a host service puts internal reads across that trust boundary. WASI does not settle Jet's naming policy.",
+          "sources": [
+            "https://docs.wasmtime.dev/security.html"
+          ]
+        },
+        {
+          "lang": "Pony / Austral",
+          "note": "Pony passes unforgeable object references as authority rather than relying on permission lists. Austral describes linear capability values, granular directory access and a root capability at entry. Their best case is explicit delegation to a narrow service or resource, including no access without a capability. Their trusted FFI wrappers still need auditing; reference capabilities for concurrency are not the same as object authority.",
+          "sources": [
+            "https://tutorial.ponylang.io/object-capabilities/object-capabilities.html",
+            "https://austral-lang.org/spec/spec.html#capability-based-security"
+          ]
+        },
+        {
+          "lang": "Koka / Effekt",
+          "note": "Koka infers effects and supports polymorphic rows and handlers, keeping much annotation out of ordinary code. Effekt offers contextual effect polymorphism with effects handled at the call site's lexical scope. Neither cited model is itself a filesystem deny-list sandbox. Their lesson is that a concise higher-level operation need not force every caller to handwrite a long list.",
+          "sources": [
+            "https://koka-lang.github.io/koka/doc/book.html#sec-effect-types",
+            "https://effekt-lang.org/docs/concepts/effect-polymorphism"
+          ]
+        },
+        {
+          "lang": "Java SecurityManager",
+          "note": "Historically it offered least-privilege checks with privileged library regions, allowing internal reads without granting callers arbitrary files. JEP 486 documents both that benefit's mechanism and its maintenance burden; it disabled the Security Manager in JDK 24. This is a warning about boundary complexity, not proof that permissions or B cannot work.",
+          "sources": [
+            "https://openjdk.org/jeps/486"
+          ]
+        },
+        {
+          "lang": "OCaml 5",
+          "note": "Effect handlers express modular control flow, concurrency and asynchronous I/O without requiring effect annotations everywhere. OCaml explicitly does not statically guarantee that all performed effects are handled; an unmatched operation raises Effect.Unhandled. These handlers are neither Jet denial rows nor an OS capability policy. Do not compare them as a failed attempt at the same sandbox.",
+          "sources": [
+            "https://ocaml.org/manual/5.3/effects.html#s:effects-unhandled"
+          ]
+        }
+      ],
+      "rec": "A",
+      "recommendation": {
+        "rec": "A",
+        "why": "Use ordinary host-effect rows first. Inference keeps the unwritten beginner path short, while explicit ceilings and denials share one meaning. The service-effect analogy does not justify privileged kernel Net boundaries. Explain output should expose actual TLS host dependencies under every option, not hide them to keep a notice short.",
+        "gains": [
+          "One grant and denial mechanism",
+          "TLS host dependencies remain visible",
+          "No engine-only authority privilege"
+        ],
+        "losses": [
+          {
+            "loss": "Explicit HTTPS ceilings need more rights.",
+            "mitigation": "Keep inference for beginners and show the missing rights with the call chain; do not recommend granting all rights to silence an error."
+          },
+          {
+            "loss": "Conservative rows can reject a file-free TLS configuration under deny FS.",
+            "mitigation": "State that limit; use separately checked file-free entry paths when required, without disabling verification or pretending a runtime branch is a static proof."
+          },
+          {
+            "loss": "Scoped TLS reads and permission errors need a real cutover.",
+            "mitigation": "Reuse the ordinary scope checks, preserve refusals through TLS and HTTP, and gate the implementation on focused runtime and tier evidence."
+          }
+        ],
+        "whyNot": [
+          {
+            "key": "B",
+            "reason": "It preserves concise grants and meaningful denials, but its engine-only privilege rule is not already implemented by kernel Net. A general boundary contract is missing."
+          },
+          {
+            "key": "C",
+            "reason": "It has the lowest code-change cost and a coherent service boundary, but excludes actual TLS reads from the denials reviewers want to enforce."
+          },
+          {
+            "key": "D",
+            "reason": "Inspectable implied grants are stronger than invisible exceptions, but Net would also authorize ordinary file and environment reads throughout the package."
+          },
+          {
+            "key": "E",
+            "reason": "A useful expert restriction, but it adds API and runtime state without replacing the actual effect rows or supplying embedded capabilities."
+          },
+          {
+            "key": "F",
+            "reason": "A useful protocol distinction, but it adds a name rather than resolving how host reads are authorized."
+          }
+        ],
+        "tradeoff": "This changes the original recommendation and lettering: original C is A, original A is B, and original B is C. It favors one checkable meaning over minimal explicit permission lists. No claim of performance superiority, complete sandboxing or completed implementation is approved."
+      },
+      "hybrid": null,
+      "ballotMode": "full",
+      "shortAuthorizedBy": null,
+      "ballotProcessVersion": 5,
+      "reviewPasses": {
+        "adversarial": "Author model family: Claude (Opus). Adversarial model family: GPT. Fresh agent: BallotHostReads. Fresh review: yes; claimReviews records each verdict and evidence, correcting stale exceptions, notice behavior and the service-effect analogy. Recommend ordinary rows, not the original engine privilege; future contracts remain unbuilt and require a passing audit."
+      },
+      "checkInstructions": "Validate this payload without writing Tower. A passing schema is not a passing implementation or an adversarial design audit. Post it only as an open policy choice with the evidence limits intact. AGENTS requires the chosen build direction to name a passing dated audit before construction.\n\nFor A, prove client failures under Net-only and deny FS/Rand/Env, and server failure under deny Rand. Exercise an in-memory trust path separately from the default system path. Test !Time carefully because it already rejects Time.Wait. Keep ordinary Net-only file reads rejected.\n\nFor scope enforcement, use a real CA under the denied path, require no content open, and retain the permission error through TLS and HTTP. Cover CA overrides, directories, symlinks, nested tasks and denial precedence without silent fallback. Test notices both with and without explicit allow; test explain output's actual dependencies.\n\nFor B or D, first approve and review the shared coverage contract under I8, including scopes and dependency sandbox intersection. For E, first review its exact API and carrier lifetime. For F, test plaintext versus TLS denial and conservative URL branches. For C, document and test the explicit internal-I/O exclusion.\n\nFor every selected option, update all affected Core rows, generated registries, authority examples, tests and docs in one cutover. Exercise every applicable tier and honest missing-capability outcomes. Do not build this review's proposed semantics merely because the ballot validator has no gaps.",
+      "surface": {
+        "gist": "Should TLS declare its host reads, or should Net cover them?",
+        "lesson": "TLS reads clocks, entropy and sometimes certificate files. Today those operations report Net, so file and random denials miss them. This is about program effects, not banning every process syscall. Beginners can omit permission lists and use inference. We recommend ordinary host-effect rows rather than an engine-only privilege rule.",
+        "trio": {
+          "current": {
+            "note": "Observed on a trusted local endpoint: the client still returned 200.",
+            "code": "authority: { allow: [Net], deny: [FS, Rand, Env] }\n// TLS still opened the test CA and obtained OS entropy.\n// Explicit allow acknowledged Net; no notice was printed."
+          },
+          "wild": {
+            "lang": "TypeScript / Deno",
+            "note": "Deno has host-scoped runtime permissions; its default CA roots can be embedded.",
+            "code": "// Documentation illustration, not executed here.\n// deno run --no-prompt --allow-net=example.com fetch.ts\nconst page = await fetch(\"https://example.com/\");\nconsole.log(page.status);"
+          }
+        },
+        "options": [
+          {
+            "key": "A",
+            "name": "Ordinary host effects",
+            "gist": "Declare the reads; infer unwritten lists.",
+            "gains": [
+              "One checking rule"
+            ],
+            "losses": [
+              "Longer explicit ceilings"
+            ],
+            "proposed": {
+              "code": "// Proposed client ceiling\nauthority: { allow: [Net, Time, Rand, Env, FS.Read] }\n// deny FS/Rand/Env refuses the default client.\n// Server: Net, FS.Read, Time, Rand; deny Rand refuses it."
+            }
+          },
+          {
+            "key": "B",
+            "name": "Engine-only coverage",
+            "gist": "Net grants reads; denials still see them.",
+            "gains": [
+              "Short grants"
+            ],
+            "losses": [
+              "New boundary rule"
+            ],
+            "proposed": {
+              "code": "// Proposed client\nauthority: { allow: [Net] }\n// deny FS/Rand/Env refuses TLS.\n// Server: Net, FS.Read, Time; deny Rand refuses it."
+            }
+          },
+          {
+            "key": "C",
+            "name": "Complete coverage",
+            "gist": "Keep internal reads outside those denials.",
+            "gains": [
+              "Lowest migration cost"
+            ],
+            "losses": [
+              "Denials exclude TLS reads"
+            ],
+            "proposed": {
+              "code": "authority: { allow: [Net], deny: [FS, Rand, Env] }\n// Client runs today; internal reads still happen.\n// Server: Net, FS.Read, Time; deny Rand still runs."
+            }
+          },
+          {
+            "key": "D",
+            "name": "Inspectable implied grants",
+            "gist": "Net visibly grants host rights everywhere.",
+            "gains": [
+              "Short, inspectable grants"
+            ],
+            "losses": [
+              "Also grants ordinary file reads"
+            ],
+            "proposed": {
+              "code": "// Proposed client and server\nauthority: { allow: [Net] }\n// explain expands Time, Rand.Draw, Env, FS.Read.\n// Denials win, including on engine reads."
+            }
+          },
+          {
+            "key": "E",
+            "name": "Configuration ceiling",
+            "gist": "Narrow host reads per TLS configuration.",
+            "gains": [
+              "Connection-local control"
+            ],
+            "losses": [
+              "Extra API and state"
+            ],
+            "proposed": {
+              "code": "// Proposed, not today's API\ntls.ClientConfig{host_reads: .Only([String]{\"Time\", \"Rand.Draw\", \"Env\", \"FS.Read\"})}\n// Client/server package grants remain A's.\n// This ceiling narrows; it never overrides denials."
+            }
+          },
+          {
+            "key": "F",
+            "name": "Separate TLS leaf",
+            "gist": "Name TLS; keep actual host reads.",
+            "gains": [
+              "Can deny TLS specifically"
+            ],
+            "losses": [
+              "Does not simplify host grants"
+            ],
+            "proposed": {
+              "code": "// Proposed: A's client/server grants, plus a new denial\nauthority: { deny: [Net.TLS] }\n// Rejects TLS; does not promise plaintext-only specialization."
+            }
+          }
+        ],
+        "recommendation": {
+          "rec": "A",
+          "why": "Inference keeps beginners' code short. Ordinary rows keep written permissions honest without an engine-only privilege. This changes the original recommendation.",
+          "gains": [
+            "One authority mechanism"
+          ],
+          "losses": [
+            {
+              "loss": "More explicit rights and conservative rows.",
+              "mitigation": "Use inference, explain missing rights, and separately check file-free paths when required."
+            }
+          ],
+          "whyNot": [
+            {
+              "key": "B",
+              "reason": "Needs a general boundary contract, not a Core exemption."
+            },
+            {
+              "key": "C",
+              "reason": "Coherent internal-I/O exclusion, but weaker denials."
+            },
+            {
+              "key": "D",
+              "reason": "Net also grants ordinary file access."
+            },
+            {
+              "key": "E",
+              "reason": "Useful narrowing, but extra API does not replace rows."
+            },
+            {
+              "key": "F",
+              "reason": "Names the protocol, not its host authority."
+            }
+          ],
+          "tradeoff": "A longer written ceiling buys one checking rule; runtime scope enforcement still needs implementation."
+        }
+      },
+      "draft": false,
+      "status": "ratified",
+      "created": "2026-11-11T21:49:26.127Z",
+      "outcome": "A",
+      "ratifiedAt": "2026-11-12",
+      "retiredAt": "2026-11-19T04:02:02.718Z"
     }
   ]
 }

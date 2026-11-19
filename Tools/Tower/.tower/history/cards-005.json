@@ -14875,6 +14875,1135 @@
       "completedAt": "2026-11-16T01:09:02.635Z",
       "questions": [],
       "retiredAt": "2026-11-19T01:12:18.630Z"
+    },
+    {
+      "id": "c0w1wcfc",
+      "num": 6151,
+      "title": "Core members are declared in Core source; the compiler's twin tables and route tables are deleted",
+      "body": "Finding F01 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). The compiler keeps a twin of Core's API. Core members are typed and dispatched by compiler tables (Compiler/Prelude/Core.jet:1-4, CoreCallExtensions.jet; generated Registry/CoreCallRows.jet:10 with 1,998 rows; hand-written Registry/CoreSignatures.jet:88, CorePlatformSignatures.jet:229, CoreHostSignatures.jet:22, CoreValueSignatures.jet). A native row wins over the Core declaration (Sema/Calls/Core.jet:264-270). A package can reach the host only through C FFI.\n\nPillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9).",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": "Add one public declaration for a host-provided function, usable by any package, whose signature, effects, failure and sink facts are read from the declaration. Move every Core member that has a CORE_CALLS row to that declaration in Core source. Delete Compiler/Prelude/Core.jet's member rows, CoreCallExtensions.jet, the generated CoreCallRows table and the hand-written signature tables in one cutover. The spelling of the declaration is ballot A on this card.",
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [
+        "c0bbj6h3"
+      ],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed by Main: every criterion is met; each moved to the card that owns its work (#6851 and others), and its blocker #6615 is done."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c14, c15 reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: split into three streams. This card keeps Core declarations, the twin signature tables, the route tables, CoreReach, core.build and the D-CORE-LOWER1/D-EMBED-TOOLCHAIN1 table work. Core-only privileges (c5, c6, c8, c9, c20, c21, c23, c35, c36) moved to #6851; declaration facts and layout (c18, c29, c30, c32, c33) moved to #6852. c46 restated: D-FLOAT-INT1=A covers scalar conversions, the SIMD bridges stay under D-SIMD1/D-SIMD2."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c18 and c20 depend on #6156/#6157 (G5DevX-1, 2026-11-12). The <corelib>/ key-prefix tests in BuildTypes.jet (about 14 sites, for example lines 33, 399, 547, 561, 598, 3384) and in Sema (about 33) decide runtime-handle layout and Core-only privileges. They can go only once a package-neutral mechanism for both exists, so moving the test into a helper would only dodge the criterion's grep and is refused."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c46 conflicts with ratified D-SIMD1/D-SIMD2 (Docs/spec/syntax-decisions.md:4116-4125): [F32#4] bridges through from_array/to_array (E2510/E2511), and Core has 30+ to_array methods in Core/Math (Math.jet:14971..17725). c46 cannot remove them without a newer owner ruling, because by the authority order the ratified decision wins. c46 stays open and unworked until its scope is restated to the to_* conversions outside the ratified SIMD bridge. Source card #6255 no longer exists on the board. c14 (CoreReach names no Core path or helper) needs the demand table derived from Core declarations; it goes to G4Ports-1, which owns CoreReach (c2c, e1384f98cc)."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "Unlanded work saved from the TLS lane worktree TlsLead-3-6151 (on 73739ba7c3) before it was removed, 2026-11-12 00:15: a Taint rework toward c32 and c33, never submitted. 35 files, +266/-362: Sema/Taint.jet (174 lines), ProveReplay.jet (99), CoreSourceRows.jet (27); it deletes JetFoundation/Data/Syntax/Sinks.jet, and touches CoreCalls.jet, CoreRecords.jet, the E0722 docs and about 25 tests/ui/taint goldens. The diff is at $JET_SCRATCH_ROOT/lanes/Main/tls-unlanded/TlsLead-3-6151.patch. It has not been reviewed, built or tested; whoever takes c32 starts from it."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "c32 credential sinks: no new marker (that would need a ballot). Sinks are derived from declarations. A credential sink is any call whose declared effect row writes outward (Log, IO, Net or FS writes), plus to_string/to_bytes on an Encode-trait impl. The Taint.jet hand table is deleted. The effect half lands first, then the sink half with a sweep of every Jet source; legitimate releases go through the existing #Secret release path. Taint.jet:315 (core.watcher.process_pid to Exec) goes away with declared destinations."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t18a landed TlsLead-6151c26 (c2cecce162..0a995af312): c26 and c27 met."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t17a landed TlsLead-6151c17 (c17 met), TlsLead-6151c23 (c24 met; c23 stays open: the Calls/Core.jet E0510 host-leaf gates remain until #6615 c5) and TlsLead-6151c52 (e75850d064..c2cecce162). c52 isn't met yet: its ffi and export case lines had red rows. Lander2 traced them to 4 selfhost_terminators jet_lexer cases broken by ScriptAPI-7 (EffectVocabulary's embed_file of toolchain:Compiler/Prelude/Effects.jet gives E0945 when a case copies JetFoundation out of the tree) and a musl race in cffi concurrent-bridges that passes alone. c52 is met when ScriptAPI's fix-forward lands and both lines pass."
+        },
+        {
+          "at": "2026-11-09",
+          "by": "Main",
+          "text": "BoardPlanner review 2026-11-09 (dev 6a06b917cb). D-FLOAT-INT1 was ratified A on 2026-11-08, so c46 (Type{value} conversions) and c51 are unblocked. Owner gate (2026-11-06): c14, c15, c17, c18, c29, c30, c35, c36 wait for one plain owner question per feature (package-private helpers, layout and lazy lowering, trait-bound format and decode, declaration facts); none is drafted yet."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c46: the conversion question is ballot D-FLOAT-INT1 (what Int{f} means for a Float). Correction to the earlier note: Type{value} is already the ratified scalar conversion (D-DOTCTOR3 amendment, syntax-decisions.md:1214-1239); only Float to Int is open. c46's work (no to_* conversions left in core.math) uses Type{value} or Target.from_source either way."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "c46 (conversions), owner note 2026-11-06: owner recalls conversions use the literal constructor form (Int{myFloatVar}). The ratified rule in Docs/spec/syntax-decisions.md:1122 is D-SHAPE-CONVERT1=A, Target.from_source(value) (Float.from_fraction(f)); no ratified Target{value} conversion form was found. c46 stays open until the owner confirms which form rules; no code changes until then."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "Owner ruling 2026-11-06 (chat, cut questions): \"Core plays by package rules\" criteria wait. Main designs the public features each needs (package-private helpers, layout and lazy-lowering control, trait-bound format/decode, declaration facts) and asks the owner one plain question per feature; nothing is dropped."
+        },
+        {
+          "at": "2026-11-06",
+          "by": "Main",
+          "text": "MechB-2 (2026-11-06): c44 and c45 landed in 362a902d3c (12 private to_u8 helpers become the public wrapping(U8{n}); git grep -w to_u8 Core is empty). Not mechanical until #6615 lands: c1, c2 (= #6615 c5), c3, c11, c12 (the D-HOST-LEAF1=E cutover) and c48-c50 (CoreCallRows, Core.jet and signature tables wait for #6615 c4/c5). Waiting on cut rows: c6 (cut c5), c9 (cut c8), c33 (cut c32)."
+        },
+        {
+          "at": "2026-11-05",
+          "by": "Main",
+          "text": "Single-source census F18 (Docs/audits/2026-11-05-single-source-census.md): Builtin method lowering routes. Already owned by #6151 c11, #3325; this is the drift evidence those criteria must clear. One hand-written home: BuiltinMethods.jet rows (plus the runtime export). Fix: gen: put the runtime symbol in the row and derive arity and borrow flags from parameters and access. Drift check: Generator `--check`; `runtime-abi-symbols.mjs` confirms each symbol exists. Drifted on 2026-11-05: Not checked row by row Effort L."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6255 \"Core `Mat3.to_array()` (and siblings) break D-SHAPE-CONVERT1: conversions are owned by the destination type\" into this card (one Core declaration per API: no twins (Law 8)); its 2 open item(s) are carried as \"(was #6255)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6389 \"Add a public truncating integer conversion and delete Core's 12 private `to_u8` copies\" into this card (one Core declaration per API: no twins (Law 8)); its 2 open item(s) are carried as \"(was #6389)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6370 \"Core twins and names that do not match what the code does (Law 8)\" into this card (one Core declaration per API: no twins (Law 8)); its 1 open item(s) are carried as \"(was #6370)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-31",
+          "by": "Main",
+          "text": "Merged #6369 \"Retire the [Int]-only combinatorics copies of generic list operations (Law 8)\" into this card (one Core declaration per API: no twins (Law 8)); its 1 open item(s) are carried as \"(was #6369)\" criteria. Owner ruling 2026-10-30: merge duplicate and superseded cards into one survivor."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "OWNER 2026-10-30 asked what Compiler/Prelude/Core.jet is ('looks nothing like jet ... some weird kind of table or config file'). Facts at dev 216cac590b: 2546 lines in a custom line format, not Jet: 1938 dispatcher_row lines (1791 of them embed literal Rust constructor text, CoreCallRecord::new(...)), 343 ambient_route, 115 module export lists, 113 source_module owner lists, 7 format_row and 4 bootstrap lines. The module, export and owns rows restate what Core/*.jet already declares. It is read by about 10 compiler registry files, Compiler/Bootstrap/generate-core-sources.mjs and Tools/agent checks, and its header still names deleted Rust tables. C2 deletes its member rows; under D-DECL-TYPES1 A (ratified) the remaining runtime-symbol and ambient facts become markers on the Core functions themselves, so the file goes entirely."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6163 into this card (one card per stream). Its title: Build core.build and the fn build host on the public compiler library. Body: Finding F16 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). core.build is implemented inside the compiler: Compiler/JetBuildSession/Source/Session.jet:1-4 (private compiler service linkage), Keys.jet:1-5 (Rust v2 key contract), Declarations.jet:1-2 (Rust runtime_bridge positional contract); Compiler/JetEval/Source/BuildServices.jet:1-3; Build and BuildPlan methods are dispatched by member-name strings in Compiler/JetDriver/Source/Driver/BuildAdapter.jet:36-81. Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: Make core.build ordinary Core source over the public compiler library's typed extension points (#6139). The fn build host calls those functions; delete the string dispatch in BuildAdapter.jet and the private session linkage."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6162 into this card (one card per stream). Its title: Core lexes and parses with the same rules as packages (amends #5978). Body: Finding F14 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). Core is lexed with reserved identifiers allowed (Compiler/JetDriver/Source/Driver/MarkerGroups.jet:222, Compiler/JetLexer/Source/Lexer/Terminators.jet:558-560) and parsed by its own job with owned members (Loader.jet:3489-3497, 3525). Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: Give packages the same private `__` name rule #5978 settles for Core, or remove Core's exception; then lex and parse Core with the ordinary job. Fold this into #5978's plan if Main prefers."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6161 into this card (one card per stream). Its title: Core calls get effects and sink classes from their declarations. Body: Finding F12 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). A Core call gets its effects and credential-sink class from module-name tables, not its signature: Sema/Taint.jet:240-288 (sema_taint_core_effect) and 290-300 (sema_taint_credential_sink). Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: Write each Core function's effects in its signature and its sink class with a public marker; read them like a package's. Delete both tables. Coordinate the moved effects with #6137."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6160 into this card (one card per stream). Its title: Copy, resource and typestate facts come from declarations, not Core type names. Body: Finding F11 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). Copy, resource and typestate facts come from name lists: Sema/Ownership/Copy.jet:298-307, 597, 697; Sema/Ownership/Crossings.jet:225; Sema/Typestate.jet:67-68 (Task join and detach). Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: Declare each fact on the Core type with the public derive, marker or typestate syntax. Delete the name lists and the hard-coded Task transitions."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6159 into this card (one card per stream). Its title: Core receives every diagnostic packages receive. Body: Finding F09 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). Core skips marker vocabulary and site checks (Sema/MarkerModules.jet:439, 447), unbuilt generator and runtime-use checks (Sema/CheckProgram.jet:5005, 5037), typestate validation (CheckProgram.jet:3189-3192, Sema/Typestate.jet:64, 70), budgets (Sema/BudgetSpecs.jet:158-165), a serde pass (Sema/Registration/SerdeItems.jet:1513), and the unbuilt-Core-call refusal (Sema/Calls/Core.jet:218-224). Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: Remove each exemption. Fix the Core sources the checks then flag, or record each needed exception with the public allowance a package would use."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6158 into this card (one card per stream). Its title: Core follows the same #Unsafe and secret rules as packages. Body: Finding F08 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). Core reads secret bytes without #Unsafe (Sema/Expressions/Places.jet:752-760, any core.* caller skips E0510). Core alone may wrap a generic formal in ExpiringSecret (Sema/FailureLaw.jet:631) and call ExpiringSecret.new with 3 arguments (Sema/Calls/Static.jet:871). Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: Wrap each Core read of secret bytes in an audited #Unsafe region. Give ExpiringSecret a public bound that admits Core's generic use, or move the use behind the public API. Delete the three exemptions."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6157 into this card (one card per stream). Its title: Remove constructs only Core may write. Body: Finding F07 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). Some record literals, annotations, private native types and protected type names are legal only in Core: Sema/Expressions/Constructors.jet:402 with Registry/CoreModules.jet:431; Sema/FailureLaw.jet:549-555 (IOOperation, IOContext, owner annotations); Sema/Registration/Items.jet:3509-3510; Sema/Calls/Methods.jet:1345; Sema/TypeRelations.jet:888 (core.email Limits); Sema/Calls/Core.jet:271 (core_private_seam lets Core reach unexported members). Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: Replace each with ordinary visibility: private fields or constructors, package-private types, and exports. Delete core_record_literal_is_core_only, the owner-annotation suffix list and core_private_seam."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6156 into this card (one card per stream). Its title: Give every package the lazy-lowering and layout rules Core gets. Body: Finding F06 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). Unreached Core bodies are not lowered, but other packages' bodies always are (Compiler/JetDriver/Source/Driver/Pipeline.jet:2643-2661, jet_driver_prunable_core_modules). Core types get runtime handle layouts by identity (Compiler/JetIR/Source/BuildTypes.jet:347, 494-504, 538). Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: Apply reachability pruning to every source module, not only Core. Give runtime-handle layouts a public declaration (F01's host declaration carries the handle type), and remove the `<corelib>/` tests in BuildTypes.jet."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6155 into this card (one card per stream). Its title: Bind format, decode, precise math and line loops through public traits. Body: Finding F05 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). Language features call named Core helpers by file path: Compiler/JetIR/Source/CoreReach.jet:35-66 (format selectors to Core/Text/Fmt.jet), 68-82 (__decode_* in Core/Encoding/Encoding.jet), 90-104 (Core/Math/Math.jet precise helpers), 117-138 (`loop line in handle.lines()` to read_line / __stdout_next_line). A user type cannot take part. Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: Express each binding as a public trait (formatting, decoding, precise arithmetic, line source) that Core implements and any package may implement. Lower the language form through the trait. Delete the path and name matching in CoreReach.jet."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6154 into this card (one card per stream). Its title: Lower Core calls through host-leaf declarations, not IR route tables. Body: Finding F04 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). IR lowers Core members straight to runtime symbols: Compiler/JetIR/Source/RouteHandle.jet (1,035 lines), RouteBuiltin.jet (660), RouteBrowser.jet (509); runtime Compiler/JetRuntime/Source/RouteAFont.jet, RouteAGame.jet, RouteBrowser.jet, RouteTerm.jet, RouteWeb.jet. Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: After F01, lower a call to a host-leaf declaration the same way for Core and packages. Delete each route table once its members are host-leaf declarations."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6153 into this card (one card per stream). Its title: Move per-domain call checks out of sema into Core declarations. Body: Finding F03 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). Sema has a hand-written checker per Core domain: Sema/Calls/Http.jet (920 lines), HttpRouting.jet (1,167), Services.jet (785), TaskGroups.jet (1,116), StreamHandles.jet (571), ProcessHandles.jet (518), TimeHandles.jet (517), UiHandles.jet (515), Hardware.jet (468), Data.jet (1,564), Geometry.jet (308); Static.jet:871 (ExpiringSecret.new with 3 arguments, Core only). Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: For each file, state each rule with a public mechanism (typed signatures, traits, typestate, marker rules or a library lint) in the Core module it guards, then delete the file. Work one domain per landing; the checklist is the file list above."
+        },
+        {
+          "at": "2026-10-30",
+          "by": "Main",
+          "text": "Merged #6152 into this card (one card per stream). Its title: Replace compiler gates on Core host leaves with ordinary visibility. Body: Finding F02 of the #6128 census (Docs/audits/2026-10-29-language-is-a-library-census.md; line numbers at dev 25f9dee58f). Sema refuses some host leaves unless the caller is one named Core module: Sema/Calls/Core.jet:1143-1147 (core.term __stdio_*), 1149-1154 (core.mem.__loader_new from core.data only), 1155-1160 (__coerce_* from core.encoding.json only), 1161-1166 (CSV leaves), 1170, 1268-1272 (global Shared constructor, E0067 outside Core); Sema/Calls/Data.jet:777. Pillar 5 (Docs/spec/philosophy.md): Core is ordinary Jet that uses only mechanisms any package can use, and every tool calls the compiler library instead of keeping its own copy of a language rule. Every new or widened diagnostic ships with a registered code, what/why/fix text and a UI snapshot (I4). The same program means the same thing at O0, O1 and O2 (I9). Plan: After F01, declare each gated leaf private to the module or package that uses it, so ordinary visibility refuses other callers. Delete the module-name gates in Sema/Calls/Core.jet and Sema/Calls/Data.jet."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 2,
+          "text": "Every Core member that has a CORE_CALLS row is declared in Core source, and the compiler's twin of Core's API is deleted in one cutover: Compiler/Prelude/Core.jet's member rows and Registry/CoreCalls.jet, CoreCallRows.jet, CoreCallExtensions.jet, CoreSignatures.jet, CorePlatformSignatures.jet, CoreHostSignatures.jet and CoreValueSignatures.jet (census F4, F19). Proof: `git ls-files Compiler/JetFoundation/Source/Registry | grep -E 'Core(Calls|CallRows|CallExtensions|[A-Za-z]*Signatures)\\.jet'` prints nothing and `jet test tests/guards --filter core_declarations` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c18, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:03.726Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 5,
+          "text": "(from #6152 Replace compiler gates on Core host leaves with ordinary vis) No sema branch compares a caller's module name or `<corelib>/` path to allow a call; a grep shows the gates are gone.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c1: no Core-only privileges is its own stream; criterion restated with its sites and a grep proof",
+          "at": "2026-11-15T02:25:37.096Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 6,
+          "text": "(from #6152 Replace compiler gates on Core host leaves with ordinary vis) A user package calling one of the former leaves gets the ordinary visibility diagnostic, with a UI snapshot.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c2: same stream; UI snapshot proof",
+          "at": "2026-11-15T02:25:38.819Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 8,
+          "text": "(from #6153 Move per-domain call checks out of sema into Core declaratio) Each listed Sema/Calls file is deleted, and every diagnostic it raised is still raised from a Core declaration (each code keeps its UI snapshot).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c3: split per checker file group into CPRIV c3-c6 so each is one sitting; this row carries the Http group",
+          "at": "2026-11-15T02:25:40.313Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 9,
+          "text": "(from #6153 Move per-domain call checks out of sema into Core declaratio) A user package that declares the same shape of API gets the same checks; one example proves it for one domain.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c7: same stream; golden proof",
+          "at": "2026-11-15T02:25:41.454Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 11,
+          "text": "IR lowers Core calls through their host-leaf declarations: JetIR's RouteHandle.jet, RouteBuiltin.jet and RouteBrowser.jet hold no Core member names, and the runtime RouteAFont, RouteAGame, RouteBrowser, RouteTerm and RouteWeb tables are deleted or keyed by declared symbols (census F04). Proof: those tables leave tests/guards/closed_lists/baseline.tsv and `jet test tests/guards --filter closed_lists` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6852 c7, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:04.896Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 12,
+          "text": "A user call and a Core call to the same jet.runtime host leaf lower to the same IR shape. Proof: `jet test Compiler --profile cases --filter host_leaf_user_and_core_lower_alike` (an IR dump comparison).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c19, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:06.087Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 14,
+          "text": "Format selectors, decode, precise math and `loop line in handle.lines()` bind through public traits: JetIR's CoreReach.jet (lines 35-138 at 25f9dee58f) names no Core file path or helper (census F05). Trait-bound format and decode is on Main's ballot list (2026-11-15). Proof: `git ls-files Compiler/JetIR/Source/CoreReach.jet` prints nothing, or `git grep -n -E 'Core/|__decode_|__stdout_next_line' Compiler/JetIR/Source/CoreReach.jet` prints nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6852 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:07.268Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 15,
+          "text": "A user type implements each of those traits and works with the language form: a format selector, decode, precise math and a line loop. It depends on the same ballot (Main's ballot list, 2026-11-15). Proof: `jet test Compiler --profile golden --filter Types/Traits/LanguageFormTraits` passes on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6852 c9, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:08.446Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 17,
+          "text": "(from #6156 Give every package the lazy-lowering and layout rules Core g) A user package's unreached function is not lowered (a build-trace or IR test).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB TlsLead-6151c17. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). build_entry/dependency_bodies_lower_only_when_reached shows with JET_TRACE_DETAIL=functions ir.function events that a dependency's unreached function is not lowered, for jet build at O0 and jet run at O2.",
+          "at": "2026-11-11T01:09:43.305Z"
+        },
+        {
+          "n": 18,
+          "text": "(from #6156 Give every package the lazy-lowering and layout rules Core g) BuildTypes.jet has no `<corelib>/` test.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6852 c5: layout facts join the declaration-facts stream; owner gate noted",
+          "at": "2026-11-15T02:25:52.228Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 20,
+          "text": "(from #6157 Remove constructs only Core may write) None of the listed branches remains; a grep for `<corelib>/` in Sema/Expressions, Sema/Registration and Sema/TypeRelations.jet finds no privilege test.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c8: same stream; sites listed",
+          "at": "2026-11-15T02:25:42.691Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 21,
+          "text": "(from #6157 Remove constructs only Core may write) A user package gets the same result with the same visibility spelling; a UI snapshot shows the ordinary visibility diagnostic.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c9: same stream",
+          "at": "2026-11-15T02:25:43.841Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 23,
+          "text": "(from #6158 Core follows the same #Unsafe and secret rules as packages) No sema branch exempts Core from E0510 or E0112.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c10: same stream; the Calls/Core.jet E0510 host-leaf gates stay with #6615 c5",
+          "at": "2026-11-15T02:25:44.928Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 24,
+          "text": "(from #6158 Core follows the same #Unsafe and secret rules as packages) The #Unsafe audit list (UnsafeObligations) includes the new Core regions.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev c2cecce162 (train t17a, e75850d064..c2cecce162), SUB TlsLead-6151c23. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t17a/REPORT.md). The new Core regions (expert byte projections, argon2id, the vault unlock helpers) are #Unsafe functions that the unsafe ratchet (UnsafeObligations) lists.",
+          "at": "2026-11-11T01:09:45.023Z"
+        },
+        {
+          "n": 26,
+          "text": "(from #6159 Core receives every diagnostic packages receive) None of the listed `sema_module_is_core_source` / `<corelib>/` exemptions remains.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 0a995af312 (train t18a, c2cecce162..0a995af312), SUB TlsLead-6151c26. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t18a/REPORT.md). The #6159 exemptions (marker vocabulary, site, collision and unbuilt-rule checks; typestate; budgets; the unbuilt Core call and handle refusal; derived methods under jet check Core) no longer skip Core.",
+          "at": "2026-11-11T03:23:22.068Z"
+        },
+        {
+          "n": 27,
+          "text": "(from #6159 Core receives every diagnostic packages receive) Core checks clean under the same rules; any allowance it needs is the public one, listed in the landing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 0a995af312 (train t18a, c2cecce162..0a995af312), SUB TlsLead-6151c26. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t18a/REPORT.md). jet check Core is clean under the same rules with no allowance, and the listed suites pass.",
+          "at": "2026-11-11T03:23:23.317Z"
+        },
+        {
+          "n": 29,
+          "text": "(from #6160 Copy, resource and typestate facts come from declarations, n) Copy.jet, Crossings.jet and Typestate.jet hold no Core type-name lists.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6852 c1: declaration facts are their own stream; owner gate noted",
+          "at": "2026-11-15T02:25:47.948Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 30,
+          "text": "(from #6160 Copy, resource and typestate facts come from declarations, n) A user type declared the same way gets the same facts; a sema test pins copy, resource and typestate.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6852 c2: same stream",
+          "at": "2026-11-15T02:25:48.903Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 32,
+          "text": "(from #6161 Core calls get effects and sink classes from their declarati) Taint.jet has no module-name effect or sink table.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6852 c3: same stream; the saved Taint patch is named in the new card body",
+          "at": "2026-11-15T02:25:49.959Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 33,
+          "text": "(from #6161 Core calls get effects and sink classes from their declarati) `jet inspect` effect output for a Core call and a user call with the same declaration matches (test).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6852 c4: same stream",
+          "at": "2026-11-15T02:25:51.130Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 35,
+          "text": "(from #6162 Core lexes and parses with the same rules as packages (amend) The driver picks the lexer and parse job without testing for Core.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c11: same stream; owner gate noted",
+          "at": "2026-11-15T02:25:45.975Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 36,
+          "text": "(from #6162 Core lexes and parses with the same rules as packages (amend) A package-private `__` helper behaves the same in a user package and in Core (UI snapshot for the refused outside use).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c12: same stream; owner gate noted",
+          "at": "2026-11-15T02:25:46.970Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 38,
+          "text": "core.build runs on the public compiler library: Driver/BuildAdapter.jet (lines 36-81) dispatches no Build or BuildPlan member-name strings, and JetBuildSession is deleted or becomes a public library package (census F16). Proof: BuildAdapter.jet's member-name list leaves tests/guards/closed_lists/baseline.tsv and `jet test tests/guards --filter closed_lists` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6852 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:09.673Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 39,
+          "text": "A user package writes a build helper with the same API core.build uses. Proof: `jet test Compiler --profile golden --filter Metaprogramming/BuildTime/UserBuildHelper` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c20, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:10.918Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 42,
+          "text": "(was #6369) core.math.combinatorics keeps no [Int]-only copy of a generic list operation or duplicate count, chain and cartesian are generic, and text.combinators.take_while takes a function predicate; every in-repo caller is migrated in the same cut, with the examples' goldens passing on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "bee9c15480, proven by Main vb8 verify batch on s1 built from dev 690b182cb3: golden Examples/features/collections/combinatorics.jet PASS on o0, o1 and o2; cases text_unicode/text_parser_helpers_preserve_optional_failure_across_tiers PASS (take_while caller). Code on dev: Core/Math/Combinatorics.jet keeps only generic list functions (chain, cartesian, product, combinations, permutations are fn<T>), the [Int]-only copies and duplicate count are deleted (count_from is a distinct generator), and Core/Text/Combinators.jet take_while takes predicate: fn(String) -> Bool. The commit builds, so every in-repo caller is migrated. Report: $JET_SCRATCH_ROOT/lanes/Main/vb8/kit/candidate-{golden,cases}-0.json",
+          "at": "2026-11-06T22:27:31.844Z"
+        },
+        {
+          "n": 43,
+          "text": "(was #6370) Each F3 group in the audit has one function with a name that states what it does (create_dir folded, walk_parallel parallel or deleted, float32 rounds or is deleted, previews/playgrounds folded, publicdecrypt fixed, one median contract); in-repo callers migrated in one cut; goldens pass on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "5f6727640a, proven by Main vb8 verify batch on s1 built from dev 690b182cb3: every example the fold touched passes its golden on o0, o1 and o2 (io/grep_scan, io/dir_entry, io/files_escape_lifecycle, io/files_projection, io/files_rooted_lifecycle, io/process_pass_directory, io/process_run_all, ui/preview_viewport, ui/surface, tooling/data_quantile_partitions); io/parallel_grep is deleted with walk_parallel. packages/mod_load_errors stays known-failing for an unrelated reason it had before the commit (#4599: mod.load is not built). Code on dev: Core/Files has the one create_dir_all, no walk_parallel, float32 or publicdecrypt twin remains, preview and playground share one UIPreview registry, and Core/Math/Stats keeps one median contract (median, median_low, median_high, median_grouped are distinct statistics). Report: $JET_SCRATCH_ROOT/lanes/Main/vb8/kit/candidate-golden-0.json",
+          "at": "2026-11-06T22:27:32.819Z"
+        },
+        {
+          "n": 44,
+          "text": "(was #6389) Every fixed-width integer type has one wrapping conversion from Int in the existing `wrapping_*` family, documented in the core-library reference with an example.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Already on dev: 362a902d3c is an ancestor of 76955986d0 (MechB-2). Checked by Main on the t6c compiler (dev 76955986d0): the case numeric_widening/fixed_narrowing_words_choose_the_outcome PASSes (wrapping U8/I8/U16/I32/U32/I64 from Int and fixed widths on none/basic/full), and core-library.md documents wrapping(T{x}) with an example.",
+          "at": "2026-11-10T10:54:10.126Z"
+        },
+        {
+          "n": 45,
+          "text": "(was #6389) The 12 private `to_u8` helpers are deleted and their callers use the public conversion; goldens unchanged on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Already on dev: 362a902d3c is an ancestor of 76955986d0 (MechB-2). Checked by Main on the t6c compiler (dev 76955986d0): `git grep -nw to_u8 76955986d0 -- Core` finds 0 hits; the full golden suite at t6c passes on O0/O1/O2 ($JET_SCRATCH_ROOT/lanes/Main/integ/t6c/REPORT.md).",
+          "at": "2026-11-10T10:54:12.700Z"
+        },
+        {
+          "n": 46,
+          "text": "core.math keeps no source-owned scalar conversion that `Type{value}` spells (D-FLOAT-INT1=A): `to_float` is removed and its callers write `Float{x}`. The SIMD `from_array`/`to_array` bridges stay, because D-SIMD1 and D-SIMD2 (ratified) require them. Proof: `git grep -n 'to_float: fn' Core/Math` prints nothing and `jet test Compiler --profile golden --filter Math` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6313 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:12.110Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 48,
+          "text": "Each Core call carries the full effect set its Core declaration writes: the call row holds a set of effects, built from the parsed Core signature, and the JS effect lists are deleted. Today Core/Jobs/Jobs.jet:126 declares `fn queue() -[DB, Env, FS, Time]>` but CoreCallRows.jet:1278 keeps only Effect.DB (census F1, Docs/audits/2026-11-05-single-source-census.md). Proof: `jet test Compiler --profile cases --filter core_call_effect_set` shows all four effects for jobs.queue.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6852 c11, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:13.318Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 52,
+          "text": "D-CORE-LOWER1=A, entry half: the entry package's own unreached bodies follow dead_code=remove. Every entry root (jobs, C exports, CLI commands, callbacks and other roots) is kept, and an unreached entry function is not lowered. It is met when the ffi and export case lines pass (they were red from 4 selfhost_terminators jet_lexer cases broken by ScriptAPI-7 and a musl race in cffi concurrent-bridges). Proof: `jet test Compiler --profile cases --filter core_lower_entry_roots` (a case per root kind).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6851 c21, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:15.154Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 53,
+          "text": "D-EMBED-TOOLCHAIN1=A table cutover, part 2: the five Core-declaration tables (CoreSourceOwned, EnumRows, StructureRows, the EnumPayload tail, CoreCallRows) are computed at build time from toolchain: reads, their copies and generator modes are deleted, and the declaration parser lives in one package. Walked and data-named reads use computed embed_file and find paths (D-EMBED-WALK1=A). The comptime cost of CoreCallRows (896 KB) against the generator run is recorded in the card log. Proof: the five generated files are absent from `git ls-files Compiler` and `jet test Compiler --profile ui --filter comptime_embed_` passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #4896 c6, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T00:55:17.088Z",
+          "closure": "duplicate"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": "c0xiig3k",
+      "needsAcceptance": false,
+      "created": "2026-10-29T12:53:42.058Z",
+      "updated": "2026-11-16T03:22:47.860Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 53,
+      "completedAt": "2026-11-16T03:22:47.860Z",
+      "questions": [
+        {
+          "id": "q0304gub",
+          "cardId": "c0w1wcfc",
+          "decisionId": "D-HOST-LEAF1",
+          "by": "owner",
+          "kind": "question",
+          "text": "I'm confused why this needs an import export market. Why not just have the code? If we use markers then the runtime could be expanded? Why not just have the runtime library be linked in the compiler as a special library? Is there a better way to handle that?",
+          "status": "answered",
+          "answer": "You're right, and I think your idea beats option A. I'll rework the ballot around it.\n\nWhy the boundary exists today: the runtime is already ordinary Jet. It is the package jet_runtime in Compiler/JetRuntime, built once into a native library that every tier links (one runtime, so one meaning on every tier). But Core doesn't use it the way one package uses another. Core calls names like core.time.__sleep_ns, and a table inside the compiler maps each name to a C-style runtime symbol (about 1,000 rows). That table is what card #6151 wants gone. Option A swapped the table for markers and symbol strings. That is still a boundary, just a checked one.\n\nYour suggestion, as a new option E: treat jet_runtime as a normal library that ships with the compiler. Core, and any package, writes `use rt: jet.runtime.time` and calls `rt.sleep_ns(duration.ns)`. There is no marker, no symbol string and no manifest. The compiler reads the runtime's real Jet signatures and effects from its prebuilt package, the way it reads any precompiled dependency. Public runtime functions are the supported surface. Private ones (handle internals, the scheduler) stay unreachable through ordinary visibility, so safe code can't forge or free handles. Effects come from the runtime's own Jet code, so nothing can drop them.\n\nWhy it's better: Core then uses only mechanisms any package can use, which is the \"language is a library\" pillar. And there is nothing to drift, because the declaration is the code itself. Go works this way: `runtime` is an ordinary package. Go's trouble came only from //go:linkname, which reached past visibility into private functions. Swift's standard library uses unchecked @_silgen_name bindings, which is the pattern to avoid.\n\nCosts:\n1. The runtime's public functions need real Jet names, modules and types (Int rather than I64, typed handles) instead of jet_std_* C names. That is a cutover of about 575 functions.\n2. The compiler must load the runtime's interface from the shipped toolchain.\n3. A few runtime helpers written in C keep a C import inside the runtime, under #Unsafe.\n#Export(c) stays only for the C ABI that generated code and foreign hosts use.\n\nNext: I'll add E to D-HOST-LEAF1 as the recommendation and attack it in the review (web tier, compile-time evaluation, the layering of the runtime below Core) before asking you to rule.",
+          "created": "2026-11-06T21:20:11.941Z",
+          "answeredAt": "2026-11-06",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q0ay96ip",
+          "cardId": "c0w1wcfc",
+          "decisionId": "D-FLOAT-INT1",
+          "by": "owner",
+          "kind": "question",
+          "text": "what is considered best practice overall across all domains? we need the correct default with the ability to control exact behavior for experts where needed",
+          "status": "answered",
+          "answer": "Best practice across fields has three parts. (1) The default never loses information silently. IEEE 754 defines float-to-int per rounding direction and signals invalid on NaN, infinity or out of range; Julia's Int(2.5) throws; Jet's own Float{n} already stops when inexact. (2) The rounding is always named, because fields disagree: games want floor for negative coordinates, statistics and money want ties-to-even (the IEEE, Python, NumPy, R, C# and Julia default), everyday arithmetic wants ties-away, and audio and pixels want saturation. (3) Out of range either stops, returns a checkable value, or saturates only when asked. The ballot now recommends A, which follows Julia. Int{f} is exact; trunc, floor, ceil, round (ties away) and a new round_even (ties to even) name the rounding; Int.from_float returns None; a new Int.saturating_from clamps, on every integer head. math.round stops on NaN and out of range instead of today's silent 0 and clamping. The rejected camps are B, truncate and stop (Swift, Python), and C, truncate and saturate (Rust as, Java, Kotlin). There is no unchecked unsafe form, because the range check is one compare that the optimizer removes when it proves the range.",
+          "created": "2026-11-07T23:05:21.581Z",
+          "answeredAt": "2026-11-08",
+          "answeredBy": "Main"
+        },
+        {
+          "id": "q5xi0jx6",
+          "cardId": "c0w1wcfc",
+          "decisionId": "D-CORE-LOWER1",
+          "by": "owner",
+          "kind": "question",
+          "text": "Should have a strict check for experts to ensure all is reached to find all errors",
+          "status": "answered",
+          "answer": "Agreed. The one downside the ballot accepted was that an unreached function is only lowered, and its backend fault only found, once something calls it. The rewrite removes that: `jet check` (and `jet build`, per your ruling that both list everything) lowers every function, reached or not, and reports every error in one run; only `jet run` and `jet dev` skip unreached bodies, for speed. If you also want a separate expert switch beyond that, the ballot will show its exact spelling as an option. It goes through a fresh review before it replaces this one.",
+          "created": "2026-11-09T22:57:19.211Z",
+          "answeredAt": "2026-11-09",
+          "answeredBy": "Main"
+        }
+      ],
+      "retiredAt": "2026-11-19T04:02:02.717Z"
+    },
+    {
+      "id": "c0bbj6h3",
+      "num": 6615,
+      "title": "D-HOST-LEAF1=E: the runtime is an ordinary library that Core uses",
+      "body": "Owner ratified D-HOST-LEAF1 option E on 2026-11-06. jet_runtime becomes an ordinary library: Core and any package write use rt: jet.runtime.time and call rt.sleep_ns(duration.ns). No marker, no symbol string, no hand-written manifest. Internals stay hidden by pub. Amended by the adversarial review (Docs/audits/2026-11-06-d-host-leaf1-option-e-review.md): a declared effect row on a pub runtime function introduces its effects, and the interface is generated from source with the runtime pack. This card builds the runtime side. The #6151 criteria (c4-c41) and #6111 c1/c2 that waited on the host-leaf ballot are unblocked by E and stay on their cards: they remove Core's privileges, which E's ordinary-library model makes possible.",
+      "kind": "feature",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed by Main: every criterion is met with recorded evidence (landed commits and audits), and moved criteria live on their owning cards."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c10 reworded; the owner-only choices are on Main's ballot list (2026-11-15) ($JET_SCRATCH_ROOT/lanes/TowerKeeper-2/ballots-needed.tsv); no question for the owner stays on this card."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "Cleaned: the TLS host reads (c12, c14, c15) moved to #6861; c16-c17 restated as the freestanding execution proofs #2300 left; c18 merged into c17."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Main decisions 2026-11-11 (TlsLead-3's open items): (1) the row_splits rows in RuntimeEffectRows (jet_time_raw_wall_sample via ssl_time, jet_random_os_entropy, jet_files_read_bytes_os, jet_fs_directory_open/close) stay until the owner ballot on whether a protocol root (Net) covers its host reads (Time, Rand, FS.Read); if it does not, the TLS entries declare the full rows in one cutover. (2) The F32 bit pair (core.math.__to_bits_f32/__from_bits_f32) has no runtime carrier: it is an IR-lowered pure intrinsic like sqrt, exempt here, pinned by a signaling-NaN round-trip case at O0/O1/O2. (3) tls.client is one declaration (tcp, server_name, config?, deadline?) -[Net, Time.Wait]> TLSStream NetError!; the host/port form and the sema arity/type dispatch are removed, and callers use tls.connect_host. (4) The 402 E3203 NonCAbiType errors come from seeds that predate the carrier commits (1e02b82ef1, 3bf0e43440, 8ff2c54775). No gate depends on them; the chain's last SUB checks the runtime binding package on the first batch compiler after it lands."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Ballot candidate (owner choice, not built): TLS certificate-validity checks read the wall clock (ssl_time via tls.__host_wall_sample). Today Net covers that read by a deliberate rule (Core/Net/SSL/Defs.jet:1501). Surfacing it as Time would add Time to about 60 SSL functions, the 10 Net callback fn types (Defs.jet:1054-1125), every Tls.jet engine fn and the public tls client/read/write/ready, http client/serve and ws upgrade rows (TlsLead3 cascade census, 2026-11-11). For #6615 the runtime binding declares Net under that rule, as an explicit exception row in RuntimeEffectRows. The open UI case: paint_state through a backend trait method needs Browser on the web backend only (effect-polymorphic trait methods); it keeps its route until decided."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Ballot NEW-D-HOST-CAP1 withdrawn 2026-11-11 after an adversarial rewrite (owner order: confusing or parallel ballots are redone, and questions an existing mechanism answers are decided rather than balloted). Decided: Preserve the existing UI needs contract in the checked runtime interface and propagate it through resolved calls; generate vocabulary from UICapability, not deleted call rows. It extends: origin/dev:Core/Ui/Host.jet:22-30 is the UI capability vocabulary. origin/dev:Compiler/JetSema/Source/Sema/CoreUsage.jet:445-480 checks declared needs; origin/dev:Compiler/JetDriver/Source/Driver/Loader.jet:256-260 currently derives valid names from Core call rows. D-HOST-LEAF1=E requires ordinary runtime library declarations and their checked interface. The full record is $JET_SCRATCH_ROOT/lanes/Main/ballots-v4/NEW-D-HOST-CAP1/verdict.md. Withdrawal decides the direction; it does not mean the build is done."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t22 landed (dev 5dc51a93f5): TlsLead-6615s4be (47d0ff8ba6, the text-cell and ETF-string decode scopes on jet.runtime.encoding) and TlsLead-6615s4bl (b48dfee798, core.log on jet.runtime.log, 15 bound leaves deleted). This is slice S4b of c5. CoreSourceRows and RuntimeEffectRows --check pass (0 differences), with no new case or core failures. c5 stays open for the remaining rows (c5a is staged)."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t21 landed on dev 4a9268e62c (83b33f14dc..4a9268e62c): TlsLead-6615s3a/s3afix (jet.runtime.time binds all 13 raw time exports core.time calls, identity-keyed, so a user lookalike stays a C import with E3101/E3203/E1341), s4ar/s4arfix (48 handle-free term/log/encoding/process leaves bound with Option-of-tuple and tuple-of-Option carriers; the unchecked string_byte/bytes_into_text and coerce_now/coerce_emit stay Core-only behind E0510 until S7), s4bp (the dead core.process __signal_* leaves, records, dispatcher rows and IRRoute rows deleted, so jet.runtime.process is the only path) and s4bpfix (the unknown_module snapshot lists the 5 runtime modules). RuntimeEffectRows joins 59/59. Every test line passes after a clean census. c4 and c5 stay open: TlsLead3 census finds most S5-S8 leaves need Result/struct carriers (S11, go) or a Core-only visibility (ballot facts pending if no ordinary mechanism fits)."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "t19 landed TlsLead-6615c4 (0efcf91a49..97462b6d92), the c4 mechanism. A jet.runtime call lowers to the runtime export its interface row names at O0/O1/O2 and in a built binary, and Tools/agent/RuntimeEffectRows.jet --check (in VerifyFull) joins each interface function to its Core leaf by name with 0 differences. c4 stays open until every runtime function Core calls is bound this way (S3 onward)."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Main ruling 2026-11-10 on S3, the time cutover (TlsLead3). Under D1 (the carrier projection ABI), each jet.runtime.<module> member is a body-less binding onto the runtime export that holds its one body. The binding is generated from the runtime export rows (the c3 interface), never hand-written, and lowered through a route derived from its Jet signature, so the hand IRRoute rows go. Sema admits carrier types (Option, tuple, List) only for bindings of the generated interface, keyed on its identity, not on a module name; a user `jet.runtime.*` module gets the ordinary C-law errors. The raw exports stay as each function's one far-side body, so they are not a twin, and c8 deletes the dispatcher rows and the compiler twin, not these exports."
+        },
+        {
+          "at": "2026-11-11",
+          "by": "Main",
+          "text": "Main rulings on the c3-c5 slice plan (TlsLead3, 16 slices, written up in its lane as 6615-plan.md). D1: a jet.runtime call uses the carrier projection of its Jet signature, computed on both sides from the one signature; no exported internal ABI. D2: `jet.runtime.<module>` is the spelling these criteria already name. `jet` is a compiler-provided namespace beside `core` and holds only `runtime`, with no other members. D3: c5 lands one module at a time (S3-S14). A module moves whole, with no dual path inside it, and its dispatcher rows, CoreCallRows, IRRoute rows and RuntimeStopExports go in the same SUB. c5 is met only when the last module lands and a census shows 0 dispatcher_row lines. Finding: c38-c40 on #6151 (core.build) are compiler comptime, not runtime, so jet.runtime does not unblock them."
+        },
+        {
+          "at": "2026-11-10",
+          "by": "Main",
+          "text": "t15a landed G6LeadC-11 (01b86931e7..8327f5ae47): c6 clause 2 (an ungated #Import(c) of a runtime export is E3101, UI snapshot runtime_import_needs_unsafe; a gated one works) and c7's interim clause (architecture.md limits the one-runtime claim to O0/O1/O2 and names the web tier's JavaScript runtime functions). c6 stays open for clause 1, and c7 for the web runtime itself."
+        },
+        {
+          "at": "2026-11-07",
+          "by": "Main",
+          "text": "Defect found by TestSystemLead-2 at 56e30acfcf: an #Import(c) call to the runtime symbol jet_rt_process_exit lowers into jet_rt_unreachable. The program prints 'internal error: entered unreachable code:' and exits 101 whatever code it passed. Repro: a 10-line program that imports raw_exit: fn(code: I64) = \"jet_rt_process_exit\" and calls it. Sites hit: Compiler Host.jet:1563 jet_cli_defect_exit, the JetTestKit fixture compiler.jet, and Compiler/JetTestKit/Assets/no_nix.jet. It belongs to c6 (reaching a runtime C symbol through #Import(c)): the imported call must exit with its argument and print nothing."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "Docs/audits/2026-11-06-d-host-leaf1-option-e-review.md is on dev and its verdict holds within the stated limits; its two amendments (declared effect rows on pub runtime functions are the introducing leaves; the runtime interface is generated from source with the runtime pack) are part of E.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Docs/audits/2026-11-06-d-host-leaf1-option-e-review.md landed on dev as a8ca8c0f63 (lane-commit, CHECK OK). Verdict: holds within limits, with the two amendments (declared effect rows on pub jet_runtime functions are the introducing leaves, proven equal to CoreCallRows effect_kind/effect_leaf at cutover; the runtime interface is generated from source with the runtime pack and embedded). The web-tier gap (Compiler/Prelude/Web/Core/Realtime.js reimplements runtime functions) is c7 on this card.",
+          "at": "2026-11-06T21:56:26.549Z"
+        },
+        {
+          "n": 2,
+          "text": "A census lists every CoreCallRecord field (borrow_mask, fallibility, effect_kind, effect_leaf, capability contract, pure_route, coverage, aot_direct, native_int_result, frame_accesses, sink_class, ui_capabilities, marker, authority) and gives each either its home in the runtime's Jet signature or a proof that nothing reads it, so it can be deleted.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6LeadC-3. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). Census of every CoreCallRecord field with its home or a proof nothing reads it.",
+          "at": "2026-11-10T16:28:17.020Z"
+        },
+        {
+          "n": 3,
+          "text": "Building the runtime pack also generates the jet_runtime interface (each pub function's Jet signature and effect row) from the runtime source and embeds it in jet. A check fails the pack build when the interface and the source disagree. No hand-written copy exists. The measured compile time of a hello-world jet check with the interface loaded is recorded and no slower than before the change.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 97462b6d92 (train t19, 0efcf91a49..97462b6d92), SUB TlsLead-6615c3 + TlsLead-6615c3fix. Every test line of the SUB passes with the compiler built from the landed tree, after a census that is clean on every pass ($JET_SCRATCH_ROOT/lanes/Main/integ/t19/REPORT.md). The runtime pack build renders the jet.runtime interface (each public runtime function's Jet signature and effect row) from the runtime source into Compiler/JetFoundation/Source/Registry/RuntimeInterface.jet, which jet embeds and loads. The pack build's interface check fails on disagreement, and no hand-written copy exists. c3fix keys kept `jet run` records of the supplied interface sources by SHA-256, so program reuse holds (case run_rerun_reuses_the_kept_program_of_a_jet_runtime_import).",
+          "at": "2026-11-11T04:40:43.821Z"
+        },
+        {
+          "n": 4,
+          "text": "Every runtime function Core calls is a pub function of jet_runtime with a Jet name, Jet types (Int, not I64; typed handles) and a declared effect row. A generated comparison over every bound function proves each declared row equals the effect_kind and effect_leaf the compiler row held before the cutover, with zero differences. Proof: `jet test Compiler --profile cases --filter runtime/declared_rows_match` shows zero differences.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6976 c7, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:22.745Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 5,
+          "text": "Core reaches the runtime only through ordinary use of jet.runtime modules. The dispatcher_row lines in Compiler/Prelude/Core.jet, the bound CoreCallRows, the IRRoute carrier rows for those functions and their RuntimeStopExports entries are deleted, and every in-repository caller is migrated in one cutover. Goldens prove o0, o1 and o2 for one call in each Core module that called the runtime. Proof: `git grep -n dispatcher_row -- Compiler/Prelude/Core.jet` prints nothing, and `jet test Compiler --profile golden --filter runtime/one_call_per_core_module` on O0, O1 and O2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6880 c31, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:25.694Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 6,
+          "text": "A safe package that names a runtime function that isn't pub fails with the ordinary visibility diagnostic, and reaching a runtime C symbol needs #Import(c) inside #Unsafe. Proof: a UI snapshot for each.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6976 c8, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:28.649Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 7,
+          "text": "The web tier provides no runtime function as a JavaScript reimplementation: it runs jet_runtime compiled for the web, or its JavaScript host only marshals values into the same runtime code (I9). Until then, no public text says every tier runs one runtime.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev e75850d064 (train t16a, 8327f5ae47..e75850d064), SUB G6LeadC-12. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t16a/REPORT.md: the census is clean after the integration fixes G1Lead-4-cefix, G6LeadC-14fix, G1Lead-4-closedelsefix, G6LeadE-4fix, G8Fix-5fix and TlsLead-69fix). `jet build --target web` runs jet_runtime selected to WebAssembly; the generated JetWeb host defines no jet_rt_/jet_std_ function and only answers system calls and marshals values. The Compiler/Prelude/Web JavaScript runtime tree is deleted.",
+          "at": "2026-11-10T23:56:31.620Z"
+        },
+        {
+          "n": 8,
+          "text": "The runtime is an ordinary library (D-HOST-LEAF1=E) and the IR route tables (IR_RUNTIME_ROUTES, the route.export rows and the generated handle helpers) are deleted, so Core's runtime calls take the ordinary call path. Proof: `git grep -n -E 'IR_RUNTIME_ROUTES|route\\.export' -- Compiler` prints nothing and `jet test Compiler --profile golden` passes on o0, o1 and o2.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6976 c9, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:32.494Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 9,
+          "text": "Authority bypass found by TlsLead3, 2026-11-11: core.ui.host.clipboard clear and is_empty reach the host clipboard without the UI.Clipboard capability check (E2937). Both now refuse without `UI.Clipboard` in authority.needs, each with a UI snapshot, and a sweep confirms that every host-reaching core.ui.host* function carries its capability.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev 26afb1a0e6, fix 37fe0976a3 (GoalsA-1, gate-p62 jet, 2026-11-14): jet test Compiler --profile ui --filter ui_clipboard_ -> 8 PASS/0 FAIL (clear and is_empty refused without UI.Clipboard, each with O0-O2 fixed companions). Sweep: Core.rows carries UI.Clipboard rows for clear and is_empty beside 14 other with_ui_capabilities rows; every public core.ui.host* fn reaching a host primitive (open_file, save_file, shortcut, accessibility, clipboard x4, ime.poll, drag_drop.poll, shortcuts binding/register/dispatch/poll, accessibility attach/project) has a row; only capabilities() (the probe) is rowless; no Core file outside Core/Ui/Host* calls ui.host.__*.",
+          "at": "2026-11-14T13:22:14.454Z"
+        },
+        {
+          "n": 10,
+          "text": "Every capability-only Core dispatcher row (Compiler/Prelude/Core.jet .with_ui_capabilities, 18 rows on dev 2dff7789f5 per TlsLead3's count: font shaping, ui.host open_file/save_file/shortcut/accessibility, clipboard x4, IME and drag-drop polls, shortcuts binding/register/dispatch/poll, accessibility attach/project, and others) and the internal CoreCallRecord.ui_capabilities field are the one remaining compiler-owned twin after c5 (Main, 2026-11-11, option A: kept as the capability carrier with vocabulary generated from UICapability, preserving every current requirement). They're deleted once a Core declaration can carry a UI capability itself. That needs a declaration-level spelling that no registered marker or effect row provides today (UI.* are not effect roots), which is new syntax; whether to add it and delete the twin is on Main's ballot list (2026-11-15). Proof when it lands: no CORE_CALLS special case in Loader.jet:256-263, and the UI snapshots for a missing capability on a constructor, a wrapper and a user wrapper are unchanged.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6447 c7, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:36.448Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 11,
+          "text": "The compiler's effect-scope covers check reaches the runtime's one covers rule through the jet.runtime.authority binding `covers` (Compiler/JetRuntime/Source/Public/Authority.jet, export jet_authority_right_covers), not a C import. Compiler/JetFoundation/Source/Policy/EffectScope.jet declares no #Import(c) and no #Unsafe, tests/guards/c_imports.jet has no CI_ALLOWED row for it, the C-string export jet_authority_covers is gone, and jet test Compiler/JetFoundation/Tests/Policy/EffectScope.jet passes the 33-row covers table on a jet built with it. SUBs: G8Scope-1c (any train), then G8Scope-1d (after a seed with 1c). Placed on #6615 rather than #6129 so this follow-up to G8Scope-1b's interim CI_ALLOWED row doesn't hold G8's closure. Proof: `jet test Compiler/JetFoundation/Tests/Policy/EffectScope.jet` passes the 33-row table and `git grep -n jet_authority_covers -- Compiler` prints nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6976 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:39.518Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 12,
+          "text": "D-NET-HOSTREADS1=A (ratified 2026-11-12) is built for all seven TLS host-ingress leaves (wall clock, OS entropy, CA bundle files and directories, and the rest the review lists), including propagation through TLS and HTTP errors, a denied override that never falls back to another bundle, callbacks and tasks, and dependency-sandbox intersections, with the caller, registry and docs cutover in one change. Proof: the seed-b5 probes (a local HTTPS client denying FS, Rand and Env, a scoped denial of its CA file, and a server denying Rand) are each refused with the registered effect diagnostic (`jet test Compiler --profile cases --filter tls_host_reads`).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6861 c1: TLS host reads are their own stream (D-NET-HOSTREADS1); split into HOSTR c1-c3",
+          "at": "2026-11-15T02:45:58.345Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 14,
+          "text": "From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). The D-NET-HOSTREADS1 implementation names its applicable-tier proof (O0, O1, O2, and web where applicable) and the outcome on targets with no clock, no entropy source or no filesystem, each proven by a case.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6861 c4: the missing-source outcome and tier proof go with the host-read card",
+          "at": "2026-11-15T02:45:59.572Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 15,
+          "text": "From the adversarial review of D-NET-HOSTREADS1 (sol-reviewer, 2026-11-11). If file-free sandboxed or embedded TLS is required, a scoped design proves separate precise entry paths or a complete provider API and lifetime design. A configuration value alone does not remove the conservative effects.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6861 c5: the embedded-TLS guard goes with the host-read card",
+          "at": "2026-11-15T02:46:00.495Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 16,
+          "text": "Sema classifies the reachable Prelude closure into core, alloc and hosted layers (D-FREESTAND-PRELUDE1=A), and a program that reaches a layer its target lacks is refused with a registered error.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6976 c11, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:43.103Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "ui",
+            "filter": "freestanding_missing_layer_"
+          }
+        },
+        {
+          "n": 17,
+          "text": "The five freestanding witnesses (heap_free_core, allocator_firmware, browser_wasm, wasi, hosted_default) run with target-selected marshalling around the one Prelude on their applicable tiers, with no second Prelude.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6144 c4, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:01:46.175Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cases",
+            "filter": "freestanding_witness_"
+          }
+        },
+        {
+          "n": 18,
+          "text": "(was #2300 c5) All five required witness sources and their target and runner applicability are integrated without a second Prelude. (moved from #4741 c15)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6615 c17: the witness sources are integrated (#2300 c5, source inspection); running them is c17",
+          "at": "2026-11-15T02:46:01.460Z",
+          "closure": "obsolete"
+        }
+      ],
+      "refs": [
+        "6151",
+        "6111"
+      ],
+      "tags": [
+        "runtime",
+        "owner-direction"
+      ],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-06T21:43:21.231Z",
+      "updated": "2026-11-16T03:22:33.380Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 18,
+      "completedAt": "2026-11-16T03:22:33.380Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T04:02:02.718Z"
+    },
+    {
+      "id": "c073cvg9",
+      "num": 6637,
+      "title": "Compiler code health after the port: retired teaching, stale comments, stutter names and unwired code",
+      "body": "Destination: the compiler source reads as conventional Jet after the port from Rust. No retired Jet spelling is recognized or taught, no comment cites deleted Rust code, no name repeats its package, tool packages run their tests, the docs teach only current forms, and no test claims an interpreter tier.\n\nWhy it matters: leftovers from the port mislead every reader and every agent that learns from the source (Pillar 5, Docs/spec/philosophy.md; AGENTS.md Greenfield cutover).\n\nRelated: dotted symbol paths (#6612), the LSP (#4917), formatter rewrites (#6850), D-NO-WARNINGS1 tidy errors (#6858).",
+      "kind": "task",
+      "track": "epoch",
+      "epoch": "e4",
+      "milestoneId": null,
+      "phase": "done",
+      "priority": "P1",
+      "plan": null,
+      "checkSteps": null,
+      "probe": null,
+      "visualMedia": [],
+      "blockedBy": [],
+      "assignee": null,
+      "log": [
+        {
+          "at": "2026-11-16",
+          "by": "Main",
+          "text": "Closed by Main: every criterion is met with recorded evidence (landed commits and audits), and moved criteria live on their owning cards."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-2",
+          "text": "Owner-wait sweep 2026-11-15 (TowerKeeper-2, for Main): c16 reworded; the text waited on an owner answer that ratified decisions already give, or on a choice within ratified scope; it is recorded as decided (Main's operational authority) and nothing waits."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: c7 merged into #6612 c4 (dotted paths), c19 moved to #4917 c71 (LSP). The other open items were restated with dev counts and proofs."
+        },
+        {
+          "at": "2026-11-15",
+          "by": "TowerKeeper-1",
+          "text": "2026-11-14 TowerKeeper-1: c8 (guard clauses) moved to #6850 c2; c10 split, its fmt half to #6850 c3 and its optimizer half to #6473 (#6473 c3)."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "dev 58395ae622, 6499a91359, adec48bfd0 and 67b6faf1de: c7 parts 1, 2, 4 and 5 (dotted identities). dev 587642cd25, bcd572c2f4, 84dc292dc4, 5332e759bf, 33993c6999 and 363f001506: c2 parts 1-6 (the copy ratchet guard plus copies turned into moves). Left: c7b2 (r4 coming) and c2 cp7-cp10 (cp7 conflicts in Pipeline.jet with c7b2)."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Unlanded record (AGENTS.md: save before removal): the previous G6Meta lead left an unproven WIP mix of ui-red fixes (inference untyped, the ViewMut binding retire, crypto password_hash_with_salt, module_value ui) in its worktree; all 52 commits of its detached 0aac795634 are on dev. The WIP is saved, not landed, at the lanes scratch G6Meta/rw-save (wip-vs-0aac7956.patch). Rows it touched that are still red start from dev, not from it. The master checkout stale code copy (2026-11-11) was replaced by a dev mirror; its 18 non-dev files and the staged diffs are saved in the Main lanes scratch master-salvage."
+        },
+        {
+          "at": "2026-11-13",
+          "by": "Main",
+          "text": "Order 2026-11-12 evening (owner alarmed at the copy count): c2 starts with defensive .copy() removal in sema hot-path files (CheckProgram 145, Ownership/Checks 144, Scopes 97, Pipeline 83, Expressions 74, InlineModules 72, Statements 70), one file per SUB, behavior unchanged, count ratcheted in the closed_lists baseline with a guard on new hits; then the rest of Compiler/ by directory, then ladders and Dyn walkers. Owner G6Meta-4."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c5 landed 2026-11-12: G6Meta-6637c5 cac0bb37e7 deletes the unbuilt Compiler/JetCli/Commands package; proof lines and LaneCheck rc 0 on 80f06dbe13 + patch."
+        },
+        {
+          "at": "2026-11-12",
+          "by": "Main",
+          "text": "c1 finding (Lander5, 2026-11-12, while testing G6Meta-6586c4): tests/release/deprecation.txt and tests/project_check/fixtures/missing_context/expected.stderr have no reader in Compiler, Tools or tests on dev 8453c8b584. Wire each into a runner with a test, or delete it."
+        }
+      ],
+      "criteria": [
+        {
+          "n": 1,
+          "text": "(moved from #4717 c31) (was #5974) (was #3965) A dated audit in Docs/audits lists every Compiler function or module no path calls, each with a disposition (wire it, with a test, or delete it), and every row is done.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev (train t12c, 4a5c0ec793..aaca1c8db2 (dev 00a2b37a42)), SUB G6LeadC-4. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t12c/REPORT.md: census rc=0, ratchets rc=0; reruns noted there for load timeouts). 249 unreached top-level Compiler functions deleted, each with a disposition row in Docs/audits.",
+          "at": "2026-11-10T16:29:18.460Z"
+        },
+        {
+          "n": 2,
+          "text": "(moved from #4717 c32) (was #5974) (was #4587) Idiom pass over the 1:1 port, bounded: a dated audit in Docs/audits counts, per Compiler module, each non-idiomatic pattern kind the port left (manual error ladders where `?`, `??` or `!` applies; Dyn walkers where a typed decode applies; hand-written tables a marker or #run could generate; defensive copies where an ownership mark applies), and for each kind a guard case or check fails on a new hit and the existing hits reach zero with identical behavior (the same goldens, cases and ui rows pass before and after each change).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Batch 15 landed on dev 734568e5cd; proved on its batch jet (gate-p20) by Lander5 b15proofs: G6Meta-6637c2-wave-r2 (the idiom-pass audit in Docs/audits plus one guard case per pattern kind, 65 files) gives all 15 of its proof checks rc 0.",
+          "at": "2026-11-14T00:53:24.322Z"
+        },
+        {
+          "n": 3,
+          "text": "`jet test Core/Math` runs without the ICE \"ir.build unlowered: __from_bits_f32 ... F32 from bits of I64\": the F32-from-bits lowering works on O0, O1 and O2 (found by G1Lead-4-c42b; same on dev without that SUB).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 8327f5ae47 (train t15a, 01b86931e7..8327f5ae47), SUB G6LeadC-10. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t15a/REPORT.md: recensus3 rc=0 on every pass after the integration fixes G6LeadC-9a2fix, TlsLead-67fix, TlsLead-66rfix and G6LeadC-9a2cov). `jet test Core/Math` runs with rc 0 and no F32-from-bits ICE; ir_f32_bits takes the bit source as an Int or as the narrowed I64 word.",
+          "at": "2026-11-10T21:29:09.176Z"
+        },
+        {
+          "n": 4,
+          "text": "Plain jet build of the assembled hosted Jetpack project ICEs. Repro on dev 00a2b37a42 (t12c compiler): run 'jet Jetpack/Bootstrap/Assemble.jet hosted' from the root of a checkout, then 'cd <bootstrap scratch>/hosted/project && jet build'. It prints 'internal compiler error: the completed build query has no plan' and exits 1, not 101. The same project builds through Jetpack/Bootstrap/Check.jet --hosted. Fixed when a plain jet build of that project either builds or reports a registered user diagnostic, and every ICE path exits 101 (I2). Proof: a case.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Landed on dev 8327f5ae47 (train t15a, 01b86931e7..8327f5ae47), SUB G6LeadC-10. Every test line of the SUB passes with the compiler built from the landed tree ($JET_SCRATCH_ROOT/lanes/Main/integ/t15a/REPORT.md: recensus3 rc=0 on every pass after the integration fixes G6LeadC-9a2fix, TlsLead-67fix, TlsLead-66rfix and G6LeadC-9a2cov). A plain `jet build` in the assembled hosted Jetpack project builds (rc 0, .jet/build/jetpack written) instead of the 'completed build query has no plan' ICE.",
+          "at": "2026-11-10T21:29:10.591Z"
+        },
+        {
+          "n": 5,
+          "text": "Found 2026-11-10 by Lander2 on dev c2cecce162: Compiler/JetCli/Commands (package jet_cli_commands) is used by nothing that ships. No manifest depends on it except its own Tests, no build or test entry names it, and only docs and a comment (InspectB.jet) mention it, so no census ever checked it (an E0307 sat in Dependency.jet for a train). It is either wired into the jet CLI with a test that runs it, or deleted with its docs, and the census package pass covers whatever remains.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Deleted (the criterion allows wire or delete): G6Meta-6637c5 landed as cac0bb37e7 on dev 2026-11-12, direct land on seed-b13 at 80f06dbe13 + patch, every line rc 0: the closed_lists guard, `jet check Compiler/JetCli/Source/Cli/InspectB.jet`, a negated git grep for jet_cli_commands, `test ! -e Compiler/JetCli/Commands`, and LaneCheck CHECK OK. jet package, jet flash and jet inspect sbom stay unbuilt rows under #6418.",
+          "at": "2026-11-12T23:12:50.332Z"
+        },
+        {
+          "n": 6,
+          "text": "Compiler sources never depend on documentation text: the CLI census no longer writes rank data into Compiler CLICommands.jet from text under Docs/Examples/tests/Tools. Either the ranks move out of the compiler into a generated docs artifact, or the census reads only registered command rows. Its --check then stays green across docs-only landings, and it joins the Lander's per-landing generator checks. Found by Lander3's generator census, 2026-11-11.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Holds on dev (1ac2a86642): jet Tools/cli-census/Census.jet --check rc 0; ranks are registry data, and no docs text is read. Lander5, gate-p62 jet on dev d2335cf385 ($JET_STATE_ROOT/lander3-tmp/holdsg6/).",
+          "at": "2026-11-14T08:46:19.438Z"
+        },
+        {
+          "n": 7,
+          "text": "No Jet output prints `::` (a standing owner rule). Semindex definition identities (fn:module:x::name, method:, type:, import:), inspect's callable identity (run::start), live value ids (app::counter) and expand's static:{module}::{name} use dotted paths with one kind-prefix scheme, cut over with every snapshot and caller in one change. A guard case fails on any `::` in UI, golden or case expected output, or in a JetCli or JetSemIndex string literal; only foreign-language subjects such as C++ and Rust FFI snippets are exempt. Effect keys were already dotted by TlsLead-3c33b (#6151 c33).",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Merged into #6612 c4: #6612 owns dotted symbol paths in tool output; the no-`::` guard joins it",
+          "at": "2026-11-15T02:34:15.981Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 8,
+          "text": "Guard-clause style is a jet fmt rewrite (never reported) applied across Compiler/, Core and Jetpack in one mechanical change; `jet fmt --check Compiler Core Jetpack` passes and the self-host chain reaches its fixed point.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6850 c2: guard-clause rewrite belongs on the formatter card",
+          "at": "2026-11-15T02:11:52.050Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 9,
+          "text": "After stage 1 (#3862), Compiler/ drops package-prefixed names, and a name that repeats its package is a tidy error with a rename fix (listed by `jet check` and `jet build`, never stopping `jet run`; D-NO-WARNINGS1=A), landed with its caller cutover.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6896 c4, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:03:32.440Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "ui",
+            "filter": "name_repeats_package"
+          }
+        },
+        {
+          "n": 10,
+          "text": "Needless temporaries (an immutable binding used once on the next line) are inlined by a jet fmt rewrite that keeps evaluation order (never reported); a fmt case pins an order-sensitive negative. The optimizer inlines single-use literal bindings.",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #6850 c3: temporary inlining in fmt; the optimizer half moved to #6473 as its own criterion",
+          "at": "2026-11-15T02:11:53.113Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 12,
+          "text": "After D-OWES1 (#4139), where a doc comment states an obligation, `jet check` lists a tidy error proposing the ratified debt spelling, and stays silent otherwise (no advisory lints under D-NO-WARNINGS1=A).",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #3175 c14, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:03:36.135Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "ui",
+            "filter": "owes_debt_spelling"
+          }
+        },
+        {
+          "n": 13,
+          "text": "(was #6215) No comment in Jet sources cites deleted Rust code, and a guard enforces it (merged from #4148 c6)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev ecc66af44f (G6Meta-6637c13-r2), landed by Lander5 2026-11-13. 431 files were rewritten so no comment in Compiler, Core or Jetpack cites deleted Rust code. Under seed-b14 on 78d3db56d8 plus the patch: RustEraRatchet ok over every comment with no allowance, the SUB tests 4/0, and jet check of the tool rc 0. copy_ratchet gives 151/2, with the same 2 FAILs as bare dev.",
+          "at": "2026-11-13T12:16:58.328Z"
+        },
+        {
+          "n": 14,
+          "text": "No .jet comment cites deleted Rust code (crates/…/src paths or .rs:N lines; 134 files on dev 72a8142651). Proof: `git grep -l -E 'crates/[a-z_-]+/src|\\.rs:[0-9]' -- '*.jet'` prints nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6899 c10, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:03:38.864Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 15,
+          "text": "No live source uses retired failure syntax (`x?` propagation, `T ! E`) in JetDevserver, JetDebug, JetLSP tests or docs: the corpus guard reports 0 offenders.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #5931 c18, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:03:42.133Z",
+          "closure": "duplicate",
+          "proof": {
+            "profile": "cmd",
+            "args": [
+              "tests/guards",
+              "--filter",
+              "corpus_ast"
+            ]
+          }
+        },
+        {
+          "n": 16,
+          "text": "JetDevserver and JetDebug parse, check and run their tests. Both are kept: the owner ruled on 2026-11-09 to finish the JetDevserver port (#5931), and JetDebug is built under #6730 and #6841. Proof: `jet test Compiler/JetDevserver` and `jet test Compiler/JetDebug` pass.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #5931 c19, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:03:44.916Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 17,
+          "text": "AGENTS.md and Docs/spec/reference teach only current failure forms (no `x?` propagation, no `T ! E`). Proof: `jet test tests/guards --filter syntax_reconciliation` passes and `git grep -n -E '[a-z)]\\?$| ! [A-Z]' -- AGENTS.md Docs/spec/reference` prints nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6899 c11, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:03:47.673Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 18,
+          "text": "(was #6221) `x: null?` is either a diagnostic or explained (merged from #4148 c11)",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev cd75291ec9 (G6Meta-6637c18): x: null? is the bare-? propagate diagnostic, pinned by the snapshot tests/ui/null_binding_bare_question. Lander directland with seed-b14: ui null_binding_bare_question rc 0; DiagnosticRows --check passed (1050 copies match). Outs $JET_SCRATCH_ROOT/lanes/Lander/loop/out/direct-G6Meta-6637c18/",
+          "at": "2026-11-13T05:04:17.541Z"
+        },
+        {
+          "n": 19,
+          "text": "(was #6341) JetLSP reads declaration visibility from Sema facts, never from source text: the import quick-fix fires for a public function in another module, and signature preview reports external callers for public functions and not for functions inside a priv module, proved by JetLSP tests whose fixtures contain no pub keyword. (merged from #4148 c13)",
+          "status": "met",
+          "metBy": "TowerKeeper-1",
+          "verifiedBy": null,
+          "evidence": "Moved to #4917 c71: JetLSP behavior belongs on the LSP card",
+          "at": "2026-11-15T02:34:17.129Z",
+          "closure": "obsolete"
+        },
+        {
+          "n": 20,
+          "text": "No test prose, case name or closure template claims an interpreter comparison (there is no interpreter tier, D-EXEC2=A; 291 test files mention 'interpreter' on dev 72a8142651), cut over with the case renames in one change. Proof: `git grep -l -i interpreter -- tests` prints nothing.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6899 c12, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:03:50.426Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 21,
+          "text": "Compiler/JetDriver/Tests checks and its tests run in lane-check (on dev 8219108260 CLISeams.jet, RustForeign.jet and SchemaIngress.jet did not compile), so a driver test cannot rot unseen. Proof: `jet test Compiler/JetDriver` passes and lane-check lists it.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "Moved to #6610 c17, the card that owns this work (board cleanup).",
+          "at": "2026-11-16T01:03:53.057Z",
+          "closure": "duplicate"
+        },
+        {
+          "n": 22,
+          "text": "No retired-Jet-spelling teaching remains in the compiler: retired codes stay as typed Retired rows with no parser arm, jet fix rule or teaching text (E0388 already holds), and the retired use-as and member-list teaching is removed with its parser arms, snapshots and fix rules. E0397 is an active check (D-DEEP-CHECK1) and stays. Foreign-language teaching stays. Proof: git grep for the retired use-as and member-list teaching texts in Compiler prints nothing, and jet test tests/guards --filter diagnostics_coverage passes.",
+          "status": "met",
+          "metBy": "Main",
+          "verifiedBy": null,
+          "evidence": "dev 50972b1244 (a398337ff6 removed the use-as and .{...} member-list parser arms, tests and jet fix edits): git grep for the retired teaching texts ('no longer names an import', 'is not an import member list', 'no longer renames an imported member', 'names an import that already has an alias', 'after as in an import', 'as is retired') in Compiler prints nothing; E0630 RetiredImportAlias remains only as its typed Retired row. jet test tests/guards --filter diagnostics_coverage on gate-p177 passes.",
+          "at": "2026-11-15T11:40:37.878Z"
+        }
+      ],
+      "refs": [],
+      "tags": [],
+      "parentId": null,
+      "needsAcceptance": false,
+      "created": "2026-11-07T02:41:10.182Z",
+      "updated": "2026-11-16T03:22:35.743Z",
+      "updatedBy": "Main",
+      "criteriaLastN": 22,
+      "completedAt": "2026-11-16T03:22:35.742Z",
+      "questions": [],
+      "retiredAt": "2026-11-19T04:02:02.718Z"
     }
   ]
 }
